@@ -209,7 +209,7 @@ still open is never a pass:
    (a timeout, not a review event): skip straight to step 4 -- there's
    nothing to address or push yet.
 2. Contributor PR, `Approve` landed: merge (subject to the separate
-   maintainer-approval gate on a non-maintainer's PR). Owner-authored PR,
+   Maintainer-approval gate on a Contributor's PR). Owner-authored PR,
    `Comment` landed with zero Medium/High findings open: merge -- that's
    the passing verdict here.
 3. `Comment` landed: address genuinely valuable findings (explain/dismiss
@@ -224,12 +224,16 @@ still open is never a pass:
    fresh review" for the exact call) and wait ~5 minutes again -- do not
    just keep pushing small commits hoping the next automatic pass flips on
    its own.
-5. **Narrow maintainer bypass, contributor PRs only:** after at least one
-   full loop, if the *current* `Comment` review's remaining findings are
-   all Low severity, the maintainer may self-merge, stating what was
-   dismissed and why. Any Medium/High finding blocks self-merge regardless
-   of who authored the PR.
-Full mechanics, the re-request API call, and the non-maintainer approval gate
+5. **Narrow verdict-shape exception, Contributor PRs only:** after at least
+   one full loop, if the *current* `Comment` review's remaining findings
+   are all Low severity, Copilot's own verdict requirement (this step) is
+   satisfied without chasing a further `Approve`, stating what was
+   dismissed and why. **This is strictly about Copilot's verdict and never
+   substitutes for the separate, always-required Maintainer-approval gate**
+   on a Contributor's PR -- satisfying this step alone never authorizes a
+   merge by itself. Any Medium/High finding blocks proceeding past this
+   step at all, regardless of who authored the PR.
+Full mechanics, the re-request API call, and the Maintainer-approval gate
 this doesn't override: CONTRIBUTING.md § "Waiting for a verdict". **This is
 agent discipline, not yet tool-enforced** -- `pr-merge --now` does not itself
 check Copilot's verdict before merging (`.agent-worktrees/config.yaml`'s
