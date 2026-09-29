@@ -147,19 +147,17 @@ explicit admin escalation).** This is enforced on four layers that agree:
    lockdown") fails whenever a protected path is touched unless the **PR's
    registered author** (`pull_request.user.login`) is ThomasMichon. This
    deliberately checks the PR's submitter, not individual commit metadata:
-   an earlier version of this check inspected each commit's API-reported
-   author/committer login, but that's just GitHub's resolution of the
+   per-commit `author`/`committer` login is just GitHub's resolution of the
    commit's plain-text git identity (name + email) against an account, not
    a cryptographic proof — any contributor could set
    `git commit --author="ThomasMichon <NNN+ThomasMichon@users.noreply.github.com>"`
-   locally and pass it with zero real involvement, so checking commit
-   metadata bought nothing but complexity. A PR's `user.login`, by
+   locally and pass it with zero real involvement, so validating commit
+   metadata would buy nothing but complexity. A PR's `user.login`, by
    contrast, is an authenticated fact GitHub sets once at PR-creation time
    (you cannot open a PR as another account) — there's no equivalent way to
    forge it, and unlike an event's `sender` (whoever triggered *that*
    webhook delivery), it doesn't change on close/reopen, so it isn't
-   vulnerable to the "fail once, then close+reopen to launder a pass"
-   game an earlier design of this check was vulnerable to.
+   vulnerable to a "fail once, then close+reopen to launder a pass" game.
    **Known, accepted residual risk:** this checks who *opened* the PR, not
    who pushed every commit in it — an already-invited Write collaborator
    with push access to the same repo could still push a follow-up commit

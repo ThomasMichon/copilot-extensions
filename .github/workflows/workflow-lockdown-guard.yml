@@ -12,20 +12,17 @@
 # author (`pull_request.user.login`) is not ThomasMichon.
 #
 # This deliberately validates the PR's SUBMITTER, not individual commit
-# authorship. An earlier version of this check inspected each commit's
-# API-reported `author.login`/`committer.login`, but those are just
-# GitHub's resolution of the commit's plain-text git identity (name +
-# email) against an account -- not a cryptographic proof. Any contributor
-# can locally set
+# authorship. Per-commit `author.login`/`committer.login` are just GitHub's
+# resolution of the commit's plain-text git identity (name + email) against
+# an account -- not a cryptographic proof. Any contributor can locally set
 # `git commit --author="ThomasMichon <NNN+ThomasMichon@users.noreply.github.com>"`
 # and have it resolve to that same login with zero access to the real
-# account, so checking commit metadata bought nothing but complexity. A PR's
-# `user.login`, by contrast, is an authenticated fact set once by GitHub
-# itself at PR-creation time (you cannot open a PR as another account) --
-# there is no equivalent way to forge it, and it doesn't change on
-# close/reopen the way an event's `sender` can be gamed into laundering a
-# stale failing result into a passing one (see git history on this file for
-# that earlier, more convoluted attempt).
+# account, so validating commit metadata would buy nothing but complexity. A
+# PR's `user.login`, by contrast, is an authenticated fact set once by
+# GitHub itself at PR-creation time (you cannot open a PR as another
+# account) -- there is no equivalent way to forge it, and it doesn't change
+# on close/reopen the way an event's `sender` can be gamed into laundering a
+# stale failing result into a passing one.
 #
 # KNOWN, ACCEPTED RESIDUAL RISK: this checks who OPENED the PR, not who
 # pushed every commit in it. An already-invited Write collaborator with
