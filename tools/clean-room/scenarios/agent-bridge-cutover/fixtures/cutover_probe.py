@@ -350,6 +350,22 @@ def check_abrupt_kill_recovery(python):
     REAL fresh daemon's own real startup reattach scan, not just the
     pure-function unit tests in ``libs/zdd/tests/test_claims.py``.
 
+    **Honest scope note (review-caught).** The claim below is stamped with a
+    test-chosen generation *label*, not the killed daemon's own real
+    ``_generation_id`` (``session_core.py`` computes that once per process
+    from ``version+pid+started_at`` -- not independently reproducible from
+    outside the process, and there is no API surface exposing it; adding one
+    would be its own production change, deliberately out of scope for a
+    clean-room-only PR). This means the drill demonstrates the underlying
+    dead-pid-recovery PRIMITIVE against a genuinely killed real process --
+    NOT that the killed daemon's own real exit-contract release path
+    (``release_all(self._generation_id)``) was interrupted, since that path
+    would never have matched an arbitrary label even on a graceful exit.
+    That narrower, already-thoroughly-unit-tested claim
+    (``test_admin_routes_phase3.py``) is a smaller, orthogonal fact this
+    Tier-P drill does not need to re-prove; what it adds is the *dead-pid
+    detection* against a real OS process a unit test cannot exercise.
+
     Two synchronization hazards a naive version of this check gets wrong
     (both review-caught in earlier revisions -- kept documented here so they
     are not reintroduced):
@@ -508,24 +524,27 @@ def check_abrupt_kill_recovery(python):
                 f"registered an unclaimed session-host record "
                 f"(rc={reg.returncode}; {reg.stderr.strip()[:160]})")
 
-        # This generation claims the record for itself, using its OWN real,
-        # live pid as owner_pid -- exactly what `_claim_host_record` does
-        # inside the real daemon (invoked directly here since making the
-        # real daemon discover and claim an ad hoc record with no live
-        # session-host child of its own needs a full session-host
-        # implementation, out of reach for a stdlib-only probe).
+        # This generation claims the record using its OWN real, live pid as
+        # owner_pid -- exactly what `_claim_host_record` does inside the
+        # real daemon (invoked directly here since making the real daemon
+        # discover and claim an ad hoc record with no live session-host
+        # child of its own needs a full session-host implementation, out of
+        # reach for a stdlib-only probe). `owner_generation` below is a
+        # TEST-CHOSEN label, not the daemon's own real `_generation_id` --
+        # see the docstring's "Honest scope note" for exactly what this
+        # does and does not prove.
         claim1_snip = (
             "from agent_bridge.session_host.host_index import HostIndex\n"
             "from agent_bridge.session_host.osutil import pid_alive\n"
             f"idx = HostIndex({index_path!r})\n"
-            f"idx.claim({session_id!r}, generation='real-gen-1', "
+            f"idx.claim({session_id!r}, generation='test-label-gen-1', "
             f"owner_pid={proc.pid}, pid_alive=pid_alive)\n"
             f"print(idx.get({session_id!r}).owner_generation)\n"
         )
         claim1 = _run_snip(claim1_snip)
         r.check(
-            claim1.returncode == 0 and claim1.stdout.strip() == "real-gen-1",
-            f"the live generation (real pid {proc.pid}) claimed the record for "
+            claim1.returncode == 0 and claim1.stdout.strip() == "test-label-gen-1",
+            f"the live process (real pid {proc.pid}) claimed the record for "
             f"itself (rc={claim1.returncode}, stdout={claim1.stdout.strip()!r}, "
             f"stderr={claim1.stderr.strip()[:160]})",
         )
