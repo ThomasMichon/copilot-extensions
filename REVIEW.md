@@ -104,9 +104,11 @@ specifically when reviewing a pull request, not a replacement for them.
   **Graceful cutover impact** statement exists and matches the diff
   (`CONTRIBUTING.md`, "Graceful cutover impact"). Flag a missing statement, a
   daemon change with no named activation seam/safe cutover point, or an
-  exemption claim that does not fit either
-  `graceful-daemon-cutover` or the documented lighter
-  `service-lifecycle-supervision` singleton-handoff path.
+  exemption claim that does not fit one of the documented alternatives:
+  `graceful-daemon-cutover`, the lighter
+  `service-lifecycle-supervision` singleton-handoff path, or a demonstrated
+  non-daemon lifecycle governed by another pattern such as
+  `ephemeral-process-reaping`.
 - **ruff signal, not noise.** Hold changed Python to at least the `F`/`E9`
   groups; do not block on pre-existing style debt in code the PR did not
   touch.
