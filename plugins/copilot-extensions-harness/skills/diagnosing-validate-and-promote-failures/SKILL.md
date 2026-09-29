@@ -3,15 +3,14 @@ name: diagnosing-validate-and-promote-failures
 description: >
   Diagnose a red `validate-and-promote` GitHub Actions run
   (`.github/workflows/validate-and-promote.yml`) -- the automated dev-to-main
-  release-pipeline gate for copilot-extensions. Walks the exact `gh run`/`gh
-  run view --log` sequence to identify the actual failed job (a per-plugin
-  fan-out job or a non-matrix guard/lint job), read the pytest failure
-  literally for a fan-out job, and tell a CI-environment-specific test bug
-  (e.g. a Windows-only `subprocess` constant referenced on a Linux runner)
-  apart from a genuine regression -- both owed a real fix-forward PR, never a
-  "pre-existing, not my concern" shrug. Use when
-  `validate-and-promote`/`dev-advanced` is failing, promotion is stuck, or a
-  contributor asks "why won't dev promote to main".
+  release-pipeline gate for copilot-extensions. Walks the `gh run`/`gh run
+  view --log` sequence to identify the actual failed job (a per-plugin
+  fan-out job or a non-matrix guard/lint job), read a fan-out job's failure
+  literally, and tell a CI-environment-specific test bug (e.g. a
+  Windows-only `subprocess` constant on a Linux runner) apart from a genuine
+  regression -- both owed a real fix-forward PR, never a "pre-existing"
+  shrug. Use when `validate-and-promote`/`dev-advanced` is failing,
+  promotion is stuck, or a contributor asks "why won't dev promote to main".
   Trigger phrases include:
   - 'validate-and-promote failing'
   - 'dev to main promotion stuck'
