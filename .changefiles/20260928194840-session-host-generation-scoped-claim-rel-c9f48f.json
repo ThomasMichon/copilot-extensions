@@ -1,0 +1,9 @@
+{
+  "comment": "session-host: generation-scoped claim/release/recover on HostRecord/HostIndex; deploy cutover is now serialized against concurrent invocations (agent-bridge-unified-zdd-cutover Phase 2).",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "minor"
+    }
+  ]
+}

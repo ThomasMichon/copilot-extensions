@@ -1,0 +1,37 @@
+{
+  "comment": "zdd: vendored generation-scoped claim/release/recover primitive and a cutover-wide serialization lock (agent-bridge-unified-zdd-cutover Phase 2); no behavior change for this plugin beyond the bumped shared zdd copy.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

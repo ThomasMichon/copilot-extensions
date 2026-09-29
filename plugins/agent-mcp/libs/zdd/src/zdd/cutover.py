@@ -204,6 +204,42 @@ class CutoverOrchestrator:
         force: bool = False,
         poll: float = 0.5,
     ) -> CutoverResult:
+        """Drive one cutover attempt, serialized against concurrent attempts.
+
+        Two invocations against the same ``config_dir`` (two operators, or a
+        ``restart`` racing an installer-driven ``deploy``) must never run this
+        sequence at once -- both would read the same predecessor breadcrumb/
+        routing state and race, so a lock (:class:`zdd.cutover_lock.CutoverLock`)
+        scoped to exactly this call serializes them. A contended lock is not an
+        exceptional condition for a caller that already handles ``CutoverResult``
+        failures uniformly, so it is reported the same way (``ok=False``, a
+        populated ``error``) rather than raised -- see the Phase 2 checklist in
+        ``efforts/active/agent-bridge-unified-zdd-cutover``.
+        """
+        from zdd.cutover_lock import CutoverLock, CutoverLockedError
+
+        try:
+            with CutoverLock(self.config_dir):
+                return self._run_locked(
+                    health_timeout=health_timeout,
+                    drain_timeout=drain_timeout,
+                    force=force,
+                    poll=poll,
+                )
+        except CutoverLockedError as exc:
+            result = CutoverResult(ok=False, error=str(exc))
+            result.steps.append(f"refused: {exc}")
+            log.warning("Cutover refused -- already in progress: %s", exc)
+            return result
+
+    def _run_locked(
+        self,
+        *,
+        health_timeout: float = 60.0,
+        drain_timeout: float = 300.0,
+        force: bool = False,
+        poll: float = 0.5,
+    ) -> CutoverResult:
         from zdd import lifecycle
 
         result = CutoverResult(ok=False)

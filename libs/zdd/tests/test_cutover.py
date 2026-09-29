@@ -355,3 +355,47 @@ def test_rollback_to_old_when_old_alive_and_drain_raises(tmp_path: Path,
     # Route restored to the old (still-alive) daemon.
     assert routing.read_table(tmp_path)["active"]["port"] == 9281
 
+
+# -- cutover-wide serialization (effort agent-bridge-unified-zdd-cutover,
+# Phase 2: two concurrent invocations must never race the same breadcrumb/
+# routing state) -------------------------------------------------------------
+
+
+def test_run_refuses_when_a_cutover_is_already_in_progress(tmp_path: Path):
+    from zdd.cutover_lock import CutoverLock
+
+    registry: dict = {}
+    orch, _handle = _make(tmp_path, healthy_ports={9290}, registry=registry)
+
+    held = CutoverLock(tmp_path)
+    held.acquire()
+    try:
+        res = orch.run(health_timeout=1, drain_timeout=1)
+    finally:
+        held.release()
+
+    assert res.ok is False
+    assert res.rolled_back is False
+    assert res.committed is False
+    assert "already in progress" in (res.error or "")
+    # Refused before ever touching the routing table.
+    assert routing.read_active_endpoint(tmp_path) is None
+
+
+def test_run_releases_lock_after_completion(tmp_path: Path):
+    from zdd.cutover_lock import CutoverLock, lock_path
+
+    registry: dict = {}
+    orch, _handle = _make(tmp_path, healthy_ports={9290}, registry=registry)
+    res = orch.run(health_timeout=1, drain_timeout=1)
+    assert res.ok is True
+
+    # The lock is free again -- a second cutover attempt can proceed.
+    contender = CutoverLock(tmp_path)
+    contender.acquire()
+    try:
+        assert contender.held
+        assert lock_path(tmp_path).exists()
+    finally:
+        contender.release()
+

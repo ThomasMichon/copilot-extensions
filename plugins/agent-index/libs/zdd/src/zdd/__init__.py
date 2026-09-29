@@ -17,14 +17,16 @@ The library carries no service-specific logic; see ``cutover``'s
 ``CutoverOrchestrator`` for the consumer contract.
 """
 
-from . import breadcrumb, cutover, routing
+from . import breadcrumb, claims, cutover, cutover_lock, routing
 from .breadcrumb import (
     clear_breadcrumb,
     read_breadcrumb,
     recover_stale_cutover,
     write_breadcrumb,
 )
+from .claims import ClaimConflict, Claimable, decide_acquire, generation_id, is_recoverable
 from .cutover import CutoverError, CutoverOrchestrator, CutoverResult
+from .cutover_lock import CutoverLock, CutoverLockedError
 from .routing import (
     Endpoint,
     clear_if_owner,
@@ -36,14 +38,23 @@ from .routing import (
 )
 
 __all__ = [
+    "Claimable",
+    "ClaimConflict",
     "CutoverError",
+    "CutoverLock",
+    "CutoverLockedError",
     "CutoverOrchestrator",
     "CutoverResult",
     "Endpoint",
     "breadcrumb",
+    "claims",
     "clear_breadcrumb",
     "clear_if_owner",
     "cutover",
+    "cutover_lock",
+    "decide_acquire",
+    "generation_id",
+    "is_recoverable",
     "publish_active",
     "read_active_endpoint",
     "read_breadcrumb",
