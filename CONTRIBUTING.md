@@ -294,7 +294,7 @@ one, since `r0` is the lowest possible baseline, not a "from now" marker:
    review event):** there's nothing to address or push yet — skip straight
    to step 4's re-request action rather than inventing an unrelated commit.
 2. **Contributor PR, `Approve` landed:** proceed to merge (subject to the
-   separate required-approving-review gate for a non-maintainer's PR — see
+   separate required-approving-review gate for a Contributor's PR — see
    "Review" above; Copilot's own `Approve` never substitutes for that).
    **Owner-authored PR, `Comment` landed with zero Medium/High findings
    open:** that *is* the passing verdict here — proceed to merge, stating
@@ -314,18 +314,20 @@ one, since `r0` is the lowest possible baseline, not a "from now" marker:
    return to step 2. Do not just keep pushing small commits hoping the next
    automatic pass flips on its own, and do not treat a timeout here
    differently from a `Comment` — both mean "not yet passing, re-request."
-5. **Genuine unresolvable-finding stall, contributor PRs only:** if the
-   loop above has run at least once on a contributor's PR and the
+5. **Genuine unresolvable-finding stall, Contributor PRs only:** if the
+   loop above has run at least once on a Contributor's PR and the
    *current* `Comment` review's remaining findings are **all Low
-   severity** (no Medium or High findings open), the maintainer may
-   self-merge without chasing a further `Approve` — state which findings
-   were dismissed and why. **Any Medium or High finding still blocks
-   self-merge**, maintainer or not, until it's resolved and a *subsequent*
-   review actually passes — merely re-requesting a review is not itself a
-   verdict, and does not unblock self-merge on its own. This does not
-   extend to a non-maintainer's PR: the maintainer's own approving review
-   remains that PR's separate, always-required gate regardless of
-   Copilot's verdict.
+   severity** (no Medium or High findings open), Copilot's *verdict-shape*
+   requirement (this step) is satisfied without chasing a further
+   `Approve` — state which findings were dismissed and why. **This is
+   strictly about Copilot's own verdict and does NOT touch the separate,
+   always-required Maintainer-approval gate** for a Contributor's PR (see
+   "Review" earlier in this section) — some Maintainer still must actually
+   approve the PR before anyone merges it; satisfying this step alone never
+   authorizes a merge by itself. Any Medium or High finding still blocks
+   proceeding past this step at all, regardless of Maintainer approval,
+   until it's resolved and a *subsequent* review actually passes — merely
+   re-requesting a review is not itself a verdict.
 - **This is agent discipline, not yet tool-enforced.** `pr-merge --now`
   itself does not check Copilot's verdict before merging --
   `.agent-worktrees/config.yaml`'s `review_blocking: false` makes every
