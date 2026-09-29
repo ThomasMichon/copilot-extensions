@@ -4,13 +4,13 @@ description: >
   Diagnose a red `validate-and-promote` GitHub Actions run
   (`.github/workflows/validate-and-promote.yml`) -- the automated dev-to-main
   release-pipeline gate for copilot-extensions. Walks the `gh run`/`gh run
-  view --log` sequence to identify the actual failed job (a per-plugin
-  fan-out job or a non-matrix guard/lint job), read a fan-out job's failure
-  literally, and tell a CI-environment-specific test bug (e.g. a
-  Windows-only `subprocess` constant on a Linux runner) apart from a genuine
-  regression -- both owed a real fix-forward PR, never a "pre-existing"
-  shrug. Use when `validate-and-promote`/`dev-advanced` is failing,
-  promotion is stuck, or a contributor asks "why won't dev promote to main".
+  view --log` sequence to identify every failed job (a per-plugin fan-out
+  job or one of the other required gate jobs), read a fan-out job's failure
+  literally, and classify it as a known accepted flake, a
+  CI-environment-specific test bug, or a genuine regression -- the latter two
+  owed a real fix-forward PR, never a "pre-existing" shrug. Use when
+  `validate-and-promote`/`dev-advanced` is failing, promotion is stuck, or a
+  contributor asks "why won't dev promote to main".
   Trigger phrases include:
   - 'validate-and-promote failing'
   - 'dev to main promotion stuck'
@@ -23,13 +23,16 @@ description: >
 
 # Diagnosing `validate-and-promote` failures
 
-`validate-and-promote` (triggered by `workflow_run`/`repository_dispatch` as
-`dev-advanced`, per the dev-branch-release-pipeline effort,
-`ThomasMichon/copilot-extensions#3336`) is the sole automated gate between
-`dev` and `main`. Its full-suite stage fans out one job per runtime plugin
-(`full - agent-worktrees`, `full - agent-bridge`, ...), but the workflow also
-runs non-matrix jobs (`guards + lint` and similar) that gate promotion just
-as hard; promotion proceeds only when **every** required job is green. A red
+`validate-and-promote` is the sole automated gate between `dev` and `main`
+(dev-branch-release-pipeline effort, `ThomasMichon/copilot-extensions#3336`).
+It is entered only via `repository_dispatch` (event type `dev-advanced`,
+fired by the separate, cheap `promote-trigger.yml` on a `workflow_run` of
+`CI`) or a human `workflow_dispatch` -- never directly by `workflow_run`
+itself. Its promotion gate (the `promote` job) needs **all** of: `gate`,
+`full` (the per-plugin fan-out matrix, one job per plugin listed in the
+current full matrix, `fail-fast: false` so more than one can be red at once),
+`worktree-manager` (out-of-plugin worktree-manager suite), and
+`guards-full-sweep` (full-tree, non-PR-scoped guard checks) to succeed. A red
 run blocks **all** pending contributors' already-merged work, not just
 whoever's change happened to break it — treat it with the same urgency as a
 production incident, not a personal test failure.
@@ -50,20 +53,21 @@ commands below use `<agent-worktrees catalog argv[0]>` as that placeholder.
    <agent-worktrees catalog argv[0]> repos gh ThomasMichon/copilot-extensions -- run list -R ThomasMichon/copilot-extensions --workflow=validate-and-promote.yml --limit 20  # marketplace-isolation: allow diagnostic-example
    ```
 
-2. **Open the failing run** and read its full job list — do not assume the
-   failure is a per-plugin fan-out job; a non-matrix job (`guards + lint` and
-   similar) can fail on its own and needs different diagnosis than the
-   fan-out guidance in steps 3-4 below:
+2. **Open the failing run** and read its full job list — because
+   `fail-fast: false`, more than one job can be red, and the failure is not
+   necessarily a `full - <plugin>` fan-out job at all; `worktree-manager` and
+   `guards-full-sweep` gate promotion just as hard and need different
+   diagnosis than the fan-out guidance in steps 3-4 below:
 
    ```bash
    <agent-worktrees catalog argv[0]> repos gh ThomasMichon/copilot-extensions -- run view <run-id> -R ThomasMichon/copilot-extensions  # marketplace-isolation: allow diagnostic-example
    ```
 
-   Note the failing job's exact name and numeric ID from the output.
+   Note every failing job's exact name and numeric ID from the output.
 
-3. **Pull that job's full log** and grep for the failure summary — the log
-   is large (tens of KB), so save it to a file and grep rather than reading
-   it inline:
+3. **Pull each failing job's full log** and grep for the failure summary —
+   the log is large (tens of KB), so save it to a file and grep rather than
+   reading it inline:
 
    ```bash
    <agent-worktrees catalog argv[0]> repos gh ThomasMichon/copilot-extensions -- run view <run-id> -R ThomasMichon/copilot-extensions --job <job-id> --log > /tmp/run-<run-id>-job-<job-id>.log  # marketplace-isolation: allow diagnostic-example
@@ -72,11 +76,20 @@ commands below use `<agent-worktrees catalog argv[0]>` as that placeholder.
 
    For a `full - <plugin>` fan-out job, read the literal `FAILED
    <test-node-id> - <ExceptionType>: <message>` line and the traceback above
-   it before forming a hypothesis. For a `guards + lint` (or other
-   non-matrix) job, read that specific guard/check's own failure output the
-   same way -- literally, before hypothesizing.
+   it before forming a hypothesis. For `worktree-manager` or
+   `guards-full-sweep` (or any other job), read that job's own failure
+   output the same way -- literally, before hypothesizing.
 
-4. **Classify a fan-out (pytest) failure — test bug vs. real regression:**
+4. **Classify a fan-out (pytest) failure — three ways, not two:**
+   - **Known, accepted flake or transient failure** — a genuinely
+     environmental hiccup (a transient checkout/setup/runner failure, a
+     flaky external dependency) already tracked by its own open issue.
+     Confirm via same-SHA rerun evidence before assuming this; link the
+     tracked issue in your PR description rather than forcing an unrelated
+     code change (see `contributing-to-copilot-extensions`'s flake
+     exception -- the *only* sanctioned exception to the fix-forward
+     obligation below). An *undocumented* one-off still needs a fix or a
+     newly filed tracking issue, not a silent skip.
    - **CI-environment-specific test bug** — the test's own assumption
      doesn't hold on the runner (classic case: referencing a platform-only
      `subprocess`/`os` constant, like `CREATE_NEW_CONSOLE`, that only exists
@@ -93,15 +106,17 @@ commands below use `<agent-worktrees catalog argv[0]>` as that placeholder.
 5. **Check whether it's already fixed** — another contributor or a
    concurrent agent may have landed the fix already (this pipeline blocks
    *everyone*, so it draws fast, parallel attention). Before opening a
-   worktree, inspect `origin/dev`'s tip explicitly -- a local checkout's bare
-   `HEAD` may sit on a different branch or a stale fetch, which would miss an
-   already-landed fix and risk a duplicate PR:
+   worktree, fetch and inspect `origin/dev`'s tip explicitly, and search both
+   open **and merged** PRs -- a local checkout's bare `HEAD` may sit on a
+   different branch or a stale fetch, and a default `gh pr list` only
+   searches open PRs, either of which would miss an already-landed fix and
+   risk a duplicate PR:
 
    ```bash
    cd <writable checkout>   # from a `related resolve copilot-extensions` lookup
    git fetch origin dev
    git log --oneline -3 origin/dev -- <path/to/the/failing/test-or-source>
-   <agent-worktrees catalog argv[0]> repos gh ThomasMichon/copilot-extensions -- pr list -R ThomasMichon/copilot-extensions --search "<test name>"  # marketplace-isolation: allow diagnostic-example
+   <agent-worktrees catalog argv[0]> repos gh ThomasMichon/copilot-extensions -- pr list -R ThomasMichon/copilot-extensions --state all --search "<test name>"  # marketplace-isolation: allow diagnostic-example
    ```
 
    If `origin/dev`'s tip already contains a fix, don't duplicate it —
@@ -134,9 +149,9 @@ exist there.
 ## Reference
 
 `contributing-to-copilot-extensions` (the full PR flow, the fix-forward
-obligation, the mandatory changefile/version bump, and the
-`<agent-worktrees catalog argv[0]>` account-routing convention);
-`diagnosing-copilot-extensions` (the sibling skill for deployed-plugin/runtime
-symptoms, as opposed to this repo's own CI); the
-dev-branch-release-pipeline effort
-(`ThomasMichon/copilot-extensions#3336`) for the pipeline's own design.
+obligation and its known-flake exception, the mandatory changefile/version
+bump, and the `<agent-worktrees catalog argv[0]>` account-routing
+convention); `diagnosing-copilot-extensions` (the sibling skill for
+deployed-plugin/runtime symptoms, as opposed to this repo's own CI); the
+dev-branch-release-pipeline effort (`ThomasMichon/copilot-extensions#3336`)
+for the pipeline's own design.

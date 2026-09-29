@@ -11,7 +11,7 @@
     {
       "id": "validate-and-promote-failure",
       "summary": "The `validate-and-promote` release-pipeline workflow (dev-advanced) is red, blocking dev-to-main promotion for every pending contributor.",
-      "pointer": "`validate-and-promote-triage.instructions.md` -- identify which job actually failed first (a per-plugin `full - <plugin>` fan-out job vs. a non-matrix job like guards/lint); for a fan-out failure, classify CI-test-bug vs. regression and fix forward; full runbook in the `diagnosing-validate-and-promote-failures` skill",
+      "pointer": "`validate-and-promote-triage.instructions.md` -- identify every job that actually failed (a per-plugin `full - <plugin>` fan-out job, or `worktree-manager`/`guards-full-sweep`); for a fan-out failure, classify known-flake vs. CI-test-bug vs. regression and fix forward; full runbook in the `diagnosing-validate-and-promote-failures` skill",
       "markers": ["validate-and-promote", "full - <plugin>", "fix-forward"]
     }
   ]

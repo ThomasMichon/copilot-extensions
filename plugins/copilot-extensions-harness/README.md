@@ -33,9 +33,10 @@ without a competing `sessionStart` output.
   may never arrive.
 - **`validate-and-promote-triage`** — a red `validate-and-promote` release
   gate blocks every pending contributor's work, not just whoever broke it;
-  identify which job actually failed first, and for a per-plugin fan-out
-  failure classify a CI-environment-specific test bug apart from a genuine
-  regression, then fix
+  identify every job that actually failed (a per-plugin fan-out job, or
+  `worktree-manager`/`guards-full-sweep`), and for a fan-out failure
+  classify a known accepted flake apart from a CI-environment-specific test
+  bug apart from a genuine regression, then fix
   forward. Full runbook in the
   [diagnosing-validate-and-promote-failures](skills/diagnosing-validate-and-promote-failures/SKILL.md)
   skill.
