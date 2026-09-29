@@ -24,7 +24,7 @@ def render_daemon_health_report(report: dict[str, object]) -> None:
     label = "fix" if mode == "apply" else "report-only"
     remaining = report.get("remaining_findings")
     unresolved = remaining if isinstance(remaining, list) else findings
-    marker = chk if mode != "apply" or not unresolved else "!"
+    marker = chk if mode == "apply" and not unresolved else "!"
     print(
         f"  {marker} Resident daemon health ({label}): "
         f"{len(findings)} finding(s)"

@@ -683,6 +683,17 @@ def apply_daemon_health(
                 )
                 attempted.add(item["pid"])
                 continue
+            if item["pid"] == owner.get("pid"):
+                actions.append(
+                    {
+                        "kind": kind,
+                        "pid": item["pid"],
+                        "blocked": True,
+                        "reason": "target is the validated live owner",
+                    }
+                )
+                attempted.add(item["pid"])
+                continue
             termination = ctx.terminate_pid_if_identity(
                 item["pid"], item.get("start_time")
             )

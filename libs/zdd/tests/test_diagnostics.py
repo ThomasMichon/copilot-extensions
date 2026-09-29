@@ -244,3 +244,25 @@ def test_report_marks_busy_cutover_as_skipped_not_healthy(tmp_path: Path):
 
     assert report["cutover_in_progress"] is True
     assert report["counts"]["total"] == 0
+
+
+def test_apply_never_terminates_validated_owner_from_stale_breadcrumb(tmp_path: Path):
+    record = breadcrumb.write_breadcrumb(
+        tmp_path,
+        state="started",
+        old={"bind": "127.0.0.1", "port": 9281},
+        new_port=9282,
+        new_pid=101,
+    )
+    _set_breadcrumb_age(tmp_path, record, seconds=9999)
+    state = {
+        "lock": {"pid": 101, "start_time": "owner"},
+        "live": {101: "owner"},
+        "terminated": [],
+    }
+
+    result = diagnostics.apply_daemon_health(_ctx(tmp_path, state=state))
+
+    assert state["terminated"] == []
+    assert result["actions"][0]["blocked"] is True
+    assert result["actions"][0]["reason"] == "target is the validated live owner"
