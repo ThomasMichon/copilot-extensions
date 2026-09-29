@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 5 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 5 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 5 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to Phase 6; Phase 6 (Tier-E live-turn-survival harness) planned, not started)
+- **Status:** In Progress (Phase 1 of 6 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 6 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 6 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 6 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 6 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to Phase 6; Phase 6 (Tier-E live-turn-survival harness) planned, not started)
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
@@ -334,12 +334,16 @@ before deciding -- this session's read was partial.
    silently passing) if the timing race missed the window.
 
 **Feasibility / cost notes.** Consumes real AI credits per run (a genuine
-Copilot turn) -- budget a low `max_credits`, and treat this as a
-manually-triggered/opt-in scenario, not a routine CI pass, per the
-harness's own Tier-E cost-gating conventions (`runs.max_credits`/
-`aggregate` in existing manifests). Requires Docker; not runnable
-off-Docker unlike the Phase 5 stdlib probe. The mid-turn timing race is
-the hardest part -- likely needs a deliberately slow/instrumented test
+Copilot turn) -- treat this as a manually-triggered/opt-in scenario, not a
+routine CI pass. Tier E is local-only, never a blocking CI gate today
+(gated behind the cheap Tier-P precondition). `runs.max_credits` is
+**advisory only** (the transport doesn't expose per-turn usage to the
+runner, so it's recorded as intent, not hard-enforced); `runs.aggregate`
+(`unanimous`/`majority`) controls how N repeated runs are combined into one
+verdict, not cost -- a claim used to gate a change needs `count >= 3` +
+`unanimous`, a single green run is evidence, not proof. Requires Docker;
+not runnable off-Docker unlike the Phase 5 stdlib probe. The mid-turn
+timing race is the hardest part -- likely needs a deliberately slow/instrumented test
 workload or a debug synchronization hook ("prompt received, model call in
 flight") to land reliably rather than by luck. Given Phase 5's own
 abrupt-kill-recovery check took nine review rounds to get honest and
