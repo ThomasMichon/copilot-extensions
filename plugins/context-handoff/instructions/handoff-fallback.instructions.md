@@ -15,10 +15,16 @@ worktree: resolve `$CH` as in *CLI fallback* below, then run
 `node "$CH" sync-worktree --json --cwd "$PWD"` (never a bare `git rebase`/
 `agent-worktrees git sync` -- both bypass the force-tier lock/rebase
 guard). A non-`synced` result isn't a blocker -- note the reason and
-continue. Compose: **Original Request/Continuing Objective/Progress/
+continue. **Self-audit first:** re-scan your own turns for self-flagged
+open-ended language ("still open," "follow-up," "deferred," "didn't
+verify") and check whether each was resolved by a later turn before
+composing -- an empty roster is a checked claim, not a default. Compose:
+**Original Request/Continuing Objective/Progress/
 Successor Work Roster/Outstanding Background Flows & External State/
 Completion Gates/Re-Handoff Instructions** (or **Active Effort/Next
-Slice/Immediate Session Delta** if effort-backed). Never drop an open
+Slice/Immediate Session Delta** if effort-backed -- route any still-open
+self-audit hit into Next Slice/the active effort here, since this shape has
+no Successor Work Roster). Never drop an open
 background flow or owned state (PR, claim) -- name it. Prefer
 `generate_handoff_prompt` -> compose -> `save_handoff_prompt` ->
 `trigger_handoff`; otherwise use the CLI below.
@@ -27,7 +33,11 @@ background flow or owned state (PR, claim) -- name it. Prefer
 
 Prefer `/consume-handoff`. A claimed-handoff response always names the
 claimant session -- state it, never "nothing to do." A disconnect mid-call
-isn't a semantic answer: retry once, then fall back to the CLI. Recording
+isn't a semantic answer: retry once, then fall back to the CLI. **Verify,
+don't just trust:** when you can read the predecessor session's own
+history, spot-check it for the same open-ended phrases (bounded search, not
+a full re-read) before reporting "nothing outstanding" -- disclose plainly
+if that check couldn't happen. Recording
 head is `agent-worktrees`' job -- if `sessionStart` didn't auto-claim it,
 run `agent-worktrees bind-session --worktree-dir "$PWD"`.
 
