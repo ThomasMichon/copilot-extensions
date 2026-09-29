@@ -306,9 +306,15 @@ no service manager is registered.
 ```bash
 agent-bridge service start      # start the daemon (no-op if already running) -- marketplace-isolation: allow service-management
 agent-bridge service stop       # stop the daemon (kills the worker + releases the port) -- marketplace-isolation: allow service-management
-agent-bridge service restart    # stop, wait for the port to release, start -- marketplace-isolation: allow service-management
+agent-bridge service restart    # zero-downtime cutover to a fresh daemon generation (same code path as `deploy`: spawn passive -> health-gate -> flip -> drain -> retire) -- marketplace-isolation: allow service-management
 agent-bridge service status     # running state + bound port + PID -- marketplace-isolation: allow service-management
 ```
+
+> **Never bypass `service restart` with the platform service manager
+> directly** (`systemctl --user restart agent-bridge.service`, `schtasks /Run`
+> on the scheduled task, etc.) -- that path is a raw stop-then-start with no
+> cutover, no drain, and no session-host handoff, and will drop every live
+> session-host with no warning.
 
 > **Note:** the payload-local `stop <session-id>` operation stops a *session*,
 > not the service. For the daemon, use the literal management command

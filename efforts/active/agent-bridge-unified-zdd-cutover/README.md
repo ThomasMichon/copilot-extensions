@@ -289,6 +289,23 @@ sequencing will be drafted here once the design is reviewed._
 - Full `agent-bridge` suite green (`tools/run-plugin-tests.py agent-bridge`).
 - Filed the umbrella issue,
   [#4477](https://github.com/ThomasMichon/copilot-extensions/issues/4477).
+- PR #4478's automated review caught three real gaps, all fixed:
+  - the regression test patched the unused module-level
+    `_service_stop`/`_service_start` names instead of what `_cmd_service`
+    actually calls (`core._service_stop`/`core._service_start` via
+    `core = _core()`) — fixed so a regression back to the raw path would
+    fail the test;
+  - `service_process_cli.py` imported the private `_cmd_deploy` symbol
+    directly instead of the `venue_cli` module — switched to
+    `venue_cli._cmd_deploy(args)`;
+  - `deploy` and `service restart`'s flags were duplicated — extracted
+    `venue_cli.add_deploy_cutover_flags()` so both share one registration;
+  - `docs/machine-config.md` and
+    `skills/agent-bridge/references/cli-commands.md` still told operators
+    `systemctl --user restart agent-bridge.service` (the unit's own
+    `ExecStart` is `agent-bridge start`) was an interchangeable restart —
+    it bypasses the CLI (and its ZDD cutover) entirely. Both now say never
+    to call the platform service manager's restart directly.
 - Phase 0's one open item (the opt-in reconcile-gate design fork) remains
   genuinely undecided — flagged for the operator, not resolved here.
 

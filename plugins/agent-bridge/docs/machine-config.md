@@ -626,9 +626,13 @@ agent-bridge agents
 Restart agent-bridge after modifying config:
 
 ```bash
-# Any platform (delegates to the scheduled task / systemd unit)
 agent-bridge service restart
-
-# Linux/WSL equivalent
-systemctl --user restart agent-bridge.service
 ```
+
+`service restart` always performs the same zero-downtime cutover
+(spawn passive -> health-gate -> flip -> drain -> retire) that
+`agent-bridge deploy` uses -- **never** `systemctl --user restart
+agent-bridge.service` directly, on any platform. The systemd/scheduled-task
+unit's own restart is a raw stop-then-start with no cutover, no drain, and
+no session-host handoff; it will drop every live session-host with no
+warning.
