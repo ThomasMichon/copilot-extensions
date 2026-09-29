@@ -1338,7 +1338,13 @@ def test_reconcile_settles_reservation_once_task_is_confirmed(q, client):
     assert q.get(t.id).status == Status.CONFIRMED
     assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
 
-    sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO)
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        local_body_verdict_fn=lambda _sid: "live",
+        local_end_fn=lambda _sid: True,
+    )
 
     assert sup.reconcile() == 1
     settled = q.get_reservation(reservation.key)
