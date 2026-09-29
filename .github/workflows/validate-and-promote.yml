@@ -729,4 +729,46 @@ jobs:
             echo "::error::PR #$pr_number diff touches paths outside .changefiles/ -- refusing to admin-merge." >&2
             exit 1
           fi
+          # `--admin` bypasses the review-required rule above (a named
+          # bypass actor on that specific ruleset), but `dev`'s separate
+          # "workflow/CODEOWNERS lockdown" ruleset (workflow-lockdown-guard.yml,
+          # #4503) enforces its required_status_checks rule with NO bypass
+          # actors at all, by design -- `--admin` cannot skip a required
+          # check that simply hasn't reported yet; it has to actually
+          # complete. That guard triggers async on PR creation and takes a
+          # few seconds to tens of seconds to report, so merging
+          # immediately after `gh pr create` above races it and fails with
+          # "Required status check \"workflow-lockdown-guard\" is expected"
+          # (confirmed live: two consecutive real promotions both hit this
+          # exact race). This diff is changefiles-only (asserted above), so
+          # the guard is expected to pass trivially -- wait for it to
+          # physically report rather than skip waiting. Bounded to 6
+          # minutes total (the guard's own job timeout is 5) so a
+          # genuinely broken/hung check fails this step instead of hanging
+          # the job.
+          #
+          # `gh pr checks --watch --required` alone does NOT close this
+          # race: if the required check has no check-run yet at all (only
+          # an "expected" status, not a reported instance), it exits
+          # immediately with "no required checks reported" instead of
+          # entering watch mode -- the exact same creation-time gap this
+          # step exists to close. So poll first until the named check has
+          # actually appeared, THEN watch it to completion, both under one
+          # shared deadline.
+          deadline=$(( $(date +%s) + 360 ))
+          until gh pr checks "$pr_number" --json name --jq '.[] | select(.name == "workflow-lockdown-guard")' 2>/dev/null | grep -q .; do
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::workflow-lockdown-guard never appeared as a check run on PR #$pr_number within the wait window -- leaving for manual review." >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          remaining=$(( deadline - $(date +%s) ))
+          if [ "$remaining" -lt 1 ]; then
+            remaining=1
+          fi
+          if ! timeout "$remaining" gh pr checks "$pr_number" --watch --required --interval 10; then
+            echo "::error::Required checks did not report success for PR #$pr_number within the wait window -- leaving for manual review; never force past a required status check." >&2
+            exit 1
+          fi
           gh pr merge "$pr_number" --squash --admin

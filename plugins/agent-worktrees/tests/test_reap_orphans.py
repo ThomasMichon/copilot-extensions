@@ -34,8 +34,18 @@ def _rec(wt_id, *, status="active", path="/tmp/wt", kind="session"):
     )
 
 
-def _run(sessions_map, records, *, dry_run=False, only_id=None,
-         activity=None, now=None, manager_owned_sessions=None):
+def _run(
+    sessions_map,
+    records,
+    *,
+    dry_run=False,
+    only_id=None,
+    worktree_ids=None,
+    include_manager_owned=False,
+    activity=None,
+    now=None,
+    manager_owned_sessions=None,
+):
     """Invoke the reaper with patched mux + tracking, capturing killed ids.
 
     ``activity`` maps session_name -> last-activity epoch (defaults every session
@@ -67,7 +77,12 @@ def _run(sessions_map, records, *, dry_run=False, only_id=None,
          patch("agent_worktrees.tracking.list_records", return_value=records), \
          patch("agent_worktrees.config.tracking_dir", return_value=Path("/tmp")):
         result = cli.reap_orphan_mux_sessions(
-            dry_run=dry_run, only_id=only_id, now=now)
+            dry_run=dry_run,
+            only_id=only_id,
+            worktree_ids=worktree_ids,
+            include_manager_owned=include_manager_owned,
+            now=now,
+        )
     return result, killed
 
 
@@ -129,6 +144,17 @@ class TestReapOrphans:
         assert killed == []
         assert {"id": "mgr", "reason": "manager-owned"} in result["skipped"]
 
+    def test_manager_owned_session_can_be_reaped_when_explicitly_enabled(self, tmp_path):
+        rec = _rec("mgr", status="finalized", path=str(tmp_path))
+        result, killed = _run(
+            {"wt-mgr": 0},
+            [rec],
+            include_manager_owned=True,
+            manager_owned_sessions={"wt-mgr"},
+        )
+        assert killed == ["mgr"]
+        assert result["reaped"] == ["mgr"]
+
     def test_non_wt_sessions_ignored(self):
         result, killed = _run({"misc": 0, "scratch": 0}, [])
         assert killed == []
@@ -188,6 +214,19 @@ class TestReapOrphans:
         result, killed = _run({"wt-fin": 0}, [rec], only_id="nope")
         assert killed == []
         assert result["reaped"] == [] and result["skipped"] == []
+
+    def test_worktree_ids_filter_targets_multiple_specific_orphans(self, tmp_path):
+        recs = [
+            _rec("fin", status="finalized", path=str(tmp_path)),
+            _rec("fin2", status="finalized", path=str(tmp_path)),
+        ]
+        result, killed = _run(
+            {"wt-fin": 0, "wt-fin2": 0},
+            recs,
+            worktree_ids={"fin2"},
+        )
+        assert killed == ["fin2"]
+        assert result["reaped"] == ["fin2"]
 
     # ── #713 idle gate: never reap a busy (recently-active) session ───────────
 

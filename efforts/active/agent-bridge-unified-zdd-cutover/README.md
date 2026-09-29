@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 5 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 5 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581))
+- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 5 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 5 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 5 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to a tracked follow-up)
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
@@ -252,10 +252,21 @@ layer — is the operator's own, captured verbatim in Request.)_
 - [ ] A real, driven cutover drill: start a session-host-carrying daemon,
   trigger the one canonical update path, and confirm the session's Copilot
   process never observes a disruption (no dropped turn, no lost event) while
-  the daemon itself fully changes generation.
+  the daemon itself fully changes generation. **Partially covered** -- the
+  pre-existing `agent-bridge-cutover` Tier-P `routing-flip-retire` check
+  already proves the daemon-level mechanism a live-turn survival depends on
+  (nothing hard-killed, clean beside-not-in-place handoff); a *fully live*
+  assertion needs a real model/ACP child in the loop and remains Tier-E scope
+  (tracked, not delivered here -- see Journal).
 - [ ] A forced-abrupt-termination drill: kill the old generation before it
   releases its claims, and confirm a later generation recovers them cleanly.
-- [ ] Extend or add a clean-room scenario (Tier P, `agent-bridge-solo` or a
+  **Partially covered** -- proves the underlying dead-pid-recovery primitive
+  against a genuinely killed real process; the claim is stamped with a
+  test-chosen generation label, not the killed daemon's own real
+  `_generation_id` (no API exposes it -- see Journal's honest scope note),
+  so this does not yet demonstrate a claim *actually owned by that daemon
+  generation* being interrupted and recovered.
+- [x] Extend or add a clean-room scenario (Tier P, `agent-bridge-solo` or a
   new `agent-bridge-cutover` companion) that exercises this on a real fresh
   machine.
 
@@ -267,7 +278,9 @@ layer — is the operator's own, captured verbatim in Request.)_
 - [ ] A live cutover drill (Phase 5) shows zero session disruption across a
   real generation change.
 - [ ] An abrupt-termination drill shows a stale claim is recovered by the
-  next generation without manual intervention.
+  next generation without manual intervention. **Partially covered** -- the
+  claim is stamped with a test-chosen label, not the daemon's own real
+  generation identity (see Journal).
 - [ ] Reconcile staleness is observable via a status command, independent of
   whether Phase 0's opt-in-gate question is resolved to keep or remove it.
 - [ ] Full plugin test suite (`python tools/run-plugin-tests.py agent-bridge`)
@@ -328,6 +341,118 @@ entry below for what was inspected, what was already covered, and the one new
 test that closes the gap.
 
 ## Journal
+
+### 2026-09-29 — Phase 5 landed partially (abrupt-termination drill + clean-room extension; live-turn drill deferred) ([#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586))
+- **What's real here (final implementation).** Extended the pre-existing
+  `tools/clean-room/scenarios/agent-bridge-cutover` Tier-P scenario (found
+  already covering the daemon-level routing-flip/drain-gate/breadcrumb-
+  recovery mechanism, predating this effort) with a new `abrupt-kill-recovery`
+  check in `fixtures/cutover_probe.py`:
+  1. A disposable **sentinel** orphan record is seeded *before* a real
+     daemon starts, then polled (via `HostIndex`'s own strict
+     `_load_or_raise()` read path, never the lenient one the real daemon
+     uses internally -- a read failure is a distinct, explicitly-raised
+     outcome, never silently treated as "the record is gone") until the
+     daemon's own ONE-SHOT startup reattach scan (`app.py`'s
+     `_reattach_session_hosts_bg`, never periodic) reaps it -- an
+     observable signal that scan has actually run, not a timing guess.
+     Seeding *before* startup (not after) matters precisely because the
+     scan is one-shot: seeding too late races it and can miss the one
+     window it runs in.
+  2. Only then is the real test record registered (with a *fresh* dummy
+     process, never the sentinel's own -- reaping force-kills a record's
+     `host_pid`/`child_pid`, so reusing it would mean the "real" record's
+     host was already dead before the ownership contract is even exercised)
+     and claimed under a test-chosen generation *label* (see the honest
+     scope note below) and the live daemon's own real, live pid -- invoking
+     the real `HostIndex.claim()` contract directly (the exact call
+     `_claim_host_record` makes; a real daemon has no API surface to
+     discover and claim an ad hoc record with no live session-host child of
+     its own, so this is the honest boundary of what a stdlib-only probe
+     can drive without building a full session-host implementation).
+  3. That daemon is SIGKILLed -- no drain, no `/api/v1/shutdown` handshake,
+     so the exit contract's own release path never runs and the claim is
+     durably stranded exactly as recorded.
+  4. A fresh daemon starts. Its OWN real startup reattach scan (the SAME
+     production code path, not a synthetic stand-in) is polled via the
+     on-disk index and required to fully reap the record -- this fixture
+     creates no adoptable DB session, so a lingering claim under the fresh
+     daemon (rather than a full reap) would itself be a bug, not an
+     alternate valid outcome.
+  **Honest scope note.** The claim is stamped with a test-chosen generation
+  *label*, not the killed daemon's own real `_generation_id`
+  (`session_core.py` computes that once per process from
+  `version+pid+started_at` -- not independently reproducible from outside
+  the process, and there is no API surface exposing it; adding one would be
+  its own production change, and doing so ran straight into the same
+  contract-registry self-reference wall Phase 3 hit for its
+  `HTTP_PROTOCOL_VERSION` bump -- `/health` is a registered semantic contract
+  source, so exposing a new field there needs a fixture whose
+  `captured_from.commit` cannot reference this PR's own not-yet-existing
+  merged commit; tried, hit exactly that wall, reverted rather than force
+  it). So this drill demonstrates the underlying dead-pid-recovery
+  PRIMITIVE against a genuinely killed real process -- not that the killed
+  daemon's own real exit-contract release path
+  (`release_all(self._generation_id)`) was interrupted, since that path
+  would never have matched an arbitrary label even on a graceful exit. That
+  narrower, already-thoroughly-unit-tested claim (`test_admin_routes_
+  phase3.py`) is a smaller, orthogonal fact this Tier-P drill does not need
+  to re-prove; what it adds is the *dead-pid detection* against a real OS
+  process a unit test cannot exercise.
+  Sanity-checked by fault-injecting an inverted `zdd.claims.is_recoverable`
+  (with `PYTHONPATH` correctly forcing the daemon subprocess to import the
+  edited source rather than its installed venv copy -- an earlier sanity
+  run without this silently exercised the unmodified installed copy and
+  gave a false PASS, caught before claiming verification) and confirming
+  the check correctly FAILS; reverted immediately. Documented the new
+  check in `tools/clean-room/README.md`'s catalog and the scenario
+  manifest's own description. Ran the full 4-check probe stable across
+  many runs.
+- **Review history (six rounds, each catching a real gap -- kept brief; full
+  detail in the PR/commit history).** (1) The first version seeded a
+  synthetic placeholder claim *before* the daemon started, so the daemon's
+  own one-shot startup scan reaped it before the simulated kill ever
+  touched a claim that mattered, and trusted raw subprocess stdout without
+  requiring the subprocess to have actually succeeded. (2) The fix's
+  `time.sleep(1.5)` guessed at scan timing rather than observing it, and
+  "recovery" was verified by a disconnected direct `HostIndex.claim()` call
+  standing in for "a new generation," never by the real fresh daemon's own
+  recovery path. (3) The sentinel and the real test record shared one dummy
+  process, so the sentinel's own reap-triggered kill left the "real"
+  record's host already dead before the contract was exercised. (4) The
+  final assertion accepted "reclaimed under the fresh daemon" as an
+  alternate valid outcome alongside "reaped" -- but this fixture has no
+  adoptable session, so the *only* legitimate outcome is a full reap; the
+  looser assertion could mask a real bug (a claim silently retained
+  forever) as a pass. (5) `_index_get` conflated a genuine "not found" with
+  a read failure (a corrupt/locked index, or a crashed subprocess), so
+  either could misreport as successful recovery -- fixed via the strict
+  `_load_or_raise()` path and a distinct, never-silently-swallowed
+  `_IndexReadError`. (6) The claim was stamped with a synthetic literal
+  rather than the daemon's own real generation id -- attempted a fix via a
+  new `/health` field, hit the contract-registry self-reference wall (see
+  the honest scope note above), reverted, and instead narrowed the check's
+  own documented claim to match what it actually proves. Each round's fix
+  is described in its own commit message; the final, current design (above)
+  folds in all six corrections.
+- **What's honestly NOT delivered.** The Plan's first bullet asks for a live
+  session's Copilot *turn* to survive a cutover with zero observed
+  disruption -- that needs a real model/ACP child in the loop synchronized
+  with the cutover, which is a materially different (and much larger) build
+  than a stdlib-only probe can provide. The pre-existing `routing-flip-retire`
+  check's own FIDELITY NOTE already drew this exact line: Tier P proves the
+  cutover *mechanism* the guarantee is built on; a fully live turn-survival
+  assertion is Tier E. This PR does not build that Tier-E harness -- it is
+  left as tracked, deliberately deferred scope, not silently dropped. A
+  genuine "reconcile staleness is observable via a status command" surface
+  (this effort's own Validation Plan item) also remains open -- the
+  `/health` field attempt above would have closed it, but hit the
+  contract-registry wall; a real fix needs either a dedicated follow-up PR
+  referencing this PR's own real merged commit (Phase 3's established
+  pattern for exactly this kind of contract-registry chicken-and-egg), or a
+  different, non-`/health` surface.
+- Full suite: `python3 tools/run-plugin-tests.py agent-bridge` and the
+  4-check clean-room probe both green throughout.
 
 ### 2026-09-29 — Phase 4 landed ([#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581))
 - **No new production mechanism was needed.** Reading `client.py`'s
