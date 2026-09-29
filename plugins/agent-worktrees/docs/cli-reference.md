@@ -466,12 +466,43 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 |------------|-------------|
 | `install` | Full deploy: runtime + project config + binstubs + terminal profiles |
 | `register` | Register a new project (create config + binstub without full reinstall) |
-| `uninstall` | Remove worktree manager |
+| `unregister` | Deregister a project's own adoption lifecycle (projects.yaml + repos.yaml entry + its binstub) -- never the shared runtime or another project's registration; see below |
+| `uninstall` | Remove worktree manager (`--remove-config` ALSO deletes the SHARED `~/.agent-worktrees` registry root -- shared by every adopted project, not just `--project`'s; requires `--yes`) |
 | `update` | Re-deploy runtime from repo source + refresh every active registered plugin payload/runtime, purge inactive installed identities absent from an authoritatively refreshed marketplace catalog, and opportunistically refresh the remaining installed-but-inactive payload inventory; then update sibling modules, fast-forward the managed repo anchor(s), and auto-prune legitimately stale Picker pivot manifests. Active or activation-unknown identities are never purged. An inactive inventory refresh/uninstall failure is advisory; an active plugin refresh failure fails the update. Version-gated: skips a runtime whose deployed version already matches its payload (`--force` re-deploys all active runtimes; `--no-anchor-sync` skips the anchor sync; `--no-prune-pivots` skips the pivot prune -- see `doctor`'s `--prune-pivots` for the same safe subset run on demand) |
 | `install-status` | Show installation and deployment status |
 | `deploy-instructions` | Retire migrated managed instruction files (machine identity now via the `session-machine` sessionStart hook) |
 | `machine-context` | sessionStart producer for the exact-session guidance writer (cwd-gated) |
 | `get` | Query config values (e.g., `agent-worktrees get repo-dir`) |
+
+### Deregistering a project (`unregister`) vs. tearing down the runtime (`uninstall --remove-config`)
+
+`~/.agent-worktrees` mixes two things with very different disposability: the
+deployed **runtime** (`venv/`, `lib/`, `bin/` -- disposable, `install`
+regenerates it with zero data loss) and the **shared registry**
+(`config.yaml`, `repos.yaml`, `projects.yaml`, `accounts.yaml`, `snapshots/`,
+`pivots/` -- the cross-project registry every adopted project shares on this
+machine). `uninstall --remove-config` deletes that whole shared root, so it
+is never scoped to the project named via `--project` -- it is a machine-wide,
+hard-to-undo action. Passing `--remove-config` alone only reports what would
+be deleted (and names any other adopted projects that would lose their
+entries); add `--yes` to actually delete it.
+
+To deregister a single project -- e.g. a stale or broken project stub with
+no repo and no worktrees -- use `unregister` instead:
+
+```
+agent-worktrees --project stale-stub unregister
+```
+
+It removes only that project's `projects.yaml` entry, its `repos.yaml`
+entry (or, with `--keep-repo-entry`, downgrades that entry to a catalogued
+`reference` repo instead of removing it), and its own per-project binstub --
+never the shared runtime, never another project's registration. It refuses
+(unless `--force`) when its own tracking still shows live worktrees, tracked
+sessions, or an open PR, so deregistering never silently orphans in-flight
+work. The project's own per-project state directory (`~/.<project>`) is left
+in place; remove it by hand, or with `uninstall --project <name>
+--remove-config --yes`, once it's no longer needed.
 
 ## Effort Focus
 

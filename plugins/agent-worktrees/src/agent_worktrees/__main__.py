@@ -5814,6 +5814,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'sync': ('worktree_ops_cli', 'cmd_sync'),
     'uninstall': ('installation_cli', 'cmd_uninstall'),
     'uninstall-plugins': ('update_cli', 'cmd_uninstall_plugins'),
+    'unregister': ('installation_cli', 'cmd_unregister'),
     'update': ('update_cli', 'cmd_update'),
     'validate': ('picker_profiles_cli', 'cmd_validate'),
     'worktree-lineage': ('session_tracking_cli', 'cmd_worktree_lineage'),
@@ -5831,7 +5832,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
 # defeat lazy dispatch for every invocation, not just fast-tracked ones.
 # Deliberately excludes manual-dispatch-only verbs that never register an
 # argparse subparser choice at all (delegates, fleet, hook, lease, reconcile,
-# unregister, worktree) -- several of those (worktree, in particular) rely on
+# worktree) -- several of those (worktree, in particular) rely on
 # being ABSENT here so `_canonical_slug()` can still fold the singular
 # "worktree" back to this binstub's own "worktrees" alias; adding them here
 # would silently break that fold-back (found the hard way, via
@@ -6454,7 +6455,7 @@ def _load_full_command_surface() -> None:
         "config-migrate": cmd_config_migrate,
         "install": cmd_install,
         "register": cmd_register,
-        "unregister": cmd_uninstall,
+        "unregister": installation_cli.cmd_unregister,
         "uninstall": cmd_uninstall,
         "update": cmd_update,
         "install-status": cmd_install_status,
