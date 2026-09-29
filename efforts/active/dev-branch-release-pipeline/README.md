@@ -2087,7 +2087,7 @@ efforts' own PRs).
   and refuses (via a new `StaleCandidatePromotion`, treated as a benign
   no-op -- CLI exit 0, not a failure) unless the candidate `dev_head` is
   either identical to it (falls through to the ordinary "no content change"
-  no-op) or a strict `git merge-base --is-ancestor` descendant of it. 4 new
+  no-op) or a strict `git merge-base --is-ancestor` descendant of it. 3 new
   tests: refuses an out-of-order stale candidate, allows genuine forward
   advancement, and confirms the CLI exit code stays 0 (matching the
   existing pause-guard precedent) so `report-failure`'s watchdog never
@@ -2096,4 +2096,40 @@ efforts' own PRs).
   whatever trigger/concurrency shape sits in front of it -- the guard
   protects `main` even if a future change reintroduces out-of-order
   dispatching some other way.
+- **A fifth review round (against the monotonic-guard commit) caught the
+  remaining half of the same problem: a liveness gap the correctness guard
+  alone doesn't close.** `promote-trigger.yml`'s filter runs are still
+  unthrottled, so an older commit's dispatch can still win
+  `validate-and-promote.yml`'s single-pending-slot race and EVICT a newer
+  commit's already-queued dispatch outright (GitHub's `queue: single`
+  semantics: a newer trigger replaces whatever was merely *pending*, never
+  the one already running -- but an out-of-order LATE dispatch can still be
+  the one that ends up pending when the running slot frees, bumping the
+  genuinely-next one). The monotonic guard correctly no-ops on that stale
+  payload once it runs -- but nothing re-queues the newer commit it evicted,
+  so `main` could lag behind `dev` indefinitely if no *further* push ever
+  happens to generate a fresh dispatch.
+- **Fix: stop trusting the dispatch payload's sha for what to promote at
+  all.** `gate` now deliberately ignores `client_payload.sha` for
+  `repository_dispatch` triggers and re-resolves `origin/dev`'s LIVE tip,
+  fresh, at its own run time instead. This sidesteps the whole class of
+  problem rather than patching around it: ANY dispatch that reaches `gate`
+  -- stale or not -- ends up validating and promoting whatever `dev`
+  actually is *right now*, so an evicted/stale dispatch is never a lost
+  opportunity; whichever dispatch happens to trigger `gate` next always
+  converges on the same, freshest target. This is the same
+  "wholesale-replace catches up everything accumulated" philosophy this
+  pipeline already relies on downstream, just applied one hop earlier.
+  Confirmed this doesn't reopen the 2026-09-28 "promote job's own re-fetch
+  could outrun gate's validated sha" bug: that fix's actual invariant --
+  everything downstream (`full`/`worktree-manager`/`guards-full-sweep`/
+  `promote`) trusts `needs.gate.outputs.sha`, never re-resolves
+  `origin/dev` independently at its own later checkout time -- is
+  completely untouched; only *where* `gate` itself samples `dev`'s state
+  from moved (a stale payload -> a fresh, authoritative git call).
+  `client_payload.sha` in `promote-trigger.yml`'s own dispatch is now
+  informational/diagnostic only, never trusted as the promotion target.
+- **Also fixed the same round's third finding:** the previous Journal
+  entry claimed "4 new tests" when the diff (and this entry's own prose)
+  only added 3 -- corrected in place.
 

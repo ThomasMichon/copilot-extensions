@@ -5,7 +5,11 @@ name: Promote trigger (dev-advancement filter)
 # see the 2026-09-29 Journal entry for the incident that motivated this
 # split). This workflow's ONLY job is: decide whether a "CI" completion was
 # a genuine `dev`-branch advancement, and if so, fire a `repository_dispatch`
-# event that carries the validated sha into `validate-and-promote.yml`.
+# signal at `validate-and-promote.yml`. `client_payload.sha` below is
+# informational only (surfaced for diagnostics/logging) -- the receiving
+# `gate` job deliberately does NOT trust it as the promotion target; see
+# that job's own comment for why (a second review round caught a liveness
+# gap in an earlier design that DID pin to this payload's sha).
 #
 # Why a separate workflow, not just a lighter job in the same file: this
 # job carries NO concurrency restriction at all, so it runs immediately for

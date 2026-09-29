@@ -132,27 +132,46 @@ jobs:
         run: |
           # Resolve the candidate sha per trigger type, then apply the
           # IDENTICAL ancestor proof to all of them -- never trust a
-          # dispatch payload alone. `repository_dispatch`'s own `github.sha`
-          # resolves to the last commit on the DEFAULT branch (main), not
-          # the validated dev sha `promote-trigger.yml` found -- that value
-          # only exists in `client_payload.sha`. `workflow_dispatch`'s
-          # `github.sha` is whatever ref a human dispatched against, and
-          # previously short-circuited straight to `is_dev=true` for it,
-          # never verified against `dev` at all -- safe only by accident,
-          # because every downstream promotion call hard-coded `origin/dev`
-          # regardless of this job's own `sha` output. Once promotion
-          # started trusting `sha` (see the `promote` job's `DEV_SHA`), an
-          # operator manually dispatching this workflow from an unreviewed
-          # feature/PR branch could promote that branch's own unreviewed
-          # content straight to `main`. Requiring the same
-          # `git merge-base --is-ancestor` proof for every trigger closes
-          # that gap regardless of who/what dispatched this run.
+          # dispatch payload alone. For `repository_dispatch`, deliberately
+          # ignore `client_payload.sha` and re-resolve `origin/dev`'s LIVE
+          # tip at THIS job's own run time instead (fixed after a live
+          # review round, 2026-09-29 -- see the effort Journal): pinning to
+          # the payload's specific sha reopened a liveness gap --
+          # `promote-trigger.yml`'s own filter runs are deliberately
+          # unthrottled, so an OLDER commit's dispatch can win
+          # `validate-and-promote.yml`'s single-pending-slot race and
+          # evict a NEWER commit's already-queued dispatch entirely; the
+          # monotonic guard in `tools/promote_release.py` then correctly
+          # no-ops on that stale payload, but nothing re-queues the evicted
+          # newer commit -- `main` could lag behind indefinitely if no
+          # further push ever happens to trigger a fresh dispatch.
+          # Resolving `origin/dev`'s tip fresh, right here, sidesteps the
+          # whole class of problem: ANY dispatch, stale or not, that
+          # reaches this point ends up validating and promoting whatever
+          # `dev` actually is *right now* -- an evicted/stale dispatch is
+          # never lost, because whichever dispatch happens to trigger this
+          # job next always converges on the same, freshest target. This
+          # is the same "wholesale-replace catches up everything
+          # accumulated" philosophy this whole pipeline already relies on,
+          # just applied one hop earlier. `workflow_dispatch`'s own
+          # `github.sha` is unchanged (whatever ref a human dispatched
+          # against) -- previously short-circuited straight to
+          # `is_dev=true` for it, never verified against `dev` at all --
+          # safe only by accident, because every downstream promotion call
+          # hard-coded `origin/dev` regardless of this job's own `sha`
+          # output. Once promotion started trusting `sha` (see the
+          # `promote` job's `DEV_SHA`), an operator manually dispatching
+          # this workflow from an unreviewed feature/PR branch could
+          # promote that branch's own unreviewed content straight to
+          # `main`. Requiring the same `git merge-base --is-ancestor`
+          # proof for every trigger closes that gap regardless of who/what
+          # dispatched this run.
+          git fetch origin dev
           if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
-            sha="${{ github.event.client_payload.sha }}"
+            sha="$(git rev-parse origin/dev)"
           else
             sha="${{ github.sha }}"
           fi
-          git fetch origin dev
           if git merge-base --is-ancestor "$sha" origin/dev; then
             echo "is_dev=true" >> "$GITHUB_OUTPUT"
             echo "sha=$sha" >> "$GITHUB_OUTPUT"
