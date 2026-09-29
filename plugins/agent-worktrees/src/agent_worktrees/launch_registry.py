@@ -31,6 +31,7 @@ still-running process tree unprotected.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -93,7 +94,11 @@ def register_launch(
     worktree simply refreshes its lock (harmless, matches this pid's own
     liveness either way).
     """
-    if not worktree_id or not pid:
+    if not worktree_id:
+        return False
+    if pid is None:
+        pid = os.getpid()
+    if not pid:
         return False
     extra = {"worktree_id": worktree_id}
     if launch_id:
@@ -140,15 +145,13 @@ def cmd_register_launch(args) -> int:
     non-fatal and continue unprotected (#4481 review: silently exiting 0 on
     every path made that failure mode invisible).
     """
-    import os as _os
-
     from . import config as _cfg
 
     worktree_id = getattr(args, "worktree_id", None)
     if not worktree_id:
         print("Usage: register-launch --worktree-id ID [--pid PID]", file=sys.stderr)
         return 1
-    pid = getattr(args, "pid", None) or _os.getpid()
+    pid = getattr(args, "pid", None)
     launch_id = getattr(args, "launch_id", None)
     ok = register_launch(_cfg.install_dir(), worktree_id, pid=pid, launch_id=launch_id)
     if not ok:

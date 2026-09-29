@@ -26,8 +26,16 @@ def test_register_launch_rejects_empty_worktree_id(tmp_path):
     assert launch_registry.register_launch(tmp_path, "", pid=os.getpid()) is False
 
 
-def test_register_launch_rejects_missing_pid(tmp_path):
-    assert launch_registry.register_launch(tmp_path, "wt-abc", pid=None) is False
+def test_register_launch_defaults_pid_to_this_process(tmp_path):
+    ok = launch_registry.register_launch(tmp_path, "wt-default")
+    assert ok
+    lock_path = tmp_path / "launch-locks" / f"launch.wt-default.{os.getpid()}.lock"
+    assert lock_path.exists()
+    assert os.getpid() in launch_registry.active_launch_pids(tmp_path)
+
+
+def test_register_launch_rejects_falsy_nonnone_pid(tmp_path):
+    assert launch_registry.register_launch(tmp_path, "wt-abc", pid=0) is False
 
 
 def test_active_launch_pids_reports_live_registered_pid(tmp_path):
