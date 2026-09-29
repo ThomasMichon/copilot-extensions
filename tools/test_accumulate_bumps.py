@@ -350,6 +350,38 @@ def test_from_diff_bumps_every_consumer_of_a_changed_lib_and_the_lib(diff_repo):
     }
 
 
+def test_from_diff_bumps_a_standalone_consumers_own_vendored_lib_copy(diff_repo):
+    """`lib_bumps_from_diff()` only ever globbed `plugins/*/libs/<lib>/`,
+    so a recognized standalone consumer's own top-level `libs/<lib>/` real
+    copy (mirroring `worktree-manager/libs/zdd`) was left stale by the
+    mechanical `--from-diff` shortcut -- `check-vendored-libs-sync.py`
+    already includes this shape in its own version-agreement check, so the
+    stale copy then fails THAT check even though `--from-diff --apply`
+    reported success (PR #4514 review)."""
+    root, git = diff_repo
+    # Land worktree-manager (with its own real shared-lib copy) on `main`
+    # too, same reasoning as the sibling standalone-consumer test above --
+    # otherwise it's "new on this branch", exempt from any bump obligation.
+    git("checkout", "-q", "main")
+    _standalone(root, "worktree-manager", "0.5.0-dev1")
+    (root / "worktree-manager/libs/shared-lib/src/shared_lib").mkdir(parents=True)
+    (root / "worktree-manager/libs/shared-lib/pyproject.toml").write_text(
+        '[project]\nname = "shared-lib"\nversion = "0.1.0-dev2"\n', encoding="utf-8",
+    )
+    (root / "worktree-manager/libs/shared-lib/src/shared_lib/__init__.py").write_text("x = 1\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "add worktree-manager with a real shared-lib copy")
+    git("checkout", "-q", "-B", "feature", "main")
+
+    for plugin in ("agent-a", "agent-b"):
+        (root / f"plugins/{plugin}/libs/shared-lib/src/shared_lib/__init__.py").write_text("x = 2\n")
+    (root / "worktree-manager/libs/shared-lib/src/shared_lib/__init__.py").write_text("x = 2\n")
+
+    _plugins, libs = acc.compute_from_diff("main")
+    wtm_copy = root / "worktree-manager/libs/shared-lib/pyproject.toml"
+    assert libs.get(wtm_copy) == ("0.1.0-dev2", "0.1.0-dev3")
+
+
 def test_from_diff_charges_all_copies_even_if_only_one_was_edited(diff_repo):
     root, _git = diff_repo
     (root / "plugins/agent-a/libs/shared-lib/src/shared_lib/__init__.py").write_text("x = 2\n")

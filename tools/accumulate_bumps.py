@@ -452,6 +452,16 @@ def lib_bumps_from_diff(base: str, changed: list[str]) -> dict[Path, tuple[str, 
     result: dict[Path, tuple[str, str]] = {}
     for lib in sorted(_changed_libs(changed)):
         copies = sorted(PLUGINS_DIR.glob(f"*/libs/{lib}/pyproject.toml"))
+        # A recognized standalone consumer (e.g. worktree-manager) can also
+        # carry its own real vendored copy under its own top-level libs/ --
+        # check-vendored-libs-sync.py already includes this shape in its
+        # own version-agreement check, so leaving it out of the mechanical
+        # --from-diff shortcut would create exactly the version-skew
+        # failure that check then flags (PR #4514 review).
+        for consumer in iter_standalone_consumer_names():
+            candidate = REPO / consumer / "libs" / lib / "pyproject.toml"
+            if candidate.is_file():
+                copies.append(candidate)
         if not copies:
             continue
         current = max(
