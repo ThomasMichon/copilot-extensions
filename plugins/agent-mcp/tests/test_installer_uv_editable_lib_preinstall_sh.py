@@ -1,0 +1,124 @@
+"""Guard for init.sh's non-uv (bare-pip) preinstall loop covering the
+`[tool.uv.sources]` workspace path deps: agent-credential-relay,
+agent-procutil, agent-single-instance-lease (all `uv`-editable canonical
+references, vendor-pointer-generalization effort), and agent-zdd (a real
+local copy). Exercises the loop via real bash execution for both the uv
+path and the bare-pip fallback path -- a regression here would still pass
+every other installer guard while silently reintroducing the bare-pip
+dependency failure the review on PR #4465 caught."""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+
+PLUGIN = Path(__file__).resolve().parents[1]
+INSTALLER = PLUGIN / "scripts" / "init.sh"
+
+pytestmark = pytest.mark.guard
+
+_LOOP_START = "for _lib_entry in \\\n    'credential-relay:agent-credential-relay'"
+_LOOP_END = "\ndone\n\n# -- 3."
+
+
+def _extract_loop() -> str:
+    text = INSTALLER.read_text(encoding="utf-8")
+    return _LOOP_START + text.split(_LOOP_START, 1)[1].split(_LOOP_END, 1)[0] + "\ndone"
+
+
+def _run(
+    bash: str, plugin_dir: Path, have_uv: bool, *, marker: Path
+) -> subprocess.CompletedProcess[str]:
+    loop = _extract_loop()
+    script = f"""
+set -uo pipefail
+_fail() {{ echo "FAIL:$1"; exit 1; }}
+uv() {{ echo "UV_INSTALL_ARGS:$*" >> '{marker}'; }}
+VENV_PYTHON=venv_python_stub
+venv_python_stub() {{ echo "PIP_INSTALL_ARGS:$*" >> '{marker}'; }}
+PLUGIN_DIR='{plugin_dir}'
+HAVE_UV={1 if have_uv else 0}
+{loop}
+"""
+    return subprocess.run(
+        [bash, "-c", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={**os.environ},
+        timeout=30,
+    )
+
+
+def _installed_paths(marker: Path) -> list[str]:
+    if not marker.exists():
+        return []
+    out = []
+    for line in marker.read_text(encoding="utf-8").splitlines():
+        if line.startswith("PIP_INSTALL_ARGS:"):
+            out.append(line[len("PIP_INSTALL_ARGS:"):].split()[-1])
+        elif line.startswith("UV_INSTALL_ARGS:"):
+            args = line[len("UV_INSTALL_ARGS:"):].split()
+            for arg in args:
+                if arg not in {
+                    "pip", "install", "--python", "venv_python_stub", "--quiet",
+                    "--reinstall-package", "agent-credential-relay", "agent-procutil",
+                    "agent-single-instance-lease", "agent-zdd",
+                }:
+                    out.append(arg)
+                    break
+    return out
+
+
+def _make_libs(root: Path) -> None:
+    for lib in ("credential-relay", "agent-procutil", "single-instance-lease", "zdd"):
+        lib_dir = root / lib
+        lib_dir.mkdir(parents=True)
+        (lib_dir / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+
+
+@pytest.mark.parametrize("have_uv", [True, False])
+def test_preinstall_loop_resolves_plugin_local_copy(have_uv: bool, tmp_path: Path):
+    bash = shutil.which("bash")
+    if os.name == "nt" or not bash:
+        pytest.skip("native POSIX bash is unavailable")
+
+    plugin_dir = tmp_path / "plugins" / "agent-mcp"
+    _make_libs(plugin_dir / "libs")
+    marker = tmp_path / "marker.txt"
+
+    proc = _run(bash, plugin_dir, have_uv, marker=marker)
+    assert proc.returncode == 0, proc.stderr
+
+    installs = _installed_paths(marker)
+    assert len(installs) == 4
+    for resolved in installs:
+        assert os.path.realpath(resolved).startswith(os.path.realpath(str(plugin_dir / "libs")))
+
+
+@pytest.mark.parametrize("have_uv", [True, False])
+def test_preinstall_loop_falls_back_to_repo_root_canonical_when_absent(
+    have_uv: bool, tmp_path: Path
+):
+    bash = shutil.which("bash")
+    if os.name == "nt" or not bash:
+        pytest.skip("native POSIX bash is unavailable")
+
+    plugin_dir = tmp_path / "plugins" / "agent-mcp"
+    plugin_dir.mkdir(parents=True)
+    canonical = tmp_path / "libs"
+    _make_libs(canonical)
+    marker = tmp_path / "marker.txt"
+
+    proc = _run(bash, plugin_dir, have_uv, marker=marker)
+    assert proc.returncode == 0, proc.stderr
+
+    installs = _installed_paths(marker)
+    assert len(installs) == 4
+    for resolved in installs:
+        assert os.path.realpath(resolved).startswith(os.path.realpath(str(canonical)))

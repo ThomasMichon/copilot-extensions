@@ -177,6 +177,23 @@ def test_shared_lib_change_passes_when_all_consumers_bump(repo: Path):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_unreadable_manifest_fails_closed_instead_of_dropping_consumer(repo: Path):
+    """A plugin whose `pyproject.toml` EXISTS but is malformed must never be
+    silently dropped from the consumer map (PR #4465 review): that would let
+    a shared-lib change ship without charging a real consumer. The guard
+    must refuse (nonzero exit) rather than continue past it."""
+    _write(repo, "plugins/gamma/plugin.json",
+           json.dumps({"name": "gamma", "version": "3.0.0-dev1"}) + "\n")
+    _write(repo, "plugins/gamma/pyproject.toml",
+           '[project]\nname = "gamma"\n\n[tool.uv]\nsources = "not-a-table"\n')
+    _write(repo, "plugins/gamma/src/gamma/__init__.py", "x = 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add gamma with a malformed pyproject.toml")
+    result = _run(repo, "--list")
+    assert result.returncode != 0
+    assert "gamma" in result.stderr
+
+
 def test_shared_lib_change_charges_uv_editable_pointer_consumer_too(repo: Path):
     """A plugin with NO local copy at all -- only a `uv`-editable canonical
     pointer in its own `pyproject.toml` -- must still be charged for a

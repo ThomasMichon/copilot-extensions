@@ -437,6 +437,40 @@ else
     _skip 'Venv already exists'
 fi
 
+# -- 2b. Preinstall workspace path deps (non-uv fallback) --------------
+# `agent-credential-relay`/`agent-procutil`/`agent-single-instance-lease`
+# are `uv`-editable canonical references (vendor-pointer-generalization
+# effort, Phase 1: no local copy in a dev checkout at all); `agent-zdd` is
+# a real local copy. All 4 are `[tool.uv.sources]` workspace path deps, so
+# when `uv` is unavailable the fallback below (bare `python -m pip
+# install`) cannot resolve any of them without this explicit preinstall --
+# it does NOT honor `[tool.uv.sources]` at all.
+for _lib_entry in \
+    'credential-relay:agent-credential-relay' \
+    'agent-procutil:agent-procutil' \
+    'single-instance-lease:agent-single-instance-lease' \
+    'zdd:agent-zdd'; do
+    _lib_dir_name="${_lib_entry%%:*}"
+    _lib_pkg_name="${_lib_entry#*:}"
+    _lib_path="$PLUGIN_DIR/libs/$_lib_dir_name"
+    if [[ ! -f "$_lib_path/pyproject.toml" ]]; then
+        _lib_path="$(cd "$PLUGIN_DIR/../.." && pwd)/libs/$_lib_dir_name"
+    fi
+    if [[ -f "$_lib_path/pyproject.toml" ]]; then
+        if [[ "$HAVE_UV" -eq 1 ]]; then
+            uv pip install --python "$VENV_PYTHON" --reinstall-package "$_lib_pkg_name" \
+                "$_lib_path" --quiet || _lib_install_rc=$?
+        else
+            "$VENV_PYTHON" -m pip install --quiet "$_lib_path" || _lib_install_rc=$?
+        fi
+        if [[ "${_lib_install_rc:-0}" -ne 0 ]]; then
+            _fail "$_lib_dir_name library install failed"
+            exit 1
+        fi
+        _lib_install_rc=0
+    fi
+done
+
 # -- 3. Install the package into the venv ------------------------------
 if [[ "$HAVE_UV" -eq 1 ]]; then
     if ! uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
