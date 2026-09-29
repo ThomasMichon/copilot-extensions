@@ -683,6 +683,7 @@ class SelfUpdateResult:
     version: str | None = None
     previous: str | None = None
     reason: str | None = None
+    cutover: dict[str, object] | None = None
 
 
 def _clear_dir(d: Path) -> None:
@@ -912,8 +913,29 @@ def self_update(
     if res.action == "error":
         return SelfUpdateResult(action="error", version=res.version,
                                 previous=previous, reason=res.reason)
+    cutover = None
+    if not dry_run and res.version is not None:
+        try:
+            from . import mux_daemon_cutover
+
+            cutover = mux_daemon_cutover.activate_after_update(
+                root=r,
+                slot=version_slot(res.version, r),
+                version=res.version,
+            )
+        except Exception as error:  # noqa: BLE001 -- best-effort like fetch/install
+            cutover = {"action": "error", "reason": f"mux cutover failed: {error}"}
     if res.action == "already-current":
-        return SelfUpdateResult(action="already-current", version=res.version,
-                                previous=previous)
+        return SelfUpdateResult(
+            action="already-current",
+            version=res.version,
+            previous=previous,
+            cutover=cutover,
+        )
     # installed | planned (dry-run)
-    return SelfUpdateResult(action="updated", version=res.version, previous=previous)
+    return SelfUpdateResult(
+        action="updated",
+        version=res.version,
+        previous=previous,
+        cutover=cutover,
+    )

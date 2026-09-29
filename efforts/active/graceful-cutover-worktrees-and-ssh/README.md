@@ -270,13 +270,13 @@ substantial in its own right.
       breadcrumb).
 
 ### Phase 2 — `worktree-manager` `mux-daemon`
-- [ ] Same shape as Phase 1, scoped to the companion `mux-daemon` process
+- [x] Same shape as Phase 1, scoped to the companion `mux-daemon` process
       specifically (not the Picker CLI's own one-shot invocations).
       Hand-off manifest: the `mux_mapping_registry`'s own on-disk state is
       already the durable source of truth (confirmed this session) — likely
       needs no *new* breadcrumb, only a successor that reads it on boot
       (already true) and a predecessor that stops writing before exiting.
-- [ ] Apply Phase 1's same atomic-landing lesson here first: confirm whether
+- [x] Apply Phase 1's same atomic-landing lesson here first: confirm whether
       `worktree-manager` has (or `agent-worktrees` reconcile has) an
       analogous flag/installer-argv coupling before setting any manifest
       flag ahead of real installer support.
@@ -421,6 +421,38 @@ substantial in its own right.
 _Pending._
 
 ## Journal
+
+### 2026-09-29 — Phase 2 implemented in `worktree-manager`
+Implemented the `mux-daemon` cutover slice. `zdd` is now vendored under
+`worktree-manager/libs/zdd/`, the daemon publishes a routed active endpoint for
+`mux-status-v1` clients, and `worktree-manager update`'s self-update path now
+invokes a `CutoverOrchestrator` whenever a live resident `mux-daemon` is
+present. The Worktree Manager is **not** a marketplace plugin and ships no
+`plugin.json`, so Phase 2's "confirm the flag coupling first" audit closed with
+an explicit **no-flag** conclusion: there is no `zeroDowntimeUpdate` /
+`runtime_installer_argv` analogue to wire here, and the correct activation seam
+is `self_install.self_update` itself, not a manifest bit.
+
+The durable hand-off decision held: `mux_mapping_registry` remains the sole
+mapping manifest, so no new successor-state breadcrumb was added beyond the
+shared `zdd` cutover breadcrumb. The drain boundary also proved narrower than
+Phase 1's monitor but broader than "between registry writes": the daemon now
+closes `mux-status-v1` admissions and stops periodic live-mapping republishes,
+then waits for every already-accepted status-apply handler **and** the current
+republish cycle to drain before a superseded generation exits. Registry
+register/remove calls remain durable, external CLI writes against the disk-backed
+registry rather than in-memory daemon state, so they are not part of the
+resident drain gate.
+
+Validation added a real installer-seam rehearsal
+(`worktree-manager/tests/test_mux_daemon_cutover_helper.py`) proving a live
+daemon flips traffic to the successor before the predecessor exits, preserves
+the on-disk mapping state across the hand-off, converges back to one live
+generation, and survives a rapid second update arriving while the first cutover
+is still draining. The Worktree Manager suite's targeted mux/update coverage,
+the full `worktree-manager/tests` suite, the focused `agent-worktrees`
+`mux_status_link`/reconcile coverage, and `tools/check-install-contract.py` all
+passed in the implementation worktree.
 
 ### 2026-09-28 — Phase 1 merged (`agent-worktrees` / PR #4447)
 Phase 1 is now merged to `dev` via PR #4447 (`agent-worktrees: add graceful
