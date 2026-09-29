@@ -10,6 +10,7 @@ from pathlib import Path
 from . import activity, disposition_history, finalize as fin, git_ops, handoff_trace, locks, prune, procs, sessions, tracking
 from . import claimant as claimant_mod
 from . import config as cfg
+from . import managed_worktree_guard
 
 
 def _core():
@@ -427,7 +428,8 @@ def sweep_managed_worktrees(
         norm = _normalize_path(rec.worktree_path) if rec.worktree_path else ""
         has_live_session = norm in session_ctx.active_sessions
 
-        if rec.worktree_path and Path(rec.worktree_path).exists():
+        checkout_exists = bool(rec.worktree_path) and Path(rec.worktree_path).exists()
+        if checkout_exists:
             info = git_ops.classify_worktree(
                 rec.worktree_path,
                 rec.branch,
@@ -462,6 +464,33 @@ def sweep_managed_worktrees(
         )
         if verdict.action == "skip":
             result["skipped"].append({"id": rec.worktree_id, "reason": verdict.reason})
+            continue
+        # Resolved HERE, before any lock is taken (issue #4556 review): a
+        # cross-machine owner probe can take up to the remote-probe timeout,
+        # and doing that while holding the repo lifecycle lock and/or this
+        # record's lock would serialize every other finalize/gc/record-write
+        # caller behind one unreachable remote owner. The locked recheck
+        # below deliberately does NOT reuse this cached verdict (a second
+        # review round: an owner previously observed dead can resume without
+        # this child's own owner_ref field changing, so trusting a stale
+        # cached "dead" across the lock-acquisition window is its own race)
+        # -- it re-resolves fresh, but with `allow_remote=False`, so it never
+        # performs a slow SSH probe while holding a lock either. A genuinely
+        # remote owner therefore stays conservatively blocked at recheck time
+        # even when this pass-1 probe (which does allow remote) confirmed it
+        # dead -- strictly safer than, never worse than, the unconditional
+        # block this whole fix replaces.
+        owner_blocker = managed_worktree_guard.owner_ref_blocker(
+            rec,
+            content_confirmed_merged=(
+                checkout_exists
+                and git_state == git_ops.WorktreeState.COMPLETED.value
+            ),
+        )
+        if owner_blocker:
+            result["skipped"].append(
+                {"id": rec.worktree_id, "reason": "owner-ref-blocked"}
+            )
             continue
         if dry_run:
             result["removed"].append(
@@ -556,13 +585,24 @@ def sweep_managed_worktrees(
                     require_sidecar=True,
                 ):
                     latest = tracking.load_record(yaml_path)
+                    fresh_owner_blocker = managed_worktree_guard.owner_ref_blocker(
+                        latest,
+                        content_confirmed_merged=(
+                            bool(latest.worktree_path)
+                            and Path(latest.worktree_path).exists()
+                            and fresh_git_state == git_ops.WorktreeState.COMPLETED.value
+                        ),
+                        resolve_alive=lambda ref: claimant_mod.resolve_claimant_alive(
+                            ref, allow_remote=False,
+                        ),
+                    )
                     if (
                         latest.worktree_id != yaml_path.stem
                         or latest.worktree_id != current.worktree_id
                         or latest.kind not in tracking.MANAGED_KINDS
                         or latest.follow_up
                         or latest.live_resources
-                        or latest.owner_ref
+                        or fresh_owner_blocker
                         or latest.is_paired
                         or latest.pending_handoffs
                         or latest.resolved_head_session is not None

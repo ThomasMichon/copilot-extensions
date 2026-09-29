@@ -297,6 +297,24 @@ a concrete result), not the seed still sitting unanswered. A candidate with
 only the seed and nothing after it means the true successor is a *later*
 session still on the worktree, or a class-E "no local transcript" gap.
 
+### A terminal managed worktree's stale, never-registered handoff successor
+
+`register-session`/`status --resolved` refuse on a terminal (`kind` managed,
+status finalized/complete/completed) worktree by design -- that gate protects
+every live session's sessionStart-hook-critical path from an accidental new
+activation on a worktree that's already done -- and `link-succession` requires
+the successor to already be a tracked `SessionEntry`. When a real successor
+consumed a `pending` handoff and did real work but crashed/raced before its
+own registration step ran, neither path applies, and `pending_handoffs`/
+`resolved_head_session` stay wedged forever, permanently blocking gc's
+managed-worktree recheck. **Never hand-edit the tracking YAML** to route
+around this. Use `resolve-handoff-successor <worktree-id> --token <token>
+--successor <session-id>` instead: it applies the identical class-G evidence
+bar above (cwd match, a real handoff-seed first turn, real turns beyond it,
+not still live) before retroactively registering the successor, linking the
+handoff, and concluding it so the record lands back in the terminal shape gc
+expects.
+
 ### Verify head repair survives reconciliation
 
 An immediate successful write is not enough when a resident reconciler may have

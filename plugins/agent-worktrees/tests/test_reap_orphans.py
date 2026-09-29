@@ -516,3 +516,127 @@ def test_managed_sweep_rechecks_live_session_before_removal():
     assert report["skipped"] == [
         {"id": "resumed", "reason": "recheck-live-session"}
     ]
+
+
+def test_managed_sweep_reaps_owner_ref_worktree_when_owner_is_provably_dead():
+    """issue #4556: an inbound ``owner_ref`` must not unconditionally block
+    the gc recheck -- only a still-live-or-unconfirmed-dead owner should."""
+    rec = _mgd("owned", kind="bridge", status="active")
+    rec.owner_ref = "m/owner/repo/dead-owner#sess"
+    with patch(
+        "agent_worktrees.claimant.resolve_claimant_alive", return_value=False,
+    ), patch("agent_worktrees.__main__._remove_managed_worktree",
+             return_value=(True, [])):
+        report = _managed_sweep([rec], dry_run=False)
+
+    assert report["skipped"] == []
+    assert [x["id"] for x in report["removed"]] == ["owned"]
+
+
+def test_managed_sweep_spares_owner_ref_worktree_when_owner_is_alive():
+    rec = _mgd("owned-live", kind="bridge", status="active")
+    rec.owner_ref = "m/owner/repo/live-owner#sess"
+    with patch(
+        "agent_worktrees.claimant.resolve_claimant_alive", return_value=True,
+    ), patch(
+        "agent_worktrees.__main__._remove_managed_worktree",
+        side_effect=AssertionError("owner-live worktree must not be removed"),
+    ):
+        report = _managed_sweep([rec], dry_run=False)
+
+    assert report["removed"] == []
+    assert report["skipped"] == [
+        {"id": "owned-live", "reason": "owner-ref-blocked"}
+    ]
+
+
+def test_managed_sweep_dry_run_reflects_owner_liveness_gate():
+    """issue-#4594-review: dry-run must report the SAME verdict as a real
+    run for an owner-liveness block -- not "would remove" only to have the
+    real run refuse it moments later."""
+    rec = _mgd("owned-live-dry", kind="bridge", status="active")
+    rec.owner_ref = "m/owner/repo/live-owner#sess"
+    with patch("agent_worktrees.claimant.resolve_claimant_alive", return_value=True):
+        report = _managed_sweep([rec], dry_run=True)
+
+    assert report["removed"] == []
+    assert report["skipped"] == [
+        {"id": "owned-live-dry", "reason": "owner-ref-blocked"}
+    ]
+
+
+def test_managed_sweep_owner_liveness_rechecked_locally_bounded_under_lock():
+    """issue-#4594-review (round 2): a cached liveness verdict can go stale
+    across the lock-acquisition window (the owner could resume without this
+    child's own owner_ref changing), so the locked recheck must re-resolve
+    fresh -- but bounded to a local-only check (``allow_remote=False``) so it
+    still never performs a slow cross-machine SSH probe while holding a lock."""
+    rec = _mgd("owned-dead-recheck", kind="bridge", status="active")
+    rec.owner_ref = "m/owner/repo/dead-owner#sess"
+    calls = []
+
+    def _probe(ref, **kwargs):
+        calls.append((ref, kwargs.get("allow_remote", True)))
+        return False
+
+    with patch("agent_worktrees.claimant.resolve_claimant_alive", side_effect=_probe), \
+         patch("agent_worktrees.__main__._remove_managed_worktree", return_value=(True, [])):
+        report = _managed_sweep([rec], dry_run=False)
+
+    assert report["skipped"] == []
+    assert [x["id"] for x in report["removed"]] == ["owned-dead-recheck"]
+    # pass-1 (before any lock) allows a remote probe; the locked recheck is
+    # bounded to local-only.
+    assert calls == [
+        ("m/owner/repo/dead-owner#sess", True),
+        ("m/owner/repo/dead-owner#sess", False),
+    ]
+
+
+def test_managed_sweep_owner_resumed_between_probe_and_lock_is_caught():
+    """issue-#4594-review (round 2): an owner observed dead in pass-1 that
+    resumes before the lock is acquired must be caught by the fresh, locked
+    recheck -- not silently reaped on the stale pass-1 verdict."""
+    rec = _mgd("owned-resumed", kind="bridge", status="active")
+    rec.owner_ref = "m/owner/repo/resumed-owner#sess"
+    calls = []
+
+    def _probe(ref, **kwargs):
+        calls.append(ref)
+        # First call (pass-1, before the lock): dead. Second call (the
+        # locked recheck): the owner has since resumed.
+        return len(calls) > 1
+
+    with patch("agent_worktrees.claimant.resolve_claimant_alive", side_effect=_probe), \
+         patch(
+             "agent_worktrees.__main__._remove_managed_worktree",
+             side_effect=AssertionError("must not remove a resumed owner's resource"),
+         ):
+        report = _managed_sweep([rec], dry_run=False)
+
+    assert report["removed"] == []
+    assert report["skipped"] == [
+        {"id": "owned-resumed", "reason": "recheck-record-changed"}
+    ]
+
+
+def test_managed_sweep_missing_checkout_does_not_fake_owner_content_merged():
+    """issue-#4594-review: a missing checkout with status "complete" must
+    NOT count as owner-confirmed-merged content -- git_state is synthesized
+    from status alone in that case, never actually inspected. A live owner
+    must still block removal."""
+    rec = _mgd("owned-missing-checkout", kind="bridge", status="complete")
+    rec.owner_ref = "m/owner/repo/live-owner#sess"
+    assert not Path(rec.worktree_path).exists()
+    with patch(
+        "agent_worktrees.claimant.resolve_claimant_alive", return_value=True,
+    ), patch(
+        "agent_worktrees.__main__._remove_managed_worktree",
+        side_effect=AssertionError("owner-live worktree must not be removed"),
+    ):
+        report = _managed_sweep([rec], dry_run=False)
+
+    assert report["removed"] == []
+    assert report["skipped"] == [
+        {"id": "owned-missing-checkout", "reason": "owner-ref-blocked"}
+    ]
