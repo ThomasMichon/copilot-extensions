@@ -56,8 +56,11 @@ status-monitor cutover feature.
 
 **At release**, `tools/materialize_main.py` rewrites every remaining
 `uv`-editable pointer into a real, promoted copy at
-`plugins/<plugin>/libs/agent-procutil/` for that consumer -- non-editable, so
-a published plugin installs a self-contained source tree with no
-cross-plugin `path` reference. `tools/sync-vendored-libs.py
---check` verifies every materialized copy's `src/` tree and version stay
-byte-identical to this canonical one and to each other.
+`<consumer>/libs/agent-procutil/` for that consumer -- `plugins/<plugin>/libs/
+agent-procutil/` for an ordinary plugin, or a top-level, out-of-plugin
+consumer's own root (e.g. `worktree-manager/libs/agent-procutil/`) for a
+standalone consumer -- non-editable, so a published consumer installs a
+self-contained source tree with no cross-plugin `path` reference.
+`tools/sync-vendored-libs.py --check` verifies every materialized copy's
+`src/` tree and version stay byte-identical to this canonical one and to
+each other.
