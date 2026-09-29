@@ -25,6 +25,14 @@
       "customizationKind": "instructions",
       "applyTo": "**",
       "legacyMarkers": []
+    },
+    {
+      "id": "validate-and-promote-triage",
+      "template": "instructions/validate-and-promote-triage.instructions.md",
+      "destination": ".github/instructions/copilot-extensions-harness/validate-and-promote-triage.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
     }
   ]
 }
