@@ -754,8 +754,20 @@ if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_CUTOVER) {
     $cutoverHealthTimeout = if ($env:AGENT_MCP_CUTOVER_HEALTH_TIMEOUT) { $env:AGENT_MCP_CUTOVER_HEALTH_TIMEOUT } else { '15' }
     $cutoverDrainTimeout = if ($env:AGENT_MCP_CUTOVER_DRAIN_TIMEOUT) { $env:AGENT_MCP_CUTOVER_DRAIN_TIMEOUT } else { '30' }
     try {
-        $cutoverJson = Invoke-Hidden $VenvPython -I -X utf8 -m agent_mcp cutover --require-live --force --json `
-            --health-timeout $cutoverHealthTimeout --drain-timeout $cutoverDrainTimeout
+        # `-ArgList` is passed explicitly (as an array) rather than as bare
+        # positional tokens: `Invoke-Hidden`'s `param()` block uses
+        # `[Parameter(...)]` attributes, which implicitly makes it an
+        # advanced function and enables PowerShell's common parameters
+        # (`-InformationAction`/`-InformationVariable`/etc.). A bare `-I`
+        # token (Python's isolated-mode flag) is ambiguous against those two
+        # common-parameter names and PowerShell throws instead of treating
+        # it as a remaining argument. Binding the whole array to `-ArgList`
+        # by name sidesteps that re-parsing entirely.
+        $cutoverArgs = @(
+            '-I', '-X', 'utf8', '-m', 'agent_mcp', 'cutover', '--require-live', '--force', '--json',
+            '--health-timeout', $cutoverHealthTimeout, '--drain-timeout', $cutoverDrainTimeout
+        )
+        $cutoverJson = Invoke-Hidden -FilePath $VenvPython -ArgList $cutoverArgs
         $cutoverArg = (($cutoverJson | Out-String).Trim())
         if ($cutoverArg) {
             $cutoverResult = $cutoverArg | ConvertFrom-Json
