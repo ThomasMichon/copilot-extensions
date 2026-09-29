@@ -73,8 +73,9 @@ agent-worktrees worktree-status-bundle --worktree <worktree-id> --json  # market
 This single call returns, among other facts, everything nested under a top-level
 `facts` key: `facts.disposition.value.title` / `.summary` (the worktree's
 current theme and recap), `facts.disposition.value.history` (the 20 most
-recent disposition changes -- what each of the last several sessions
-reported it was doing, newest first), and `facts.lineage.value.sessions` /
+recent disposition changes, returned **oldest-first** -- what each of the
+last several sessions reported it was doing; the last array entry is the
+most recent), and `facts.lineage.value.sessions` /
 `.handoffs` (the predecessor/successor chain, with state and timestamps for
 each session).
 
