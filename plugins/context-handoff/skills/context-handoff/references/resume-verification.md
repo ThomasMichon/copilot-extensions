@@ -69,13 +69,23 @@ sufficient:
 agent-worktrees worktree-status-bundle --worktree <worktree-id> --json  # marketplace-isolation: allow diagnostic-tooling
 ```
 
-This single call returns, among other facts: `disposition.value.title` /
-`.summary` (the worktree's current theme and recap), `disposition.value.history`
-(a factual, timestamped activity log spanning every session that has worked
-this worktree -- not a raw transcript, but what each session reported it was
-doing at the time), and `lineage.value.sessions` / `.handoffs` (the full
-predecessor/successor chain, however many hops deep, with state and
-timestamps for each session).
+This single call returns, among other facts, everything nested under a top-level
+`facts` key: `facts.disposition.value.title` / `.summary` (the worktree's
+current theme and recap), `facts.disposition.value.history` (a factual,
+timestamped activity log spanning every session that has worked this
+worktree -- not a raw transcript, but what each session reported it was doing
+at the time), and `facts.lineage.value.sessions` / `.handoffs` (the
+predecessor/successor chain, with state and timestamps for each session).
+
+**This lineage is retained-but-bounded, not unlimited.** The bundle caps at
+512 sessions and 256 handoffs
+(`facts.lineage.value.bounds.sessions`/`.handoffs`, each with its own
+`limit`/`total`/`returned`/`omitted`/`overflow` fields) -- check those bounds
+before treating an apparently-short or apparently-complete chain as proof
+that no older work exists. An `overflow: true` or nonzero `omitted` means the
+true history extends further back than this one call shows; widen the
+history query (or accept the gap and say so) rather than asserting
+completeness.
 
 - **Read `disposition.history` as a cheap first pass.** It's far less context
   than reading raw transcripts and often answers "what has this worktree
