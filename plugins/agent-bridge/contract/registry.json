@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 18,
+        "current": 19,
         "minimum": 1,
-        "previous_generation": 17,
+        "previous_generation": 18,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -24,7 +24,8 @@
           15,
           16,
           17,
-          18
+          18,
+          19
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -37,7 +38,8 @@
           "0.4.0-dev535",
           "0.4.0-dev502",
           "0.4.0-dev537",
-          "0.4.0-dev549"
+          "0.4.0-dev549",
+          "0.4.1-dev3"
         ]
       },
       "capability_versions": {
@@ -56,13 +58,14 @@
         "remote_commands": 14,
         "dispatch_task_session": 15,
         "bare_session_transcript": 17,
-        "remote_session_copilot_args": 18
+        "remote_session_copilot_args": 18,
+        "live_session_mode": 19
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "ffccaefdb817801f9ee1ef26858c659572ac3aadecaded8c24b29aaf665c0258",
+          "sha256": "7b6f84cd989d1526ed1d54550e5a7754a473b45ed10c2717650b15632913ee99",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -100,9 +103,9 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
-          "sha256": "12749db0f835eb717e4c60bcbffdcf0148636ba4e6b96760048712195e062b0b",
+          "sha256": "4fdaabbdbf7da900e0b9a229dffbea51df89e5abf89fcc9f29dfbab1bec86a95",
           "role": "current health response",
-          "generation": 18
+          "generation": 19
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-13/health.json",
@@ -130,15 +133,15 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-response.json",
-          "sha256": "43fd8a6dff4bebb5631c7e9735eff8b8a747056b9ed5cdb5717b4aa07e6ab1e9",
+          "sha256": "5d7ddb7a7a86858bcafa027b54cee038d6994b38704c8969056e2df17877aeb6",
           "role": "current session-create response",
-          "generation": 18
+          "generation": 19
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
-          "sha256": "243d80a48d1c1628acf10c8e634573d8f2f352ee8201a9356418f55c4d2a4adc",
+          "sha256": "45a95367a38bba953a6eb3b4483b387721ac2684ee0cf0ae05949a057d54e175",
           "role": "current representative FastAPI error",
-          "generation": 18
+          "generation": 19
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-11/health.json",
@@ -160,15 +163,15 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/protocol-constants.json",
-          "sha256": "428be6202ec2b802764a941ace153c9fa87f79cddd3fe01903b7ee3fdde7bc9d",
+          "sha256": "b0035034ff19bcb4831e4ce71ff9911ad7fba6de3112a6a6dd6d4bf2a659dc31",
           "role": "current HTTP range and capability constants",
-          "generation": 18
+          "generation": 19
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-command.json",
-          "sha256": "90c3020a6c8fe271738a08082631d38bce56f012f6795c8469c13a1fab341486",
+          "sha256": "9435389430f87fe8feb84e20f7f986302611ca8ecc4fb435c509b198de1861c8",
           "role": "current carrier-backed remote command request and response",
-          "generation": 18
+          "generation": 19
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-14/health.json",
@@ -187,6 +190,12 @@
           "sha256": "aa3f4956c84272d907184f80d0d5092bb6a2fc929f19f09f2e5b68d50fff8a67",
           "role": "previous generation-17 health response",
           "generation": 17
+        },
+        {
+          "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-18/health.json",
+          "sha256": "12749db0f835eb717e4c60bcbffdcf0148636ba4e6b96760048712195e062b0b",
+          "role": "previous generation-18 health response",
+          "generation": 18
         }
       ],
       "provenance": [
@@ -565,9 +574,49 @@
           "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
           "source_git_blob": "510e2934cf8567a396c6cd4af95fc02c4328eae0",
           "capture_method": "Serialize the reviewed session-create response shape; re-attested for the generation-18 bump -- installation-scoped runtime defaults do not alter the representative wire shape."
+        },
+        {
+          "commit": "4313805d12a1c70f379321bae6af51be7b4a3696",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 19,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "ca098768745ddfebc4e0cf8b5f0161c99091ac58",
+          "capture_method": "Re-attested for the generation-19 bump -- this file's own content is unchanged."
+        },
+        {
+          "commit": "4313805d12a1c70f379321bae6af51be7b4a3696",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 19,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "67e68baa8275e0ab61f48a218c3a2214a04a9757",
+          "capture_method": "Serialize the reviewed protocol version + capability table; re-attested for the generation-19 bump (HTTP_PROTOCOL_VERSION 18 -> 19, adding live_session_mode for POST /live-sessions/{id}/mode and its /controls poll)."
+        },
+        {
+          "commit": "4313805d12a1c70f379321bae6af51be7b4a3696",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 19,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
+          "source_git_blob": "597419228aa8d66fc18d954aa8e889c303ecec86",
+          "capture_method": "Re-attested for the generation-19 bump -- this file's own content is unchanged."
+        },
+        {
+          "commit": "4313805d12a1c70f379321bae6af51be7b4a3696",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 19,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
+          "source_git_blob": "4d52912f627bb286e74c9852cfac3a312a7a07c0",
+          "capture_method": "Re-attested for the generation-19 bump -- this file's own content is unchanged."
+        },
+        {
+          "commit": "4313805d12a1c70f379321bae6af51be7b4a3696",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 19,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
+          "source_git_blob": "0376764246259993a910c18c6fe386474ebefa45",
+          "capture_method": "Re-attested for the generation-19 bump -- this file's own content is unchanged."
         }
       ],
-      "support_window": "The daemon declares HTTP generations 1 through 18 supported; evidence currently exercises generations 9 through 18 (16 retained only via its own previous-generation health fixture, 17 likewise, not the current generation).",
+      "support_window": "The daemon declares HTTP generations 1 through 19 supported; evidence currently exercises generations 9 through 19 (16 retained only via its own previous-generation health fixture, 17 and 18 likewise, not the current generation).",
       "bridge_contract_rollback_window": "Retain the generation 11 fixture, the older generation 9 fixture, and a generation 10 prior-runtime fixture until the live and recoverable reference census permits retirement.",
       "mixed_version_scenarios": [
         "new-client_old-daemon",
