@@ -316,7 +316,7 @@ substantial in its own right.
       drifting copy of that table).
 
 ### Phase 5 — Elevate to a binding design invariant (operator round 2)
-- [ ] Update `docs/patterns/graceful-daemon-cutover.md`'s own **Invariants**
+- [x] Update `docs/patterns/graceful-daemon-cutover.md`'s own **Invariants**
       section: today it binds *how* a cutover behaves once a plugin adopts
       the pattern (no stop-then-start, never strand clients, drain-gated
       retirement, etc.) but does not yet bind *which* plugins must adopt it
@@ -325,7 +325,7 @@ substantial in its own right.
       service" plugin shape, or any daemon meeting that description
       regardless of shape label) MUST implement this pattern** — not an
       opt-in convention.
-- [ ] Update `docs/patterns/README.md`'s **Plugin shapes** table (or its
+- [x] Update `docs/patterns/README.md`'s **Plugin shapes** table (or its
       accompanying **Design principles** list) so classifying a plugin as
       "Runtime service" (or adding a new resident daemon to any plugin)
       carries an explicit, visible pointer to this requirement — the
@@ -333,13 +333,13 @@ substantial in its own right.
       point (a plugin design/effort that introduces a daemon must reconcile
       against this invariant the same way Design principle 0 already
       requires vision reconciliation).
-- [ ] **Implementation-time audit**: add the requirement to `CONTRIBUTING.md`
+- [x] **Implementation-time audit**: add the requirement to `CONTRIBUTING.md`
       (near its existing "Documentation impact" / review-gate conventions)
       so a PR introducing or materially changing a resident daemon must
       state how it satisfies (or is exempted from, with justification) the
       graceful-cutover invariant — mirroring how `CONTRIBUTING.md` already
       makes "Documentation impact" a required PR-description statement.
-- [ ] **Review-time audit**: investigate whether an automated guard is
+- [x] **Review-time audit**: investigate whether an automated guard is
       feasible (a script in the `check-*.py` family, e.g.
       `check-module-size.py`/`check-changefile-presence.py`'s own shape) that
       can detect a plugin newly introducing a long-lived resident process
@@ -427,6 +427,35 @@ substantial in its own right.
 _Pending._
 
 ## Journal
+
+### 2026-09-29 — Phase 5 made graceful cutover a binding audit point
+Phase 5 closed the "adoption is optional" gap at all three non-code audit
+surfaces. `docs/patterns/graceful-daemon-cutover.md` now says explicitly that
+**any `agent-*` plugin with a long-lived resident daemon must adopt this
+pattern**, even if the daemon is introduced under some other shape label.
+`docs/patterns/README.md` now surfaces that obligation at the design-time
+classification seam itself: the **Runtime service** plugin-shape row and Design
+principle 4 both point directly at `graceful-daemon-cutover` so "we added a
+daemon" is automatically also "we owe a cutover story".
+
+`CONTRIBUTING.md` now adds the implementation/review-time gate: any PR that
+introduces or materially changes a resident daemon must carry a **Graceful
+cutover impact** statement naming the daemon, its activation seam, its
+drain/cutover contract, or the explicit justification for a claimed exemption.
+
+The automated-guard investigation concluded that a new `check-*.py` review gate
+is **not reliably feasible today**, so none was added. The repo has no single
+machine-readable declaration of "this change introduced a resident daemon":
+real adopters already span plugin and non-plugin surfaces (`worktree-manager`),
+`install.*` and `init.*` activation seams, and both manifest-flagged and
+manifest-less cutover lanes; meanwhile static heuristics such as
+`serve`/`daemon` naming, `while True` loops, vendored `zdd`, or
+`zeroDowntimeUpdate` are neither necessary nor sufficient (`agent-ssh` proves
+vendored `zdd` can be present but entirely unwired, while `worktree-manager`
+proves a real adopter need not be a plugin-manifested runtime service at all).
+Phase 5 therefore documents the fallback explicitly: until the suite gains a
+manifest-level resident-daemon declaration, the new CONTRIBUTING checklist item
+is the **sole review-time gate** for this invariant.
 
 ### 2026-09-29 — Phase 4 documented in the pattern doc
 Closed the Phase 4 docs gap in the canonical pattern itself. Updated

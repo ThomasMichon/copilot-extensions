@@ -32,7 +32,7 @@ Choose the simplest shape that fits; don't impose structure a plugin doesn't nee
 |-------|-----------|----------|
 | **Payload-only** | Skills / hooks / a session extension; enabling the plugin is the whole install — no runtime | efforts, visions, context-handoff, customizing-copilot, harness-* |
 | **Runtime CLI** | Target: installation-cell runtime + payload-local shim, invoked on demand; legacy implementations still use a global binstub during migration | agent-mcp, agent-containers (migration targets) |
-| **Runtime service** | Runtime CLI **plus** a long-lived local service under platform-native supervision | agent-bridge, agent-dispatch, agent-vault |
+| **Runtime service** | Runtime CLI **plus** a long-lived local service under platform-native supervision. Choosing this shape — or adding an equivalent resident daemon under any other label — must reconcile to [`graceful-daemon-cutover`](graceful-daemon-cutover.md); the cutover contract is a design invariant, not a follow-up enhancement. | agent-bridge, agent-dispatch, agent-vault |
 | **Namespace-provider** | A plugin that registers a namespace with a sibling service via a filesystem **manifest** (its binstub driven over a process boundary), rather than running its own daemon | agent-codespaces / agent-containers (providers to agent-bridge) |
 | **Managed companion capability** | An explicitly configured optional heavyweight capability whose attributed runtime declaration is materialized only by an already-running trusted supervisor | agent-ssh dtssh host through agent-dispatch |
 
@@ -56,7 +56,10 @@ Choose the simplest shape that fits; don't impose structure a plugin doesn't nee
    its own installer per the install contract. Nothing at run time depends on a
    git checkout of this repo, and a bare plugin name never selects mutable state.
 4. **Right-size the surface.** Payload-only < runtime CLI < runtime service.
-   Don't add a daemon, a port, or a resolver a plugin doesn't need.
+   Don't add a daemon, a port, or a resolver a plugin doesn't need. If you do
+   add a long-lived resident daemon under any shape, you have taken on the
+   [`graceful-daemon-cutover`](graceful-daemon-cutover.md) obligation at design
+   time and must justify any claimed exemption explicitly.
 5. **Cross-platform parity is a feature.** A plugin behaves the same on Windows
    and Linux/WSL; platform differences are handled at the edges (installer,
    binstub, supervision), never leaked into behavior.

@@ -453,6 +453,34 @@ Reviewers confirm that the statement and documentation match the final diff.
 Treat a missing assessment or inaccurate affected documentation as unfinished
 work.
 
+### Graceful cutover impact (required for resident-daemon changes)
+
+Any PR that introduces or materially changes a **long-lived resident daemon**
+— usually a Runtime service plugin, but also any other plugin/tooling that adds
+an always-on local process — must include a **Graceful cutover impact**
+statement in the PR description.
+
+1. Name the daemon(s) and the installer/update/activation seam that owns their
+   rollout.
+2. State how the change satisfies
+   [`docs/patterns/graceful-daemon-cutover.md`](docs/patterns/graceful-daemon-cutover.md),
+   including the safe cutover/drain boundary; or, if claiming an exemption,
+   explain why the process is **not** a long-lived resident daemon and which
+   lifecycle pattern governs it instead.
+3. Link the doc/effort updates that record the contract, or explain why
+   existing documentation remains accurate and complete.
+
+Reviewers treat a missing or hand-wavy statement as unfinished work.
+
+There is intentionally **no CI guard for this today**. This repo has no
+reliable static signal for "a new resident daemon was introduced": heuristics
+over names like `serve`/`daemon`, `while True` loops, vendored `zdd`, or
+`plugin.json["zeroDowntimeUpdate"]` would both miss real daemon introductions
+and flag unrelated code, while legitimate adopters already span plugin and
+non-plugin surfaces (`worktree-manager`) plus both `install.*` and `init.*`
+activation seams. Until the suite gains a manifest-level daemon declaration,
+this PR-description statement is the review-time gate.
+
 ## Release & Versioning
 
 ### Marketplace architecture
