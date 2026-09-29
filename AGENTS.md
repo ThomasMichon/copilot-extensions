@@ -172,15 +172,20 @@ first exposure to what it checks for. When a finding does arrive, fix the bug
 flagged instance — a per-instance fix just spends the next round rediscovering
 a sibling.
 
-Both roles also share one **stopping rule**, spelled out in full in
-`CONTRIBUTING.md` § "Waiting for a verdict": `Approve`, or a `Comment` verdict
-with zero Medium/High-severity findings open and green checks, is the passing
-verdict — full stop. Continuing to iterate on remaining Low-severity findings
-past that point is not extra diligence; it is chasing a bar (zero remaining
-comments) that neither this repo's contribution flow nor the reviewer's own
-directives require. If you are driving a PR toward merge and unsure whether
-you've reached that point, re-read that section before assuming a further
-round is needed.
+Both roles also share one **stopping rule for Copilot's own verdict** —
+spelled out in full in `CONTRIBUTING.md` § "Waiting for a verdict": `Approve`,
+or a `Comment` verdict with zero Medium/High-severity findings open and green
+checks, satisfies that gate (on a Contributor PR, only after one full review
+loop — a first-round clean `Comment` still needs another attempt). Continuing
+to iterate on remaining Low-severity findings past that point is not extra
+diligence; it is chasing a bar (zero remaining comments) that neither this
+repo's contribution flow nor the reviewer's own directives require.
+**Satisfying Copilot's verdict is never merge authorization by itself** — a
+Contributor PR still needs a separate Maintainer-approval review before
+merging (see "Review" in `CONTRIBUTING.md`); only the repo owner's own
+bypassed PRs skip that second gate. If you are driving a PR toward merge and
+unsure whether you've reached the applicable point, re-read that section
+before assuming a further round is needed.
 
 ### Test Portfolio
 

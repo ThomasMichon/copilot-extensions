@@ -254,13 +254,20 @@ copilot-extensions finalize          # clean up the worktree
 ### Waiting for a verdict
 
 > **TL;DR (the shared stopping rule both the author and reviewer converge
-> on):** `Approve` → merge. `Comment` with **zero Medium/High-severity
-> findings open and green checks** → also merge — this is the passing
-> verdict on an owner-authored PR, and (per step 5 below) the accepted
-> stall-breaker on a Contributor PR after one full loop. Any Medium/High
-> finding still open blocks merging regardless of verdict shape. Low-severity
-> findings are advisory once that condition holds — do not keep iterating
-> chasing a clean `Comment` with zero comments left; that is not the bar.
+> on for Copilot's own verdict — a separate gate from merge authorization,
+> see below):** `Approve` satisfies Copilot's verdict gate. `Comment` with
+> **zero Medium/High-severity findings open and green checks** also
+> satisfies it — on an owner-authored PR that's the passing shape outright;
+> on a Contributor PR it's the accepted stall-breaker, but only **after one
+> full loop** (step 5 below) — a first-round clean `Comment` still needs
+> another review attempt, not an immediate merge. Any Medium/High finding
+> still open blocks proceeding at all, regardless of verdict shape.
+> Low-severity findings are advisory once the applicable condition above
+> holds — do not keep iterating chasing a clean `Comment` with zero comments
+> left; that is not the bar. **Satisfying Copilot's verdict gate is never
+> merge authorization by itself: a Contributor PR still requires a separate
+> Maintainer-approval review before merging** (see "Review" earlier in this
+> section); only the repo owner's own bypassed PRs skip that second gate.
 > The full loop below covers cursor hygiene, re-review requests, and the
 > Contributor-vs-owner verdict-shape difference in detail — read it once,
 > then apply this TL;DR on every subsequent round rather than re-deriving it.
@@ -446,12 +453,15 @@ which turn a bounded review loop into an unbounded one:
   instance while a sibling function has the identical defect just spends the
   next review round rediscovering it.
 - **Chasing zero comments instead of the actual bar.** Once the loop in
-  "Waiting for a verdict" above says you've passed (its TL;DR: `Approve`, or
-  `Comment` with zero Medium/High findings and green checks), stop and
-  merge. Continuing to iterate on remaining Low-severity findings past that
-  point is not more thorough — it's optimizing for a bar (zero remaining
-  comments) neither this repo's contribution flow nor the automated
-  reviewer's own directives actually require.
+  "Waiting for a verdict" above says you've satisfied Copilot's own verdict
+  gate (its TL;DR: `Approve`, or `Comment` with zero Medium/High findings and
+  green checks — plus, on a Contributor PR, the one-full-loop qualifier and
+  the still-separate Maintainer-approval gate), stop iterating on that
+  verdict and proceed to whichever merge step actually applies. Continuing to
+  iterate on remaining Low-severity findings past that point is not more
+  thorough — it's optimizing for a bar (zero remaining comments) neither
+  this repo's contribution flow nor the automated reviewer's own directives
+  actually require.
 
 ### Parent trackers stay open across partial slices
 

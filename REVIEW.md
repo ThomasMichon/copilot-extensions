@@ -163,9 +163,13 @@ specifically when reviewing a pull request, not a replacement for them.
   `Comment` verdict's remaining findings are all Low severity (no Medium or
   High open), say so explicitly in the overview — e.g. "remaining findings
   are Low-severity and non-blocking" — rather than leaving severity icons as
-  the only signal. This is the same stopping condition
-  `CONTRIBUTING.md` § "Waiting for a verdict" gives the author; stating it in
-  plain language in the review itself removes the need for the author to
-  infer it from severity counts alone, and avoids an unbounded loop of the
-  author chasing zero remaining comments past the point where this repo's
-  own contribution flow already treats the PR as ready.
+  the only signal. On an **owner-authored PR**, this is Copilot's own passing
+  verdict shape outright. On a **Contributor PR**, note additionally that
+  this reflects only Copilot's verdict gate — it is the accepted
+  stall-breaker after a full review loop, per `CONTRIBUTING.md` § "Waiting
+  for a verdict" step 5, and never substitutes for the separate,
+  always-required Maintainer-approval review. Stating this in plain language
+  removes the need for the author to infer it from severity counts alone,
+  and avoids an unbounded loop of the author chasing zero remaining comments
+  past the point where this repo's own contribution flow already treats
+  Copilot's verdict as satisfied.
