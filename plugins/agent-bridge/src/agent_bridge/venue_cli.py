@@ -305,6 +305,19 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
     sys.exit(0 if res.ok else 1)
 
 
+def add_deploy_cutover_flags(parser: argparse.ArgumentParser) -> None:
+    """Register the flags ``_cmd_deploy`` reads off its args Namespace.
+
+    Shared by the ``deploy`` verb and ``service restart`` (which calls
+    ``_cmd_deploy`` directly) so the two never drift out of sync.
+    """
+    parser.add_argument("--health-timeout", type=float, default=60.0, metavar="SECONDS", help="Max seconds to wait for the new daemon to become healthy.")
+    parser.add_argument("--drain-timeout", type=float, default=300.0, metavar="SECONDS", help="Max seconds to wait for the old daemon's in-flight work to settle.")
+    parser.add_argument("--force", action="store_true", help="Proceed with cutover even if the old daemon does not fully drain.")
+    parser.add_argument("--recover", action="store_true", help="Only heal a prior aborted cutover: undrain a survivor left drained by a cutover that never completed, then exit. Does not start a new cutover.")
+    parser.add_argument("--json", action="store_true", help="Emit JSON.")
+
+
 def register_venue_commands(sub: argparse._SubParsersAction) -> None:
     parity_p = sub.add_parser("parity", help="Run redacted launch/auth/reattach acceptance for a remote venue")
     parity_p.add_argument("target", help="Remote agent target (container: or codespace:)")
@@ -333,9 +346,5 @@ def register_venue_commands(sub: argparse._SubParsersAction) -> None:
         "deploy",
         help="(internal) installer-driven ZDD cutover seam -- activation runs it automatically on update; operators do not invoke it directly",
     )
-    deploy_p.add_argument("--health-timeout", type=float, default=60.0, metavar="SECONDS", help="Max seconds to wait for the new daemon to become healthy.")
-    deploy_p.add_argument("--drain-timeout", type=float, default=300.0, metavar="SECONDS", help="Max seconds to wait for the old daemon's in-flight work to settle.")
-    deploy_p.add_argument("--force", action="store_true", help="Proceed with cutover even if the old daemon does not fully drain.")
-    deploy_p.add_argument("--recover", action="store_true", help="Only heal a prior aborted cutover: undrain a survivor left drained by a cutover that never completed, then exit. Does not start a new cutover.")
-    deploy_p.add_argument("--json", action="store_true", help="Emit JSON.")
+    add_deploy_cutover_flags(deploy_p)
     deploy_p.set_defaults(func=_cmd_deploy)

@@ -636,9 +636,9 @@ def _cmd_service(args: argparse.Namespace) -> None:
         # drain -> retire). A raw stop-then-start would drop every live
         # session-host with no drain and no handoff -- see
         # efforts/active/agent-bridge-unified-zdd-cutover Phase 1.
-        from .venue_cli import _cmd_deploy
+        from . import venue_cli
 
-        _cmd_deploy(args)
+        venue_cli._cmd_deploy(args)
     elif action == "status":
         core._cmd_status(args)
         pid = core._service_pid()
@@ -668,9 +668,10 @@ def register_service_control_commands(sub: argparse._SubParsersAction) -> None:
     ):
         action_p = service_sub.add_parser(_act, help=_help)
         if _act == "restart":
-            # Same flags as `venue deploy` -- `restart` calls _cmd_deploy directly.
-            action_p.add_argument("--health-timeout", type=float, default=60.0, metavar="SECONDS", help="Max seconds to wait for the new daemon to become healthy.")
-            action_p.add_argument("--drain-timeout", type=float, default=300.0, metavar="SECONDS", help="Max seconds to wait for the old daemon's in-flight work to settle.")
-            action_p.add_argument("--force", action="store_true", help="Proceed with cutover even if the old daemon does not fully drain.")
-            action_p.add_argument("--json", action="store_true", help="Emit JSON.")
+            # Same flags as `venue deploy` -- `restart` calls _cmd_deploy
+            # directly, via the shared registration helper so the two never
+            # drift apart.
+            from . import venue_cli
+
+            venue_cli.add_deploy_cutover_flags(action_p)
     service_p.set_defaults(func=_cmd_service)

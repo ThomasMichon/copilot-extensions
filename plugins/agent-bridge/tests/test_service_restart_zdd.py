@@ -15,6 +15,7 @@ import argparse
 
 import pytest
 
+from agent_bridge import __main__ as core
 from agent_bridge import service_process_cli as spc
 from agent_bridge import venue_cli
 
@@ -38,8 +39,13 @@ def test_service_restart_parses_deploy_style_flags():
 
 def test_service_restart_calls_cmd_deploy_not_raw_stop_start(monkeypatch):
     calls: list[str] = []
-    monkeypatch.setattr(spc, "_service_stop", lambda: calls.append("stop"))
-    monkeypatch.setattr(spc, "_service_start", lambda: calls.append("start"))
+    # `_cmd_service` resolves the daemon lifecycle helpers via
+    # `core = _core()` (`agent_bridge.__main__`), not the module-level
+    # names in `service_process_cli` itself -- patch the same attributes
+    # `_cmd_service` would actually dereference for start/stop, so a
+    # regression back to a raw stop-then-start fails this test.
+    monkeypatch.setattr(core, "_service_stop", lambda: calls.append("stop"))
+    monkeypatch.setattr(core, "_service_start", lambda: calls.append("start"))
 
     def fake_cmd_deploy(args):
         calls.append("deploy")
