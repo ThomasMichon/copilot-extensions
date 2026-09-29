@@ -633,8 +633,8 @@ def _cmd_service(args: argparse.Namespace) -> None:
     elif action == "restart":
         # `restart` is not a distinct behavior: it is the same always-ZDD
         # cutover `deploy` performs (spawn passive -> health-gate -> flip ->
-        # drain -> retire). A raw stop-then-start would drop every live
-        # session-host with no drain and no handoff -- see
+        # drain -> retire). A raw stop-then-start bypasses the health gate
+        # and coordinated handoff -- see
         # efforts/active/agent-bridge-unified-zdd-cutover Phase 1.
         from . import venue_cli
 
@@ -670,8 +670,10 @@ def register_service_control_commands(sub: argparse._SubParsersAction) -> None:
         if _act == "restart":
             # Same flags as `venue deploy` -- `restart` calls _cmd_deploy
             # directly, via the shared registration helper so the two never
-            # drift apart.
+            # drift apart. `--recover` is excluded: it's a deploy-only
+            # maintenance mode that exits without restarting anything, which
+            # would make `service restart --recover` silently no-op.
             from . import venue_cli
 
-            venue_cli.add_deploy_cutover_flags(action_p)
+            venue_cli.add_deploy_cutover_flags(action_p, include_recover=False)
     service_p.set_defaults(func=_cmd_service)

@@ -319,6 +319,19 @@ sequencing will be drafted here once the design is reviewed._
   `service` subcommands delegate to the platform manager, which now
   contradicts `restart`'s deploy-cutover behavior; and this Journal
   undercounted the fixes above as three instead of four.
+- A third review pass caught one real bug and two smaller gaps, all fixed:
+  the shared `add_deploy_cutover_flags()` helper also exposed `--recover`
+  on `service restart`, but `--recover` is a deploy-only maintenance mode
+  that exits without starting a new cutover -- `service restart --recover`
+  would have returned success while never actually restarting the daemon;
+  the helper now takes `include_recover=False` for `restart` (deploy still
+  gets it, locked in by a new test). `tests/test_service_restart_zdd.py`
+  gained `pytestmark = pytest.mark.guard` so this restart regression is
+  covered by the fast contract lane (`--guards`), per `TESTING.md`. The CLI
+  reference's Windows warning named `schtasks /Run` as the disruptive
+  restart path, but the scheduled task is registered `-MultipleInstances
+  IgnoreNew`, so a bare `/Run` while active is simply ignored -- reworded to
+  name the actual equivalent (`schtasks /End` then `/Run`).
 - Phase 0's one open item (the opt-in reconcile-gate design fork) remains
   genuinely undecided — flagged for the operator, not resolved here.
 

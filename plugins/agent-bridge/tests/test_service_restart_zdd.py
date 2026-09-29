@@ -19,6 +19,10 @@ from agent_bridge import __main__ as core
 from agent_bridge import service_process_cli as spc
 from agent_bridge import venue_cli
 
+# Fast parser/routing contract checks (no I/O, no daemon) -- covered by the
+# `--guards` fast contract lane per TESTING.md.
+pytestmark = pytest.mark.guard
+
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
@@ -72,3 +76,29 @@ def test_service_restart_args_have_every_attribute_cmd_deploy_reads():
     args = parser.parse_args(["service", "restart"])
     for attr in ("health_timeout", "drain_timeout", "force", "json"):
         assert hasattr(args, attr), f"service restart args missing .{attr}"
+
+
+def test_service_restart_does_not_expose_recover():
+    # `--recover` is a deploy-only maintenance mode: `_cmd_deploy` exits
+    # immediately after healing a prior aborted cutover, *without* starting
+    # a new one. Exposing it on `restart` would let
+    # `agent-bridge service restart --recover` return success while never
+    # actually restarting the daemon. `_cmd_deploy` reads it via
+    # `getattr(args, "recover", False)`, so simply not registering the flag
+    # keeps it always-False for restart.
+    parser = _build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["service", "restart", "--recover"])
+
+    args = parser.parse_args(["service", "restart"])
+    assert getattr(args, "recover", False) is False
+
+
+def test_deploy_still_exposes_recover():
+    # The shared flag helper must not have dropped `--recover` from `deploy`
+    # itself while excluding it from `restart`.
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers()
+    venue_cli.register_venue_commands(sub)
+    args = parser.parse_args(["deploy", "--recover"])
+    assert args.recover is True

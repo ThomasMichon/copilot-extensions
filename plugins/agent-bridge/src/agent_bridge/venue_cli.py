@@ -305,16 +305,26 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
     sys.exit(0 if res.ok else 1)
 
 
-def add_deploy_cutover_flags(parser: argparse.ArgumentParser) -> None:
+def add_deploy_cutover_flags(
+    parser: argparse.ArgumentParser, *, include_recover: bool = True
+) -> None:
     """Register the flags ``_cmd_deploy`` reads off its args Namespace.
 
     Shared by the ``deploy`` verb and ``service restart`` (which calls
     ``_cmd_deploy`` directly) so the two never drift out of sync.
+    ``--recover`` is deploy-only maintenance mode (heal a prior aborted
+    cutover and exit *without* starting a new one) -- exposing it on
+    ``restart`` would let ``service restart --recover`` return success
+    without ever actually restarting anything, so callers that don't want
+    it pass ``include_recover=False``. ``_cmd_deploy`` reads it via
+    ``getattr(args, "recover", False)``, so omitting the flag entirely is
+    equivalent to it always being unset.
     """
     parser.add_argument("--health-timeout", type=float, default=60.0, metavar="SECONDS", help="Max seconds to wait for the new daemon to become healthy.")
     parser.add_argument("--drain-timeout", type=float, default=300.0, metavar="SECONDS", help="Max seconds to wait for the old daemon's in-flight work to settle.")
     parser.add_argument("--force", action="store_true", help="Proceed with cutover even if the old daemon does not fully drain.")
-    parser.add_argument("--recover", action="store_true", help="Only heal a prior aborted cutover: undrain a survivor left drained by a cutover that never completed, then exit. Does not start a new cutover.")
+    if include_recover:
+        parser.add_argument("--recover", action="store_true", help="Only heal a prior aborted cutover: undrain a survivor left drained by a cutover that never completed, then exit. Does not start a new cutover.")
     parser.add_argument("--json", action="store_true", help="Emit JSON.")
 
 

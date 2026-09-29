@@ -315,13 +315,16 @@ agent-bridge service status     # running state + bound port + PID -- marketplac
 ```
 
 > **Never bypass `service restart` with the platform service manager
-> directly** (`systemctl --user restart agent-bridge.service`, `schtasks /Run`
-> on the scheduled task, etc.) -- that path is a raw stop-then-start with no
-> health gate and no coordinated cutover: existing sessions may still
-> reattach after (the shutdown path detaches for background recovery, and
-> `KillMode=process` on Linux lets a Session Host outlive the frontend), but
-> callers see an uncoordinated gap instead of `service restart`/`deploy`'s
-> health-gated, zero-downtime handoff.
+> directly** -- `systemctl --user restart agent-bridge.service` on Linux, or
+> ending and rerunning the Windows scheduled task (`schtasks /End` then
+> `/Run` -- the task is registered `-MultipleInstances IgnoreNew`, so a bare
+> `schtasks /Run` while it's already active is simply ignored, not a
+> restart) -- that path is a raw stop-then-start with no health gate and no
+> coordinated cutover: existing sessions may still reattach after (the
+> shutdown path detaches for background recovery, and `KillMode=process` on
+> Linux lets a Session Host outlive the frontend), but callers see an
+> uncoordinated gap instead of `service restart`/`deploy`'s health-gated,
+> zero-downtime handoff.
 
 > **Note:** the payload-local `stop <session-id>` operation stops a *session*,
 > not the service. For the daemon, use the literal management command
