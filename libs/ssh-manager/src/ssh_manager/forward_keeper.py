@@ -161,19 +161,29 @@ async def run_supervised_loop(
 
 def _state_process_records(state: dict[str, Any]) -> list[dict[str, str | int | None]]:
     records: list[dict[str, str | int | None]] = []
-    records.append({"pid": state.get("pid"), "identity": state.get("pid_identity")})
+    records.append(
+        {
+            "pid": state.get("pid"),
+            "identity": state.get("pid_identity"),
+            "kind": "parent",
+        }
+    )
     children = state.get("children")
     if isinstance(children, list):
         for child in children:
             if isinstance(child, dict):
                 records.append(
-                    {"pid": child.get("pid"), "identity": child.get("identity")}
+                    {
+                        "pid": child.get("pid"),
+                        "identity": child.get("identity"),
+                        "kind": "child",
+                    }
                 )
     else:
         child_values = state.get("child_pids")
         if isinstance(child_values, list):
             for value in child_values:
-                records.append({"pid": value, "identity": None})
+                records.append({"pid": value, "identity": None, "kind": "child"})
     normalized: list[dict[str, str | int | None]] = []
     pids: list[int] = []
     for record in records:
@@ -188,6 +198,7 @@ def _state_process_records(state: dict[str, Any]) -> list[dict[str, str | int | 
                 {
                     "pid": pid,
                     "identity": identity if isinstance(identity, str) and identity else None,
+                    "kind": record.get("kind") or "child",
                 }
             )
     return normalized
@@ -198,4 +209,6 @@ def _record_is_live(record: dict[str, str | int | None]) -> bool:
     identity = record.get("identity")
     if isinstance(identity, str) and identity:
         return process_identity(pid) == identity
+    if record.get("kind") == "parent":
+        return pid_alive(pid)
     return False

@@ -181,6 +181,7 @@ class SupervisedRelayForward:
                 stderr=asyncio.subprocess.PIPE,
             )
             self._proc = proc
+            self._notify_pid_change()
             try:
                 settled = await self._wait_settled(proc)
             except asyncio.CancelledError:

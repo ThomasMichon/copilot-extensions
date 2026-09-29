@@ -29,9 +29,23 @@ def test_keeper_store_state_and_stop(tmp_path, monkeypatch):
     assert store.read("target:one") is None
 
 
+def test_keeper_store_stops_legacy_parent_record_without_identity(tmp_path, monkeypatch):
+    store = fk.KeeperStore(tmp_path)
+    monkeypatch.setattr(fk, "pid_alive", lambda pid: pid == 123)
+    killed = []
+    monkeypatch.setattr(fk, "_terminate_pid", lambda pid: killed.append(pid))
+
+    store.write("target:one", {"pid": 123, "mux": "wt-x"})
+
+    assert store.alive("target:one") is True
+    assert store.stop("target:one") is True
+    assert killed == [123]
+
+
 def test_keeper_store_ignores_reused_pid_without_identity_match(tmp_path, monkeypatch):
     store = fk.KeeperStore(tmp_path)
     monkeypatch.setattr(fk, "process_identity", lambda pid: "someone-else")
+    monkeypatch.setattr(fk, "_terminate_pid", lambda pid: (_ for _ in ()).throw(AssertionError("should not kill")))
 
     store.write("target:one", {"pid": 123, "pid_identity": "keep-123", "mux": "wt-x"})
 
