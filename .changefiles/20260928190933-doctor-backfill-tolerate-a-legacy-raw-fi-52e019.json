@@ -1,0 +1,9 @@
+{
+  "comment": "doctor/backfill: tolerate a legacy raw-filesystem-path caller_worktree instead of raising a path-safety error during controller-relation derivation",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

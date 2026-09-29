@@ -284,6 +284,35 @@ def _derive_initial_controller_relations(
     if caller_worktree:
         caller_ref = caller_worktree
         parsed_caller = parse_claim_ref(caller_worktree)
+        caller_ref_unresolved_path = False
+        if (
+            parsed_caller is not None
+            and not parsed_caller.is_qualified
+            and any(sep in parsed_caller.worktree_id for sep in ("\\", "/"))
+        ):
+            # Some legacy records stored `caller_worktree` as a raw
+            # filesystem path (e.g. an absolute Windows worktree checkout
+            # path) rather than a path-safe worktree id -- reduce it to its
+            # final path component, the same tolerance
+            # `delegate_cli._caller_lookup_tokens` already applies when
+            # reading this field, instead of letting the raw path reach
+            # `_normalize_controller_ref` and trip its path-safety check.
+            bare_id = Path(parsed_caller.worktree_id).name
+            if bare_id:
+                parsed_caller = ClaimRef(
+                    worktree_id=bare_id,
+                    machine=parsed_caller.machine,
+                    project=parsed_caller.project,
+                    session=parsed_caller.session,
+                )
+                caller_ref = bare_id
+            else:
+                # Could not reduce the path to a usable bare id (e.g. a
+                # root path). Nothing safe to derive from this field;
+                # owner_ref/parent_session already carry the
+                # authoritative relation in that case.
+                parsed_caller = None
+                caller_ref_unresolved_path = True
         matches_richer_owner = bool(
             parsed_caller is not None
             and not parsed_caller.is_qualified
@@ -310,7 +339,8 @@ def _derive_initial_controller_relations(
                 parsed_caller.worktree_id,
                 parsed_caller.session,
             )
-        add_reference("caller-worktree", caller_ref)
+        if not caller_ref_unresolved_path:
+            add_reference("caller-worktree", caller_ref)
     if parent_session:
         matching = next((relation for relation in relations
                          if relation.source == "caller-worktree"), None)
