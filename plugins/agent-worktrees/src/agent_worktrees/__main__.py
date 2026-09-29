@@ -100,7 +100,6 @@ from . import (
     front_door_cli,
     git_ops,
     handoff_trace,
-    headed_launch,
     launch_registry,
     list_cache,  # noqa: F401 -- compatibility re-export for extracted status-monitor CLI
     locks,
@@ -2418,71 +2417,6 @@ from .handoff_cutover import (  # noqa: E402 -- re-export position matches origi
     _settle_predecessor_session_claim,  # noqa: F401 -- re-exported for tests
     _wait_for_handoff_candidate,  # noqa: F401 -- re-exported for tests
 )
-
-
-def cmd_copilot(args: argparse.Namespace) -> int:
-    """Deliver a TTY Copilot session in THIS terminal, or with ``--headed``
-    a brand-new visible window instead.
-
-    Ensures a durable, mux-wrapped Copilot session exists (identical
-    create-or-resume semantics to `embody`), then hands a terminal to it.
-    By default that's THIS process's own controlling terminal, replaced via
-    exec so no wrapper is left holding the TTY; refuses without one.
-    ``--headed`` opens a separate window instead and returns without
-    touching this process's stdio, for a caller that must keep running
-    (e.g. the Picker's "Launch in new window"); needs no controlling
-    terminal of its own. `agent-codespaces`/`agent-containers` implement
-    the same verb remotely via SSH `-t`; `--headed` is local-only.
-    """
-    headed = getattr(args, "headed", False)
-    if not headed and not sys.stdin.isatty():
-        output.err(
-            "`copilot` needs a controlling terminal to attach to -- for a "
-            "programmatic/detached launch use `embody` instead, or pass "
-            "--headed to open a new window."
-        )
-        return 2
-
-    # Reuse embody's create-or-resume logic in-process; only its JSON result
-    # matters, not its stdout. `_json_output` writes to `sys.__stdout__`,
-    # which a plain `contextlib.redirect_stdout` never captures (confirmed
-    # live, agent-bridge-cli-mode-sessions Phase 4); `capture_json_output()`
-    # swaps `sys.__stdout__` itself.
-    with output.capture_json_output() as buf:
-        rc = cmd_embody(args)
-    if rc != 0:
-        # embody already wrote its JSON error to buf; surface it and exit.
-        sys.stderr.write(buf.getvalue())
-        return rc
-    try:
-        result = json.loads(buf.getvalue())
-    except (ValueError, TypeError):
-        output.err("copilot: could not parse the embodiment result")
-        return 1
-
-    session_name = result.get("session")
-    if not session_name:
-        output.err("copilot: embodiment result had no session name")
-        return 1
-
-    mux_bin = sessions._mux_bin(getattr(args, "mux", None))
-    if headed:
-        try:
-            spawned = headed_launch.spawn_headed_attach(
-                mux_bin, session_name, title=result.get("worktree_id"))
-        except headed_launch.HeadedLaunchError as exc:
-            output.err(f"copilot --headed: {exc}")
-            return 1
-        output.info(f"Opened {session_name!r} in a new window "
-                    f"(spawner: {spawned['spawner']}, pid: {spawned['pid']})")
-        return 0
-    argv = [mux_bin, "attach-session", "-t", session_name]
-    try:
-        os.execvp(mux_bin, argv)  # never returns on success
-    except OSError as exc:
-        output.err(f"copilot: could not attach to {session_name!r}: {exc}")
-        return 1
-    return 0  # pragma: no cover -- unreachable after a successful execvp
 
 
 def cmd_resolve(args: argparse.Namespace) -> int:
@@ -5534,7 +5468,7 @@ def build_parser() -> argparse.ArgumentParser:
     pane_lifecycle.register_cli(sub)
     handoff_cli.add_parsers(sub)
 
-    handoff_cli.add_copilot_parser(sub)
+    copilot_cli.add_copilot_parser(sub)
 
     list_cli.add_parsers(sub)
     claims_cli.add_parsers(sub)
@@ -6011,7 +5945,7 @@ def _load_full_command_surface() -> None:
     global cmd_session_tail
     global cmd_session_transcript, cmd_set_pr, cmd_state_root_dispatch, cmd_status, cmd_status_context, cmd_status_monitor, cmd_status_monitor_restart, cmd_status_segment
     global cmd_status_updater, cmd_sync, cmd_uninstall, cmd_uninstall_plugins, cmd_update, cmd_validate, cmd_worktree_dispatch
-    global cmd_worktree_lineage, cmd_worktree_status_bundle, context_cli, copilot_identity_cli, finalize_cli, finalize_one, follow_ups_cli, front_door_cli, git_cli
+    global cmd_worktree_lineage, cmd_worktree_status_bundle, context_cli, copilot_cli, copilot_identity_cli, finalize_cli, finalize_one, follow_ups_cli, front_door_cli, git_cli
     global handoff_cli, handoff_diagnostics, installation_cli, list_cli, maintenance_cli, doctor_render, picker_profiles_cli, plan_pre_launch, pr_cli
     global pr_state_cli, reap_cli, reap_orphan_launcher_shells, reclaim_cli, reclaim_one, related_cli, repos_cli, resolve_cli
     global resolve_launch_cli, resolve_machine_cli, resolve_picker_cli, resolve_system_cli, services_cli, session_binding_cli, session_inspection_cli, session_metadata_cli
@@ -6022,6 +5956,7 @@ def _load_full_command_surface() -> None:
         claims_cli,
         cleanup_gc_cli,
         context_cli,
+        copilot_cli,
         copilot_identity_cli,
         finalize_cli,
         follow_ups_cli,
@@ -6293,6 +6228,7 @@ def _load_full_command_surface() -> None:
     _restore_before_resume = handoff_cli._restore_before_resume
     _resolve_codename_anywhere = handoff_cli._resolve_codename_anywhere
     cmd_embody = handoff_cli.cmd_embody
+    cmd_copilot = copilot_cli.cmd_copilot
     cmd_handoffs_check = handoff_cli.cmd_handoffs_check
     cmd_handoff_cutover_trigger = handoff_cli.cmd_handoff_cutover_trigger
     _enumerate_launcher_shells_posix = reap_cli._enumerate_launcher_shells_posix

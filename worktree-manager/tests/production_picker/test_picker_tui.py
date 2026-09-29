@@ -2095,6 +2095,137 @@ def test_embody_cli_internal_action_exits_with_resume_decision(monkeypatch):
     asyncio.run(run())
 
 
+def test_launch_in_new_window_offered_only_for_local_open_or_resume_rows():
+    """copilot --headed (#copilot-headed): the "Launch in new window" verb
+    rides alongside Open/Resume, but ONLY for a local row -- a headed
+    window pops on THIS machine, meaningless for a remote (SSH) worktree."""
+    from worktree_manager.production_picker.picker_tui.engine_worktree_actions import (
+        PickerScreenWorktreeActionsMixin as M,
+    )
+
+    local_mux_live = {
+        "source_kind": "machine-ssh", "is_local": True, "mux_live": True,
+        "cleanup_bucket": "wip",
+    }
+    acts = M._session_action_verbs(local_mux_live)
+    assert "Open" in acts
+    assert "Launch in new window" in acts
+
+    remote_mux_live = dict(local_mux_live, is_local=False)
+    acts = M._session_action_verbs(remote_mux_live)
+    assert "Open" in acts
+    assert "Launch in new window" not in acts
+
+    local_resumable = {
+        "source_kind": "machine-ssh", "is_local": True, "sessionless": False,
+        "cleanup_bucket": "unused",
+    }
+    acts = M._session_action_verbs(local_resumable)
+    assert "Resume" in acts
+    assert "Launch in new window" in acts
+
+    # A row offering neither Open nor Resume (e.g. reclaimable) never offers
+    # "Launch in new window" either -- there's no live-or-resumable session
+    # yet to attach a new window to.
+    reclaimable = {
+        "source_kind": "machine-ssh", "is_local": True,
+        "session_lock_live": True,
+    }
+    acts = M._session_action_verbs(reclaimable)
+    assert "Open" not in acts and "Resume" not in acts
+    assert "Launch in new window" not in acts
+
+
+def test_launch_in_new_window_runs_in_background_without_exiting_picker(
+    monkeypatch,
+):
+    """Selecting "Launch in new window" must run `copilot --headed --json`
+    as a background subprocess and report through ``self.debug`` -- unlike
+    every other Actions-menu verb, it must NOT exit the Picker (no
+    ``_decide`` call, ``app.result`` stays unset)."""
+    from worktree_manager import engine_client
+    from worktree_manager.production_picker import context as picker_context
+
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+
+            def _sync_run_bg(_label, work, done=None, **_kwargs):
+                result = work()
+                if done is not None:
+                    done(result)
+
+            monkeypatch.setattr(scr, "_run_bg", _sync_run_bg)
+            monkeypatch.setattr(picker_context, "project", lambda: "my-project")
+            calls = []
+
+            def fake_run_json(project, args, **kwargs):
+                calls.append((project, args))
+                return {"ok": True, "session": "wt-aaaa", "spawner": "wt.exe", "pid": 4242}
+
+            monkeypatch.setattr(engine_client, "run_json", fake_run_json)
+
+            rec = next(
+                r for r in scr.list_records()
+                if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa"
+            )
+            scr._wt_submenu_dispatch(rec, ("Launch in new window", False, False))
+
+            assert app.result is None  # the Picker was never exited
+            assert calls == [(
+                "my-project",
+                ["copilot", "--worktree-id", "anomalous-potato-win-20260627-aaaa",
+                 "--headed", "--json"],
+            )]
+            assert "wt.exe" in scr.debug
+
+    asyncio.run(run())
+
+
+def test_launch_in_new_window_failure_is_reported_via_debug_not_raised(
+    monkeypatch,
+):
+    from worktree_manager import engine_client
+    from worktree_manager.production_picker import context as picker_context
+
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+
+            def _sync_run_bg(_label, work, done=None, **_kwargs):
+                result = work()
+                if done is not None:
+                    done(result)
+
+            monkeypatch.setattr(scr, "_run_bg", _sync_run_bg)
+            monkeypatch.setattr(picker_context, "project", lambda: "my-project")
+
+            def boom(project, args, **kwargs):
+                raise engine_client.EngineError("no visible terminal spawner found")
+
+            monkeypatch.setattr(engine_client, "run_json", boom)
+
+            rec = next(
+                r for r in scr.list_records()
+                if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa"
+            )
+            scr._wt_submenu_dispatch(rec, ("Launch in new window", False, False))
+
+            assert app.result is None
+            assert "Launch in new window failed" in scr.debug
+            assert "no visible terminal spawner found" in scr.debug
+
+    asyncio.run(run())
+
+
 def test_open_venue_missing_identity_is_safe():
     """No provider/venue in ctx (a malformed row) is a reported no-op --
     never a crash, never an exit."""

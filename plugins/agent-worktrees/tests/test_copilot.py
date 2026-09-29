@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import argparse
 
-from agent_worktrees import __main__ as m
+from agent_worktrees import copilot_cli as m
 from agent_worktrees import output
 
 
@@ -34,7 +34,7 @@ def _ns(**kwargs) -> argparse.Namespace:
     defaults = {
         "worktree_id": None, "new": False, "codename": None, "seed": None,
         "seed_ready_timeout": 180.0, "driver": None, "recovery": False,
-        "ensure_mux": False, "mux": None, "headed": False,
+        "ensure_mux": False, "mux": None, "headed": False, "json": False,
     }
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
@@ -54,7 +54,7 @@ class TestCmdCopilot:
             output._json_output({"ok": True, "session": "wt-abc", "worktree_id": "abc"})
             return 0
 
-        monkeypatch.setattr(m, "cmd_embody", fake_embody)
+        monkeypatch.setattr(m.handoff_cli, "cmd_embody", fake_embody)
         monkeypatch.setattr(m.sessions, "_mux_bin", lambda mux=None: "tmux")
         execed = {}
 
@@ -78,7 +78,7 @@ class TestCmdCopilot:
             output._json_output({"ok": False, "error": "Worktree not found: nope"})
             return 1
 
-        monkeypatch.setattr(m, "cmd_embody", fake_embody)
+        monkeypatch.setattr(m.handoff_cli, "cmd_embody", fake_embody)
         rc = m.cmd_copilot(_ns(worktree_id="nope"))
         assert rc == 1
         assert "Worktree not found: nope" in capfd.readouterr().err
@@ -90,7 +90,7 @@ class TestCmdCopilot:
             output._json_output({"ok": True})  # malformed: no "session" key
             return 0
 
-        monkeypatch.setattr(m, "cmd_embody", fake_embody)
+        monkeypatch.setattr(m.handoff_cli, "cmd_embody", fake_embody)
         rc = m.cmd_copilot(_ns(worktree_id="abc"))
         assert rc == 1
         assert "no session name" in capfd.readouterr().out
@@ -102,7 +102,7 @@ class TestCmdCopilot:
             m.sys.__stdout__.write("not json\n")
             return 0
 
-        monkeypatch.setattr(m, "cmd_embody", fake_embody)
+        monkeypatch.setattr(m.handoff_cli, "cmd_embody", fake_embody)
         rc = m.cmd_copilot(_ns(worktree_id="abc"))
         assert rc == 1
         assert "could not parse" in capfd.readouterr().out
@@ -114,7 +114,7 @@ class TestCmdCopilot:
             output._json_output({"ok": True, "session": "wt-abc"})
             return 0
 
-        monkeypatch.setattr(m, "cmd_embody", fake_embody)
+        monkeypatch.setattr(m.handoff_cli, "cmd_embody", fake_embody)
         monkeypatch.setattr(m.sessions, "_mux_bin", lambda mux=None: "tmux")
 
         def fake_execvp(bin_, argv):
@@ -142,7 +142,7 @@ class TestCmdCopilot:
             output._json_output({"ok": True, "session": "wt-abc"})
             return 0
 
-        monkeypatch.setattr(m, "cmd_embody", fake_embody)
+        monkeypatch.setattr(m.handoff_cli, "cmd_embody", fake_embody)
         monkeypatch.setattr(m.sessions, "_mux_bin", lambda mux=None: "tmux")
         execed = {}
         monkeypatch.setattr(
@@ -162,7 +162,7 @@ class TestCmdCopilot:
             output._json_output({"ok": True, "session": "wt-abc"})
             return 0
 
-        monkeypatch.setattr(m, "cmd_embody", fake_embody)
+        monkeypatch.setattr(m.handoff_cli, "cmd_embody", fake_embody)
         seen = {}
         monkeypatch.setattr(
             m.sessions, "_mux_bin", lambda mux=None: seen.setdefault("mux", mux) or "psmux"
@@ -189,7 +189,7 @@ class TestCmdCopilotHeaded:
             output._json_output({"ok": True, "session": "wt-abc", "worktree_id": "abc"})
             return 0
 
-        monkeypatch.setattr(m, "cmd_embody", fake_embody)
+        monkeypatch.setattr(m.handoff_cli, "cmd_embody", fake_embody)
         monkeypatch.setattr(m.sessions, "_mux_bin", lambda mux=None: "tmux")
         monkeypatch.setattr(
             m.headed_launch, "spawn_headed_attach",
@@ -205,7 +205,7 @@ class TestCmdCopilotHeaded:
             output._json_output({"ok": True, "session": "wt-abc", "worktree_id": "abc"})
             return 0
 
-        monkeypatch.setattr(m, "cmd_embody", fake_embody)
+        monkeypatch.setattr(m.handoff_cli, "cmd_embody", fake_embody)
         monkeypatch.setattr(m.sessions, "_mux_bin", lambda mux=None: "tmux")
 
         def boom(*a, **kw):
@@ -231,7 +231,7 @@ class TestCmdCopilotHeaded:
             output._json_output({"ok": True, "session": "wt-abc", "worktree_id": "abc"})
             return 0
 
-        monkeypatch.setattr(m, "cmd_embody", fake_embody)
+        monkeypatch.setattr(m.handoff_cli, "cmd_embody", fake_embody)
         monkeypatch.setattr(m.sessions, "_mux_bin", lambda mux=None: "tmux")
 
         def fake_spawn(mux_bin, session, title=None):
@@ -241,3 +241,64 @@ class TestCmdCopilotHeaded:
         rc = m.cmd_copilot(_ns(worktree_id="abc", headed=True))
         assert rc == 1
         assert "no visible terminal spawner found" in capfd.readouterr().out
+
+
+class TestCmdCopilotHeadedJson:
+    """`--headed --json`: for a scripted caller (the Worktree Manager
+    Picker) that needs a machine-parseable result instead of a human status
+    line."""
+
+    def test_json_requires_headed(self, monkeypatch, capfd):
+        monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True)
+        rc = m.cmd_copilot(_ns(worktree_id="abc", headed=False, json=True))
+        assert rc == 2
+        assert "only meaningful with --headed" in capfd.readouterr().out
+
+    def test_json_success_envelope(self, monkeypatch, capfd):
+        def fake_embody(args):
+            output._json_output({"ok": True, "session": "wt-abc", "worktree_id": "abc"})
+            return 0
+
+        monkeypatch.setattr(m.handoff_cli, "cmd_embody", fake_embody)
+        monkeypatch.setattr(m.sessions, "_mux_bin", lambda mux=None: "tmux")
+        monkeypatch.setattr(
+            m.headed_launch, "spawn_headed_attach",
+            lambda mux_bin, session, title=None: {"spawner": "wt.exe", "pid": 999},
+        )
+        rc = m.cmd_copilot(_ns(worktree_id="abc", headed=True, json=True))
+        assert rc == 0
+        payload = m.json.loads(capfd.readouterr().out)
+        assert payload["ok"] is True
+        assert payload["session"] == "wt-abc"
+        assert payload["spawner"] == "wt.exe"
+        assert payload["pid"] == 999
+
+    def test_json_spawn_failure_envelope(self, monkeypatch, capfd):
+        def fake_embody(args):
+            output._json_output({"ok": True, "session": "wt-abc", "worktree_id": "abc"})
+            return 0
+
+        monkeypatch.setattr(m.handoff_cli, "cmd_embody", fake_embody)
+        monkeypatch.setattr(m.sessions, "_mux_bin", lambda mux=None: "tmux")
+
+        def fake_spawn(mux_bin, session, title=None):
+            raise m.headed_launch.HeadedLaunchError("no visible terminal spawner found")
+
+        monkeypatch.setattr(m.headed_launch, "spawn_headed_attach", fake_spawn)
+        rc = m.cmd_copilot(_ns(worktree_id="abc", headed=True, json=True))
+        assert rc == 1
+        payload = m.json.loads(capfd.readouterr().out)
+        assert payload["ok"] is False
+        assert "no visible terminal spawner found" in payload["error"]
+
+    def test_json_embody_failure_envelope(self, monkeypatch, capfd):
+        def fake_embody(args):
+            output._json_output({"ok": False, "error": "Worktree not found: nope"})
+            return 1
+
+        monkeypatch.setattr(m.handoff_cli, "cmd_embody", fake_embody)
+        rc = m.cmd_copilot(_ns(worktree_id="nope", headed=True, json=True))
+        assert rc == 1
+        payload = m.json.loads(capfd.readouterr().out)
+        assert payload["ok"] is False
+        assert payload["error"] == "Worktree not found: nope"

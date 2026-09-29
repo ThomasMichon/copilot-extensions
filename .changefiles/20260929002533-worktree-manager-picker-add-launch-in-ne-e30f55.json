@@ -1,0 +1,13 @@
+{
+  "comment": "Worktree Manager Picker: add 'Launch in new window' Actions verb (copilot --headed --json) alongside Open/Resume for local rows, without exiting the Picker; add copilot --json for the headed path",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "minor"
+    }
+  ]
+}
