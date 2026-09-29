@@ -372,7 +372,7 @@ cutover behavior on both platforms even though it has no plugin manifest.
 |---|---|---|
 | Service manager | Scheduled Task, but `conhost --headless` **detaches** the daemon — the task never tracks the live process | systemd `--user` unit **tracks** the daemon (its `ExecStart` PID) |
 | A plain "stop" is… | a **hard kill** (no clean SIGTERM-drain path) — so the zdd cutover is **required** to avoid dropping in-flight work | a **SIGTERM**: `Type=simple` + `Restart=on-failure`, and the daemons drain on SIGTERM (uvicorn for the coordinator/index service; a signal handler for agent-vault). So `systemctl restart` is already **graceful** (drains in-flight work, exits 0 → no resurrect), just with a brief API-unavailable blip |
-| Default update path | in-process zdd cutover (no opt-in) | **zdd cutover when a live routed daemon is serving** (agent-bridge, agent-dispatch, agent-index, agent-worktrees, and worktree-manager via its analogous self-update seam), **falling back** to the SIGTERM-graceful `systemctl restart` when a cutover can't run or fails |
+| Default update path | in-process zdd cutover (no opt-in) | **zdd cutover when a live routed daemon is serving** (agent-bridge, agent-dispatch, agent-index), **falling back** to the SIGTERM-graceful `systemctl restart` when a cutover can't run or fails |
 | Post-cutover reconcile | idempotently ensure the existing boot-task definition **without starting** it (`-NoStart`): no-op when unchanged, update in place for an intentional definition migration, and register only when absent; the detached daemon serves and the next boot resolves the new slot through the stable launcher | refresh the unit **without restarting** (`_install_service --no-restart`); the old (unit-tracked) daemon exits cleanly so `Restart=on-failure` never resurrects it; the detached survivor serves; next boot starts the new slot |
 
 Consequences of this equivalence:
@@ -382,11 +382,14 @@ Consequences of this equivalence:
   is the **zero-downtime enhancement** (removes the brief blip), gated on a live
   *routed* (Thread-B) daemon with the `systemctl restart` as the always-safe
   fallback.
-- **This parity now explicitly covers `agent-worktrees` and `worktree-manager`.**
-  `agent-worktrees` reaches it through `install.ps1`/`install.sh` plus the
-  routed `status-monitor` control plane; `worktree-manager` reaches the same
-  guarantee through its `self_install.self_update` seam even though it is not a
-  marketplace plugin and therefore has no `zeroDowntimeUpdate` manifest bit.
+- **Detached daemons still participate, but via activation-seam parity rather
+  than a service-manager fallback.** `agent-worktrees` reaches the same
+  cross-platform guarantee through `install.ps1`/`install.sh` plus the routed
+  `status-monitor` control plane, and `worktree-manager` does so through its
+  `self_install.self_update` seam even though it is not a marketplace plugin
+  and therefore has no `zeroDowntimeUpdate` manifest bit. Neither daemon is a
+  systemd-managed service, so their POSIX lane is the direct `zdd` cutover
+  path, not a `systemctl restart` fallback.
 - **The `AGENT_BRIDGE_ZERO_DOWNTIME` / `-ZeroDowntime` opt-in is retired on both
   lanes** — the cutover is the default whenever a live daemon is running.
 - **agent-vault needs no `.sh` cutover:** its fixed-endpoint service drains on

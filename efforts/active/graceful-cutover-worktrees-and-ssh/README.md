@@ -436,22 +436,13 @@ explicitly reflect the already-landed `agent-worktrees` and `worktree-manager`
 cutover adopters rather than stopping at the earlier `agent-bridge` /
 `agent-dispatch` / `agent-index` set.
 
-The new `agent-worktrees` row records the actual shipped shape from Phases 1 and
-its merge follow-up: vendored `zdd`, automatic `install.ps1`/`install.sh`
-activation cutover behind `"zeroDowntimeUpdate": true`, the owner-scoped
-loopback control token, the admission-closed + in-flight-handler/write drain
-boundary, and the per-sweep generation self-retire behavior. The new
-`worktree-manager` row does the same for Phase 2's landed `mux-daemon`
-implementation: vendored `zdd`, `self_install.self_update` as the update seam
-on both platforms (explicitly noting the absence of any plugin-manifest flag),
-the owner-scoped loopback token, the republish/status-apply drain boundary, and
-the existing `mux_mapping_registry` as the durable hand-off manifest.
-
 Per Phase 3's completed audit, **no `agent-ssh` adoption row was added**. The
 pattern doc remains a list of real cutover adopters only; the "no persistent
 daemon, right-sized ephemeral-process reaping instead" conclusion stays recorded
 in this effort's Phase 3 journal entry rather than creating a misleading
-"non-adopter row" in the pattern doc.
+"non-adopter row" in the pattern doc. The detailed adopter inventory remains in
+`docs/patterns/graceful-daemon-cutover.md`; this effort journal records only
+that the canonical doc was updated and why.
 
 ### 2026-09-29 — Phase 3 audited in `agent-ssh`; no daemon cutover adopted
 Phase 3 closed with the audit-first conclusion the effort's review had already
