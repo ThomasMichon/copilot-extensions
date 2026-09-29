@@ -25,6 +25,7 @@ __all__ = [
     "count_processes_named",
     "is_descendant_of",
     "parent_pid",
+    "process_age_seconds",
     "process_executable_path",
     "processes_with_cwd_under",
     "processes_with_executable_under",
@@ -295,6 +296,101 @@ def _win_parent_pid(pid: int) -> int | None:
         return None
     finally:
         k32.CloseHandle(handle)
+
+
+def _process_age_seconds_posix(pid: int) -> float | None:
+    """Seconds elapsed since ``pid`` started, via ``/proc/<pid>/stat`` +
+    ``/proc/uptime`` (both in the kernel's own clock-tick/uptime units)."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(errors="ignore")
+        uptime_text = Path("/proc/uptime").read_text(errors="ignore")
+    except OSError:
+        return None
+    rparen = stat.rfind(")")
+    if rparen == -1:
+        return None
+    rest = stat[rparen + 1:].split()
+    if len(rest) < 20:
+        return None
+    try:
+        starttime_ticks = int(rest[19])
+        clk_tck = os.sysconf("SC_CLK_TCK")
+        uptime_seconds = float(uptime_text.split()[0])
+    except (ValueError, OSError, IndexError):
+        return None
+    if not clk_tck:
+        return None
+    return max(0.0, uptime_seconds - (starttime_ticks / clk_tck))
+
+
+def _win_process_age_seconds(pid: int) -> float | None:
+    """Seconds elapsed since ``pid`` started, via ``GetProcessTimes`` vs
+    ``GetSystemTimeAsFileTime`` (both 100ns-tick Windows ``FILETIME``s)."""
+    import ctypes
+    from ctypes import wintypes
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+    k32.CloseHandle.restype = wintypes.BOOL
+    k32.GetProcessTimes.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+    ]
+    k32.GetProcessTimes.restype = wintypes.BOOL
+    k32.GetSystemTimeAsFileTime.argtypes = [ctypes.POINTER(wintypes.FILETIME)]
+
+    handle = k32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return None
+    try:
+        creation = wintypes.FILETIME()
+        exit_ = wintypes.FILETIME()
+        kernel = wintypes.FILETIME()
+        user = wintypes.FILETIME()
+        ok = k32.GetProcessTimes(
+            handle, ctypes.byref(creation), ctypes.byref(exit_),
+            ctypes.byref(kernel), ctypes.byref(user),
+        )
+        if not ok:
+            return None
+        created_ticks = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
+        now = wintypes.FILETIME()
+        k32.GetSystemTimeAsFileTime(ctypes.byref(now))
+        now_ticks = (now.dwHighDateTime << 32) | now.dwLowDateTime
+        return max(0.0, (now_ticks - created_ticks) / 10_000_000.0)
+    except OSError:
+        return None
+    finally:
+        k32.CloseHandle(handle)
+
+
+def process_age_seconds(pid: int) -> float | None:
+    """Seconds elapsed since ``pid`` started, or ``None`` when unreadable.
+
+    Best-effort and dependency-free on both platforms; never raises.
+    """
+    if pid <= 0:
+        return None
+    try:
+        if platform.system() == "Windows":
+            return _win_process_age_seconds(pid)
+        return _process_age_seconds_posix(pid)
+    except OSError:
+        return None
+
+
+# A candidate this old is treated as genuinely stuck rather than a launcher's
+# still-in-flight subprocess call -- #4268 observed wedged invocations
+# surviving for roughly two hours; a short-lived `resolve`/`activity-log`/
+# `get` call normally completes in well under a minute. Generous on purpose:
+# ancestor protection is meant to shield brief legitimate work, not
+# indefinitely shelter anything descended from a live launcher.
+_PROTECT_ANCESTOR_GRACE_SECONDS = 120.0
 
 
 def parent_pid(pid: int) -> int | None:
@@ -709,7 +805,10 @@ def processes_with_executable_under(
     (registered via :mod:`launch_registry`) shields its own short-lived
     ``agent_worktrees resolve``/``activity-log`` subprocess calls from being
     caught mid-flight by a version-cutover sweep (#4454 follow-up) -- those
-    calls are legitimate, still-running work, not a wedged orphan.
+    calls are legitimate, still-running work, not a wedged orphan. The
+    exclusion is bounded by :data:`_PROTECT_ANCESTOR_GRACE_SECONDS`: a
+    descendant older than that reads as genuinely stuck (the #4268 case this
+    sweep exists for) and is reaped regardless of its ancestor.
 
     Returns ``{"pid": int, "name": str, "executable": str}`` dicts.
     Best-effort: any process that can't be opened or read is silently skipped,
@@ -750,7 +849,16 @@ def processes_with_executable_under(
         if exclude and _is_under(exe, exclude):
             continue
         if protect_ancestors and is_descendant_of(pid, protect_ancestors):
-            continue
+            age = process_age_seconds(pid)
+            # Protection only shields a candidate PROVEN to be recent: a
+            # genuinely wedged descendant of an otherwise-live launcher (the
+            # original #4268 case -- surviving for hours) must remain
+            # reapable, or this exclusion would defeat the sweep's whole
+            # purpose for that class of process. An unmeasurable age fails
+            # CLOSED (no protection) -- protection is the exception path, so
+            # failing to prove "still fresh" must not grant it.
+            if age is not None and age <= _PROTECT_ANCESTOR_GRACE_SECONDS:
+                continue
         hits.append({"pid": pid, "name": name, "executable": exe})
     return hits
 

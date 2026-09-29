@@ -1,0 +1,9 @@
+{
+  "comment": "worktree-manager launchers: register a live launcher's root pid so a version-cutover reap protects its short-lived resolve/activity-log/get subprocess calls instead of killing them mid-flight (#4454)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -17,10 +17,16 @@ process descended from a registered, still-live root as protected -- shielding
 every subprocess call that root spawns, without needing each of those
 short-lived calls to register individually.
 
-One lock file per worktree id, reusing :mod:`locks`' provable-liveness
-primitive (pid + start-time token) so a crashed launcher's stale entry reads
-as dead rather than falsely protecting an unrelated, later process that
-happens to reuse its pid.
+One lock file per **``(worktree id, pid)``** pair, reusing :mod:`locks`'
+provable-liveness primitive (pid + start-time token) so a crashed launcher's
+stale entry reads as dead rather than falsely protecting an unrelated, later
+process that happens to reuse its pid. Keying by pid as well as worktree id
+matters: a worktree can legitimately have more than one live launcher root at
+once (a fast re-attach to an already-live mux session starts a second
+launcher process alongside the first, which keeps running until its own
+attach loop notices the session and exits) -- keying by worktree id alone
+would let the second registration silently evict the first, leaving its
+still-running process tree unprotected.
 """
 
 from __future__ import annotations
@@ -55,17 +61,17 @@ def add_subparser(sub) -> None:
     )
 
 
-def _safe_component(worktree_id: str) -> str:
-    """Sanitize ``worktree_id`` for use as a filename component."""
-    return "".join(c if (c.isalnum() or c in "-_.") else "_" for c in worktree_id)
+def _safe_component(value: str) -> str:
+    """Sanitize ``value`` for use as a filename component."""
+    return "".join(c if (c.isalnum() or c in "-_.") else "_" for c in value)
 
 
 def _locks_dir(install_dir: str | Path) -> Path:
     return Path(install_dir) / "launch-locks"
 
 
-def _lock_path(install_dir: str | Path, worktree_id: str) -> Path:
-    return _locks_dir(install_dir) / f"launch.{_safe_component(worktree_id)}.lock"
+def _lock_path(install_dir: str | Path, worktree_id: str, pid: int) -> Path:
+    return _locks_dir(install_dir) / f"launch.{_safe_component(worktree_id)}.{pid}.lock"
 
 
 def register_launch(
@@ -75,20 +81,21 @@ def register_launch(
     pid: int | None = None,
     launch_id: str | None = None,
 ) -> bool:
-    """Record ``pid`` (default: this process) as the live launcher root for
+    """Record ``pid`` (default: this process) as a live launcher root for
     ``worktree_id``. Returns success; best-effort, never raises.
 
-    Overwrites any prior entry for the same ``worktree_id`` -- a worktree has
-    at most one live launcher root at a time, and a fresh launch superseding a
-    dead one is the common case (a crashed/finalized prior launch's stale
-    entry would otherwise never be replaced by name alone).
+    Keyed by ``(worktree_id, pid)`` -- a second launch for the same worktree
+    (e.g. a fast re-attach racing an already-running one) gets its own entry
+    rather than evicting the first. Re-registering the SAME pid for the same
+    worktree simply refreshes its lock (harmless, matches this pid's own
+    liveness either way).
     """
-    if not worktree_id:
+    if not worktree_id or not pid:
         return False
     extra = {"worktree_id": worktree_id}
     if launch_id:
         extra["launch_id"] = launch_id
-    return _locks.write_lock(_lock_path(install_dir, worktree_id), pid=pid, extra=extra)
+    return _locks.write_lock(_lock_path(install_dir, worktree_id, pid), pid=pid, extra=extra)
 
 
 def active_launch_pids(install_dir: str | Path) -> set[int]:

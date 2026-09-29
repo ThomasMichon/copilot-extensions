@@ -18,12 +18,16 @@ from agent_worktrees import launch_registry
 def test_register_launch_writes_a_lock_file_for_this_process(tmp_path):
     ok = launch_registry.register_launch(tmp_path, "wt-abc", pid=os.getpid())
     assert ok
-    lock_path = tmp_path / "launch-locks" / "launch.wt-abc.lock"
+    lock_path = tmp_path / "launch-locks" / f"launch.wt-abc.{os.getpid()}.lock"
     assert lock_path.exists()
 
 
 def test_register_launch_rejects_empty_worktree_id(tmp_path):
     assert launch_registry.register_launch(tmp_path, "", pid=os.getpid()) is False
+
+
+def test_register_launch_rejects_missing_pid(tmp_path):
+    assert launch_registry.register_launch(tmp_path, "wt-abc", pid=None) is False
 
 
 def test_active_launch_pids_reports_live_registered_pid(tmp_path):
@@ -40,7 +44,7 @@ def test_active_launch_pids_prunes_a_dead_pid_and_excludes_it(tmp_path):
     proc_pid = proc.pid
     try:
         launch_registry.register_launch(tmp_path, "wt-dead", pid=proc_pid)
-        lock_path = tmp_path / "launch-locks" / "launch.wt-dead.lock"
+        lock_path = tmp_path / "launch-locks" / f"launch.wt-dead.{proc_pid}.lock"
         assert lock_path.exists()
 
         proc.kill()
@@ -70,17 +74,31 @@ def test_active_launch_pids_empty_when_directory_absent(tmp_path):
     assert launch_registry.active_launch_pids(tmp_path / "does-not-exist") == set()
 
 
-def test_register_launch_overwrites_a_prior_entry_for_the_same_worktree(tmp_path):
-    proc = subprocess.Popen([sys.executable, "-c", "pass"])
-    stale_pid = proc.pid
-    proc.wait()
-    launch_registry.register_launch(tmp_path, "wt-same", pid=stale_pid)
+def test_register_launch_keys_by_worktree_and_pid_so_concurrent_launchers_coexist(tmp_path):
+    """Two live launcher roots for the SAME worktree (a fast re-attach racing
+    an already-running one, #4481 review) must both stay protected -- keying
+    by worktree id alone would let the second registration evict the first."""
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(3)"])
+    try:
+        launch_registry.register_launch(tmp_path, "wt-concurrent", pid=proc.pid)
+        launch_registry.register_launch(tmp_path, "wt-concurrent", pid=os.getpid())
+
+        pids = launch_registry.active_launch_pids(tmp_path)
+
+        assert proc.pid in pids
+        assert os.getpid() in pids
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_register_launch_is_idempotent_for_the_same_worktree_and_pid(tmp_path):
+    launch_registry.register_launch(tmp_path, "wt-same", pid=os.getpid())
     launch_registry.register_launch(tmp_path, "wt-same", pid=os.getpid())
 
-    pids = launch_registry.active_launch_pids(tmp_path)
-
-    assert os.getpid() in pids
-    assert stale_pid not in pids
+    lock_dir = tmp_path / "launch-locks"
+    assert len(list(lock_dir.glob("launch.*.lock"))) == 1
+    assert os.getpid() in launch_registry.active_launch_pids(tmp_path)
 
 
 class _Args:

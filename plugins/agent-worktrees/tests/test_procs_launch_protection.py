@@ -85,7 +85,6 @@ def test_is_descendant_of_true_for_a_grandchild_two_levels_up():
             pass
         proc.kill()
         proc.wait()
-        proc.wait()
 
 
 def test_is_descendant_of_false_when_ancestor_is_unrelated():
@@ -98,7 +97,8 @@ def test_is_descendant_of_false_for_empty_ancestor_set():
 
 def test_processes_with_executable_under_skips_a_protected_descendant(monkeypatch):
     """Unit-level check of the wiring: a candidate under ``root`` is dropped
-    when ``protect_ancestors`` proves descent, kept otherwise."""
+    when ``protect_ancestors`` proves descent AND it reads as recent,
+    kept otherwise."""
     monkeypatch.setattr(
         procs, "_iter_processes_posix",
         lambda: iter([(555, "/tmp", "python"), (777, "/tmp", "python")]),
@@ -112,9 +112,78 @@ def test_processes_with_executable_under_skips_a_protected_descendant(monkeypatc
         procs, "is_descendant_of",
         lambda pid, ancestors, **kw: pid == 555,
     )
+    monkeypatch.setattr(procs, "process_age_seconds", lambda pid: 1.0)
 
     hits = procs.processes_with_executable_under(
         "/root/versions", protect_ancestors={42},
     )
 
     assert [h["pid"] for h in hits] == [777]
+
+
+def test_processes_with_executable_under_still_reaps_an_old_protected_descendant(monkeypatch):
+    """#4481 review: ancestor protection must not indefinitely shelter a
+    genuinely wedged descendant (the exact #4268 case this sweep exists
+    for) just because its parent is a live, registered launcher."""
+    monkeypatch.setattr(
+        procs, "_iter_processes_posix",
+        lambda: iter([(555, "/tmp", "python")]),
+    )
+    monkeypatch.setattr(procs.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        procs, "process_executable_path",
+        lambda pid: "/root/versions/1.0.0/bin/python",
+    )
+    monkeypatch.setattr(procs, "is_descendant_of", lambda pid, ancestors, **kw: True)
+    monkeypatch.setattr(
+        procs, "process_age_seconds",
+        lambda pid: procs._PROTECT_ANCESTOR_GRACE_SECONDS + 1,
+    )
+
+    hits = procs.processes_with_executable_under(
+        "/root/versions", protect_ancestors={42},
+    )
+
+    assert [h["pid"] for h in hits] == [555]  # too old to protect -- stays reapable
+
+
+def test_processes_with_executable_under_fails_closed_on_unmeasurable_age(monkeypatch):
+    """An ancestor-descended candidate whose age can't be read is NOT
+    protected -- protection is the exception path, so failing to prove
+    'still fresh' must not grant it."""
+    monkeypatch.setattr(
+        procs, "_iter_processes_posix",
+        lambda: iter([(555, "/tmp", "python")]),
+    )
+    monkeypatch.setattr(procs.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        procs, "process_executable_path",
+        lambda pid: "/root/versions/1.0.0/bin/python",
+    )
+    monkeypatch.setattr(procs, "is_descendant_of", lambda pid, ancestors, **kw: True)
+    monkeypatch.setattr(procs, "process_age_seconds", lambda pid: None)
+
+    hits = procs.processes_with_executable_under(
+        "/root/versions", protect_ancestors={42},
+    )
+
+    assert [h["pid"] for h in hits] == [555]
+
+
+def test_process_age_seconds_of_a_real_child_is_small_and_nonnegative():
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; print('ready', flush=True); time.sleep(3)"],
+        stdout=subprocess.PIPE, text=True,
+    )
+    try:
+        proc.stdout.readline()
+        age = procs.process_age_seconds(proc.pid)
+        assert age is not None
+        assert 0 <= age < 30
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_process_age_seconds_returns_none_for_an_implausible_pid():
+    assert procs.process_age_seconds(999_999_999) is None
