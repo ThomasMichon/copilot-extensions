@@ -199,7 +199,7 @@ class QueueSteeringMixin:
                     f"cannot steer a {task.status!r} task"
                     + (
                         " (use reopen_completed to re-queue it with steering)"
-                        if task.status == Status.COMPLETED
+                        if task.status == Status.SUBMITTED
                         else ""
                     )
                 )

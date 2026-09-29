@@ -46,8 +46,8 @@ def test_all_task_statuses_is_exhaustive():
         Status.CLAIMED,
         Status.STARTED,
         Status.SUSPENDED,
+        Status.SUBMITTED,
         Status.COMPLETED,
-        Status.CONFIRMED,
         Status.ABANDONED,
         Status.DEAD_LETTER,
     }
@@ -104,8 +104,8 @@ def test_cold_is_consistent_only_for_statuses_with_a_known_covering_sweep():
     covered = {
         Status.SUSPENDED,
         Status.QUEUED,
+        Status.SUBMITTED,
         Status.COMPLETED,
-        Status.CONFIRMED,
         Status.ABANDONED,
         Status.DEAD_LETTER,
     }

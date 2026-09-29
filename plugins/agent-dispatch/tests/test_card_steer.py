@@ -671,24 +671,24 @@ def test_confirm_and_reopen_roundtrip_over_http(api):
     tid = _held_over_http(api)
     r = api.post(f"/tasks/{tid}/complete", json={"worker_id": "w1", "result_ref": "pr/1"})
     assert r.status_code == 200
-    assert r.json()["status"] == "completed"
+    assert r.json()["status"] == "submitted"
 
     r = api.post(f"/tasks/{tid}/confirm", json={"actor": "evaluator"})
     assert r.status_code == 200
-    assert r.json()["status"] == "confirmed"
+    assert r.json()["status"] == "completed"
 
-    # A confirmed task's confirm is idempotent (replay), not an error --
+    # A completed task's confirm is idempotent (replay), not an error --
     # matching the same idempotent-replay contract every other terminal
     # transition already carries (e.g. abandon).
     replay = api.post(f"/tasks/{tid}/confirm", json={})
     assert replay.status_code == 200
-    assert replay.json()["status"] == "confirmed"
-    # But a genuinely different action against an already-confirmed task
-    # (re-completing, reopening) is rejected -- confirmed really is final.
+    assert replay.json()["status"] == "completed"
+    # But a genuinely different action against an already-completed task
+    # (re-completing, reopening) is rejected -- completed really is final.
     assert api.post(f"/tasks/{tid}/reopen", json={}).status_code == 409
 
     log = api.get(f"/tasks/{tid}/events").json()
-    assert any(e["to_status"] == "confirmed" for e in log)
+    assert any(e["to_status"] == "completed" for e in log)
 
 
 def test_reopen_returns_to_queued_with_a_steer(api):
@@ -712,7 +712,7 @@ def test_reopen_returns_to_queued_with_a_steer(api):
     assert claimed["id"] == tid
 
 
-def test_reopen_on_non_completed_task_is_409(api):
+def test_reopen_on_non_submitted_task_is_409(api):
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     assert api.post(f"/tasks/{tid}/reopen", json={}).status_code == 409
 

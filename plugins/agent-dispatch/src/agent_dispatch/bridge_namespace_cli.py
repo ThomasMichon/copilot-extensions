@@ -96,7 +96,7 @@ def _cmd_namespace_resolve(args: argparse.Namespace) -> int:
     status = task.get("status")
     owner = task.get("owner")
     claimed = bool(owner) and status in (
-        "claimed", "started", "suspended", "completed",
+        "claimed", "started", "suspended", "submitted",
     )
     if claimed:
         machine, worktree_id = core._split_owner(owner)

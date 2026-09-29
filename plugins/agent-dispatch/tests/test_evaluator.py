@@ -14,7 +14,7 @@ def _args(argv):
     return build_parser().parse_args(argv)
 
 
-def _completed_event(labels=("recipe:reviewer",), status="completed", **task):
+def _completed_event(labels=("recipe:reviewer",), status="submitted", **task):
     t = {"id": "t-1", "labels": list(labels), "status": status,
          "origin_ref": "o/n#42", "source": "recipe", **task}
     return {"type": "task.completed", "task": t}
@@ -36,7 +36,7 @@ def test_spec_requires_rules_list():
 def test_rule_matches_on_event_type_and_labels():
     spec = ev.SpecEvaluator({"rules": [{
         "on": "task.completed",
-        "when": {"labels_any": ["recipe:reviewer"], "status": "completed"},
+        "when": {"labels_any": ["recipe:reviewer"], "status": "submitted"},
         "emit": {"title_template": "unstick {origin_ref}",
                  "labels": ["recipe:conflict-resolution"],
                  "dedup_template": "evaluator:followup:{task_id}"},
@@ -159,14 +159,14 @@ def test_apply_confirm_calls_confirmer_with_task_id():
 
     def confirmer(task_id, **kwargs):
         calls.append((task_id, kwargs))
-        return {"id": task_id, "status": "confirmed"}
+        return {"id": task_id, "status": "completed"}
 
     decisions = [ev.Confirm(reason="corroborated")]
     out = ev.apply_decisions(
         decisions, creator=lambda *a, **k: {}, task_id="t-1", confirmer=confirmer
     )
     assert calls == [("t-1", {"actor": "evaluator"})]
-    assert out[0] == {"decision": "confirm", "confirmed": {"id": "t-1", "status": "confirmed"}}
+    assert out[0] == {"decision": "confirm", "completed": {"id": "t-1", "status": "completed"}}
 
 
 def test_apply_confirm_without_confirmer_is_skipped_not_raised():

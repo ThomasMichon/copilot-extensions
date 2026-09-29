@@ -348,7 +348,7 @@ def register_task_lifecycle_commands(sub) -> None:
     p = sub.add_parser(
         "confirm",
         help="the Completion Review card's Confirm action: corroborate a "
-        "completion claim and close the task for good (completed -> confirmed)",
+        "completion claim and close the task for good (submitted -> completed)",
     )
     p.add_argument("task_id")
     p.add_argument("--actor", help="operator/evaluator identity recorded in the audit trail")
@@ -363,8 +363,8 @@ def register_task_lifecycle_commands(sub) -> None:
     p = sub.add_parser(
         "reopen",
         help="the Completion Review card's Re-queue-with-steering action: "
-        "return a completed-but-unconfirmed task to queued, progress "
-        "preserved (completed -> queued)",
+        "return a submitted-but-not-yet-completed task to queued, progress "
+        "preserved (submitted -> queued)",
     )
     p.add_argument("task_id")
     p.add_argument("--reason", help="optional note recorded in the audit trail")
@@ -432,4 +432,3 @@ def register_task_lifecycle_commands(sub) -> None:
     p = sub.add_parser("detach", help="demote a hard worktree pin to a soft affinity")
     p.add_argument("task_id")
     p.set_defaults(func=_core()._simple("detach", "task_id"))
-

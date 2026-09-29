@@ -871,7 +871,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "consume",
         help="resume-and-consume a handoff: drive it to completed (idempotent; "
-        "a spent completed handoff is refused, exit 3, never replayed) "
+        "a spent submitted/completed handoff is refused, exit 3, never replayed) "
         "and print its payload -- the successor's one-command pickup",
     )
     p.add_argument("task_id")

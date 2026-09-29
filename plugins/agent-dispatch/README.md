@@ -266,16 +266,16 @@ q.reconcile_liveness()
 ### State model
 
 ```
-proposed -> queued -> claimed -> started -> completed        (terminal)
-                ^         |          |
-                +-- decline/yield ---+
-                ^
+proposed -> queued -> claimed -> started -> submitted -> completed
+                ^         |          |            |            (terminal)
+                +-- decline/yield ---+            |
+                ^                                  +-- confirm
                 +-- owner-gone (liveness GC requeue, attempts++)
-started -> suspended -> started                              (resume; same owner)
-               |
-               +-----------> queued                          (release; replacement)
-               +-----------> completed                       (condition resolved)
-   (any non-terminal) --------------------------> abandoned   (terminal, permission-gated)
+started -> suspended -> started
+               |                                   (resume; same owner)
+               +-----------> queued                (release; replacement)
+               +-----------> submitted             (condition resolved)
+   (any non-terminal except completed) -------> abandoned     (terminal, permission-gated)
 ```
 
 - **proposed** -- written but not yet claimable (a draft handoff / undecided idea).
@@ -285,6 +285,7 @@ started -> suspended -> started                              (resume; same owner
 - **suspended** -- previously started but dormant and non-claimable; retains the
   same owner/session, worktree identity, generation, progress, and card while
   clearing active lease/activity.
+- **submitted** -- the worker's provisional completion claim.
 - **completed** / **abandoned** / **dead_letter** -- terminal (abandon requires
   permission; **dead_letter** is where a task lands when GC has requeued it past
   the attempts cap -- its owner kept going gone -- an actionable failure state).
@@ -381,7 +382,7 @@ external deps). `read_payload()` (engine) / `GET /tasks/{id}/payload` /
 `agent-dispatch payload <id> [--raw]` resolve either form transparently; an
 external `payload_ref` (e.g. `pr/123`) is left opaque for the caller.
 `agent-dispatch consume <id>` is the resume-and-consume shortcut: it idempotently
-drives the task to `completed` (approve → claim → start → complete) and then
+drives the task to `submitted` (approve → claim → start → complete) and then
 prints the payload, so a handoff successor's single command both loads the brief
 and spends the baton.
 
@@ -807,7 +808,7 @@ goal) without a bespoke module.
 
 ```bash
 # apply an evaluator to an event read from stdin (a hook/producer pipes it in):
-echo '{"type":"task.completed","task":{"id":"t1","labels":["recipe:reviewer"],"status":"completed","origin_ref":"o/n#42"}}' \
+echo '{"type":"task.completed","task":{"id":"t1","labels":["recipe:reviewer"],"status":"submitted","origin_ref":"o/n#42"}}' \
   | agent-dispatch evaluate --spec evaluator.json --repo o/n
 agent-dispatch evaluate --spec evaluator.json --event-file event.json --dry-run
 ```

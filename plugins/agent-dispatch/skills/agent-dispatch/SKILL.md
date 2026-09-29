@@ -6,7 +6,7 @@ description: >
   browse/dedup, atomically claim, and drive tasks through their lifecycle so
   multiple worktree/session agents cooperate without racing through
   origin/master or needing an account per agent. Covers the CLI verbs, the
-  eight-state model, worker identity (machine/worktree), capability + affinity
+  nine-state model, worker identity (machine/worktree), capability + affinity
   routing, include/exclude selector matching, targeting, dedup-before-create,
   atomic create-and-claim, spawning workers via agent-bridge,
   and loopback-vs-remote coordinator config.
@@ -53,7 +53,7 @@ queue of *tasks*, so multiple agents coordinate without racing through
 A **task** is a graduated handoff: a title + `prompt` + optional Markdown
 `payload`. It carries routing (`requires` / `affinity`), targeting
 (`target_machine` / `target_worktree` / `target_repo`, `labels`), optional
-spawn exclusivity (`exclusive_key`), and moves through an eight-state lifecycle.
+spawn exclusivity (`exclusive_key`), and moves through a nine-state lifecycle.
 
 ## When to reach for it
 
@@ -209,19 +209,19 @@ so you pass nothing:
   agent-worktrees registry). <!-- marketplace-isolation: allow agent-worktrees-management -->
   Output carries both `repo` (remote) and `repo_name`.
 
-## The eight-state lifecycle
+## The nine-state lifecycle
 
 ```
-proposed -> queued -> claimed -> started -> completed        (terminal)
-                ^         |          |
-                +- decline/yield ----+
-                ^         |          |
+proposed -> queued -> claimed -> started -> submitted -> completed
+                ^         |          |            |            (terminal)
+                +- decline/yield ----+            |
+                ^         |                       +-- confirm
                 +- owner-gone (liveness GC requeue, attempts++)
-started -> suspended -> started                              (resume; same owner)
-               |
-               +-----------> queued                          (release; replacement)
-               +-----------> completed                       (condition resolved)
-   (any non-terminal) --> abandoned (terminal, permission-gated)
+started -> suspended -> started
+               |                                   (resume; same owner)
+               +-----------> queued                (release; replacement)
+               +-----------> submitted             (condition resolved)
+   (any non-terminal except completed) --> abandoned (terminal, permission-gated)
    (owner-gone past the attempts cap) --> dead_letter (terminal)
 ```
 
@@ -232,7 +232,8 @@ started -> suspended -> started                              (resume; same owner
 | **claimed** | held; worker may evaluate before committing | held |
 | **started** | under active implementation | held |
 | **suspended** | previously started, dormant, same owner/session preserved | No |
-| **completed** | driven to done | terminal |
+| **submitted** | provisional completion claim | No |
+| **completed** | corroborated done | terminal |
 | **abandoned** | discarded (duplicate / dropped priority) | terminal |
 | **dead_letter** | requeued too many times (owner kept going gone) -- an actionable failure | terminal |
 
@@ -243,7 +244,7 @@ started -> suspended -> started                              (resume; same owner
   **evaluation window** (`claim --evaluation`) -- a semantic "evaluating, not yet
   committed" marker; elapsed time alone does **not** recover it (see below).
 - **started -> queued** yields **with a note** on a recoverable snag (merge
-  conflict, needs a later cycle); **started -> completed** on success.
+  conflict, needs a later cycle); **started -> submitted** on success, and **submitted -> completed** once corroborated by `confirm`.
 - **started -> suspended** (`suspend --reason <why>`) is owner-gated and parks a
   dormant task without losing its owner/session identity, worktree, generation,
   progress, or card. It clears active lease/activity and is neither claimable nor
@@ -253,7 +254,7 @@ started -> suspended -> started                              (resume; same owner
   without a captured interactive inbox is released to **queued** for safe
   re-embodiment;
   `release` clears ownership and returns it to **queued** for a replacement.
-- **suspended -> completed** is owner-gated and direct: if an external condition
+- **suspended -> submitted** is owner-gated and direct: if an external condition
   satisfies the dormant goal, its resolver calls `complete` under the preserved
   owner without waking a process or manufacturing an active turn.
 - Steering a suspended task durably records the steer and atomically either
@@ -832,7 +833,7 @@ to `machine` only when the mismatch is machine-wide.
 >   successor*: it loads the brief, works the task, and runs
 >   `<agent-dispatch catalog argv[0]> complete <id>` **explicitly** only when
 >   it judges the goal reached -- so
->   `completed` means *the work is done*, not *the baton was handed over*.
+>   `submitted` means *the work is done*, not *the baton was handed over*.
 >
 > An already-terminal (or unclaimable) task just has its payload re-printed,
 > never an error. Use plain `payload --raw` to read *without* any state change.
@@ -887,7 +888,7 @@ to `machine` only when the mismatch is machine-wide.
   This is the **"dispatch an agent to do X"** path: the embodied session claims →
   starts → works the task autonomously → and **completes it explicitly** only
   when it judges the goal reached (**deferred completion** -- the task's
-  `completed` state means the *work is done*, not that a baton was handed over).
+  `submitted` state means the *work is done*, not that a baton was handed over).
 
 **Same body choice in the supervisor, keyed by label.** A persistent
 `agent-dispatch supervise` loop <!-- marketplace-isolation: allow supervisor-management -->

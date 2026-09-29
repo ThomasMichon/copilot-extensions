@@ -694,7 +694,7 @@ def test_existing_resource_reservation_rows_receive_tokens_on_migration(
 def test_same_occurrence_is_not_reemitted_after_restart():
     existing = {
         "id": "old",
-        "status": "completed",
+        "status": "submitted",
         "source": "repository-backlog",
         "origin_ref": "backlog/occurrence/7200",
         "exclusive_key": "repository-issue-loop:backlog",
@@ -759,7 +759,7 @@ def test_source_change_does_not_fork_active_episode():
 def test_source_change_does_not_replay_same_terminal_occurrence():
     existing = {
         "id": "old",
-        "status": "completed",
+        "status": "submitted",
         "source": "old-source",
         "origin_ref": "backlog/occurrence/7200",
         "exclusive_key": "repository-issue-loop:backlog",
@@ -994,7 +994,7 @@ def test_active_task_suppresses_reservation_promotion_forge_reads():
     assert provider.list_calls == 0
 
 
-@pytest.mark.parametrize("status", ["completed", "abandoned", "dead_letter"])
+@pytest.mark.parametrize("status", ["submitted", "abandoned", "dead_letter"])
 def test_terminal_task_releases_claim_when_issue_remains_open(status):
     reserved = {
         "loop": "backlog",
@@ -1029,7 +1029,7 @@ def test_terminal_task_releases_claim_when_issue_remains_open(status):
 def test_completed_task_with_closed_issue_keeps_historical_claim():
     task = {
         "id": "task-existing",
-        "status": "completed",
+        "status": "submitted",
         "source": "repository-backlog",
         "origin_ref": "backlog/occurrence/7200",
         "exclusive_key": "repository-issue-loop:backlog",

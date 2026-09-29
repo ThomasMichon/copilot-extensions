@@ -124,7 +124,7 @@ def test_namespace_resolve_completed_headless_task_returns_session_spec(
         m, "_client",
         lambda _args, **_kw: _FakeClient(
             {
-                "status": "completed",
+                "status": "submitted",
                 "owner": None,
                 "owner_session_id": "s-completed",
             },
@@ -150,7 +150,7 @@ def test_namespace_resolve_completed_headless_task_falls_back_to_attachment_sess
     monkeypatch.setattr(
         m, "_client",
         lambda _args, **_kw: _FakeClient(
-            {"status": "completed", "owner": None},
+            {"status": "submitted", "owner": None},
             attachments=[{"session_id": "s-from-history"}],
         ),
     )
@@ -171,7 +171,7 @@ def test_namespace_resolve_headless_task_cross_machine_exits_bad_state(
         m, "_client",
         lambda _args, **_kw: _FakeClient(
             {
-                "status": "completed",
+                "status": "submitted",
                 "owner": None,
                 "owner_session_id": "s-1",
                 "target_machine": "wheatley",

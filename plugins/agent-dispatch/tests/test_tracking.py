@@ -543,7 +543,7 @@ def test_enrich_tasks_skips_bridge_probe_when_none_leased(monkeypatch):
     monkeypatch.setattr(tracking, "bridge_available", fake_available)
     tasks = [
         {"id": "a", "status": "queued", "owner": None},
-        {"id": "b", "status": "completed", "owner": "m/wt"},
+        {"id": "b", "status": "submitted", "owner": "m/wt"},
     ]
     out = tracking.enrich_tasks(tasks)
     assert out is tasks

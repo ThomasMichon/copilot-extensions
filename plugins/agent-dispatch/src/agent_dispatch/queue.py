@@ -7,11 +7,11 @@ library that the coordinator process wraps behind HTTP. Everything that must be
 leased-queue design.
 Design notes
 ------------
-* **Eight-state model** (see :class:`Status`):
-  ``proposed -> queued -> claimed -> started -> completed`` plus dormant
-  ``suspended`` and terminal ``abandoned`` / ``dead_letter``. ``proposed`` and
-  ``suspended`` are never claimable; liveness recovery returns only actively
-  held tasks to ``queued``.
+* **Nine-state model** (see :class:`Status`):
+  ``proposed -> queued -> claimed -> started -> submitted -> completed`` plus
+  dormant ``suspended`` and terminal ``abandoned`` / ``dead_letter``.
+  ``proposed`` and ``suspended`` are never claimable; liveness recovery returns
+  only actively held tasks to ``queued``.
 * **Capability-gated claim.** A task carries a hard ``requires`` set (capability
   tokens or an ``agent:<id>`` identity pin); a worker advertises a capability
   set at claim time. A task is claimable only when ``requires`` is a subset of
@@ -151,17 +151,18 @@ class TaskQueue(
     #: ``abandoned`` (an abandoned task is not a live duplicate of new work).
     #: This is the corpus the agent-driven "sweep + explore + verify" dedup
     #: flow reads before creating a task; see :meth:`sweep`. Includes
-    #: ``confirmed`` alongside ``completed`` (2026-09-25): a confirmed task
-    #: is exactly as real a prior instance of the work as a merely-completed
-    #: one -- the confirm step doesn't make it any less relevant to dedup.
+    #: ``completed`` alongside ``submitted`` (2026-09-25): a truly completed
+    #: task is exactly as real a prior instance of the work as a merely
+    #: submitted one -- the confirm step doesn't make it any less relevant to
+    #: dedup.
     SWEEP_STATES = (
         Status.PROPOSED,
         Status.QUEUED,
         Status.CLAIMED,
         Status.STARTED,
         Status.SUSPENDED,
+        Status.SUBMITTED,
         Status.COMPLETED,
-        Status.CONFIRMED,
     )
 
     def __init__(
@@ -296,11 +297,11 @@ class TaskQueue(
                 "   AND task_events.worker IS NOT NULL"
                 ")",
                 (
-                    Status.COMPLETED,
-                    Status.COMPLETED,
-                    Status.COMPLETED,
-                    Status.COMPLETED,
-                    Status.COMPLETED,
+                    Status.SUBMITTED,
+                    Status.SUBMITTED,
+                    Status.SUBMITTED,
+                    Status.SUBMITTED,
+                    Status.SUBMITTED,
                 ),
             )
             # Append-only progress log -- the *accumulated* counterpart of the

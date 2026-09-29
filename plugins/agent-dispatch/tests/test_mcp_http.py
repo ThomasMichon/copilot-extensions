@@ -485,7 +485,7 @@ def test_mcp_complete_result_is_visible_over_rest(coord):
 
     assert completed["result"] == result
     assert client.get(task["id"])["result"] == result
-    listed = client.list(status=Status.COMPLETED)[0]
+    listed = client.list(status=Status.SUBMITTED)[0]
     assert listed["has_result"] is True
     assert "result" not in listed
     retrieved = asyncio.new_event_loop().run_until_complete(

@@ -188,14 +188,14 @@ def test_explicit_project_override_is_returned(q, client, monkeypatch):
     assert calls[0]["project"] == "custom-project"
 
 
-@pytest.mark.parametrize("status_setter", ["claimed", "started", "completed", "abandoned"])
+@pytest.mark.parametrize("status_setter", ["claimed", "started", "submitted", "abandoned"])
 def test_ineligible_status_is_rejected(q, client, monkeypatch, status_setter):
     t = q.create("work")
-    if status_setter in ("claimed", "started", "completed"):
+    if status_setter in ("claimed", "started", "submitted"):
         q.claim_one("m/other", task_id=t.id, machine="m", worktree="other")
-        if status_setter in ("started", "completed"):
+        if status_setter in ("started", "submitted"):
             q.start(t.id, "m/other")
-            if status_setter == "completed":
+            if status_setter == "submitted":
                 q.complete(t.id, "m/other")
     elif status_setter == "abandoned":
         q.abandon(t.id, permitted=True, reason="test")

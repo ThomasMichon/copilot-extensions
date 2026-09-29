@@ -160,12 +160,12 @@ class SpecEvaluator:
 
         {"rules": [
           {"on": "task.completed",
-           "when": {"labels_any": ["recipe:reviewer"], "status": "completed"},
+           "when": {"labels_any": ["recipe:reviewer"], "status": "submitted"},
            "emit": {"title_template": "unstick {origin_ref}",
                     "labels": ["recipe:conflict-resolution"],
                     "dedup_template": "evaluator:followup:{task_id}"}},
           {"on": "task.completed",
-           "when": {"labels_any": ["recipe:goal-driven"], "status": "completed"},
+           "when": {"labels_any": ["recipe:goal-driven"], "status": "submitted"},
            "confirm": true}
         ]}
 
@@ -241,7 +241,7 @@ def apply_decisions(
                 )
             else:
                 confirmed = confirmer(task_id, actor="evaluator")
-                results.append({"decision": "confirm", "confirmed": confirmed})
+                results.append({"decision": "confirm", "completed": confirmed})
         else:
             results.append(d.to_dict())
     return results

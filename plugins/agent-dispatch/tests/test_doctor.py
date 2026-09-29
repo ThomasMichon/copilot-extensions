@@ -206,7 +206,7 @@ def test_repair_terminal_task_clears_only_the_stale_reservation():
             raise AssertionError("must not transition an already-terminal task")
 
     d = doctor.Diagnosis(
-        task_id="t-1", status="completed", verdict="orphaned_worktree_gone",
+        task_id="t-1", status="submitted", verdict="orphaned_worktree_gone",
         detail="gone", worktree_id="wt-1", reservation_key="dispatch-task:t-1:1",
         owner="headless-x",
     )
@@ -559,7 +559,7 @@ def test_diagnose_many_repairs_only_the_reservation_for_a_terminal_task(monkeypa
     resolves as confirmed gone, is now cleared (force + confirmed_absent)
     rather than left permanently fencing its exclusive_key."""
     monkeypatch.setattr(doctor, "resolve_worktree", lambda wt, **k: {"status": "finalized"})
-    terminal_task = _task(task_id="t-1", status="completed")
+    terminal_task = _task(task_id="t-1", status="submitted")
 
     class _Client:
         def fail_spawn(self, key, *, detail=None, force=False, confirmed_absent=False, **k):

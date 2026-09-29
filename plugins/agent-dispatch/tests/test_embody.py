@@ -577,7 +577,7 @@ def test_resolve_worktree_bypasses_display_cache(monkeypatch):
 
 @pytest.mark.parametrize(
     "status",
-    ["finalizing", "finalized", "complete", "completed", "orphaned"],
+    ["finalizing", "finalized", "complete", "submitted", "orphaned"],
 )
 def test_resolve_worktree_rejects_terminal_checkout(monkeypatch, status):
     monkeypatch.setattr(

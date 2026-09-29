@@ -32,9 +32,9 @@ class QueueCompletionReviewMixin:
     ) -> Task:
         """Corroborate a completion claim and close the task for good.
 
-        The true lifecycle terminal beyond a provisional ``completed`` --
+        The true lifecycle terminal beyond a provisional ``submitted`` --
         see the agent-dispatch vision's *verify-the-completion-claim* / *The
-        lifecycle*. Requires no owner (a completed task has none); ``actor``
+        lifecycle*. Requires no owner (a submitted task has none); ``actor``
         is recorded in the audit note only -- an evaluator's own identity
         for an automatic confirmation of emitter-driven work, or the
         operator's for a manual one via the Completion Review card.

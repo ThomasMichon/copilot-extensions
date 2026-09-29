@@ -222,8 +222,8 @@ spawned — or is still held by a slow-but-alive embody — is skipped. **Elapse
 time is not treated as death**, so a slow-but-alive embody is never
 double-spawned. Each cycle:
 
-1. **reconcile** — settle reservations whose task reached a **terminal** state
-   (`completed`/`abandoned`). An exclusive reservation is not released merely
+1. **reconcile** — settle reservations whose task reached a **concluded**
+   state (`submitted`/`completed`/`abandoned`). An exclusive reservation is not released merely
    because its task became terminal: live/unknown bodies remain bound, and only
    a confirmed-gone body or an explicit end/conclusion permits release. A
    completed idle **local** headless session may remain carried for the next task

@@ -123,11 +123,11 @@ def test_full_lifecycle(tools):
     done = tools.complete(
         t["id"], owner, result_ref="pr/1", result=result
     )
-    assert done["status"] == Status.COMPLETED
+    assert done["status"] == Status.SUBMITTED
     assert done["result_ref"] == "pr/1"
     assert done["result"] == result
     assert tools.show(t["id"])["result"] == result
-    listed = tools.list(status=Status.COMPLETED)[0]
+    listed = tools.list(status=Status.SUBMITTED)[0]
     assert listed["has_result"] is True
     assert "result" not in listed
     assert tools.result(t["id"])["result"] == result
