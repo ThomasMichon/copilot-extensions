@@ -518,8 +518,14 @@ def _write_liveness(
 
 
 def _clear_liveness() -> None:
-    """Remove the daemon liveness beacon (best-effort; never raises)."""
+    """Remove this daemon's liveness beacon (best-effort; never raises).
+
+    Only when the beacon is this process's own: an Owner that yielded to
+    another must not erase the live Owner's beacon on its way out."""
     try:
+        current = read_liveness()
+        if current is not None and current.pid != os.getpid():
+            return
         LIVE_FILE.unlink(missing_ok=True)
     except Exception as exc:
         log.debug("Connection Owner liveness beacon clear failed: %s", exc)
@@ -636,6 +642,27 @@ def claim_owner_singleton(interval: float) -> bool:
         if live is not None and live.pid != os.getpid():
             return False
         _write_liveness(interval)
+        return True
+
+
+def renew_owner_singleton(
+    interval: float,
+    active: Iterable[str] | None = None,
+    bridge_forwards: Iterable[str] | None = None,
+) -> bool:
+    """Refresh this daemon's beacon -- or report that another Owner holds the machine.
+
+    Freshness is the only liveness signal where a pid can't be checked
+    (Windows), so a beacon that lapsed during one slow cycle lets a second
+    Owner start. Without this check both keep rewriting the beacon and both
+    keep competing forwards into every CodeSpace, indefinitely. Each cycle,
+    under the registry lock, an Owner that finds another's fresh beacon
+    yields (False) instead of overwriting it."""
+    with _owner_lock():
+        live = _live_snapshot()
+        if live is not None and live.pid != os.getpid():
+            return False
+        _write_liveness(interval, active=active, bridge_forwards=bridge_forwards)
         return True
 
 
@@ -930,12 +957,18 @@ async def run_owner_daemon(
             except Exception as exc:  # a bad cycle must not kill the daemon
                 log.warning("Connection Owner reconcile cycle failed: %s", exc)
             # Refresh the beacon each cycle, publishing which CodeSpaces now have
-            # a live relay channel so tenants can defer to them.
-            _write_liveness(
+            # a live relay channel so tenants can defer to them -- or stand down
+            # if another Owner took the machine over meanwhile.
+            if not renew_owner_singleton(
                 interval,
                 active=owner.active_codespaces(),
                 bridge_forwards=_bridge_forwards_of(owner),
-            )
+            ):
+                log.warning(
+                    "Connection Owner: another Owner holds this machine now; "
+                    "stopping this one and its forwards."
+                )
+                break
             if idle_shutdown_after is not None:
                 if list_holds():
                     idle_since = None

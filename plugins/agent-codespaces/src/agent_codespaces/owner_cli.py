@@ -67,6 +67,7 @@ def cmd_owner(args: argparse.Namespace) -> int:
     from .session_forwards import (
         SessionForwards,
         make_local_forward_factory,
+        make_remote_bridge_probe,
         make_remote_mux_probe,
         make_supervised_daemon_forward_factory,
     )
@@ -119,6 +120,7 @@ def cmd_owner(args: argparse.Namespace) -> int:
             make_supervised_daemon_forward_factory(config_source_cls=_account_source),
             make_remote_mux_probe(),
             local_factory=make_local_forward_factory(config_source_cls=_account_source),
+            bridge_probe=make_remote_bridge_probe(),
         ),
     )
 

@@ -8,6 +8,7 @@ semantics, TTL-based tenant reclamation, pin stickiness, and persistence.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 import types
@@ -369,6 +370,31 @@ async def test_run_owner_daemon_survives_a_failing_cycle(store):
     await owner.run_owner_daemon(fake, interval=0, stop_event=fake.stop_event)
     assert fake.reconciles >= 2
     assert fake.shutdowns == 1
+
+
+async def test_an_owner_that_finds_another_owners_beacon_stands_down(store, monkeypatch):
+    """Two Owners (a beacon that lapsed during a slow cycle let a second one
+    start) must not both keep forwards into every CodeSpace: the one that finds
+    the other's fresh beacon yields, and leaves that beacon in place."""
+    fake = _FakeOwner(stop_after=1000)
+    other = {"pid": 424242, "host": "h", "interval": 15.0, "active": [], "bridge_forwards": []}
+
+    async def reconcile():
+        fake.reconciles += 1
+        if fake.reconciles == 2:  # another Owner took the machine over meanwhile
+            owner.LIVE_FILE.write_text(json.dumps({**other, "heartbeat_at": time.time()}), "utf-8")
+
+    fake.reconcile = reconcile
+    monkeypatch.setattr(owner, "_pid_alive", lambda pid: None)  # as on Windows: freshness only
+    await asyncio.wait_for(owner.run_owner_daemon(fake, interval=0), timeout=5)
+    assert fake.reconciles == 2 and fake.shutdowns == 1
+    assert json.loads(owner.LIVE_FILE.read_text("utf-8"))["pid"] == 424242  # not erased
+
+
+def test_clear_liveness_leaves_another_owners_beacon(store):
+    owner.LIVE_FILE.write_text(json.dumps({"pid": 424242, "heartbeat_at": time.time()}), "utf-8")
+    owner._clear_liveness()
+    assert owner.LIVE_FILE.exists()
 
 
 async def test_run_owner_daemon_idle_shutdown_exits_with_no_holds(store):

@@ -1,0 +1,9 @@
+{
+  "comment": "Connection Owner heals its own forwards: a host-bridge forward whose ssh is alive but no longer serves is detected by the venue probe (while a session provably runs there) and rebuilt, and an Owner that finds another Owner's fresh beacon stands down (and never erases that beacon) instead of both keeping competing forwards.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
