@@ -446,8 +446,9 @@ existed, letting reverse-forward helpers stack silently over time. The landed
 fix now records the supervised child pid(s) alongside the keeper pid, refreshes
 that state after the forward actually starts, and reaps those children when a
 stale keeper record is replaced or explicitly stopped. Added regression
-coverage in `libs/ssh-manager/tests/test_forward_keeper.py` for both the new
-child-pid reap path and the post-start state refresh.
+coverage in `libs/ssh-manager/tests/test_forward_keeper.py` for the new
+child-pid reap path and in `plugins/agent-ssh/tests/test_copilot_detach.py`
+for the post-start/restart state refresh path.
 
 No `docs/patterns/graceful-daemon-cutover.md` adoption-table row was added for
 `agent-ssh`; that table remains a list of real cutover adopters only. Phase 4
