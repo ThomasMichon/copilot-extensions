@@ -100,6 +100,7 @@ from . import (
     front_door_cli,
     git_ops,
     handoff_trace,
+    headed_launch,
     launch_registry,
     list_cache,  # noqa: F401 -- compatibility re-export for extracted status-monitor CLI
     locks,
@@ -2421,48 +2422,37 @@ from .handoff_cutover import (  # noqa: E402 -- re-export position matches origi
 
 
 def cmd_copilot(args: argparse.Namespace) -> int:
-    """Deliver a TTY Copilot session to the user in THIS terminal.
+    """Deliver a TTY Copilot session in THIS terminal, or with ``--headed``
+    a brand-new visible window instead.
 
-    The canonical "___ copilot" verb: ensure a durable, mux-wrapped Copilot
-    session exists for the target worktree (identical create-or-resume
-    semantics to `embody`), then hand this process's own controlling
-    terminal over to it -- this process becomes the mux client, replacing
-    itself via exec so there is no wrapper left holding the TTY. Unlike
-    `embody` (always detached, JSON out, for a programmatic caller), this is
-    the human/TTY-facing counterpart and refuses without one.
-
-    `agent-codespaces`/`agent-containers` implement the same verb
-    (`copilot <name>`) for a remote venue by SSH `-t`'ing in and running
-    this exact command there -- one name, one meaning, everywhere: deliver a
-    TTY Copilot session in the current terminal. The amount of setup needed
-    before that's possible (none locally; venue prep + reverse-forwards
-    remotely) is the only thing that differs.
+    Ensures a durable, mux-wrapped Copilot session exists (identical
+    create-or-resume semantics to `embody`), then hands a terminal to it.
+    By default that's THIS process's own controlling terminal, replaced via
+    exec so no wrapper is left holding the TTY; refuses without one.
+    ``--headed`` opens a separate window instead and returns without
+    touching this process's stdio, for a caller that must keep running
+    (e.g. the Picker's "Launch in new window"); needs no controlling
+    terminal of its own. `agent-codespaces`/`agent-containers` implement
+    the same verb remotely via SSH `-t`; `--headed` is local-only.
     """
-    if not sys.stdin.isatty():
+    headed = getattr(args, "headed", False)
+    if not headed and not sys.stdin.isatty():
         output.err(
             "`copilot` needs a controlling terminal to attach to -- for a "
-            "programmatic/detached launch use `embody` instead."
+            "programmatic/detached launch use `embody` instead, or pass "
+            "--headed to open a new window."
         )
         return 2
 
-    # Reuse embody's full target-resolution/preflight/create-or-resume logic
-    # in-process rather than duplicating it -- only its JSON result is wanted
-    # here, not its stdout (which is about to become the mux client's TTY).
-    # `embody`'s JSON goes through `_json_output`, which deliberately writes
-    # to `sys.__stdout__` (not `sys.stdout`) so it still reaches the real
-    # terminal from inside `output.stdout_to_stderr` -- a plain
-    # `contextlib.redirect_stdout` (which only swaps `sys.stdout`) never
-    # captures it, so `buf.getvalue()` came back empty every single call
-    # (confirmed live, agent-bridge-cli-mode-sessions Phase 4 validation:
-    # 100% reproducible both locally and over a remote venue SSH session --
-    # `copilot` never actually attached to the mux session it had just
-    # created). `output.capture_json_output()` swaps `sys.__stdout__` itself,
-    # the level `_json_output` actually writes to.
+    # Reuse embody's create-or-resume logic in-process; only its JSON result
+    # matters, not its stdout. `_json_output` writes to `sys.__stdout__`,
+    # which a plain `contextlib.redirect_stdout` never captures (confirmed
+    # live, agent-bridge-cli-mode-sessions Phase 4); `capture_json_output()`
+    # swaps `sys.__stdout__` itself.
     with output.capture_json_output() as buf:
         rc = cmd_embody(args)
     if rc != 0:
-        # embody already wrote its JSON error to buf; surface it for a human
-        # on stderr and exit the same way embody would have.
+        # embody already wrote its JSON error to buf; surface it and exit.
         sys.stderr.write(buf.getvalue())
         return rc
     try:
@@ -2477,6 +2467,16 @@ def cmd_copilot(args: argparse.Namespace) -> int:
         return 1
 
     mux_bin = sessions._mux_bin(getattr(args, "mux", None))
+    if headed:
+        try:
+            spawned = headed_launch.spawn_headed_attach(
+                mux_bin, session_name, title=result.get("worktree_id"))
+        except headed_launch.HeadedLaunchError as exc:
+            output.err(f"copilot --headed: {exc}")
+            return 1
+        output.info(f"Opened {session_name!r} in a new window "
+                    f"(spawner: {spawned['spawner']}, pid: {spawned['pid']})")
+        return 0
     argv = [mux_bin, "attach-session", "-t", session_name]
     try:
         os.execvp(mux_bin, argv)  # never returns on success

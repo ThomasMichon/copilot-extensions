@@ -1,0 +1,9 @@
+{
+  "comment": "Add copilot --headed: attach in a brand-new, visible terminal window instead of this one, for a caller (e.g. the Worktree Manager Picker) that must keep running rather than being replaced by the mux client",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}
