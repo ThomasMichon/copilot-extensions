@@ -2148,3 +2148,49 @@ _Pending._
   assume the same index works across scripts). Re-validated: full
   `agent-worktrees` + `agent-machines` (673 passed) and `agent-dispatch`
   (3525 passed) suites green with the new tests included.
+
+### 2026-09-28 — Concrete motivating case for Phase 2: `agent-worktrees`'s bespoke resolver drifted and broke
+
+- While diagnosing an unrelated Worktree Manager launch failure ("failed
+  to locate pyvenv.cfg"), root-caused and fixed a real production bug in
+  `agent-worktrees`'s launcher scripts (`worktree-manager/bin/
+  launch-session.ps1`/`.sh`): `agent_worktrees resolve` bakes the running
+  interpreter's own path into the resolved launch plan as a literal
+  `-RuntimePython`/`--runtime-python` argument, before the launcher's own
+  background stage-update swaps the runtime venv slot. If a runtime
+  update lands in between, the baked path can point at a slot the update
+  has already pruned, so the pane launch fails outright. Fixed by
+  re-patching that argument to the freshly-refreshed interpreter path
+  right after the update-apply step (mirroring the pre-existing
+  `#stale-venv` re-resolve idiom already used elsewhere in the same
+  scripts). Filed and fixed upstream: issue #4432, PR #4428 (both merged).
+- This is exactly the class of drift this effort's Phase 2 (canonical-
+  reference form for the shared installer engine) exists to close:
+  `agent-worktrees` ships a **bespoke** resolver/installer variant
+  (`plugins/agent-worktrees/scripts/versioned_runtime.py`'s sibling
+  concept, hand-grown rather than vendored from `libs/versioned-runtime/`
+  -- see `tools/sync-versioned-runtime.py`'s explicit `RESOLVER_BESPOKE =
+  {"agent-worktrees"}` exclusion), so it sits outside the byte-identity
+  drift-check this effort's sibling (`vendored-installer-engine`)
+  enforces for every other plugin. A live-reference canonical-installer-
+  engine form (this effort's Phase 2 goal) would have made this bug
+  either structurally impossible (the stale-argument fix lives in one
+  place, inherited everywhere) or immediately visible as a drift-check
+  failure the moment `agent-worktrees` diverged from the shared logic --
+  instead it shipped silently for some period as a real, user-facing
+  launch failure.
+- `worktree-manager`'s own out-of-plugin `self_install`/`self_update`
+  (`worktree-manager/src/worktree_manager/self_install.py`) was checked
+  for the same failure class and does **not** have it: it never prunes
+  old `versions/<ver>/` slots at all (only cleans its own just-created
+  slot on a failed install, plus one-time legacy-artifact migration), so
+  there is no old-slot deletion to race against an in-flight launch.
+  Different tradeoff, same root cause it avoids only by omission (old
+  slots currently accumulate unbounded rather than ever racing) -- noted
+  here in case Phase 2's canonical-reference engine ends up giving
+  `worktree-manager` real slot GC for the first time, at which point this
+  exact race class becomes newly possible there too and should be
+  designed against from the start rather than rediscovered.
+- No code change proposed here; this is evidence for scheduling/
+  prioritizing Phase 2, not a mechanism decision -- left for this
+  effort's driver per its own coordination note above.
