@@ -428,6 +428,29 @@ def test_promote_preserves_shipped_version_of_a_standalone_consumer(repo: Path):
     assert 'version = "0.1.1-dev1"' in pyproject
 
 
+def test_promote_aborts_rather_than_consuming_an_unapplied_bump(repo: Path):
+    """A computed bump that `apply()` could not actually write (here: a
+    plugin present in `plugin.json` but missing from `marketplace.json`
+    entirely, so `_write_marketplace_entry()` returns `False` and the
+    plugin is excluded from `apply()`'s own `applied` list even though its
+    `plugin.json`/`pyproject.toml` were already partially rewritten) must
+    ABORT promotion rather than silently consuming the changefile and
+    shipping the OLD version anyway -- the recurring "changefile consumed
+    despite an unapplied bump" data-loss shape flagged across several PR
+    #4514 review rounds' individual TOML-format fixes; this is the
+    structural fix instead of chasing every possible format edge case
+    one-by-one."""
+    _git(["checkout", "-q", "dev"], repo)
+    _write_plugin(repo, "orphan-plugin", "0.1.0-dev1")
+    # Deliberately do NOT add "orphan-plugin" to marketplace.json.
+    _write_changefile(repo, "20260101-orphan-abc123.json", "orphan-plugin", "patch")
+    _commit(repo, "add orphan-plugin, no marketplace entry, with a changefile")
+    _git(["checkout", "-q", "main"], repo)
+
+    with pytest.raises(pr.PromotionError, match="orphan-plugin"):
+        pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+
+
 def test_promote_refuses_when_paused(repo: Path):
     _git(["checkout", "-q", "dev"], repo)
     (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("x\n", encoding="utf-8")

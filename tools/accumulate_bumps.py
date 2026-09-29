@@ -182,11 +182,18 @@ def _write_project_version(pp: Path, new_version: str) -> bool:
     both, so a write-side regex that only matched double quotes could
     compute a real bump for a single-quoted manifest and then silently
     fail to apply it, letting the changefile-consuming promotion path ship
-    the OLD version with no error at all (PR #4514 review)."""
+    the OLD version with no error at all (PR #4514 review). Also matches
+    a quoted table name (`["project"]`/`['project']`), an equally valid
+    TOML spelling of the same table (promotion now additionally aborts
+    rather than silently consuming a changefile whenever any computed
+    bump could not actually be applied -- see `promote_release.py`'s
+    `consume_pending_changes()` -- so this class of edge case can no
+    longer silently lose a bump even if some future TOML form is still
+    missed here)."""
     if not pp.exists():
         return False
     text = pp.read_text(encoding="utf-8")
-    header = re.search(r"^[ \t]*\[project\][ \t]*(?:#.*)?$", text, re.MULTILINE)
+    header = re.search(r"""^[ \t]*\[\s*(?:project|"project"|'project')\s*\][ \t]*(?:#.*)?$""", text, re.MULTILINE)
     if header is None:
         return False
     start = header.end()
@@ -485,6 +492,18 @@ def lib_bumps_from_diff(base: str, changed: list[str]) -> dict[Path, tuple[str, 
             candidate = REPO / consumer / "libs" / lib / "pyproject.toml"
             if candidate.is_file():
                 copies.append(candidate)
+        # The top-level CANONICAL libs/<lib>/pyproject.toml (distinct from
+        # any plugin's own vendored copy) is what gets materialized into
+        # every pointer-only consumer at promotion time
+        # (tools/materialize_main.py) -- for a lib with a mix of real
+        # copies and pointer-only consumers (e.g. plugin-resolve), leaving
+        # canonical out of this bump means promotion ships its OLD,
+        # unbumped content into every pointer consumer, creating version
+        # skew on main even though every real copy bumped correctly (PR
+        # #4514 review).
+        canonical = REPO / "libs" / lib / "pyproject.toml"
+        if canonical.is_file():
+            copies.append(canonical)
         if not copies:
             continue
         current = max(

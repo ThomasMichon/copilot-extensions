@@ -306,6 +306,26 @@ def test_standalone_write_accepts_indented_project_header(isolated: Path):
     assert acc.read_pyproject_project_version(d) == "0.1.0-dev96"
 
 
+def test_standalone_write_accepts_quoted_project_table_name(isolated: Path):
+    """TOML allows a table name to be a bare key (`[project]`) or a quoted
+    string (`["project"]`/`['project']`) -- all equally valid and all
+    already accepted by `read_pyproject_project_version()`'s genuine
+    `tomllib` parsing. A write-side header regex that only matched the
+    bare-key spelling would compute a real bump for a quoted-table
+    manifest and then silently fail to apply it (PR #4514 review)."""
+    d = isolated / "worktree-manager"
+    d.mkdir(parents=True)
+    (d / "pyproject.toml").write_text(
+        '["project"]\nname = "worktree-manager"\nversion = "0.1.0-dev95"\n',
+        encoding="utf-8",
+    )
+
+    applied = acc.apply({"worktree-manager": ("0.1.0-dev95", "0.1.0-dev96")})
+
+    assert applied == ["worktree-manager"]
+    assert acc.read_pyproject_project_version(d) == "0.1.0-dev96"
+
+
 def test_apply_rewrites_standalone_consumer_source_fallback(isolated: Path):
     _standalone(isolated, "worktree-manager", "0.1.0-dev95")
     init = isolated / "worktree-manager/src/worktree_manager/__init__.py"
@@ -473,6 +493,35 @@ def test_from_diff_bumps_a_standalone_only_lib_edit_with_no_plugin_copy_touched(
     _plugins, libs = acc.compute_from_diff("main")
     wtm_copy = root / "worktree-manager/libs/shared-lib/pyproject.toml"
     assert libs.get(wtm_copy) == ("0.1.0-dev2", "0.1.0-dev3")
+
+
+def test_from_diff_bumps_the_canonical_lib_copy_alongside_real_copies(diff_repo):
+    """The top-level CANONICAL `libs/<lib>/pyproject.toml` (distinct from
+    any plugin's own vendored copy) is what gets materialized into every
+    pointer-only consumer at promotion time -- for a lib with a mix of
+    real copies and pointer-only consumers, leaving canonical out of the
+    `--from-diff` shortcut means promotion ships its OLD, unbumped
+    content into every pointer consumer, creating version skew on `main`
+    even though every real copy bumped correctly (PR #4514 review)."""
+    root, git = diff_repo
+    # Land the canonical tree on `main` too -- otherwise it's "new on this
+    # branch", exempt from any bump obligation (same reasoning as the
+    # standalone-consumer tests above).
+    git("checkout", "-q", "main")
+    (root / "libs/shared-lib/src/shared_lib").mkdir(parents=True)
+    (root / "libs/shared-lib/pyproject.toml").write_text(
+        '[project]\nname = "shared-lib"\nversion = "0.1.0-dev2"\n', encoding="utf-8",
+    )
+    (root / "libs/shared-lib/src/shared_lib/__init__.py").write_text("x = 1\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "add canonical shared-lib tree")
+    git("checkout", "-q", "-B", "feature", "main")
+
+    (root / "plugins/agent-a/libs/shared-lib/src/shared_lib/__init__.py").write_text("x = 2\n")
+
+    _plugins, libs = acc.compute_from_diff("main")
+    canonical_copy = root / "libs/shared-lib/pyproject.toml"
+    assert libs.get(canonical_copy) == ("0.1.0-dev2", "0.1.0-dev3")
 
 
 def test_from_diff_charges_all_copies_even_if_only_one_was_edited(diff_repo):

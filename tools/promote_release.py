@@ -299,6 +299,21 @@ def consume_pending_changes(
                 grouped.setdefault(change["plugin"], []).append(change["type"])
         computed = acc.compute(grouped)
         applied = acc.apply(computed) if computed else []
+        unapplied = sorted(set(computed) - set(applied))
+        if unapplied:
+            # A computed bump that `apply()` could not actually write (a
+            # manifest-format edge case `apply()` doesn't recognize, a
+            # missing file, etc.) must never be silently accepted --
+            # consuming the changefile below regardless would ship the OLD
+            # version on `main` while permanently discarding the bump
+            # intent (PR #4514 review, a recurring finding across several
+            # prior rounds' individual TOML-format fixes; this is the
+            # structural fix instead of another one-off format patch).
+            raise PromotionError(
+                f"promotion refused: computed a version bump for "
+                f"{', '.join(unapplied)} but apply() could not write it -- "
+                "fix the underlying manifest(s) before promoting again."
+            )
         if all_changefiles:
             # Delete every changefile physically present, not just the ones
             # that drove a bump this round -- an already-consumed changefile
