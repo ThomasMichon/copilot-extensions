@@ -31,6 +31,10 @@
 
 .PARAMETER Force
     Overwrite config without drift confirmation.
+
+.PARAMETER ZeroDowntime
+    Deprecated no-op. Update now auto-detects and cuts over a live
+    status-monitor whenever possible.
 #>
 [CmdletBinding()]
 param(
@@ -42,7 +46,8 @@ param(
 
     [string]$InstallDir,
     [switch]$RemoveConfig,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$ZeroDowntime
 )
 
 Set-StrictMode -Version Latest
@@ -787,6 +792,14 @@ function Invoke-VersionedActivate {
             Write-ServiceWarn "Could not touch superseded slot mtime ($prevSlot): $($_.Exception.Message)"
         }
     }
+    $monitorWasLive = $false
+    if (-not $ContextualInstall) {
+        $prevHealthPP = $env:PYTHONPATH
+        $env:PYTHONPATH = $null
+        & $VenvPython -c 'from agent_worktrees.status_monitor_cutover import monitor_live_now as _f; raise SystemExit(0 if _f() else 1)' > $null 2>&1
+        $monitorWasLive = ($LASTEXITCODE -eq 0)
+        $env:PYTHONPATH = $prevHealthPP
+    }
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-ServiceChanged $_ }
     if ($LASTEXITCODE -ne 0) {
@@ -794,17 +807,22 @@ function Invoke-VersionedActivate {
         return $false
     }
     Write-ServiceOk "Runtime version $SrcVersion active (marker -> versions/$SrcVersion)"
-    # Consolidated-status-daemon Phase 1 (#1696): the cutover just superseded any
-    # running status-monitor, which self-retires but only RESPAWNS on the next
-    # session start -- leaving live sessions' status bars frozen until then. Reap
-    # the superseded monitor + spawn the current one now (from the NEW slot's
-    # python), so every live session's bar is re-served with no session restart.
-    # Best-effort, never fatal.
+    # Graceful status-monitor cutover: now that the new slot is active, ask the
+    # newly-activated runtime to cut over a live resident monitor in-process
+    # (or, for a pre-cutover daemon with no routed control endpoint yet, fall
+    # back once to the legacy restart path). Best-effort, never fatal.
     if (-not $ContextualInstall) {
         try {
-            & $LinkPython -m agent_worktrees status-monitor-restart 2>&1 |
+            $prevHelperPP = $env:PYTHONPATH
+            $env:PYTHONPATH = $null
+            $env:AGENT_WORKTREES_MONITOR_WAS_LIVE = if ($monitorWasLive) { '1' } else { '0' }
+            & $LinkPython -c 'from agent_worktrees.status_monitor_cutover import installer_after_update as _f; raise SystemExit(_f())' 2>&1 |
                 ForEach-Object { Write-ServiceChanged "monitor: $_" }
         } catch {}
+        finally {
+            $env:PYTHONPATH = $prevHelperPP
+            Remove-Item Env:AGENT_WORKTREES_MONITOR_WAS_LIVE -ErrorAction SilentlyContinue
+        }
     }
     # #742: record the just-activated version as `last-known-good` so a future
     # marker-absent resolution (resolve-runtime.ps1 tier 2) prefers it over a
@@ -1853,6 +1871,21 @@ function Deploy-Package {
         $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-plugin-activation' -PkgDir $pluginActivationDir
         if ($libRes.ExitCode -ne 0) {
             Write-ServiceErr "plugin-activation library install failed (exit $($libRes.ExitCode))"
+            if ($libRes.Output.Trim()) { Write-ServiceErr ("install: " + $libRes.Output.Trim()) }
+            $ErrorActionPreference = $prevEAP
+            return $false
+        }
+    }
+
+    # Vendored zero-downtime cutover lib (agent-zdd / module zdd). Install it
+    # before the main package so the bare `python -m pip` fallback path (used
+    # when `uv` is absent and therefore ignoring `[tool.uv.sources]`) never
+    # tries to resolve this unpublished dependency from the package index.
+    $zddDir = Join-Path $PluginDir 'libs\zdd'
+    if (Test-Path (Join-Path $zddDir 'pyproject.toml')) {
+        $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-zdd' -PkgDir $zddDir
+        if ($libRes.ExitCode -ne 0) {
+            Write-ServiceErr "zdd library install failed (exit $($libRes.ExitCode))"
             if ($libRes.Output.Trim()) { Write-ServiceErr ("install: " + $libRes.Output.Trim()) }
             $ErrorActionPreference = $prevEAP
             return $false

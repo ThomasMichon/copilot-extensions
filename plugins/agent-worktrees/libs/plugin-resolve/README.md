@@ -9,13 +9,6 @@ Distribution name `agent-plugin-resolve` (dependency-confusion-safe); import
 module `plugin_resolve`. Pure-stdlib, fail-safe. Mirrors the vendored
 `config_migrate` / `ssh_manager` / `zdd` libs.
 
-**In dev**, every consumer's `pyproject.toml` references this library through
-a `uv`-editable canonical pointer (`vendor-pointer-generalization` effort,
-Phase 1), so there is no per-plugin dev copy to keep in sync. **At release**,
-`tools/materialize_main.py` rewrites that pointer into a real, promoted copy
-at `plugins/<plugin>/libs/plugin-resolve/` for each consumer -- non-editable,
-so a published plugin installs a self-contained source tree.
-
 ## Why
 
 Copilot CLI recognizes both its own conventions and the Claude conventions it is

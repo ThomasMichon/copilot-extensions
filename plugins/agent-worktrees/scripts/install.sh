@@ -20,6 +20,8 @@
 #   --force          Overwrite config without drift confirmation
 #   --remove-config  On uninstall: also delete config and session metadata
 #   --machine NAME   Machine name (auto-detected if omitted)
+#   --zero-downtime  Deprecated no-op; update now auto-detects and cuts over
+#                    a live status-monitor whenever possible
 # =============================================================================
 
 set -euo pipefail
@@ -419,6 +421,7 @@ REMOVE_CONFIG=false
 MACHINE=""
 PROJECT_NAME_ARG=""
 INSTALL_DIR_ARG=""
+ZERO_DOWNTIME=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -427,6 +430,7 @@ while [[ $# -gt 0 ]]; do
         --machine)       MACHINE="$2"; shift 2 ;;
         --project-name)  PROJECT_NAME_ARG="$2"; shift 2 ;;
         --install-dir)   INSTALL_DIR_ARG="$2"; shift 2 ;;
+        --zero-downtime) ZERO_DOWNTIME=true; shift ;;
         *)               echo "Unknown option: $1" >&2; exit 1 ;;
     esac
 done
@@ -713,19 +717,29 @@ _versioned_activate() {
     if [[ -n "$prev" ]]; then
         touch "$INSTALL_DIR/versions/$prev" 2>/dev/null || true
     fi
+    local monitor_was_live=0
+    if ! $CONTEXTUAL_INSTALL && PYTHONPATH= "$VENV_PYTHON" - <<'PY' >/dev/null 2>&1; then
+from agent_worktrees.status_monitor_cutover import monitor_live_now
+raise SystemExit(0 if monitor_live_now() else 1)
+PY
+        monitor_was_live=1
+    fi
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --no-link; then
         err "Failed to activate runtime version (marker -> versions/$SRC_VERSION)"
         return 1
     fi
     ok "Runtime version $SRC_VERSION active (marker -> versions/$SRC_VERSION)"
-    # Consolidated-status-daemon Phase 1 (#1696): the cutover just superseded any
-    # running status-monitor, which self-retires but only RESPAWNS on the next
-    # session start -- leaving live sessions' status bars frozen until then. Reap
-    # the superseded monitor + spawn the current one now (from the NEW slot's
-    # python), so every live session's bar is re-served with no session restart.
-    # Best-effort, never fatal.
+    # Graceful status-monitor cutover: now that the new slot is active, ask the
+    # newly-activated runtime to cut over a live resident monitor in-process
+    # (or, for a pre-cutover daemon with no routed control endpoint yet, fall
+    # back once to the legacy restart path). Best-effort, never fatal.
     if ! $CONTEXTUAL_INSTALL; then
-        "$VENV_PYTHON" -m agent_worktrees status-monitor-restart 2>&1 | sed 's/^/  → monitor: /' || true
+        AGENT_WORKTREES_MONITOR_WAS_LIVE="$monitor_was_live" \
+            PYTHONPATH= \
+            "$VENV_PYTHON" - <<'PY' 2>&1 | sed 's/^/  → monitor: /' || true
+from agent_worktrees.status_monitor_cutover import installer_after_update
+raise SystemExit(installer_after_update())
+PY
     fi
     # #742: record the just-activated version as `last-known-good` so a future
     # marker-absent resolution (resolve-runtime.sh tier 2) prefers it over a
@@ -986,6 +1000,19 @@ deploy_package() {
         if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-plugin-resolve \
                 "$plugin_resolve_dir" --quiet; then
             err "plugin-resolve library install failed"
+            return 1
+        fi
+    fi
+
+    # Vendored zero-downtime cutover lib (agent-zdd / module zdd). Install it
+    # before the main package so the bare `python -m pip` fallback path on
+    # Windows (which ignores `[tool.uv.sources]`) never tries to resolve this
+    # unpublished dependency from the package index.
+    local zdd_dir="$PLUGIN_DIR/libs/zdd"
+    if [[ -f "$zdd_dir/pyproject.toml" ]]; then
+        if ! uv pip install --python "$VENV_PYTHON" --reinstall-package agent-zdd \
+                "$zdd_dir" --quiet; then
+            err "zdd library install failed"
             return 1
         fi
     fi

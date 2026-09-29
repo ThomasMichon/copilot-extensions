@@ -1953,12 +1953,13 @@ def test_monotonic_guard_still_deploys_forward_upgrade(env, monkeypatch):
 
 
 def test_zero_downtime_appends_flag(tmp_path, monkeypatch):
-    """A plugin declaring zeroDowntimeUpdate carries -ZeroDowntime into its
-    reconcile-driven install.ps1 update (Windows); absence -> no flag (#533 B)."""
+    """A plugin declaring zeroDowntimeUpdate carries the compatibility flag
+    into reconcile-driven installer updates on both platforms (#533 B)."""
     monkeypatch.setattr(reconcile.platform, "system", lambda: "Windows")
     pdir = tmp_path / "plug"
     (pdir / "scripts").mkdir(parents=True)
     (pdir / "scripts" / "install.ps1").write_text("", encoding="utf-8")
+    (pdir / "scripts" / "install.sh").write_text("# --zero-downtime\n", encoding="utf-8")
 
     # No zeroDowntimeUpdate -> plain `update`, no flag.
     (pdir / "plugin.json").write_text(
@@ -1975,6 +1976,14 @@ def test_zero_downtime_appends_flag(tmp_path, monkeypatch):
     )
     _, argv = reconcile.runtime_installer_argv(pdir)
     assert argv[-2:] == ["update", "-ZeroDowntime"]
+
+    monkeypatch.setattr(reconcile.platform, "system", lambda: "Linux")
+    _, argv = reconcile.runtime_installer_argv(pdir)
+    assert argv[-2:] == ["update", "--zero-downtime"]
+
+    (pdir / "scripts" / "install.sh").write_text("", encoding="utf-8")
+    _, argv = reconcile.runtime_installer_argv(pdir)
+    assert "--zero-downtime" not in argv
 
 
 

@@ -105,6 +105,8 @@ def add_parsers(sub) -> None:
         "AGENT_WORKTREES_STATUS_MONITOR=0)",
     )
     p.add_argument("--interval", type=int, default=15, help="Sweep cadence in seconds (min 2)")
+    p.add_argument("--passive", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--control-port", type=int, default=None, help=argparse.SUPPRESS)
 
 
 def cmd_status_monitor(args: argparse.Namespace) -> int:
@@ -121,7 +123,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     from . import classify_daemon, loop_governance, monitor_roots, mux_link, pane_reaper, registry_paths, session_catalog
     from . import locks as _locks
-    from . import resident_push, status_monitor_runtime, status_updater_cli
+    from . import resident_push, self_retire, status_monitor_cutover, status_monitor_runtime, status_updater_cli
     from . import tracking_write
     from . import worktree_status_daemon
     from .hook_ipc import HookIpcServer, HookUnavailable
@@ -130,6 +132,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     mux = "psmux" if shutil.which("psmux") else ("tmux" if shutil.which("tmux") else None)
     mux_bin = (shutil.which(mux) or mux) if mux else None
     interval = args.interval if getattr(args, "interval", None) and args.interval >= 2 else 15
+    passive_mode = bool(getattr(args, "passive", False))
 
     # Stage D (agent-cli-lazy-dispatch): these six are owned by
     # status_updater_cli/status_monitor_runtime (both already cluster-free);
@@ -149,13 +152,22 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     resident_hook_lock_timeout = core._resident_hook_lock_timeout
     resident_hook_should_yield = core._resident_hook_should_yield
     release_resident_lifecycle = core._release_resident_lifecycle
+    runtime_superseded = _core_helper("_runtime_superseded", status_updater_cli._runtime_superseded)
     wait_for_lifecycle_priority = core._wait_for_lifecycle_priority
     classify_daemon_compute = core._classify_daemon_compute
     worktree_status_compute = core._worktree_status_compute
-    runtime_superseded = _core_helper("_runtime_superseded", status_updater_cli._runtime_superseded)
+    shutdown_requested = threading.Event()
+    admission_closed = False
+    published_lock = not passive_mode
+    sweep_active = False
+    self_retire_generation = None
+    self_retire_confirms = 0
+    self_retire_confirmations = 2
 
     def _other_current_monitor() -> bool:
         """A *different*, live monitor on a non-superseded runtime owns the host."""
+        if passive_mode:
+            return False
         d = _locks.read_lock(lock)
         if not (_locks.lock_is_live(d) and isinstance(d, dict)):
             return False
@@ -168,7 +180,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     if _other_current_monitor():
         return 0
-    _locks.write_lock(lock, extra={"prefix": my_prefix, "mux": bool(mux_bin)})
+    if not passive_mode:
+        _locks.write_lock(lock, extra={"prefix": my_prefix, "mux": bool(mux_bin)})
 
     ctx_done: set[str] = set()
 
@@ -208,6 +221,17 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     if hook_policy.ready():
         hook_policy.plugin_related_anchors()
     installation_context = registry_paths.installation_context()
+
+    def _classify_compute(kind: str, payload: dict) -> dict:
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            try:
+                delay_s = float(payload.get("__test_delay_s") or 0.0)
+            except (TypeError, ValueError):
+                delay_s = 0.0
+            if delay_s > 0:
+                time.sleep(delay_s)
+                return {"delayed": True}
+        return classify_daemon_compute(kind, payload)
 
     def _decide(kind: str, payload: dict, deadline: float) -> dict:
         nonlocal lifecycle_count
@@ -280,35 +304,56 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         lifecycle_priority.clear()
 
     hook_server = None
-    if hook_policy.ready():
-        try:
-            hook_server = HookIpcServer(_decide)
-            hook_server.start()
-        except Exception:
-            hook_server = None
-
     classify_server = None
-    try:
-        classify_server = classify_daemon.start_server(classify_daemon_compute)
-        classify_server.start()
-    except Exception:
-        classify_server = None
-
     tracking_write_server = None
-    try:
-        # Load every verb-owning module (currently none -- see
-        # tracking_write._VERB_MODULES) eagerly at monitor startup, not
-        # lazily on the first request: a Phase 3 verb module's own
-        # `register_verb` call is then guaranteed to have run before this
-        # daemon ever answers a `tracking_write` request, closing the
-        # 2026-09-26 PR review's "load production verbs at the monitor's
-        # own startup/import path" finding at this call site specifically
-        # (compute/run_direct already call this too, idempotently).
-        tracking_write._ensure_verb_modules_loaded()
-        tracking_write_server = tracking_write.start_server(tracking_write.compute)
-        tracking_write_server.start()
-    except Exception:
-        tracking_write_server = None
+    retired_hook_servers: list[HookIpcServer] = []
+    retired_classify_servers = []
+    retired_tracking_write_servers = []
+
+    def _start_request_surfaces() -> None:
+        nonlocal hook_server, classify_server, tracking_write_server
+        if admission_closed or not published_lock:
+            return
+        if hook_server is None and hook_policy.ready():
+            try:
+                hook_server = HookIpcServer(_decide)
+                hook_server.start()
+            except Exception:
+                hook_server = None
+        if classify_server is None:
+            try:
+                classify_server = classify_daemon.start_server(_classify_compute)
+                classify_server.start()
+            except Exception:
+                classify_server = None
+        if tracking_write_server is None:
+            try:
+                tracking_write._ensure_verb_modules_loaded()
+                tracking_write_server = tracking_write.start_server(tracking_write.compute)
+                tracking_write_server.start()
+            except Exception:
+                tracking_write_server = None
+
+    def _close_request_surfaces() -> None:
+        nonlocal hook_server, classify_server, tracking_write_server
+        if hook_server is not None:
+            retired_hook_servers.append(hook_server)
+            hook_server.close()
+            hook_server = None
+        if classify_server is not None:
+            retired_classify_servers.append(classify_server)
+            classify_server.close()
+            classify_server = None
+        if tracking_write_server is not None:
+            retired_tracking_write_servers.append(tracking_write_server)
+            tracking_write_server.close()
+            tracking_write_server = None
+
+    def _enter_drain_only_state() -> None:
+        nonlocal admission_closed, published_lock
+        admission_closed = True
+        published_lock = False
+        _close_request_surfaces()
 
     worktree_status_runtime = worktree_status_daemon.InProcessRuntime()
     worktree_status_runtime.start(
@@ -331,48 +376,178 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     "pluginRoot": str(installation_context.get("pluginRoot") or ""),
                 }
             )
-        if hook_server is not None:
+        if hook_server is not None and published_lock:
             extra.update(hook_server.rendezvous())
-        if classify_server is not None:
+        if classify_server is not None and published_lock:
             extra.update(classify_daemon.rendezvous_fields(classify_server))
-        if tracking_write_server is not None:
+        if tracking_write_server is not None and published_lock:
             extra.update(tracking_write.rendezvous_fields(tracking_write_server))
-        extra.update(worktree_status_runtime.lock_extra())
-        extra.update(managed_mux_runtime.lock_extra())
+        if published_lock:
+            extra.update(worktree_status_runtime.lock_extra())
+            extra.update(managed_mux_runtime.lock_extra())
         return extra
 
-    _locks.write_lock(lock, extra=_lock_extra())
+    def _hook_busy() -> bool:
+        return any(
+            server.active_handler_count() > 0
+            for server in ([hook_server] if hook_server is not None else []) + retired_hook_servers
+        )
+
+    def _classify_busy() -> bool:
+        return any(
+            server.active_handler_count() > 0
+            for server in ([classify_server] if classify_server is not None else [])
+            + retired_classify_servers
+        )
+
+    def _tracking_write_busy() -> bool:
+        return any(
+            server.active_handler_count() > 0
+            for server in ([tracking_write_server] if tracking_write_server is not None else [])
+            + retired_tracking_write_servers
+        ) or tracking_write.has_inflight_write()
+
+    def _cleanup_retired_request_surfaces() -> None:
+        with state_lock:
+            retired_hook_servers[:] = [
+                server for server in retired_hook_servers if server.active_handler_count() > 0
+            ]
+            retired_classify_servers[:] = [
+                server for server in retired_classify_servers if server.active_handler_count() > 0
+            ]
+            if not tracking_write.has_inflight_write():
+                retired_tracking_write_servers[:] = [
+                    server
+                    for server in retired_tracking_write_servers
+                    if server.active_handler_count() > 0
+                ]
+
+    def _drain_busy_reasons() -> list[str]:
+        reasons: list[str] = []
+        if sweep_active:
+            reasons.append("sweep")
+        if _hook_busy():
+            reasons.append("hook")
+        if _classify_busy():
+            reasons.append("classify")
+        if _tracking_write_busy():
+            reasons.append("tracking-write")
+        return reasons
+
+    control_server = status_monitor_cutover.ControlServer(
+        lambda action, payload: _handle_control(action, payload),
+        port=getattr(args, "control_port", None),
+    )
+    control_server.start()
+    status_monitor_cutover.publish_route(
+        control_server.port,
+        pid=os.getpid(),
+        version=None,
+    ) if not passive_mode else None
+    _start_request_surfaces()
+    if published_lock:
+        _locks.write_lock(lock, extra=_lock_extra())
     empty_strikes = 0
     max_empty_strikes = 3
 
-    def _tracking_write_busy() -> bool:
-        # subscriber_count() alone is not enough: a client releases its own
-        # lease as soon as its own request call returns or times out, which
-        # can happen well before the daemon-side compute this triggered
-        # actually finishes (CoalescingServer never cancels an accepted
-        # owner). tracking_write.has_inflight_write() tracks the compute
-        # itself, in this same process, independent of any client's own
-        # lease lifecycle (2026-09-26 PR review finding).
-        # active_handler_count() closes a third, narrower gap
-        # (copilot-extensions#3798): a connection can be accepted, and this
-        # counter incremented, before its handler thread's first line runs
-        # `owner.touch()` (what `subscriber_count()` reads) -- a shutdown
-        # racing that exact window would otherwise see neither predicate as
-        # busy even though a write is about to execute.
-        return (
-            tracking_write_server is not None
-            and (
-                tracking_write_server.subscriber_count() > 0
-                or tracking_write_server.active_handler_count() > 0
-            )
-        ) or tracking_write.has_inflight_write()
+    def _handle_control(action: str, payload: dict) -> dict:
+        nonlocal admission_closed, published_lock
+        if action == "health":
+            return {
+                "status": "draining" if admission_closed else "ready",
+                "published": published_lock,
+                "pid": os.getpid(),
+            }
+        if action == "promote":
+            with state_lock:
+                _cleanup_retired_request_surfaces()
+                published_lock = True
+                _start_request_surfaces()
+                _locks.write_lock(lock, extra=_lock_extra())
+            wake_event.set()
+            return {"adopted": True}
+        if action == "shutdown":
+            shutdown_requested.set()
+            wake_event.set()
+            return {"shutdown": True}
+        if action == "undrain":
+            with state_lock:
+                admission_closed = False
+                _cleanup_retired_request_surfaces()
+                published_lock = True
+                _start_request_surfaces()
+                _locks.write_lock(lock, extra=_lock_extra())
+            wake_event.set()
+            return {"draining": False}
+        if action != "drain":
+            return {"ok": False, "error": f"unsupported action {action!r}"}
+        timeout = float(payload.get("timeout") or 0.0)
+        poll = float(payload.get("poll") or 0.1)
+        force = bool(payload.get("force"))
+        with state_lock:
+            _enter_drain_only_state()
+        deadline = time.time() + max(0.0, timeout)
+        while True:
+            _cleanup_retired_request_surfaces()
+            reasons = _drain_busy_reasons()
+            if not reasons:
+                return {
+                    "drained": True,
+                    "clean": True,
+                    "forced": False,
+                    "busy_sessions": [],
+                }
+            if timeout <= 0 or time.time() >= deadline:
+                return {
+                    "drained": force,
+                    "clean": False,
+                    "forced": force,
+                    "busy_sessions": reasons,
+                }
+            time.sleep(max(0.05, poll))
 
     try:
         while True:
-            if runtime_superseded():
+            _cleanup_retired_request_surfaces()
+            active_generation = status_monitor_cutover.active_generation_for_pid(os.getpid())
+            if active_generation is not None and not published_lock:
+                with state_lock:
+                    if not published_lock:
+                        published_lock = True
+                        _start_request_surfaces()
+                        _locks.write_lock(lock, extra=_lock_extra())
+                wake_event.set()
+            if self_retire_generation is None:
+                self_retire_generation = active_generation
+                if self_retire_generation is None and runtime_superseded():
+                    break
+            if shutdown_requested.is_set() and not _drain_busy_reasons():
                 break
-            if _other_current_monitor():
-                return 0
+            if self_retire_generation is not None:
+                try:
+                    superseded = self_retire.is_superseded(
+                        status_monitor_cutover.routing_dir(),
+                        os.getpid(),
+                        self_retire_generation,
+                    )
+                except Exception:
+                    superseded = False
+                if superseded:
+                    with state_lock:
+                        _enter_drain_only_state()
+                if superseded and not _drain_busy_reasons():
+                    self_retire_confirms += 1
+                    if self_retire_confirms >= self_retire_confirmations:
+                        break
+                else:
+                    self_retire_confirms = 0
+            with state_lock:
+                can_sweep = published_lock and not admission_closed
+                if can_sweep:
+                    sweep_active = True
+            if not can_sweep:
+                _wake_interruptible_wait(wake_event, interval)
+                continue
             try:
                 core._status_monitor_recheck(governance, "iteration-boundary")
                 core._status_monitor_recheck(governance, "pre-mutation:lock-renewal")
@@ -415,7 +590,9 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         raise
                     except Exception:
                         pass
+                sweep_active = False
             except status_monitor_governance_deferred as exc:
+                sweep_active = False
                 print(
                     "status-monitor backing off at "
                     f"{exc.result.get('checkpoint')}: "
@@ -459,31 +636,12 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 empty_strikes = 0
             _wake_interruptible_wait(wake_event, interval)
     finally:
-        if hook_server is not None:
-            hook_server.close()
-        if classify_server is not None:
-            classify_server.close()
-        if tracking_write_server is not None:
-            # 2026-09-26 PR review: close *first*, then drain -- closing
-            # stops the server accepting any *new* request immediately;
-            # waiting first (the original ordering) left the server still
-            # accepting connections throughout the whole grace window, so a
-            # fresh write could arrive right after the final busy check and
-            # start executing just as close() ran, which -- since close()
-            # never drains an already-dispatched handler thread -- could
-            # still terminate the process mid-transaction. Closing first
-            # removes that race outright: every request counted by
-            # `_tracking_write_busy()` from this point on was necessarily
-            # accepted *before* close(), so waiting for that predicate to
-            # clear now genuinely drains only already-accepted work, never a
-            # request that could still arrive during the wait. Bounded --
-            # a shutdown must still terminate eventually, never wait forever
-            # on a wedged compute.
-            tracking_write_server.close()
-            _wait_for_tracking_write_idle(_tracking_write_busy)
+        _close_request_surfaces()
+        control_server.close()
         resident_push.reset()
         worktree_status_runtime.shutdown()
         managed_mux_runtime.shutdown()
+        status_monitor_cutover.clear_route_if_owner(os.getpid())
         d = _locks.read_lock(lock)
         if isinstance(d, dict) and d.get("pid") == os.getpid():
             _locks.remove_lock(lock)

@@ -230,19 +230,19 @@ substantial in its own right.
       - `agent-ssh`: pending Phase 0's audit outcome above.
 
 ### Phase 1 — `agent-worktrees` `status-monitor`
-- [ ] Vendor `zdd` into `plugins/agent-worktrees/libs/zdd/` (byte-identical
+- [x] Vendor `zdd` into `plugins/agent-worktrees/libs/zdd/` (byte-identical
       sync from `libs/zdd/`, per the pattern's own sync convention).
-- [ ] Implement the consumer contract: `spawn_passive`, `health_check`,
+- [x] Implement the consumer contract: `spawn_passive`, `health_check`,
       `make_client` (drain/undrain/shutdown), `pick_free_port`.
-- [ ] Wire `agent-worktrees update`'s activation path to invoke
+- [x] Wire `agent-worktrees update`'s activation path to invoke
       `CutoverOrchestrator` automatically whenever it detects a live
       `status-monitor` (no operator flag, no new CLI verb — Invariant #1).
-- [ ] Add the **generation self-retire** loop (`self_retire.is_superseded`)
+- [x] Add the **generation self-retire** loop (`self_retire.is_superseded`)
       inside the resident sweep loop itself, gated per the pattern's own
       "before any repeated loop, subscription connection, request" framing
       — checked at the top of every sweep iteration, not only at daemon
       startup, so a same-tick rapid-fire re-release is still caught.
-- [ ] **Land `plugin.json`'s `"zeroDowntimeUpdate": true` atomically with
+- [x] **Land `plugin.json`'s `"zeroDowntimeUpdate": true` atomically with
       `scripts/install.ps1`/`install.sh` actually accepting and implementing
       automatic cutover on BOTH platforms, in the same PR — never as
       separate steps, and never Windows-only.**
@@ -262,7 +262,7 @@ substantial in its own right.
       fallback the pattern doc's own Cross-platform-parity table already
       describes for other plugins) alongside the Windows switch — do not
       ship Windows-only and call the flag "done."
-- [ ] Define the **hand-off manifest**: what "outstanding work" a
+- [x] Define the **hand-off manifest**: what "outstanding work" a
       `status-monitor` generation must persist for its successor (per-session
       claim/observation state it would otherwise reconstruct from scratch —
       confirm whether this is already fully derivable from existing durable
@@ -421,6 +421,38 @@ substantial in its own right.
 _Pending._
 
 ## Journal
+
+### 2026-09-28 — Phase 1 implemented in `agent-worktrees`
+Implemented the `status-monitor` cutover slice. `zdd` is now vendored under
+`plugins/agent-worktrees/libs/zdd/`, the plugin declares
+`"zeroDowntimeUpdate": true`, and both installer lanes now accept the
+historical reconcile flags (`-ZeroDowntime` / `--zero-downtime`) while
+driving the actual installer behavior automatically through a new
+`status_monitor_cutover` helper instead of a hard restart. The resident
+monitor now publishes a routed control endpoint, exposes the cutover
+consumer contract (`spawn_passive`, `health_check`, `make_client`,
+`pick_free_port`), and clears its routed claim on exit.
+
+The drain boundary decision landed exactly as Phase 0 required: drain closes
+admission to hook/classify/tracking-write requests first, then waits for the
+current sweep plus every already-accepted handler/write to clear before the
+old generation can retire. Generation self-retire now re-checks routed
+supersession at the top of every sweep iteration and only exits at that same
+safe point. For the hand-off manifest, no new successor breadcrumb was
+needed: the durable tracking dir, the managed-mux cache/registry, and the
+existing `zdd` routing + cutover breadcrumb are sufficient. The old
+generation either drains already-accepted non-resumable work before exit or,
+for work reconstructed on demand, leaves the successor to rebuild from those
+existing durable stores rather than inventing a parallel manifest.
+
+Validation added a new runnable `pytest` rehearsal around the installer seam
+itself (`test_status_monitor_cutover_helper.py`) that proves the cutover
+helper flips to a serving successor before the prior generation exits,
+preserves an in-flight drain, converges back to one live generation, and
+survives a second update arriving during the first cutover. The full
+`agent-worktrees` suite and `tools/check-install-contract.py` both passed in
+the implementation worktree. Review rounds: pending on the Phase 1 PR opened
+from this slice; append the review/merge outcome here before closing Phase 1.
 
 ### 2026-09-28 — Scope expanded to a binding invariant + diagnostic tooling; handing off
 Operator direction (Request § Round 2): elevate this pattern from a

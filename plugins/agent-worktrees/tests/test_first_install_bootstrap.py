@@ -324,7 +324,7 @@ def test_windows_stamp_reuses_immutable_version_snapshot() -> None:
 @pytest.mark.skipif(os.name == "nt", reason="POSIX installer integration")
 # Genuinely heavier than most tests in this file: a real payload copytree,
 # then `install.sh provision` (self-stage re-exec + venv create + package
-# install + versioned-activate + a status-monitor-restart round-trip),
+# install + versioned-activate + the post-activation monitor seam),
 # followed by two more subprocess invocations of the generated launchers.
 # That's 5+ real subprocess spawns chained together -- reliably ~15s in
 # 20/20 isolated local reproductions, but observed to intermittently exceed
