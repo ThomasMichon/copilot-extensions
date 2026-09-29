@@ -485,7 +485,7 @@ def test_mcp_complete_result_is_visible_over_rest(coord):
 
     assert completed["result"] == result
     assert client.get(task["id"])["result"] == result
-    listed = client.list(status=Status.COMPLETED)[0]
+    listed = client.list(status=Status.SUBMITTED)[0]
     assert listed["has_result"] is True
     assert "result" not in listed
     retrieved = asyncio.new_event_loop().run_until_complete(
@@ -530,7 +530,7 @@ def test_mcp_retry_fill_emits_result_recorded_not_duplicate_completion(
 
     assert json.loads(response.content[0].text)["result"] == {"ok": True}
     types = [event["type"] for event in published]
-    assert types.count("task.completed") == 1
+    assert types.count("task.submitted") == 1
     assert types.count("task.result_recorded") == 1
 
 

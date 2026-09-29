@@ -1204,7 +1204,7 @@ def test_recover_stranded_cold_reservation_releases_confirmed_gone_body(q, clien
 
 
 def test_recover_stranded_cold_reservation_ignores_unconfirmed_liveness(q, client):
-    """Never act on an unknown/live verdict -- only a CONFIRMED-gone (or
+    """Never act on an unknown/live verdict -- only a COMPLETED-gone (or
     cold-probe-confirmed) body is released."""
     blocked = q.create("needs operator", labels=["review"])
     reservation, _ = q.reserve_spawn(blocked.id)
@@ -1321,12 +1321,12 @@ def test_recover_stranded_cold_reservation_never_counts_toward_dead_letter(
 
 
 def test_reconcile_settles_reservation_once_task_is_confirmed(q, client):
-    """``CONFIRMED`` is the true completion terminal (superseding the
-    provisional ``COMPLETED``, see queue_records.py) -- reconcile() must
+    """``COMPLETED`` is the true completion terminal (superseding the
+    provisional ``SUBMITTED``, see queue_records.py) -- reconcile() must
     settle a still-active reservation once a task reaches it, exactly like
-    it already does for ``COMPLETED``, or the reservation (and its
+    it already does for ``SUBMITTED``, or the reservation (and its
     exclusive_key) is fenced forever (rubber-duck review, 2026-09-28:
-    ``Supervisor._TERMINAL`` had never been updated when ``CONFIRMED`` was
+    ``Supervisor._TERMINAL`` had never been updated when ``COMPLETED`` was
     introduced)."""
     t = q.create("work")
     reservation, _ = q.reserve_spawn(t.id)
@@ -1335,7 +1335,7 @@ def test_reconcile_settles_reservation_once_task_is_confirmed(q, client):
     q.start(t.id, "owner")
     q.complete(t.id, "owner", result_ref="done")
     q.confirm(t.id, actor="evaluator")
-    assert q.get(t.id).status == Status.CONFIRMED
+    assert q.get(t.id).status == Status.COMPLETED
     assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
 
     sup = Supervisor(
@@ -7626,7 +7626,7 @@ def _spec_evaluator(rules):
 
 
 _REVIEWER_DONE_RULE = {
-    "on": "task.completed",
+    "on": "task.submitted",
     "when": {"labels_any": ["recipe:reviewer"]},
     "emit": {
         "title_template": "unstick follow-up for {title}",

@@ -156,7 +156,7 @@ such as `issue:owner/repo#42:reopen:<event-id>`.
 
 ## See also
 
-- The **`agent-dispatch`** skill — the full CLI, the eight-state lifecycle, worker
+- The **`agent-dispatch`** skill — the full CLI, the nine-state lifecycle, worker
   identity, capability/affinity routing, and selector (`--require`/`--exclude`)
   matching. Its responsibility boundary distinguishes durable task-loop state
   from live agent-bridge conversation. For generic task decomposition and the

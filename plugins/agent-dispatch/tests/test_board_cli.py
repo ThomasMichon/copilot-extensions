@@ -59,8 +59,8 @@ def test_build_orders_started_ahead_of_queued(monkeypatch):
     monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)
     rows = board_cli._build(
         [
+            {"id": "submitted", "status": "submitted", "updated_at": 100},
             {"id": "completed", "status": "completed", "updated_at": 100},
-            {"id": "confirmed", "status": "confirmed", "updated_at": 100},
             {"id": "blocked", "status": "started", "awaiting_steer": True,
              "updated_at": 100},
             {"id": "queued", "status": "queued", "updated_at": 100},
@@ -74,7 +74,7 @@ def test_build_orders_started_ahead_of_queued(monkeypatch):
     )
     assert [row["group"] for row in rows] == [
         "Blocked", "Proposed", "Started", "Queued", "Suspended",
-        "Completed", "Confirmed", "Abandoned",
+        "Submitted", "Completed", "Abandoned",
     ]
 
 
@@ -112,7 +112,7 @@ def test_build_cli_openable_matches_interactive_embody_statuses(monkeypatch):
             {"id": "held", "status": "queued", "hold_reason": "pause", "updated_at": 5},
             {"id": "claimed", "status": "claimed", "updated_at": 4},
             {"id": "started", "status": "started", "updated_at": 3},
-            {"id": "completed", "status": "completed", "updated_at": 2},
+            {"id": "submitted", "status": "submitted", "updated_at": 2},
         ],
         machine="m1",
         recent_mins=120,
@@ -126,7 +126,7 @@ def test_build_cli_openable_matches_interactive_embody_statuses(monkeypatch):
     assert by_id["held"]["cli_openable"] is False
     assert by_id["claimed"]["cli_openable"] is False
     assert by_id["started"]["cli_openable"] is False
-    assert by_id["completed"]["cli_openable"] is False
+    assert by_id["submitted"]["cli_openable"] is False
 
 
 def test_build_group_paused_for_held_task(monkeypatch):

@@ -153,7 +153,7 @@ def build_coordinator_mcp(
             result = asdict(mutation)
         except TaskError as exc:
             return {"error": str(exc)}
-        if event_type in ("task.completed", "task.abandoned"):
+        if event_type in ("task.submitted", "task.abandoned"):
             # Shared terminal-transition hook, mirroring coordinator_tasks.py's
             # own _guard: MCP calls queue.complete_with_outcome/abandon
             # directly (in-process), bypassing the HTTP routes entirely, so

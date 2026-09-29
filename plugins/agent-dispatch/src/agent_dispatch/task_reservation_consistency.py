@@ -7,7 +7,7 @@ review of agent-dispatch's task-status/spawn-reservation state management,
 follow-up #4542): three separate cross-FSM orphan gaps were each found only
 *after* a task got stuck for hours in production (aperture-labs PR #7759's
 COLD+QUEUED stall; two more found by inspection: reconcile()'s ``_TERMINAL``
-missing ``CONFIRMED``, and ``recover_gone()``'s ``SPAWNED``-only reservation
+missing ``COMPLETED``, and ``recover_gone()``'s ``SPAWNED``-only reservation
 loop missing ``DEAD_LETTER``+``COLD``). Each fix closed one specific pairing
 after the fact. This module instead declares -- as data, once -- **every**
 ``(Status, SpawnState)`` pairing this codebase's sweeps are aware of, so the
@@ -61,8 +61,8 @@ ALL_TASK_STATUSES: frozenset[str] = frozenset(
         Status.CLAIMED,
         Status.STARTED,
         Status.SUSPENDED,
+        Status.SUBMITTED,
         Status.COMPLETED,
-        Status.CONFIRMED,
         Status.ABANDONED,
         Status.DEAD_LETTER,
     }
@@ -115,20 +115,20 @@ _CONSISTENT_PAIRS: frozenset[tuple[str, str]] = frozenset(
         # -- so recover_gone() alone covers every status here except the
         # three now-widened _TERMINAL ones, which reconcile() covers
         # instead (its own RESERVING/SPAWNED/COLD pool, gated on
-        # Supervisor._TERMINAL -- fixed in #4542 to include CONFIRMED).
+        # Supervisor._TERMINAL -- fixed in #4542 to include COMPLETED).
         (Status.PROPOSED, SpawnState.SPAWNED),
         (Status.QUEUED, SpawnState.SPAWNED),
         (Status.CLAIMED, SpawnState.SPAWNED),
         (Status.STARTED, SpawnState.SPAWNED),
         (Status.SUSPENDED, SpawnState.SPAWNED),
+        (Status.SUBMITTED, SpawnState.SPAWNED),
         (Status.COMPLETED, SpawnState.SPAWNED),
-        (Status.CONFIRMED, SpawnState.SPAWNED),
         (Status.ABANDONED, SpawnState.SPAWNED),
         (Status.DEAD_LETTER, SpawnState.SPAWNED),
         # COLD: only ever legitimately set while a task is SUSPENDED (see
         # Supervisor.cool_dormant_bodies's own status guard) -- the
-        # steady-state dormant shape. QUEUED/DEAD_LETTER/COMPLETED/
-        # CONFIRMED/ABANDONED are each covered by their own dedicated
+        # steady-state dormant shape. QUEUED/DEAD_LETTER/SUBMITTED/
+        # COMPLETED/ABANDONED are each covered by their own dedicated
         # sweep (recover_stranded_cold_reservations #4512,
         # recover_dead_lettered_cold_reservations #4542, and reconcile()'s
         # RESERVING/SPAWNED/COLD pool for the three _TERMINAL statuses).
@@ -137,8 +137,8 @@ _CONSISTENT_PAIRS: frozenset[tuple[str, str]] = frozenset(
         # as ANOMALY (the default) below, not added here.
         (Status.SUSPENDED, SpawnState.COLD),
         (Status.QUEUED, SpawnState.COLD),
+        (Status.SUBMITTED, SpawnState.COLD),
         (Status.COMPLETED, SpawnState.COLD),
-        (Status.CONFIRMED, SpawnState.COLD),
         (Status.ABANDONED, SpawnState.COLD),
         (Status.DEAD_LETTER, SpawnState.COLD),
     }

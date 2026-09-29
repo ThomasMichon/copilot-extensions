@@ -2961,7 +2961,7 @@ def test_complete_resolves_owner_from_identity(monkeypatch, capsys):
             completed["worker_id"] = worker_id
             completed["result_ref"] = result_ref
             completed["result"] = result
-            return {"id": task_id, "status": "completed", "owner": worker_id}
+            return {"id": task_id, "status": "submitted", "owner": worker_id}
 
         def __enter__(self):
             return self
@@ -2997,7 +2997,7 @@ def test_complete_reads_structured_result_file(monkeypatch, tmp_path, capsys):
                 result_ref=result_ref,
                 result=result,
             )
-            return {"id": task_id, "status": "completed", "result": result}
+            return {"id": task_id, "status": "submitted", "result": result}
 
         def __enter__(self):
             return self
@@ -3039,7 +3039,7 @@ def test_complete_reads_utf8_bom_result_file(monkeypatch, tmp_path):
     class _C:
         def complete(self, task_id, worker_id, *, result_ref=None, result=None):
             completed["result"] = result
-            return {"id": task_id, "status": "completed", "result": result}
+            return {"id": task_id, "status": "submitted", "result": result}
 
         def __enter__(self):
             return self
@@ -3084,7 +3084,7 @@ def test_complete_accepts_utf8_bom_from_inline_and_windows_style_stdin(
     class _C:
         def complete(self, task_id, worker_id, *, result_ref=None, result=None):
             completed["result"] = result
-            return {"id": task_id, "status": "completed", "result": result}
+            return {"id": task_id, "status": "submitted", "result": result}
 
         def __enter__(self):
             return self
@@ -3141,7 +3141,7 @@ def test_complete_prechecks_canonical_not_raw_result_file_size(
     class _C:
         def complete(self, task_id, worker_id, *, result_ref=None, result=None):
             completed["result"] = result
-            return {"id": task_id, "status": "completed", "result": result}
+            return {"id": task_id, "status": "submitted", "result": result}
 
         def __enter__(self):
             return self
@@ -3341,7 +3341,7 @@ class _PickupClient:
     def complete(self, task_id, owner, **kwargs):
         self.transitions.append("complete")
         self.complete_kwargs = kwargs
-        return {"id": task_id, "status": "completed", "owner": owner}
+        return {"id": task_id, "status": "submitted", "owner": owner}
 
     def payload(self, task_id):
         return {"payload": "the brief"}
@@ -3437,9 +3437,9 @@ def test_consume_baton_completes_suspended_task_directly(monkeypatch, capsys):
 
 
 class _SpentHandoffClient:
-    """A fake client whose task is an already-completed handoff baton."""
+    """A fake client whose task is an already-spent handoff baton."""
 
-    def __init__(self, *, labels=None, source=None, status="completed"):
+    def __init__(self, *, labels=None, source=None, status="submitted"):
         self._task = {
             "id": "T1",
             "status": status,
@@ -3492,7 +3492,7 @@ def test_consume_completed_handoff_is_not_replayed(monkeypatch, capsys):
     assert args.func(args) == 3
     out = capsys.readouterr().out
     # STOP notice replaces the brief; no lifecycle transitions or payload read.
-    assert "already COMPLETED" in out
+    assert "already spent" in out
     assert "PAYLOAD-XYZZY" not in out
     assert fake.transitions == []
 
@@ -3508,7 +3508,7 @@ def test_consume_completed_handoff_by_source_is_not_replayed(monkeypatch, capsys
 
     args = build_parser().parse_args(["consume", "T1", "--defer-complete"])
     assert args.func(args) == 3
-    assert "already COMPLETED" in capsys.readouterr().out
+    assert "already spent" in capsys.readouterr().out
     assert fake.transitions == []
 
 
@@ -3811,8 +3811,8 @@ class TestInboxBoard:
         assert self._grp(status="claimed") == "Started"
         assert self._grp(status="started") == "Started"
         assert self._grp(status="suspended") == "Suspended"
+        assert self._grp(status="submitted") == "Submitted"
         assert self._grp(status="completed") == "Completed"
-        assert self._grp(status="confirmed") == "Confirmed"
         assert self._grp(status="abandoned") == "Abandoned"
         assert self._grp(status="dead_letter") == "Abandoned"
 
@@ -3825,10 +3825,10 @@ class TestInboxBoard:
 
     def test_terminal_wins_over_stale_awaiting_steer(self):
         # A task abandoned/completed WHILE awaiting-steer keeps a stale flag; it
-        # must group as terminal, never Blocked.
+        # must group as concluded, never Blocked.
         assert self._grp(status="abandoned", awaiting_steer=True) == "Abandoned"
+        assert self._grp(status="submitted", awaiting_steer=True) == "Submitted"
         assert self._grp(status="completed", awaiting_steer=True) == "Completed"
-        assert self._grp(status="confirmed", awaiting_steer=True) == "Confirmed"
 
     def test_hold_reason_is_paused_and_wins_over_blocked(self):
         # Phase 7 follow-up (2026-09-29): a durable operator-set hold is its
@@ -3914,7 +3914,7 @@ class TestInboxBoard:
     def test_sort_orders_by_group_priority(self):
         from agent_dispatch import __main__ as m
         tasks = [
-            {"status": "completed", "updated_at": 100},
+            {"status": "submitted", "updated_at": 100},
             {"status": "started", "awaiting_steer": True, "updated_at": 100},
             {"status": "queued", "updated_at": 100},
             {"status": "proposed", "updated_at": 100},
@@ -3925,7 +3925,7 @@ class TestInboxBoard:
         tasks.sort(key=m._board_sort_key)
         assert [m._board_group(t) for t in tasks] == [
             "Blocked", "Proposed", "Started", "Queued", "Suspended",
-            "Completed", "Abandoned",
+            "Submitted", "Abandoned",
         ]
 
     def test_sort_within_group_is_recent_first(self):
@@ -3943,11 +3943,11 @@ class TestInboxBoard:
         assert m._board_keep({"status": "proposed"}, cutoff) is True
         # Terminal tasks: kept only when their terminal time is at/after cutoff.
         assert m._board_keep(
-            {"status": "completed", "completed_at": 1500}, cutoff) is True
+            {"status": "submitted", "completed_at": 1500}, cutoff) is True
         assert m._board_keep(
             {"status": "abandoned", "completed_at": 500}, cutoff) is False
         # Missing terminal timestamp -> dropped (can't prove it's recent).
-        assert m._board_keep({"status": "completed"}, cutoff) is False
+        assert m._board_keep({"status": "submitted"}, cutoff) is False
 
     def test_parser_accepts_board_flags(self):
         args = _args(["inbox", "--machine", "m1", "--board", "--recent-mins", "30"])

@@ -24,11 +24,11 @@ log = logging.getLogger("agent-dispatch.supervisor")
 
 #: Settled by reconcile()/dead-lettering elsewhere -- never this sweep's job.
 #: Kept identical to :data:`agent_dispatch.supervisor._TERMINAL` (includes
-#: CONFIRMED as of 2026-09-28, rubber-duck review -- see that constant's own
+#: COMPLETED as of 2026-09-28, rubber-duck review -- see that constant's own
 #: comment for why DEAD_LETTER is deliberately excluded from this set even
 #: though it's also settled elsewhere, by recover_dead_lettered_cold_reservations
 #: below).
-_TERMINAL = frozenset({Status.COMPLETED, Status.CONFIRMED, Status.ABANDONED})
+_TERMINAL = frozenset({Status.SUBMITTED, Status.COMPLETED, Status.ABANDONED})
 
 
 def recover_stranded_cold_reservations(supervisor: Any) -> int:

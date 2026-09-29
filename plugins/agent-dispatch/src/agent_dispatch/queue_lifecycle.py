@@ -128,7 +128,7 @@ class QueueLifecycleMixin:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
 
-            if task.status == Status.COMPLETED and encoded_result is not None:
+            if task.status == Status.SUBMITTED and encoded_result is not None:
                 completing_owner = task.completed_by
                 if completing_owner is None:
                     completion_workers = self._completion_event_workers(conn, task_id)
@@ -185,8 +185,8 @@ class QueueLifecycleMixin:
                     conn,
                     task_id,
                     ts=ts,
-                    from_status=Status.COMPLETED,
-                    to_status=Status.COMPLETED,
+                    from_status=Status.SUBMITTED,
+                    to_status=Status.SUBMITTED,
                     worker=worker_id,
                     note="complete retry: result recorded",
                 )
@@ -216,7 +216,7 @@ class QueueLifecycleMixin:
                 " result = ?, completed_by = ?, owner = NULL,"
                 " lease_expires_at = NULL WHERE id = ?",
                 (
-                    Status.COMPLETED,
+                    Status.SUBMITTED,
                     ts,
                     ts,
                     ts,
@@ -231,14 +231,14 @@ class QueueLifecycleMixin:
                 task_id,
                 ts=ts,
                 from_status=task.status,
-                to_status=Status.COMPLETED,
+                to_status=Status.SUBMITTED,
                 worker=worker_id,
                 note="complete",
             )
             completed = self._fetch(conn, task_id)
             assert completed is not None
             conn.execute("COMMIT")
-        return CompletionOutcome(completed, "task.completed")
+        return CompletionOutcome(completed, "task.submitted")
 
     @staticmethod
     def _completion_event_workers(conn: sqlite3.Connection, task_id: str) -> list[str]:
@@ -247,7 +247,7 @@ class QueueLifecycleMixin:
             "SELECT DISTINCT worker FROM task_events"
             " WHERE task_id = ? AND to_status = ? AND from_status <> ?"
             " AND worker IS NOT NULL ORDER BY worker",
-            (task_id, Status.COMPLETED, Status.COMPLETED),
+            (task_id, Status.SUBMITTED, Status.SUBMITTED),
         )
         return [str(row["worker"]) for row in rows]
 

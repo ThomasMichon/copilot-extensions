@@ -343,7 +343,7 @@ class WakeOperation:
 
 @dataclass(frozen=True)
 class CompletionOutcome:
-    """A completed task plus the observable event caused by this invocation."""
+    """A submitted task plus the observable event caused by this invocation."""
 
     task: Task
     event_type: str | None

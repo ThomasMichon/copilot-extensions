@@ -520,7 +520,7 @@ def test_accepted_request_retry_survives_completion_and_retirement(tmp_path):
     )
 
     assert retry.id == accepted.id
-    assert retry.status == "completed"
+    assert retry.status == "submitted"
 
 
 def test_claim_rejects_injected_protected_label_without_accepted_fence(tmp_path):

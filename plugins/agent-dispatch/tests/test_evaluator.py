@@ -14,10 +14,10 @@ def _args(argv):
     return build_parser().parse_args(argv)
 
 
-def _completed_event(labels=("recipe:reviewer",), status="completed", **task):
+def _completed_event(labels=("recipe:reviewer",), status="submitted", **task):
     t = {"id": "t-1", "labels": list(labels), "status": status,
          "origin_ref": "o/n#42", "source": "recipe", **task}
-    return {"type": "task.completed", "task": t}
+    return {"type": "task.submitted", "task": t}
 
 
 # -- spec validation ---------------------------------------------------------
@@ -35,8 +35,8 @@ def test_spec_requires_rules_list():
 
 def test_rule_matches_on_event_type_and_labels():
     spec = ev.SpecEvaluator({"rules": [{
-        "on": "task.completed",
-        "when": {"labels_any": ["recipe:reviewer"], "status": "completed"},
+        "on": "task.submitted",
+        "when": {"labels_any": ["recipe:reviewer"], "status": "submitted"},
         "emit": {"title_template": "unstick {origin_ref}",
                  "labels": ["recipe:conflict-resolution"],
                  "dedup_template": "evaluator:followup:{task_id}"},
@@ -56,7 +56,7 @@ def test_emit_prompt_is_appended_with_the_untrusted_content_note():
     # untrusted external source (a webhook, an issue title); the rule
     # author's own prompt_template should not need to remember this itself.
     spec = ev.SpecEvaluator({"rules": [{
-        "on": "task.completed",
+        "on": "task.submitted",
         "emit": {"title_template": "x", "prompt_template": "do the thing for {task_id}"},
     }]})
     emit = spec.evaluate(_completed_event())[0]
@@ -73,7 +73,7 @@ def test_rule_skipped_on_wrong_event_type():
 
 def test_when_labels_all_and_source_predicates():
     spec = ev.SpecEvaluator({"rules": [{
-        "on": ["task.completed"],
+        "on": ["task.submitted"],
         "when": {"labels_all": ["a", "b"], "source": "recipe"},
         "emit": {"title_template": "ok"},
     }]})
@@ -85,23 +85,23 @@ def test_when_labels_all_and_source_predicates():
 
 def test_first_matching_rule_wins():
     spec = ev.SpecEvaluator({"rules": [
-        {"on": "task.completed", "when": {"status": "queued"},
+        {"on": "task.submitted", "when": {"status": "queued"},
          "emit": {"title_template": "first"}},
-        {"on": "task.completed", "emit": {"title_template": "second"}},
+        {"on": "task.submitted", "emit": {"title_template": "second"}},
     ]})
     emit = spec.evaluate(_completed_event())[0]
     assert emit.title == "second"
 
 
 def test_emit_rule_without_title_template_raises():
-    spec = ev.SpecEvaluator({"rules": [{"on": "task.completed", "emit": {}}]})
+    spec = ev.SpecEvaluator({"rules": [{"on": "task.submitted", "emit": {}}]})
     with pytest.raises(ev.EvaluatorError):
         spec.evaluate(_completed_event())
 
 
 def test_confirm_rule_matches():
     spec = ev.SpecEvaluator({"rules": [{
-        "on": "task.completed",
+        "on": "task.submitted",
         "when": {"labels_any": ["recipe:goal-driven"]},
         "confirm": True,
         "confirm_reason": "goal corroborated by recipe",
@@ -116,7 +116,7 @@ def test_emit_rule_wins_over_confirm_when_both_present_on_same_rule():
     """``emit`` is checked first -- a rule authoring both keys is unusual, but
     the precedence must be deterministic and documented, not accidental."""
     spec = ev.SpecEvaluator({"rules": [{
-        "on": "task.completed",
+        "on": "task.submitted",
         "emit": {"title_template": "x"},
         "confirm": True,
     }]})
@@ -125,7 +125,7 @@ def test_emit_rule_wins_over_confirm_when_both_present_on_same_rule():
 
 def test_no_matching_confirm_rule_falls_through_to_noop():
     spec = ev.SpecEvaluator({"rules": [{
-        "on": "task.completed",
+        "on": "task.submitted",
         "when": {"labels_any": ["recipe:goal-driven"]},
         "confirm": True,
     }]})
@@ -159,14 +159,14 @@ def test_apply_confirm_calls_confirmer_with_task_id():
 
     def confirmer(task_id, **kwargs):
         calls.append((task_id, kwargs))
-        return {"id": task_id, "status": "confirmed"}
+        return {"id": task_id, "status": "completed"}
 
     decisions = [ev.Confirm(reason="corroborated")]
     out = ev.apply_decisions(
         decisions, creator=lambda *a, **k: {}, task_id="t-1", confirmer=confirmer
     )
     assert calls == [("t-1", {"actor": "evaluator"})]
-    assert out[0] == {"decision": "confirm", "confirmed": {"id": "t-1", "status": "confirmed"}}
+    assert out[0] == {"decision": "confirm", "completed": {"id": "t-1", "status": "completed"}}
 
 
 def test_apply_confirm_without_confirmer_is_skipped_not_raised():
@@ -184,7 +184,7 @@ def test_apply_confirm_without_task_id_is_skipped_not_raised():
 
 def test_evaluate_and_apply_threads_task_id_to_confirmer():
     calls = []
-    spec = ev.SpecEvaluator({"rules": [{"on": "task.completed", "confirm": True}]})
+    spec = ev.SpecEvaluator({"rules": [{"on": "task.submitted", "confirm": True}]})
     report = ev.evaluate_and_apply(
         spec,
         _completed_event(),
@@ -199,7 +199,7 @@ def test_evaluate_and_apply_dry_run_creates_nothing():
     def creator(*a, **k):  # pragma: no cover - dry run must not create
         raise AssertionError("dry run must not create")
 
-    spec = ev.SpecEvaluator({"rules": [{"on": "task.completed",
+    spec = ev.SpecEvaluator({"rules": [{"on": "task.submitted",
                                         "emit": {"title_template": "x"}}]})
     report = ev.evaluate_and_apply(
         spec, _completed_event(), creator=creator, apply=False
@@ -219,7 +219,7 @@ def test_cli_parses_evaluate():
 def test_cmd_evaluate_dry_run_reads_event_file(tmp_path, capsys):
     spec = tmp_path / "spec.json"
     spec.write_text(json.dumps({"rules": [{
-        "on": "task.completed",
+        "on": "task.submitted",
         "when": {"labels_any": ["recipe:reviewer"]},
         "emit": {"title_template": "unstick {origin_ref}",
                  "labels": ["recipe:conflict-resolution"]},

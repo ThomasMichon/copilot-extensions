@@ -53,13 +53,13 @@ def test_full_happy_path(q):
     started = q.start(t.id, "w1")
     assert started.status == Status.STARTED
     done = q.complete(t.id, "w1", result_ref="pr/42")
-    assert done.status == Status.COMPLETED
+    assert done.status == Status.SUBMITTED
     assert done.result_ref == "pr/42"
     assert done.owner is None
     assert done.completed_by == "w1"
 
 
-# -- confirm / reopen_completed (the completed -> confirmed lifecycle) ------
+# -- confirm / reopen_completed (the submitted -> completed lifecycle) ------
 
 
 def test_confirm_closes_a_completed_task(q):
@@ -68,10 +68,10 @@ def test_confirm_closes_a_completed_task(q):
     q.start(t.id, "w1")
     q.complete(t.id, "w1", result_ref="pr/1")
     confirmed = q.confirm(t.id, actor="evaluator")
-    assert confirmed.status == Status.CONFIRMED
+    assert confirmed.status == Status.COMPLETED
 
 
-def test_confirm_rejects_a_non_completed_task(q):
+def test_confirm_rejects_a_non_submitted_task(q):
     t = q.create("work")
     with pytest.raises(TaskError):
         q.confirm(t.id)
@@ -83,8 +83,8 @@ def test_confirm_is_idempotent_on_replay(q):
     q.start(t.id, "w1")
     q.complete(t.id, "w1")
     q.confirm(t.id)
-    again = q.confirm(t.id)  # replay: already confirmed
-    assert again.status == Status.CONFIRMED
+    again = q.confirm(t.id)  # replay: already completed
+    assert again.status == Status.COMPLETED
 
 
 def test_reopen_completed_returns_to_queued_and_clears_the_claim(q):
@@ -102,7 +102,7 @@ def test_reopen_completed_returns_to_queued_and_clears_the_claim(q):
     assert claimed.id == t.id
 
 
-def test_reopen_completed_rejects_a_non_completed_task(q):
+def test_reopen_completed_rejects_a_non_submitted_task(q):
     t = q.create("work")
     with pytest.raises(TaskError):
         q.reopen_completed(t.id)
@@ -124,10 +124,10 @@ def test_reopen_completed_records_a_steer_atomically(q):
 
 
 def test_confirmed_and_completed_are_both_in_concluded(q):
+    assert Status.SUBMITTED in Status.CONCLUDED
     assert Status.COMPLETED in Status.CONCLUDED
-    assert Status.CONFIRMED in Status.CONCLUDED
-    assert Status.COMPLETED not in Status.TERMINAL  # provisional, not terminal
-    assert Status.CONFIRMED in Status.TERMINAL
+    assert Status.SUBMITTED not in Status.TERMINAL  # provisional, not terminal
+    assert Status.COMPLETED in Status.TERMINAL
 
 
 def test_abandon_permits_a_completed_but_unconfirmed_task(q):
@@ -162,7 +162,7 @@ def test_complete_persists_schema_neutral_structured_result(q):
 
     done = q.complete(t.id, "w1", result_ref="artifact/42", result=result)
 
-    assert done.status == Status.COMPLETED
+    assert done.status == Status.SUBMITTED
     assert done.result_ref == "artifact/42"
     assert done.result == result
     assert done.has_result is True
@@ -272,7 +272,7 @@ def test_complete_without_result_remains_backward_compatible(q):
 
     done = q.complete(t.id, "w1", result_ref="artifact/legacy")
 
-    assert done.status == Status.COMPLETED
+    assert done.status == Status.SUBMITTED
     assert done.result_ref == "artifact/legacy"
     assert done.result is None
 
@@ -289,7 +289,7 @@ def test_same_owner_can_retry_completed_task_to_fill_missing_result(q):
     )
 
     assert retried.event_type == "task.result_recorded"
-    assert retried.task.status == Status.COMPLETED
+    assert retried.task.status == Status.SUBMITTED
     assert retried.task.result == result
     assert q.events(t.id)[-1]["note"] == "complete retry: result recorded"
     repeated = q.complete_with_outcome(t.id, "w1", result=result)
@@ -309,7 +309,7 @@ def test_retry_fill_recovers_owner_from_completion_after_migration(tmp_path):
             "UPDATE tasks SET status = ?, completed_at = ?, result_ref = ?,"
             " result = NULL, completed_by = NULL, owner = NULL"
             " WHERE id = ?",
-            (Status.COMPLETED, 10, "artifact/old", task.id),
+            (Status.SUBMITTED, 10, "artifact/old", task.id),
         )
         conn.execute(
             "INSERT INTO task_events"
@@ -319,7 +319,7 @@ def test_retry_fill_recovers_owner_from_completion_after_migration(tmp_path):
                 task.id,
                 10,
                 Status.STARTED,
-                Status.COMPLETED,
+                Status.SUBMITTED,
                 "worker-1",
                 "complete",
             ),
@@ -346,8 +346,8 @@ def test_retry_fill_recovers_owner_from_completion_after_migration(tmp_path):
     assert len(events_after) == len(events_before) + 1
     assert events_after[-1] == {
         "ts": events_after[-1]["ts"],
-        "from_status": Status.COMPLETED,
-        "to_status": Status.COMPLETED,
+        "from_status": Status.SUBMITTED,
+        "to_status": Status.SUBMITTED,
         "worker": "worker-1",
         "note": "complete retry: result recorded",
     }
@@ -551,7 +551,7 @@ def test_set_hold_refuses_terminal_task(q):
     q.claim_one("w1", task_id=t.id)
     q.start(t.id, "w1")
     q.complete(t.id, "w1")
-    with pytest.raises(TaskError, match="completed"):
+    with pytest.raises(TaskError, match="submitted"):
         q.set_hold(t.id, reason="too late", actor="operator")
 
 
@@ -846,13 +846,13 @@ def test_suspended_task_can_complete_without_resume(q):
 
     done = q.complete(t.id, "w1", result_ref="change/42")
 
-    assert done.status == Status.COMPLETED
+    assert done.status == Status.SUBMITTED
     assert done.result_ref == "change/42"
     assert done.owner is None
     assert done.generation == claimed.generation
     assert [event["to_status"] for event in q.events(t.id)][-2:] == [
         Status.SUSPENDED,
-        Status.COMPLETED,
+        Status.SUBMITTED,
     ]
 
 
@@ -1559,6 +1559,60 @@ def test_migration_adds_nullable_result_column_to_existing_db(tmp_path):
     assert {"result", "completed_by"} <= columns
 
 
+def test_migration_renames_legacy_completed_and_confirmed_statuses(tmp_path):
+    db = tmp_path / "legacy-statuses.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE tasks ("
+            "id TEXT PRIMARY KEY, status TEXT, result TEXT, result_ref TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO tasks VALUES (?, ?, NULL, NULL)",
+            [("t-submitted", "completed"), ("t-completed", "confirmed")],
+        )
+        conn.execute(
+            "CREATE TABLE task_events ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,"
+            "ts REAL NOT NULL, from_status TEXT, to_status TEXT,"
+            "worker TEXT, note TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO task_events (task_id, ts, from_status, to_status, worker, note)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                ("t-submitted", 1, "started", "completed", "worker-1", "complete"),
+                ("t-completed", 2, "completed", "confirmed", "evaluator", "confirm"),
+            ],
+        )
+
+    q = RealTaskQueue(db)
+
+    assert q.get("t-submitted").status == Status.SUBMITTED
+    assert q.get("t-completed").status == Status.COMPLETED
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute(
+            "SELECT task_id, from_status, to_status FROM task_events ORDER BY id"
+        ).fetchall()
+        applied = conn.execute(
+            "SELECT COUNT(*) FROM queue_migrations"
+            " WHERE name = '2026-09-29-status-rename-submitted-completed'"
+        ).fetchone()[0]
+    assert rows == [
+        ("t-submitted", "started", "submitted"),
+        ("t-completed", "submitted", "completed"),
+    ]
+    assert applied == 1
+
+    fresh = q.create("fresh work", repo="github.com/example/repo")
+    q.claim_one("worker-1")
+    q.start(fresh.id, "worker-1")
+    q.complete(fresh.id, "worker-1")
+    q.confirm(fresh.id)
+
+    reopened = RealTaskQueue(db)
+    assert reopened.get(fresh.id).status == Status.COMPLETED
+
+
 def test_migration_backfills_stable_completing_owner(tmp_path):
     db = tmp_path / "legacy-completed.db"
     with sqlite3.connect(db) as conn:
@@ -1567,7 +1621,7 @@ def test_migration_backfills_stable_completing_owner(tmp_path):
             "id TEXT PRIMARY KEY, status TEXT, result TEXT, result_ref TEXT)"
         )
         conn.execute(
-            "INSERT INTO tasks VALUES ('t1', 'completed', NULL, 'artifact/1')"
+            "INSERT INTO tasks VALUES ('t1', 'submitted', NULL, 'artifact/1')"
         )
         conn.execute(
             "CREATE TABLE task_events ("
@@ -1578,7 +1632,7 @@ def test_migration_backfills_stable_completing_owner(tmp_path):
         conn.execute(
             "INSERT INTO task_events "
             "(task_id, ts, from_status, to_status, worker, note)"
-            " VALUES ('t1', 1, 'started', 'completed', 'worker-1', 'complete')"
+            " VALUES ('t1', 1, 'started', 'submitted', 'worker-1', 'complete')"
         )
 
     q = RealTaskQueue(db)
@@ -1595,7 +1649,7 @@ def test_legacy_completion_without_owner_fails_retry_fill_closed(tmp_path):
         conn.execute(
             "CREATE TABLE tasks (id TEXT PRIMARY KEY, status TEXT, result TEXT)"
         )
-        conn.execute("INSERT INTO tasks VALUES ('t1', 'completed', NULL)")
+        conn.execute("INSERT INTO tasks VALUES ('t1', 'submitted', NULL)")
 
     q = RealTaskQueue(db)
 
@@ -1609,7 +1663,7 @@ def test_legacy_completion_with_ambiguous_owners_fails_retry_fill_closed(tmp_pat
         conn.execute(
             "CREATE TABLE tasks (id TEXT PRIMARY KEY, status TEXT, result TEXT)"
         )
-        conn.execute("INSERT INTO tasks VALUES ('t1', 'completed', NULL)")
+        conn.execute("INSERT INTO tasks VALUES ('t1', 'submitted', NULL)")
         conn.execute(
             "CREATE TABLE task_events ("
             "id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,"
@@ -1619,7 +1673,7 @@ def test_legacy_completion_with_ambiguous_owners_fails_retry_fill_closed(tmp_pat
         conn.executemany(
             "INSERT INTO task_events"
             " (task_id, ts, from_status, to_status, worker, note)"
-            " VALUES ('t1', ?, 'started', 'completed', ?, 'complete')",
+            " VALUES ('t1', ?, 'started', 'submitted', ?, 'complete')",
             [(1, "worker-1"), (2, "worker-2")],
         )
 
@@ -1645,7 +1699,7 @@ def test_events_record_transitions(q):
     q.start(t.id, "w1")
     q.complete(t.id, "w1")
     trail = [e["to_status"] for e in q.events(t.id)]
-    assert trail == [Status.QUEUED, Status.CLAIMED, Status.STARTED, Status.COMPLETED]
+    assert trail == [Status.QUEUED, Status.CLAIMED, Status.STARTED, Status.SUBMITTED]
 
 
 # -- worker identity + targeting-in-claim ------------------------------------
@@ -1785,7 +1839,7 @@ def _seed_all_states(q):
         Status.QUEUED: queued,
         Status.CLAIMED: claimed_t,
         Status.STARTED: started_t,
-        Status.COMPLETED: completed_t,
+        Status.SUBMITTED: completed_t,
         Status.ABANDONED: abandoned_t,
     }
 
@@ -1847,7 +1901,7 @@ def test_sweep_spans_all_states_except_abandoned(q):
             Status.QUEUED,
             Status.CLAIMED,
             Status.STARTED,
-            Status.COMPLETED,
+            Status.SUBMITTED,
         )
     }
     assert seed[Status.ABANDONED].id not in swept

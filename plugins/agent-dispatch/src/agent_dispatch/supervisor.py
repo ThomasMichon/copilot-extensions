@@ -19,7 +19,7 @@ reservation and is skipped, so a slow-but-alive embody can never be
 double-spawned (the exact failure this component exists to prevent).
 
 A reservation is released for a **fresh** spawn only when its task reaches a
-**terminal** state (``completed``/``abandoned`` -> ``reconcile`` settles it) or
+**terminal** state (``submitted``/``abandoned`` -> ``reconcile`` settles it) or
 when an operator explicitly fails it (having confirmed the embody is gone). That
 means **auto-recovery of a genuinely dead-but-non-terminal embody is
 intentionally NOT done here** -- it requires embody-session *liveness detection*
@@ -127,21 +127,21 @@ log = logging.getLogger("agent-dispatch.supervisor")
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
 
 #: "Provably finished, reconcile() may settle a still-active reservation" --
-#: includes CONFIRMED (2026-09-28, rubber-duck review): it is Status.CONFIRMED
-#: that is the TRUE completion terminal now (Status.COMPLETED is only a
+#: includes COMPLETED (2026-09-28, rubber-duck review): it is Status.COMPLETED
+#: that is the TRUE completion terminal now (Status.SUBMITTED is only a
 #: worker's unverified claim -- see queue_records.py), but this set had never
-#: been updated when CONFIRMED was introduced, so a task reaching CONFIRMED
+#: been updated when COMPLETED was introduced, so a task reaching COMPLETED
 #: before its next reconcile() pass permanently fenced its exclusive_key --
 #: reconcile() never settled the reservation, and no other sweep covers a
-#: RESERVING/SPAWNED/COLD reservation on a CONFIRMED task either. Deliberately
+#: RESERVING/SPAWNED/COLD reservation on a COMPLETED task either. Deliberately
 #: NOT Status.CONCLUDED (which also has DEAD_LETTER): DEAD_LETTER keeps its
 #: own, simpler settlement in recover_dead_lettered_cold_reservations() below
 #: rather than running it through this set's completion-verification-shaped
 #: branch in reconcile() (mirrors how ABANDONED already coexists with the
-#: completion-narrative-heavy branch below -- CONFIRMED slots in the same
+#: completion-narrative-heavy branch below -- COMPLETED slots in the same
 #: way ABANDONED already does, not by relying on reconcile()'s completion
 #: fields being meaningful for a task that never completed a goal).
-_TERMINAL = frozenset({Status.COMPLETED, Status.CONFIRMED, Status.ABANDONED})
+_TERMINAL = frozenset({Status.SUBMITTED, Status.COMPLETED, Status.ABANDONED})
 _LEASED = frozenset({Status.CLAIMED, Status.STARTED})
 _CONCLUSION_PER_CYCLE = 10
 _COLD_RESUME_RETRY_SECONDS = 300
@@ -1910,7 +1910,7 @@ class Supervisor:
         """Settle-detail for a terminal task, with completion-claim verification.
 
         Implements *verify-the-completion-claim*: a **goal-bearing** task that
-        reaches ``completed`` is corroborated against what was recorded -- a
+        reaches ``submitted`` is corroborated against what was recorded -- a
         result reference, or at least one progress-log entry. A goal completed
         with **neither** is not trusted at face value: it is flagged in the
         reservation detail and logged, so an empty "done" is **held for review**
@@ -1918,7 +1918,7 @@ class Supervisor:
         simple deferred-completion contract.
         """
         status = task.get("status")
-        if status != Status.COMPLETED or not task.get("goal"):
+        if status != Status.SUBMITTED or not task.get("goal"):
             return f"task {status}"
         if task.get("result_ref"):
             return "task completed (result-ref recorded)"
@@ -2241,7 +2241,7 @@ class Supervisor:
                     session_override=str(acp_session),
                 )
                 return True, outcome
-            if task.get("status") == Status.COMPLETED and task.get("completed_by"):
+            if task.get("status") == Status.SUBMITTED and task.get("completed_by"):
                 try:
                     if self.local_body_activity_fn(local_sid) == "IDLE":
                         return True, None
@@ -3338,12 +3338,12 @@ class Supervisor:
         return max(overrides) if overrides else self.max_attempts
 
     def advance_via_evaluator(self) -> int:
-        """Feed each newly-terminal task's lifecycle event to the evaluator and
+        """Feed each newly-concluded task's lifecycle event to the evaluator and
         apply its decisions (the service-driven loop-advancement pass).
 
-        Lists recent terminal tasks in the lane (completed / abandoned), and for
+        Lists recent concluded tasks in the lane (submitted / abandoned), and for
         each one not yet seen this process, synthesizes the coordinator-shaped
-        lifecycle event ``{"type": "task.completed"|"task.abandoned", "task":
+        lifecycle event ``{"type": "task.submitted"|"task.abandoned", "task":
         {...}}``, runs the evaluator, and applies the returned decisions through
         :func:`~agent_dispatch.producers.evaluator.apply_decisions` (an ``Emit``
         creates a follow-up task in this lane). Returns the number of follow-up
@@ -3351,7 +3351,7 @@ class Supervisor:
 
         Best-effort and non-fatal: a bad evaluator or a failed create is logged
         and skipped, never allowed to abort the supervision cycle. Each task's
-        terminal event fires **at most once per process**; the emitted follow-up's
+        concluded event fires **at most once per process**; the emitted follow-up's
         ``dedup_key`` is the durable cross-restart guard against duplicates.
         """
         if self.evaluator is None:
@@ -3361,7 +3361,7 @@ class Supervisor:
         try:
             terminal = self.client.list(
                 repo=self.repo,
-                status=[Status.COMPLETED, Status.ABANDONED],
+                status=[Status.SUBMITTED, Status.ABANDONED],
                 evaluator_ref=self.evaluator_ref or "",
                 limit=self.evaluate_limit,
             )
@@ -3380,7 +3380,9 @@ class Supervisor:
             if task.get("evaluator_ref") != self.evaluator_ref:
                 continue
             self._evaluated.add(tid)  # fire once per process, success or not
-            event = {"type": f"task.{task.get('status')}", "task": task}
+            status = task.get("status")
+            event_type = "task.abandoned" if status == Status.ABANDONED else "task.submitted"
+            event = {"type": event_type, "task": task}
             try:
                 decisions = self.evaluator.evaluate(event)
                 results = apply_decisions(
@@ -3402,9 +3404,9 @@ class Supervisor:
                         event["type"],
                         r["created"].get("id"),
                     )
-                elif r.get("decision") == "confirm" and r.get("confirmed"):
+                elif r.get("decision") == "confirm" and r.get("completed"):
                     log.info(
-                        "evaluator pass: task %s (%s) -> confirmed",
+                        "evaluator pass: task %s (%s) -> completed",
                         tid,
                         event["type"],
                     )

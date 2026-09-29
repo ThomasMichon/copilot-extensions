@@ -25,7 +25,7 @@ class CompletionReviewMixin:
         expected_generation: int | None = None,
     ) -> dict:
         """Corroborate a completion claim and close the task for good --
-        the true lifecycle terminal beyond a provisional ``completed``
+        the true lifecycle terminal beyond a provisional ``submitted``
         (:meth:`agent_dispatch.queue.TaskQueue.confirm`)."""
         return self._unwrap(
             self._http.post(
@@ -49,7 +49,7 @@ class CompletionReviewMixin:
         expected_generation: int | None = None,
     ) -> dict:
         """The Completion Review card's "Re-queue with steering" action --
-        return a completed-but-unconfirmed task to ``queued``, progress
+        return a submitted-but-not-yet-completed task to ``queued``, progress
         preserved, optionally recording new operator steer fields atomically
         with the reopen (:meth:`agent_dispatch.queue.TaskQueue
         .reopen_completed`)."""

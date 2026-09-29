@@ -32,8 +32,8 @@ def test_all_states_match_queue_status():
         Status.CLAIMED,
         Status.STARTED,
         Status.SUSPENDED,
+        Status.SUBMITTED,
         Status.COMPLETED,
-        Status.CONFIRMED,
         Status.ABANDONED,
         Status.DEAD_LETTER,
     }

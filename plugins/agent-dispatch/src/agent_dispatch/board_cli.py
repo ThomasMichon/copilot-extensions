@@ -38,11 +38,11 @@ GROUPS = (
     "Started",
     "Queued",
     "Suspended",
+    "Submitted",
     "Completed",
-    "Confirmed",
     "Abandoned",
 )
-TERMINAL = frozenset({"Completed", "Confirmed", "Abandoned"})
+TERMINAL = frozenset({"Submitted", "Completed", "Abandoned"})
 ACTIVITY_TTL_SECONDS = 90.0
 _RELAY_ENDPOINT: str | None = None
 
@@ -105,10 +105,10 @@ def _endpoint() -> str:
 
 def _group(task: dict) -> str:
     status = task.get("status")
+    if status == "submitted":
+        return "Submitted"
     if status == "completed":
         return "Completed"
-    if status == "confirmed":
-        return "Confirmed"
     if status in {"abandoned", "dead_letter"}:
         return "Abandoned"
     if task.get("hold_reason"):
@@ -428,7 +428,7 @@ def main(argv: list[str] | None = None) -> int:
     query = {
         "status": (
             "proposed,queued,claimed,started,suspended,"
-            "completed,abandoned,dead_letter"
+            "submitted,completed,abandoned,dead_letter"
         ),
         "limit": str(args.limit),
     }

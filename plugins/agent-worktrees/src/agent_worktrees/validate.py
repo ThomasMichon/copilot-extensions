@@ -13,7 +13,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import git_ops, output
+from . import env_scrub, git_ops, output
 
 # Legacy hardcoded paths -- used as default when no config is provided.
 # New deployments should set validate_paths in config.yaml instead.
@@ -59,6 +59,7 @@ def _check_powershell(full_path: Path) -> ValidationFailure | None:
                 """,
             ],
             capture_output=True, text=True,
+            env=env_scrub.scrub_python_runtime_env(os.environ.copy()),
         )
         if result.returncode != 0:
             return ValidationFailure(
@@ -87,6 +88,7 @@ def _check_bash(full_path: Path) -> ValidationFailure | None:
             result = subprocess.run(
                 [bash_cmd, "-n", str(full_path)],
                 capture_output=True, text=True,
+                env=env_scrub.scrub_python_runtime_env(os.environ.copy()),
             )
             if result.returncode != 0:
                 return ValidationFailure(
@@ -102,10 +104,12 @@ def _check_bash(full_path: Path) -> ValidationFailure | None:
 
 def _check_python(full_path: Path) -> ValidationFailure | None:
     """Validate Python syntax using py_compile, then optionally ruff."""
+    clean_env = env_scrub.scrub_python_runtime_env(os.environ.copy())
     try:
         result = subprocess.run(
             ["python", "-m", "py_compile", str(full_path)],
             capture_output=True, text=True,
+            env=clean_env,
         )
         if result.returncode != 0:
             return ValidationFailure(
@@ -121,6 +125,7 @@ def _check_python(full_path: Path) -> ValidationFailure | None:
         result = subprocess.run(
             ["ruff", "check", "--no-fix", "--force-exclude", str(full_path)],
             capture_output=True, text=True,
+            env=clean_env,
         )
         if result.returncode != 0 and result.stdout.strip():
             return ValidationFailure(

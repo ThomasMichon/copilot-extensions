@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from . import env_scrub
+
 log = logging.getLogger("agent-worktrees")
 
 _REPOSITORY_CONTEXT_ENV = frozenset({
@@ -49,11 +51,10 @@ _REPOSITORY_CONTEXT_ENV = frozenset({
 def repository_identity_env() -> dict[str, str]:
     """Return ambient process state without inherited Git context.
 
-    Repository identity probes supply their checkout explicitly with ``git -C``.
-    Inherited repository/config-selection variables can override or alter that
-    selection, so they are removed. Unrelated process and Git settings remain.
+    Repository identity probes supply their checkout via ``git -C``; inherited
+    repo/config-selection vars are removed so they cannot override it (others remain).
     """
-    env = os.environ.copy()
+    env = env_scrub.scrub_python_runtime_env(os.environ.copy())
     for name in list(env):
         upper = name.upper()
         if (
@@ -166,20 +167,19 @@ def git(
             network ops like ``fetch``/``push``). Read-only inspection callers
             (worktree classification) pass a bound so a single stalled ``git``
             spawn cannot hang them indefinitely.
-        no_hooks: If True, run with ``-c core.hooksPath=<empty>`` so a repo's
-            client-side guard hooks cannot block/corrupt trusted plumbing
-            that only re-arranges ALREADY-committed content (squash
-            re-commit, rebase). **``push()`` never passes this** (#3561): a
-            real pre-push release guard (e.g. ``check-changefile-presence.py``)
-            must be allowed to block a non-compliant push. Not
-            ``--no-verify``: scopes the disable to internal git ops. #3707.
+        no_hooks: If True, run with ``-c core.hooksPath=<empty>`` so a repo's client-side
+            guard hooks cannot block/corrupt trusted plumbing that only re-arranges
+            ALREADY-committed content (squash re-commit, rebase). **``push()`` never passes
+            this** (#3561): a real pre-push release guard (e.g. ``check-changefile-presence.py``)
+            must be allowed to block a non-compliant push (not ``--no-verify``; scopes the
+            disable to internal git ops). #3707.
 
     Returns:
         CompletedProcess with stdout/stderr as strings.
     """
     prefix = ["-c", f"core.hooksPath={_NO_HOOKS_PATH}"] if no_hooks else []
     cmd = ["git", *prefix, *args]
-    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    env = env_scrub.scrub_python_runtime_env({**os.environ, "GIT_TERMINAL_PROMPT": "0"})
     result = subprocess.run(
         cmd,
         cwd=cwd,
