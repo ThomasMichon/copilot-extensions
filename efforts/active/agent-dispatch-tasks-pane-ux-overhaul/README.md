@@ -67,6 +67,15 @@ agent-chat-driven flow).
 kept up to date at the end of every session (or handoff point) so a fresh
 session never has to re-derive "what's already done" from the Journal alone.
 
+- **2026-09-29 status, update 2 (row-shape standardization landed; read
+  this first, supersedes the bullet below it):** Phases 0-8 remain
+  COMPLETE. Additionally landed a Phase 3 amendment this session: the
+  Tasks row now uses the SAME two-line shape as Worktrees/CodeSpaces/
+  Containers (columnized stats on line 1, `[tag] repo title - phrase` on
+  line 2) — see Phase 3's own new checklist bullet and the Journal's
+  second 2026-09-29 entry for the full design/heuristic detail. Same
+  worktree, PR not yet opened as of this bullet's own writing — check
+  `pr-status` before starting further work here.
 - **2026-09-29 status (read this bullet first; everything below it in this
   section is historical and was already stale before this update — trust
   the Plan checklist's own `[x]`/`[ ]` marks over any prose here that
@@ -724,6 +733,28 @@ without it.
       operator must be able to tell "no artifacts" from "artifacts column
       unavailable here," per the rubber-duck's column-drop finding.
       **Landed** — see the Runbook above (Phase 3 is now fully complete).
+- [x] **Row-shape standardization (2026-09-29, operator feedback).**
+      Standardize the Tasks row on the SAME two-line shape Worktrees/
+      CodeSpaces/Containers already use: line 1 (`columns`) stays pure
+      columnized stats (`ID`, `PHASE`, `WT`, `LIVE`, `T`, trailing
+      `ARTIFACTS`/claims); the title, repo, and an activity phrase move to
+      line 2 (the manifest's `entry.subtitle`, a single composed field per
+      `_column_subtitle`'s existing generic mechanism — no engine change
+      needed). `TITLE`/`REPO` dropped from `columns` entirely. New
+      `board_cli._subtitle_for_task()` composes
+      `[tag] <repo> <title> - <phrase>` (tag/repo each optional): `_tag`
+      mirrors Worktrees' own `[system]`/`[delegate]`/`[acp]` title-prefix
+      convention (`derive.norm`) — only the NON-default interface gets a
+      mark, so a `"cli"` tag appears only for a heuristically CLI-embodied
+      task (owned + live but no headless `wt_live` signal), never for the
+      default headless/pool case. `_activity_phrase()` supplies the phrase:
+      a real `wt_live` signal always wins; otherwise a hold reason
+      (truncated), awaiting-steer, or the raw lifecycle status supplies a
+      sensible fallback. This is the SAME heuristic ambiguity `wt_live`
+      itself already carries (a blank/CLI-guessed tag means "no headless
+      signal", not a hard guarantee) — a real `embodiment_kind` backend
+      field remains the noted, still-open follow-on if the operator wants
+      it made authoritative.
 
 ### Phase 4 — Worktree cross-link
 - [x] Confirm the WT column round-trips against a live coordinator (not just
@@ -2807,4 +2838,117 @@ reachable/confusing in practice.
 **Phase 7 is now COMPLETE.** Next candidates per the Runbook's updated
 2026-09-29 summary: Phase 10 (New Task composer, zero dependencies) or
 Phase 11 (Completion Review card, unblocked since PR #3715).
+
+### 2026-09-29 (later same day) — Phase 3 amendment: standardize the Tasks row on the shared two-line shape
+Same session, continuing after the Phase 7 PR merged. New operator
+feedback: the Tasks row should follow the SAME two-line convention
+Worktrees/CodeSpaces/Containers already use —
+
+```
+<id##>  STATUS  stat1  stat2  stat3  ...  <claim1>, <claim2>, <claim3>...
+  [tag] <optional-repo?> <succinct title explaining work> - <short phrase describing activity...>
+```
+
+— rather than the Tasks pane's current flat, single-line `columns` table
+(id/PHASE/REPO/TITLE/WT/T/LIVE/ARTIFACTS all crammed into line 1).
+
+**Investigation (read-only, before touching anything):** dispatched a
+background `explore` agent to map exactly how Worktrees/CodeSpaces/
+Containers get this shape today. Finding: it is **not** one shared
+`detail_line`/multi-field manifest contract — `TasksView._column_subtitle()`
+(`engine_views.py`) is a simple single-field lookup: whatever the manifest's
+`entry.subtitle` names, rendered dim on an indented second line. CodeSpaces/
+Containers already opt into exactly this (their own `subtitle` field is a
+fully pre-composed string built in their own board/pool Python, e.g.
+`agent_codespaces/pool.py`'s `_prefixed_subtitle`). Worktrees itself has a
+bespoke (non-generic) `_detail_line()`, but its `[tag]` convention —
+`derive.norm()`'s `_tag` (`"system"`/`"delegate"`/`"acp"`) prefixed onto the
+title — is exactly the shape the operator's ASCII template's `[tag]` means:
+**only the row's NON-default kind gets a bracketed mark**; the common case
+stays untagged. No engine/manifest-schema change was needed at all — this
+whole redesign is a `board_cli.py` (data) + manifest (drop two columns, wire
+one field name) change, reusing machinery that already exists.
+
+**What landed:**
+
+1. **Line 1 (`columns`) now carries stats only:** `ID`, `PHASE`, `WT`,
+   `LIVE`, `T`, trailing `ARTIFACTS` (the claims list — now also the FLEX
+   column by virtue of being last/no `"title"` key present, which happens
+   to suit it well: a claims list is naturally variable-length, the same
+   role `TITLE` used to play). `TITLE` and `REPO` are gone from `columns`
+   entirely.
+2. **Line 2 (`entry.subtitle` -> a new `subtitle` field) carries
+   `[tag] <repo> <title> - <phrase>`:** three new `board_cli.py` functions —
+   `_embodiment_tag()`, `_activity_phrase()`, `_subtitle_for_task()` — compose
+   it. `_embodiment_tag()` mirrors Worktrees' own convention: a confirmed
+   headless liveness signal (`wt_live` non-`None`) is the DEFAULT embodiment
+   for a Task -> no tag; an owned, live task with NO headless signal is
+   assumed CLI-embodied (Phase 1/2's only other embodiment path) -> `"cli"`.
+   **This is explicitly a heuristic, not a new authoritative
+   `embodiment_kind` field** — it reuses the exact same ambiguity `wt_live`
+   itself already documents (a blank/guessed value means "no headless
+   signal available here", not a hard guarantee). A real `embodiment_kind`
+   sourced from the coordinator's `local-body:`/`fleet-body:` spawn-
+   reservation handle (see Phase 1 item 2's `_active_headless_handle`)
+   remains the still-open, more-authoritative follow-on if the operator
+   wants the tag to stop being a guess — tracked here, not built today.
+   `_activity_phrase()` prefers a real `wt_live` signal, else falls back in
+   priority order: hold reason (truncated to 40 chars) -> awaiting-steer ->
+   raw lifecycle status (`"queued"`/`"queued for a worker"` when pooled/
+   `"awaiting approval"`/`"claimed, starting…"`/`"in progress"`/terminal
+   labels).
+3. **Manifest:** `entry.subtitle` renamed from `"repo_name"` to the new
+   `"subtitle"` field (matching the field NAME CodeSpaces/Containers already
+   use for the same mechanism — a naming convention, not a functional
+   requirement). `title`/`repo_name` columns removed; remaining column
+   `priority`s renumbered contiguously (1-5); `artifacts_summary` dropped
+   its now-meaningless declared `priority` (it's the flex column, never
+   dropped, so a declared priority number was dead weight).
+
+**What did NOT change:** `entry.title` stays `"title"` (still needed for
+`{title}` action templating, e.g. the `kick` action, and for the non-
+`columns` fallback render path) — removing a field from `columns` (display)
+never touches `entry.title`/`entry.id` (identity/templating), a distinct,
+unrelated manifest concern confirmed by direct code reading before editing.
+No `worktree-manager` engine code changed at all; `_column_subtitle` already
+did exactly what was needed.
+
+**Validation (2026-09-29):** New tests in `test_board_cli.py`
+(`test_activity_phrase_prioritizes_wt_live_then_hold_then_lifecycle`,
+`test_embodiment_tag_only_marks_the_non_default_cli_interface`,
+`test_subtitle_for_task_assembles_tag_repo_title_and_phrase`,
+`test_build_populates_subtitle_and_drops_title_repo_from_columns`).
+`agent-dispatch` full suite: **3563 passed / 1 pre-existing failed / 20
+skipped** (same lone flake as the prior entry, `test_supervisor.py::
+test_idle_headless_fleet_nudge_includes_remote_host`). `worktree-manager`
+full suite: **1541 passed / 4 pre-existing failed / 5 skipped** — note the
+total is naturally lower than the prior entry's 1554/1564 because this
+session's `git sync` (see below) pulled in 3 new `origin/dev` commits with
+their own test churn, not a regression; `--collect-only` confirmed 1550
+tests collected, matching 1541+4+5 exactly. All 4 failures are the SAME
+pre-existing/environmental ones already logged in the prior Journal entry
+(2 of the previous run's 5 — the `test_registered_pivot_conditional_
+actions_filter_by_when` load-sensitive flake and the `test_steering_card_
+and_form_actions_gate_and_drive` flake — simply didn't reproduce this run,
+consistent with them being flakes, not fixed regressions).
+
+**Side quest, unrelated to this change but blocking `create-pr` on this
+worktree:** `check-vendored-libs-sync` failed with `agent-procutil`
+"COPIES OUT OF SYNC" between `plugins/agent-dispatch/libs/agent-procutil`,
+`worktree-manager/libs/agent-procutil`, and `plugins/agent-worktrees/libs/
+agent-procutil`. Root-caused (not a real repo defect): both non-
+agent-worktrees consumers already use the `--uv-editable` reference form
+(no real committed copy at all -- `git ls-files` confirmed zero tracked
+files under either path); this session's own `uv pip install -e`/`uv sync`
+calls materialized a real LOCAL editable-install cache (`build/`, `*.egg-
+info`) at those exact paths, which `sync-vendored-libs.py --check` then
+mistook for a genuine (empty, missing `__init__.py`) vendored copy and
+flagged as drifted against `agent-worktrees`' real one. Deleting those
+local-only leftover directories (they contained nothing but stale build
+artifacts) made the check pass again -- this will reproduce for ANY
+contributor who runs this effort's own documented build/test commands in a
+fresh worktree before opening a PR; worth a `.gitignore` follow-up in
+`tools/sync-vendored-libs.py`'s own repo if it recurs, but out of scope for
+this effort.
+
 

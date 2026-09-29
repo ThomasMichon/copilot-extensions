@@ -167,6 +167,96 @@ def _repo_name(value: object) -> str | None:
     return text.rsplit("/", 1)[-1].removesuffix(".git") if text else None
 
 
+#: Operator feedback 2026-09-29: standardize the Tasks pane row on the same
+#: two-line shape Worktrees/CodeSpaces/Containers already use -- line 1 is
+#: purely columnized (id, phase/status, stats, trailing claims), line 2 is
+#: the title + a short activity phrase (`board_cli._subtitle_for_task`),
+#: with an optional bracketed interface tag (mirroring Worktrees'
+#: `[system]`/`[delegate]`/`[acp]` title-prefix convention in `derive.py`).
+_MAX_HOLD_REASON_CHARS = 40
+
+
+def _embodiment_tag(task: dict, wt_live: str | None) -> str | None:
+    """The optional bracketed interface tag for the subtitle line, mirroring
+    Worktrees' own title-prefix convention (`derive.norm`'s `_tag`): only the
+    NON-default interface gets a visible mark. A headless body (pool/dedicated
+    agent) is the default embodiment for a Task, so it stays untagged; a
+    CLI-embodied (interactive, non-railroaded) session gets ``"cli"``.
+
+    This is a best-effort HEURISTIC, not an authoritative `embodiment_kind`
+    field (that would need a new board-facing field sourced from the
+    coordinator's `local-body:`/`fleet-body:` spawn-reservation handle --
+    still just a Runbook-tracked follow-on, not implemented here): a
+    confirmed headless liveness signal (``wt_live`` non-``None``) means
+    "definitely headless" -> no tag; an owned, live-status task with NO
+    headless signal is assumed CLI-embodied (the only other embodiment Phase
+    1/2 support) -> ``"cli"``. A task not yet embodied at all has no
+    interface to tag.
+    """
+    status = task.get("status")
+    if status not in ("claimed", "started"):
+        return None
+    if not task.get("owner_session_id"):
+        return None
+    return None if wt_live is not None else "cli"
+
+
+def _activity_phrase(task: dict, wt_live: str | None) -> str:
+    """The short, human-readable phrase after the subtitle's `` - `` --
+    whatever is most useful to know about this task's activity right now.
+    Prefers a real headless liveness signal (``wt_live``) when there is one;
+    otherwise falls back to a phrase derived from the task's own lifecycle
+    fields, in priority order: an operator hold, then awaiting-steer, then
+    the raw status."""
+    if wt_live is not None:
+        return wt_live
+    hold_reason = task.get("hold_reason")
+    if hold_reason:
+        reason = str(hold_reason).strip()
+        if len(reason) > _MAX_HOLD_REASON_CHARS:
+            reason = reason[: _MAX_HOLD_REASON_CHARS - 1].rstrip() + "…"
+        return f"paused — {reason}" if reason else "paused"
+    if task.get("awaiting_steer"):
+        return "awaiting your steer"
+    status = task.get("status")
+    if status == "suspended":
+        return "suspended — no live session"
+    if status == "queued":
+        return "queued for a worker" if task.get("pool") else "queued"
+    if status == "proposed":
+        return "awaiting approval"
+    if status == "claimed":
+        return "claimed, starting…"
+    if status == "started":
+        return "in progress"
+    if status == "completed":
+        return "completed"
+    if status == "confirmed":
+        return "confirmed"
+    if status in ("abandoned", "dead_letter"):
+        return "abandoned"
+    return ""
+
+
+def _subtitle_for_task(task: dict, *, wt_live: str | None) -> str:
+    """Compose the Tasks pane's standardized second-line subtitle:
+    ``[tag] <repo> <title> - <activity phrase>`` (tag and repo are each
+    optional; the phrase is omitted only when genuinely empty). Mirrors the
+    same shape Worktrees/CodeSpaces/Containers already use, so a Task row
+    reads with the same at-a-glance rhythm as any other pivot's row."""
+    parts: list[str] = []
+    tag = _embodiment_tag(task, wt_live)
+    if tag:
+        parts.append(f"[{tag}]")
+    repo_name = task.get("repo_name") or _repo_name(task.get("repo"))
+    if repo_name:
+        parts.append(str(repo_name))
+    parts.append(str(task.get("title") or task.get("id") or "(untitled)"))
+    prefix = " ".join(parts)
+    phrase = _activity_phrase(task, wt_live)
+    return f"{prefix} - {phrase}" if phrase else prefix
+
+
 def _cli_openable(task: dict) -> bool:
     """Whether the task is eligible for Phase 7's interactive embodiment.
 
@@ -350,6 +440,11 @@ def _build(
         row["has_charter"] = bool(task.get("title"))
         row["charter"] = _charter_for_task(task)
         row.setdefault("repo_name", _repo_name(task.get("repo")))
+        # Operator feedback 2026-09-29: standardize on the Worktrees/
+        # CodeSpaces/Containers two-line row shape -- `columns` (line 1)
+        # stays pure stats, `subtitle` (line 2) carries the title + an
+        # activity phrase (and an optional `[cli]` interface tag).
+        row["subtitle"] = _subtitle_for_task(row, wt_live=row["wt_live"])
         repo = str(row.get("repo") or "")
         if repo and claimed_worktree:
             relay_keys.append((repo, claimed_worktree))
