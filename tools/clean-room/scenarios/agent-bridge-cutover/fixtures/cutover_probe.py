@@ -381,6 +381,7 @@ def check_abrupt_kill_recovery(python):
     proc = None
     proc2 = None
     alive_dummy = None
+    sentinel_dummy = None
     session_id = "abrupt-kill-sim-session"
     sentinel_id = "abrupt-kill-sim-sentinel"
     index_path = os.path.join(c.root, "hosts", "index.json")
@@ -410,11 +411,15 @@ def check_abrupt_kill_recovery(python):
             return None
 
     try:
-        # A pid that stays alive for the check's duration -- standing in for
-        # the session-host child itself (`host_pid`/`child_pid`); the claim
-        # contract under test is ownership (owner_generation/owner_pid), not
-        # host liveness, but a live host_pid keeps the record realistic.
-        alive_dummy = subprocess.Popen([python, "-c", "import time; time.sleep(300)"])
+        # A disposable dummy standing in for the sentinel's session-host
+        # child. Reaping a dead/orphan record doesn't just drop the index
+        # entry -- it force-kills the record's own `host_pid`/`child_pid`
+        # too (`session_host_connection.py`), so this process is expected to
+        # die as part of the sentinel being reaped and must NEVER be reused
+        # for the real test record below (a real bug an earlier revision
+        # had: reusing it meant the "real" record's host was already dead
+        # before the ownership contract was even exercised).
+        sentinel_dummy = subprocess.Popen([python, "-c", "import time; time.sleep(300)"])
 
         # Seed the sentinel BEFORE the daemon starts -- an orphan (no
         # adoptable DB session) the daemon's own one-shot startup scan is
@@ -423,8 +428,8 @@ def check_abrupt_kill_recovery(python):
             "from agent_bridge.session_host.host_index import HostIndex, HostRecord\n"
             f"idx = HostIndex({index_path!r})\n"
             "idx.register(HostRecord("
-            f"session_id={sentinel_id!r}, port=1, host_pid={alive_dummy.pid}, "
-            f"child_pid={alive_dummy.pid}))\n"
+            f"session_id={sentinel_id!r}, port=1, host_pid={sentinel_dummy.pid}, "
+            f"child_pid={sentinel_dummy.pid}))\n"
         )
         seed = _run_snip(seed_sentinel)
         r.check(seed.returncode == 0,
@@ -450,6 +455,10 @@ def check_abrupt_kill_recovery(python):
             time.sleep(0.25)
         if not r.check(sentinel_gone, "sentinel orphan reaped -- one-shot startup scan has run"):
             return r
+
+        # A FRESH, still-alive dummy for the real test record -- never the
+        # sentinel's own dummy, which the reap above already force-killed.
+        alive_dummy = subprocess.Popen([python, "-c", "import time; time.sleep(300)"])
 
         # Only now register the real test record -- nothing else ever
         # revisits it for the rest of this generation's life (the scan
@@ -541,7 +550,7 @@ def check_abrupt_kill_recovery(python):
         )
         return r
     finally:
-        for p in (proc, proc2, alive_dummy):
+        for p in (proc, proc2, alive_dummy, sentinel_dummy):
             try:
                 if p is not None and p.poll() is None:
                     p.terminate()

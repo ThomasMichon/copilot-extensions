@@ -335,69 +335,58 @@ test that closes the gap.
 ## Journal
 
 ### 2026-09-29 — Phase 5 landed partially (abrupt-termination drill + clean-room extension; live-turn drill deferred) (TBD)
-- **What's real here.** Extended the pre-existing `tools/clean-room/scenarios/
-  agent-bridge-cutover` Tier-P scenario (found already covering the daemon-level
-  routing-flip/drain-gate/breadcrumb-recovery mechanism, predating this effort)
-  with a new `abrupt-kill-recovery` check in `fixtures/cutover_probe.py`: a
-  real daemon registers an unclaimed session-host record for itself (after
-  its own one-shot startup reattach scan has already run, so it survives),
-  claims it for its own real, live pid; is then SIGKILLed (no drain, no
-  `/api/v1/shutdown` handshake -- the exit contract's own release path never
-  runs); and a fresh generation's own claim attempt against that now-dead pid
-  is asserted to succeed (no `ClaimConflict`) and durably transfer ownership,
-  invoking the real `HostIndex.claim()` contract directly (the exact call
-  `_claim_host_record` makes). Also confirms a real fresh daemon starts
-  cleanly afterward and publishes its own new active endpoint. Sanity-checked
-  by fault-injecting an inverted `zdd.claims.is_recoverable` (with
-  `PYTHONPATH` correctly forcing the daemon subprocess to import the edited
-  source, not its installed venv copy -- an earlier sanity run without this
-  silently exercised the unmodified installed copy and gave a false PASS,
-  caught before landing) and confirming the check correctly FAILS; reverted
-  immediately. Ran the full 4-check probe 5x locally with no flakiness.
-- **Corrected after automated review.** The first version of this check
-  seeded the record *before* spawning the daemon and stamped its
-  `owner_generation`/`owner_pid` with synthetic placeholders (a fabricated
-  "stale-gen-sim" string, a separately-started-and-waited dead pid) rather
-  than the daemon's own real identity. Review correctly caught that this
-  record was reaped by the daemon's own one-shot startup reattach scan
-  (any session-host record with no adoptable DB session gets reaped the
-  instant that scan runs, whether the record predates startup or is written
-  moments before it) *before* the simulated "abrupt kill" ever touched a
-  claim that mattered -- the check could pass without ever exercising real
-  recovery. Also caught: the ownership-transfer assertion trusted raw
-  subprocess stdout without first requiring the subprocess to have actually
-  succeeded, so a crashed check-snippet (empty stdout) could false-PASS
-  merely by not being byte-identical to the stale placeholder string. Fixed
-  both: the record is now registered *after* the daemon's one-shot startup
-  scan has had time to run (so nothing ever revisits it for the rest of that
-  generation's life), claimed with the *real* daemon's own real pid, and
-  every downstream check gates on `returncode == 0` *and* an exact expected
-  stdout match -- there is no path left where a crash or a no-op can read as
-  a pass.
-- **Corrected a second time after another review round.** That second
-  version still had two real gaps, both caught: (1) a fixed `time.sleep(1.5)`
-  guessed at how long the one-shot startup scan takes rather than observing
-  it -- a slower host could still register the test record before the scan
-  runs, letting it get reaped by the *very* scan the check is trying to get
-  past; fixed by seeding a disposable **sentinel** orphan record *before*
-  daemon startup and polling until it is reaped, an observable signal that
-  the one-shot scan has actually run, before registering the real test
-  record. (2) recovery was "verified" by a disconnected direct
-  `HostIndex.claim()` call standing in for "a new generation," never by the
-  real fresh daemon's own recovery path -- so the check could pass while the
-  actual production reattach scan silently did nothing. Fixed by polling the
-  on-disk index *after the real fresh daemon starts* and requiring either
-  the record to be gone (reaped) or reclaimed under that daemon's own real
-  pid specifically -- not merely "some different value" (a port can in
-  principle be reused). Re-verified via fault injection with `PYTHONPATH`
-  correctly forcing the daemon subprocess to import the edited `zdd` source
-  (an earlier sanity-check run without this silently exercised the
-  unmodified installed venv copy and gave a false PASS, caught before
-  claiming it as verified) -- the corrected check now correctly FAILS.
-  Documented the new check in `tools/clean-room/README.md`'s catalog and the
-  scenario manifest's own description (both previously left listing only
-  the original three checks). Ran the full 4-check probe stable across
+- **What's real here (final implementation).** Extended the pre-existing
+  `tools/clean-room/scenarios/agent-bridge-cutover` Tier-P scenario (found
+  already covering the daemon-level routing-flip/drain-gate/breadcrumb-
+  recovery mechanism, predating this effort) with a new `abrupt-kill-recovery`
+  check in `fixtures/cutover_probe.py`:
+  1. A real daemon starts. A disposable **sentinel** orphan record is seeded
+     and polled until the daemon's own ONE-SHOT startup reattach scan
+     (`app.py`'s `_reattach_session_hosts_bg`, never periodic) reaps it --
+     an observable signal that scan has actually run, not a timing guess.
+  2. Only then is the real test record registered (with a *fresh* dummy
+     process, never the sentinel's own -- reaping force-kills a record's
+     `host_pid`/`child_pid`, so reusing it would mean the "real" record's
+     host was already dead before the ownership contract is even
+     exercised) and claimed for the live daemon's own real, live pid --
+     invoking the real `HostIndex.claim()` contract directly (the exact
+     call `_claim_host_record` makes; a real daemon has no API surface to
+     discover and claim an ad hoc record with no live session-host child of
+     its own, so this is the honest boundary of what a stdlib-only probe
+     can drive without building a full session-host implementation).
+  3. That daemon is SIGKILLed -- no drain, no `/api/v1/shutdown` handshake,
+     so the exit contract's own release path never runs and the claim is
+     durably stranded exactly as recorded.
+  4. A fresh daemon starts. Its OWN real startup reattach scan (the SAME
+     production code path, not a synthetic stand-in) is polled via the
+     on-disk index and required to either reap the record or reclaim it
+     under that daemon's own real pid specifically -- never merely "some
+     different value" (a port, or even a pid, could in principle be
+     reused).
+  Sanity-checked by fault-injecting an inverted `zdd.claims.is_recoverable`
+  (with `PYTHONPATH` correctly forcing the daemon subprocess to import the
+  edited source rather than its installed venv copy -- an earlier sanity
+  run without this silently exercised the unmodified installed copy and
+  gave a false PASS, caught before claiming verification) and confirming
+  the check correctly FAILS; reverted immediately. Documented the new
+  check in `tools/clean-room/README.md`'s catalog and the scenario
+  manifest's own description. Ran the full 4-check probe stable across
   many runs.
+- **Review history (three rounds, each catching a real gap -- kept brief;
+  full detail in the PR/commit history).** (1) The first version seeded a
+  synthetic placeholder claim *before* the daemon started, so the daemon's
+  own one-shot startup scan reaped it before the simulated kill ever
+  touched a claim that mattered, and trusted raw subprocess stdout without
+  requiring the subprocess to have actually succeeded (a crash's empty
+  stdout could false-PASS). (2) The fix's `time.sleep(1.5)` guessed at scan
+  timing rather than observing it, and "recovery" was verified by a
+  disconnected direct `HostIndex.claim()` call standing in for "a new
+  generation," never by the real fresh daemon's own recovery path. (3) The
+  sentinel and the real test record shared one dummy process, so the
+  sentinel's own reap-triggered kill left the "real" record's host already
+  dead before the contract was exercised. Each round's fix is described in
+  its own commit message; the final, current design (above) folds in all
+  three corrections.
 - **What's honestly NOT delivered.** The Plan's first bullet asks for a live
   session's Copilot *turn* to survive a cutover with zero observed
   disruption -- that needs a real model/ACP child in the loop synchronized
