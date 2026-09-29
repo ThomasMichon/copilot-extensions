@@ -34,13 +34,11 @@ from ..models import (
     LiveSessionListResponse,
     LiveSessionVenue,
     RegisterLiveSessionRequest,
-    SET_MODE_CONTROL,
     SendMessageRequest,
     SendMessageResult,
-    SetModeRequest,
-    SetModeResult,
 )
 from ..events import EventLog
+from ..live_controls import SET_MODE_CONTROL, SetModeRequest, SetModeResult
 from ..live_representation import (
     progress_from_events,
     await_turn_reply,
