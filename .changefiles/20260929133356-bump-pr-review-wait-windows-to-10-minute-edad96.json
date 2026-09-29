@@ -1,0 +1,9 @@
+{
+  "comment": "Bump PR review wait windows to 10 minutes and add a bounded 3-round strive-for-Approve loop for contributor PRs in the contribution guidance",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}

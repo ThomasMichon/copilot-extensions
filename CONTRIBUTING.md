@@ -229,15 +229,17 @@ copilot-extensions create            # isolated worktree (no mux/session)
 #   Complete the documentation-impact review below.
 copilot-extensions create-pr         # squashes the worktree, pushes pr/<slug>,
                                      # and (auto_open) opens the GitHub PR
-#   → wait ~5 minutes for Copilot's review to land
+#   → wait up to 10 minutes for Copilot's review to land (re-requesting a
+#     review is itself not instant -- give it room to actually run)
 #   → Contributor PR, Approved: merge. Owner-authored PR, clean Comment (no
 #     Medium/High findings open): merge -- that's the passing verdict here,
 #     Copilot structurally never renders Approve on this repo's own PRs.
-#     Otherwise: address findings, push, wait ~5 minutes for the automatic
-#     post-push review; still not passing -> re-request review via the API
-#     (see "Requesting a fresh review" below), wait ~5 minutes again. Repeat
-#     until passing, or until the contributor-PR-only maintainer bypass
-#     below applies. See "Waiting for a verdict" for the full loop.
+#     Otherwise: address findings, push, wait up to 10 minutes for the
+#     automatic post-push review; still not passing -> re-request review via
+#     the API (see "Requesting a fresh review" below), wait up to 10 minutes
+#     again. A Contributor PR gets up to 3 such rounds striving for a real
+#     Approve before the maintainer bypass below may apply. See "Waiting for
+#     a verdict" for the full loop.
 copilot-extensions pr-merge ThomasMichon/copilot-extensions <#> --now   # MANUAL squash-merge (you own the merge)
 copilot-extensions finalize          # clean up the worktree
 ```
@@ -258,24 +260,29 @@ copilot-extensions finalize          # clean up the worktree
 > and from merge authorization, see below):** `Approve` satisfies Copilot's
 > verdict gate. `Comment` with **zero Medium/High-severity findings open**
 > also satisfies it — on an owner-authored PR that's the passing shape
-> outright; on a Contributor PR it's the accepted stall-breaker, but only
-> **after one full loop** (step 5 below) — a first-round clean `Comment`
-> still needs another review attempt, not an immediate merge. Any
-> Medium/High finding still open blocks proceeding at all, regardless of
-> verdict shape. Once that condition holds, a still-open Low-severity
-> finding stays whatever it already was — genuinely valuable, fix it;
-> already considered and dismissed, don't spin a further review round
-> solely to make the comment thread read zero. **Required status checks are
-> a separate merge gate, not part of Copilot's verdict** — a clean review
-> can land before or after checks finish; don't wait on checks to decide
-> whether the verdict gate is satisfied. **Satisfying Copilot's verdict gate
-> is never merge authorization by itself: a Contributor PR still requires a
-> separate Maintainer-approval review before merging** (see "Review" earlier
-> in this section); only the repo owner's own bypassed PRs skip that second
-> gate.
+> outright; on a Contributor PR it's only the accepted stall-breaker **after
+> up to 3 rounds** (step 5 below) of genuinely striving for a real `Approve`
+> — a first-round clean `Comment` still needs another review attempt, not
+> an immediate merge. Any Medium/High finding still open blocks proceeding
+> at all, regardless of verdict shape. Once that condition holds, a
+> still-open Low-severity finding stays whatever it already was — genuinely
+> valuable, fix it; already considered and dismissed, don't spin a further
+> review round solely to make the comment thread read zero. **Required
+> status checks are a separate merge gate, not part of Copilot's verdict** —
+> a clean review can land before or after checks finish; don't wait on
+> checks to decide whether the verdict gate is satisfied. **Satisfying
+> Copilot's verdict gate is never merge authorization by itself: a
+> Contributor PR still requires a separate Maintainer-approval review before
+> merging** (see "Review" earlier in this section); only the repo owner's
+> own bypassed PRs skip that second gate.
 > The full loop below covers cursor hygiene, re-review requests, and the
 > Contributor-vs-owner verdict-shape difference in detail — read it once,
 > then apply this TL;DR on every subsequent round rather than re-deriving it.
+> **Endeavor to get a genuine `Approve` on a Contributor PR** — the 3-round
+> bound exists so an overly stubborn or cautious reviewer can't block a
+> merge indefinitely, not as a target to race toward; a Maintainer may
+> short-circuit earlier only when the stall is genuinely unresolvable (see
+> step 5), not as a default shortcut.
 
 **Copilot code review can only ever render two outcomes: `Approve` or
 `Comment`.** (There is no "Request changes" capability in Copilot code
@@ -324,7 +331,7 @@ need `Approve`; the repo owner's own PRs need a `Comment` review with
 nothing Medium/High left open (see the note above for the other
 Maintainers). Each wait below uses `pr-watch wait <owner>/<repo>
 <PR> --since <cursor> --until approved,commented,changes_requested
---timeout 300` — scope `--until` to actual review transitions (`--until
+--timeout 600` — scope `--until` to actual review transitions (`--until
 any` also wakes on unrelated transitions like checks or conflicts, which is
 not itself a review result), **check `events[].review.user` before treating
 a wake as Copilot's verdict** (this same `--until` set also wakes on an
@@ -334,12 +341,16 @@ Copilot's verdict and follows the ordinary human-review path instead), and
 `pr-watch`/`pr-status` returns, or `pr-watch cursor <owner>/<repo> <PR>`
 right before waiting) — reusing a stale cursor (e.g. always passing
 `--since r0`) can report an *old* review instead of waiting for the new
-one, since `r0` is the lowest possible baseline, not a "from now" marker:
+one, since `r0` is the lowest possible baseline, not a "from now" marker.
+**Wait up to 10 minutes per attempt, not ~5** — triggering a review (an
+initial open, a push, or an explicit re-request) is not instant, so give
+each attempt real room to actually land before treating it as a timeout:
 
-1. Open (or update) the PR, then wait **~5 minutes** (order of minutes, not
-   hours) for Copilot's review to land. **Nothing landed (a timeout, not a
-   review event):** there's nothing to address or push yet — skip straight
-   to step 4's re-request action rather than inventing an unrelated commit.
+1. Open (or update) the PR, then wait **up to 10 minutes** (order of
+   minutes, not hours) for Copilot's review to land. **Nothing landed (a
+   timeout, not a review event):** there's nothing to address or push yet —
+   skip straight to step 4's re-request action rather than inventing an
+   unrelated commit.
 2. **Contributor PR, `Approve` landed:** proceed to merge (subject to the
    separate required-approving-review gate for a Contributor's PR — see
    "Review" above; Copilot's own `Approve` never substitutes for that).
@@ -348,8 +359,8 @@ one, since `r0` is the lowest possible baseline, not a "from now" marker:
    which (Low-severity or already-addressed) findings were dismissed and
    why in the merge/commit message.
 3. **`Comment` landed, and addressing it requires an actual change:**
-   address the genuinely valuable findings, push the update, then wait ~5
-   minutes for the automatic post-push review and go to step 4.
+   address the genuinely valuable findings, push the update, then wait up
+   to 10 minutes for the automatic post-push review and go to step 4.
    **`Comment` landed, but every finding is dismissed/explained with no
    actual change needed:** there's nothing new for a re-review to see —
    skip the push and go straight to step 4's re-request action.
@@ -357,16 +368,25 @@ one, since `r0` is the lowest possible baseline, not a "from now" marker:
    clean `Comment` (owner-authored PR):** merge. **Still not there** (a
    `Comment` with a Medium/High finding still open, or the post-push wait
    also timed out with nothing landing): explicitly re-request a review —
-   see "Requesting a fresh review" below — then wait ~5 minutes again and
-   return to step 2. Do not just keep pushing small commits hoping the next
-   automatic pass flips on its own, and do not treat a timeout here
+   see "Requesting a fresh review" below — then wait up to 10 minutes again
+   and return to step 2. Do not just keep pushing small commits hoping the
+   next automatic pass flips on its own, and do not treat a timeout here
    differently from a `Comment` — both mean "not yet passing, re-request."
+   **Count this as one round** (steps 2→4 once through) — a Contributor PR
+   gets up to 3 rounds before step 5's bypass may apply; genuinely strive
+   for a real `Approve` across those rounds rather than treating the bound
+   as a target.
 5. **Genuine unresolvable-finding stall, Contributor PRs only:** if the
-   loop above has run at least once on a Contributor's PR and the
-   *current* `Comment` review's remaining findings are **all Low
-   severity** (no Medium or High findings open), Copilot's *verdict-shape*
-   requirement (this step) is satisfied without chasing a further
-   `Approve` — state which findings were dismissed and why. **This is
+   loop above has run through **up to 3 rounds** on a Contributor's PR
+   without landing `Approve`, and the *current* `Comment` review's
+   remaining findings are **all Low severity** (no Medium or High findings
+   open), Copilot's *verdict-shape* requirement (this step) is satisfied
+   without chasing a further `Approve` — state which findings were
+   dismissed and why. This bound exists so a genuinely stubborn or overly
+   cautious reviewer can't block a merge indefinitely — it is not license
+   to invoke the bypass at round 1 just because a first pass came back
+   `Comment`; use the full 3 rounds when the reviewer keeps surfacing
+   findings worth engaging with. **This is
    strictly about Copilot's own verdict and does NOT touch the separate,
    always-required Maintainer-approval gate** for a Contributor's PR (see
    "Review" earlier in this section) — some Maintainer still must actually
