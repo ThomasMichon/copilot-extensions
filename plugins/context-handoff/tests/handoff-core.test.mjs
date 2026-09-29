@@ -1807,7 +1807,7 @@ test("listWorktreeSessions returns sessions/handoffs when agent-worktrees resolv
       return "wt-example";
     }
     if (bin === "agent-worktrees" && argv[0] === "list-sessions") {
-      assert.deepEqual(argv, ["list-sessions", "--worktree", "wt-example", "--json"]);
+      assert.deepEqual(argv, ["list-sessions", "--worktree", "wt-example", "--all-projects", "--json"]);
       return JSON.stringify({
         sessions: [{ id: "s1", is_head: true, state: "active", name: "Fix parser", created_at: "t1" }],
         handoffs: [{ predecessor: "s0", successor: "s1", token: "manual-1", linked_at: "t2" }],
@@ -1906,10 +1906,14 @@ test("abortHandoffTask abandons the agent-dispatch task with the given reason", 
     if (argv[0] === "show") {
       return JSON.stringify({ id: "task-42", labels: ["handoff"], source: "context-handoff", status: "queued" });
     }
+    if (argv[0] === "payload") return "";
     return "{}";
   };
   const result = abortHandoffTask("C:\\repo", "task-42", "no longer needed", execute);
-  assert.deepEqual(result, { ok: true, id: "task-42", kind: "task" });
+  assert.equal(result.ok, true);
+  assert.equal(result.id, "task-42");
+  assert.equal(result.kind, "task");
+  assert.match(result.ledgerNote, /handoffs-check/);
   assert.deepEqual(calls, [
     { bin: "agent-dispatch", argv: ["show", "task-42"] },
     {
@@ -1919,6 +1923,7 @@ test("abortHandoffTask abandons the agent-dispatch task with the given reason", 
         "--expected-status", "queued",
       ],
     },
+    { bin: "agent-dispatch", argv: ["payload", "task-42", "--raw"] },
   ]);
 });
 
@@ -1972,32 +1977,78 @@ test("abortHandoffTask degrades safe on a CLI failure", () => {
 });
 
 test("abortFileHandoff marks an unconsumed file handoff aborted, never claiming a fake consumer", () => {
-  const dir = mkdtempSync(join(tmpdir(), "context-handoff-abort-"));
+  withTempHome(() => {
+    const dir = mkdtempSync(join(tmpdir(), "context-handoff-abort-"));
+    try {
+      const path = join(dir, "handoff-to-abort.json");
+      writeJsonAtomic(path, {
+        kind: "context-handoff",
+        version: 2,
+        id: "handoff-to-abort",
+        storage: "file",
+        sessionId: "predecessor-1",
+        cwd: "C:\\repo",
+        title: "Continue",
+        promptText: "stored markdown",
+        consumed: false,
+        consumedAt: null,
+      });
+      writeSessionStateHandoff({
+        sid: "predecessor-1",
+        promptText: "stored markdown",
+        stored: { storage: "file", id: "handoff-to-abort" },
+        seed: "seed text",
+      });
+      const result = abortFileHandoff(
+        "C:\\repo", "aborting-session", "handoff-to-abort", path, "changed my mind",
+      );
+      assert.equal(result.ok, true);
+      assert.equal(result.record.consumed, true);
+      assert.equal(result.record.consumedBySession, null);
+      assert.equal(result.record.aborted, true);
+      assert.equal(result.record.abortedBySession, "aborting-session");
+      assert.equal(result.record.abortReason, "changed my mind");
+      assert.match(result.ledgerNote, /handoffs-check/);
+      const onDisk = JSON.parse(readFileSync(path, "utf-8"));
+      assert.equal(onDisk.aborted, true);
+      // Best-effort side effect: the predecessor's own session-state marker
+      // is also retired, so it stops reporting `consumed: false` forever.
+      const sessionState = readSessionStateHandoff("predecessor-1");
+      assert.equal(sessionState.record.consumed, true);
+      assert.equal(sessionState.record.aborted, true);
+      assert.equal(sessionState.record.abortReason, "changed my mind");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+test("abortFileHandoff reclaims a stale lock left by a crashed consumer instead of failing forever", () => {
+  const dir = mkdtempSync(join(tmpdir(), "context-handoff-abort-stale-lock-"));
   try {
-    const path = join(dir, "handoff-to-abort.json");
+    const path = join(dir, "handoff-stale-lock.json");
     writeJsonAtomic(path, {
       kind: "context-handoff",
       version: 2,
-      id: "handoff-to-abort",
+      id: "handoff-stale-lock",
       storage: "file",
       sessionId: "predecessor-1",
       cwd: "C:\\repo",
-      title: "Continue",
       promptText: "stored markdown",
       consumed: false,
       consumedAt: null,
     });
+    // A lock naming a PID that cannot possibly still be running (crashed
+    // holder), the same shape consumeFileHandoffOnce's own stale-reclaim
+    // test uses.
+    writeFileSync(`${path}.consume.lock`, JSON.stringify({
+      pid: 999999999, sessionId: "crashed-consumer", createdAt: new Date().toISOString(),
+    }), "utf-8");
     const result = abortFileHandoff(
-      "C:\\repo", "aborting-session", "handoff-to-abort", path, "changed my mind",
+      "C:\\repo", "aborting-session", "handoff-stale-lock", path, "reclaim test",
     );
     assert.equal(result.ok, true);
-    assert.equal(result.record.consumed, true);
-    assert.equal(result.record.consumedBySession, null);
     assert.equal(result.record.aborted, true);
-    assert.equal(result.record.abortedBySession, "aborting-session");
-    assert.equal(result.record.abortReason, "changed my mind");
-    const onDisk = JSON.parse(readFileSync(path, "utf-8"));
-    assert.equal(onDisk.aborted, true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -2060,7 +2111,7 @@ test("abortFileHandoff refuses to abort while a real consume holds the lock (nev
       "C:\\repo", "aborting-session", "handoff-in-flight", path, "too slow",
     );
     assert.equal(result.ok, false);
-    assert.match(result.message, /currently being consumed/);
+    assert.match(result.message, /already locked/);
     // The abort attempt must not have deleted the real consumer's lock.
     assert.ok(existsSync(`${path}.consume.lock`));
     const onDisk = JSON.parse(readFileSync(path, "utf-8"));

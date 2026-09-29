@@ -1835,15 +1835,14 @@ export function markFileHandoffConsumed(path, record, sid) {
   return consumed;
 }
 
-export function consumeFileHandoffOnce(
-  cwd, sid, handoffId, explicitPath = null,
-  options = {},
-) {
-  const found = readFileHandoff(cwd, sid, handoffId, explicitPath, options);
-  if (!found) {
-    return { ok: false, message: "File-backed handoff was not found." };
-  }
-  const lockPath = `${found.path}.consume.lock`;
+// Shared lock-acquire-with-stale-reclaim for `<handoff>.json.consume.lock`,
+// used by BOTH `consumeFileHandoffOnce` and `abortFileHandoff` so an abort
+// racing a real consume (or vice versa) is refused rather than silently
+// racing an atomic write -- and so a lock abandoned by a crashed holder
+// doesn't permanently block either operation. Returns `{ ok: true, lockFd }`
+// on success (caller owns closing/unlinking the lock when done) or
+// `{ ok: false, busy, claimedBySession, message }` on failure.
+function acquireFileHandoffLockWithReclaim(lockPath, sid, describeTarget) {
   let lockFd = null;
   for (let attempt = 0; attempt < 2 && lockFd === null; attempt++) {
     try {
@@ -1860,7 +1859,7 @@ export function consumeFileHandoffOnce(
         try { unlinkSync(lockPath); } catch { /* nothing to clean */ }
         return {
           ok: false,
-          message: `Could not lock file-backed handoff for consumption: ${error.message}`,
+          message: `Could not lock ${describeTarget()}: ${error.message}`,
         };
       }
       let ownerPid = null;
@@ -1918,8 +1917,7 @@ export function consumeFileHandoffOnce(
           return {
             ok: false,
             busy: true,
-            message:
-              `Handoff ${found.record.id || found.path} recovery is already active.`,
+            message: `${describeTarget()} recovery is already active.`,
           };
         }
         try {
@@ -1952,12 +1950,29 @@ export function consumeFileHandoffOnce(
         busy: true,
         claimedBySession: ownerSessionId,
         message:
-          `Handoff ${found.record.id || found.path} is already being consumed ` +
-          `by session \`${ownerSessionId || "unknown"}\`. ` +
-          "Do not replay it; retry only after the active consumer finishes.",
+          `${describeTarget()} is already locked ` +
+          `by session \`${ownerSessionId || "unknown"}\` (an active consume or ` +
+          "abort is in progress). Retry only once that finishes.",
       };
     }
   }
+  return { ok: true, lockFd };
+}
+
+export function consumeFileHandoffOnce(
+  cwd, sid, handoffId, explicitPath = null,
+  options = {},
+) {
+  const found = readFileHandoff(cwd, sid, handoffId, explicitPath, options);
+  if (!found) {
+    return { ok: false, message: "File-backed handoff was not found." };
+  }
+  const lockPath = `${found.path}.consume.lock`;
+  const acquired = acquireFileHandoffLockWithReclaim(
+    lockPath, sid, () => `handoff ${found.record.id || found.path}`,
+  );
+  if (!acquired.ok) return acquired;
+  const lockFd = acquired.lockFd;
   try {
     const current = readFileHandoff(
       cwd, sid, handoffId, found.path, options,
@@ -2029,9 +2044,9 @@ export function findHandoffTask(cwd, worktree) {
   return mine[0] || null;
 }
 
-export function readTaskPayloadRaw(cwd, taskId) {
+export function readTaskPayloadRaw(cwd, taskId, execute = runCli) {
   try {
-    return runCli( // marketplace-isolation: allow agent-dispatch-management
+    return execute( // marketplace-isolation: allow agent-dispatch-management
       "agent-dispatch", ["payload", taskId, "--raw"],
       { cwd, timeout: 15000 },
     );
@@ -2249,7 +2264,7 @@ export function writeSessionStateHandoff(
 
 export function markSessionStateHandoffConsumed(
   predecessorSessionId,
-  { consumedBySession = null, handoffId = null } = {},
+  { consumedBySession = null, handoffId = null, aborted = false, abortReason = null } = {},
 ) {
   if (!predecessorSessionId) return null;
   const found = readSessionStateHandoff(predecessorSessionId);
@@ -2263,6 +2278,7 @@ export function markSessionStateHandoffConsumed(
     consumed: true,
     consumedAt: current.consumedAt || new Date().toISOString(),
     consumedBySession: consumedBySession || current.consumedBySession || null,
+    ...(aborted ? { aborted: true, abortReason: abortReason || current.abortReason || null } : {}),
   };
   writeJsonAtomic(found.path, consumed);
   return consumed;
@@ -3469,7 +3485,7 @@ export function listWorktreeSessions(cwd, worktreeId = null, sessionId = null, e
   try {
     const raw = execute(
       "agent-worktrees", // marketplace-isolation: allow diagnostic-tooling
-      ["list-sessions", "--worktree", resolvedWorktree, "--json"],
+      ["list-sessions", "--worktree", resolvedWorktree, "--all-projects", "--json"],
       { cwd, timeout: 15000 },
     );
     const parsed = JSON.parse(raw);
@@ -3584,7 +3600,24 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
       ],
       { cwd, timeout: 15000 },
     );
-    return { ok: true, id: taskId, kind: "task" };
+    // Best-effort: mark the predecessor's own session-state handoff-request
+    // marker aborted too, so a later `readSessionStateHandoff` lookup (or a
+    // stale-claimant check) doesn't keep reporting `consumed: false` for a
+    // handoff this command just retired. Decoding the payload for its
+    // embedded sessionId is advisory -- never fails the abort itself.
+    let predecessorSessionId = null;
+    try {
+      const decoded = decodeHandoffPayload(readTaskPayloadRaw(cwd, taskId, execute));
+      predecessorSessionId = decoded?.metadata?.sessionId || null;
+    } catch { /* best-effort */ }
+    if (predecessorSessionId) {
+      try {
+        markSessionStateHandoffConsumed(predecessorSessionId, {
+          handoffId: taskId, aborted: true, abortReason: reason || null,
+        });
+      } catch { /* best-effort */ }
+    }
+    return { ok: true, id: taskId, kind: "task", ledgerNote: ABORT_LEDGER_ADVISORY };
   } catch (error) {
     return {
       ok: false,
@@ -3595,18 +3628,27 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
   }
 }
 
+// context-handoff has no primitive to directly cancel the agent-worktrees
+// ledger's own `pending_handoffs` entry for this specific handoff (that
+// state lives in a different plugin's tracking store; agent-worktrees only
+// clears it internally, as a side effect of a NEW session registering on
+// the worktree -- there is no standalone "cancel this one" CLI verb today).
+// Abort therefore cannot claim to have fully retired a `mode: auto`
+// worktree's live-cutover arming on its own; surface that gap honestly
+// rather than silently leaving it unmentioned.
+const ABORT_LEDGER_ADVISORY =
+  "This retires the backing handoff record, but context-handoff has no " +
+  "primitive to directly cancel agent-worktrees' own pending-handoff ledger " +
+  "entry (if one was armed under mode: auto). Run `agent-worktrees " +
+  "handoffs-check --worktree-id <id> --execute --json` to reconcile it.";
+
 // File-backed abort participates in the SAME `.consume.lock` protocol
 // `consumeFileHandoffOnce` uses (open the lock file exclusively, re-read the
 // record while holding it, then write) -- without this, an abort racing a
 // real consume could each read `consumed: false`, both "succeed", and
 // whichever atomic write lands last would silently win: either resurrecting
 // an aborted handoff or overwriting a real consumer's claim with an aborted
-// marker. Reclaim logic is deliberately NOT duplicated here: abort is an
-// explicit, human/agent-directed action, not a background retry path, so a
-// held lock (someone else is actively consuming right now) is reported as a
-// straightforward failure rather than attempting the same stale-lock
-// recovery dance `consumeFileHandoffOnce` performs for its own crash-safety
-// needs.
+// marker.
 export function abortFileHandoff(
   cwd, sid, handoffId, explicitPath, reason,
   { get = agentWorktreesGet, execute = runCli } = {},
@@ -3616,36 +3658,11 @@ export function abortFileHandoff(
     return { ok: false, kind: "file", message: "File-backed handoff was not found." };
   }
   const lockPath = `${found.path}.consume.lock`;
-  let lockFd;
-  try {
-    lockFd = openSync(lockPath, "wx");
-    writeFileSync(lockFd, JSON.stringify({
-      pid: process.pid, sessionId: sid || null, createdAt: new Date().toISOString(),
-    }), "utf-8");
-  } catch (error) {
-    if (error?.code === "EEXIST") {
-      return {
-        ok: false,
-        kind: "file",
-        id: found.record.id,
-        message: `Handoff ${found.record.id || found.path} is currently being consumed ` +
-          "(active lock held) -- too late to abort; do not force-clear the lock.",
-      };
-    }
-    // The lock file itself may have been created before the write failed
-    // (e.g. a full filesystem) -- clean it up rather than leaving an orphan
-    // that would permanently block every future consume/abort of this
-    // handoff, mirroring consumeFileHandoffOnce's own cleanup on this path.
-    if (lockFd !== undefined) {
-      try { closeSync(lockFd); } catch { /* already closed */ }
-    }
-    try { unlinkSync(lockPath); } catch { /* never created, or already gone */ }
-    return {
-      ok: false,
-      kind: "file",
-      message: `Could not lock file-backed handoff for abort: ${error.message}`,
-    };
-  }
+  const acquired = acquireFileHandoffLockWithReclaim(
+    lockPath, sid, () => `handoff ${found.record.id || found.path}`,
+  );
+  if (!acquired.ok) return { ...acquired, kind: "file", id: found.record.id };
+  const lockFd = acquired.lockFd;
   try {
     const current = readFileHandoff(cwd, sid, handoffId, found.path, { get, execute });
     if (!current) {
@@ -3687,7 +3704,20 @@ export function abortFileHandoff(
       abortReason: reason || null,
     };
     writeJsonAtomic(current.path, aborted);
-    return { ok: true, kind: "file", id: aborted.id, path: current.path, record: aborted };
+    // Best-effort: the file record's own `sessionId` IS the predecessor
+    // session -- mark its session-state handoff-request marker aborted too
+    // (see the identical note on the task path above and ABORT_LEDGER_ADVISORY).
+    if (current.record.sessionId) {
+      try {
+        markSessionStateHandoffConsumed(current.record.sessionId, {
+          handoffId: aborted.id, aborted: true, abortReason: reason || null,
+        });
+      } catch { /* best-effort */ }
+    }
+    return {
+      ok: true, kind: "file", id: aborted.id, path: current.path, record: aborted,
+      ledgerNote: ABORT_LEDGER_ADVISORY,
+    };
   } finally {
     try { closeSync(lockFd); } catch { /* best-effort */ }
     try { unlinkSync(lockPath); } catch { /* already gone */ }
