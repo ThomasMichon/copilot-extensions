@@ -1,9 +1,0 @@
-{
-  "comment": "Add a focused installer guard covering both plugin-local and repo-root config-migrate resolution in install.ps1.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

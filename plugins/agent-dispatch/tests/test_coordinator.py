@@ -257,7 +257,7 @@ def test_client_completes_suspended_task_without_wake(client, monkeypatch):
         task["id"], owner, result_ref="condition:satisfied"
     )
 
-    assert done["status"] == Status.COMPLETED
+    assert done["status"] == Status.SUBMITTED
     assert done["result_ref"] == "condition:satisfied"
     assert done["owner"] is None
 
@@ -634,7 +634,7 @@ def test_full_lifecycle_over_http(api):
     done = api.post(
         f"/tasks/{tid}/complete", json={"worker_id": "w1", "result_ref": "pr/1"}
     ).json()
-    assert done["status"] == Status.COMPLETED
+    assert done["status"] == Status.SUBMITTED
 
 
 def test_complete_over_http_releases_handoff_claim(api, monkeypatch):
@@ -664,7 +664,7 @@ def test_complete_over_http_releases_handoff_claim(api, monkeypatch):
     done = api.post(
         f"/tasks/{tid}/complete", json={"worker_id": "m/wt-9", "result_ref": "pr/1"}
     ).json()
-    assert done["status"] == Status.COMPLETED
+    assert done["status"] == Status.SUBMITTED
     assert released == [(tid, "wt-9")]
 
 
@@ -686,7 +686,7 @@ def test_complete_over_http_never_releases_a_non_handoff_task(api, monkeypatch):
 
 
 def test_idempotent_result_recording_retry_does_not_re_release(api, monkeypatch):
-    """A retry that only attaches a missing result to an already-COMPLETED
+    """A retry that only attaches a missing result to an already-SUBMITTED
     task (event_type stays None) must not fire the release hook again."""
     from agent_dispatch import handoff_claim_release
 
@@ -706,7 +706,7 @@ def test_idempotent_result_recording_retry_does_not_re_release(api, monkeypatch)
         handoff_claim_release, "release_if_handoff",
         lambda task, task_id=None: released.append(task.get("id")),
     )
-    # Retry attaching a result to the already-completed task.
+    # Retry attaching a result to the already-submitted task.
     api.post(
         f"/tasks/{tid}/complete",
         json={"worker_id": "m/wt-9", "result_ref": "pr/1", "result": {"ok": True}},
@@ -930,7 +930,7 @@ def test_client_omits_none_result_for_older_coordinator():
 
         seen.update(json.loads(request.content))
         return httpx.Response(
-            200, json={"id": "t1", "status": Status.COMPLETED}
+            200, json={"id": "t1", "status": Status.SUBMITTED}
         )
 
     with DispatchClient(
@@ -944,7 +944,7 @@ def test_client_omits_none_result_for_older_coordinator():
 def test_client_detects_coordinator_that_drops_structured_result():
     def handler(request):
         return httpx.Response(
-            200, json={"id": "t1", "status": Status.COMPLETED}
+            200, json={"id": "t1", "status": Status.SUBMITTED}
         )
 
     with DispatchClient(
@@ -1287,9 +1287,9 @@ def test_client_round_trip(client):
     assert claimed["id"] == t["id"]
     client.start(t["id"], "w1")
     done = client.complete(t["id"], "w1", result_ref="pr/9")
-    assert done["status"] == Status.COMPLETED
+    assert done["status"] == Status.SUBMITTED
     trail = [e["to_status"] for e in client.events(t["id"])]
-    assert trail == [Status.QUEUED, Status.CLAIMED, Status.STARTED, Status.COMPLETED]
+    assert trail == [Status.QUEUED, Status.CLAIMED, Status.STARTED, Status.SUBMITTED]
 
 
 def test_client_tasks_for_session_round_trip(client):
@@ -1354,7 +1354,8 @@ def test_sse_stream_distinguishes_retry_recorded_result(server_url):
         try:
             for ev in streamer.stream_events():
                 received.append(ev)
-                if ev.get("type") == "task.result_recorded":
+                types = {item.get("type") for item in received}
+                if {"task.result_recorded", "task.completed"} <= types:
                     break
         except Exception:
             return  # stream closed / server stopped -- best effort
@@ -1377,6 +1378,7 @@ def test_sse_stream_distinguishes_retry_recorded_result(server_url):
     mutator.start(tid, "w1")
     mutator.complete(tid, "w1")
     mutator.complete(tid, "w1", result={"summary": "done"})
+    mutator.confirm(tid, actor="evaluator")
 
     t.join(timeout=5)
     streamer.close()
@@ -1385,12 +1387,14 @@ def test_sse_stream_distinguishes_retry_recorded_result(server_url):
     types = [e["type"] for e in received]
     assert "task.created" in types
     assert "task.claimed" in types
+    assert "task.submitted" in types
     assert "task.completed" in types
     assert "task.result_recorded" in types
+    assert types.count("task.submitted") == 1
     assert types.count("task.completed") == 1
     created = next(e for e in received if e["type"] == "task.created")
     assert created["task"]["id"] == tid
-    completed = next(e for e in received if e["type"] == "task.completed")
+    completed = next(e for e in received if e["type"] == "task.submitted")
     assert completed["task"]["has_result"] is False
     assert "result" not in completed["task"]
     recorded = next(
@@ -1398,6 +1402,8 @@ def test_sse_stream_distinguishes_retry_recorded_result(server_url):
     )
     assert recorded["task"]["has_result"] is True
     assert "result" not in recorded["task"]
+    confirmed = next(e for e in received if e["type"] == "task.completed")
+    assert confirmed["task"]["status"] == "completed"
 
 
 def test_health_reports_zero_subscribers_initially(api):
@@ -1810,18 +1816,18 @@ def test_cli_consume_completes_and_prints_payload(server_url, client, monkeypatc
     assert __main__._cmd_consume(args) == 0
     assert "BRIEF-BODY" in capsys.readouterr().out
     done = client.get(tid)
-    assert done["status"] == Status.COMPLETED
+    assert done["status"] == Status.SUBMITTED
     # owner is cleared on completion (the lease is released); the result_ref
     # proves the successor's identity owned it through the complete transition.
     assert done["result_ref"] == "consumed:wt-1"
 
-    # Debounce: consuming the now-completed handoff again is refused (exit 3)
+    # Debounce: consuming the now-spent handoff again is refused (exit 3)
     # with a stop notice instead of a replayed brief.
     assert __main__._cmd_consume(args) == 3
     out = capsys.readouterr().out
-    assert "already COMPLETED" in out
+    assert "already spent" in out
     assert "BRIEF-BODY" not in out
-    assert client.get(tid)["status"] == Status.COMPLETED
+    assert client.get(tid)["status"] == Status.SUBMITTED
 
 
 # -- satellite presence registry ---------------------------------------------

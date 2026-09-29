@@ -2061,6 +2061,11 @@ async def test_reattach_session_hosts_on_restart(tmp_path, monkeypatch):
         # simulate a frontend restart: detach (host survives) + drop generation 1
         await session.client.shutdown()
         db1.close()
+        # A real restart's outgoing generation releases its session-host claims
+        # as part of its own /api/v1/shutdown exit contract (Phase 3) -- this
+        # test drives SessionManager directly rather than through that HTTP
+        # handler, so simulate the same release explicitly.
+        mgr1._host_index.release_all(mgr1._generation_id)
         assert osutil_pid_alive(host_pid)  # host untouched by the front going away
 
         # --- frontend generation 2: reattach to the surviving host ---
@@ -3457,6 +3462,10 @@ async def test_reattach_reaps_orphaned_host(tmp_path, monkeypatch):
         await session.client.shutdown()
         db1.delete_session(sid)
         db1.close()
+        # Simulate generation 1's own /api/v1/shutdown exit-contract release
+        # (Phase 3) -- this test drives SessionManager directly, not through
+        # that HTTP handler.
+        mgr1._host_index.release_all(mgr1._generation_id)
         assert osutil_pid_alive(host_pid)
 
         # Fresh frontend: rehydrate won't see the deleted session, so reattach

@@ -265,6 +265,10 @@ class QueueClient:
         self.queue = queue
 
     def list(self, **kwargs):
+        status = kwargs.get("status")
+        if isinstance(status, str) and "," in status:
+            kwargs = dict(kwargs)
+            kwargs["status"] = [part.strip() for part in status.split(",") if part.strip()]
         return [asdict(task) for task in self.queue.list(**kwargs)]
 
     def get(self, task_id):
@@ -694,7 +698,7 @@ def test_existing_resource_reservation_rows_receive_tokens_on_migration(
 def test_same_occurrence_is_not_reemitted_after_restart():
     existing = {
         "id": "old",
-        "status": "completed",
+        "status": "submitted",
         "source": "repository-backlog",
         "origin_ref": "backlog/occurrence/7200",
         "exclusive_key": "repository-issue-loop:backlog",
@@ -708,6 +712,32 @@ def test_same_occurrence_is_not_reemitted_after_restart():
 
     assert result["suppressed"] is True
     assert client.created == []
+    assert provider.reserved == []
+    assert provider.list_calls == 0
+
+
+def test_same_occurrence_is_not_reemitted_after_restart_with_queue_client(tmp_path):
+    queue = RepoDefaultingQueue(tmp_path / "tasks.db")
+    repo = "example/project"
+    existing = queue.create(
+        "old",
+        repo=repo,
+        source="repository-backlog",
+        origin_ref="backlog/occurrence/7200",
+        exclusive_key="repository-issue-loop:backlog",
+    )
+    queue.claim_one("worker-1", repo=repo, task_id=existing.id)
+    queue.start(existing.id, "worker-1")
+    queue.complete(existing.id, "worker-1")
+    client = QueueClient(queue)
+    provider = FakeProvider([_issue(1)])
+
+    result = run_tick(
+        client, _config(repo=repo), provider=provider, clock=lambda: 7_500
+    )
+
+    assert result["suppressed"] is True
+    assert result["same_occurrence_tasks"][0]["id"] == existing.id
     assert provider.reserved == []
     assert provider.list_calls == 0
 
@@ -759,7 +789,7 @@ def test_source_change_does_not_fork_active_episode():
 def test_source_change_does_not_replay_same_terminal_occurrence():
     existing = {
         "id": "old",
-        "status": "completed",
+        "status": "submitted",
         "source": "old-source",
         "origin_ref": "backlog/occurrence/7200",
         "exclusive_key": "repository-issue-loop:backlog",
@@ -994,7 +1024,7 @@ def test_active_task_suppresses_reservation_promotion_forge_reads():
     assert provider.list_calls == 0
 
 
-@pytest.mark.parametrize("status", ["completed", "abandoned", "dead_letter"])
+@pytest.mark.parametrize("status", ["submitted", "completed", "abandoned", "dead_letter"])
 def test_terminal_task_releases_claim_when_issue_remains_open(status):
     reserved = {
         "loop": "backlog",
@@ -1976,4 +2006,3 @@ class TestAzureDevOpsProvider:
         fields_arg = tag_call[tag_call.index("--fields") + 1]
         assert "agent-reserved" in fields_arg
         assert "ready" in fields_arg
-

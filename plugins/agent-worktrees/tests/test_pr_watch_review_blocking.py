@@ -40,18 +40,45 @@ class TestPrWatchReviewBlocking:
         config = SimpleNamespace(default_repo=repo)
         called = MagicMock()
         monkeypatch.setattr("agent_worktrees.providers.get_provider", called)
-        assert m._pr_watch_review_blocking(config, repo.pr, _args()) is True
+        assert m._pr_watch_review_blocking(config, _args()) is True
         called.assert_not_called()
 
     def test_non_self_merge_repo_stays_non_blocking_no_network(self, monkeypatch):
-        """review_blocking=False but not a pr-self-merge profile (no
-        self_approve/merge_actor): nothing to gate by actor authority."""
+        """An ordinary human-merge flow preserves its explicit non-blocking
+        review policy without a live permission read."""
         repo = _repo_config(review_blocking=False)
         config = SimpleNamespace(default_repo=repo)
         called = MagicMock()
         monkeypatch.setattr("agent_worktrees.providers.get_provider", called)
-        assert m._pr_watch_review_blocking(config, repo.pr, _args()) is False
+        assert m._pr_watch_review_blocking(config, _args()) is False
         called.assert_not_called()
+
+    def test_conservative_base_maintain_override_keeps_actor_postures(
+        self, monkeypatch,
+    ):
+        """A conservative human-merge base blocks Write actors on approval,
+        while its Maintain override gets the configured non-blocking
+        submitter-direct wait."""
+        repo = _repo_config(
+            review_blocking=True,
+            provider="github",
+            roles={
+                "maintain": cfg.PRRoleOverride(
+                    merge_actor="submitter-direct",
+                    review_blocking=False,
+                ),
+            },
+        )
+        config = SimpleNamespace(default_repo=repo)
+        permission = {"value": "write"}
+        monkeypatch.setattr(
+            "agent_worktrees.providers.actor_viewer_permission",
+            lambda *a, **k: permission["value"],
+        )
+        assert m._pr_watch_review_blocking(config, _args()) is True
+
+        permission["value"] = "maintain"
+        assert m._pr_watch_review_blocking(config, _args()) is False
 
     def test_self_merge_maintainer_stays_non_blocking(self, monkeypatch):
         """Live authority True (write/maintain/admin): the maintainer waits
@@ -62,7 +89,7 @@ class TestPrWatchReviewBlocking:
             "agent_worktrees.providers.actor_viewer_permission",
             lambda *a, **k: "write",
         )
-        assert m._pr_watch_review_blocking(config, repo.pr, _args()) is False
+        assert m._pr_watch_review_blocking(config, _args()) is False
 
     def test_self_merge_contributor_falls_back_to_blocking(self, monkeypatch):
         """Live authority False (a confident read-only/no-access read): a
@@ -74,7 +101,31 @@ class TestPrWatchReviewBlocking:
             "agent_worktrees.providers.actor_viewer_permission",
             lambda *a, **k: "read",
         )
-        assert m._pr_watch_review_blocking(config, repo.pr, _args()) is True
+        assert m._pr_watch_review_blocking(config, _args()) is True
+
+    @pytest.mark.parametrize("review_blocking", [False, True])
+    def test_explicit_write_role_review_policy_is_honored(
+        self, monkeypatch, review_blocking,
+    ):
+        """An explicit role that removes self-merge also owns its review
+        posture; write authority alone must not rewrite that policy."""
+        repo = _repo_config(
+            review_blocking=False,
+            merge_actor="submitter-direct",
+            provider="github",
+            roles={
+                "write": cfg.PRRoleOverride(
+                    merge_actor="",
+                    review_blocking=review_blocking,
+                ),
+            },
+        )
+        config = SimpleNamespace(default_repo=repo)
+        monkeypatch.setattr(
+            "agent_worktrees.providers.actor_viewer_permission",
+            lambda *a, **k: "write",
+        )
+        assert m._pr_watch_review_blocking(config, _args()) is review_blocking
 
     def test_self_merge_unknown_authority_fails_open_to_non_blocking(self, monkeypatch):
         """An unknown/failed live read (None) must never deny a legitimate
@@ -85,7 +136,7 @@ class TestPrWatchReviewBlocking:
             "agent_worktrees.providers.actor_viewer_permission",
             lambda *a, **k: "",
         )
-        assert m._pr_watch_review_blocking(config, repo.pr, _args()) is False
+        assert m._pr_watch_review_blocking(config, _args()) is False
 
     def test_self_merge_provider_read_failure_fails_open(self, monkeypatch):
         repo = _repo_config(review_blocking=False, self_approve=True, provider="github")
@@ -95,7 +146,7 @@ class TestPrWatchReviewBlocking:
             raise RuntimeError("network down")
 
         monkeypatch.setattr("agent_worktrees.providers.get_provider", _boom)
-        assert m._pr_watch_review_blocking(config, repo.pr, _args()) is False
+        assert m._pr_watch_review_blocking(config, _args()) is False
 
 
 class TestPrWatchUntilDefaultIntegration:

@@ -4922,3 +4922,181 @@ def test_executable_cell_coordinator_preserves_reserved_exit(
 
     assert result.returncode == exit_code
     assert "reserved crash" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("source_name", "lib", "package_dir"),
+    (
+        ("agent-procutil", "agent-procutil", "agent_procutil"),
+        ("agent-zdd", "zdd", "zdd"),
+    ),
+)
+def test_backfill_canonical_vendored_libs_copies_repo_root_canonical(
+    tmp_path: Path,
+    source_name: str,
+    lib: str,
+    package_dir: str,
+) -> None:
+    """A dev-checkout payload has no local canonical-reference lib copy at all
+    -- the snapshot must still end up with a real copy sourced from the sibling
+    repo-root `libs/`, and the escaping source entry must be rewritten local."""
+    repo = tmp_path / "repo"
+    payload_root = repo / "plugins" / "fake-plugin"
+    payload_root.mkdir(parents=True)
+    canonical = repo / "libs" / lib
+    (canonical / "src" / package_dir).mkdir(parents=True)
+    (canonical / "src" / package_dir / "__init__.py").write_text(
+        "real = True\n", encoding="utf-8"
+    )
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "pyproject.toml").write_text(
+        "[project]\nname = \"fake-plugin\"\n\n"
+        "[tool.uv.sources]\n"
+        "# resolves live to canonical\n"
+        f'{source_name} = {{ path = "../../libs/{lib}", editable = true }}\n',
+        encoding="utf-8",
+    )
+
+    CELL._backfill_canonical_vendored_libs(payload_root, snapshot)
+
+    copied = snapshot / "libs" / lib / "src" / package_dir / "__init__.py"
+    assert copied.read_text(encoding="utf-8") == "real = True\n"
+    rewritten = (snapshot / "pyproject.toml").read_text(encoding="utf-8")
+    assert f'{source_name} = {{ path = "libs/{lib}" }}' in rewritten
+    assert "editable" not in rewritten
+    assert "# resolves live to canonical" in rewritten
+
+
+@pytest.mark.parametrize("lib", ("agent-procutil", "zdd"))
+def test_backfill_canonical_vendored_libs_skips_when_snapshot_already_has_it(
+    tmp_path: Path,
+    lib: str,
+) -> None:
+    """A release payload already snapshots a real local copy -- the backfill
+    must not touch it, or the already-local (non-editable) source entry."""
+    repo = tmp_path / "repo"
+    payload_root = repo / "plugins" / "fake-plugin"
+    payload_root.mkdir(parents=True)
+    (repo / "libs" / lib / "src").mkdir(parents=True)
+    snapshot = tmp_path / "snapshot"
+    existing = snapshot / "libs" / lib
+    existing.mkdir(parents=True)
+    (existing / "marker.txt").write_text("already-there\n", encoding="utf-8")
+    (snapshot / "pyproject.toml").write_text(
+        "[tool.uv.sources]\n"
+        f'agent-{lib} = {{ path = "libs/{lib}" }}\n',
+        encoding="utf-8",
+    )
+
+    CELL._backfill_canonical_vendored_libs(payload_root, snapshot)
+
+    assert (existing / "marker.txt").read_text(encoding="utf-8") == "already-there\n"
+    assert not (existing / "src").exists()
+    assert (snapshot / "pyproject.toml").read_text(encoding="utf-8") == (
+        "[tool.uv.sources]\n"
+        f'agent-{lib} = {{ path = "libs/{lib}" }}\n'
+    )
+
+
+def test_backfill_canonical_vendored_libs_rejects_symlinked_lib_dir(
+    tmp_path: Path,
+) -> None:
+    """A symlinked `libs/agent-procutil` (or its `libs/` parent) must never
+    be silently followed and copied through -- `Path.is_dir()` dereferences
+    a symlink/reparse point the same as a real directory, so without an
+    explicit rejection here `copytree()` would dereference the source root
+    itself and copy external files into the published snapshot, breaking
+    the snapshot's own no-link invariant that `_copy_payload()` already
+    enforces for its descendants (PR #4465 review)."""
+    repo = tmp_path / "repo"
+    payload_root = repo / "plugins" / "fake-plugin"
+    payload_root.mkdir(parents=True)
+    real_target = tmp_path / "outside-the-repo"
+    (real_target / "src" / "agent_procutil").mkdir(parents=True)
+    (real_target / "src" / "agent_procutil" / "__init__.py").write_text(
+        "real = True\n", encoding="utf-8"
+    )
+    (repo / "libs").mkdir(parents=True)
+    (repo / "libs" / "agent-procutil").symlink_to(real_target, target_is_directory=True)
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "pyproject.toml").write_text(
+        "[tool.uv.sources]\n"
+        'agent-procutil = { path = "../../libs/agent-procutil", editable = true }\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CELL.CellError, match="link or reparse"):
+        CELL._backfill_canonical_vendored_libs(payload_root, snapshot)
+
+    assert not (snapshot / "libs").exists()
+
+
+def test_backfill_canonical_vendored_libs_rejects_symlinked_libs_parent(
+    tmp_path: Path,
+) -> None:
+    """Same no-link invariant, but for the `libs/` directory itself being
+    the symlink rather than the `agent-procutil` leaf beneath it."""
+    repo = tmp_path / "repo"
+    payload_root = repo / "plugins" / "fake-plugin"
+    payload_root.mkdir(parents=True)
+    real_target = tmp_path / "outside-the-repo-libs"
+    (real_target / "agent-procutil" / "src" / "agent_procutil").mkdir(parents=True)
+    (real_target / "agent-procutil" / "src" / "agent_procutil" / "__init__.py").write_text(
+        "real = True\n", encoding="utf-8"
+    )
+    repo.mkdir(parents=True, exist_ok=True)
+    (repo / "libs").symlink_to(real_target, target_is_directory=True)
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "pyproject.toml").write_text(
+        "[tool.uv.sources]\n"
+        'agent-procutil = { path = "../../libs/agent-procutil", editable = true }\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CELL.CellError, match="link or reparse"):
+        CELL._backfill_canonical_vendored_libs(payload_root, snapshot)
+
+    assert not (snapshot / "libs").exists()
+
+
+def test_backfill_canonical_vendored_libs_noop_when_no_canonical_reachable(
+    tmp_path: Path,
+) -> None:
+    """A standalone payload (no sibling repo-root `libs/`) with no local
+    copy either must not raise -- nothing to back-fill from."""
+    payload_root = tmp_path / "shallow" / "standalone-plugin"
+    payload_root.mkdir(parents=True)
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+
+    CELL._backfill_canonical_vendored_libs(payload_root, snapshot)
+
+    assert not (snapshot / "libs").exists()
+
+
+def test_payload_routing_module_falls_back_to_repo_root_canonical_zdd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    plugin_scripts = repo / "plugins" / "agent-index" / "scripts"
+    plugin_scripts.mkdir(parents=True)
+    canonical = repo / "libs" / "zdd" / "src" / "zdd"
+    canonical.mkdir(parents=True)
+    (canonical / "__init__.py").write_text("", encoding="utf-8")
+    (canonical / "routing.py").write_text("VALUE = 'canonical'\n", encoding="utf-8")
+
+    prior = list(sys.path)
+    monkeypatch.setattr(CELL, "__file__", str(plugin_scripts / "cell-runtime.py"))
+    sys.modules.pop("zdd", None)
+    sys.modules.pop("zdd.routing", None)
+    try:
+        routing = CELL._payload_routing_module()
+    finally:
+        sys.path[:] = prior
+        sys.modules.pop("zdd", None)
+        sys.modules.pop("zdd.routing", None)
+
+    assert routing.VALUE == "canonical"

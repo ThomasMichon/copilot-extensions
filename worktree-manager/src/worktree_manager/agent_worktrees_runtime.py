@@ -93,6 +93,9 @@ def ensure_engine_runtime() -> Path:
         "config-migrate",
         "single-instance-lease",
         "lazy-cli-dispatch",
+        "work-coalescing-singleton",
+        "dropin-registry",
+        "plugin-activation",
     ):
         lib_source = libs_root / lib / "src"
         if not lib_source.is_dir():

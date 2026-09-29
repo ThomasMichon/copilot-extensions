@@ -484,12 +484,22 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             msg = str(e)
             return core._json_error(msg) if use_json else (output.err(msg) or 1)
 
+        reminder_flow = None
+        if result.get("viewer_permission"):
+            from . import pr_config
+
+            reminder_prcfg = cfg.resolve_role_pr_config(
+                config.default_repo.pr,
+                result["viewer_permission"],
+            )
+            reminder_flow = pr_config._profile_for_pr_config(reminder_prcfg)
         reminder = context_cli._pr_reminder_for(
             config,
             "create-pr",
             state=("created" if result.get("success") else ""),
             ok=bool(result.get("success")),
             reason=("" if result.get("success") else result.get("error", "")),
+            flow=reminder_flow,
         )
         if reminder is not None:
             result["reminder"] = reminder.as_dict()

@@ -23,6 +23,21 @@ Passes:
      the derived head is None and the worktree is un-resumable. Detected only
      when dark + stale (never a healthy in-flight cutover); with ``apply`` the
      orchestrator re-activates the handed-off tail so the head derives again.
+  6. Stale active reconciliation -- ``status: active`` records the *raw*
+     lifecycle write path never closes (a killed terminal, a rebooted VM, a
+     crashed Copilot process -- anything skipping the graceful
+     ``finalize``/``restart``/``conclude-session`` transitions that stamp
+     ``complete``/``completed_at``). Pass 2 only catches this once
+     ``completed_at`` is already set; it never fires for a record simply
+     abandoned mid-flight. This pass recomputes each ``active`` record's real
+     state the way ``status``/the Picker already do
+     (:func:`git_ops.classify_worktree`, gated by the same mux/lock/bridge
+     ``active_paths``), flagging only the unambiguous terminal outcomes
+     (:class:`git_ops.WorktreeState.GONE`/``COMPLETED``/``UNUSED``) with zero
+     liveness evidence -- never a live, dirty, orphaned, or timed-out
+     worktree. Closes the gap that let Reclaim ("nothing to reclaim" was a
+     correct answer) and Restore/Resume then fail against a record the
+     Picker still rendered Active forever.
 
 Registry/title backfill is delegated to ``sessions.backfill_sessions`` by the
 orchestrator; it is not duplicated here.
@@ -40,6 +55,7 @@ from pathlib import Path
 import yaml
 
 from . import config as cfg
+from . import git_ops
 from . import handoff_trace
 from . import tracking
 from .handoff_diagnostics import HANDOFF_STAGES
@@ -278,6 +294,109 @@ def find_stale_status(records) -> list:
         r for r in records
         if getattr(r, "completed_at", None) and r.status == "active"
     ]
+
+
+# --------------------------------------------------------------------------- #
+# Pass 6: stale active reconciliation
+# --------------------------------------------------------------------------- #
+# Only these raw git-state outcomes are safe to reconcile automatically -- each
+# is an unambiguous, no-work-lost terminal: GONE (the checkout is simply gone),
+# COMPLETED (merged/landed, clean), UNUSED (clean, commit-less, never used).
+# DIRTY, ORPHAN (no merge-base), and UNKNOWN (classification timeout) all need
+# a human -- never auto-closed.
+_SAFE_TERMINAL_STATES = frozenset({
+    git_ops.WorktreeState.GONE,
+    git_ops.WorktreeState.COMPLETED,
+    git_ops.WorktreeState.UNUSED,
+})
+
+
+@dataclass
+class StaleActiveFinding:
+    """An ``active`` record whose real (live-checked) state is terminal."""
+
+    worktree_id: str
+    computed_state: str
+
+    def as_dict(self) -> dict:
+        return {"worktree_id": self.worktree_id, "computed_state": self.computed_state}
+
+
+def find_stale_active_records(
+    records,
+    *,
+    active_paths: frozenset[str] | set[str],
+    remote: str = "origin",
+    default_branch: str = "master",
+) -> list[StaleActiveFinding]:
+    """``active`` records whose real git/liveness state is unambiguously done.
+
+    Recomputes each candidate exactly the way ``status``/the Picker already
+    do (:func:`git_ops.classify_worktree`, no network fetch -- doctor never
+    reaches out to a remote on its own), gated by the caller-supplied
+    *active_paths* (the same batched mux/lock/bridge liveness set
+    ``__main__._build_active_paths`` builds). ``classify_worktree`` itself
+    treats any path in *active_paths* as unconditionally ``ACTIVE`` regardless
+    of git state, so a live worktree can never be flagged here no matter what
+    its git history looks like. Only :data:`_SAFE_TERMINAL_STATES` are
+    reported -- a dirty, orphaned, or timed-out classification is left alone
+    for a human to look at.
+    """
+    findings: list[StaleActiveFinding] = []
+    for r in records:
+        if r.status != "active" or not r.worktree_path:
+            continue
+        info = git_ops.classify_worktree(
+            r.worktree_path,
+            r.branch,
+            fetch=False,
+            remote=remote,
+            default_branch=default_branch,
+            active_paths=active_paths,
+        )
+        if info.state in _SAFE_TERMINAL_STATES:
+            findings.append(StaleActiveFinding(r.worktree_id, info.state.value))
+    return findings
+
+
+def apply_stale_active_repairs(records, findings: list[StaleActiveFinding]) -> int:
+    """Close each :func:`find_stale_active_records` finding: ``status ->
+    complete``, stamping ``completed_at`` if it was never set. Returns the
+    number of records repaired and saved."""
+    by_id = {r.worktree_id: r for r in records}
+    now_iso = datetime.now().isoformat(timespec="seconds")
+    fixed = 0
+    for finding in findings:
+        record = by_id.get(finding.worktree_id)
+        if record is None:
+            continue
+        record.status = "complete"
+        if not getattr(record, "completed_at", None):
+            record.completed_at = now_iso
+        tracking.save_record(record)
+        fixed += 1
+    return fixed
+
+
+def reconcile_stale_active(records, *, apply: bool) -> tuple[list[StaleActiveFinding], int]:
+    """Doctor's pass-6 entry point: find, then (if ``apply``) repair.
+
+    Resolves the repo config + liveness set itself so ``maintenance_cli``
+    stays a thin orchestrator; a repo config that can't be resolved (no
+    anchor registered for this project) skips the pass rather than raising.
+    """
+    try:
+        repo_cfg = cfg.load_config().default_repo
+    except Exception:
+        return [], 0
+    from . import __main__ as _core  # lazy: avoid a module-load cycle
+    findings = find_stale_active_records(
+        records,
+        active_paths=_core._build_active_paths(records),
+        remote=repo_cfg.remote,
+        default_branch=repo_cfg.default_branch,
+    )
+    return findings, (apply_stale_active_repairs(records, findings) if apply else 0)
 
 
 # --------------------------------------------------------------------------- #

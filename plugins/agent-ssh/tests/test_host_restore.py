@@ -25,6 +25,8 @@ def _setup(tmp_path, monkeypatch):
     script.parent.mkdir(parents=True)
     script.write_text("", encoding="utf-8")
     monkeypatch.setenv("COPILOT_PLUGIN_ROOT", str(payload))
+    monkeypatch.delenv("SSH_CONNECTION", raising=False)
+    monkeypatch.delenv("SSH_CLIENT", raising=False)
     monkeypatch.setattr(host_restore.platform, "system", lambda: "Windows")
     monkeypatch.setattr(host_restore.shutil, "which", lambda _name: "pwsh")
     monkeypatch.setattr(host_restore.time, "sleep", lambda _seconds: None)

@@ -124,7 +124,7 @@ continue to work unchanged.
 | `push-changes` | Push worktree changes to remote default branch (squash, rebase, push). Aborts if the pre-squash fails (`--allow-unsquashed` to opt into individual commits) |
 | `finalize` | Validate the branch's content is on upstream; prune the worktree/branch only when idle (deferred while a session is live). The creating agent owns child cleanup; `--abandon` is refused without an operator-directed `--handoff-to <recipient-or-flow>`, recorded on each re-homed obligation |
 | `mark-complete` | Manual recovery -- set tracking status flag only (hidden from help) |
-| `claims` | The worktree's **resource-obligation ledger** (accountability for what it allocated; effort `resource-obligation-settlement`). `claims [id]` shows the ledger; `claims owner <kind> <ref> [--json] [--all-states]` searches every registered project on this machine for the worktree(s) holding that outbound claim (held claims only by default); `claims add <kind> <ref> [--owner-ref <m/p/w>]` journals an outbound claim; `claims annotate <ref> --note <text>` attaches/updates a note on an already-existing claim (e.g. one an underlying tool auto-created) without release + re-add; `claims settle <ref> [--released]` marks it at-rest/released; `claims release <ref> [--remove]` retires one; `claims sweep [--apply]` runs the never-wedge reclaim (flip a provably-gone+safe `active` claim → `abandoned`; dry-run default); `claims reconcile-at-rest [<worktree-id> ...] [--apply]` is the dedicated legacy/GC close-out reconciliation command (`worktree-finality-and-obligations` design.md): releases lingering **at-rest-only** claims on existing records that predate/bypassed finalize's own automatic release-under-freeze, never an `active` one; no selector means every tracked record; dry-run by default; `claims orphans` lists the durable orphanage (obligations re-homed by a `finalize --abandon`); `claims cleanup [<ref-or-source-worktree> ...] [--apply]` is the acting consumer that reclaims matching orphaned resources (delete the CodeSpace, finalize the cross-repo worktree) and drops settled entries. No selector means the entire orphanage. Same-machine, best-effort, dry-run by default |
+| `claims` | The worktree's **resource-obligation ledger** (accountability for what it allocated; effort `resource-obligation-settlement`). `claims [id]` shows the ledger; `claims owner <kind> <ref> [--json] [--all-states]` searches every registered project on this machine for the worktree(s) holding that outbound claim (held claims only by default); `claims add <kind> <ref> [--owner-ref <m/p/w>]` journals an outbound claim; `claims annotate <ref> --note <text>` attaches/updates a note on an already-existing claim (e.g. one an underlying tool auto-created) without release + re-add; `claims settle <ref> [--released]` marks it at-rest/released; `claims release <ref> [--remove]` retires one; `claims handoff offer ...` offers exact held claims to another worktree, and `claims handoff accept <bundle-id>` atomically transfers them -- same-machine in-process, cross-machine by SSHing to the source machine's own project binstub for the source-side settle while the accepting machine commits the consumer-side ledger locally, fenced by the shared claim-handoff lease; `claims sweep [--apply]` runs the never-wedge reclaim (flip a provably-gone+safe `active` claim → `abandoned`; dry-run default); `claims reconcile-at-rest [<worktree-id> ...] [--apply]` is the dedicated legacy/GC close-out reconciliation command (`worktree-finality-and-obligations` design.md): releases lingering **at-rest-only** claims on existing records that predate/bypassed finalize's own automatic release-under-freeze, never an `active` one; no selector means every tracked record; dry-run by default; `claims orphans` lists the durable orphanage (obligations re-homed by a `finalize --abandon`); `claims cleanup [<ref-or-source-worktree> ...] [--apply]` is the acting consumer that reclaims matching orphaned resources (delete the CodeSpace, finalize the cross-repo worktree) and drops settled entries. No selector means the entire orphanage. Same-machine, best-effort, dry-run by default |
 | `follow-ups` | The worktree's **itemized follow-up ledger** (worktree-finality-and-obligations effort; replaces the boolean-only `follow_up` flag). `follow-ups [id]` lists items + the effective open count; `follow-ups add <summary> [--ref <kind>:<value>]...` journals a new open item (`--ref` is repeatable; kinds: `resource-claim`\|`dispatch-task`\|`issue`\|`pull-request`\|`file`\|`effort`\|`other`) and reopens a `finalized` owner; `follow-ups resolve <id> [--result-ref <ref>]` marks one done; `follow-ups dismiss <id> --reason <text>` marks one explicitly not requiring action. An open (or `pending-transfer`) item counts as an open obligation the same way `status --follow-up` did, and blocks `cleanup`/`gc` the same way a held claim does. Transfer (`offer`/`accept`/`decline`) is not yet implemented |
 | `cleanup` | List and remove orphaned or finalized worktrees |
 | `gc` | Garbage-collect this project's worktrees on this machine: tracked reap (cleanup verdict) + **managed system/bridge leak sweep** (`--no-managed` to skip) + orphan-directory sweep + **orphaned launcher-shell reap** (`--no-reap-shells` to skip) + `git worktree prune`. `--dry-run` lists without removing; `--json` reports the managed + orphan + shell sweeps. Also runs automatically on the no-daemon cadence (picker launch + session end) |
@@ -146,6 +146,7 @@ continue to work unchanged.
 | `reconcile` | Force-refresh PR state for every tracked worktree (including `finalized`) out of band, so `list` stays a pure file read |
 | `delegates` | Focused cross-machine delegate/caller query built on the fleet snapshot. Dry-run by default: reports every `caller_worktree` delegate plus whether its host is `resolved`, `gone`, `unreachable`, or `ambiguous`, and whether the delegate became finalizable because the host is `finalized` / `complete(d)` / gone. `--execute` finalizes every currently eligible delegate through the owning host. |
 | `conclude-session` / `link-succession` | Project-agnostic write primitives for explicit session conclusion and exact-token handoff succession links (JSON) |
+| `resolve-handoff-successor` | Sanctioned repair for a terminal (`kind` managed, status finalized/complete/completed) worktree whose real handoff successor session ran to completion but was never `register-session`'d (a crash/race in that step), leaving `pending_handoffs`/`resolved_head_session` permanently wedged. `--token` names the still-`pending` handoff and `--successor` the NOT-yet-tracked session id; refuses unless the successor is a real, non-live, non-detached local session (`sessions.validate_session_id`) whose recorded cwd matches the worktree's `worktree_path` and whose transcript's first turn is itself a handoff-seed prompt with real turns beyond it (the same class-G evidence bar `repairing-worktrees` documents). On success it retroactively registers the successor, links the handoff, and immediately concludes it so the worktree lands back in the terminal shape gc already expects -- the sanctioned alternative to hand-editing tracking YAML |
 | `conclude-disposable` | Project-agnostic, exact-id terminal conclusion for an explicitly disposable CLI worker. Requires `--policy disposable-cli` and `--owner`; preserves live sessions, all dirty work (including generated local overlays), local commits, follow-ups, claims, pairs, and open PRs. A clean branch with zero commits ahead of upstream may remain behind without being rewritten, then the command marks the record managed/final. `--remove` immediately runs the conservative managed-GC verdict for only that exact id, with fresh lifecycle/liveness checks; an already-removed id is idempotent success. |
 | `session-transcript` | Emit a Copilot session's renderable transcript events by session id (JSON) |
 | `session-tail` | Emit one Copilot session's last N message-bearing turns by session id (`--limit N`, JSON), including per-turn `tool_names` and an ending-state signal (`complete` / `assistant_turn_in_progress` / `assistant_offer_pending`) |
@@ -164,24 +165,27 @@ continue to work unchanged.
 The `pr-*` family drives PR-gated landing (config `pr.enabled` / `pr.required` —
 see [config-reference.md § PR workflow](config-reference.md)). `push-changes`
 then targets the *feature* branch, never the default branch. The verbs are
-self-describing: `pr-status` prints the active `flow:` profile, and `pr-merge`
-refuses (naming the reason) on a repo where no consent label is bound. Full
-narrative in [worktree-lifecycle.md § Landing the change](worktree-lifecycle.md).
+self-describing: `pr-status` prints the active actor-effective `flow:` profile,
+and `pr-merge` refuses (naming the reason) on a repo where the effective flow
+does not authorize that action. Full narrative in
+[worktree-lifecycle.md § Landing the change](worktree-lifecycle.md).
 
-On a `pr-self-merge` repo, `pr-merge --now` also checks the acting identity's
-own **live** provider permission before merging (general multi-maintainer
-comprehension: the repo's config says the flow is self-merge, but that's a
-maintainer's choice — it never grants every submitter merge rights). A
-confident read-only/no-access read refuses with a reminder pointing at the
-contributor path (open the PR, wait for a maintainer); an unknown/unreadable
-permission fails open, unchanged from before this check existed.
+Networked actor-specific commands resolve a shared **effective actor profile**:
+configured/base `PRConfig` + live provider permission + a matching GitHub
+`pr.roles` override. Thus a conservative base can become `pr-self-merge` for a
+configured maintainer role, while an explicitly non-self-merge Read/Write role
+remains on its review path. A confident read-only permission also demotes an
+otherwise unscoped self-merge profile. An unknown/unreadable permission falls
+back to the configured base: conservative bases fail closed, while a legacy
+base that is itself self-merge preserves the historical fail-open contract.
+Repos without `pr.roles` and non-GitHub providers keep their prior behavior.
 
 | Subcommand | Description |
 |------------|-------------|
 | `create-pr` (alias `pr-create`) | Squash the worktree's commits, publish the PR head branch, and open the PR. Flags: `--title`, `--body`/`--body-file`, `--draft` (open not-ready-for-review), `--new` (force a fresh head branch for a parallel PR), `--no-open` (push only), `--hold` (deprecated alias for `--draft`) |
 | `pr-ready` | Move a draft PR **out of draft** — request review |
 | `set-pr` | Record PR metadata (`--url`, `--number`) when the PR was opened out of band by a provider sub-agent |
-| `pr-status` | Show tracked PR metadata + live verdict / conflict / merge state; prints the `flow:` profile and flags pull-forward once merged |
+| `pr-status` | Show tracked PR metadata + live verdict / conflict / merge state; prints the effective actor `flow:` plus the configured profile/resolution source and flags pull-forward once merged. `--no-live` stays offline and reports the configured profile. |
 | `pr-nudge` | Ask this repo's bound automated reviewer (`pr.reviewer`, e.g. GitHub Copilot) to (re-)review the active PR. Nothing to nudge (unconfigured/unsupported) is reported, not an error; a successful request is async -- poll `pr-status`/`pr-watch` for a fresh verdict |
 | `pr-watch` | Block until the PR moves (`wait <repo> <pr> [--until …]`) and wake the caller with a race-proof cursor; `cursor <repo> <pr>` prints the current baseline |
 | `pr-merge` | Signal **merge consent** on an approved PR (applies the bound `automerge_label`); the review gate merges when satisfied. `--all` / `--loop` for sweeps |
@@ -189,9 +193,11 @@ permission fails open, unchanged from before this check existed.
 | `attribution-audit` | Config-only check: flags this repo's `pr.head_pattern` for the branch-name leak class (embeds `{machine}` while `pr.source_attribution` isn't `true`; `{worktree_id}` is never flagged -- it isn't part of `pr_head_name`'s rendering contract, so it can't actually leak). Plain mode prints findings and exits 1 if any are found (0 if none); `--json` exits 0 whenever it can report findings (empty or not). A configuration-load failure exits 1 in both modes |
 | `pr` | Namespace grouping the `pr-*` verbs |
 
-`get pr-profile` / `get pr-required` / `get pr-provider` report the repo's PR
-disposition (`direct` | `pr-human-merge` | `pr-agent-merge` |
-`pr-self-merge`) so you know which verbs apply before signing off.
+`get pr-profile` / `get pr-required` / `get pr-provider` are deliberately
+network-free configuration queries. `get pr-profile` reports the configured
+base disposition (`direct` | `pr-human-merge` | `pr-agent-merge` |
+`pr-self-merge`); use live `pr-status` for the acting identity's effective
+profile when `pr.roles` or live merge authority can change which verbs apply.
 
 
 
@@ -461,12 +467,43 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 |------------|-------------|
 | `install` | Full deploy: runtime + project config + binstubs + terminal profiles |
 | `register` | Register a new project (create config + binstub without full reinstall) |
-| `uninstall` | Remove worktree manager |
+| `unregister` | Deregister a project's own adoption lifecycle (projects.yaml + repos.yaml entry + its binstub) -- never the shared runtime or another project's registration; see below |
+| `uninstall` | Remove worktree manager (`--remove-config` ALSO deletes the SHARED `~/.agent-worktrees` registry root -- shared by every adopted project, not just `--project`'s; requires `--yes`) |
 | `update` | Re-deploy runtime from repo source + refresh every active registered plugin payload/runtime, purge inactive installed identities absent from an authoritatively refreshed marketplace catalog, and opportunistically refresh the remaining installed-but-inactive payload inventory; then update sibling modules, fast-forward the managed repo anchor(s), and auto-prune legitimately stale Picker pivot manifests. Active or activation-unknown identities are never purged. An inactive inventory refresh/uninstall failure is advisory; an active plugin refresh failure fails the update. Version-gated: skips a runtime whose deployed version already matches its payload (`--force` re-deploys all active runtimes; `--no-anchor-sync` skips the anchor sync; `--no-prune-pivots` skips the pivot prune -- see `doctor`'s `--prune-pivots` for the same safe subset run on demand) |
 | `install-status` | Show installation and deployment status |
 | `deploy-instructions` | Retire migrated managed instruction files (machine identity now via the `session-machine` sessionStart hook) |
 | `machine-context` | sessionStart producer for the exact-session guidance writer (cwd-gated) |
 | `get` | Query config values (e.g., `agent-worktrees get repo-dir`) |
+
+### Deregistering a project (`unregister`) vs. tearing down the runtime (`uninstall --remove-config`)
+
+`~/.agent-worktrees` mixes two things with very different disposability: the
+deployed **runtime** (`venv/`, `lib/`, `bin/` -- disposable, `install`
+regenerates it with zero data loss) and the **shared registry**
+(`config.yaml`, `repos.yaml`, `projects.yaml`, `accounts.yaml`, `snapshots/`,
+`pivots/` -- the cross-project registry every adopted project shares on this
+machine). `uninstall --remove-config` deletes that whole shared root, so it
+is never scoped to the project named via `--project` -- it is a machine-wide,
+hard-to-undo action. Passing `--remove-config` alone only reports what would
+be deleted (and names any other adopted projects that would lose their
+entries); add `--yes` to actually delete it.
+
+To deregister a single project -- e.g. a stale or broken project stub with
+no repo and no worktrees -- use `unregister` instead:
+
+```
+agent-worktrees --project stale-stub unregister
+```
+
+It removes only that project's `projects.yaml` entry, its `repos.yaml`
+entry (or, with `--keep-repo-entry`, downgrades that entry to a catalogued
+`reference` repo instead of removing it), and its own per-project binstub --
+never the shared runtime, never another project's registration. It refuses
+(unless `--force`) when its own tracking still shows live worktrees, tracked
+sessions, or an open PR, so deregistering never silently orphans in-flight
+work. The project's own per-project state directory (`~/.<project>`) is left
+in place; remove it by hand, or with `uninstall --project <name>
+--remove-config --yes`, once it's no longer needed.
 
 ## Effort Focus
 

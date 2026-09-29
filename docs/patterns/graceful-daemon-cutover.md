@@ -1,8 +1,9 @@
 # Pattern: graceful daemon cutover (update without killing in-flight work)
 
 > **Serves the vision:** a runtime update is invisible to work in progress.
-> **Embodied by:** `agent-bridge` (reference), `agent-index` (service),
-> and — as this pattern rolls out — `agent-dispatch` and `agent-vault`.
+> **Embodied by:** `agent-bridge`, `agent-dispatch`, `agent-index`,
+> `agent-mcp`, `agent-worktrees`, and `worktree-manager`; `agent-vault`
+> remains the main planned adopter still to land.
 > **Companion patterns:** [`durable-vs-versioned-runtime`](durable-vs-versioned-runtime.md)
 > (decoupling a warm daemon from the swappable runtime),
 > [`service-lifecycle-supervision`](service-lifecycle-supervision.md),
@@ -79,6 +80,7 @@ pure stdlib and imports nothing from any consuming plugin; **keep it that way.**
 | `zdd.routing` | The file-based routing table `active.json` (no front proxy). The daemon `publish_active`s its endpoint on startup and flips `active`/`previous` atomically on cutover; short-lived clients re-read it every invocation and self-heal (dead `active` → `previous` → the caller's static config). API: `Endpoint`, `read_active_endpoint`, `publish_active`, `clear_if_owner`, `routing_table_path`. |
 | `zdd.cutover` | `CutoverOrchestrator` drives one cutover: spawn passive → health-gate → flip → drain → retire, reversible up to an explicit commit point, with **rollback** (pre-commit failure) and **commit-forward** (retire the old even if unreachable, rather than strand clients). |
 | `zdd.breadcrumb` | Recovers a **stranded survivor** left drained by an *aborted* cutover: `recover_stale_cutover` undrains it so it is not stuck closed to new work (agent-bridge `deploy --recover`). `reap_abandoned_passive` is the matching backstop for the *new* side: a `spawn_passive` daemon whose cutover's orchestrator died before promoting it never becomes anyone's "old" (aperture-labs #5195) -- see § Never-Promoted Abandoned Passive below. |
+| `zdd.diagnostics` | Shared daemon-health audit + repair: report-only and apply modes that surface the four field-proven abnormality classes uniformly (duplicate resident daemon, stranded survivor, never-promoted abandoned passive, stale superseded generation) and gate destructive repair on a validated live owner plus identity-bound termination. |
 
 **Why a routing *table*, not a front proxy:** a proxy on a stable port is itself
 a long-lived process you must update — re-introducing the downtime, and demanding
@@ -299,6 +301,8 @@ failure degrades to `active`/`previous: null` rather than failing the whole
 | **agent-bridge** | session-host (hosts a live Copilot CLI per session) | ✅ **Cutover already the default** — full `zdd` (active/passive, `drain`/`undrain`, breadcrumb recover), and `install.ps1 update`/POSIX `update` already run the cutover unconditionally whenever a live daemon is running (Thread B, invariant #1) -- no flag, no opt-in. `-ZeroDowntime` is accepted only as a deprecated no-op for back-compat callers. A public `deploy` verb also exists as an operator escape hatch / self-triggered-update spawn target | **turn boundary with no active background task** — drain refuses new turns, waits for the in-flight turn to finish | Keep it the exemplar; extract shared shapes into `zdd`. Per invariant #1's target state, eventually demote the `deploy` verb to an installer-internal seam once nothing external needs to trigger a cutover by hand |
 | **agent-index** | (a) service shell; (b) indexing worker subprocesses; (c) warm embedding **engine** daemon | ✅ **Service cutover already installer-driven** — `install.ps1 update`'s `Invoke-ServiceCutover` already runs `agent_index deploy` (the zdd active/passive flip) unconditionally whenever a live, healthy service is running -- no flag, no opt-in; `plugin.json` declares `"zeroDowntimeUpdate": true` and `install.ps1` accepts (and ignores) a back-compat `-ZeroDowntime` switch. **Worker re-adoption** already works too (workers are detached, persist progress to `tasks.db`, and are re-adopted after a service restart). The **engine daemon is left untouched by a service update by design** | service: between task dispatches; worker: `run_reindex` checkpoints `path_index` per flush, `resume_since` skips stored files (the only non-resumable slice is the current unflushed batch) | Give the **engine daemon** an explicit *outlive + reconnect* story (it is the [`durable-vs-versioned-runtime`](durable-vs-versioned-runtime.md) warm runtime): confirm it survives a service cutover and the new service reconnects to it; the installer version- + health-gates its own engine cutover |
 | **agent-dispatch** | coordinator (`serve`, FastAPI); supervisor (`supervise` spawn loop); spawned embodied/headless workers; detached `run` waiters | ✅ **Cutover already the default** — `install.ps1 update`/`install.sh update` already run `Invoke-CoordinatorCutover`/`_coordinator_cutover` unconditionally whenever a live, routed coordinator is running (Thread B; parity with agent-bridge's Invariant #1, no flag involved on either platform), falling back to stop-and-swap only for a pre-Thread-B coordinator or a failed cutover. `plugin.json` now also declares `"zeroDowntimeUpdate": true` and `install.ps1` accepts (and ignores) a back-compat `-ZeroDowntime` switch, so the reconcile-at-launch path's redundant flag-pass no longer needs a special case. The coordinator also has a live self-update loop (opt-in, `AGENT_DISPATCH_SELF_UPDATE=1`) that notices a newer `current-version` slot between launches and self-triggers the same cutover; a public `deploy` verb exists (parity with agent-bridge's) for the same cutover run by hand. The **`supervise serve` singleton daemon** has its own analogous but distinct live self-update loop, **default-ON / opt-out** (`AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE=0` to disable, #2259 -- there is no launch-path protocol in this harness to flip an opt-in flag before a daemon's first boot, so this one mirrors self-retire's default-on shape instead of the coordinator's opt-in one, validated end-to-end on a fresh box by the clean-room `agent-dispatch-supervisor-self-update` scenario before defaulting on): since a reconcile tick always runs to completion before the next one starts, every tick boundary is already a safe cutover point (no K-confirmation needed, unlike the coordinator's routing-table race), so a stale check simply winds down every managed unit, releases the single-instance lease, spawns a successor daemon on the newer interpreter with its own unmodified `sys.argv`, and exits — closing the gap where a scheduled-task-launched daemon with no periodic trigger otherwise never cycles onto a newly-published version between logons | coordinator: between task **claims** (drain = stop claiming, let a claimed-but-unstarted task settle to a resumable state in the queue DB); supervisor: between spawn reservations | **Repossess** the supervisor + spawned workers: let them **outlive** the coordinator swap and re-adopt via the durable SQLite queue DB + `running-version.json` (they already run detached). Add `stamp`/`provision` (Thread A) at the same time. Consider flipping `AGENT_DISPATCH_SELF_UPDATE`'s default to on too once it has soaked, mirroring self-retire and the supervisor's own now-default-on loop |
+| **agent-worktrees** | resident `status-monitor` (sweep loop + hook/classify/tracking-write control plane) | ✅ **Cutover already the default** — `zdd` is vendored under `plugins/agent-worktrees/libs/zdd/`; `plugin.json` declares `"zeroDowntimeUpdate": true`; and both `install.ps1 update` and `install.sh update` drive the `status_monitor_cutover` seam automatically whenever a live, routed monitor is running, while still accepting the historical `-ZeroDowntime` / `--zero-downtime` switches only for reconcile/back-compat callers. The routed loopback control plane is guarded by an owner-scoped bearer token loaded from `status-monitor-control.token`, so the installer/cutover client can drain, promote, and retire generations without exposing an unauthenticated local surface. `agent-worktrees doctor` now also reports the shared `zdd.diagnostics` audit and can opt in to the identity-bound repair pass with `--apply-daemon-health`. | **close admission first, keep the sweep marked active through reconciliation/pane-reap mutations, then wait for every already-accepted hook/classify/tracking-write handler plus in-flight write compute to drain**; generation self-retire re-checks routed supersession at the top of every sweep iteration and exits only at that same safe point | No plugin-specific adoption gap remains; future diagnostic/self-repair improvements should stay shared in `zdd` rather than reintroducing monitor-specific cutover logic |
+| **worktree-manager** | resident `mux-daemon` (`mux-status-v1` status-apply + live-republish service) | ✅ **Cutover already the default** — `zdd` is vendored under `worktree-manager/libs/zdd/`, and `worktree-manager update`'s `self_install.self_update` runs `activate_after_update`, which drives a `CutoverOrchestrator`, whenever a live, **routed** `mux-daemon` is present on either platform. Because Worktree Manager is not a marketplace plugin, there is no `plugin.json` / `zeroDowntimeUpdate` manifest bit here; the activation seam is the self-update path itself. The one-time first upgrade from a pre-adoption **lock-only** daemon uses the legacy identity-bound replacement path instead of an orchestrated drain because there is no routed control plane to talk to yet. Once a routed generation exists, `activate_after_update` **no-ops with no orchestrator constructed at all** when that generation already reports the target version and answers healthy (`self_update` reconciles on every session launch, far more often than the payload actually changes) -- unless a durable breadcrumb marks a prior cutover aborted mid-flight, in which case that lock-free shortcut is skipped and recovery/reaping always run first, under the lock, before any no-op decision; the full spawn/flip/drain/retire cutover contract then runs only if the post-recovery route still needs it (a genuinely different version). The routed loopback control plane uses the same owner-scoped token shape, and passive generations self-promote + self-retire around the `mux-status-v1` active table. `worktree-manager doctor` now includes the shared `zdd.diagnostics` audit and can opt in to the repair pass with `--apply-daemon-health`. | **close `mux-status-v1` admissions, stop periodic live-mapping republishes, then wait for every already-accepted status-apply handler and the current republish cycle to drain**; disk-backed registry register/remove writes stay durable outside the resident drain gate | No new hand-off manifest is needed beyond `mux_mapping_registry` plus the shared `zdd` breadcrumb; future shared diagnostics belong in `zdd`, not a manager-only fork |
 | **agent-vault** | `agent_vault.service` (owns the in-memory unlocked KeePass master + credential cache; serves loopback/pipe/TCP) | ❌ **None** — update re-registers the task + starts; the unlocked master + cache **die on restart** | no in-flight secret request in flight (requests are short) | **Lightest tier** (connection-owner, dotfiles#1333): the "connection" is the *authenticated in-memory session*. Make **`install.ps1 update`/activation** adopt `zdd` routing (clients follow the new daemon) and perform the flip automatically, and define **reconnect** as re-establishing the auth state on the new daemon — either (a) hand off via the opt-in **encrypted persistent cache** (`credential-cache.enc` + wrapped key) so the new daemon warms without a re-prompt, or (b) accept a single re-unlock prompt on first post-cutover use. Drain = finish the in-flight request; never cut over mid-request |
 | **agent-mcp** | `serve` (resident warmth daemon: one-shot `call`/`materialize`/`list`, plus long-lived multiplexed `bridge`/`forward` attach sessions) | ✅ **Cutover already the default on activation** — `zdd` vendored + adopted; `init.ps1`/`init.sh` (agent-mcp's installer, named `init` rather than `install`) now invoke `agent-mcp cutover --require-live --force --json` unconditionally on every activation, right before the existing stale-slot process reap. `--require-live` makes this safe with no opt-in: it never starts a resident daemon where none was running (`serve` stays optional, on-demand warmth) and no-ops when the live daemon is already on the target version; only a genuinely live, differently-versioned daemon actually cuts over. A public `cutover` verb also remains for a manual/operator-triggered run | one-shot ops: unaffected by drain, finish normally; attach sessions: drain refuses *new* attaches (the client's existing "live host refuses attach → direct in-process bridge" fallback already covers this) and lets already-attached sessions ride out to natural close before the old generation retires | Add the **generation self-retire** backstop (deferred in v1, matching the reference implementation's own optional status for it). If agent-mcp's installer is ever renamed `install.ps1`/`install.sh` to converge with the other plugins' naming convention, also set `"zeroDowntimeUpdate": true` (inert today since the launch-time reconciler only wires that flag onto a script named `install.ps1`). See effort `agent-mcp-graceful-cutover` |
 
@@ -312,6 +316,21 @@ agent-bridge needs.
 
 ## Invariants (binding)
 
+0. **Any long-lived resident daemon in the suite that serves callers through a
+   discoverable local endpoint, routed control plane, or other non-resumable
+   in-flight work MUST adopt this pattern.** The common case is an `agent-*`
+   plugin in the [`Runtime service`](README.md#plugin-shapes) shape, but the
+   obligation is behavioral, not nominal: if any suite component (including a
+   sibling runtime such as `worktree-manager`) adds that class of resident
+   daemon under some other label, it still owes graceful cutover semantics.
+   "It isn't classified as a runtime service" is not an exemption. The only
+   valid alternatives are to show that the process is **not** that class of
+   daemon at all and belongs under a different lifecycle pattern instead (for
+   example [`ephemeral-process-reaping`](ephemeral-process-reaping.md) for a
+   detached helper), or that it explicitly fits the lighter
+   [`service-lifecycle-supervision`](service-lifecycle-supervision.md)
+   wind-down-and-successor path for a singleton daemon with no shared endpoint
+   and no in-flight request to drain.
 1. **Cutover is installer-driven and automatic — there is NO externally-driven
    `deploy` command.** The installer's `update`/activation (and first-use
    `provision`) performs the cutover in-process whenever it detects a live
@@ -360,6 +379,11 @@ legitimately differs is the **service-manager integration**, and the two
 platforms reach the **same behavioral guarantee** (an update never hard-kills
 in-flight, non-resumable work) by different, OS-appropriate routes:
 
+For non-marketplace peers such as **worktree-manager**, read the
+`install.ps1`/`install.sh` shorthand here as "the equivalent update activation
+seam" — in its case `self_install.self_update`, which now drives the same `zdd`
+cutover behavior on both platforms even though it has no plugin manifest.
+
 | | Windows (`install.ps1`) | POSIX (`install.sh`) |
 |---|---|---|
 | Service manager | Scheduled Task, but `conhost --headless` **detaches** the daemon — the task never tracks the live process | systemd `--user` unit **tracks** the daemon (its `ExecStart` PID) |
@@ -374,6 +398,14 @@ Consequences of this equivalence:
   is the **zero-downtime enhancement** (removes the brief blip), gated on a live
   *routed* (Thread-B) daemon with the `systemctl restart` as the always-safe
   fallback.
+- **Detached daemons still participate, but via activation-seam parity rather
+  than a service-manager fallback.** `agent-worktrees` reaches the same
+  cross-platform guarantee through `install.ps1`/`install.sh` plus the routed
+  `status-monitor` control plane, and `worktree-manager` does so through its
+  `self_install.self_update` seam even though it is not a marketplace plugin
+  and therefore has no `zeroDowntimeUpdate` manifest bit. Neither daemon is a
+  systemd-managed service, so their POSIX lane is the direct `zdd` cutover
+  path, not a `systemctl restart` fallback.
 - **The `AGENT_BRIDGE_ZERO_DOWNTIME` / `-ZeroDowntime` opt-in is retired on both
   lanes** — the cutover is the default whenever a live daemon is running.
 - **agent-vault needs no `.sh` cutover:** its fixed-endpoint service drains on
@@ -386,6 +418,82 @@ Consequences of this equivalence:
   `.sh` change always **falls back** to the already-proven SIGTERM-graceful
   `systemctl restart`, so the worst case is today's behavior.
 
+## Common review findings — a pre-flight self-check
+
+The `graceful-cutover-worktrees-and-ssh` effort landed six phases across eight
+PRs (#4447, #4483, #4497, #4518, #4550, #4554, #4563, #4583); the four PRs that
+actually implemented cutover/repair logic (#4447, #4497, #4518, #4563) needed
+6-14 automated review rounds each before merging, almost entirely on a small,
+*recurring* set of bug classes rather than novel ones each round. Read this
+section — and actually check your own diff against it — **before** opening a
+PR that touches cutover, drain, promotion, or process-repair logic; it is
+cheaper than a review round.
+
+1. **Serialize cutover attempts under one lease.** Two overlapping cutover
+   invocations (a rapid-fire re-release, or a manual repair racing an
+   in-progress installer-driven cutover) must never both proceed. Acquire a
+   single exclusive lease/guard for the whole cutover *and* for any repair
+   path that also touches promotion/retirement state — an audit/`doctor`
+   snapshot may read without the lease, but anything that could mutate
+   generation state must hold it.
+2. **Promote before you retire — never the reverse.** The old generation may
+   only retire once the successor's promotion is *confirmed*, not merely
+   attempted. A failure between "route flipped" and "successor confirmed
+   live" must roll back or retry, never leave both generations gone.
+3. **Drain boundary = admission closed AND every already-admitted unit of
+   work finished** — not "between sweep ticks." If the daemon serves any
+   concurrent request surface (a hook/classify/control-plane endpoint)
+   *separate* from its periodic sweep, both must be drained; a sweep-only
+   drain boundary misses in-flight requests.
+4. **A repair/self-heal path must re-validate its target immediately before
+   acting, not just at snapshot time.** Between an audit snapshot and a
+   repair action, the routed active daemon can change, a passive can be
+   promoted, or a candidate can exit and its PID be reused. Re-check the
+   target's identity (owner/lock/routing agreement) at the point of action,
+   not only when the finding was first produced.
+5. **Any process termination by PID needs a direct, dedicated safety test —
+   an end-to-end rehearsal is not sufficient evidence.** Two separate safety
+   layers are involved, and a reaper needs both: (a) **identity-bound
+   termination** — `zdd.diagnostics.process_start_time` obtains a PID's
+   identity token and `zdd.diagnostics.terminate_pid_if_identity` verifies
+   only that the token still matches before signaling, refusing on any
+   mismatch (stale PID, reused PID); and (b) **owner validation** — a
+   separate check that the candidate is actually the legitimate target, not
+   an unrelated live process, performed by the higher-level
+   `zdd.diagnostics.audit_daemon_health`/`apply_daemon_health` path, not by
+   the low-level pair alone. Reuse these shared primitives — a plugin-private
+   module like `agent_worktrees.locks`/`agent_worktrees.procs` is an example
+   of the same discipline, not something another plugin can import. Ship a
+   unit test proving both layers, not just the identity-token match. This
+   applies to every destructive repair/reap path, not only the first one you
+   write.
+6. **Loopback control-plane surfaces need owner-scoped auth,** not just
+   "loopback-only." Any local process can otherwise reach the endpoint. Use a
+   per-owner bearer token file (best-effort restrictive permissions), and
+   keep ambient `PYTHONPATH`/environment from leaking into a
+   subprocess-launched activation helper — clear or sanitize it explicitly at
+   the launch seam.
+7. **State your cross-platform coverage explicitly, and don't conflate
+   "POSIX" with "Linux."** A process-census/liveness primitive written
+   against `/proc` or `pidfd` is Linux-specific, not POSIX-general — macOS is
+   POSIX but has neither. If your change claims general cross-platform
+   support, name Windows, Linux, **and** macOS explicitly and say what each
+   one does (implemented, or an explicit, justified exemption) rather than
+   letting "POSIX" silently mean "Linux, untested elsewhere."
+8. **Bookkeeping findings are the cheapest to prevent and the most common to
+   ship anyway** — before opening the PR, re-check: when a change touches a
+   vendored/shared library, the changefile names every **consuming plugin**
+   whose payload actually changed as a result (never the shared library
+   itself — a library like `zdd`/`ssh-manager` isn't independently released;
+   see CONTRIBUTING.md's changefile requirement); the PR's Documentation
+   impact statement matches the final diff, not an earlier draft; no
+   unrelated generated/vendored directory rode along in the diff (`git
+   status`/`git diff --stat` against your intended file list before
+   pushing); and if the
+   PR touches an effort README, its Journal's completion claims are checked
+   against that same phase's own Validation Plan items, not asserted
+   independently.
+
 ## Rollout sequencing
 
 1. **agent-dispatch** — ~~highest value, currently kill-and-restart~~ **done**:
@@ -394,17 +502,29 @@ Consequences of this equivalence:
    exists as an escape hatch), supervisor/workers already outlive the
    coordinator swap via the queue DB. Thread-A `stamp`/`provision` remains
    open.
-2. **agent-vault** — installer-driven routing flip + auth-state reconnect
+2. **agent-worktrees** — **done**: vendored `zdd`, set
+   `"zeroDowntimeUpdate": true`, and wired `install.ps1 update`/`install.sh
+   update` to auto-cut over the routed `status-monitor` whenever a live daemon
+   is present. The control plane is loopback-only behind an owner-scoped token,
+   and demoted generations self-retire only after admissions close, the current
+   sweep/reconciliation work finishes, and already-admitted
+   hook/classify/tracking-write activity drains.
+3. **worktree-manager** — **done**: vendored `zdd` and wired
+   `self_install.self_update` to auto-cut over the resident `mux-daemon` on
+   both platforms. Its routed `mux-status-v1` control plane uses the same
+   owner-scoped loopback token shape, and demoted generations wait for admitted
+   status-apply work plus the current republish cycle to drain before exit.
+4. **agent-vault** — installer-driven routing flip + auth-state reconnect
    (persistent-cache hand-off or re-unlock). Add Thread-A `stamp`/`provision`.
-3. **agent-index engine daemon** — the outlive + reconnect gap (installer-driven
+5. **agent-index engine daemon** — the outlive + reconnect gap (installer-driven
    engine cutover / re-adoption guarantee). The *service* cutover itself is
    already installer-driven and unconditional (see the per-plugin table).
-4. **agent-bridge** — cutover is already unconditional in the installer
+6. **agent-bridge** — cutover is already unconditional in the installer
    (invariant #1's automatic-activation half is done); only the `deploy`
    subcommand's eventual demotion/retirement (the invariant's stricter
    "no operator verb at all" half) and folding any newly-shared shapes back
    into `zdd` remain.
-5. **agent-mcp** — **done**: core mechanism (`agent-mcp cutover`) plus
+7. **agent-mcp** — **done**: core mechanism (`agent-mcp cutover`) plus
    installer-driven activation (`init.ps1`/`init.sh` calling
    `cutover --require-live` unconditionally, effort
    `agent-mcp-graceful-cutover`); the generation self-retire backstop remains

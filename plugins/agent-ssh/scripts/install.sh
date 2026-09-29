@@ -12,10 +12,11 @@ _step() { printf '  ...    %s\n' "$1"; }
 # Resolve a vendored library path (libs/<name>) across multiple layouts.
 # Prints the resolved directory path to stdout (nothing else).
 # Returns 0 if found, 1 if not. Mirrors plugins/agent-bridge/scripts/
-# install.sh's identically-named helper -- needed here because ssh-manager
-# and agent-procutil are now consumed as `uv`-editable canonical
-# references (vendor-pointer-generalization effort, Phase 1): a dev
-# checkout has no `$PLUGIN_DIR/libs/<lib>` copy at all for either one.
+# install.sh's identically-named helper -- needed here because
+# ssh-manager, agent-procutil, and venue-copilot are now consumed as
+# `uv`-editable canonical references (vendor-pointer-generalization
+# effort, Phase 1): a dev checkout has no `$PLUGIN_DIR/libs/<lib>` copy
+# at all for any of them.
 _resolve_vendored_lib() {
     local lib_name="$1"
     local candidate
@@ -69,16 +70,24 @@ raise SystemExit(1)
 }
 _resolve_ssh_manager() { _resolve_vendored_lib ssh-manager; }
 _resolve_agent_procutil() { _resolve_vendored_lib agent-procutil; }
+_resolve_venue_copilot() { _resolve_vendored_lib venue-copilot; }
+_resolve_zdd() { _resolve_vendored_lib zdd; }
 
 _install_agent_ssh_package() {
     if [[ "$HAVE_UV" -eq 1 ]]; then
-        if uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
+        local venue_copilot_dir
+        venue_copilot_dir="$(_resolve_venue_copilot)" || {
+            _fail 'Cannot locate venue-copilot library'
+            return 1
+        }
+        if uv pip install --python "$VENV_PYTHON" --reinstall-package agent-venue-copilot "$venue_copilot_dir" --quiet 2>/dev/null \
+            && uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
             return 0
         fi
         _step 'uv package install failed -- falling back to python -m pip'
     fi
 
-    local agent_procutil_dir ssh_manager_dir
+    local agent_procutil_dir ssh_manager_dir venue_copilot_dir zdd_dir
     agent_procutil_dir="$(_resolve_agent_procutil)" || {
         _fail 'Cannot locate agent-procutil library'
         return 1
@@ -87,12 +96,20 @@ _install_agent_ssh_package() {
         _fail 'Cannot locate ssh-manager library'
         return 1
     }
+    venue_copilot_dir="$(_resolve_venue_copilot)" || {
+        _fail 'Cannot locate venue-copilot library'
+        return 1
+    }
+    zdd_dir="$(_resolve_zdd)" || {
+        _fail 'Cannot locate zdd library'
+        return 1
+    }
     "$VENV_PYTHON" -m pip install --quiet \
         "$agent_procutil_dir" \
         "$PLUGIN_DIR/libs/dropin-registry" \
         "$ssh_manager_dir" \
-        "$PLUGIN_DIR/libs/venue-copilot" \
-        "$PLUGIN_DIR/libs/zdd" \
+        "$venue_copilot_dir" \
+        "$zdd_dir" \
         "$PLUGIN_DIR" 2>/dev/null
 }
 

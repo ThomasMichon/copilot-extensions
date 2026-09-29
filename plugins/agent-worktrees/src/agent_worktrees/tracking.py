@@ -329,6 +329,8 @@ class SessionHandoff:
     linked_at: str | None = None
     candidate: str | None = None
     candidate_at: str | None = None
+    #: Arms status-monitor auto spawn+retire; see _monitor_pending_handoff_request.
+    live_cutover: bool = False
 
 
 @dataclass
@@ -1975,6 +1977,7 @@ def _load_record_uncached(path: Path) -> WorktreeRecord:
                     str(raw["candidate"]) if raw.get("candidate") else None
                 ),
                 candidate_at=str(candidate_at) if candidate_at else None,
+                live_cutover=bool(raw.get("live_cutover", False)),  # missing on legacy records
             ))
 
     profile_assignments: list[ProfileAssignment] = []
@@ -2792,10 +2795,8 @@ def _save_record_unlocked(
                         {"candidate": handoff.candidate}
                         if handoff.candidate else {}
                     ),
-                    **(
-                        {"candidate_at": handoff.candidate_at}
-                        if handoff.candidate_at else {}
-                    ),
+                    **({"candidate_at": handoff.candidate_at} if handoff.candidate_at else {}),
+                    **({"live_cutover": True} if handoff.live_cutover else {}),
                 }
                 for handoff in record.handoffs
             ]},

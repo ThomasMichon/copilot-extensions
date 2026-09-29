@@ -170,7 +170,11 @@ The adapters preserve these state distinctions:
 - `agent-machines` is configuration-empty when no applicable requirement
   package exists, but malformed package layouts fail.
 - `agent-codespaces` checks runtime prerequisites, authentication, and
-  configuration health without requiring or creating a live CodeSpace.
+  configuration health without requiring or creating a live CodeSpace --
+  the gh/codespace-scope authentication check itself is conditional: it
+  only runs once this plugin is actually configured/adopted somewhere, so
+  an unconfigured (`configuration-empty`) installation never requires a
+  CodeSpace-scoped gh token.
 - `agent-dispatch` reuses the coordinator health endpoint without autostarting
   it; installer updates own service cutover, while manual `service.env` edits
   still require an explicit service restart.

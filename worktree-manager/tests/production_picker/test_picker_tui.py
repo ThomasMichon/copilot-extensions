@@ -2095,6 +2095,137 @@ def test_embody_cli_internal_action_exits_with_resume_decision(monkeypatch):
     asyncio.run(run())
 
 
+def test_launch_in_new_window_offered_only_for_local_open_or_resume_rows():
+    """copilot --headed (#copilot-headed): the "Launch in new window" verb
+    rides alongside Open/Resume, but ONLY for a local row -- a headed
+    window pops on THIS machine, meaningless for a remote (SSH) worktree."""
+    from worktree_manager.production_picker.picker_tui.engine_worktree_actions import (
+        PickerScreenWorktreeActionsMixin as M,
+    )
+
+    local_mux_live = {
+        "source_kind": "machine-ssh", "is_local": True, "mux_live": True,
+        "cleanup_bucket": "wip",
+    }
+    acts = M._session_action_verbs(local_mux_live)
+    assert "Open" in acts
+    assert "Launch in new window" in acts
+
+    remote_mux_live = dict(local_mux_live, is_local=False)
+    acts = M._session_action_verbs(remote_mux_live)
+    assert "Open" in acts
+    assert "Launch in new window" not in acts
+
+    local_resumable = {
+        "source_kind": "machine-ssh", "is_local": True, "sessionless": False,
+        "cleanup_bucket": "unused",
+    }
+    acts = M._session_action_verbs(local_resumable)
+    assert "Resume" in acts
+    assert "Launch in new window" in acts
+
+    # A row offering neither Open nor Resume (e.g. reclaimable) never offers
+    # "Launch in new window" either -- there's no live-or-resumable session
+    # yet to attach a new window to.
+    reclaimable = {
+        "source_kind": "machine-ssh", "is_local": True,
+        "session_lock_live": True,
+    }
+    acts = M._session_action_verbs(reclaimable)
+    assert "Open" not in acts and "Resume" not in acts
+    assert "Launch in new window" not in acts
+
+
+def test_launch_in_new_window_runs_in_background_without_exiting_picker(
+    monkeypatch,
+):
+    """Selecting "Launch in new window" must run `copilot --headed --json`
+    as a background subprocess and report through ``self.debug`` -- unlike
+    every other Actions-menu verb, it must NOT exit the Picker (no
+    ``_decide`` call, ``app.result`` stays unset)."""
+    from worktree_manager import engine_client
+    from worktree_manager.production_picker import context as picker_context
+
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+
+            def _sync_run_bg(_label, work, done=None, **_kwargs):
+                result = work()
+                if done is not None:
+                    done(result)
+
+            monkeypatch.setattr(scr, "_run_bg", _sync_run_bg)
+            monkeypatch.setattr(picker_context, "project", lambda: "my-project")
+            calls = []
+
+            def fake_run_json(project, args, **kwargs):
+                calls.append((project, args))
+                return {"ok": True, "session": "wt-aaaa", "spawner": "wt.exe", "pid": 4242}
+
+            monkeypatch.setattr(engine_client, "run_json", fake_run_json)
+
+            rec = next(
+                r for r in scr.list_records()
+                if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa"
+            )
+            scr._wt_submenu_dispatch(rec, ("Launch in new window", False, False))
+
+            assert app.result is None  # the Picker was never exited
+            assert calls == [(
+                "my-project",
+                ["copilot", "--worktree-id", "anomalous-potato-win-20260627-aaaa",
+                 "--headed", "--json"],
+            )]
+            assert "wt.exe" in scr.debug
+
+    asyncio.run(run())
+
+
+def test_launch_in_new_window_failure_is_reported_via_debug_not_raised(
+    monkeypatch,
+):
+    from worktree_manager import engine_client
+    from worktree_manager.production_picker import context as picker_context
+
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await pilot.pause()
+
+            def _sync_run_bg(_label, work, done=None, **_kwargs):
+                result = work()
+                if done is not None:
+                    done(result)
+
+            monkeypatch.setattr(scr, "_run_bg", _sync_run_bg)
+            monkeypatch.setattr(picker_context, "project", lambda: "my-project")
+
+            def boom(project, args, **kwargs):
+                raise engine_client.EngineError("no visible terminal spawner found")
+
+            monkeypatch.setattr(engine_client, "run_json", boom)
+
+            rec = next(
+                r for r in scr.list_records()
+                if (r.get("raw") or {}).get("id") == "anomalous-potato-win-20260627-aaaa"
+            )
+            scr._wt_submenu_dispatch(rec, ("Launch in new window", False, False))
+
+            assert app.result is None
+            assert "Launch in new window failed" in scr.debug
+            assert "no visible terminal spawner found" in scr.debug
+
+    asyncio.run(run())
+
+
 def test_open_venue_missing_identity_is_safe():
     """No provider/venue in ctx (a malformed row) is a reported no-op --
     never a crash, never an exit."""
@@ -3244,10 +3375,12 @@ def test_sessionless_flag_only_when_count_known_zero():
 
 
 def test_sess_turns_combines_session_count_and_turn_count():
-    """#3307 Phase 6: the combined SESS/TURNS column renders
-    "<session_count>/<turn_count>", falling back to "-" for the session half
-    when ``session_count`` is absent (a fixture or a too-old remote) rather
-    than fabricating a count -- the turn half always renders."""
+    """#3307 Phase 6, renamed LENGTH (operator feedback 2026-09-29): the
+    combined column renders "<session_count>s <turn_count>t", falling back
+    to "-" for the session half when ``session_count`` is absent (a
+    fixture or a too-old remote) rather than fabricating a count -- the
+    turn half always renders. Unit-suffixed so it never reads ambiguously
+    like a date (the prior "N/M" form's exact complaint)."""
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
 
     def n(**extra):
@@ -3256,10 +3389,10 @@ def test_sess_turns_combines_session_count_and_turn_count():
         base.update(extra)
         return derive.norm(base, "m", "Win")
 
-    assert n(session_count=3, turn_count=47)["sess_turns"] == "3/47"
-    assert n(session_count=0, turn_count=0)["sess_turns"] == "0/0"
-    assert n(turn_count=5)["sess_turns"] == "-/5"          # count unknown
-    assert n()["sess_turns"] == "-/0"                      # neither known
+    assert n(session_count=3, turn_count=47)["sess_turns"] == "3s 47t"
+    assert n(session_count=0, turn_count=0)["sess_turns"] == "0s 0t"
+    assert n(turn_count=5)["sess_turns"] == "-s 5t"          # count unknown
+    assert n()["sess_turns"] == "-s 0t"                      # neither known
 
 
 def test_pair_marker_names_this_rows_own_role():
@@ -9660,6 +9793,25 @@ def test_palette_style_reuses_worktree_state_palette():
     # Unknown palette / value -> no style (falls back to the column's literal).
     assert _palette_style("nope", "RUNNING") == ""
     assert _palette_style("state", "???") == ""
+
+
+def test_palette_style_task_phase_distinguishes_paused_from_suspended():
+    """Phase 7 follow-up (2026-09-29): a durable operator-set pause hold
+    ("Paused") must render with its own colour, never the same as a
+    system-Suspended task's teal or a Blocked task's amber."""
+    from worktree_manager.production_picker.picker_tui.engine import (
+        C_STATE,
+        _palette_style,
+    )
+    assert _palette_style("task_phase", "PAUSED") == C_STATE["ORPHAN"]
+    assert _palette_style("task_phase", "paused") == C_STATE["ORPHAN"]
+    assert _palette_style("task_phase", "SUSPENDED") == C_STATE["CONVO"]
+    assert _palette_style("task_phase", "PAUSED") != _palette_style(
+        "task_phase", "SUSPENDED"
+    )
+    assert _palette_style("task_phase", "PAUSED") != _palette_style(
+        "task_phase", "BLOCKED"
+    )
 
 
 def test_codespaces_state_column_is_colour_coded(tmp_path, monkeypatch):

@@ -1,0 +1,9 @@
+{
+  "comment": "Auto-dismiss Copilot's first-run desktop-app nudge in detached embody launches, which otherwise deadlocks the launch waiting for a selection nobody can make.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

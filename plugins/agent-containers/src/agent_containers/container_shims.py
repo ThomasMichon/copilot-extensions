@@ -20,7 +20,6 @@ from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
-import uuid
 
 from agent_procutil import no_window_flags
 
@@ -32,7 +31,8 @@ AZURE_HELPER_PATH = f"{_BIN}/azure-auth-helper"
 ADO_HELPER_PATH = f"{_BIN}/ado-auth-helper"
 AGENT_WORKTREES_PATH = f"{_BIN}/agent-worktrees"
 _AW_RUNTIME_REL = ".agent-worktrees"
-_AW_STAGE_PARENT_REL = ".agent-containers/staging"
+_AW_PAYLOAD_PARENT_REL = f"{_AW_RUNTIME_REL}/payload-src"
+_AW_PAYLOAD_READY_MARKER = ".payload-sync-complete"
 _PATH_SPEC = re.compile(r'path\s*=\s*"([^"]+)"')
 
 # Generic relay client: speaks the credential-relay wire protocol to the host,
@@ -144,15 +144,28 @@ ADO_HELPER = f"""#!/usr/bin/env bash
 exec python3 {RELAY_CLIENT_PATH} ado "$@"
 """
 
-AGENT_WORKTREES_WRAPPER = r"""#!/usr/bin/env bash
-set -euo pipefail
-candidate="$HOME/.local/bin/agent-worktrees"
-if [[ -x "$candidate" ]]; then
-    exec "$candidate" "$@"
-fi
-echo "agent-worktrees is not installed for HOME=$HOME (expected $candidate)" >&2
-exit 127
-"""
+def _agent_worktrees_wrapper(payload_root: str | None) -> str:
+    lines = ["#!/usr/bin/env bash", "set -euo pipefail"]
+    if payload_root:
+        lines.extend(
+            [
+                f"payload_root={payload_root!r}",
+                'if [[ -f "$payload_root/plugin.json" ]]; then',
+                '    export AGENT_WORKTREES_PAYLOAD_ROOT="$payload_root"',
+                "fi",
+            ]
+        )
+    lines.extend(
+        [
+            'candidate="$HOME/.local/bin/agent-worktrees"',
+            'if [[ -x "$candidate" ]]; then',
+            '    exec "$candidate" "$@"',
+            "fi",
+            'echo "agent-worktrees is not installed for HOME=$HOME (expected $candidate)" >&2',
+            "exit 127",
+        ]
+    )
+    return "\n".join(lines) + "\n"
 
 
 def _run_docker(args: list[str], *, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
@@ -204,6 +217,21 @@ def _docker_exists(container: str, path: str, *, user: str = "0", timeout: float
 def _agent_worktrees_ready(container: str, *, user: str, timeout: float = 60.0) -> bool:
     result = _docker_exec(container, "agent-worktrees --version", user=user, timeout=timeout)
     return result.returncode == 0
+
+
+def _agent_worktrees_payload_paths(home: str) -> tuple[str, str]:
+    payload_root = _agent_worktrees_payload_root()
+    common_root, _sources = _agent_worktrees_copy_sources(payload_root)
+    parent = str(PurePosixPath(home, _AW_PAYLOAD_PARENT_REL))
+    payload = _copied_path(parent, payload_root, common_root=common_root)
+    return parent, payload
+
+
+def _agent_worktrees_payload_ready(container: str, *, user: str, home: str) -> bool:
+    parent, payload = _agent_worktrees_payload_paths(home)
+    return _docker_exists(container, f"{parent}/{_AW_PAYLOAD_READY_MARKER}", user=user) and (
+        _docker_exists(container, f"{payload}/plugin.json", user=user)
+    )
 
 
 def _agent_containers_source_root() -> Path:
@@ -321,13 +349,12 @@ def _copied_path(root: str, source: Path, *, common_root: Path) -> str:
     return str(PurePosixPath(_to_posix(root, relative.parent), source.name))
 
 
-def _stage_agent_worktrees_payload(container: str, *, user: str, home: str) -> tuple[str, str]:
+def _sync_agent_worktrees_payload(container: str, *, user: str, home: str) -> str:
     payload_root = _agent_worktrees_payload_root()
     common_root, sources = _agent_worktrees_copy_sources(payload_root)
-    stage_root = str(
-        PurePosixPath(home, _AW_STAGE_PARENT_REL, f"agent-worktrees-{uuid.uuid4().hex}")
-    )
+    stage_root = str(PurePosixPath(home, _AW_PAYLOAD_PARENT_REL))
     mkdirs = [
+        f"rm -rf {stage_root!r}",
         f"install -d -m 755 {stage_root!r}",
     ]
     for source in sources:
@@ -356,55 +383,102 @@ def _stage_agent_worktrees_payload(container: str, *, user: str, home: str) -> t
             f"could not assign the staged agent-worktrees payload to '{user}' in '{container}': "
             f"{chowned.stderr.strip() or chowned.stdout.strip() or f'exit {chowned.returncode}'}"
         )
-    return stage_root, _copied_path(stage_root, payload_root, common_root=common_root)
+    marked = _docker_exec(
+        container,
+        f"touch {str(PurePosixPath(stage_root, _AW_PAYLOAD_READY_MARKER))!r}",
+        user=user,
+        timeout=120.0,
+    )
+    if marked.returncode != 0:
+        raise RuntimeError(
+            f"could not mark the staged agent-worktrees payload ready in '{container}': "
+            f"{marked.stderr.strip() or marked.stdout.strip() or f'exit {marked.returncode}'}"
+        )
+    return _copied_path(stage_root, payload_root, common_root=common_root)
 
 
-def _deploy_agent_worktrees_wrapper(container: str) -> None:
-    _docker_write(container, AGENT_WORKTREES_PATH, AGENT_WORKTREES_WRAPPER)
+def _deploy_agent_worktrees_wrapper(container: str, payload_root: str | None = None) -> None:
+    _docker_write(container, AGENT_WORKTREES_PATH, _agent_worktrees_wrapper(payload_root))
 
 
 def ensure_agent_worktrees(container: str, *, user: str) -> None:
     """Ensure ``agent-worktrees`` is runnable on the detached-launch PATH."""
-    if _agent_worktrees_ready(container, user=user):
-        return
     home = _container_home(container, user=user)
+    payload_root = (
+        _agent_worktrees_payload_paths(home)[1]
+        if _agent_worktrees_payload_ready(container, user=user, home=home)
+        else None
+    )
+    if _agent_worktrees_ready(container, user=user) and payload_root:
+        _deploy_agent_worktrees_wrapper(container, payload_root)
+        return
     user_binstub = str(PurePosixPath(home, ".local/bin/agent-worktrees"))
+    if payload_root is None:
+        payload_root = _sync_agent_worktrees_payload(container, user=user, home=home)
     if _docker_exists(container, user_binstub, user=user):
-        _deploy_agent_worktrees_wrapper(container)
+        _deploy_agent_worktrees_wrapper(container, payload_root)
         if _agent_worktrees_ready(container, user=user):
             return
-    stage_root, staged_payload = _stage_agent_worktrees_payload(container, user=user, home=home)
     install_dir = str(PurePosixPath(home, _AW_RUNTIME_REL))
     host_uv_index = _host_uv_index()
     install_env = {"UV_DEFAULT_INDEX": host_uv_index} if host_uv_index else None
-    try:
-        install = _docker_exec(
-            container,
-            (
-                "set -euo pipefail; "
-                f"cd {staged_payload!r}; "
-                f"bash scripts/install.sh provision --install-dir {install_dir!r}"
-            ),
-            user=user,
-            env=install_env,
-            timeout=900.0,
+    install = _docker_exec(
+        container,
+        (
+            "set -euo pipefail; "
+            f"cd {payload_root!r}; "
+            f"bash scripts/install.sh provision --install-dir {install_dir!r}"
+        ),
+        user=user,
+        env=install_env,
+        timeout=900.0,
+    )
+    if install.returncode != 0:
+        detail = (
+            install.stderr.strip() or install.stdout.strip() or f"exit {install.returncode}"
+        )[-3000:]
+        raise RuntimeError(
+            "could not provision agent-worktrees in the container with "
+            f"`bash scripts/install.sh provision --install-dir {install_dir}`: {detail}"
         )
-        if install.returncode != 0:
-            detail = (
-                install.stderr.strip() or install.stdout.strip() or f"exit {install.returncode}"
-            )[-3000:]
-            raise RuntimeError(
-                "could not provision agent-worktrees in the container with "
-                f"`bash scripts/install.sh provision --install-dir {install_dir}`: {detail}"
-            )
-        _deploy_agent_worktrees_wrapper(container)
-        if not _agent_worktrees_ready(container, user=user):
-            raise RuntimeError(
-                "agent-worktrees finished provisioning but still is not runnable on the "
-                "container PATH"
-            )
-    finally:
-        _docker_exec(container, f"rm -rf {stage_root!r}", user="0", timeout=120.0)
+    _deploy_agent_worktrees_wrapper(container, payload_root)
+    if not _agent_worktrees_ready(container, user=user):
+        raise RuntimeError(
+            "agent-worktrees finished provisioning but still is not runnable on the "
+            "container PATH"
+        )
+
+
+def ensure_agent_worktrees_workspace_registered(
+    container: str,
+    *,
+    user: str,
+    workspace_folder: str,
+    project_name: str | None = None,
+) -> None:
+    """Adopt the container workspace repo so detached ``embody`` can run there."""
+    folder = PurePosixPath(workspace_folder)
+    project = project_name or folder.name
+    if not project:
+        raise RuntimeError(
+            "could not infer an agent-worktrees project name from the workspace folder"
+        )
+    register = _docker_exec(
+        container,
+        (
+            "set -euo pipefail; "
+            f"cd {str(folder)!r}; "
+            f"{AGENT_WORKTREES_PATH!r} register {project!r} --repo-dir {str(folder)!r}"
+        ),
+        user=user,
+        timeout=300.0,
+    )
+    if register.returncode != 0:
+        detail = register.stderr.strip() or register.stdout.strip() or f"exit {register.returncode}"
+        raise RuntimeError(
+            f"could not register workspace repo {workspace_folder!r} as project {project!r}: "
+            f"{detail}"
+        )
 
 
 def _docker_write(container: str, path: str, content: str, mode: str = "755") -> None:

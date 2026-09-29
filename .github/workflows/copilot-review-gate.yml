@@ -1,0 +1,105 @@
+# Requests a Copilot code review only for PRs authored by an invited
+# collaborator (Maintainer or Contributor) -- never automatically for an
+# uninvited outsider. GitHub's `copilot_code_review` ruleset rule
+# (`review_on_push`) has no "collaborators only" condition, so it would
+# otherwise auto-review every PR, including from people who were never
+# granted any access (billed to the repo owner, and giving an unreviewed
+# outsider a free automated pass through the same visible review surface
+# trusted contributors get). This workflow replaces that automatic trigger
+# with an explicit, permission-checked one -- see CONTRIBUTING.md for the
+# ruleset-side change removing the native `copilot_code_review` rule.
+#
+# A maintainer can still manually request Copilot's review on any PR
+# (including an outsider's) via the normal "Reviewers" sidebar or the REST
+# API at any time -- this workflow only controls the *automatic* path.
+#
+# `edited` is included in `types` below: a PR originally opened against a
+# different base branch and later RETARGETED to `dev` fires `edited` (with
+# `changes.base` present), not any of the other listed types -- without it,
+# such a PR would never get its automatic review. The job itself only acts
+# when `changes.base` is actually present, so an ordinary title/body/label
+# edit doesn't trigger a redundant re-review request.
+#
+# Uses `pull_request_target`, not `pull_request`: a same-repo Write
+# collaborator's own PR would otherwise run their edited copy of this file
+# (which requests `pull-requests: write` and calls a write API), and a
+# fork PR's forced-read-only `GITHUB_TOKEN` under plain `pull_request` would
+# make `requestReviewers` fail outright for a legitimate collaborator who
+# happens to submit via a fork. `pull_request_target` runs the trusted
+# default-branch definition either way. This job never checks out or
+# executes PR content -- only reads PR/collaborator metadata via the REST
+# API -- so it carries none of the classic `pull_request_target`
+# secret-exfiltration risk.
+name: Copilot review gate
+
+on:
+  pull_request_target:
+    branches: [dev]
+    types: [opened, reopened, ready_for_review, synchronize, edited]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  request-review:
+    name: request-review-if-collaborator
+    if: >-
+      github.event.pull_request.draft == false &&
+      (github.event.action != 'edited' || github.event.changes.base != null)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Request Copilot review for known collaborators only
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const author = context.payload.pull_request.user.login;
+
+            // Deliberately NOT `getCollaboratorPermissionLevel` + checking
+            // `permissions.pull`: on a PUBLIC repo, that endpoint reports
+            // `pull: true` (read access) for literally anyone, invited or
+            // not -- public repos grant implicit read to everyone, so
+            // `pull` can never distinguish "invited collaborator" from "any
+            // GitHub user browsing this repo." `checkCollaborator` answers
+            // the actual question ("is this an invited collaborator?"): 204
+            // if yes, 404 if no, independent of the repo's public/private
+            // visibility or the author's permission level.
+            async function isInvitedCollaborator(username) {
+              try {
+                await github.rest.repos.checkCollaborator({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  username,
+                });
+                return true;
+              } catch (error) {
+                if (error.status === 404) {
+                  return false;
+                }
+                throw error;
+              }
+            }
+
+            const trusted = await isInvitedCollaborator(author);
+            if (!trusted) {
+              core.info(
+                `${author} is not an invited collaborator; skipping automatic Copilot review. ` +
+                  "A maintainer may still request one manually via the Reviewers sidebar.",
+              );
+              return;
+            }
+
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number,
+                reviewers: ["copilot-pull-request-reviewer[bot]"],
+              });
+              core.info(`Requested Copilot review for ${author}'s PR.`);
+            } catch (error) {
+              // Non-fatal: a stale/duplicate request, or Copilot review being
+              // unavailable, shouldn't fail the PR's checks.
+              core.warning(`Could not request Copilot review: ${error.message}`);
+            }

@@ -30,9 +30,11 @@ dependencies = [
 # `main`-branch release (tools/materialize_main.py) ever gets a real local
 # copy.
 agent-credential-relay = { path = "../../libs/credential-relay", editable = true }
-# Windows-headless process-spawn helpers (module ``agent_procutil``). Vendored per
-# plugin; byte-identical src across copies.
-agent-procutil = { path = "libs/agent-procutil" }
+# `path` escapes this plugin's own root and resolves live to
+# `libs/agent-procutil`, so this `dev`-branch checkout has nothing to keep
+# manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
+agent-procutil = { path = "../../libs/agent-procutil", editable = true }
 # single-instance lease (module ``single_instance_lease``). The serve
 # session-host acquires it so at most one warm multiplexer host runs per
 # AGENT_MCP_HOME, making it safe for the thin forwarders to race-spawn it on
@@ -45,7 +47,7 @@ agent-single-instance-lease = { path = "../../libs/single-instance-lease", edita
 # byte-identical src across copies (see docs/patterns/graceful-daemon-cutover.md).
 # Drives the `serve --passive` / `cutover` control-plane handoff so a version
 # update never leaves callers with no live daemon to reach.
-agent-zdd = { path = "libs/zdd" }
+agent-zdd = { path = "../../libs/zdd", editable = true }
 
 [project.scripts]
 agent-mcp = "agent_mcp.__main__:console_entry"

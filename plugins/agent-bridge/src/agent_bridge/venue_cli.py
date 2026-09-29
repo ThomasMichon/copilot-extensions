@@ -257,10 +257,11 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
         else:
             print(f"[>] {recovery.get('reason')}")
         sys.exit(0)
+    prelude_steps: list[str] = []
     if recovery.get("recovered"):
-        print(f"[>] Recovered a prior aborted cutover: {recovery.get('reason')}")
+        prelude_steps.append(f"recovered a prior aborted cutover: {recovery.get('reason')}")
     if passive_reap.get("reaped"):
-        print(f"[>] Reaped an abandoned never-promoted passive (pid={passive_reap.get('pid')})")
+        prelude_steps.append(f"reaped an abandoned never-promoted passive (pid={passive_reap.get('pid')})")
 
     orch = CutoverOrchestrator(
         config_dir(),
@@ -272,6 +273,10 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
         pick_free_port=pick_free_port,
     )
     res = orch.run(health_timeout=args.health_timeout, drain_timeout=args.drain_timeout, force=args.force)
+    # Prepend rather than print eagerly: an eager print corrupts `--json`
+    # output, since it lands on stdout ahead of the single JSON payload
+    # `core._json_out(res.to_dict())` emits below.
+    res.steps = prelude_steps + res.steps
 
     if res.ok:
         active = routing.read_active_endpoint(config_dir(), verify_listener=False)
@@ -279,10 +284,24 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
             core._reconcile_service_marker(active.pid, active.version)
             res.steps.append(f"service marker reconciled -> pid {active.pid} (port {active.port})")
         old = res.old_endpoint
+        # Confirmed-gone means exactly that -- confirmed, not merely
+        # "we don't have contrary evidence" (PR #4543 review: treating an
+        # unknown pid as confirmed retirement could let the post-cutover
+        # reattach retry below run while a legacy/partial routing record's
+        # old frontend is still actually attached).
+        if old is None:
+            old_confirmed_gone = True  # cold start -- no predecessor to wait for
+        elif not old.pid:
+            old_confirmed_gone = False  # pid unknown -- cannot confirm either way
+        elif active is not None and old.pid == active.pid:
+            old_confirmed_gone = True  # "old" IS the new active -- nothing to retire
+        else:
+            old_confirmed_gone = False  # confirmed below, or left False
         if old is not None and old.pid and (active is None or old.pid != active.pid):
             exited, forced = core._ensure_retired_daemon_exited(old.pid)
             if exited:
                 res.steps.append(f"old daemon exited pid={old.pid}" + (" (forced tree reap)" if forced else ""))
+                old_confirmed_gone = True
             else:
                 res.steps.append(f"FAILED: retired daemon pid={old.pid} is still alive")
                 res.ok = False
@@ -290,6 +309,28 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
                     f"retired daemon pid={old.pid} survived graceful and forced process-tree retirement; "
                     "split-brain is possible"
                 )
+        if res.ok and old_confirmed_gone and active is not None:
+            # Phase 3's "the next generation earns the handoff, never assumes
+            # it": the new daemon's own startup reattach pass ran while the
+            # old generation still held its session-host claims (it was still
+            # passive at that point), so it likely skipped every live record
+            # as contended. Now that the old generation is *confirmed* exited
+            # (its own /shutdown handler already released every claim it
+            # held), retry the scan so surviving session-hosts are actually
+            # adopted rather than left stranded until some later opportunity.
+            # Best-effort, mirroring the existing relay-adopt post-cutover step
+            # (which similarly calls its endpoint unconditionally rather than
+            # gating on a protocol-version capability check).
+            try:
+                active_url = f"http://{routing.format_authority(host, active.port)}"
+                reattach = make_client(active_url)._request(
+                    "POST", "/api/v1/session-hosts/reattach"
+                ) or {}
+                res.steps.append(
+                    f"post-cutover reattach: {reattach.get('reattached', 0)} session(s)"
+                )
+            except Exception as exc:  # noqa: BLE001 -- best-effort, never fails the cutover
+                res.steps.append(f"post-cutover reattach failed (non-fatal): {exc}")
 
     if args.json:
         core._json_out(res.to_dict())
@@ -303,6 +344,37 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
         else:
             print(f"[FAIL] Cutover failed: {res.error}", file=sys.stderr)
     sys.exit(0 if res.ok else 1)
+
+
+def add_deploy_cutover_flags(
+    parser: argparse.ArgumentParser, *, include_recover: bool = True
+) -> None:
+    """Register the flags ``_cmd_deploy`` reads off its args Namespace.
+
+    Shared by the ``deploy`` verb and ``service restart`` (which calls
+    ``_cmd_deploy`` directly) so the two never drift out of sync.
+    ``--recover`` is deploy-only maintenance mode (heal a prior aborted
+    cutover and exit *without* starting a new one) -- exposing it on
+    ``restart`` would let ``service restart --recover`` return success
+    without ever actually restarting anything, so callers that don't want
+    it pass ``include_recover=False``. ``_cmd_deploy`` reads it via
+    ``getattr(args, "recover", False)``, so omitting the flag entirely is
+    equivalent to it always being unset.
+    """
+    parser.add_argument("--health-timeout", type=float, default=60.0, metavar="SECONDS", help="Max seconds to wait for the new daemon to become healthy.")
+    parser.add_argument("--drain-timeout", type=float, default=300.0, metavar="SECONDS", help="Max seconds to wait for the old daemon's in-flight work to settle.")
+    parser.add_argument("--force", action="store_true", help="Proceed with cutover even if the old daemon does not fully drain.")
+    if include_recover:
+        parser.add_argument("--recover", action="store_true", help="Only heal a prior aborted cutover: undrain a survivor left drained by a cutover that never completed, then exit. Does not start a new cutover.")
+    # `default=argparse.SUPPRESS`, not `False`: the top-level `--json` flag
+    # (`build_parser()`) already sets `args.json` in the shared Namespace
+    # before this subparser is applied. A `False` default here would
+    # silently overwrite a `agent-bridge --json deploy`/`--json service
+    # restart` invocation back to `False` (the exact regression documented
+    # in `tests/test_session_selection.py`'s
+    # `test_global_json_flag_survives_into_resume_namespace`). SUPPRESS lets
+    # this local `--json` only ever *add* the flag, never blank it.
+    parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Emit JSON.")
 
 
 def register_venue_commands(sub: argparse._SubParsersAction) -> None:
@@ -333,9 +405,5 @@ def register_venue_commands(sub: argparse._SubParsersAction) -> None:
         "deploy",
         help="(internal) installer-driven ZDD cutover seam -- activation runs it automatically on update; operators do not invoke it directly",
     )
-    deploy_p.add_argument("--health-timeout", type=float, default=60.0, metavar="SECONDS", help="Max seconds to wait for the new daemon to become healthy.")
-    deploy_p.add_argument("--drain-timeout", type=float, default=300.0, metavar="SECONDS", help="Max seconds to wait for the old daemon's in-flight work to settle.")
-    deploy_p.add_argument("--force", action="store_true", help="Proceed with cutover even if the old daemon does not fully drain.")
-    deploy_p.add_argument("--recover", action="store_true", help="Only heal a prior aborted cutover: undrain a survivor left drained by a cutover that never completed, then exit. Does not start a new cutover.")
-    deploy_p.add_argument("--json", action="store_true", help="Emit JSON.")
+    add_deploy_cutover_flags(deploy_p)
     deploy_p.set_defaults(func=_cmd_deploy)

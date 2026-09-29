@@ -8,11 +8,13 @@ window -- reusing the exact conservative safety of the manual ``cleanup``.
 
 from __future__ import annotations
 
+import argparse
 import types
 from pathlib import Path
 from unittest.mock import patch
 
 from agent_worktrees import __main__ as cli
+from agent_worktrees import cleanup_gc_cli
 from agent_worktrees import tracking
 
 
@@ -267,3 +269,46 @@ def test_grace_invalid_env_falls_back(monkeypatch):
     from agent_worktrees import gc as gc_mod
     monkeypatch.setenv(cli._AUTO_CLEAN_GRACE_ENV, "not-a-number")
     assert cli._auto_clean_grace_secs() == float(gc_mod.SESSION_GC_GRACE_SECS)
+
+
+def test_cmd_sweep_managed_json(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        cleanup_gc_cli,
+        "sweep_managed_worktrees",
+        lambda **_kwargs: {"removed": [{"id": "svc"}], "skipped": []},
+    )
+    monkeypatch.setattr(
+        cleanup_gc_cli,
+        "_json_output",
+        lambda payload: seen.setdefault("payload", payload),
+    )
+
+    assert cli.cmd_sweep_managed(argparse.Namespace(dry_run=False, json=True)) == 0
+    assert seen["payload"] == {
+        "removed": [{"id": "svc"}],
+        "skipped": [],
+    }
+
+
+def test_cmd_sweep_finished_sessions_json(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        cli,
+        "sweep_finished_session_worktrees",
+        lambda **_kwargs: {"removed": [{"id": "done"}], "skipped": []},
+    )
+    monkeypatch.setattr(
+        cleanup_gc_cli,
+        "_json_output",
+        lambda payload: seen.setdefault("payload", payload),
+    )
+
+    assert (
+        cli.cmd_sweep_finished_sessions(argparse.Namespace(dry_run=False, json=True))
+        == 0
+    )
+    assert seen["payload"] == {
+        "removed": [{"id": "done"}],
+        "skipped": [],
+    }

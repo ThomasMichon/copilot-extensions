@@ -35,7 +35,7 @@ from .registrar import (
 )
 from .worker_identities import load_worker_identity
 
-_TERMINAL = frozenset({"completed", "confirmed", "abandoned", "dead_letter"})
+_TERMINAL = frozenset({"submitted", "completed", "abandoned", "dead_letter"})
 _KNOWN_KEYS = frozenset(
     {
         "name",
@@ -1302,7 +1302,7 @@ def plan(
         repo=config["repo"],
         status=(
             "proposed,queued,claimed,started,suspended,"
-            "completed,abandoned,dead_letter"
+            "submitted,completed,abandoned,dead_letter"
         ),
         exclusive_key=exclusive_key,
         limit=1000,
@@ -1716,7 +1716,7 @@ def run_tick(
                 repo=config["repo"],
                 status=(
                     "proposed,queued,claimed,started,suspended,"
-                    "completed,abandoned,dead_letter"
+                    "submitted,completed,abandoned,dead_letter"
                 ),
                 exclusive_key=discovered["exclusive_key"],
                 origin_ref=discovered["origin_ref"],

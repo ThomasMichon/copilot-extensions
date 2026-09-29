@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from . import config as cfg, finalize as fin, output, profile_assignment, sessions, tracking
-from . import reclaim_cli, resolve_launch_cli
+from . import reclaim_cli, resolve_launch_cli, status_monitor_runtime
 
 
 def _core():
@@ -21,8 +21,6 @@ def _core_helper(name: str, local):
         return candidate
     return local
 
-
-LaunchPreflightError = _core().LaunchPreflightError
 
 def _apply_assignment_env(*args, **kwargs): return _core_helper("_apply_assignment_env", resolve_launch_cli._apply_assignment_env)(*args, **kwargs)
 def _build_env(*args, **kwargs): return _core()._build_env(*args, **kwargs)
@@ -44,8 +42,8 @@ def _unsupported_hosted_launch(*args, **kwargs): return _core()._unsupported_hos
 def _pending_handoff_retire_requests(*args, **kwargs): return _core()._pending_handoff_retire_requests(*args, **kwargs)
 def _monitor_retire_handoff_predecessor(*args, **kwargs): return _core()._monitor_retire_handoff_predecessor(*args, **kwargs)
 def _monitor_maybe_process_handoff_record(*args, **kwargs): return _core()._monitor_maybe_process_handoff_record(*args, **kwargs)
-def _monitor_session_state_handoff_path(*args, **kwargs): return _core()._monitor_session_state_handoff_path(*args, **kwargs)
-def _monitor_read_session_state_handoff(*args, **kwargs): return _core()._monitor_read_session_state_handoff(*args, **kwargs)
+def _monitor_session_state_handoff_path(*args, **kwargs): return _core_helper("_monitor_session_state_handoff_path", status_monitor_runtime._monitor_session_state_handoff_path)(*args, **kwargs)
+def _monitor_read_session_state_handoff(*args, **kwargs): return _core_helper("_monitor_read_session_state_handoff", status_monitor_runtime._monitor_read_session_state_handoff)(*args, **kwargs)
 def resolve_worktree_id_by_codename(*args, **kwargs): return _core().resolve_worktree_id_by_codename(*args, **kwargs)
 
 
@@ -76,65 +74,6 @@ def add_launch_passthrough_args(p: argparse.ArgumentParser) -> None:
         "the same repo stay distinguishable on the host bridge. Does not change "
         "the local mux session name.",
     )
-
-
-def add_copilot_parser(sub) -> None:
-    # copilot (the human/TTY-facing counterpart of embody -- deliver a TTY
-    # Copilot session in THIS terminal, the canonical "___ copilot" verb also
-    # implemented by agent-codespaces/agent-containers for a remote venue)
-    p = sub.add_parser(
-        "copilot",
-        help="Deliver a TTY Copilot session to the user in this terminal "
-        "(create-or-resume like embody, then attach this terminal to it; "
-        "refuses without a controlling terminal)",
-    )
-    g = p.add_mutually_exclusive_group()
-    g.add_argument(
-        "--worktree-id", dest="worktree_id", default=None,
-        help="Deliver a Copilot session for this existing worktree",
-    )
-    g.add_argument(
-        "--new", action="store_true", help="Create a fresh worktree first, then deliver Copilot in it"
-    )
-    g.add_argument(
-        "--codename", default=None,
-        help="Same codename resolution as `embody --codename` (local first, "
-        "then a cross-machine SSH scan; fails closed on a different machine).",
-    )
-    g.add_argument(
-        "--anchor", action="store_true",
-        help="Deliver a Copilot session directly in the active project's "
-        "anchor checkout instead of any worktree -- same as "
-        "`embody --anchor`, see its help for the full rationale.",
-    )
-    p.add_argument(
-        "--seed", default=None,
-        help="Seed prompt injected as the session's first interactive turn once Copilot is ready",
-    )
-    p.add_argument(
-        "--seed-ready-timeout", dest="seed_ready_timeout", type=float, default=180.0,
-        metavar="SECONDS",
-        help="How long to wait for Copilot's input prompt before typing --seed (default 180)",
-    )
-    p.add_argument(
-        "--driver", default=None,
-        help="Label of the agent steering this session; stamps the "
-        "'driven by <agent>' banner (AGENT_BRIDGE_DRIVEN_BY)",
-    )
-    p.add_argument(
-        "--recovery", action="store_true", help="Use the repo's recovery launch command"
-    )
-    p.add_argument(
-        "--ensure-mux", dest="ensure_mux", action="store_true",
-        help="Best-effort self-heal a missing tmux/psmux before creating the "
-        "session (same explicit opt-in as `embody --ensure-mux`).",
-    )
-    p.add_argument(
-        "--mux", default=None,
-        help="Override the mux binary used to attach (default: auto-detect "
-        "tmux/psmux, same resolution as the rest of agent-worktrees)",
-    )
-    add_launch_passthrough_args(p)
 
 
 def _passthrough_error(args: argparse.Namespace) -> str | None:
@@ -362,7 +301,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
                     kind="session",
                     recovery=getattr(args, "recovery", False),
                 )
-        except LaunchPreflightError as e:
+        except _core().LaunchPreflightError as e:
             return _json_error(str(e), exit_code=3)
         except Exception as e:
             return _json_error(f"failed to create worktree: {e}")

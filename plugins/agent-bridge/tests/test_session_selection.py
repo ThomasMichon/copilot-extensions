@@ -384,6 +384,59 @@ def test_cmd_send_uses_main_resolve_target_compatibility_seam(monkeypatch):
     }
 
 
+def test_cmd_create_prepends_companion_heads_up(monkeypatch):
+    class _Client:
+        def get_session(self, _target):
+            raise BridgeClientError(404, "not found")
+
+    client = _Client()
+    seen = {}
+    monkeypatch.setattr(m, "_get_client", lambda: client)
+    monkeypatch.setattr(
+        "agent_bridge.resume_handoff_cli.find_singleton_repo",
+        lambda target: None,
+    )
+    monkeypatch.setattr(m, "_caller_id_for", lambda _args: "caller-A")
+    monkeypatch.setattr(m, "_resolve_target", lambda *_args, **_kwargs: "sess-new")
+    monkeypatch.setattr(
+        m,
+        "_submit_and_stream",
+        lambda _client, _args, session_id, prompt, *, caller_id: seen.update(
+            {"session_id": session_id, "prompt": prompt, "caller_id": caller_id}
+        ),
+    )
+    args = argparse.Namespace(
+        target="agent-x",
+        prompt="Investigate the failure and report back.",
+        prompt_file=None,
+        caller=None,
+        json=False,
+        no_wait=True,
+        force=False,
+        full_history=False,
+        session_id_file=None,
+        model=None,
+        effort=None,
+        charter=None,
+        target_dir=None,
+        worktree_id=None,
+    )
+
+    m._cmd_create(args)
+
+    assert seen == {
+        "session_id": "sess-new",
+        "prompt": (
+            "Heads-up: you are an agent-bridge companion agent, not an "
+            "agent-dispatch worker. Ordinary end-of-turn prose is fine here: "
+            "the controlling agent reads it. Use dispatch-style lifecycle/tool "
+            "calls only when your actual task explicitly asks for them.\n\n"
+            "Investigate the failure and report back."
+        ),
+        "caller_id": "caller-A",
+    }
+
+
 class _ReadRenderer:
     def render_events(self, _events):
         return ""
@@ -836,6 +889,93 @@ def test_resolve_target_busy_session_id_force_takes_over(fixed_caller, monkeypat
     sid = m._resolve_target(client, "s1", force=True)
     assert client.ended == ["s1"]
     assert sid == "fresh-sid"
+
+
+# -- copilot-extensions#2247: `send`/`_resolve_target` must resolve a
+# freshly-created-or-resumed *worktree handle* whose actual session id
+# differs from the handle, the same way `read` already does (see
+# `test_resolve_read_target_prefers_live_owned_worktree_session` above).
+# Before this fix, `_resolve_target` only checked an exact `session_id`
+# match and then agent-name matching -- a worktree handle that resolves to a
+# *different* session id (e.g. one minted by `resume_worktree`) fell through
+# to "not a known agent name or session ID" and tried to spawn a brand-new
+# agent named after the worktree handle instead.
+
+def _wsess(sid, *, worktree_id, agent="log-writer-loop-worker",
+           caller="host-A", status="idle", turns=0):
+    return {
+        "session_id": sid,
+        "name": f"name-{sid}",
+        "worktree_id": worktree_id,
+        "agent_name": agent,
+        "caller_id": caller,
+        "status": status,
+        "turn_count": turns,
+    }
+
+
+def test_resolve_target_resolves_worktree_handle_with_different_session_id(
+    fixed_caller,
+):
+    # The handle ("lambda-core-wsl-...-8510") is neither the session id nor a
+    # registered agent name -- only `list_sessions()` filtered by
+    # `worktree_id` reveals the real, idle session behind it.
+    client = FakeClient(sessions=[
+        _wsess("real-sid-1", worktree_id="lambda-core-wsl-20260928-141002-8510"),
+    ])
+    sid = m._resolve_target(client, "lambda-core-wsl-20260928-141002-8510")
+    assert sid == "real-sid-1"
+    assert client.started == []  # never treated as an agent name to spawn
+
+
+def test_resolve_target_worktree_handle_stopped_resumes(fixed_caller):
+    client = FakeClient(sessions=[
+        _wsess("real-sid-2", worktree_id="wt-jams", status="stopped"),
+    ])
+    sid = m._resolve_target(client, "wt-jams")
+    assert sid == "real-sid-2"
+    assert client.resumed == ["real-sid-2"]
+
+
+def test_resolve_target_worktree_handle_busy_without_force_exits(
+    fixed_caller, capsys,
+):
+    client = FakeClient(sessions=[
+        _wsess("real-sid-3", worktree_id="wt-busy", status="running"),
+    ])
+    with pytest.raises(SystemExit) as ei:
+        m._resolve_target(client, "wt-busy")
+    assert ei.value.code == m._SEND_BUSY_EXIT
+    assert "BUSY" in capsys.readouterr().err
+
+
+def test_resolve_target_worktree_handle_busy_force_takes_over(
+    fixed_caller, monkeypatch,
+):
+    monkeypatch.setattr(m, "_wait_for_idle", lambda *a, **k: None)
+    client = FakeClient(sessions=[
+        _wsess("real-sid-4", worktree_id="wt-busy2", status="running"),
+    ])
+    sid = m._resolve_target(client, "wt-busy2", force=True)
+    assert client.ended == ["real-sid-4"]
+    assert sid == "fresh-sid"
+
+
+def test_resolve_target_unmatched_handle_still_spawns_fresh_without_waiting(
+    fixed_caller, monkeypatch,
+):
+    # A target that matches no session id, no worktree id, and no registered
+    # agent must still fall through to a fresh spawn -- and must do so
+    # instantly (no retry/grace wait), unlike `read`'s streaming-reconnect
+    # race. Fail the test if anything sleeps.
+    monkeypatch.setattr(
+        "time.sleep",
+        lambda *_a, **_k: pytest.fail("_resolve_target must not sleep/wait"),
+    )
+    client = FakeClient(sessions=[])
+    sid = m._resolve_target(client, "some-fresh-agent-name")
+    assert sid == "fresh-sid"
+    assert client.started and client.started[0]["agent"] == "some-fresh-agent-name"
 
 
 def test_wait_for_idle_surfaces_connect_failure_detail(capsys):

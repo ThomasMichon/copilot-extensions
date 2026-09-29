@@ -43,7 +43,15 @@ force-release a claim.
   the operator rather than inventing a different flow.
 
 Inspect the ledger any time with
-`<agent-worktrees catalog argv[0]> claims show`. Creator
+`<agent-worktrees catalog argv[0]> claims show`, or move named obligations to a
+consumer worktree with
+`<agent-worktrees catalog argv[0]> claims handoff offer ...` followed by the
+consumer's affirmative
+`<agent-worktrees catalog argv[0]> claims handoff accept <bundle-id>`. For a
+consumer on another machine, `accept` does **not** invent a new bridge RPC: it
+holds the shared claim-handoff lease as a fence, SSHes to the **source
+machine's own project binstub** for the source-side settle, then commits the
+consumer-side ledger locally. Creator
 ownership is invariant: `AGENT_WORKTREES_OBLIGATION_GATE=warn|off` does not
 permit releasing unsettled resources without the affirmative handoff above.
 

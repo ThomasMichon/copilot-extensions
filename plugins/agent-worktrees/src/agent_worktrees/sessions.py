@@ -2109,18 +2109,12 @@ def mux_seed_pane(
 
     Hardened against seeding into the wrong pane state (a half-loaded TUI, or a
     pane that fell back to a bare shell whose ``❯`` looks like Copilot's caret):
-
-    * **Confirmed-ready, not first-frame.** Readiness requires a Copilot cue (the
-      ``❯`` caret or the ``esc … interrupt`` footer -- the generic rule line is no
-      longer trusted) seen on **two consecutive** polls, so a transient
-      banner/spinner frame can't trip it.
-    * **Never blind-submit.** If readiness is not confirmed within
-      ``ready_timeout`` the seed is **not** typed and Enter is **never** pressed --
-      the successor just lands at a fresh prompt (safe) instead of executing a
-      mistyped line. The caller sees ``sent``/``submitted`` false.
-    * **Echo-verify before Enter.** After typing, the pane is captured and Enter
-      is pressed **only** once a distinctive head of the seed is echoed there, so
-      a partially-eaten seed is never submitted as a bogus turn.
+    confirmed-ready requires two consecutive stable polls (never a first-frame
+    match); an unconfirmed pane never gets a typed/submitted seed (the caller
+    sees ``sent``/``submitted`` false); a typed seed is echo-verified before
+    Enter is pressed. Also auto-dismisses known blocking startup dialogs (see
+    :mod:`agent_worktrees.pane_nudges`) -- e.g. Copilot's first-run desktop-app
+    nudge, which otherwise deadlocks a detached launch forever.
 
     Returns ``{ok, pane, ready, sent, submitted, reason}`` -- ``ok`` is true only
     when the seed was actually delivered as a turn (``submitted``).
@@ -2128,6 +2122,8 @@ def mux_seed_pane(
     import re
     import subprocess
     import time
+
+    from . import pane_nudges
 
     mux_bin = _mux_bin(mux)
 
@@ -2147,17 +2143,21 @@ def mux_seed_pane(
         return "enter to select" not in low and (
             "❯" in cap or ("esc" in low and "interrupt" in low) or ("╻▄" in cap and "╹▀" in cap))
 
-    # Readiness must be STABLE (two consecutive sightings) so a single transient
-    # frame (a startup banner, a spinner) is not mistaken for the input prompt.
+    # Readiness must be STABLE (two polls) so a transient banner/spinner frame
+    # can't trip it. A known blocking dialog is dismissed at most once per call.
     ready = False
-    stable = 0
+    stable, dismissed_nudge = 0, False
     deadline = time.monotonic() + ready_timeout
     while time.monotonic() < deadline:
-        if _is_copilot_ready(_cap()):
+        cap = _cap()
+        if _is_copilot_ready(cap):
             stable += 1
             if stable >= 2:
                 ready = True
                 break
+        elif not dismissed_nudge and pane_nudges.is_desktop_app_nudge(cap):
+            dismissed_nudge, stable = True, 0
+            pane_nudges.dismiss(mux_bin, pane_id)
         else:
             stable = 0
         time.sleep(poll_interval)

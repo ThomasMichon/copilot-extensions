@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import types
+import typing
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,47 @@ class TestGitWrapper:
             assert e.returncode != 0
             assert isinstance(e.cmd, list)
             assert isinstance(e.stderr, str)
+
+
+class TestPythonRuntimeEnvScrub:
+    """#4552: a leaked PYTHONHOME/PYTHONPATH/PYTHONEXECUTABLE/VIRTUAL_ENV/
+    UV_INTERNAL__PYTHONHOME/__PYVENV_LAUNCHER__ from this plugin's own
+    runtime must never reach a spawned ``git`` child (or the
+    ``repository_identity_env()`` probes), since that redirects any other
+    interpreter the child in turn execs (e.g. a repo's pre-push hook) onto
+    this plugin's version-mismatched stdlib/venv."""
+
+    _LEAKED: typing.ClassVar[dict[str, str]] = {
+        "PYTHONHOME": r"C:\fake\stale\home",
+        "PYTHONPATH": r"C:\fake\stale\path",
+        "PYTHONEXECUTABLE": r"C:\fake\stale\python.exe",
+        "VIRTUAL_ENV": r"C:\fake\stale\venv",
+        "UV_INTERNAL__PYTHONHOME": r"C:\fake\uv\internal",
+        "__PYVENV_LAUNCHER__": r"C:\fake\stale\launcher.exe",
+    }
+
+    def test_git_scrubs_python_runtime_vars(self, monkeypatch):
+        import agent_worktrees.git_ops as go
+        for name, value in self._LEAKED.items():
+            monkeypatch.setenv(name, value)
+        captured = {}
+
+        def fake_run(cmd, **kw):
+            captured["env"] = kw.get("env")
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(go.subprocess, "run", fake_run)
+        go.git("--version")
+        for name in self._LEAKED:
+            assert name not in captured["env"]
+
+    def test_repository_identity_env_scrubs_python_runtime_vars(self, monkeypatch):
+        import agent_worktrees.git_ops as go
+        for name, value in self._LEAKED.items():
+            monkeypatch.setenv(name, value)
+        env = go.repository_identity_env()
+        for name in self._LEAKED:
+            assert name not in env
 
 
 class TestNoHooks:
@@ -129,7 +171,8 @@ class TestPush:
         monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
         seen = {}
         monkeypatch.setattr(go, "git", lambda *a, cwd=None, check=True,
-                            capture=True, timeout=None, no_hooks=False: (
+                            capture=True, timeout=None, no_hooks=False,
+                            kill_tree=False: (
             seen.update(args=a, no_hooks=no_hooks),
             types.SimpleNamespace(returncode=0, stdout="", stderr=""))[1])
         assert bool(go.push("origin", "main", cwd=".")) is True
@@ -146,7 +189,8 @@ class TestPush:
         )
         no_hooks_seen: list[bool] = []
 
-        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None, no_hooks=False):
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
+                     no_hooks=False, kill_tree=False):
             no_hooks_seen.append(no_hooks)
             injected = "http.extraheader=AUTHORIZATION: basic x" in args
             rc = 1 if injected else 0
@@ -156,6 +200,338 @@ class TestPush:
         assert bool(go.push("origin", "main", cwd=".")) is True
         assert no_hooks_seen == [False, False]  # neither the injected nor the fallback call
 
+
+class TestPushTimeout:
+    """A repo's pre-push hook re-invokes the full agent-worktrees binstub,
+    which resolves its own runtime slot on every call and can stall for the
+    same reasons a direct CLI invocation can (ThomasMichon/copilot-extensions
+    #4547): a self-update racing the runtime-slot swap, or the mutex-gated
+    self-provisioning path's own ~30-120s venv build. Left unbounded, that
+    stall propagated into an indefinite ``push()`` hang with no diagnostic --
+    exactly the failure mode that drove agents to bypass ``create-pr`` for a
+    raw ``git push`` + ``gh pr create``, silently losing PR attribution."""
+
+    def test_push_passes_default_timeout(self, monkeypatch):
+        monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
+        captured = {}
+
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
+                     no_hooks=False, kill_tree=False):
+            captured["timeout"] = timeout
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(go, "git", fake_git)
+        assert bool(go.push("origin", "main", cwd=".")) is True
+        assert captured["timeout"] == go.push_timeout.DEFAULT_PUSH_TIMEOUT
+
+    def test_push_timeout_override(self, monkeypatch):
+        monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
+        captured = {}
+
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
+                     no_hooks=False, kill_tree=False):
+            captured["timeout"] = timeout
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(go, "git", fake_git)
+        assert bool(go.push("origin", "main", cwd=".", timeout=5)) is True
+        assert captured["timeout"] == 5
+
+    def test_push_none_timeout_preserves_unbounded(self, monkeypatch):
+        monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
+        captured = {}
+
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
+                     no_hooks=False, kill_tree=False):
+            captured["timeout"] = timeout
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(go, "git", fake_git)
+        assert bool(go.push("origin", "main", cwd=".", timeout=None)) is True
+        assert captured["timeout"] is None
+
+    def test_push_kills_tree_on_stall(self, monkeypatch):
+        """push() must ask git() to kill the WHOLE process tree on a stall
+        (Copilot review finding on PR #4600), not just rely on the default
+        (tree-preserving) behavior every other git() caller gets."""
+        captured = {}
+
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
+                     no_hooks=False, kill_tree=False):
+            captured["kill_tree"] = kill_tree
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
+        monkeypatch.setattr(go, "git", fake_git)
+        assert bool(go.push("origin", "main", cwd=".")) is True
+        assert captured["kill_tree"] is True
+
+    def test_push_stall_becomes_result_not_hang(self, monkeypatch):
+        """A stall past the bound surfaces as a failed (falsy) PushResult the
+        existing create-pr/push-changes error-reporting path already knows
+        how to render -- never an unbounded hang."""
+        import subprocess
+        monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
+
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
+                     no_hooks=False, kill_tree=False):
+            raise subprocess.TimeoutExpired(
+                cmd=["git", *args], timeout=timeout,
+                output="", stderr="[agent-worktrees] runtime not provisioned...",
+            )
+
+        monkeypatch.setattr(go, "git", fake_git)
+        result = go.push("origin", "main", cwd=".")
+        assert bool(result) is False
+        assert "timed out after 180s" in result.stderr
+        assert "#4547" in result.stderr
+        # Partial hook output captured before the timeout is forwarded, not
+        # discarded -- the whole point of surfacing "what it was doing".
+        assert "runtime not provisioned" in result.stderr
+        assert "silently skip PR attribution" in result.stderr
+
+    def test_push_stall_forwards_stdout_too(self, monkeypatch):
+        """Copilot review finding on PR #4600: a hook's STDOUT (not just
+        stderr) must also be forwarded -- git() captures both streams, so
+        discarding stdout would silently drop diagnostic content some hook
+        invocations write there instead of stderr."""
+        import subprocess
+        monkeypatch.setattr(go, "_auth_config_args", lambda remote, *, cwd: [])
+
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
+                     no_hooks=False, kill_tree=False):
+            raise subprocess.TimeoutExpired(
+                cmd=["git", *args], timeout=timeout,
+                output="stdout: provisioning uv venv...",
+                stderr="stderr: runtime not provisioned",
+            )
+
+        monkeypatch.setattr(go, "git", fake_git)
+        result = go.push("origin", "main", cwd=".")
+        assert bool(result) is False
+        assert "stdout: provisioning uv venv..." in result.stderr
+        assert "stderr: runtime not provisioned" in result.stderr
+
+    def test_push_retry_stall_also_becomes_result_not_hang(self, monkeypatch):
+        """The auth-fallback retry (#900) must be bounded too -- it is still
+        the same terminal publish action, just retried without the injected
+        cross-account token."""
+        import subprocess
+        monkeypatch.setattr(
+            go, "_auth_config_args",
+            lambda remote, *, cwd: ["-c", "http.extraheader=AUTHORIZATION: basic x"],
+        )
+
+        def fake_git(*args, cwd=None, check=True, capture=True, timeout=None,
+                     no_hooks=False, kill_tree=False):
+            injected = "http.extraheader=AUTHORIZATION: basic x" in args
+            if injected:
+                return types.SimpleNamespace(returncode=1, stdout="", stderr="403")
+            raise subprocess.TimeoutExpired(cmd=["git", *args], timeout=timeout)
+
+        monkeypatch.setattr(go, "git", fake_git)
+        result = go.push("origin", "main", cwd=".")
+        assert bool(result) is False
+        assert "timed out after 180s" in result.stderr
+
+
+class TestPushTimeoutTreeKill:
+    """Real-subprocess regression test (Copilot review finding on PR #4600):
+    prove push_timeout.run_bounded() kills a stalled command's ENTIRE process
+    tree, not just its direct child -- a monkeypatched ``git`` cannot exercise
+    this since the whole point is real OS-level process/descendant lifetime.
+    """
+
+    def test_run_bounded_kills_grandchild_on_timeout(self, tmp_path, monkeypatch):
+        import os
+        import platform
+        import subprocess
+        import sys
+        import time
+
+        from agent_worktrees import push_timeout
+        from agent_worktrees.locks import pid_alive, process_start_time
+
+        # This test's whole point is the REAL, non-contained pgid-based
+        # descendant sweep in push_timeout._kill_tree (see its own
+        # docstring): that sweep is deliberately skipped whenever
+        # contained_test_mode() is true, so that a test harness invoking a
+        # stalled command doesn't killpg its own worker. The repository's
+        # own full-suite test runner (tools/run-plugin-tests.py, via
+        # tools/plugin_test_containment.py) sets
+        # COPILOT_EXTENSIONS_TEST_CONTAINED=1 ambiently for the ENTIRE
+        # test process to protect itself from exactly that -- which leaks
+        # into this test's own call to run_bounded() and silently disables
+        # the very sweep being asserted (confirmed live: the fast/PR-time
+        # lane runs a bare test invocation with no such wrapper, so this
+        # passed there, while every full-suite run -- including every real
+        # validate-and-promote promotion attempt -- inherits the
+        # containment flag and fails this assertion deterministically).
+        #
+        # Clearing it here is required to exercise the real sweep, but it
+        # also moves the spawned tree outside plugin_test_containment.py's
+        # own protection: if push_timeout._kill_tree ever regresses --
+        # exactly the failure this test exists to catch -- the escaped
+        # grandchild would otherwise survive its full 60s sleep unreaped
+        # and excluded from the suite's own resource accounting. The
+        # `finally` block below is an independent safety net -- it force-
+        # kills the recorded grandchild PID directly regardless of whether
+        # the assertion above it passed or failed, so this test can never
+        # itself leak a live process even on its own negative path.
+        monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+
+        ready = tmp_path / "ready"
+        pidfile = tmp_path / "grandchild.pid"
+        # A real script file (not an inline -c string) avoids Windows
+        # quoting/escaping fragility. Outer process spawns a grandchild that
+        # outlives it, then hangs -- simulating a pre-push hook (outer)
+        # whose own provisioning descendant (grandchild) must not survive
+        # the tree-kill either.
+        grandchild_script = tmp_path / "grandchild.py"
+        grandchild_script.write_text(
+            f"import time\n"
+            f"open({str(pidfile)!r}, 'w').write('x')\n"
+            f"time.sleep(60)\n"
+        )
+        outer_script = tmp_path / "outer.py"
+        outer_script.write_text(
+            f"import subprocess, sys, time\n"
+            f"p = subprocess.Popen([sys.executable, {str(grandchild_script)!r}])\n"
+            f"open({str(ready)!r}, 'w').write(str(p.pid))\n"
+            f"time.sleep(60)\n"
+        )
+        cmd = [sys.executable, str(outer_script)]
+
+        grandchild_pid: int | None = None
+        grandchild_start_time: str | None = None
+        try:
+            with pytest.raises(subprocess.TimeoutExpired):
+                push_timeout.run_bounded(
+                    cmd, cwd=str(tmp_path), env=dict(os.environ), timeout=1.0,
+                )
+
+            deadline = time.monotonic() + 10
+            while not (ready.exists() and pidfile.exists()) and time.monotonic() < deadline:
+                time.sleep(0.1)
+            assert ready.exists() and pidfile.exists(), (
+                "grandchild never started -- test setup issue, not a real assertion"
+            )
+            grandchild_pid = int(ready.read_text().strip())
+            # Captured immediately after reading the PID, before any risk
+            # of it exiting and being reused -- the finally block below
+            # revalidates against this token before ever signaling the PID.
+            grandchild_start_time = process_start_time(grandchild_pid)
+
+            deadline = time.monotonic() + 10
+            alive = pid_alive(grandchild_pid)
+            while alive and time.monotonic() < deadline:
+                time.sleep(0.2)
+                alive = pid_alive(grandchild_pid)
+            assert not alive, "grandchild process survived run_bounded's tree-kill"
+        finally:
+            # Independent safety net (see comment above): force-kill the
+            # grandchild directly by PID if it's still alive, regardless of
+            # the outcome above -- this test must never itself leak a live
+            # process back to the (now-uncontained) suite. Revalidate the
+            # start-time identity token first (agent_worktrees.locks'
+            # PID-reuse-proof mechanism, already used elsewhere in this
+            # module for exactly this class of race): a PID can be reaped
+            # and reused by an unrelated process during the poll window
+            # above, and signaling a bare PID without this check could kill
+            # that unrelated process instead of our own grandchild.
+            if (
+                grandchild_pid is not None
+                and grandchild_start_time is not None
+                and pid_alive(grandchild_pid)
+                and process_start_time(grandchild_pid) == grandchild_start_time
+            ):
+                if platform.system() == "Windows":
+                    subprocess.run(
+                        ["taskkill", "/F", "/PID", str(grandchild_pid)],
+                        capture_output=True, check=False,
+                    )
+                else:
+                    import signal
+                    try:
+                        os.kill(grandchild_pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        pass
+
+    def test_kill_tree_kills_root_via_handle(self, monkeypatch):
+        """Copilot review finding on PR #4600: the root process must be
+        terminated via its own Popen handle (``proc.kill()``), never a bare
+        PID string alone -- a handle can't be confused by PID reuse, since
+        the OS keeps that exact PID reserved as long as any handle to it
+        stays open."""
+        from agent_worktrees import push_timeout
+
+        calls: list[str] = []
+        fake_proc = types.SimpleNamespace(
+            pid=999999, poll=lambda: None, kill=lambda: calls.append("kill"),
+        )
+        monkeypatch.setattr(push_timeout, "contained_test_mode", lambda: True)
+        push_timeout._kill_tree(fake_proc)
+        assert calls == ["kill"], "root must be killed via its own Popen handle"
+
+    def test_kill_tree_refuses_pid_sweep_for_already_exited_process(self, monkeypatch):
+        """Copilot review finding on PR #4600 ("add a direct regression
+        proving a stale or mismatched identity is refused"): once
+        ``proc.poll()`` shows the process has ALREADY exited on its own,
+        its PID may already have been reused by an unrelated process --
+        the PID-based sweep must be skipped entirely rather than risk
+        acting on a now-unverifiable identity, even outside test
+        containment. The handle-bound ``proc.kill()`` is still safe and
+        still runs regardless (killing an already-exited process is a
+        harmless no-op)."""
+        from agent_worktrees import push_timeout
+
+        monkeypatch.setattr(push_timeout, "contained_test_mode", lambda: False)
+        sweep_called = []
+        monkeypatch.setattr(
+            push_timeout.subprocess, "run",
+            lambda *a, **k: sweep_called.append(True),
+        )
+        fake_proc = types.SimpleNamespace(pid=999999, poll=lambda: 0, kill=lambda: None)
+        push_timeout._kill_tree(fake_proc)
+        assert sweep_called == [], "a PID whose process already exited must not be swept"
+
+    def test_kill_tree_sweeps_pid_tree_for_still_running_process(self, monkeypatch):
+        """The complement of the above: a CONFIRMED-still-running process
+        (``poll() is None``) is safe to sweep by PID, since our own open
+        handle guarantees that exact PID hasn't been reused."""
+        from agent_worktrees import push_timeout
+
+        monkeypatch.setattr(push_timeout, "contained_test_mode", lambda: False)
+        monkeypatch.setattr(push_timeout.platform, "system", lambda: "Windows")
+        sweep_called = []
+        monkeypatch.setattr(
+            push_timeout.subprocess, "run",
+            lambda *a, **k: sweep_called.append(a),
+        )
+        fake_proc = types.SimpleNamespace(pid=999999, poll=lambda: None, kill=lambda: None)
+        push_timeout._kill_tree(fake_proc)
+        assert sweep_called, "a confirmed-still-running process should be swept by PID"
+        assert "999999" in sweep_called[0][0]
+
+    def test_kill_tree_skips_group_sweep_under_test_containment(self, monkeypatch):
+        """Copilot review finding on PR #4600: under
+        COPILOT_EXTENSIONS_TEST_CONTAINED=1, detached_kwargs() deliberately
+        leaves a POSIX child in the CALLER's own process group -- a killpg
+        sweep there would kill the test harness's own worker, not just the
+        stalled command's tree. The PID-based sweep must be skipped
+        entirely in that mode (root-only kill via the handle is still
+        performed)."""
+        from agent_worktrees import push_timeout
+
+        monkeypatch.setattr(push_timeout, "contained_test_mode", lambda: True)
+        sweep_called = []
+        monkeypatch.setattr(
+            push_timeout.subprocess, "run",
+            lambda *a, **k: sweep_called.append(True),
+        )
+        fake_proc = types.SimpleNamespace(pid=999999, poll=lambda: None, kill=lambda: None)
+        push_timeout._kill_tree(fake_proc)
+        assert sweep_called == [], "PID-based sweep must not run under test containment"
 
 
 # ---------------------------------------------------------------------------

@@ -42,13 +42,15 @@ def run_and_exit(main: Callable[[], int]) -> None:
     except SystemExit as exc:
         code = exc.code
     except KeyboardInterrupt:
-        if not _AFFECTED_RUNTIME:
-            raise
-        # Affected runtime: Ctrl+C must not be allowed to propagate into
-        # normal interpreter shutdown either -- that would still risk the
-        # very crash this workaround exists to dodge. Use the conventional
-        # 128+SIGINT exit code (130); no traceback -- that's what a normal
-        # KeyboardInterrupt at the top level doesn't produce either.
+        # A user-initiated Ctrl+C must exit cleanly -- conventional
+        # 128+SIGINT exit code (130), no traceback -- on every runtime, not
+        # just the one the os._exit() bypass below is scoped to. Letting it
+        # re-raise here reaches the interpreter's default top-level handler,
+        # which prints a full traceback and (behind a .bat/cmd.exe wrapper)
+        # trips cmd's own "Terminate batch job (Y/N)?" prompt. Whether the
+        # *rest* of this exit additionally bypasses normal interpreter
+        # shutdown via os._exit() is the separate, narrowly-scoped concern
+        # handled below (_AFFECTED_RUNTIME).
         code = 130
     except Exception:
         if not _AFFECTED_RUNTIME:

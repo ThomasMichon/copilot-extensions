@@ -369,7 +369,18 @@ integers allocated under the record lock determine ordering:
 - **`handoffs[]` / `handoff_counter`** — an incrementing ledger of handoff
   intents. Each entry has a stable external token, one predecessor, and an
   eventual exact successor. A new session can claim only the token it was given;
-  it never adopts "the newest pending handoff."
+  it never adopts "the newest pending handoff." Each entry also carries
+  **`live_cutover`** (default `False`): whether the opener intends the resident
+  status-monitor to auto-spawn a successor pane and retire the predecessor for
+  it. Recording a handoff at all (so lineage is trackable, and a
+  manually-consuming successor can later be promoted to head via
+  `link-succession`) must never by itself risk an unwanted automatic spawn — the
+  monitor's own spawn-eligibility gate
+  (`status_monitor_runtime._monitor_pending_handoff_request`) requires this
+  field to be `True`, not merely the entry's existence (context-handoff's
+  `mode: manual-only` vs `auto` maps directly to this flag, not to whether the
+  entry gets recorded at all — see the `context-handoff` plugin's own `triggerHandoff`
+  for the caller side).
 - **`head_transitions[]` / `lifecycle_revision`** — the authoritative,
   replayable changes to the current session. `head_session` and `head_revision`
   are materialized caches repaired from the highest valid transition revision.
@@ -1099,6 +1110,47 @@ current, and the (slow) re-deploy is skipped. The skip is conservative: an
 unknown deployed version (no `deploy-manifest.json`) always re-deploys, so a
 stale runtime is never left behind. Pass `--force` to re-deploy every runtime
 unconditionally.
+
+### Version-cutover reap and live-launcher protection
+
+A version bump publishes a fresh `~/.agent-worktrees/versions/<v>` slot and
+calls `status-monitor-restart` (`_restart_status_monitor`) from that new
+slot's interpreter. Alongside reaping the singleton status-monitor's own
+known pid, this calls `stale_runtime_reap.reap()`, which terminates **every
+process on the machine** whose resolved executable is still under a
+superseded `versions/<old>` slot (`procs.terminate_processes_under_executable`).
+This exists to catch a one-shot CLI verb invocation (`list --json`, `status
+--json`, ...) that wedges on a lock/IPC call and never exits on its own
+(#4268 observed 18 such orphans for a single project over roughly two
+hours) -- there is no per-invocation self-check, only this cutover-time
+sweep.
+
+That sweep is unconditional and machine-wide, which also makes it a hazard
+for anything else still legitimately running under the outgoing slot at the
+wrong instant: a live worktree launcher (`launch-session.ps1`/`.sh`)
+repeatedly shells out to short-lived `agent_worktrees
+resolve`/`activity-log`/`get` subprocesses throughout an interactive
+session, and any one of those can be caught mid-flight by a cutover
+triggered by a completely different, concurrent launch's own self-update
+(#4454). `launch_registry` closes that gap: each launcher registers its own
+root pid (one provable-liveness lock file per `(worktree_id, pid)` pair,
+reusing `locks.py`'s pid + start-time token) as soon as it knows its
+worktree id, via `agent-worktrees register-launch` -- called synchronously,
+not the detached `activity-log` pattern, since the write must complete
+before any later subprocess call in this run could become a reap target.
+The reap forwards `launch_registry.active_launch_pids()` to
+`terminate_processes_under_executable` as `protect_ancestors`: a candidate
+descended from a registered, still-live root is skipped.
+
+Protection is **bounded, not indefinite**: `procs.process_age_seconds()`
+(via `GetProcessTimes`/`GetSystemTimeAsFileTime` on Windows, `/proc/<pid>/stat`
++ `/proc/uptime` on posix) gates the exclusion at
+`_PROTECT_ANCESTOR_GRACE_SECONDS` (120s). A descendant older than that reads
+as genuinely stuck -- the exact #4268 case -- and is reaped regardless of
+its ancestor, so this protection cannot reintroduce the orphan-accumulation
+bug it sits next to. An unmeasurable age fails closed (no protection):
+protection is the exception path, so failing to prove "still fresh" must
+never grant it.
 
 ### Version Checking
 

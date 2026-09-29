@@ -266,6 +266,25 @@ CFG_MIGRATE_DIR="$PLUGIN_DIR/libs/config-migrate"
 if [[ ! -f "$CFG_MIGRATE_DIR/pyproject.toml" ]]; then
     CFG_MIGRATE_DIR="$REPO_ROOT/libs/config-migrate"
 fi
+# zdd dir (uv-editable canonical reference in a dev checkout, real copy in a
+# materialized release payload): plugin-vendored or repo-root.
+ZDD_DIR="$PLUGIN_DIR/libs/zdd"
+if [[ ! -f "$ZDD_DIR/pyproject.toml" ]]; then
+    ZDD_DIR="$REPO_ROOT/libs/zdd"
+fi
+# venue-copilot dir (uv-editable canonical reference in a dev checkout, real
+# copy in a materialized release payload): plugin-vendored or repo-root.
+VENUE_COPILOT_DIR="$PLUGIN_DIR/libs/venue-copilot"
+if [[ ! -f "$VENUE_COPILOT_DIR/pyproject.toml" ]]; then
+    VENUE_COPILOT_DIR="$REPO_ROOT/libs/venue-copilot"
+fi
+# session-liveness-probe dir (uv-editable canonical reference in a dev
+# checkout, real copy in a materialized release payload): plugin-vendored or
+# repo-root.
+SESSION_LIVENESS_PROBE_DIR="$PLUGIN_DIR/libs/session-liveness-probe"
+if [[ ! -f "$SESSION_LIVENESS_PROBE_DIR/pyproject.toml" ]]; then
+    SESSION_LIVENESS_PROBE_DIR="$REPO_ROOT/libs/session-liveness-probe"
+fi
 
 DEPLOY_SOURCE_PATHS=("plugins/agent-codespaces/")
 INSTALLER_REL_PATH="plugins/agent-codespaces/scripts/install.sh"
@@ -420,8 +439,9 @@ PY
     exit 1
 }
 
-# uv pip install the vendored libs (ssh-manager, credential-relay) then
-# agent-codespaces into the given venv python. Non-editable by default; deps
+# uv pip install the vendored libs (ssh-manager, credential-relay, zdd,
+# venue-copilot, session-liveness-probe) then agent-codespaces into the given
+# venv python. Non-editable by default; deps
 # resolved from pyproject.toml. The vendored libs are force-reinstalled so a
 # local code change propagates even without a version bump (uv otherwise skips
 # a same-version path dep, leaving the venv stale).
@@ -446,6 +466,18 @@ _install_package_into() {
         _fail "config-migrate source not found at $CFG_MIGRATE_DIR"
         return 1
     fi
+    if [[ ! -f "$ZDD_DIR/pyproject.toml" ]]; then
+        _fail "zdd source not found at $ZDD_DIR"
+        return 1
+    fi
+    if [[ ! -f "$VENUE_COPILOT_DIR/pyproject.toml" ]]; then
+        _fail "venue-copilot source not found at $VENUE_COPILOT_DIR"
+        return 1
+    fi
+    if [[ ! -f "$SESSION_LIVENESS_PROBE_DIR/pyproject.toml" ]]; then
+        _fail "session-liveness-probe source not found at $SESSION_LIVENESS_PROBE_DIR"
+        return 1
+    fi
     if [[ "$mode" == "--editable" ]]; then
         uv pip install --python "$py" --editable "$SSH_MGR_DIR" --quiet || {
             _fail "ssh-manager install failed"; return 1; }
@@ -453,6 +485,12 @@ _install_package_into() {
             _fail "credential-relay install failed"; return 1; }
         uv pip install --python "$py" --editable "$CFG_MIGRATE_DIR" --quiet || {
             _fail "config-migrate install failed"; return 1; }
+        uv pip install --python "$py" --editable "$ZDD_DIR" --quiet || {
+            _fail "zdd install failed"; return 1; }
+        uv pip install --python "$py" --editable "$VENUE_COPILOT_DIR" --quiet || {
+            _fail "venue-copilot install failed"; return 1; }
+        uv pip install --python "$py" --editable "$SESSION_LIVENESS_PROBE_DIR" --quiet || {
+            _fail "session-liveness-probe install failed"; return 1; }
         uv pip install --python "$py" --editable "$PLUGIN_DIR" --quiet || {
             _fail "agent-codespaces install failed"; return 1; }
         return 0
@@ -463,6 +501,12 @@ _install_package_into() {
         _fail "credential-relay install failed"; return 1; }
     uv pip install --python "$py" --reinstall-package agent-config-migrate "$CFG_MIGRATE_DIR" --quiet || {
         _fail "config-migrate install failed"; return 1; }
+    uv pip install --python "$py" --reinstall-package agent-zdd "$ZDD_DIR" --quiet || {
+        _fail "zdd install failed"; return 1; }
+    uv pip install --python "$py" --reinstall-package agent-venue-copilot "$VENUE_COPILOT_DIR" --quiet || {
+        _fail "venue-copilot install failed"; return 1; }
+    uv pip install --python "$py" --reinstall-package agent-session-liveness-probe "$SESSION_LIVENESS_PROBE_DIR" --quiet || {
+        _fail "session-liveness-probe install failed"; return 1; }
     uv pip install --python "$py" --reinstall-package agent-codespaces "$PLUGIN_DIR" --quiet || {
         _fail "agent-codespaces install failed"; return 1; }
 }

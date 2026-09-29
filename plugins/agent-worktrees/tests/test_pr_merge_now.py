@@ -11,6 +11,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import agent_worktrees.__main__ as m
+from agent_worktrees import config as cfg
 from agent_worktrees import pr_contract as pc
 from agent_worktrees import providers as prov
 
@@ -92,6 +93,22 @@ class _FakeProvider:
 def _patch_provider(monkeypatch, provider):
     monkeypatch.setattr(prov, "get_provider", lambda name: provider)
     monkeypatch.setattr(prov, "account_token_for_slug", lambda slug, prcfg: "tok")
+
+
+def _config(prcfg):
+    repo = cfg.RepoConfig(
+        anchor="/anchor",
+        worktree_root="/worktrees",
+        default_branch="main",
+        pr=prcfg,
+    )
+    return cfg.Config(
+        srcroot="/src",
+        machine="host",
+        platform="linux",
+        repo_name="repo",
+        repos={"repo": repo},
+    )
 
 
 def test_now_self_merge_calls_merge_pull_squash_admin(monkeypatch, capsys):
@@ -213,6 +230,88 @@ def test_now_json_success_shape(monkeypatch, capsys):
     assert out["applied"] is True
     assert out["action"] == "merge"
     assert out["reminder"]["profile"] == "pr-self-merge"
+
+
+def test_dispatch_maintain_role_resolves_self_merge_once(monkeypatch):
+    fake = _FakeProvider()
+    _patch_provider(monkeypatch, fake)
+    calls = []
+    monkeypatch.setattr(
+        prov,
+        "actor_viewer_permission",
+        lambda *a, **k: calls.append((a, k)) or "maintain",
+    )
+    prcfg = cfg.PRConfig(
+        enabled=True,
+        required=True,
+        provider="github",
+        prefer_auto_merge=False,
+        roles={
+            "maintain": cfg.PRRoleOverride(merge_actor="submitter-direct"),
+        },
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda path=None: _config(prcfg))
+
+    rc = m.cmd_pr_merge_dispatch(["o/r", "7", "--now"])
+
+    assert rc == 0
+    assert len(calls) == 1
+    assert fake.calls == [
+        dict(repo="o/r", number=7, squash=True, admin=True),
+    ]
+
+
+def test_dispatch_write_role_explicitly_disables_self_merge(monkeypatch):
+    fake = _FakeProvider()
+    _patch_provider(monkeypatch, fake)
+    calls = []
+    monkeypatch.setattr(
+        prov,
+        "actor_viewer_permission",
+        lambda *a, **k: calls.append((a, k)) or "write",
+    )
+    prcfg = cfg.PRConfig(
+        enabled=True,
+        required=True,
+        provider="github",
+        merge_actor="submitter-direct",
+        prefer_auto_merge=False,
+        roles={"write": cfg.PRRoleOverride(merge_actor="")},
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda path=None: _config(prcfg))
+
+    rc = m.cmd_pr_merge_dispatch(["o/r", "7", "--now"])
+
+    assert rc == 2
+    assert len(calls) == 1
+    assert fake.calls == []
+
+
+def test_dispatch_unknown_permission_uses_safe_base_profile(monkeypatch):
+    fake = _FakeProvider()
+    _patch_provider(monkeypatch, fake)
+    calls = []
+    monkeypatch.setattr(
+        prov,
+        "actor_viewer_permission",
+        lambda *a, **k: calls.append((a, k)) or "",
+    )
+    prcfg = cfg.PRConfig(
+        enabled=True,
+        required=True,
+        provider="github",
+        prefer_auto_merge=False,
+        roles={
+            "maintain": cfg.PRRoleOverride(merge_actor="submitter-direct"),
+        },
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda path=None: _config(prcfg))
+
+    rc = m.cmd_pr_merge_dispatch(["o/r", "7", "--now"])
+
+    assert rc == 2
+    assert len(calls) == 1
+    assert fake.calls == []
 
 
 # --- prefer_auto_merge policy (#225) ---------------------------------------

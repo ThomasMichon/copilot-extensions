@@ -147,6 +147,10 @@ def seams(monkeypatch):
         lambda *a, **k: calls.shims.append(("ensure", a, k)),
     )
     monkeypatch.setattr(
+        "agent_containers.container_shims.ensure_agent_worktrees_workspace_registered",
+        lambda *a, **k: calls.shims.append(("register", a, k)),
+    )
+    monkeypatch.setattr(
         "agent_containers.container_shims.deploy",
         lambda *a, **k: calls.shims.append(("deploy", a, k)),
     )
@@ -218,7 +222,12 @@ def test_detach_success_provisions_credentials_starts_keeper_and_reports_handle(
         "relay_port": 9857,
         "host_relay_port": 61234,
     }
-    assert [item[0] for item in seams.shims] == ["ensure", "deploy"]
+    assert [item[0] for item in seams.shims] == ["ensure", "register", "deploy"]
+    assert seams.shims[1] == (
+        "register",
+        ("repo-1",),
+        {"user": "vscode", "workspace_folder": "/workspaces/repo"},
+    )
     assert "auth.yaml" in seams.run[0] and "active.json" in seams.run[0]
     launch = next(cmd for cmd in seams.run if "agent-worktrees embody" in cmd)
     assert "cd /workspaces/repo" in launch
@@ -246,6 +255,58 @@ def test_detach_forwards_the_host_github_token_when_enabled(seams, monkeypatch, 
     assert seams.remote_env[0]["LC_GIT_CREDENTIAL_RELAY_TOKEN"] == "relay-token"
     assert all("gho_host" not in cmd for cmd in seams.run)  # staged over stdin, never argv
     assert "gho_host" not in capsys.readouterr().out
+
+
+def test_detach_forwards_dispatch_reachback_environment(seams, monkeypatch, capsys):
+    monkeypatch.setenv("AGENT_DISPATCH_URL", "http://host.docker.internal:50087")
+    monkeypatch.setenv("AGENT_DISPATCH_SHARED_TOKEN", "shared-token")
+    monkeypatch.setenv("AGENT_DISPATCH_CONTROL_TOKEN", "control-token")
+
+    rc = detach.cmd_detach(
+        _args(),
+        require_live_relay_port=lambda: 61234,
+        relay_healthy=lambda p: True,
+    )
+
+    assert rc == 0
+    assert seams.remote_env[0]["AGENT_DISPATCH_URL"] == "http://host.docker.internal:50087"
+    assert seams.remote_env[0]["AGENT_DISPATCH_SHARED_TOKEN"] == "shared-token"
+    assert "AGENT_DISPATCH_CONTROL_TOKEN" not in seams.remote_env[0]
+    assert "shared-token" not in capsys.readouterr().out
+
+
+def test_detach_without_relay_still_prepares_agent_worktrees_and_workspace(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        "agent_containers.container_shims.ensure_agent_worktrees",
+        lambda *a, **k: seen.append(("ensure", a, k)),
+    )
+    monkeypatch.setattr(
+        "agent_containers.container_shims.ensure_agent_worktrees_workspace_registered",
+        lambda *a, **k: seen.append(("register", a, k)),
+    )
+    monkeypatch.setattr(
+        "agent_containers.resolver.host_gh_token",
+        lambda: None,
+        raising=False,
+    )
+
+    env, relay_port, host_relay_port = detach._launch_env(
+        _args(no_relay=True),
+        _target(),
+        require_live_relay_port=lambda: (_ for _ in ()).throw(AssertionError("no relay")),
+        relay_healthy=lambda p: (_ for _ in ()).throw(AssertionError("no relay")),
+    )
+
+    assert relay_port is None and host_relay_port is None
+    assert seen == [
+        ("ensure", ("repo-1",), {"user": "vscode"}),
+        (
+            "register",
+            ("repo-1",),
+            {"user": "vscode", "workspace_folder": "/workspaces/repo"},
+        ),
+    ]
 
 
 def test_detach_fails_before_launch_when_the_forwarded_token_is_missing(

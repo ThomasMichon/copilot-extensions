@@ -54,6 +54,7 @@ def test_no_cli_prompt_container_uses_forwarded_env_contract():
 
     assert "agent_containers._peer_launch.peer_environment()" in prompt
     assert "Use those exact values if they are present" in prompt
+    assert "If `python` is unavailable but `python3` exists" in prompt
 
 
 def test_no_cli_prompt_machine_supports_shared_token_command():

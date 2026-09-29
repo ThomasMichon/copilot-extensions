@@ -16,7 +16,7 @@ This plugin ships four cooperating payload pieces:
 | **continuity guidance hook** | Declarative `sessionStart` hook | Writes the full owner-marked continuity contract to the exact session folder and emits only `{}` |
 | **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard/**force** thresholds (55% / 70% / 79% by default) with optional repository overrides, delivered on the next idle -- soft/hard warnings fire under the default `manual-only` mode too (any mode other than `off`); only the force tier's auto-draft/store/trigger + mutating-tool-call denial, and `trigger_handoff`'s live-cutover signaling, are opt-in (`mode: auto` in `.context-handoff/config.yaml`; the default, `manual-only`, always still stores/seeds a handoff on request, see § Thresholds); provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, and `trigger_handoff` tools plus **`/handoff-continue`**, **`/consume-handoff`**, and the compatibility **`/resume-handoff`** alias |
 | **context-handoff skill** | Skill | Owns the `/handoff` workflow: compose the continuation prompt from the extension's structured facts and the agent's live context, decide when to store it, and decide whether to ask or trigger |
-| **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save, trigger, task/file consume, `check-heads` auditing, a safe `retry-cutover` remediation for a superseded session, and a lock/rebase-safe `sync-worktree` (shared with the force-tier path). Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension |
+| **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save, trigger, task/file consume, `check-heads` auditing, a safe `retry-cutover` remediation for a superseded session, a lock/rebase-safe `sync-worktree` (shared with the force-tier path), `list-sessions`/`get-previous-session` lineage lookups, and `abort` to cancel a pending handoff before it's consumed. Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension |
 
 ## The boundary
 
@@ -160,36 +160,41 @@ It always:
 1. drops the composed handoff markdown in the current session's session-state
    folder,
 2. durably stores it (`agent-dispatch` task-backed storage when available,
-   otherwise a worktree-state file).
+   otherwise a worktree-state file),
+3. notes it in the worktree's own record via `agent-worktrees note-handoff`
+   (this creates a `pending_handoffs` entry -- lineage/tracking state, so a
+   manually-consuming successor can later be promoted to head via
+   `link-succession` regardless of mode). This step runs in **every** mode,
+   including `off` -- `off` disables only automatic/unprompted behavior, never
+   a manually-invoked `trigger_handoff` (see `note-handoff --live-cutover`
+   below for the piece that's actually mode-gated).
 
 **Only when `.context-handoff/config.yaml`'s `mode` is `auto`** (the default
-is `manual-only`) does it additionally:
+is `manual-only`) does it additionally arm **live-cutover**:
 
-3. note it in the worktree's own record via `agent-worktrees note-handoff`
-   (this creates a `pending_handoffs` entry agent-worktrees' resident
-   monitor can discover and claim on its own -- a live-cutover trigger
-   point, not merely advisory, so it is gated identically to the two
-   below), refresh worktree-visible PENDING-HANDOFF state -- the signal
-   agent-worktrees' resident status-monitor watches for -- when
-   `agent-worktrees` is available,
-4. best-effort ping `agent-bridge` if present,
-5. wait up to 30 seconds for the CUTOVER to start -- not for the successor to
+4. pass `--live-cutover` to the same `note-handoff` call from step 3 --
+   agent-worktrees' resident status-monitor requires this exact flag on the
+   entry (not merely the entry's existence) before it will ever discover and
+   claim it on its own; refresh worktree-visible PENDING-HANDOFF state -- the
+   signal the monitor watches for -- when `agent-worktrees` is available,
+5. best-effort ping `agent-bridge` if present,
+6. wait up to 30 seconds for the CUTOVER to start -- not for the successor to
    fully finish cold-starting and consume the handoff, which legitimately
    takes longer (40-90+ seconds) and isn't worth blocking on.
 
 Regardless of mode, it always:
 
-6. check once whether the session-state marker was consumed, the worktree
+7. check once whether the session-state marker was consumed, the worktree
    recorded a successor, the dispatch task moved out of `proposed` /
    `queued`, or (the earlier, cheaper signal) the resident status-monitor
    has already logged a `handoff_cutover_spawn` for this token -- under
-   `manual-only` this is a single check with no polling wait (steps 3-5 are
+   `manual-only` this is a single check with no polling wait (steps 4-6 are
    the only ones actually skipped),
-7. print manual continuation instructions -- distinctly worded when
+8. print manual continuation instructions -- distinctly worded when
    automatic cutover is simply disabled by `mode` versus when it was
    attempted and nothing happened, or a distinct "already under way" note if
    a spawn is merely in flight,
-8. always end by printing the final short handoff prompt/seed.
+9. always end by printing the final short handoff prompt/seed.
 
 That final seed is the "if your download doesn't start, click here" fallback:
 it gives a human or control system enough to continue even if none of the
@@ -614,6 +619,9 @@ node "$CH" consume --locator "task:<task-id>" \
   --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" consume --locator "file:<handoff-id>" \
   --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+node "$CH" list-sessions --json --cwd "$PWD"
+node "$CH" get-previous-session --json --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+node "$CH" abort --locator "task:<task-id>" --reason "<why>" --cwd "$PWD"
 ```
 
 PowerShell uses the same verified, plugin-folder-relative invocation:
@@ -639,6 +647,9 @@ node $ch trigger --title '<topic>' --prompt-file '<handoff.md>' --session-id $en
 node $ch trigger --handoff-token '<HANDOFF_TOKEN>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch consume --locator 'task:<task-id>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch consume --locator 'file:<handoff-id>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+node $ch list-sessions --json --cwd $PWD
+node $ch get-previous-session --json --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+node $ch abort --locator 'task:<task-id>' --reason '<why>' --cwd $PWD
 ```
 
 ## Last-resort fallback: write the file yourself
@@ -747,11 +758,21 @@ warnings above fire under `manual-only` too -- only the force tier's own
 automatic handoff and any live pickup signaling wait for `mode: auto`.
 `save_handoff_prompt`,
 `trigger_handoff`, and `consume_handoff` all keep working under
-`manual-only` -- `trigger_handoff` still stores/seeds the handoff and prints
-the manual pickup instructions, it just never wires up automatic pickup.
-`mode: off` disables both automatic behavior and the extension/CLI handoff
-entry points for that repo entirely (only the last-resort manual file write
-remains reachable, since it depends on nothing this plugin owns).
+`manual-only` -- `trigger_handoff` still stores/seeds/notes the handoff and
+prints the manual pickup instructions, it just never arms the resident
+monitor's live-cutover (the `note-handoff` ledger entry itself is still
+recorded under `manual-only`; only its `--live-cutover` flag is `mode: auto`
+gated -- this is what lets a manually-consumed successor still be promoted
+to the worktree's head regardless of mode).
+`mode: off` disables only automatic/unprompted behavior -- the soft/hard
+context-pressure nudges above, and the force tier's own auto-draft/store/
+trigger. It does **not** disable the manual entry points: `generate_handoff_
+prompt`, `save_handoff_prompt`, `trigger_handoff`, `consume_handoff`, and
+their `/handoff-continue` / `/consume-handoff` / `/resume-handoff` slash
+commands all keep working exactly as under `manual-only`, including
+`trigger_handoff`'s ledger note. A session or operator who explicitly reaches
+for the mechanism gets it, regardless of the repo's automatic-behavior
+policy; `off` only means "don't nudge me, and don't ever act on my behalf."
 
 Each threshold tier may use either `<tier>_percent` or `<tier>_tokens`. Mixed
 configs are allowed per tier; percent tiers resolve against the live session

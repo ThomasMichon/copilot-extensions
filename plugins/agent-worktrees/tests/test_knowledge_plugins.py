@@ -1768,7 +1768,13 @@ def test_concurrent_compose_is_cross_process_atomic(tmp_path: Path):
     for process in processes:
         process.start()
     for process in processes:
-        process.join(timeout=120)
+        # 4 ``spawn``-context worker interpreters under real disk-lock
+        # contention can take well over 120s to finish on a heavily loaded
+        # shared machine (observed: >120s wall-clock under concurrent load
+        # elsewhere on the host) -- generous headroom here avoids a false
+        # failure from environmental contention rather than a genuine
+        # atomicity regression; the assertions below are unchanged.
+        process.join(timeout=300)
         assert process.exitcode == 0, f"compose worker exited {process.exitcode}"
 
     overlay = _read_overlay(harness)

@@ -269,9 +269,14 @@ branch. Three profiles decide which verbs apply:
   CI-gated auto-merge when the provider supports it and otherwise performs the
   configured merge.
 
-The verbs are self-describing — `pr-status` prints the active `flow:` and
-`pr-merge` refuses (naming the reason + next step) where it doesn't apply.
-Believe them; never hand-merge past a verb that says it doesn't apply.
+The base config has a pure, offline **configured profile** (`get pr-profile`).
+Networked actor-specific verbs resolve an **effective actor profile** from that
+base + live provider permission + a matching GitHub `pr.roles` override.
+`pr-status` prints the effective `flow:` and its configured source;
+`pr-status --no-live` remains configured-only. `pr-merge` uses the same
+resolver before deciding whether `--now` applies, and `pr-watch wait` uses the
+same effective review posture. Believe those live surfaces; never hand-merge
+past a verb that says it doesn't apply.
 
 | Verb | Role in the loop |
 |------|------------------|

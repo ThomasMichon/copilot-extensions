@@ -89,6 +89,73 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
+def process_identity(pid: int) -> str | None:
+    """Return a stable birth-identity token for ``pid`` while it remains live."""
+    if pid <= 0 or not pid_alive(pid):
+        return None
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        access = 0x1000
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        kernel32.GetProcessTimes.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+        ]
+        kernel32.GetProcessTimes.restype = wintypes.BOOL
+        handle = kernel32.OpenProcess(access, False, pid)
+        if not handle:
+            return None
+        try:
+            creation = wintypes.FILETIME()
+            exit_ = wintypes.FILETIME()
+            kernel = wintypes.FILETIME()
+            user = wintypes.FILETIME()
+            ok = kernel32.GetProcessTimes(
+                handle,
+                ctypes.byref(creation),
+                ctypes.byref(exit_),
+                ctypes.byref(kernel),
+                ctypes.byref(user),
+            )
+            if not ok:
+                return None
+            ticks = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
+            return f"windows-filetime:{ticks}"
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        boot_id = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
+        tail = raw.rsplit(")", 1)[1].split()
+        if tail and tail[0] == "Z":
+            return None
+        return f"proc-start:{boot_id}:{tail[19]}"
+    except (IndexError, OSError, UnicodeError):
+        pass
+    try:
+        result = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except OSError:
+        return None
+    started = result.stdout.strip()
+    return f"ps-start:{started}" if result.returncode == 0 and started else None
+
+
 def _terminate(pid: int, *, grace: float = 3.0) -> None:
     """Best-effort terminate a local process tree and wait briefly for exit."""
     if pid <= 0 or not pid_alive(pid):

@@ -78,7 +78,9 @@ _GET_KEYS: dict[str, str] = {
     "pr-enabled": "Whether PR mode is enabled (true/false)",
     "pr-required": "Whether PRs are required, blocking direct-to-master (true/false)",
     "pr-provider": "PR provider (gitea|github|azure-devops) when PR mode is on",
-    "pr-profile": "PR-flow profile: direct|pr-human-merge|pr-agent-merge (check first)",
+    "pr-profile": "Configured/offline PR-flow profile: direct|pr-human-merge|"
+    "pr-agent-merge|pr-self-merge (networked commands may report an "
+    "actor-effective profile)",
 }
 
 #: Keys whose value can depend on the control-plane PR-graft overlay
@@ -215,14 +217,15 @@ def _pr_reminder_for(
     ok: bool = True,
     state: str = "",
     reason: str = "",
+    flow=None,
 ):
     """Build this repo's stay-on-rails PR reminder for ``verb`` (or ``None``)."""
     from . import pr_config
     from . import pr_contract as pc
 
     try:
-        flow = pr_config._pr_flow_profile(config.default_repo)
-        return pc.pr_reminder(flow, verb, state, ok=ok, reason=reason)
+        resolved_flow = flow or pr_config._pr_flow_profile(config.default_repo)
+        return pc.pr_reminder(resolved_flow, verb, state, ok=ok, reason=reason)
     except Exception:
         return None
 

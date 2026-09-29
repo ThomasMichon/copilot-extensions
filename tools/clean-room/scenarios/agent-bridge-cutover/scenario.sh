@@ -29,7 +29,7 @@ source "${CR_LIB:-$_SELF_DIR/../../lib/clean-room-lib.sh}"
 MARKETPLACE_REPO="${CR_MARKETPLACE_REPO:-ThomasMichon/copilot-extensions}"
 MARKETPLACE_NAME="${CR_MARKETPLACE_NAME:-copilot-extensions}"
 UV_INDEX="${CR_UV_INDEX:-}"
-CHECKS="${CR_CUTOVER_CHECKS:-routing-flip-retire,drain-gate,breadcrumb-recover}"
+CHECKS="${CR_CUTOVER_CHECKS:-routing-flip-retire,drain-gate,breadcrumb-recover,abrupt-kill-recovery}"
 PLUGIN="agent-bridge"
 INSTALLED_ROOT="$HOME/.copilot/installed-plugins/$MARKETPLACE_NAME"
 

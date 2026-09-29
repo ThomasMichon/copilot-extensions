@@ -46,21 +46,56 @@ _enrich = _proxy("_enrich")
 _resolve_client_target = _proxy("_resolve_client_target")
 
 
+def _reexec_argv(args: argparse.Namespace) -> list[str]:
+    """The ``[<python>, -m, agent_dispatch, <flags>]`` prefix a serve loop's
+    forked per-tick subprocess re-invokes -- see ``emitter.serve``/
+    ``schedule.serve``'s own docstrings.
+
+    Reproduces THIS invocation's own top-level ``--url``/``--shared``/
+    ``--token``/``--control-token`` flags (an operator's explicit,
+    deliberately pinned target must keep applying to every tick, exactly
+    like ``test_serve_still_supports_a_pinned_static_target`` expects) but
+    nothing else: when none of those were given, each forked tick is simply
+    a brand-new ``agent-dispatch`` command that runs its own normal
+    discovery (``_resolve_client_target``'s local-first, opt-in-``--shared``
+    precedence) fresh, exactly like any other freshly-typed CLI invocation
+    would -- never silently caching whatever happened to resolve at
+    ``serve`` startup.
+    """
+    argv = [sys.executable, "-m", "agent_dispatch"]
+    if getattr(args, "url", None):
+        argv += ["--url", args.url]
+    if getattr(args, "token", None):
+        argv += ["--token", args.token]
+    if getattr(args, "control_token", None):
+        argv += ["--control-token", args.control_token]
+    if getattr(args, "shared", False):
+        argv.append("--shared")
+    return argv
+
+
 def _cmd_schedule(args: argparse.Namespace) -> int:
     from .producers import schedule
 
     cmd = args.schedule_command
 
     if cmd == "serve":
-        _url, _token = _resolve_client_target(args)
         if getattr(args, "registry", False):
             if not args.lease_scope or not args.holder:
                 raise SystemExit(
                     "schedule serve --registry: --lease-scope and --holder are required"
                 )
+            # The registry lease is acquired/renewed by THIS loop itself (the
+            # cross-machine "only one holder ticks" guarantee), not by a
+            # reusable one-shot CLI primitive -- there is no equivalent
+            # "acquire-lease-then-tick-if-granted" subcommand to shell out to
+            # today, so this path keeps re-resolving its own coordinator
+            # target fresh every tick in-process instead (same fix rationale,
+            # just not the subprocess-per-tick shape the plain/emitter loops
+            # use below).
+            _resolve_client_target(args)  # fail fast on e.g. a bad --shared
             schedule.serve_registry(
-                url=_url,
-                token=_token,
+                resolve_target=lambda: _resolve_client_target(args),
                 interval=args.interval,
                 lease_scope=args.lease_scope,
                 holder=args.holder,
@@ -70,7 +105,14 @@ def _cmd_schedule(args: argparse.Namespace) -> int:
         else:
             if not args.spec:
                 raise SystemExit("schedule serve: pass a SPEC path or --registry")
-            schedule.serve(args.spec, url=_url, token=_token, interval=args.interval)
+            # Fail fast on obvious misconfiguration (e.g. ``--shared`` with no
+            # shared coordinator configured) before entering the loop, same
+            # as the registry branch above and the emitter serve branch
+            # below -- each forked tick re-runs this exact same check itself
+            # regardless, so this is a startup-time UX improvement, not a
+            # substitute for it.
+            _resolve_client_target(args)
+            schedule.serve(args.spec, cli_argv=_reexec_argv(args), interval=args.interval)
         return 0
 
     if cmd == "tick":
@@ -165,11 +207,13 @@ def _cmd_emitter(args: argparse.Namespace) -> int:
             return 2
     spec = emitter.load_spec(args.spec)
     if args.emitter_command == "serve":
-        url, token = _resolve_client_target(args)
+        # Fail fast on obvious misconfiguration (e.g. ``--shared`` with no
+        # shared coordinator configured) before entering the loop -- each
+        # forked tick re-runs this exact same check itself regardless.
+        _resolve_client_target(args)
         emitter.serve(
             args.spec,
-            url=url,
-            token=token,
+            cli_argv=_reexec_argv(args),
             holder=args.holder,
         )
         return 0

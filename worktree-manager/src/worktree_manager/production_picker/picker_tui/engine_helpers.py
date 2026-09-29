@@ -238,7 +238,12 @@ _TASK_PHASE_PALETTE = {
     "QUEUED": C_STATE["UNUSED"],     # approved, awaiting a worker -> same grey
     "STARTED": C_STATE["ACTIVE"],    # an agent is actively working it -> blue
     "BLOCKED": C_STATE["WIP"],       # awaiting operator steer -> WIP amber
-    "SUSPENDED": C_STATE["CONVO"],   # user/system paused, mid-conversation -> teal
+    "PAUSED": C_STATE["ORPHAN"],     # durable operator-set hold -> magenta;
+                                     # deliberately distinct from SUSPENDED's
+                                     # teal (a system/liveness outcome, not
+                                     # an explicit operator pause) -- #7-2
+    "SUSPENDED": C_STATE["CONVO"],   # system-suspended (liveness-detected or
+                                     # force-stopped), mid-conversation -> teal
     "COMPLETED": C_STATE["FINAL"],   # done and settled -> FINAL green
     "ABANDONED": C_STATE["GONE"],    # terminal, no longer relevant -> dark grey
 }
@@ -308,7 +313,12 @@ def _claims_cell(rec, w):
     Builds real per-claim hyperlink spans from ``claims_links`` (a
     ``[{"label", "url"}]`` list, engine-computed) when present; falls back
     to the plain ``claims_summary`` string (still unclipped) for an older
-    engine or a sibling pivot that hasn't adopted ``claims_links`` yet."""
+    engine or a sibling pivot that hasn't adopted ``claims_links`` yet.
+
+    A linked claim renders underlined (operator feedback, 2026-09-29) --
+    the terminal's own OSC 8 hyperlink affordance conventionally pairs with
+    an underline so it visually reads as a clickable link, not just as
+    differently-coloured text."""
     links = rec.get("claims_links")
     if links:
         seg = Text()
@@ -317,7 +327,7 @@ def _claims_cell(rec, w):
                 seg.append(" \u00b7 ", style=C_DIM)
             label = str(entry.get("label") or "")
             url = entry.get("url")
-            seg.append(label, style=f"link {url}" if url else "")
+            seg.append(label, style=f"underline link {url}" if url else "")
     else:
         seg = Text(str(rec.get("claims_summary", "") or ""))
     if seg.cell_len < w:
@@ -373,9 +383,16 @@ def row_text(rec, cols, width, selected, indent=1, pulse=0, mark=None):
         elif k == "pr" and rec.get("pr", "").endswith("✓"):
             style = C_PR_MERGED
         elif k == "sess":
-            if rec.get("sess", "").startswith("●") or rec.get("sess") == "PROC":
+            sess_val = rec.get("sess", "")
+            # #3307 operator feedback 2026-09-29: MUX/ACP/PROC pulse when
+            # genuinely live-and-attended; a MUX(0) (unattached mux
+            # session -- the old bare "○") does NOT pulse, matching the
+            # prior "●" (pulse) vs "○" (no pulse) distinction exactly.
+            if sess_val in ("ACP", "PROC") or (
+                sess_val.startswith("MUX(") and sess_val != "MUX(0)"
+            ):
                 style = C_PULSE[pulse]
-            elif rec.get("sess") == "LOCK":
+            elif sess_val == "LOCK":
                 style = C_STATE["WIP"]
         t.append(cell, style=style)
     if t.cell_len < width:
@@ -410,14 +427,16 @@ ACTIVE_SPECS = [
     ("age", "age", 4, "l", 7),
     # #3307 follow-up: recency of last real interaction (resume/activity),
     # distinct from AGE (creation/status-transition age) -- see
-    # ``derive._last_active_display``. Dropped before LIVE/SESS-TURNS under
+    # ``derive._last_active_display``. Dropped before LIVE/LENGTH under
     # width pressure since AGE alone still gives a rough proxy.
     ("used", "used", 4, "l", 8),
-    ("sess", "live", 4, "l", 9),
-    # #3307 Phase 6: combined SESS/TURNS column ("3/47" -- total session
-    # count over the current session's turn count). Dropped first (prio 10)
+    # #3307 operator feedback 2026-09-29: widened 4 -> 8 to fit "MUX(12)"
+    # without truncation (see ``derive._sess``'s MUX/ACP/PROC/LOCK/- taxonomy).
+    ("sess", "live", 8, "l", 9),
+    # #3307 Phase 6, renamed LENGTH (operator feedback 2026-09-29): combined
+    # session-count/turn-count column ("1s 25t"). Dropped first (prio 10)
     # under width pressure -- the least essential of the LIVE-row columns.
-    ("sess_turns", "sess/t", 7, "r", 10),
+    ("sess_turns", "length", 7, "r", 10),
     # #3307 Phase 4: standardized on "claims" (the shared claims_rank
     # summary), replacing the single-PR-only "pr" column -- matching the
     # Codespaces/Containers pivots' own column label.
@@ -427,10 +446,11 @@ LIST_SPECS = [
     ("id4", "id", 4, "l", 2), ("state", "state", 8, "l", 4),
     ("age", "age", 4, "l", 6),
     ("used", "used", 4, "l", 7),
-    ("sess", "live", 4, "l", 8),
-    # #3307 Phase 6: replaces the standalone "t" turns-only column with the
-    # combined SESS/TURNS display (see ``derive._sess_turns``).
-    ("sess_turns", "sess/t", 7, "r", 9),
+    ("sess", "live", 8, "l", 8),
+    # #3307 Phase 6, renamed LENGTH (operator feedback 2026-09-29): replaces
+    # the standalone "t" turns-only column with the combined session-count/
+    # turn-count display (see ``derive._length_display``).
+    ("sess_turns", "length", 7, "r", 9),
     ("claims_summary", "claims", 12, "l", 3),
 ]
 #: The Worktrees list's own row title now lives entirely on the detail line

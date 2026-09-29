@@ -1,0 +1,80 @@
+name: Promote trigger (dev-advancement filter)
+
+# Cheap, unthrottled companion to `validate-and-promote.yml` (Phase 3 of the
+# dev-branch-release-pipeline effort, ThomasMichon/copilot-extensions#3336;
+# see the 2026-09-29 Journal entry for the incident that motivated this
+# split). This workflow's ONLY job is: decide whether a "CI" completion was
+# a genuine `dev`-branch advancement, and if so, fire a `repository_dispatch`
+# signal at `validate-and-promote.yml`. `client_payload.sha` below is
+# informational only (surfaced for diagnostics/logging) -- the receiving
+# `gate` job deliberately does NOT trust it as the promotion target; see
+# that job's own comment for why (a second review round caught a liveness
+# gap in an earlier design that DID pin to this payload's sha).
+#
+# Why a separate workflow, not just a lighter job in the same file: this
+# job carries NO concurrency restriction at all, so it runs immediately for
+# every trigger. `workflow_run: workflows: ["CI"]` has no reliable branch
+# filter (`ci.yml` runs on every `pull_request`, not just `dev` pushes, and
+# GitHub's `workflow_run.head_branch` unreliably reports the default branch
+# regardless of the real triggering branch -- confirmed empirically across
+# many real runs in this repo). Under this repo's real concurrent-PR volume,
+# EVERY one of those irrelevant completions used to compete for
+# `validate-and-promote.yml`'s own single-pending-slot concurrency group,
+# starving out the rare genuine `dev`-advancement event before its own
+# ancestry check ever got a turn (confirmed live 2026-09-29: 10+ consecutive
+# runs in a ~20 minute window all declined to promote). Moving the filter
+# into its own concurrency-free workflow means the raw CI-completion
+# firehose never reaches that shared queue at all -- only a genuinely
+# confirmed `dev` advancement ever fires the `repository_dispatch` this
+# workflow emits.
+#
+# Why `repository_dispatch`, not `workflow_dispatch`, to hand off: per
+# GitHub's own docs (Events that trigger workflows -> `GITHUB_SHA`/
+# `GITHUB_REF` columns), `repository_dispatch` resolves the target
+# workflow's own YAML from the repository's DEFAULT branch, exactly like
+# `workflow_run` already did -- `workflow_dispatch` does NOT (it loads the
+# YAML from whichever ref is dispatched). Since `validate-and-promote.yml`'s
+# `promote` job holds `APERTURE_RELEASE_TOKEN` and runs under the
+# `main-promotion` environment, dispatching it in a way that could execute
+# a `dev`-branch (zero-review-required) copy of its own YAML would be a
+# real security regression, not merely a design nit -- confirmed against
+# the docs before choosing this mechanism, not assumed.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+jobs:
+  filter-and-dispatch:
+    name: filter (dev-ancestry) and dispatch
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check dev ancestry and dispatch if genuine
+        env:
+          # A fine-grained PAT is not required here: the endpoint needs
+          # only "Contents" write (per GitHub's own REST API docs), which
+          # this job's own `permissions: contents: write` already grants
+          # the default `GITHUB_TOKEN` for -- and firing an explicit
+          # API-triggered dispatch is unaffected by the anti-recursion
+          # restriction that applies to events IMPLICITLY triggered by
+          # GITHUB_TOKEN-authored content (e.g. a push).
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          git fetch origin dev
+          if git merge-base --is-ancestor "$SHA" origin/dev; then
+            echo "::notice::$SHA is a genuine dev advancement -- dispatching validate-and-promote.yml."
+            gh api "repos/${{ github.repository }}/dispatches" --input - <<EOF
+          {"event_type": "dev-advanced", "client_payload": {"sha": "$SHA"}}
+          EOF
+          else
+            echo "::notice::$SHA is not on origin/dev's history -- this CI completion was for a different branch/PR; skipping."
+          fi

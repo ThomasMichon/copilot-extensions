@@ -525,6 +525,333 @@ class TestNoteHandoff:
         assert captured["noted"] is False
 
 
+class TestCancelHandoff:
+    def test_cancels_the_one_matching_pending_entry(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
+        captured = {}
+        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "sess-pred")
+
+        # Open the handoff the same way note-handoff would.
+        rc = m.cmd_note_handoff(argparse.Namespace(
+            task="task123", title="Fix the widget",
+            worktree_dir="/tmp/src/wt-hd", worktree_id=None, session_id=None))
+        assert rc == 0
+        record = m.tracking.load_record(tmp_tracking_dir / "wt-hd.yaml")
+        assert record.handoffs[0].state == "pending"
+
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task123", worktree_dir="/tmp/src/wt-hd", worktree_id=None))
+        assert rc == 0
+        assert captured["cancelled"] is True
+        assert captured["worktree_id"] == "wt-hd"
+        record = m.tracking.load_record(tmp_tracking_dir / "wt-hd.yaml")
+        assert record.handoffs[0].state == "cancelled"
+
+    def test_dry_run_reports_eligibility_without_mutating_the_ledger(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        """Real regression this guards (PR #4570 review round 18): a caller
+        with a separate destructive action to fence (context-handoff's task
+        abandon / file write) must be able to peek at candidate/eligibility
+        BEFORE committing that action, then commit the real cancellation
+        only afterward. Committing first (the round-17 shape) left the
+        ledger showing "cancelled" even when the caller's own action then
+        failed. --dry-run must never call cancel_handoff or save_record."""
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
+        captured = {}
+        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "sess-pred")
+
+        rc = m.cmd_note_handoff(argparse.Namespace(
+            task="task456", title="Fix the widget",
+            worktree_dir="/tmp/src/wt-hd", worktree_id=None, session_id=None))
+        assert rc == 0
+
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task456", worktree_dir="/tmp/src/wt-hd", worktree_id=None, dry_run=True))
+        assert rc == 0
+        assert captured["cancelled"] is False
+        assert captured["dry_run"] is True
+        assert captured["eligible"] is True
+        assert captured["candidate"] is None
+        # The ledger must be untouched -- still pending, not cancelled.
+        record = m.tracking.load_record(tmp_tracking_dir / "wt-hd.yaml")
+        assert record.handoffs[0].state == "pending"
+
+        # The real (non-dry-run) call still works afterward.
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task456", worktree_dir="/tmp/src/wt-hd", worktree_id=None))
+        assert rc == 0
+        assert captured["cancelled"] is True
+        record = m.tracking.load_record(tmp_tracking_dir / "wt-hd.yaml")
+        assert record.handoffs[0].state == "cancelled"
+
+    def test_never_cancels_a_handoff_with_an_associated_candidate(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        """Real regression this guards (PR #4570 review round 16):
+        associate_handoff_candidate() leaves the handoff `pending` while
+        setting `candidate` -- a successor can register during cutover
+        before it formally consumes the task/file. `pending` alone must
+        never be read as "safe to cancel"; a candidate-associated handoff is
+        already mid-pickup and cancel-handoff must decline (idempotent
+        no-op), never report a false success over an in-flight successor."""
+        yaml_path = tmp_tracking_dir / "wt-hd.yaml"
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+        captured = {}
+        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        m.tracking.register_session("wt-hd", "sess-pred", source="handoff")
+        m.tracking.register_session("wt-hd", "sess-candidate", source="handoff")
+
+        with m.tracking._RecordLock(yaml_path):
+            record = m.tracking.load_record(yaml_path)
+            m.tracking.open_handoff(record, "sess-pred", "task-mid-cutover", save=False)
+            m.tracking.associate_handoff_candidate(
+                record, "task-mid-cutover", "sess-candidate", save=False)
+            m.tracking.save_record(record, yaml_path)
+
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task-mid-cutover", worktree_dir="/tmp/src/wt-hd", worktree_id=None))
+        assert rc == 0
+        after = m.tracking.load_record(yaml_path)
+        assert after.handoffs[0].state == "pending"
+        assert after.handoffs[0].candidate == "sess-candidate"
+        # Round 17: the caller must be able to tell "declined because a
+        # candidate is mid-pickup" apart from "declined, nothing to worry
+        # about" -- surfaced regardless of `cancelled`'s own value.
+        assert captured["cancelled"] is False
+        assert captured["candidate"] == "sess-candidate"
+
+    def test_advances_lifecycle_revision_so_a_stale_writer_cannot_resurrect_it(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        """Real regression this guards (PR #4570 review round 6): cancelling
+        must bump lifecycle_revision like open_handoff and every other
+        mutation path do -- save_record()'s optimistic-concurrency check only
+        preserves newer session/handoff data when the revision increases, so
+        skipping this would let an unrelated writer holding a
+        pre-cancellation snapshot later save with the same (or lower)
+        revision and silently restore the handoff to pending."""
+        yaml_path = tmp_tracking_dir / "wt-hd.yaml"
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
+        monkeypatch.setattr(m, "_json_output", lambda o: None)
+        monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "sess-pred")
+
+        m.cmd_note_handoff(argparse.Namespace(
+            task="task-rev", title=None,
+            worktree_dir="/tmp/src/wt-hd", worktree_id=None, session_id=None))
+        before = m.tracking.load_record(yaml_path).lifecycle_revision
+
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task-rev", worktree_dir="/tmp/src/wt-hd", worktree_id=None))
+        assert rc == 0
+        after = m.tracking.load_record(yaml_path)
+        assert after.lifecycle_revision > before
+        assert after.handoffs[0].state == "cancelled"
+        # Round 8 finding: cancelling must not permanently strand the
+        # worktree headless -- sess-pred was moved to "yielded" when the
+        # handoff opened; since no successor ever took over, it must be
+        # restored to "active" and reclaim head.
+        assert after.session_entry("sess-pred").state == "active"
+        assert after.resolved_head_session == "sess-pred"
+
+    def test_does_not_reclaim_head_for_a_predecessor_a_successor_already_superseded(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        """The headless-recovery restoration above must never clobber a
+        LEGITIMATE newer head: if a successor already claimed head some
+        other way (not by consuming THIS handoff), cancelling a stale
+        handoff must leave that successor as head and the original
+        predecessor still yielded.
+
+        Built directly via tracking primitives (not register_session/
+        cmd_note_handoff) so the successor's head claim never routes through
+        register_session's own broad "rebind" auto-cancel heuristic --
+        that would cancel this handoff itself before cmd_cancel_handoff ever
+        runs, testing that heuristic instead of cancel_handoff's own guard.
+        """
+        yaml_path = tmp_tracking_dir / "wt-hd.yaml"
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+        monkeypatch.setattr(m, "_json_output", lambda o: None)
+        m.tracking.register_session("wt-hd", "sess-pred", source="handoff")
+        m.tracking.register_session("wt-hd", "sess-successor", source="handoff")
+
+        with m.tracking._RecordLock(yaml_path):
+            record = m.tracking.load_record(yaml_path)
+            m.tracking.open_handoff(record, "sess-pred", "task-superseded", save=False)
+            record.session_entry("sess-successor").state = "active"
+            m.tracking._append_head_transition(record, "sess-successor", reason="test-setup")
+            m.tracking.save_record(record, yaml_path)
+
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task-superseded", worktree_dir="/tmp/src/wt-hd", worktree_id=None))
+        assert rc == 0
+        after = m.tracking.load_record(yaml_path)
+        assert after.handoffs[0].state == "cancelled"
+        assert after.resolved_head_session == "sess-successor"
+        assert after.session_entry("sess-pred").state == "yielded"
+
+    def test_does_not_restore_a_stale_predecessor_over_a_newer_yielded_head(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        """Real regression this guards (PR #4570 review round 15):
+        resolved_head_session deliberately hides YIELDED sessions, so "no
+        current head" alone is not proof the worktree is genuinely headless
+        -- a genuinely newer head that has since yielded its OWN pending
+        handoff also reads as "no head" that way. Cancelling an OLDER
+        handoff (sess-a) must not restore sess-a to head and silently
+        overwrite sess-b's newer (still-pending) lineage."""
+        yaml_path = tmp_tracking_dir / "wt-hd.yaml"
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+        monkeypatch.setattr(m, "_json_output", lambda o: None)
+        m.tracking.register_session("wt-hd", "sess-a", source="handoff")
+        m.tracking.register_session("wt-hd", "sess-b", source="handoff")
+
+        with m.tracking._RecordLock(yaml_path):
+            record = m.tracking.load_record(yaml_path)
+            m.tracking.open_handoff(record, "sess-a", "task-a", save=False)
+            # sess-b claims head via its own transition (a real successor
+            # pickup/bind), then ALSO opens its own pending handoff, yielding.
+            record.session_entry("sess-b").state = "active"
+            m.tracking._append_head_transition(record, "sess-b", reason="test-setup")
+            m.tracking.open_handoff(record, "sess-b", "task-b", save=False)
+            m.tracking.save_record(record, yaml_path)
+
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task-a", worktree_dir="/tmp/src/wt-hd", worktree_id=None))
+        assert rc == 0
+        after = m.tracking.load_record(yaml_path)
+        by_token = {h.token: h.state for h in after.handoffs}
+        assert by_token["task-a"] == "cancelled"
+        assert by_token["task-b"] == "pending"
+        assert after.session_entry("sess-a").state == "yielded"
+        assert after.head_transitions[-1].session_id == "sess-b"
+
+    def test_explicit_worktree_id_always_activates_its_owning_project(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        """An explicit --worktree-id (no cwd resolution at all) must always
+        activate that worktree's OWNING project before touching
+        cfg.tracking_dir() -- unconditionally, not only when no project is
+        active yet. Real regression this guards (PR #4570 review round 13):
+        if a DIFFERENT project already happens to be active (e.g. abort
+        running from inside a different adopted checkout), skipping
+        relocation would read cfg.tracking_dir() for the wrong project
+        entirely."""
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
+        # A DIFFERENT project is already active -- activation must still run.
+        monkeypatch.setattr(m.cfg, "active_project", lambda: "some-other-project")
+        activated = []
+        monkeypatch.setattr(
+            m, "_activate_project_for_worktree_id",
+            lambda wt_id: activated.append(wt_id) or True,
+        )
+        captured = {}
+        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+
+        m.cmd_note_handoff(argparse.Namespace(
+            task="task-explicit", title=None,
+            worktree_dir="/tmp/src/wt-hd", worktree_id=None, session_id="sess-x"))
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task-explicit", worktree_dir=None, worktree_id="wt-hd"))
+        assert rc == 0
+        assert activated == ["wt-hd"]
+        assert captured["cancelled"] is True
+
+    def test_explicit_unknown_worktree_id_fails_closed_instead_of_tracebacking(
+        self, monkeypatch_config, monkeypatch
+    ):
+        """Real regression this guards (PR #4570 review round 12): when no
+        project is active and activation cannot find the owner (an unknown
+        or mistyped explicit ID), fail closed with a clean JSON result --
+        never fall through to _resolve_worktree_id/cfg.tracking_dir(), which
+        require an active project and would raise instead. Mirrors the
+        paired explicit-ID fail-closed pattern in session_binding_cli.py."""
+        monkeypatch.setattr(m.cfg, "active_project", lambda: None)
+        monkeypatch.setattr(m, "_activate_project_for_worktree_id", lambda wt_id: False)
+        captured = {}
+        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task-x", worktree_dir=None, worktree_id="wt-unknown"))
+        assert rc == 1
+        assert captured["cancelled"] is False
+        assert "wt-unknown" in captured["reason"]
+
+    def test_does_not_cancel_an_unrelated_pending_handoff(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        # Real regression this guards: cancel-handoff must be scoped to its
+        # exact token, never a blanket "cancel everything pending" sweep --
+        # that's _cancel_pending_handoffs's job, reserved for new-session
+        # registration, not an explicit external abort of ONE handoff.
+        #
+        # Both predecessor sessions are registered up front (rather than via
+        # separate cmd_note_handoff calls) so opening the second handoff
+        # doesn't itself look like a brand-new session bootstrapping onto a
+        # worktree with only yielded predecessors -- that's a distinct,
+        # legitimate register_session rebind heuristic
+        # (_pending_handoffs_all_from_yielded) this test isn't exercising.
+        yaml_path = tmp_tracking_dir / "wt-hd.yaml"
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
+        monkeypatch.setattr(m, "_json_output", lambda o: None)
+        m.tracking.register_session("wt-hd", "sess-pred", source="handoff")
+        m.tracking.register_session("wt-hd", "sess-other", source="handoff")
+
+        with m.tracking._RecordLock(yaml_path):
+            record = m.tracking.load_record(yaml_path)
+            m.tracking.open_handoff(record, "sess-pred", "task-keep", save=False)
+            m.tracking.open_handoff(record, "sess-other", "task-cancel", save=False)
+            m.tracking.save_record(record, yaml_path)
+
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task-cancel", worktree_dir="/tmp/src/wt-hd", worktree_id=None))
+        assert rc == 0
+        record = m.tracking.load_record(yaml_path)
+        by_token = {h.token: h.state for h in record.handoffs}
+        assert by_token["task-cancel"] == "cancelled"
+        assert by_token["task-keep"] == "pending"
+
+    def test_idempotent_on_an_already_cancelled_or_unknown_token(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
+        captured = {}
+        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="never-existed", worktree_dir="/tmp/src/wt-hd", worktree_id=None))
+        assert rc == 0
+        assert captured["cancelled"] is False
+
+    def test_untracked_is_silent_noop(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: None)
+        captured = {}
+        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="t", worktree_dir="/tmp/nope", worktree_id=None))
+        assert rc == 0
+        assert captured["cancelled"] is False
+
+
 class TestSessionRole:
     def _rec(self, sessions, head=None):
         from agent_worktrees.tracking import WorktreeRecord

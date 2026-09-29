@@ -1,9 +1,0 @@
-{
-  "comment": "instructions: shrink head-claim-fallback.instructions.md under its shipped-projection byte budget (fixes dev CI blocker)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

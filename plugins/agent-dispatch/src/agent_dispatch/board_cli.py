@@ -23,17 +23,26 @@ from .worktree_status_relay import board_fields_for_task, claimed_identity
 #: glance than Queued (a task not yet running), so it sits right after
 #: Blocked/Proposed. `__main__.py`'s `_BOARD_GROUPS` is a byte-identical
 #: duplicate (used by the delegated `inbox` CLI path) and must stay in sync.
+#: Phase 7 follow-up (2026-09-29): a durable, operator-set pause hold
+#: (``hold_reason``) is its OWN group -- distinct from system-``Suspended``
+#: (a liveness-detected/force-stop outcome the system can recover from on its
+#: own schedule) and from ``Blocked`` (the task itself is asking the operator
+#: something). Sits right after Blocked: both need the operator's attention,
+#: but a paused task is waiting on the operator to *unpause*, not to answer a
+#: question. Keep this in sync with `task_query_cli.py`'s byte-identical
+#: `_BOARD_GROUPS` tuple.
 GROUPS = (
     "Blocked",
+    "Paused",
     "Proposed",
     "Started",
     "Queued",
     "Suspended",
+    "Submitted",
     "Completed",
-    "Confirmed",
     "Abandoned",
 )
-TERMINAL = frozenset({"Completed", "Confirmed", "Abandoned"})
+TERMINAL = frozenset({"Submitted", "Completed", "Abandoned"})
 ACTIVITY_TTL_SECONDS = 90.0
 _RELAY_ENDPOINT: str | None = None
 
@@ -96,12 +105,14 @@ def _endpoint() -> str:
 
 def _group(task: dict) -> str:
     status = task.get("status")
+    if status == "submitted":
+        return "Submitted"
     if status == "completed":
         return "Completed"
-    if status == "confirmed":
-        return "Confirmed"
     if status in {"abandoned", "dead_letter"}:
         return "Abandoned"
+    if task.get("hold_reason"):
+        return "Paused"
     if task.get("awaiting_steer"):
         return "Blocked"
     if status == "proposed":
@@ -156,6 +167,96 @@ def _repo_name(value: object) -> str | None:
     return text.rsplit("/", 1)[-1].removesuffix(".git") if text else None
 
 
+#: Operator feedback 2026-09-29: standardize the Tasks pane row on the same
+#: two-line shape Worktrees/CodeSpaces/Containers already use -- line 1 is
+#: purely columnized (id, phase/status, stats, trailing claims), line 2 is
+#: the title + a short activity phrase (`board_cli._subtitle_for_task`),
+#: with an optional bracketed interface tag (mirroring Worktrees'
+#: `[system]`/`[delegate]`/`[acp]` title-prefix convention in `derive.py`).
+_MAX_HOLD_REASON_CHARS = 40
+
+
+def _embodiment_tag(task: dict, wt_live: str | None) -> str | None:
+    """The optional bracketed interface tag for the subtitle line, mirroring
+    Worktrees' own title-prefix convention (`derive.norm`'s `_tag`): only the
+    NON-default interface gets a visible mark. A headless body (pool/dedicated
+    agent) is the default embodiment for a Task, so it stays untagged; a
+    CLI-embodied (interactive, non-railroaded) session gets ``"cli"``.
+
+    This is a best-effort HEURISTIC, not an authoritative `embodiment_kind`
+    field (that would need a new board-facing field sourced from the
+    coordinator's `local-body:`/`fleet-body:` spawn-reservation handle --
+    still just a Runbook-tracked follow-on, not implemented here): a
+    confirmed headless liveness signal (``wt_live`` non-``None``) means
+    "definitely headless" -> no tag; an owned, live-status task with NO
+    headless signal is assumed CLI-embodied (the only other embodiment Phase
+    1/2 support) -> ``"cli"``. A task not yet embodied at all has no
+    interface to tag.
+    """
+    status = task.get("status")
+    if status not in ("claimed", "started"):
+        return None
+    if not task.get("owner_session_id"):
+        return None
+    return None if wt_live is not None else "cli"
+
+
+def _activity_phrase(task: dict, wt_live: str | None) -> str:
+    """The short, human-readable phrase after the subtitle's `` - `` --
+    whatever is most useful to know about this task's activity right now.
+    Prefers a real headless liveness signal (``wt_live``) when there is one;
+    otherwise falls back to a phrase derived from the task's own lifecycle
+    fields, in priority order: an operator hold, then awaiting-steer, then
+    the raw status."""
+    if wt_live is not None:
+        return wt_live
+    hold_reason = task.get("hold_reason")
+    if hold_reason:
+        reason = str(hold_reason).strip()
+        if len(reason) > _MAX_HOLD_REASON_CHARS:
+            reason = reason[: _MAX_HOLD_REASON_CHARS - 1].rstrip() + "…"
+        return f"paused — {reason}" if reason else "paused"
+    if task.get("awaiting_steer"):
+        return "awaiting your steer"
+    status = task.get("status")
+    if status == "suspended":
+        return "suspended — no live session"
+    if status == "queued":
+        return "queued for a worker" if task.get("pool") else "queued"
+    if status == "proposed":
+        return "awaiting approval"
+    if status == "claimed":
+        return "claimed, starting…"
+    if status == "started":
+        return "in progress"
+    if status == "completed":
+        return "completed"
+    if status == "confirmed":
+        return "confirmed"
+    if status in ("abandoned", "dead_letter"):
+        return "abandoned"
+    return ""
+
+
+def _subtitle_for_task(task: dict, *, wt_live: str | None) -> str:
+    """Compose the Tasks pane's standardized second-line subtitle:
+    ``[tag] <repo> <title> - <activity phrase>`` (tag and repo are each
+    optional; the phrase is omitted only when genuinely empty). Mirrors the
+    same shape Worktrees/CodeSpaces/Containers already use, so a Task row
+    reads with the same at-a-glance rhythm as any other pivot's row."""
+    parts: list[str] = []
+    tag = _embodiment_tag(task, wt_live)
+    if tag:
+        parts.append(f"[{tag}]")
+    repo_name = task.get("repo_name") or _repo_name(task.get("repo"))
+    if repo_name:
+        parts.append(str(repo_name))
+    parts.append(str(task.get("title") or task.get("id") or "(untitled)"))
+    prefix = " ".join(parts)
+    phrase = _activity_phrase(task, wt_live)
+    return f"{prefix} - {phrase}" if phrase else prefix
+
+
 def _cli_openable(task: dict) -> bool:
     """Whether the task is eligible for Phase 7's interactive embodiment.
 
@@ -175,6 +276,54 @@ def _cli_openable(task: dict) -> bool:
     if status == "queued":
         return not task.get("awaiting_steer") and not task.get("pool")
     return False
+
+
+def _charter_for_task(task: dict) -> dict:
+    """Compose the read-only ``charter`` card: a short description plus
+    structured metadata, and the raw prompt verbatim -- so the operator can
+    see "what this task is" the same way they can already read a steering
+    card's raw prose (Phase 7's own charter note). Never mutates the task.
+    """
+    repo_name = task.get("repo_name") or _repo_name(task.get("repo"))
+    labels = task.get("labels") or []
+    if isinstance(labels, str):
+        labels = [labels]
+    meta = "\n".join(
+        [
+            f"- Repo: `{repo_name or 'unknown'}`",
+            f"- Source: `{task.get('source') or 'unknown'}`",
+            f"- Registrar/origin: `{task.get('origin_ref') or 'none'}`",
+            f"- Target machine: `{task.get('target_machine') or 'any'}`",
+            "- Labels: `"
+            + (", ".join(str(label) for label in labels) if labels else "none")
+            + "`",
+        ]
+    )
+    goal = task.get("goal")
+    goal_text = goal.strip() if isinstance(goal, str) and goal.strip() else None
+    done_criteria = task.get("done_criteria")
+    done_text = (
+        done_criteria.strip()
+        if isinstance(done_criteria, str) and done_criteria.strip()
+        else None
+    )
+    prompt = task.get("prompt")
+    prompt_text = prompt.strip() if isinstance(prompt, str) else ""
+    body = "\n\n".join(
+        [
+            meta,
+            "## Goal\n"
+            + (goal_text or "_no durable goal recorded — see the raw prompt below_"),
+            "## Done criteria\n" + (done_text or "_not specified_"),
+            "## Raw prompt\n```\n" + prompt_text + "\n```",
+        ]
+    )
+    return {
+        "title": task.get("title") or task.get("id"),
+        "status": task.get("status"),
+        "link": None,
+        "body": body,
+    }
 
 
 def _sort_timestamp(task: dict) -> float:
@@ -285,13 +434,17 @@ def _build(
         # --interactive`, so this row-level gate can finally mirror the
         # transaction's own status contract instead of staying hard-false.
         row["cli_openable"] = _cli_openable(task)
-        # `has_charter` similarly stays `False`: nothing today populates a
-        # real `charter.*` object (title/status/link/body), so leaving the
-        # action ungated would render an empty card. Gating it behind this
-        # field (mirroring `worktree-status`'s own `has_worktree` gate)
-        # keeps it schema-visible without showing a broken empty card.
-        row["has_charter"] = False
+        # `has_charter`/`charter`: every task carries at least a title +
+        # prompt, so the charter card is always populated (2026-09-29,
+        # closes the Phase 7 gap this comment used to document as open).
+        row["has_charter"] = bool(task.get("title"))
+        row["charter"] = _charter_for_task(task)
         row.setdefault("repo_name", _repo_name(task.get("repo")))
+        # Operator feedback 2026-09-29: standardize on the Worktrees/
+        # CodeSpaces/Containers two-line row shape -- `columns` (line 1)
+        # stays pure stats, `subtitle` (line 2) carries the title + an
+        # activity phrase (and an optional `[cli]` interface tag).
+        row["subtitle"] = _subtitle_for_task(row, wt_live=row["wt_live"])
         repo = str(row.get("repo") or "")
         if repo and claimed_worktree:
             relay_keys.append((repo, claimed_worktree))
@@ -370,7 +523,7 @@ def main(argv: list[str] | None = None) -> int:
     query = {
         "status": (
             "proposed,queued,claimed,started,suspended,"
-            "completed,abandoned,dead_letter"
+            "submitted,completed,abandoned,dead_letter"
         ),
         "limit": str(args.limit),
     }

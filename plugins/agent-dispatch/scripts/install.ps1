@@ -998,6 +998,44 @@ function Install-Runtime {
         exit 1
     }
 
+    # Every OTHER `[tool.uv.sources]` workspace path dep that is a `uv`-
+    # editable canonical reference (vendor-pointer-generalization effort,
+    # Phase 1: no local copy in a dev checkout at all) needs the exact same
+    # standalone pre-install as zdd above, and for the same reason: when
+    # `uv` is unavailable the fallback below uses bare `python -m pip`
+    # install, which does NOT honor `[tool.uv.sources]` at all -- without a
+    # local copy AND without this pre-install, that non-uv path cannot
+    # resolve the dependency and may instead try (and fail) to resolve a
+    # same-named index package. `plugin-activation` is installed LAST since
+    # it imports `dropin_registry`/`plugin_resolve` at module load time.
+    foreach ($lib in @(
+        @{ Dir = 'dropin-registry'; Pkg = 'agent-dropin-registry'; Display = 'dropin-registry' },
+        @{ Dir = 'plugin-resolve'; Pkg = 'agent-plugin-resolve'; Display = 'plugin-resolve' },
+        @{ Dir = 'single-instance-lease'; Pkg = 'agent-single-instance-lease'; Display = 'single-instance-lease' },
+        @{ Dir = 'agent-procutil'; Pkg = 'agent-procutil'; Display = 'agent-procutil' },
+        @{ Dir = 'plugin-activation'; Pkg = 'agent-plugin-activation'; Display = 'plugin-activation' }
+    )) {
+        $libDir = Resolve-VendoredLib -LibName $lib.Dir
+        if (-not $libDir) {
+            Write-Fail "Cannot locate $($lib.Display) library. Reinstall the agent-dispatch plugin from the marketplace (copilot plugin install agent-dispatch@copilot-extensions), then rerun this installer."
+            exit 1
+        }
+        Remove-PluginBuildArtifacts -PluginDir $PluginDir -ExtraDir $libDir
+        if (Get-Command uv -ErrorAction SilentlyContinue) {
+            $libOut = & uv pip install --python $VenvPython "$libDir" --reinstall-package $lib.Pkg --refresh-package $lib.Pkg --quiet 2>&1
+        } else {
+            $libOut = & $VenvPython -m pip install "$libDir" 2>&1
+        }
+        Remove-PluginBuildArtifacts -PluginDir $PluginDir -ExtraDir $libDir
+        if ($LASTEXITCODE -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            Write-Fail "$($lib.Display) install failed (exit $LASTEXITCODE)"
+            if ($libOut) { Write-Host ($libOut | Out-String) }
+            exit 1
+        }
+        Write-Ok "$($lib.Display) installed"
+    }
+
     # -ReinstallPackage/-RefreshPackage (uv only): this installs from a local
     # PATH source (not a registry), and uv's local-path build cache is keyed
     # by source path, not source content. A version string that was ever

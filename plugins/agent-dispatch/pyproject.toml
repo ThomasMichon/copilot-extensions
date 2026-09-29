@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-dispatch"
-version = "0.1.2-dev200"
+version = "0.1.2-dev203"
 description = "Portable agent task-queue + per-host coordinator: a single-writer SQLite work queue so agents coordinate without push latency or an account per agent."
 readme = "README.md"
 license = "MIT"
@@ -27,18 +27,25 @@ dependencies = [
 
 [tool.uv.sources]
 # zero-downtime cutover primitives -- the routing table + cutover orchestrator
-# (module ``zdd``), vendored byte-identically (like versioned_runtime.py) so the
-# installer-driven graceful daemon cutover reuses the shared library.
-agent-zdd = { path = "libs/zdd" }
-# Shared Windows-headless / detached process-spawn kwargs (module
-# ``agent_procutil``). Vendored per plugin; byte-identical src across copies.
-agent-procutil = { path = "libs/agent-procutil" }
+# (module ``zdd``). This is a `uv`-editable canonical reference
+# (vendor-pointer-generalization effort, Phase 1): `path` escapes this
+# plugin's own root and resolves live to `libs/zdd`, so this `dev`-branch
+# checkout has nothing to keep manually in sync -- only a real
+# `main`-branch release (tools/materialize_main.py) ever gets a real local
+# copy. The installer-driven graceful daemon cutover still reuses the same
+# shared library either way.
+agent-zdd = { path = "../../libs/zdd", editable = true }
+# `path` escapes this plugin's own root and resolves live to
+# `libs/agent-procutil`, so this `dev`-branch checkout has nothing to keep
+# manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
+agent-procutil = { path = "../../libs/agent-procutil", editable = true }
 # Resilient tri-state scans/findings for registrar.d.
-agent-dropin-registry = { path = "libs/dropin-registry" }
+agent-dropin-registry = { path = "../../libs/dropin-registry", editable = true }
 # Effective plugin enablement and identity-verified root resolution.
-agent-plugin-activation = { path = "libs/plugin-activation" }
+agent-plugin-activation = { path = "../../libs/plugin-activation", editable = true }
 # Copilot CLI + Claude marketplace/plugin/settings resolution.
-agent-plugin-resolve = { path = "libs/plugin-resolve" }
+agent-plugin-resolve = { path = "../../libs/plugin-resolve", editable = true }
 # Single-instance lease (module ``single_instance_lease``). Supplies the
 # shared fail-safe supersession decision (``is_superseded``) that
 # ``self_retire.py`` wraps. This is a `uv`-editable canonical reference

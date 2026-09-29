@@ -35,7 +35,7 @@ from .harness_state import (
     user_enabled_plugins,
 )
 from .model import Model, build_model, coverage, effective_prereqs
-from .prereqs import current_os, detect_baseline, missing
+from .prereqs import detect_baseline, missing
 from .provision import apply as provision_apply
 from .provision import plan as provision_plan
 from .provision import restart_needed
@@ -804,94 +804,9 @@ def _cmd_contracts(rest: list[str]) -> int:
 
 def _cmd_mux_daemon(rest: list[str]) -> int:
     """Manager mux-companion daemon internals (Phase 3b Sub-slice 3)."""
-    from . import mux_daemon
+    from .mux_daemon_cli import cmd_mux_daemon
 
-    args = list(rest)
-    if not args:
-        print("usage: worktree-manager mux-daemon <run|ensure|register|remove|show> [...]")
-        return 2
-    action = args.pop(0)
-    if action == "run":
-        from pathlib import Path
-
-        root = None
-        for arg in args:
-            if arg.startswith("--root="):
-                root = Path(arg.split("=", 1)[1])
-        return mux_daemon.run_daemon_foreground(root)
-    if action == "ensure":
-        ok = mux_daemon.ensure_daemon_running()
-        print(json.dumps({"running": ok}))
-        return 0 if ok else 1
-    if action == "register":
-        values: dict[str, str] = {}
-        for arg in args:
-            if arg.startswith("--") and "=" in arg:
-                key, _, value = arg[2:].partition("=")
-                values[key.replace("-", "_")] = value
-        payload: dict = dict(values)
-        for int_field in ("mapping_revision", "attached_clients"):
-            if int_field in payload:
-                try:
-                    payload[int_field] = int(payload[int_field])
-                except ValueError:
-                    print(f"error: --{int_field.replace('_', '-')} must be an integer")
-                    return 2
-        if "live" in payload:
-            payload["live"] = payload["live"].strip().lower() not in ("0", "false", "no")
-        try:
-            result = mux_daemon.register_managed_mapping(payload)
-        except ValueError as exc:
-            print(f"error: {exc}")
-            return 2
-        print(json.dumps(result))
-        return 0 if result.get("applied") else 1
-    if action == "remove":
-        project = worktree_id = mux_session = session_incarnation = revision = None
-        for arg in args:
-            if arg.startswith("--project="):
-                project = arg.split("=", 1)[1]
-            elif arg.startswith("--worktree-id="):
-                worktree_id = arg.split("=", 1)[1]
-            elif arg.startswith("--mux-session="):
-                mux_session = arg.split("=", 1)[1]
-            elif arg.startswith("--session-incarnation="):
-                session_incarnation = arg.split("=", 1)[1]
-            elif arg.startswith("--mapping-revision="):
-                try:
-                    revision = int(arg.split("=", 1)[1])
-                except ValueError:
-                    print("error: --mapping-revision must be an integer")
-                    return 2
-        if not project or not worktree_id:
-            print("error: remove needs --project=NAME --worktree-id=ID")
-            return 2
-        try:
-            result = mux_daemon.remove_managed_mapping(
-                project, worktree_id, mapping_revision=revision,
-                mux_session=mux_session, session_incarnation=session_incarnation,
-            )
-        except ValueError as exc:
-            print(f"error: {exc}")
-            return 2
-        print(json.dumps(result))
-        return 0 if result.get("applied") else 1
-    if action == "show":
-        project = None
-        worktree_id = None
-        for arg in args:
-            if arg.startswith("--project="):
-                project = arg.split("=", 1)[1]
-            elif arg.startswith("--worktree-id="):
-                worktree_id = arg.split("=", 1)[1]
-        if not project or not worktree_id:
-            print("error: show needs --project=NAME --worktree-id=ID")
-            return 2
-        entry = mux_daemon.get_mapping(project, worktree_id)
-        print(json.dumps(entry))
-        return 0 if entry is not None else 1
-    print(f"error: unknown mux-daemon action {action!r}")
-    return 2
+    return cmd_mux_daemon(rest)
 
 
 def _cmd_companion(rest: list[str]) -> int:
@@ -1447,60 +1362,6 @@ def _run_launch(req) -> int:
             return _run_relocated_mux_launch(req, plan, script)
     return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
 
-
-
-def _prereq_line(s) -> str:
-    if not s.present:
-        state = "optional, absent" if s.optional else "MISSING"
-        mark = "○" if s.optional else "✗"
-    elif not s.satisfied:
-        state = f"{s.version or '?'} < required {s.min_required}"
-        mark = "✗"
-    else:
-        ver = f" {s.version}" if s.version else ""
-        state = f"ok{ver}"
-        mark = "✓"
-    return f"    {mark} {s.name.ljust(9)} {state}"
-
-
-def _cmd_doctor() -> int:
-    statuses = detect_baseline()
-    core = core_status()
-    print()
-    print(f"  {_BANNER} — doctor  (os: {current_os()})")
-    print()
-    print("  prerequisites:")
-    for s in statuses:
-        print(_prereq_line(s))
-    print()
-    print("  agent-worktrees core:")
-    print(f"    state: {core.state}")
-    print(f"    runtime: {core.runtime_dir} "
-          f"({'present' if core.runtime_present else 'absent'}"
-          f"{', venv' if core.venv_present else ''})")
-    print(f"    binstub: {core.binstub or 'not found in ~/.local/bin'}")
-    print()
-    selfst = self_status()
-    print("  worktree-manager (self):")
-    print(f"    installed version: {selfst.installed_version or '(not versioned-installed)'}")
-    print(f"    running version:   {__version__}")
-    print(f"    binstub: {selfst.binstub or 'not found in ~/.local/bin'}")
-    print(f"    root: {selfst.root}")
-    from . import source_config as _sc
-    _cfg_repo, _cfg_ref = _sc.configured_source()
-    print(f"    update source: {_sc.resolved_repo()} @ {_sc.resolved_ref()}"
-          f"{' (default)' if not (_cfg_repo or _cfg_ref) else ' (configured)'}")
-    print()
-    gaps = missing(statuses)
-    if gaps or not core.installed:
-        print("  → not fully set up. Run `worktree-manager setup` to see the plan "
-              "(add --apply to execute).")
-    else:
-        print("  ✓ prerequisites satisfied and the core is installed.")
-    print()
-    return 0 if (not gaps and core.installed) else 1
-
-
 def _cmd_setup(rest: list[str]) -> int:
     do_apply = "--apply" in rest
     statuses = detect_baseline()
@@ -1697,6 +1558,17 @@ def _cmd_update(rest: list[str]) -> int:
     # 1. Self-update the Manager (best-effort; the new slot takes effect next run).
     print("  Self-updating the Worktree Manager …")
     su = self_update(dry_run=False)
+    cutover = su.cutover if isinstance(su.cutover, dict) else None
+    cutover_failed = bool(
+        cutover
+        and (
+            cutover.get("action") == "error"
+            or (
+                isinstance(cutover.get("result"), dict)
+                and cutover["result"].get("ok") is False
+            )
+        )
+    )
     if su.action == "updated":
         print(f"    ✓ updated {su.previous or '(none)'} → {su.version} "
               "(active on next run)")
@@ -1704,6 +1576,8 @@ def _cmd_update(rest: list[str]) -> int:
         print(f"    ✓ already current ({su.version})")
     else:
         print(f"    ○ self-update {su.action}: {su.reason} — continuing")
+    if cutover_failed:
+        print(f"    ✗ mux-daemon cutover failed: {cutover}")
     # The manager_update_check cache is stale after a version change -- drop
     # it so the next poll re-checks for real instead of serving the
     # pre-update verdict (#4424).
@@ -1720,12 +1594,13 @@ def _cmd_update(rest: list[str]) -> int:
     print("  Updating harness plugins + runtimes via agent-worktrees …")
     print()
     try:
-        return ec.run_engine_passthrough(project, ["update", "--no-manager", *forwarded])
+        rc = ec.run_engine_passthrough(project, ["update", "--no-manager", *forwarded])
     except ec.EngineError as e:
         print(f"  ✗ {e}")
         if getattr(e, "install_hint", False):
             print("    Run `worktree-manager setup --apply` to install the engine first.")
         return 1
+    return 1 if cutover_failed and rc == 0 else rc
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1745,7 +1620,8 @@ def main(argv: list[str] | None = None) -> int:
         print("commands:")
         print("  (no args)              show the app banner + build-out roadmap")
         print("  --project NAME         launch NAME's interactive Picker (binstub seam)")
-        print("  doctor                 report prerequisites + the agent-worktrees core")
+        print("  doctor [--json] [--apply-daemon-health]")
+        print("                         report prerequisites + the agent-worktrees core")
         print("  setup [--apply]        plan (default) or run prereq provisioning + core install")
         print("  self-install [--apply] version the app: current-version marker + ~/.local/bin binstub")
         print("  source                 show the self-update source (git repo + ref/branch)")
@@ -1806,7 +1682,9 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "mux-daemon":
         return _cmd_mux_daemon(args[1:])
     if args and args[0] == "doctor":
-        return _cmd_doctor()
+        from . import doctor_cli
+
+        return doctor_cli.cmd_doctor(args[1:])
     if args and args[0] == "setup":
         return _cmd_setup(args[1:])
     if args and args[0] == "self-install":

@@ -76,6 +76,80 @@ class TestStaleStatus:
 
 
 # --------------------------------------------------------------------------- #
+# Stale active reconciliation (real state vs. tracked ``active``)
+# --------------------------------------------------------------------------- #
+class TestStaleActiveReconciliation:
+    def _rec(self, wid: str, *, status: str = "active", path: str = "/w/a") -> SimpleNamespace:
+        return SimpleNamespace(
+            worktree_id=wid, status=status, branch=f"worktree/{wid}", worktree_path=path,
+        )
+
+    def _info(self, state):
+        from agent_worktrees import git_ops
+        return git_ops.WorktreeStateInfo(state=state)
+
+    def test_flags_gone_completed_and_unused(self, monkeypatch):
+        from agent_worktrees import git_ops
+
+        recs = [self._rec("gone-one"), self._rec("done-one"), self._rec("unused-one")]
+        for r in recs:
+            r.worktree_path = f"/w/{r.worktree_id}"
+        states = {
+            "/w/gone-one": git_ops.WorktreeState.GONE,
+            "/w/done-one": git_ops.WorktreeState.COMPLETED,
+            "/w/unused-one": git_ops.WorktreeState.UNUSED,
+        }
+        monkeypatch.setattr(
+            health.git_ops, "classify_worktree",
+            lambda path, branch, **kw: self._info(states[path]),
+        )
+        found = health.find_stale_active_records(recs, active_paths=set())
+        assert {f.worktree_id for f in found} == {"gone-one", "done-one", "unused-one"}
+        assert {f.computed_state for f in found} == {"gone", "completed", "unused"}
+
+    def test_skips_non_active_status(self, monkeypatch):
+        from agent_worktrees import git_ops
+
+        rec = self._rec("finalized-one", status="finalized")
+        monkeypatch.setattr(
+            health.git_ops, "classify_worktree",
+            lambda *a, **kw: self._info(git_ops.WorktreeState.GONE),
+        )
+        assert health.find_stale_active_records([rec], active_paths=set()) == []
+
+    def test_skips_ambiguous_or_live_states(self, monkeypatch):
+        from agent_worktrees import git_ops
+
+        recs = [
+            self._rec("dirty-one", path="/w/dirty-one"),
+            self._rec("orphan-one", path="/w/orphan-one"),
+            self._rec("unknown-one", path="/w/unknown-one"),
+            self._rec("active-one", path="/w/active-one"),
+        ]
+        states = {
+            "/w/dirty-one": git_ops.WorktreeState.DIRTY,
+            "/w/orphan-one": git_ops.WorktreeState.ORPHAN,
+            "/w/unknown-one": git_ops.WorktreeState.UNKNOWN,
+            "/w/active-one": git_ops.WorktreeState.ACTIVE,
+        }
+        monkeypatch.setattr(
+            health.git_ops, "classify_worktree",
+            lambda path, branch, **kw: self._info(states[path]),
+        )
+        assert health.find_stale_active_records(recs, active_paths=set()) == []
+
+    def test_skips_records_without_worktree_path(self, monkeypatch):
+        rec = self._rec("no-path", path="")
+        called = []
+        monkeypatch.setattr(
+            health.git_ops, "classify_worktree",
+            lambda *a, **kw: called.append(1),
+        )
+        assert health.find_stale_active_records([rec], active_paths=set()) == []
+        assert called == []
+
+
+# --------------------------------------------------------------------------- #
 # Empty session shells
 # --------------------------------------------------------------------------- #
 def _mk_session(root: Path, sid: str, *, user_msg: bool, age_h: float = 5.0,

@@ -720,6 +720,68 @@ def _copy_payload(source: Path, destination: Path) -> None:
     shutil.copytree(source, destination, dirs_exist_ok=True)
 
 
+def _rewrite_uv_source_to_local(pyproject: Path, source_name: str, lib: str | None = None) -> bool:
+    """Rewrite one `[tool.uv.sources]` entry back to `libs/<lib>`."""
+    if lib is None: lib = source_name
+    text = pyproject.read_text(encoding="utf-8")
+    header = re.search(r"^\[tool\.uv\.sources\]\s*$", text, re.MULTILINE)
+    if header is None: return False
+    start = header.end()
+    next_header = re.search(r"^\[", text[start:], re.MULTILINE); end = start + next_header.start() if next_header else len(text)
+    escaped = re.escape(source_name)
+    key = r'(?:"' + escaped + r'"|\'' + escaped + r"'|" + escaped + r")"
+    pattern = re.compile(r'^([ \t]*' + key + r'\s*=\s*)\{[^}]*\}[ \t]*(?:#.*)?$', re.MULTILINE)
+    new_body, count = pattern.subn(
+        lambda m: f'{m.group(1)}{{ path = "libs/{lib}" }}', text[start:end], count=1
+    )
+    if count != 1:
+        return False
+    pyproject.write_text(text[:start] + new_body + text[end:], encoding="utf-8")
+    return True
+
+def _escaping_uv_source_libs(pyproject: Path, root: Path) -> list[tuple[str, str]]:
+    """Escaping `[tool.uv.sources]` `(source name, lib)` refs in `pyproject`."""
+    text = pyproject.read_text(encoding="utf-8")
+    header = re.search(r"^\[tool\.uv\.sources\]\s*$", text, re.MULTILINE)
+    if header is None:
+        return []
+    start = header.end()
+    next_header = re.search(r"^\[", text[start:], re.MULTILINE); end = start + next_header.start() if next_header else len(text)
+    entry_re = re.compile(r"""(?mx)^[ \t]*(?:"(?P<dqkey>[^"]+)"|'(?P<sqkey>[^']+)'|(?P<barekey>[A-Za-z0-9_.-]+))\s*=\s*\{(?P<body>[^}]*)\}""")
+    path_re = re.compile(r"""path\s*=\s*(?:"(?P<dq>[^"]+)"|'(?P<sq>[^']+)')""")
+    libs: list[tuple[str, str]] = []; root_resolved = root.resolve()
+    for match in entry_re.finditer(text[start:end]):
+        path_match = path_re.search(match.group("body"));  # noqa: E702
+        if path_match is None: continue
+        raw_path = path_match.group("dq") or path_match.group("sq")
+        candidate = (root / raw_path).resolve()
+        if candidate == root_resolved or root_resolved in candidate.parents: continue
+        name = match.group("dqkey") or match.group("sqkey") or match.group("barekey")
+        lib = Path(raw_path).name
+        if lib and lib not in (".", "..") and Path(lib).name == lib: libs.append((name, lib))
+    return libs
+
+def _backfill_canonical_vendored_libs(payload_root: Path, snapshot: Path) -> None:
+    """Back-fill every uv-editable canonical lib absent from a dev snapshot."""
+    pyproject = snapshot / "pyproject.toml"
+    if not pyproject.is_file(): return
+    for source_name, lib in _escaping_uv_source_libs(pyproject, snapshot):
+        if (snapshot / "libs" / lib).exists():
+            continue
+        canonical_libs = payload_root.parents[1] / "libs"
+        canonical = canonical_libs / lib
+        if (
+            canonical_libs.is_symlink()
+            or _is_reparse(canonical_libs)
+            or canonical.is_symlink()
+            or _is_reparse(canonical)
+        ):
+            raise CellError(f"canonical vendored-lib path contains a link or reparse point: {canonical}")
+        if canonical.is_dir():
+            _copy_payload(canonical, snapshot / "libs" / lib)
+            _rewrite_uv_source_to_local(pyproject, source_name, lib)
+
+
 def _snapshot_owner(marketplace_id: str, version: str) -> str:
     return "\n".join(
         (
@@ -786,6 +848,7 @@ def _ensure_snapshot(
     (stage / owner_name).write_text(expected_owner, encoding="utf-8", newline="\n")
     try:
         _copy_payload(payload_root, stage)
+        _backfill_canonical_vendored_libs(payload_root, stage)
         if snapshot_root.exists() or snapshot_root.is_symlink():
             raise CellError("cell snapshot appeared during publication")
         os.rename(stage, snapshot_root)
@@ -2673,7 +2736,9 @@ def _undrain_owned_instance(
 
 
 def _payload_routing_module():
-    library = Path(__file__).resolve().parent.parent / "libs" / "zdd" / "src"
+    payload_root = Path(__file__).resolve().parent.parent
+    library = payload_root / "libs" / "zdd" / "src"
+    if not library.is_dir(): library = payload_root.parents[1] / "libs" / "zdd" / "src"
     _assert_directory(library, "payload zdd library")
     value = str(library)
     if value not in sys.path:

@@ -31,6 +31,10 @@
 
 .PARAMETER Force
     Overwrite config without drift confirmation.
+
+.PARAMETER ZeroDowntime
+    Deprecated no-op. Update now auto-detects and cuts over a live
+    status-monitor whenever possible.
 #>
 [CmdletBinding()]
 param(
@@ -42,7 +46,8 @@ param(
 
     [string]$InstallDir,
     [switch]$RemoveConfig,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$ZeroDowntime
 )
 
 Set-StrictMode -Version Latest
@@ -721,8 +726,80 @@ function Invoke-VersionedActivate {
         }
         return $false
     }
+    # Determine the just-superseded slot by calling the CANONICAL resolver
+    # (resolve-runtime.ps1) directly, rather than reimplementing its tiered
+    # marker/last-known-good/newest-slot validity logic here (review finding,
+    # round 5): `current`/reading last-known-good as raw strings only checks
+    # for EMPTINESS, not whether the resolver actually considers that slot
+    # valid/complete -- a nonempty but incomplete marker or last-known-good
+    # value makes the resolver reject it and fall through to a further tier,
+    # while this heuristic would have stopped at the first nonempty value and
+    # protected the WRONG (or no) slot. Calling the resolver directly is
+    # authoritative by construction: it IS the exact code path a real
+    # resolve()/launch would use, so whatever slot it returns here is exactly
+    # what a plan resolved moments earlier would have pinned.
+    #
+    # MUST run BEFORE Invoke-VersionedMarkComplete (review finding, round 6):
+    # marking $SrcVersion complete makes IT a valid tier-3 candidate too: if
+    # both the marker and last-known-good are invalid at this exact moment,
+    # a resolve AFTER mark-complete could have the newest-slot scan pick the
+    # brand-new $SrcVersion itself (its own version number sorts newest)
+    # instead of the actually-previously-pinned older slot, leaving that real
+    # $prev undetected and unprotected.
+    $prev = $null
+    try {
+        $savedRtRoot = $env:AGENT_RT_ROOT
+        $env:AGENT_RT_ROOT = $InstallDir
+        $resolverSrc = Join-Path $ScriptDir 'resolve-runtime.ps1'
+        if (Test-Path -LiteralPath $resolverSrc) {
+            . $resolverSrc
+            if ($AwPy) {
+                # $AwPy = .../versions/<ver>/{Scripts/python.exe,bin/python};
+                # the version is two directory levels up from the interpreter.
+                $prev = Split-Path -Leaf (Split-Path -Parent (Split-Path -Parent $AwPy))
+            }
+        }
+    } catch {
+        Write-ServiceWarn "Could not resolve pre-activation runtime slot: $($_.Exception.Message)"
+    } finally {
+        $env:AGENT_RT_ROOT = $savedRtRoot
+    }
     Invoke-VersionedMarkComplete
-    $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
+    # Touch the just-superseded slot's mtime IMMEDIATELY after resolving it,
+    # BEFORE activate() runs (review finding on #4451): installs run
+    # concurrently by design, so a delay here (activate + status-monitor-
+    # restart + last-known-good write all used to run first) leaves a window
+    # where a CONCURRENT installer can activate the NEXT generation and run
+    # its own gc -- which protects only ITS OWN $prev (the version we are
+    # about to activate, not the one before it) -- reaping this $prev before
+    # this invocation's own touch/gc ever runs. Touching as early as possible
+    # minimizes that exposure window. `gc`'s --min-age-days floor measures a
+    # slot's age from its directory mtime (~= install time, versioned_runtime
+    # .py's _slot_age_days), NOT from when it stopped being current. Without
+    # this touch, a slot installed more than --min-age-days ago (the common
+    # case -- most versions live for days between releases) gets ZERO
+    # protection from the floor the moment it's superseded. Resetting $prev's
+    # mtime here makes the floor measure what it needs to: time-since-
+    # superseded, so a plan resolved against it moments before this
+    # activation survives the immediately-following gc.
+    if ($prev) {
+        try {
+            $prevSlot = Join-Path (Join-Path $InstallDir 'versions') $prev
+            if (Test-Path -LiteralPath $prevSlot) {
+                (Get-Item -LiteralPath $prevSlot).LastWriteTime = Get-Date
+            }
+        } catch {
+            Write-ServiceWarn "Could not touch superseded slot mtime ($prevSlot): $($_.Exception.Message)"
+        }
+    }
+    $monitorWasLive = $false
+    if (-not $ContextualInstall) {
+        $prevHealthPP = $env:PYTHONPATH
+        $env:PYTHONPATH = $null
+        & $VenvPython -c 'from agent_worktrees.status_monitor_cutover import monitor_live_now as _f; raise SystemExit(0 if _f() else 1)' > $null 2>&1
+        $monitorWasLive = ($LASTEXITCODE -eq 0)
+        $env:PYTHONPATH = $prevHealthPP
+    }
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-ServiceChanged $_ }
     if ($LASTEXITCODE -ne 0) {
@@ -730,17 +807,22 @@ function Invoke-VersionedActivate {
         return $false
     }
     Write-ServiceOk "Runtime version $SrcVersion active (marker -> versions/$SrcVersion)"
-    # Consolidated-status-daemon Phase 1 (#1696): the cutover just superseded any
-    # running status-monitor, which self-retires but only RESPAWNS on the next
-    # session start -- leaving live sessions' status bars frozen until then. Reap
-    # the superseded monitor + spawn the current one now (from the NEW slot's
-    # python), so every live session's bar is re-served with no session restart.
-    # Best-effort, never fatal.
+    # Graceful status-monitor cutover: now that the new slot is active, ask the
+    # newly-activated runtime to cut over a live resident monitor in-process
+    # (or, for a pre-cutover daemon with no routed control endpoint yet, fall
+    # back once to the legacy restart path). Best-effort, never fatal.
     if (-not $ContextualInstall) {
         try {
-            & $LinkPython -m agent_worktrees status-monitor-restart 2>&1 |
+            $prevHelperPP = $env:PYTHONPATH
+            $env:PYTHONPATH = $null
+            $env:AGENT_WORKTREES_MONITOR_WAS_LIVE = if ($monitorWasLive) { '1' } else { '0' }
+            & $LinkPython -c 'from agent_worktrees.status_monitor_cutover import installer_after_update as _f; raise SystemExit(_f())' 2>&1 |
                 ForEach-Object { Write-ServiceChanged "monitor: $_" }
         } catch {}
+        finally {
+            $env:PYTHONPATH = $prevHelperPP
+            Remove-Item Env:AGENT_WORKTREES_MONITOR_WAS_LIVE -ErrorAction SilentlyContinue
+        }
     }
     # #742: record the just-activated version as `last-known-good` so a future
     # marker-absent resolution (resolve-runtime.ps1 tier 2) prefers it over a
@@ -753,7 +835,15 @@ function Invoke-VersionedActivate {
         try { Remove-Item -LiteralPath $lkgTmp -Force -ErrorAction SilentlyContinue } catch {}
     }
     $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    $gcArgs = @($vr, '--root', $InstallDir, '--link-name', '.venv', 'gc', '--protect-pids')
+    # --min-age-days is a recency floor protecting a STORED (not-running)
+    # path-pinned reference -- launch-session.ps1/.sh's `resolve` bakes the
+    # runtime interpreter's path into a plan BEFORE this activation runs; if
+    # that plan hasn't launched its pane yet, its baked path names a slot that
+    # is neither `current` nor `--keep`-protected nor attributable to a live
+    # process (the resolving process already exited). 0.05 days (~72min)
+    # matches agent-mcp's init.ps1 precedent for the same class of not-yet-live
+    # reference. See #4432 for the concrete failure this closes.
+    $gcArgs = @($vr, '--root', $InstallDir, '--link-name', '.venv', 'gc', '--protect-pids', '--min-age-days', '0.05')
     if ($prev) { $gcArgs += @('--keep', $prev) }
     & $LinkPython @gcArgs 2>&1 | ForEach-Object { Write-ServiceChanged "gc: $_" }
     $ErrorActionPreference = $prevEAP
@@ -1729,15 +1819,73 @@ function Deploy-Package {
     }
 
     # Vendored plugin-resolution lib (agent-plugin-resolve / module
-    # plugin_resolve). Like config-migrate, install it first so the package's
-    # dependency is satisfied from the local path: the venv build prefers
-    # `python -m pip`, which does NOT honor pyproject's [tool.uv.sources] path,
-    # so the dep must already be present when the main package installs.
+    # plugin_resolve). Plugin-vendored (marketplace/release layout) or, when
+    # absent, the monorepo's own canonical `libs/plugin-resolve` (git-checkout/
+    # dev layout, uv-editable canonical reference -- vendor-pointer-
+    # generalization effort, Phase 1). Needed even when `uv` is available,
+    # since the `Invoke-VenvPackageInstall` fallback to bare `python -m pip`
+    # (used when `uv` is absent) does not honor `[tool.uv.sources]` at all.
     $pluginResolveDir = Join-Path $PluginDir 'libs\plugin-resolve'
+    if (-not (Test-Path (Join-Path $pluginResolveDir 'pyproject.toml'))) {
+        $pluginResolveDir = Join-Path $PluginDir '..\..\libs\plugin-resolve'
+    }
     if (Test-Path (Join-Path $pluginResolveDir 'pyproject.toml')) {
         $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-plugin-resolve' -PkgDir $pluginResolveDir
         if ($libRes.ExitCode -ne 0) {
             Write-ServiceErr "plugin-resolve library install failed (exit $($libRes.ExitCode))"
+            if ($libRes.Output.Trim()) { Write-ServiceErr ("install: " + $libRes.Output.Trim()) }
+            $ErrorActionPreference = $prevEAP
+            return $false
+        }
+    }
+
+    # Vendored plugin contribution registry lib (agent-dropin-registry /
+    # module dropin_registry). Same dev/release-layout fallback as
+    # config-migrate/plugin-resolve above (vendor-pointer-generalization
+    # effort, Phase 1).
+    $dropinRegistryDir = Join-Path $PluginDir 'libs\dropin-registry'
+    if (-not (Test-Path (Join-Path $dropinRegistryDir 'pyproject.toml'))) {
+        $dropinRegistryDir = Join-Path $PluginDir '..\..\libs\dropin-registry'
+    }
+    if (Test-Path (Join-Path $dropinRegistryDir 'pyproject.toml')) {
+        $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-dropin-registry' -PkgDir $dropinRegistryDir
+        if ($libRes.ExitCode -ne 0) {
+            Write-ServiceErr "dropin-registry library install failed (exit $($libRes.ExitCode))"
+            if ($libRes.Output.Trim()) { Write-ServiceErr ("install: " + $libRes.Output.Trim()) }
+            $ErrorActionPreference = $prevEAP
+            return $false
+        }
+    }
+
+    # Vendored plugin activation/inventory lib (agent-plugin-activation /
+    # module plugin_activation). Installed AFTER dropin-registry and
+    # plugin-resolve above: it imports both at module load time, so its own
+    # install step must come after theirs (mirrors agent-logger's own
+    # install-order guard). Same dev/release-layout fallback (vendor-pointer-
+    # generalization effort, Phase 1).
+    $pluginActivationDir = Join-Path $PluginDir 'libs\plugin-activation'
+    if (-not (Test-Path (Join-Path $pluginActivationDir 'pyproject.toml'))) {
+        $pluginActivationDir = Join-Path $PluginDir '..\..\libs\plugin-activation'
+    }
+    if (Test-Path (Join-Path $pluginActivationDir 'pyproject.toml')) {
+        $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-plugin-activation' -PkgDir $pluginActivationDir
+        if ($libRes.ExitCode -ne 0) {
+            Write-ServiceErr "plugin-activation library install failed (exit $($libRes.ExitCode))"
+            if ($libRes.Output.Trim()) { Write-ServiceErr ("install: " + $libRes.Output.Trim()) }
+            $ErrorActionPreference = $prevEAP
+            return $false
+        }
+    }
+
+    # Vendored zero-downtime cutover lib (agent-zdd / module zdd). Install it
+    # before the main package so the bare `python -m pip` fallback path (used
+    # when `uv` is absent and therefore ignoring `[tool.uv.sources]`) never
+    # tries to resolve this unpublished dependency from the package index.
+    $zddDir = Join-Path $PluginDir 'libs\zdd'
+    if (Test-Path (Join-Path $zddDir 'pyproject.toml')) {
+        $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-zdd' -PkgDir $zddDir
+        if ($libRes.ExitCode -ne 0) {
+            Write-ServiceErr "zdd library install failed (exit $($libRes.ExitCode))"
             if ($libRes.Output.Trim()) { Write-ServiceErr ("install: " + $libRes.Output.Trim()) }
             $ErrorActionPreference = $prevEAP
             return $false

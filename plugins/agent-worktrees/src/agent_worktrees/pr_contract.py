@@ -950,13 +950,9 @@ def classify_pr_flow(
     Callers that expect agent-merge (e.g. the multi-machine system) should confirm the
     anchor is current before treating an empty label as "human-merge".
 
-    A fourth shape, **pr-self-merge**, sits between agent-consent and
-    human-merge: PR-required, but the **submitter performs the merge directly**
-    (no consent label) -- selected by ``self_approve`` or
-    ``merge_actor == "submitter-direct"``. Review approval remains governed by
-    the provider/repository policy; in particular, GitHub authors cannot approve
-    their own PRs. The full pr-* family applies (``pr-merge --now`` performs the
-    mediated direct merge once required checks/reviews permit it).
+    A fourth shape, **pr-self-merge**: submitter merges directly (no consent
+    label) when ``self_approve`` or ``merge_actor == "submitter-direct"``;
+    ``review_blocking`` gates only the tooling -- a repo's verdict policy still applies.
     """
     _matrix = dict(
         reviewer=reviewer, review_blocking=review_blocking,
@@ -1109,11 +1105,14 @@ def _review_phrase(flow: PRFlowProfile) -> str:
 def _merge_instruction(flow: PRFlowProfile) -> str:
     """The sanctioned way THIS repo merges -- always an agent-worktrees verb."""
     if flow.profile == PROFILE_PR_SELF_MERGE:
-        caveat = (
-            " (GitHub authors cannot approve their own PRs)"
-            if flow.provider.lower() == "github" else ""
-        )
-        return f"merge with `pr-merge <#> --now` once required checks/reviews allow it{caveat}"
+        if not flow.review_blocking:
+            verdict_note = "; still wait for a clean review verdict first" if flow.reviewer else ""
+            return f"merge with `pr-merge <#> --now` -- tooling needs no approval{verdict_note}"
+        # `review_blocking` alone doesn't prove an *approval* is required (it
+        # can come from a required status check with no required review, per
+        # derive_policy_matrix) -- omit the GitHub self-approval caveat
+        # rather than infer it from an unrelated `reviewer` field.
+        return "merge with `pr-merge <#> --now` once required checks/reviews allow it"
     if flow.profile == PROFILE_PR_AGENT_MERGE:
         label = flow.automerge_label or "the consent label"
         return (f"after an approval, consent with `pr-merge <#>` (applies "

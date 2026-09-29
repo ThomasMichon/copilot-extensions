@@ -164,7 +164,7 @@ def test_find_stale_handoff_tasks_ignores_non_handoff_labels(q):
 
 
 def test_find_stale_handoff_tasks_ignores_claimed_tasks(q):
-    # A CLAIMED/STARTED/COMPLETED handoff task is no longer "unclaimed"; only
+    # A CLAIMED/STARTED/SUBMITTED handoff task is no longer "unclaimed"; only
     # proposed/queued are reconciliation candidates.
     task = q.create(
         "claimed", status=Status.QUEUED, target_machine="m1",

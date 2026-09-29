@@ -4,9 +4,11 @@ Covers: os._exit() is used only on the affected runtime (never elsewhere),
 atexit callbacks run before the hard exit, streams are flushed, SystemExit
 raised by ``main`` is treated the same as a returned code, a non-int/None
 code normalizes to 0/1, a non-SystemExit exception (and traceback-printing
-failure) still reaches the hard exit, KeyboardInterrupt hard-exits with 130
-on the affected runtime, ``console_entry`` routes through the same helper,
-and the installed console script is actually mapped to ``console_entry`` in
+failure) still reaches the hard exit, KeyboardInterrupt always exits cleanly
+with code 130 on every runtime (hard-exit via os._exit() only on the
+affected one; ordinary sys.exit() elsewhere), ``console_entry`` routes
+through the same helper, and the installed console script is actually
+mapped to ``console_entry`` in
 ``pyproject.toml`` (a packaging-level regression a unit test calling
 ``console_entry()`` directly would never catch) -- all without actually
 terminating the test process (``os._exit`` and ``atexit._run_exitfuncs`` are
@@ -183,9 +185,14 @@ def test_windows_keyboard_interrupt_hard_exits_with_130() -> None:
     mock_exit.assert_called_once_with(130)
 
 
-def test_unaffected_runtime_keyboard_interrupt_propagates_normally() -> None:
-    """Off the affected runtime, ``KeyboardInterrupt`` must propagate exactly
-    as it would have before this workaround existed.
+def test_unaffected_runtime_keyboard_interrupt_exits_cleanly_with_130() -> None:
+    """Off the affected runtime, ``KeyboardInterrupt`` must still exit
+    cleanly with the conventional 128+SIGINT exit code (130) -- via ordinary
+    ``sys.exit()``, not the ``os._exit()`` bypass (that stays scoped to the
+    affected runtime). Letting it propagate un-caught here left users on any
+    non-3.13 runtime staring at a raw traceback (and, behind a .bat/cmd.exe
+    wrapper, cmd's own "Terminate batch job (Y/N)?" prompt) on a plain
+    Ctrl+C.
     """
 
     def main() -> int:
@@ -197,10 +204,10 @@ def test_unaffected_runtime_keyboard_interrupt_propagates_normally() -> None:
     ):
         try:
             _shutdown_exit.run_and_exit(main)
-        except KeyboardInterrupt:
-            pass
+        except SystemExit as exc:
+            assert exc.code == 130
         else:
-            raise AssertionError("expected KeyboardInterrupt to propagate")
+            raise AssertionError("expected SystemExit(130)")
     mock_exit.assert_not_called()
 
 

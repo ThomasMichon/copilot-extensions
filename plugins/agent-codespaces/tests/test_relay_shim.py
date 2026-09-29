@@ -18,6 +18,7 @@ import pytest
 
 from agent_codespaces import relay_token
 from agent_codespaces.codespace_assets import asset_text, build_provision_command
+from credential_relay.server import ScopeDenied
 
 
 @pytest.fixture
@@ -56,13 +57,16 @@ class TestRelayToken:
 
         stale = relay_token.token_for("cs-1")  # the old unscoped mint
         storage = {"scope": "https://storage.azure.com/.default"}
-        assert relay_token.authorize_azure(stale, "get-azure-token", storage) is False
+        with pytest.raises(ScopeDenied):
+            relay_token.authorize_azure(stale, "get-azure-token", storage)
         tok = scoped_relay_token("cs-1", cfg.CodespacesConfig())
         assert tok == stale  # same secret, re-scoped in place
         assert relay_token.authorize_azure(tok, "get-azure-token", storage) is True
-        assert relay_token.authorize_azure(
-            tok, "get-azure-token", {"scope": "https://graph.microsoft.com/.default"},
-        ) is False
+        with pytest.raises(ScopeDenied):
+            relay_token.authorize_azure(
+                tok, "get-azure-token",
+                {"scope": "https://graph.microsoft.com/.default"},
+            )
 
 
 class TestRegisterRelay:
@@ -98,10 +102,11 @@ class TestRegisterRelay:
             tok, "get-azure-token",
             {"scope": "https://storage.azure.com/.default"},
         ) is True
-        assert srv.token_authorizer(
-            tok, "get-azure-token",
-            {"scope": "https://graph.microsoft.com/.default"},
-        ) is False
+        with pytest.raises(ScopeDenied):
+            srv.token_authorizer(
+                tok, "get-azure-token",
+                {"scope": "https://graph.microsoft.com/.default"},
+            )
         assert srv.token_authorizer(
             "wrong", "get-azure-token", {"scope": ado},
         ) is False
@@ -297,6 +302,66 @@ class TestProvisioningAndClient:
         assert "no ADO access token available for host=" in client
         assert "no credential relay reachable and no cached" in client
 
+    def test_relay_client_states_confirmed_denial_when_relay_replies_explicitly(
+        self, tmp_path,
+    ):
+        """#4367: when the relay's response carries an explicit
+        ``error=access_denied`` line (rather than closing with zero bytes),
+        the client states the denial with certainty instead of the older
+        "likely" heuristic."""
+        with _OneShotRelay("error=access_denied\nreason=resource_not_allowed\n\n") as relay:
+            result = _run_bare_token(
+                relay.port, "azure", "https://denied.example.com/.default",
+                tmp_path / "cache",
+            )
+
+        assert result.returncode == 1
+        assert result.stdout == ""
+        assert "confirmed this resource is not in the host's Azure allowlist" in (
+            result.stderr
+        )
+        assert relay.request.decode("utf-8") == (
+            "get-azure-token\nscope=https://denied.example.com/.default\n\n"
+        )
+
+    def test_relay_client_still_diagnoses_denial_against_an_older_relay(
+        self, tmp_path,
+    ):
+        """A relay predating the explicit ``error=`` response line (a bare
+        empty reply) still gets the pre-#4367 "likely" diagnostic -- the new
+        client-side logic must not regress compatibility with an
+        unpatched/older relay."""
+        with _OneShotRelay("\n\n") as relay:
+            result = _run_bare_token(
+                relay.port, "azure", "https://denied.example.com/.default",
+                tmp_path / "cache",
+            )
+
+        assert result.returncode == 1
+        assert result.stdout == ""
+        assert "resource likely not in the host's Azure allowlist" in result.stderr
+
+    def test_relay_client_skips_stale_cache_on_explicit_denial(self, tmp_path):
+        """#4367: an explicit policy denial must never fall through to a
+        stale cached token from before this scope's allowlist entry was
+        revoked -- the relay just said, in-band, that it's no longer
+        authorized."""
+        cache_dir = tmp_path / "cache"
+        keymat = "https://revoked.example.com/.default"
+        with _OneShotRelay("protocol=https\nhost=x\ntoken=STALE-TOKEN\n\n") as relay:
+            first = _run_bare_token(relay.port, "azure", keymat, cache_dir)
+        assert first.returncode == 0
+        assert first.stdout.strip() == "STALE-TOKEN"
+
+        with _OneShotRelay(
+            "error=access_denied\nreason=resource_not_allowed\n\n"
+        ) as relay:
+            second = _run_bare_token(relay.port, "azure", keymat, cache_dir)
+
+        assert second.returncode == 1
+        assert second.stdout == ""
+        assert "STALE-TOKEN" not in second.stdout
+
     def test_relay_client_does_not_impersonate_azure_helper(self):
         client = asset_text("ado-auth-helper-relay")
         assert "LC_GIT_CREDENTIAL_RELAY_HELPER" not in client
@@ -407,6 +472,24 @@ def _git_cache_python() -> str:
     start = client.index(marker) + len(marker)
     end = client.index('\n\' "$RELAY_PORT" "$RELAY_TOKEN_CACHE_DIR"', start)
     return client[start:end]
+
+
+def _bare_token_python() -> str:
+    """Extract the ``get-access-token``/``get-azure-token`` embedded script
+    (the second heredoc), for direct invocation in a live-relay test."""
+    client = asset_text("ado-auth-helper-relay")
+    marker = '"$RELAY_TOKEN_CACHE_DIR" "$RELAY_TOKEN_CACHE_TTL" <<\'PY\'\n'
+    start = client.index(marker) + len(marker)
+    end = client.index("\nPY\n", start)
+    return client[start:end]
+
+
+def _run_bare_token(port: int, mode: str, keymat: str, cache_dir, ttl: int = 1500):
+    return subprocess.run(
+        [sys.executable, "-c", _bare_token_python(),
+         str(port), mode, keymat, "", str(cache_dir), str(ttl)],
+        text=True, capture_output=True, timeout=10, check=False,
+    )
 
 
 def _decoded_chunked_payloads(cmd: str) -> list[str]:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "copilot-extensions-worktree-manager"
-version = "0.1.0-dev95"
+version = "0.1.0-dev96"
 description = "Standalone, out-of-plugin control plane (installer, configurator & worktree launcher) for the copilot-extensions harness."
 readme = "README.md"
 license = "MIT"
@@ -28,9 +28,13 @@ dependencies = [
     # agent-bridge stages a repo's plugin stack for a standalone launch.
     "agent-plugin-resolve",
     # Shared Windows-headless / detached process-spawn kwargs (module
-    # ``agent_procutil``). Vendored per plugin; byte-identical src across
-    # copies. Used by the production Picker's SSH/maintenance/task subprocess
-    # spawns (copilot-extensions#3359).
+    # ``agent_procutil``). This is a `uv`-editable canonical reference
+    # (vendor-pointer-generalization effort, Phase 1): `path` escapes this
+    # plugin's own root and resolves live to `libs/agent-procutil`, so this
+    # `dev`-branch checkout has nothing to keep manually in sync -- only a
+    # real `main`-branch release (tools/materialize_main.py) ever gets a
+    # real local copy. Used by the production Picker's SSH/maintenance/task
+    # subprocess spawns (copilot-extensions#3359).
     "agent-procutil",
     # Resilient scan authority, entry decisions, and bounded warning tracking
     # for filesystem registries (module ``dropin_registry``). Used by the
@@ -48,6 +52,12 @@ dependencies = [
     # ``mux-status-v1`` requests from agent-worktrees, mirroring
     # ``agent_worktrees.mux_link``'s own use of the same shared library.
     "agent-work-coalescing-singleton",
+    # Zero-downtime active/passive cutover primitives (routing table +
+    # orchestrator). This is a `uv`-editable canonical reference on `dev`
+    # (shared with the runtime plugins), and only a materialized `main`
+    # payload carries the real local vendored tree. Used by the resident
+    # mux-daemon update path.
+    "agent-zdd",
 ]
 
 [tool.uv.sources]
@@ -56,16 +66,18 @@ dependencies = [
 # (module ``plugin_resolve``). Vendored per the harness's shared-lib convention
 # (dotfiles#929); kept byte-identical to every other copy by
 # tools/check-vendored-libs-sync.py.
-agent-plugin-resolve = { path = "libs/plugin-resolve" }
-# Shared Windows-headless / detached process-spawn kwargs (module
-# ``agent_procutil``). Vendored per plugin; byte-identical src across copies.
-agent-procutil = { path = "libs/agent-procutil" }
+agent-plugin-resolve = { path = "../libs/plugin-resolve", editable = true }
+# `path` escapes this plugin's own root and resolves live to
+# `libs/agent-procutil`, so this `dev`-branch checkout has nothing to keep
+# manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
+agent-procutil = { path = "../libs/agent-procutil", editable = true }
 # Resilient scan authority, entry decisions, and bounded warning tracking for
 # filesystem registries (module ``dropin_registry``).
-agent-dropin-registry = { path = "libs/dropin-registry" }
+agent-dropin-registry = { path = "../libs/dropin-registry", editable = true }
 # Effective global-or-adopted-project plugin eligibility and identity-verified
 # roots for attributed registry entries (module ``plugin_activation``).
-agent-plugin-activation = { path = "libs/plugin-activation" }
+agent-plugin-activation = { path = "../libs/plugin-activation", editable = true }
 # Coalesce/refcount/idle-exit daemon wire protocol + client (module
 # ``work_coalescing_singleton``). This is a `uv`-editable canonical reference
 # (vendor-pointer-generalization effort, Phase 1): `path` escapes this
@@ -74,6 +86,13 @@ agent-plugin-activation = { path = "libs/plugin-activation" }
 # a real `main`-branch release (tools/materialize_main.py) ever gets a real
 # local copy.
 agent-work-coalescing-singleton = { path = "../libs/work-coalescing-singleton", editable = true }
+# Zero-downtime active/passive cutover primitives (module ``zdd``). This is a
+# `uv`-editable canonical reference (vendor-pointer-generalization effort,
+# Phase 1): `path` escapes this project's own root and resolves live to
+# `libs/zdd`, so this `dev`-branch checkout has nothing to keep manually in
+# sync -- only a real `main`-branch release (tools/materialize_main.py)
+# ever gets a real local copy.
+agent-zdd = { path = "../libs/zdd", editable = true }
 
 [project.scripts]
 worktree-manager = "worktree_manager.__main__:console_entry"

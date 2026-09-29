@@ -13,7 +13,9 @@ Two surfaces are covered:
 from __future__ import annotations
 
 import concurrent.futures
+import subprocess
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -310,3 +312,174 @@ def test_serve_registry_ticks_only_while_lease_held(client, monkeypatch):
         on_tick=on_tick,
     )
     assert ticks and ticks[0]["held"] is False  # refused -> idled, did not tick
+
+
+# -- schedule.serve() shells out to `schedule tick` fresh every cycle -------
+#
+# Regression coverage (see the matching emitter.serve
+# tests): a long-lived schedule timer must never build/hold a DispatchClient
+# (or any resolved coordinator address) across its sleep boundary. Each tick
+# now re-invokes ``agent-dispatch schedule tick <spec>`` in a fresh
+# subprocess, which re-discovers the coordinator exactly like any other
+# one-shot CLI invocation would.
+#
+# serve_registry() is different: its cross-machine lease-gating is
+# orchestrated by the loop itself (there is no reusable one-shot CLI
+# primitive that atomically acquires the lease and conditionally ticks), so
+# it keeps the in-process ``resolve_target`` fix instead (still re-resolving
+# fresh every tick, just not via a forked subprocess) -- see its own tests
+# below, unchanged.
+
+
+def test_schedule_serve_runs_schedule_tick_as_a_fresh_subprocess_every_cycle(tmp_path):
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text('{"schedules": []}')
+
+    seen_argv: list[list[str]] = []
+    seen_kwargs: dict = {}
+    payloads = iter(
+        ['{"created": [], "errors": []}', '{"created": [{"id": "t-1"}], "errors": []}']
+    )
+
+    def fake_runner(argv, **kwargs):
+        seen_argv.append(list(argv))
+        seen_kwargs.update(kwargs)
+        return SimpleNamespace(returncode=0, stdout=next(payloads))
+
+    ticks: list[dict] = []
+    calls = {"n": 0}
+
+    def fake_sleep(_seconds):
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise KeyboardInterrupt
+
+    schedule.serve(
+        spec_path,
+        cli_argv=["fake-python", "-m", "agent_dispatch"],
+        runner=fake_runner,
+        interval=0,
+        on_tick=lambda result: ticks.append(result),
+        sleep=fake_sleep,
+    )
+
+    assert seen_argv == [
+        ["fake-python", "-m", "agent_dispatch", "schedule", "tick", str(spec_path)],
+        ["fake-python", "-m", "agent_dispatch", "schedule", "tick", str(spec_path)],
+    ]
+    assert [len(t["created"]) for t in ticks] == [0, 1]
+    # Only stdout is piped -- stderr is left to inherit ours directly (real
+    # OS-level passthrough, no Python-side buffering) so any diagnostic the
+    # tick process writes there streams straight through.
+    assert seen_kwargs["stdout"] is subprocess.PIPE
+    assert "stderr" not in seen_kwargs
+    assert "capture_output" not in seen_kwargs
+
+
+def test_schedule_serve_synthesizes_an_error_from_a_hard_subprocess_failure(tmp_path):
+    """A hard failure (nonzero exit, no JSON on stdout -- its own traceback
+    already streamed live to our inherited stderr) becomes a clean
+    synthetic error entry rather than crashing the loop."""
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text('{"schedules": []}')
+
+    def fake_runner(_argv, **_kwargs):
+        return SimpleNamespace(returncode=1, stdout="")
+
+    ticks: list[dict] = []
+
+    def fake_sleep(_seconds):
+        raise KeyboardInterrupt
+
+    schedule.serve(
+        spec_path,
+        cli_argv=["fake-python", "-m", "agent_dispatch"],
+        runner=fake_runner,
+        interval=0,
+        on_tick=lambda result: ticks.append(result),
+        sleep=fake_sleep,
+    )
+
+    assert ticks[0]["errors"] == [
+        {"error": "schedule tick produced no valid JSON result (exit 1)"}
+    ]
+
+
+def test_schedule_serve_rejects_a_zero_exit_payload_missing_created_or_errors(
+    tmp_path,
+):
+    """A zero-exit tick whose stdout doesn't decode to a dict with
+    list-valued ``created``/``errors`` is a protocol violation, not a
+    vacuous success -- it must surface as an error, never silently
+    normalize to an empty, error-free tick that would lose the failure
+    entirely."""
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text('{"schedules": []}')
+
+    def fake_runner(_argv, **_kwargs):
+        return SimpleNamespace(returncode=0, stdout="")
+
+    ticks: list[dict] = []
+
+    def fake_sleep(_seconds):
+        raise KeyboardInterrupt
+
+    schedule.serve(
+        spec_path,
+        cli_argv=["fake-python", "-m", "agent_dispatch"],
+        runner=fake_runner,
+        interval=0,
+        on_tick=lambda result: ticks.append(result),
+        sleep=fake_sleep,
+    )
+
+    assert ticks[0]["created"] == []
+    assert ticks[0]["errors"] == [
+        {"error": "schedule tick produced no valid JSON result (exit 0)"}
+    ]
+
+
+def test_serve_registry_requires_url_or_resolve_target():
+    with pytest.raises(ValueError):
+        schedule.serve_registry(lease_scope="chronicle", holder="cloud1")
+
+
+def test_serve_registry_re_resolves_target_every_tick(monkeypatch):
+    resolved = iter(
+        [("http://127.0.0.1:1111", None), ("http://127.0.0.1:2222", None)]
+    )
+    seen_urls: list[str] = []
+
+    class _RecordingClient:
+        def __init__(self, url, token=None):
+            self.url = url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def acquire_schedule_lease(self, scope, holder, **kwargs):
+            seen_urls.append(self.url)
+            return {"granted": False, "lease": {"scope": scope, "holder": "other"}}
+
+    monkeypatch.setattr(schedule, "DispatchClient", _RecordingClient)
+
+    calls = {"n": 0}
+
+    def fake_sleep(_seconds):
+        calls["n"] += 1
+        if calls["n"] >= 2:
+            raise KeyboardInterrupt
+
+    schedule.serve_registry(
+        resolve_target=lambda: next(resolved),
+        interval=0,
+        lease_scope="chronicle",
+        holder="cloud1",
+        on_tick=lambda _result: None,
+        sleep=fake_sleep,
+    )
+
+    assert seen_urls == ["http://127.0.0.1:1111", "http://127.0.0.1:2222"]

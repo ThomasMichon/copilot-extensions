@@ -4,7 +4,7 @@ emitters-and-evaluators).
 A **producer** puts work on the queue; an **evaluator** is its companion handler
 that decides what happens *next* as that work progresses. Like a hook, an
 evaluator receives a task's **lifecycle event** -- the shape the coordinator
-publishes, ``{"type": "task.completed", "task": {...}}`` -- and returns
+publishes, ``{"type": "task.submitted", "task": {...}}`` -- and returns
 **decisions**: emit a follow-up task, confirm the originating task's completion
 claim, or do nothing. Producers wire a domain's *world* into the queue;
 evaluators wire its *judgment* into the loop, so a standing domain can automate
@@ -33,7 +33,7 @@ from . import UNTRUSTED_EXTERNAL_CONTENT_NOTE
 
 # Lifecycle event types the coordinator publishes (see coordinator._emit).
 EVENT_QUEUED = "task.queued"
-EVENT_COMPLETED = "task.completed"
+EVENT_SUBMITTED = "task.submitted"
 EVENT_ABANDONED = "task.abandoned"
 EVENT_PROGRESS = "task.progress"
 
@@ -159,13 +159,13 @@ class SpecEvaluator:
     Spec shape (JSON)::
 
         {"rules": [
-          {"on": "task.completed",
-           "when": {"labels_any": ["recipe:reviewer"], "status": "completed"},
+          {"on": "task.submitted",
+           "when": {"labels_any": ["recipe:reviewer"], "status": "submitted"},
            "emit": {"title_template": "unstick {origin_ref}",
                     "labels": ["recipe:conflict-resolution"],
                     "dedup_template": "evaluator:followup:{task_id}"}},
-          {"on": "task.completed",
-           "when": {"labels_any": ["recipe:goal-driven"], "status": "completed"},
+          {"on": "task.submitted",
+           "when": {"labels_any": ["recipe:goal-driven"], "status": "submitted"},
            "confirm": true}
         ]}
 
@@ -241,7 +241,7 @@ def apply_decisions(
                 )
             else:
                 confirmed = confirmer(task_id, actor="evaluator")
-                results.append({"decision": "confirm", "confirmed": confirmed})
+                results.append({"decision": "confirm", "completed": confirmed})
         else:
             results.append(d.to_dict())
     return results

@@ -214,10 +214,14 @@ function Install-AgentSshPackage {
     param(
         [Parameter(Mandatory = $true)][string]$Python,
         [Parameter(Mandatory = $true)][string]$Source,
-        [string[]]$Dependencies = @()
+        [string[]]$Dependencies = @(),
+        [switch]$SkipUv
     )
 
-    $uvCommand = Get-Command uv -ErrorAction SilentlyContinue
+    $uvCommand = $null
+    if (-not $SkipUv) {
+        $uvCommand = Get-Command uv -ErrorAction SilentlyContinue
+    }
     if ($uvCommand) {
         $uvResult = 1
         try {
@@ -287,12 +291,14 @@ raise SystemExit(1)
     return $null
 }
 
-# Resolve the ssh-manager / agent-procutil vendored libs (thin wrappers) --
-# both are now consumed as `uv`-editable canonical references
-# (vendor-pointer-generalization effort, Phase 1), so a dev checkout has
-# no `$PluginDir\libs\<lib>` copy for either one.
+# Resolve the ssh-manager / agent-procutil / venue-copilot vendored libs
+# (thin wrappers) -- all 3 are now consumed as `uv`-editable canonical
+# references (vendor-pointer-generalization effort, Phase 1), so a dev
+# checkout has no `$PluginDir\libs\<lib>` copy for any of them.
 function Resolve-SshManager { return (Resolve-VendoredLib -LibName 'ssh-manager') }
 function Resolve-AgentProcutil { return (Resolve-VendoredLib -LibName 'agent-procutil') }
+function Resolve-VenueCopilot { return (Resolve-VendoredLib -LibName 'venue-copilot') }
+function Resolve-Zdd { return (Resolve-VendoredLib -LibName 'zdd') }
 
 $PluginDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $PkgSrcDir = Join-Path $PluginDir 'src\agent_ssh'
@@ -764,17 +770,36 @@ if (-not $sshManagerDir) {
     Write-Fail 'Cannot locate ssh-manager library'
     exit 1
 }
+$venueCopilotDir = Resolve-VenueCopilot
+if (-not $venueCopilotDir) {
+    Write-Fail 'Cannot locate venue-copilot library'
+    exit 1
+}
+$skipUv = $false
+if (Get-Command uv -ErrorAction SilentlyContinue) {
+    & uv pip install --python $VenvPython --reinstall-package agent-venue-copilot "$venueCopilotDir" --quiet 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn 'venue-copilot uv preinstall failed -- falling back to python -m pip'
+        $skipUv = $true
+    }
+}
+$zddDir = Resolve-Zdd
+if (-not $zddDir) {
+    Write-Fail 'Cannot locate zdd library'
+    exit 1
+}
 $vendoredDependencies = @(
     $agentProcutilDir,
     (Join-Path $PluginDir 'libs\dropin-registry'),
     $sshManagerDir,
-    (Join-Path $PluginDir 'libs\venue-copilot'),
-    (Join-Path $PluginDir 'libs\zdd')
+    $venueCopilotDir,
+    $zddDir
 )
 $pkgInstalled = Install-AgentSshPackage `
     -Python $VenvPython `
     -Source $PluginDir `
-    -Dependencies $vendoredDependencies
+    -Dependencies $vendoredDependencies `
+    -SkipUv:$skipUv
 $ErrorActionPreference = $prevEAP
 if (-not $pkgInstalled) {
     Write-Fail 'Failed to install agent-ssh package into venv'

@@ -236,7 +236,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
     """Feed one task **lifecycle event** through a declarative evaluator and apply
     its decisions (the *evaluator* half of emitters-and-evaluators). The event
     JSON is read from ``--event-file`` or stdin; the coordinator shape is
-    ``{"type": "task.completed", "task": {...}}``."""
+    ``{"type": "task.submitted", "task": {...}}``."""
     from .producers.evaluator import EvaluatorError, SpecEvaluator, evaluate_and_apply
 
     try:

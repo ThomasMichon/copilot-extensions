@@ -566,14 +566,19 @@ _PYPROJECT_TEXT = (_PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8")
 def _vendored_path_dependencies() -> dict[str, str]:
     """Map each ``[tool.uv.sources]`` path-pinned package name to its vendored
     ``libs/<dir>`` directory name (e.g. ``"agent-plugin-activation" ->
-    "plugin-activation"``)."""
+    "plugin-activation"``). Matches both the real-copy form
+    (``path = "libs/<dir>"``) and the `uv`-editable canonical-reference form
+    (``path = "../../libs/<dir>", editable = true`` --
+    vendor-pointer-generalization effort, Phase 1) -- a lib converted to the
+    latter still needs its own explicit install step ahead of this
+    installer's final ``--no-deps`` install, exactly like a real copy does."""
     sources_match = re.search(
         r"\[tool\.uv\.sources\](.*?)(?:\n\[|\Z)", _PYPROJECT_TEXT, re.DOTALL
     )
     assert sources_match, "pyproject.toml has no [tool.uv.sources] table"
     mapping = {}
     for name, lib_dir in re.findall(
-        r'^([\w-]+)\s*=\s*\{\s*path\s*=\s*"libs/([\w-]+)"',
+        r'^([\w-]+)\s*=\s*\{\s*path\s*=\s*"(?:\.\./)*libs/([\w-]+)"',
         sources_match.group(1),
         re.MULTILINE,
     ):

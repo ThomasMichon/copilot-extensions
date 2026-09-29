@@ -13,6 +13,7 @@ from pathlib import Path
 
 from . import config as cfg
 from . import git_ops, output
+from .installer_capabilities import posix_zero_downtime_flag_supported
 
 
 def _core():
@@ -735,11 +736,13 @@ def _update_modules(
             shell_prefix = ["bash", str(installer)]
 
         update_args = ["update"]
-        if platform_name == "windows":
-            from . import reconcile as _reconcile
+        from . import reconcile as _reconcile
 
-            if _reconcile._zero_downtime_update(module_dir):
+        if _reconcile._zero_downtime_update(module_dir):
+            if platform_name == "windows":
                 update_args.append("-ZeroDowntime")
+            elif posix_zero_downtime_flag_supported(module_dir):
+                update_args.append("--zero-downtime")
         output.header(f"Updating Module: {name}")
         try:
             r = subprocess.run(

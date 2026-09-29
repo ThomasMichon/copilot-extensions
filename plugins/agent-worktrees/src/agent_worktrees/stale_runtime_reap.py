@@ -13,7 +13,11 @@ resolved only by a manual, by-hand kill.
 :func:`reap` closes that gap: called from the cutover reap
 (``_restart_status_monitor``) alongside the status-monitor singleton's own
 known-pid reap, it additionally terminates any OTHER live process whose
-resolved executable is still under a superseded ``versions/<old>`` slot.
+resolved executable is still under a superseded ``versions/<old>`` slot --
+except one descended from a registered, still-live worktree launcher root
+(see :mod:`launch_registry`): that shields a live launcher's own short-lived
+``resolve``/``activity-log``/``get`` subprocess calls from being killed
+mid-flight by this same sweep (#4454 follow-up).
 """
 
 from __future__ import annotations
@@ -30,14 +34,17 @@ def reap(cfg) -> list[int]:
     tests). Best-effort; never raises.
     """
     try:
+        from . import launch_registry
         from . import procs as _procs
 
-        versions_root = os.path.join(str(cfg.install_dir()), "versions")
+        install_dir = cfg.install_dir()
+        versions_root = os.path.join(str(install_dir), "versions")
         current = os.path.realpath(sys.prefix)
+        protect = launch_registry.active_launch_pids(install_dir)
         return [
             t["pid"]
             for t in _procs.terminate_processes_under_executable(
-                versions_root, exclude=current
+                versions_root, exclude=current, protect_ancestors=protect,
             )
             if t.get("killed")
         ]

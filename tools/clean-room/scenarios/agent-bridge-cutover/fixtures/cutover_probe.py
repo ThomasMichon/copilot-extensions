@@ -33,6 +33,16 @@ Checks (each prints ``PROBE: <name> PASS|FAIL <detail>``):
                        waited on); `undrain` releases it
   breadcrumb-recover   an aborted cutover strands a DRAINED survivor; recovery
                        (`deploy --recover`) undrains it (not stuck closed)
+  abrupt-kill-recovery a real, live process holding a session-host claim
+                       (stamped with a test-chosen generation label, not the
+                       daemon's own real identity -- see the check's own
+                       docstring for why) is SIGKILLed with no graceful
+                       shutdown, and a fresh generation started afterward
+                       still comes up clean and does not sit stuck behind
+                       the now-genuinely-dead pid's stale claim -- the
+                       dead-PID recovery primitive, not interruption of a
+                       daemon-owned claim (agent-bridge-unified-zdd-cutover
+                       Phase 5)
 
 Usage:
     python cutover_probe.py --python <agent_bridge-venv-python> [--checks a,b]
@@ -53,7 +63,10 @@ import time
 import types
 import urllib.request
 
-ALL_CHECKS = ["routing-flip-retire", "drain-gate", "breadcrumb-recover"]
+ALL_CHECKS = [
+    "routing-flip-retire", "drain-gate", "breadcrumb-recover",
+    "abrupt-kill-recovery",
+]
 
 
 class Ctx:
@@ -329,10 +342,327 @@ def check_breadcrumb_recover(python):
         shutil.rmtree(cfg, ignore_errors=True)
 
 
+def check_abrupt_kill_recovery(python):
+    """A generation is SIGKILLed before it can run its own exit contract (the
+    ``/api/v1/shutdown`` release-every-claim path, #4543) -- the "kill the old
+    generation before it releases its claims" drill this effort's Phase 5
+    calls for. A stale session-host claim it never released must not wedge a
+    later generation forever: ``zdd.claims.is_recoverable`` treats a claim
+    whose owner pid is dead as free for the taking, no live handshake
+    required (Phase 2's contract) -- this proves that holds for a REAL killed
+    daemon process (its actual own pid, actually SIGKILLed) recovered by a
+    REAL fresh daemon's own real startup reattach scan, not just the
+    pure-function unit tests in ``libs/zdd/tests/test_claims.py``.
+
+    **Honest scope note (review-caught).** The claim below is stamped with a
+    test-chosen generation *label*, not the killed daemon's own real
+    ``_generation_id`` (``session_core.py`` computes that once per process
+    from ``version+pid+started_at`` -- not independently reproducible from
+    outside the process, and there is no API surface exposing it; adding one
+    would be its own production change, deliberately out of scope for a
+    clean-room-only PR). This means the drill demonstrates the underlying
+    dead-pid-recovery PRIMITIVE against a genuinely killed real process --
+    NOT that the killed daemon's own real exit-contract release path
+    (``release_all(self._generation_id)``) was interrupted, since that path
+    would never have matched an arbitrary label even on a graceful exit.
+    That narrower, already-thoroughly-unit-tested claim
+    (``test_admin_routes_phase3.py``) is a smaller, orthogonal fact this
+    Tier-P drill does not need to re-prove; what it adds is the *dead-pid
+    detection* against a real OS process a unit test cannot exercise.
+
+    Two synchronization hazards a naive version of this check gets wrong
+    (both review-caught in earlier revisions -- kept documented here so they
+    are not reintroduced):
+      1. The daemon's own ONE-SHOT startup reattach scan (a background task,
+         never periodic -- ``app.py``'s ``_reattach_session_hosts_bg``) would
+         reap an orphan record (no adoptable DB session) the instant it
+         runs, whether the record predates startup or arrives moments after
+         -- so a fixed sleep before registering the test record is a race,
+         not a real synchronization point (the scan may spend up to its own
+         remote-recovery budget). A **sentinel** orphan record is seeded
+         *before* the daemon starts and polled until removed -- its removal
+         is the daemon's own real scan having actually run to completion --
+         before the real test record is registered.
+      2. The record's *recovery* must be observed as done BY THE REAL FRESH
+         DAEMON's own background task, not by a disconnected direct
+         ``HostIndex.claim()`` call standing in for "a new generation" --
+         otherwise the check can pass while the real daemon's own recovery
+         path silently does nothing. This fixture creates no adoptable DB
+         session, so the production path's only valid terminal outcome is a
+         full reap (claim, then remove -- "no adoptable session on
+         reattach"); this check polls the on-disk index after the fresh
+         daemon starts and requires the record to be **gone**, never
+         "claimed under the fresh daemon's pid" as an alternate pass --
+         that would let the check observe the intermediate claim write and
+         pass even if the record's subsequent removal then silently fails
+         (removal is itself best-effort/suppressed in production).
+    """
+    r = Result("abrupt-kill-recovery")
+    cfg = tempfile.mkdtemp(prefix="abcv-ak-")
+    c = Ctx(python, cfg)
+    proc = None
+    proc2 = None
+    alive_dummy = None
+    sentinel_dummy = None
+    session_id = "abrupt-kill-sim-session"
+    sentinel_id = "abrupt-kill-sim-sentinel"
+    index_path = os.path.join(c.root, "hosts", "index.json")
+
+    def _run_snip(snip, timeout=30):
+        return subprocess.run([python, "-c", snip], env=c.env,
+                               capture_output=True, text=True, timeout=timeout)
+
+    class _IndexReadError(RuntimeError):
+        """A read attempt failed or was unparseable -- NEVER treated as "the
+        record is absent"; the caller must retry or fail the check, not
+        silently pass through as if reaping had been observed."""
+
+    def _index_get(sid):
+        """Read one record's (owner_generation, owner_pid) via the real
+        HostIndex class's STRICT load path, or None only when the read
+        genuinely succeeded and the record does not exist.
+
+        Uses ``_load_or_raise()`` (not the lenient ``get()``/``_load()``
+        path ``HostIndex`` uses internally elsewhere, which deliberately
+        *suppresses* JSON/OSError load failures to stay availability-first
+        for the real daemon) -- a corrupt or momentarily-locked index file
+        must surface as a read failure here, never as a false "GONE".
+        """
+        snip = (
+            "from agent_bridge.session_host.host_index import HostIndex\n"
+            f"idx = HostIndex({index_path!r})\n"
+            "idx._load_or_raise()\n"
+            f"rec = idx._records.get({sid!r})\n"
+            "print((rec.owner_generation, rec.owner_pid) if rec else 'GONE')\n"
+        )
+        out = _run_snip(snip)
+        if out.returncode != 0:
+            raise _IndexReadError(
+                f"index read subprocess failed (rc={out.returncode}): "
+                f"{out.stderr.strip()[:200]}"
+            )
+        text = out.stdout.strip()
+        if text == "GONE":
+            return None
+        if not text:
+            raise _IndexReadError("index read subprocess produced no output")
+        try:
+            return eval(text, {"__builtins__": {}})  # noqa: S307 -- our own tuple literal
+        except Exception as exc:
+            raise _IndexReadError(f"unparseable index read output {text!r}") from exc
+
+
+    try:
+        # A disposable dummy standing in for the sentinel's session-host
+        # child. Reaping a dead/orphan record doesn't just drop the index
+        # entry -- it force-kills the record's own `host_pid`/`child_pid`
+        # too (`session_host_connection.py`), so this process is expected to
+        # die as part of the sentinel being reaped and must NEVER be reused
+        # for the real test record below (a real bug an earlier revision
+        # had: reusing it meant the "real" record's host was already dead
+        # before the ownership contract was even exercised).
+        sentinel_dummy = subprocess.Popen([python, "-c", "import time; time.sleep(300)"])
+
+        # Seed the sentinel BEFORE the daemon starts -- an orphan (no
+        # adoptable DB session) the daemon's own one-shot startup scan is
+        # guaranteed to remove.
+        seed_sentinel = (
+            "from agent_bridge.session_host.host_index import HostIndex, HostRecord\n"
+            f"idx = HostIndex({index_path!r})\n"
+            "idx.register(HostRecord("
+            f"session_id={sentinel_id!r}, port=1, host_pid={sentinel_dummy.pid}, "
+            f"child_pid={sentinel_dummy.pid}))\n"
+        )
+        seed = _run_snip(seed_sentinel)
+        r.check(seed.returncode == 0,
+                f"seeded a sentinel orphan record before daemon startup "
+                f"(rc={seed.returncode}; {seed.stderr.strip()[:160]})")
+
+        proc = c.spawn_serve()
+        a = c.active()
+        if not r.check(a is not None, "generation-to-be-killed's daemon is up"):
+            return r
+        old_port = a["port"]
+        r.check(_listening(old_port), f"generation to be killed is listening on :{old_port}")
+
+        # Poll until the sentinel is gone -- the real, observable signal
+        # that this generation's one-shot startup reattach scan has actually
+        # run to completion (never a fixed sleep guess). A read FAILURE
+        # (corrupt/locked index, subprocess crash) is never treated as
+        # "gone" -- retry within the same deadline; a read that never
+        # succeeds is a genuine check failure, not a silent pass.
+        sentinel_gone = False
+        last_read_error = None
+        deadline = time.monotonic() + 60.0
+        while time.monotonic() < deadline:
+            try:
+                if _index_get(sentinel_id) is None:
+                    sentinel_gone = True
+                    break
+            except _IndexReadError as exc:
+                last_read_error = str(exc)
+            time.sleep(0.25)
+        if not r.check(
+            sentinel_gone,
+            "sentinel orphan reaped -- one-shot startup scan has run"
+            + (f" (last read error: {last_read_error})" if last_read_error and not sentinel_gone else ""),
+        ):
+            return r
+
+        # A FRESH, still-alive dummy for the real test record -- never the
+        # sentinel's own dummy, which the reap above already force-killed.
+        alive_dummy = subprocess.Popen([python, "-c", "import time; time.sleep(300)"])
+
+        # Only now register the real test record -- nothing else ever
+        # revisits it for the rest of this generation's life (the scan
+        # never repeats), so it durably survives until we claim it below.
+        register_snip = (
+            "from agent_bridge.session_host.host_index import HostIndex, HostRecord\n"
+            f"idx = HostIndex({index_path!r})\n"
+            "idx.register(HostRecord("
+            f"session_id={session_id!r}, port=59999, host_pid={alive_dummy.pid}, "
+            f"child_pid={alive_dummy.pid}))\n"
+        )
+        reg = _run_snip(register_snip)
+        r.check(reg.returncode == 0,
+                f"registered an unclaimed session-host record "
+                f"(rc={reg.returncode}; {reg.stderr.strip()[:160]})")
+
+        # This generation claims the record using its OWN real, live pid as
+        # owner_pid -- exactly what `_claim_host_record` does inside the
+        # real daemon (invoked directly here since making the real daemon
+        # discover and claim an ad hoc record with no live session-host
+        # child of its own needs a full session-host implementation, out of
+        # reach for a stdlib-only probe). `owner_generation` below is a
+        # TEST-CHOSEN label, not the daemon's own real `_generation_id` --
+        # see the docstring's "Honest scope note" for exactly what this
+        # does and does not prove.
+        claim1_snip = (
+            "from agent_bridge.session_host.host_index import HostIndex\n"
+            "from agent_bridge.session_host.osutil import pid_alive\n"
+            f"idx = HostIndex({index_path!r})\n"
+            f"idx.claim({session_id!r}, generation='test-label-gen-1', "
+            f"owner_pid={proc.pid}, pid_alive=pid_alive)\n"
+            f"print(idx.get({session_id!r}).owner_generation)\n"
+        )
+        claim1 = _run_snip(claim1_snip)
+        r.check(
+            claim1.returncode == 0 and claim1.stdout.strip() == "test-label-gen-1",
+            f"the live process (real pid {proc.pid}) claimed the record for "
+            f"itself (rc={claim1.returncode}, stdout={claim1.stdout.strip()!r}, "
+            f"stderr={claim1.stderr.strip()[:160]})",
+        )
+        try:
+            before = _index_get(session_id)
+        except _IndexReadError as exc:
+            before = None
+            r.check(False, f"read back the claim before the kill (index read failed: {exc})")
+        else:
+            r.check(
+                before is not None and before[1] == proc.pid,
+                f"claim durably recorded owner_pid={proc.pid} before the kill "
+                f"(read back {before!r})",
+            )
+
+        # The abrupt kill itself: SIGKILL, no drain, no /api/v1/shutdown
+        # handshake -- the exit contract's own release_all() never runs, so
+        # the claim above is durably stranded exactly as recorded.
+        proc.kill()
+        proc.wait(timeout=10)
+        r.check(not _listening(old_port), f"killed generation's :{old_port} is gone (no graceful exit ran)")
+
+        # A real fresh daemon -- its own startup reattach scan (the SAME
+        # production code path, not a synthetic stand-in) must recover this
+        # record. This fixture creates no adoptable session, so the only
+        # valid outcome is a full reap (claim, then remove); see the
+        # dedicated check below for why "still claimed under proc2" is
+        # deliberately NOT accepted as an alternate pass.
+        proc2 = c.spawn_serve()
+        a2 = None
+        deadline = time.monotonic() + 25.0
+        while time.monotonic() < deadline:
+            candidate = c.active(tries=1)
+            if candidate and candidate.get("pid") == proc2.pid:
+                a2 = candidate
+                break
+            time.sleep(0.25)
+        r.check(
+            a2 is not None,
+            "a real fresh daemon (its own real pid) starts cleanly after the "
+            "abrupt kill and publishes its own active endpoint -- no manual "
+            "fix needed",
+        )
+
+        # This fixture deliberately creates no adoptable DB session, so the
+        # production path's ONLY valid terminal outcome is reap (claim, then
+        # remove -- `session_host_recovery.py`'s "no adoptable session on
+        # reattach" branch); it never legitimately stays claimed under this
+        # fresh daemon's own pid. Accepting `owner_pid == proc2.pid` as an
+        # alternate pass would let the check observe the intermediate claim
+        # write and pass even if the subsequent removal then silently fails
+        # (that removal is itself best-effort/suppressed in production) --
+        # require absence, not "claimed OR reaped".
+        recovered = False
+        after = None
+        last_read_error = None
+        deadline = time.monotonic() + 30.0
+        while time.monotonic() < deadline:
+            try:
+                after = _index_get(session_id)
+            except _IndexReadError as exc:
+                last_read_error = str(exc)
+            else:
+                if after is None:
+                    recovered = True
+                    break
+            time.sleep(0.25)
+        r.check(
+            recovered,
+            "the fresh daemon's OWN real startup reattach scan claimed then "
+            f"reaped the stale claim (record now {after!r}) -- never left "
+            f"wedged under killed pid {proc.pid}, and not silently retained "
+            "under the fresh daemon either (this fixture has no adoptable "
+            "session, so a lingering claim would itself be a bug)"
+            + (f" (last read error: {last_read_error})" if last_read_error and not recovered else ""),
+        )
+
+        # A full reap doesn't just drop the index row -- `_reap_host_record`
+        # also best-effort kills the record's own host/child process
+        # (`session_host_connection.py`). Index disappearance alone doesn't
+        # prove that ran; confirm `alive_dummy` (standing in for that
+        # process) actually exited too, so a leaked orphan process can't
+        # hide behind a passing index check.
+        if recovered:
+            dummy_exited = False
+            deadline = time.monotonic() + 10.0
+            while time.monotonic() < deadline:
+                if alive_dummy.poll() is not None:
+                    dummy_exited = True
+                    break
+                time.sleep(0.25)
+            r.check(
+                dummy_exited,
+                "the reap also terminated the record's own host/child "
+                f"process (pid {alive_dummy.pid}) -- not just the index row, "
+                "so no orphan process is left behind",
+            )
+        return r
+    finally:
+        for p in (proc, proc2, alive_dummy, sentinel_dummy):
+            try:
+                if p is not None and p.poll() is None:
+                    p.terminate()
+            except Exception:
+                pass
+        time.sleep(0.5)
+        shutil.rmtree(cfg, ignore_errors=True)
+
+
 CHECKS = {
     "routing-flip-retire": check_routing_flip_retire,
     "drain-gate": check_drain_gate,
     "breadcrumb-recover": check_breadcrumb_recover,
+    "abrupt-kill-recovery": check_abrupt_kill_recovery,
 }
 
 

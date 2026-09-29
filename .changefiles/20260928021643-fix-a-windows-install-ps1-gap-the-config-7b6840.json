@@ -1,9 +1,0 @@
-{
-  "comment": "Fix a Windows install.ps1 gap: the config-migrate pre-install block now falls back to the monorepo's canonical libs/config-migrate when no local per-plugin copy exists (dev / uv-editable canonical reference), so the bare-pip fallback path (used when uv is unavailable) can still resolve it.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

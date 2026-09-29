@@ -280,6 +280,8 @@ def add_parsers(sub) -> None:
         default=None,
         help="Predecessor session ID (default: COPILOT_AGENT_SESSION_ID)",
     )
+    sp.add_argument("--live-cutover", action="store_true",
+        help="Arm automatic cutover for this handoff (default: off)")
 
 
 def _emit_handoff_claim_stages(
@@ -770,10 +772,8 @@ def cmd_note_handoff(args: argparse.Namespace) -> int:
             with tracking._RecordLock(yaml_path):
                 record = tracking.load_record(yaml_path)
                 handoff = tracking.open_handoff(
-                    record,
-                    session_id,
-                    task,
-                    save=False,
+                    record, session_id, task, save=False,
+                    live_cutover=bool(getattr(args, "live_cutover", False)),
                 )
                 tracking.save_record(record, yaml_path)
                 handoff_ordinal = handoff.ordinal
@@ -797,6 +797,7 @@ def cmd_note_handoff(args: argparse.Namespace) -> int:
             "session": session_id,
             "task": task or None,
             "handoff_ordinal": handoff_ordinal,
+            "live_cutover": bool(getattr(args, "live_cutover", False)),
         }
     )
     return 0

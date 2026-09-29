@@ -141,12 +141,15 @@ def _terminate_tree(pid: int) -> bool:
         return False
     if os.name == "nt":
         # taskkill /T walks the child TREE (descendants), not a process group,
-        # so it already cannot reach a foreign parent -- safe as-is.
+        # so it already cannot reach a foreign parent -- safe as-is. Timeout
+        # has headroom beyond taskkill's normal sub-second runtime: under
+        # heavy host process-launch contention, spawning even this one child
+        # command can itself stall well past a tight budget (#4366).
         try:
             proc = subprocess.run(
                 ["taskkill", "/PID", str(pid), "/T", "/F"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                timeout=15, check=False,
+                timeout=45, check=False,
             )
             return proc.returncode == 0
         except Exception:

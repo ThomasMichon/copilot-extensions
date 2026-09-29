@@ -167,8 +167,11 @@ class CoalescingServer:
         subscriber_ttl: float = 30.0,
         reap_interval: float = 5.0,
         on_idle: Callable[[], None] | None = None,
+        bind_host: str = "127.0.0.1",
+        bind_port: int = 0,
+        token: str | None = None,
     ):
-        self.token = secrets.token_urlsafe(32)
+        self.token = token or secrets.token_urlsafe(32)
         self.generation = secrets.token_hex(16)
         self._compute = compute
         self._linger_seconds = linger_seconds
@@ -229,7 +232,7 @@ class CoalescingServer:
         self._serve_running = threading.Event()
         self._reap_stop = threading.Event()
 
-        self._server = _Server(("127.0.0.1", 0), _Handler, owner=self)
+        self._server = _Server((bind_host, bind_port), _Handler, owner=self)
         self._serve_thread = threading.Thread(
             # A short poll_interval (vs. serve_forever's 0.5s default) so
             # service_actions() -- and therefore _serve_running -- fires

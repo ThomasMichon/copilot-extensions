@@ -233,7 +233,7 @@ def test_provider_inactive_withdraws_companion(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "completed",
+    "completed_process",
     [
         subprocess.CompletedProcess(["provider"], 1, stdout="", stderr="failed"),
         subprocess.CompletedProcess(["provider"], 0, stdout="not-json", stderr=""),
@@ -245,7 +245,7 @@ def test_provider_inactive_withdraws_companion(tmp_path):
         ),
     ],
 )
-def test_provider_failure_is_indeterminate(tmp_path, completed):
+def test_provider_failure_is_indeterminate(tmp_path, completed_process):
     root = tmp_path / "plugin"
     _write_script(root / "bin" / "service.py")
     _write_script(root / "bin" / "provider.py")
@@ -256,7 +256,7 @@ def test_provider_failure_is_indeterminate(tmp_path, completed):
             registration,
             machine="machine-a",
             env="default",
-            runner=lambda *args, **kwargs: completed,
+            runner=lambda *args, **kwargs: completed_process,
         )
 
 

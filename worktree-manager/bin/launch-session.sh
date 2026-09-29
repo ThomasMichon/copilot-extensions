@@ -281,6 +281,33 @@ activity_log() {
         "${fields[@]+"${fields[@]}"}" >/dev/null 2>&1 & ) || true
 }
 
+# ── Crash detector ──────────────────────────────────────────────────────────
+# A global ERR trap so `set -e` killing the script anywhere below this point
+# (a tmux create/attach failure not otherwise caught, or any other unguarded
+# command) is diagnosed and recorded instead of exiting silently with a bare
+# code (#4454, Windows counterpart of this gap in launch-session.ps1).
+# WORKTREE_ID/LAUNCH_PROJECT may still be unset if the crash happens early;
+# handled defensively so this never masks the real failure with a trap error.
+_aw_crash_trap() {
+    local exit_code=$? line_no=$1 cmd="$2"
+    setup_log ERROR "UNHANDLED: '$cmd' failed (exit $exit_code) at line $line_no"
+    if [[ -n "${WORKTREE_ID:-}" ]]; then
+        activity_log mux_failed "$WORKTREE_ID" mux=unknown reason=unhandled_exception "exit_code=$exit_code"
+    fi
+    local recovery_project="${LAUNCH_PROJECT:-agent-worktrees}"
+    local recovery_hint
+    if [[ -n "${WORKTREE_ID:-}" ]]; then
+        recovery_hint="Run '$recovery_project --worktree-id $WORKTREE_ID' to retry, or use --no-mux to request a direct session explicitly."
+    else
+        recovery_hint="Run '$recovery_project' again to retry, or use --no-mux to request a direct session explicitly."
+    fi
+    echo "" >&2
+    echo "Worktree launcher crashed unexpectedly ('$cmd' exited $exit_code)." >&2
+    echo "$recovery_hint" >&2
+    echo "Details logged to: $SETUP_LOG" >&2
+}
+trap '_aw_crash_trap "$LINENO" "$BASH_COMMAND"' ERR
+
 # ── Plugin auto-update ─────────────────────────────────────────────────────
 # If installed from the copilot-extensions marketplace plugin, check for
 # updates.  When the plugin source changes: run the full installer (which
@@ -509,6 +536,13 @@ for key, value in environment.items():
                         || setup_log WARN "Update failed for $SVC_NAME (exit $?)"
                 fi
             done
+            # Re-resolve before the re-check: one of the updates just applied
+            # above (e.g. agent-worktrees) may have swapped the runtime venv
+            # slot out from under the cached $PYTHON, leaving it pointing at a
+            # now-deleted interpreter (#stale-venv).
+            if _refreshed_python="$(resolve_runtime_python)" && [[ -n "$_refreshed_python" && -x "$_refreshed_python" ]]; then
+                PYTHON="$_refreshed_python"
+            fi
             setup_log INFO 'Re-checking staleness after update'
             PRE_JSON=$("$PYTHON" -m agent_worktrees pre-launch 2>/dev/null) || PRE_JSON='{"action":"continue"}'
             _log_prelaunch_diagnostics "$PRE_JSON"
@@ -582,6 +616,13 @@ for key, value in update.get('environment', {}).items():
                 env ${_RENV[@]+"${_RENV[@]}"} "${_RARGV[@]}" 2>&1 | while IFS= read -r _rl; do setup_log INFO "reconcile: $_rl"; done \
                     || setup_log WARN "Plugin reconcile: step failed for $_RSVC"
             done
+            # Re-resolve before the next pass: this pass's reconcile actions
+            # (the runtime-gated pass in particular) may have swapped the
+            # runtime venv slot out from under the cached $PYTHON, leaving it
+            # pointing at a now-deleted interpreter (#stale-venv).
+            if _refreshed_python="$(resolve_runtime_python)" && [[ -n "$_refreshed_python" && -x "$_refreshed_python" ]]; then
+                PYTHON="$_refreshed_python"
+            fi
         done
     fi
 }
@@ -768,6 +809,22 @@ if [[ "$ACTION" == "exec" ]]; then
     POST_EXIT=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('post_exit') else '0')")
     WORKTREE_ID=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('worktree_id') or '')")
     NO_MUX=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('no_mux') else '0')")
+
+    # Register this launcher's own root pid as a protected process root
+    # (#4454 follow-up: a version-cutover reap elsewhere on the machine
+    # unconditionally kills every process resolved under a superseded
+    # runtime slot -- including a short-lived `agent_worktrees
+    # resolve`/`activity-log`/`get` subprocess THIS launcher spawns later in
+    # its own run, if the cutover lands at the wrong instant). Synchronous,
+    # not backgrounded: the write must complete before any later subprocess
+    # call in this run could become a reap target. Best-effort -- a failure
+    # here only widens the pre-existing race back to today's behavior.
+    if [[ -n "$WORKTREE_ID" ]]; then
+        "$PYTHON" -m agent_worktrees register-launch \
+            --worktree-id "$WORKTREE_ID" --pid "$$" --launch-id "$LAUNCH_ID" \
+            >/dev/null 2>&1 \
+            || setup_log WARN "register-launch failed (exit $?)"
+    fi
 
     # Env var override takes precedence
     _NO_MUX="${WORKTREE_NO_MUX:-}"

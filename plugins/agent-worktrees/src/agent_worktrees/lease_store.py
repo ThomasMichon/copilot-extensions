@@ -207,6 +207,59 @@ class GitLeaseStore:
             raise LeaseLost("renewal compare-and-swap failed; the lease is lost") from None
         return self._snapshot(item, oid, record, now)
 
+    def transfer(
+        self,
+        kind: str,
+        key: str,
+        token: str,
+        holder: str,
+        *,
+        ttl_seconds: int | None = None,
+        context: object = None,
+    ) -> LeaseSnapshot:
+        """Atomically fence a live lease over to a new holder.
+
+        The exact current ``token`` is required, so a transfer is a strict
+        read-modify-write on the live remote ref rather than a best-effort
+        release-and-reacquire dance.
+        """
+        item = resource(kind, key)
+        token = validate_oid(token)
+        holder = validate_holder(holder)
+        current = self._require_token(item, token)
+        now = self._utc_now()
+        if not current.live:
+            raise LeaseLost("cannot transfer a released or expired lease")
+        if now > current.record.expires() - timedelta(
+            seconds=self.settings.clock_skew_seconds
+        ):
+            raise LeaseLost("cannot transfer after the lease's safe local deadline")
+        if current.record.holder == holder:
+            return current
+        ttl = self.settings.ttl(ttl_seconds)
+        context_value = (
+            current.record.context if context is None else validate_context(context)
+        )
+        stamp = format_timestamp(now)
+        record = LeaseRecord(
+            schema_version=1,
+            resource=current.record.resource,
+            state="leased",
+            event="transfer",
+            lease_id=uuid.uuid4().hex,
+            holder=holder,
+            issued_at=stamp,
+            renewed_at=stamp,
+            expires_at=format_timestamp(now + timedelta(seconds=ttl)),
+            ttl_seconds=ttl,
+            context=context_value,
+        )
+        try:
+            oid = self._transition(item, token, record)
+        except _CASConflict:
+            raise LeaseLost("transfer compare-and-swap failed; the lease is lost") from None
+        return self._snapshot(item, oid, record, now)
+
     def release(self, kind: str, key: str, token: str) -> LeaseSnapshot:
         """Append a release tombstone iff token is the exact current OID."""
         item = resource(kind, key)
@@ -439,6 +492,26 @@ class GitLeaseStore:
                 raise ProtocolError("a takeover must use a new lease_id")
             if issued <= deadline:
                 raise ProtocolError("takeover occurred before expiry plus clock skew")
+            return
+        if current.event == "transfer":
+            deadline = previous.expires() - timedelta(
+                seconds=self.settings.clock_skew_seconds
+            )
+            if current.lease_id == previous.lease_id:
+                raise ProtocolError("a transfer must use a new lease_id")
+            if current.holder == previous.holder:
+                raise ProtocolError("transfer must change the holder")
+            if current.issued_at != current.renewed_at:
+                raise ProtocolError("transfer must issue and renew together")
+            if issued < prior_renewed:
+                raise ProtocolError("transfer moved renewed_at backward")
+            if issued > previous.expires():
+                raise ProtocolError("transfer occurred after lease expiry")
+            if issued > deadline:
+                # Once the old holder has crossed its own safe deadline, the
+                # transfer must be treated like a lost lease and restarted by
+                # acquisition/takeover.
+                raise ProtocolError("transfer occurred after the prior safe deadline")
             return
 
         if current.lease_id != previous.lease_id:

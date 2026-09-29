@@ -8,13 +8,17 @@ import subprocess
 import sys
 import threading
 import time
+import ctypes
+from types import SimpleNamespace
 
 import pytest
+import ssh_manager.locks as locks_mod
 
 from ssh_manager.locks import (
     LockHolder,
     TargetBusyError,
     TargetLock,
+    process_identity,
     pid_alive,
 )
 
@@ -39,6 +43,80 @@ class TestPidAlive:
     def test_almost_certainly_dead_pid(self):
         # A very high pid is almost never live on a fresh machine.
         assert pid_alive(2**31 - 1) is False
+
+
+class TestProcessIdentity:
+    def test_windows_creation_time_identity(self, monkeypatch):
+        class Fn:
+            def __init__(self, func):
+                self.func = func
+                self.argtypes = None
+                self.restype = None
+
+            def __call__(self, *args):
+                return self.func(*args)
+
+        def get_process_times(handle, creation, exit_, kernel, user):
+            creation.dwHighDateTime = 1
+            creation.dwLowDateTime = 2
+            exit_.dwHighDateTime = 0
+            exit_.dwLowDateTime = 0
+            return 1
+
+        kernel32 = SimpleNamespace(
+            OpenProcess=Fn(lambda access, inherit, pid: 99),
+            CloseHandle=Fn(lambda handle: 1),
+            GetProcessTimes=Fn(get_process_times),
+        )
+
+        monkeypatch.setattr(locks_mod.sys, "platform", "win32")
+        monkeypatch.setattr(locks_mod, "pid_alive", lambda pid: True)
+        monkeypatch.setattr(
+            ctypes,
+            "WinDLL",
+            lambda name, use_last_error=True: kernel32,
+            raising=False,
+        )
+        monkeypatch.setattr(ctypes, "byref", lambda value: value)
+
+        assert process_identity(123) == "windows-filetime:4294967298"
+
+    def test_procfs_start_time_identity(self, monkeypatch):
+        tokens = ["S"] + ["0"] * 18 + ["12345"]
+        monkeypatch.setattr(locks_mod.sys, "platform", "linux")
+        monkeypatch.setattr(locks_mod, "pid_alive", lambda pid: True)
+        def read_text(self, encoding="ascii"):
+            if str(self) == "/proc/sys/kernel/random/boot_id":
+                return "boot-123\n"
+            return f"123 (python) {' '.join(tokens)}"
+        monkeypatch.setattr(locks_mod.Path, "read_text", read_text)
+        assert process_identity(123) == "proc-start:boot-123:12345"
+
+    def test_procfs_zombie_has_no_identity(self, monkeypatch):
+        tokens = ["Z"] + ["0"] * 18 + ["12345"]
+        monkeypatch.setattr(locks_mod.sys, "platform", "linux")
+        monkeypatch.setattr(locks_mod, "pid_alive", lambda pid: True)
+        def read_text(self, encoding="ascii"):
+            if str(self) == "/proc/sys/kernel/random/boot_id":
+                return "boot-123\n"
+            return f"123 (python) {' '.join(tokens)}"
+        monkeypatch.setattr(locks_mod.Path, "read_text", read_text)
+        assert process_identity(123) is None
+
+    def test_ps_fallback_identity(self, monkeypatch):
+        monkeypatch.setattr(locks_mod.sys, "platform", "linux")
+        monkeypatch.setattr(locks_mod, "pid_alive", lambda pid: True)
+
+        def fail_proc(*_args, **_kwargs):
+            raise OSError("missing procfs")
+
+        monkeypatch.setattr(locks_mod.Path, "read_text", fail_proc)
+        monkeypatch.setattr(
+            locks_mod.subprocess,
+            "run",
+            lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="Mon Sep 29 04:00:00 2026\n"),
+        )
+        assert process_identity(123) == "ps-start:Mon Sep 29 04:00:00 2026"
 
 
 class TestAcquireRelease:

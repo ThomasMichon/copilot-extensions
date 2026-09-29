@@ -83,6 +83,18 @@ def _rev_parse(ref: str, *, cwd: Path | None = None) -> str | None:
         return None
 
 
+def _is_ancestor(ancestor: str, descendant: str, *, cwd: Path | None = None) -> bool:
+    """True when ``ancestor`` is reachable from ``descendant`` (``git
+    merge-base --is-ancestor``) -- includes the equal-commit case."""
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=str(cwd or REPO),
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0
+
+
 def _load_module(path: Path, name: str) -> types.ModuleType:
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
@@ -142,26 +154,39 @@ def _seed_versions_from_main(scratch: Path, main_head: str, *, acc, repo: Path) 
     agent-bridge 0.4.1-dev1 -> 0.4.0-dev551) -- that fix was necessary but
     not sufficient on its own; this seed step is the other required half."""
     plugins_dir = scratch / "plugins"
-    if not plugins_dir.is_dir():
-        return
     seed_result: dict[str, tuple[str, str]] = {}
-    for plugin_dir in sorted(plugins_dir.iterdir()):
-        if not plugin_dir.is_dir():
-            continue
-        plugin = plugin_dir.name
-        main_pj_raw = _git(
-            ["show", f"{main_head}:plugins/{plugin}/plugin.json"], cwd=repo, check=False,
-        )
-        if not main_pj_raw:
+    if plugins_dir.is_dir():
+        for plugin_dir in sorted(plugins_dir.iterdir()):
+            if not plugin_dir.is_dir():
+                continue
+            plugin = plugin_dir.name
+            main_pj_raw = _git(
+                ["show", f"{main_head}:plugins/{plugin}/plugin.json"], cwd=repo, check=False,
+            )
+            if not main_pj_raw:
+                continue  # never shipped on main yet -- dev's own literal stands as-is
+            try:
+                main_version = json.loads(main_pj_raw)["version"]
+            except (json.JSONDecodeError, KeyError):
+                continue
+            dev_version = acc.read_plugin_json_version(plugin)
+            if dev_version is None or dev_version == main_version:
+                continue
+            seed_result[plugin] = (dev_version, main_version)
+    # A standalone, out-of-plugin consumer (e.g. `worktree-manager`) ships
+    # its own `pyproject.toml` [project].version instead of a plugin.json --
+    # it needs the exact same main-is-truth seeding, or a promotion round
+    # with no new changefile for it would regress it back to dev's stale
+    # literal (or repeat an already-shipped bump) the same way an
+    # un-seeded plugin would (PR #4514 review).
+    for consumer in acc.iter_standalone_consumer_names():
+        main_version = acc._project_version_at(main_head, f"{consumer}/pyproject.toml")
+        if main_version is None:
             continue  # never shipped on main yet -- dev's own literal stands as-is
-        try:
-            main_version = json.loads(main_pj_raw)["version"]
-        except (json.JSONDecodeError, KeyError):
-            continue
-        dev_version = acc.read_plugin_json_version(plugin)
+        dev_version = acc.read_consumer_version(consumer)
         if dev_version is None or dev_version == main_version:
             continue
-        seed_result[plugin] = (dev_version, main_version)
+        seed_result[consumer] = (dev_version, main_version)
     if seed_result:
         acc.apply(seed_result)
 
@@ -274,6 +299,21 @@ def consume_pending_changes(
                 grouped.setdefault(change["plugin"], []).append(change["type"])
         computed = acc.compute(grouped)
         applied = acc.apply(computed) if computed else []
+        unapplied = sorted(set(computed) - set(applied))
+        if unapplied:
+            # A computed bump that `apply()` could not actually write (a
+            # manifest-format edge case `apply()` doesn't recognize, a
+            # missing file, etc.) must never be silently accepted --
+            # consuming the changefile below regardless would ship the OLD
+            # version on `main` while permanently discarding the bump
+            # intent (PR #4514 review, a recurring finding across several
+            # prior rounds' individual TOML-format fixes; this is the
+            # structural fix instead of another one-off format patch).
+            raise PromotionError(
+                f"promotion refused: computed a version bump for "
+                f"{', '.join(unapplied)} but apply() could not write it -- "
+                "fix the underlying manifest(s) before promoting again."
+            )
         if all_changefiles:
             # Delete every changefile physically present, not just the ones
             # that drove a bump this round -- an already-consumed changefile
@@ -338,6 +378,10 @@ class PromotionPaused(PromotionError):
 
 
 class NonIncrementalPromotion(PromotionError):
+    pass
+
+
+class StaleCandidatePromotion(PromotionError):
     pass
 
 
@@ -467,9 +511,39 @@ def promote(
             "-- or pass --force to override this guard deliberately."
         )
 
+    last_promotion = state.get("last_promotion") or {}
+    last_dev_head = last_promotion.get("dev_head")
+    # Monotonic stale-candidate guard (added after a live review catch,
+    # 2026-09-29 -- see the dev-branch-release-pipeline effort Journal):
+    # `validate-and-promote.yml`'s own concurrency group only serializes
+    # DISPATCH-ARRIVAL order, never commit order. Two `dev` commits' own
+    # `promote-trigger.yml` filter runs (deliberately unthrottled -- that's
+    # the whole point of the split) can complete and dispatch out of order
+    # -- an older commit A's dispatch can arrive and get processed AFTER a
+    # newer commit B's, even though A was pushed first. Without this guard,
+    # `dev_head` (A) being a real `origin/dev` ancestor was the only check,
+    # so A's (stale) content would silently promote on top of main's
+    # already-newer (B) content -- a genuine regression, not a no-op.
+    # Refuse unless `dev_head` is at least as new as whatever this pipeline
+    # already promoted: either the identical commit (a legitimate re-run,
+    # e.g. a retried dispatch -- falls through to the ordinary "no content
+    # change vs. main" no-op below) or a strict descendant of it.
+    if (
+        last_dev_head
+        and last_dev_head != dev_head
+        and not _is_ancestor(last_dev_head, dev_head, cwd=repo)
+    ):
+        raise StaleCandidatePromotion(
+            f"refusing to promote dev@{dev_head[:12]}: it is not a descendant "
+            f"of the already-promoted dev@{last_dev_head[:12]} -- this looks "
+            "like an out-of-order/stale candidate (a newer dev commit was "
+            "already promoted while this one was still validating). No "
+            "action needed: dev has already moved forward past this "
+            "candidate's own content."
+        )
+
     scratch = add_scratch_worktree(dev_head, repo=repo)
     try:
-        last_promotion = state.get("last_promotion") or {}
         summary = consume_pending_changes(
             scratch,
             last_dev_head=last_promotion.get("dev_head"),
@@ -556,6 +630,15 @@ def main(argv: list[str] | None = None) -> int:
         # A pause is an expected, intentional operator action (part of the
         # rollback procedure), not a pipeline failure -- exit 0 so a CI run
         # reports this as a normal no-op rather than a red build.
+        print(f"promote-release: {exc}")
+        return 0
+    except StaleCandidatePromotion as exc:
+        # Also a normal, expected outcome under out-of-order dispatch
+        # racing (see the guard's own comment in promote()) -- dev has
+        # already moved forward past this candidate via a different,
+        # already-completed promotion run. Nothing is wrong and nothing
+        # needs fixing; exit 0 rather than failing report-failure's
+        # watchdog into filing a spurious incident for benign behavior.
         print(f"promote-release: {exc}")
         return 0
     except PromotionError as exc:

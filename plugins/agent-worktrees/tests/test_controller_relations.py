@@ -253,6 +253,54 @@ def test_cross_project_owner_folds_matching_bare_caller(
     assert child.controllers[0].source == "owner-ref"
 
 
+def test_raw_path_caller_worktree_matching_owner_does_not_raise(
+    tmp_tracking_dir: Path,
+) -> None:
+    """A legacy raw-filesystem-path ``caller_worktree`` that refers to the same
+    worktree as a richer ``owner_ref`` must fold into that relation instead of
+    raising a path-safety ``ControllerRelationError``."""
+    child = tracking.create_new_record(
+        "child",
+        "worktree/child",
+        "/tmp/child",
+        "target-project",
+        "host",
+        "windows",
+        tmp_tracking_dir,
+        parent_session="controller-session",
+        caller_worktree="D:\\Src\\.worktrees\\dotfiles\\parent",
+        owner_ref="host/source-project/parent#controller-session",
+    )
+
+    assert len(child.controllers) == 1
+    assert child.controllers[0].controller_ref == (
+        "host/source-project/parent#controller-session"
+    )
+    assert child.controllers[0].source == "owner-ref"
+
+
+def test_raw_path_caller_worktree_without_owner_derives_bare_id(
+    tmp_tracking_dir: Path,
+) -> None:
+    """A legacy raw-filesystem-path ``caller_worktree`` with no ``owner_ref``
+    to fold into still derives a valid, path-safe relation from its final
+    path component instead of raising."""
+    child = tracking.create_new_record(
+        "child",
+        "worktree/child",
+        "/tmp/child",
+        "target-project",
+        "host",
+        "windows",
+        tmp_tracking_dir,
+        caller_worktree="D:\\Src\\.worktrees\\dotfiles\\parent",
+    )
+
+    assert len(child.controllers) == 1
+    assert child.controllers[0].controller_ref == "host/target-project/parent"
+    assert child.controllers[0].source == "caller-worktree"
+
+
 def test_controller_end_and_removal_preserve_bound_relation(
     tmp_path: Path,
     tmp_tracking_dir: Path,

@@ -51,8 +51,51 @@ def add_parsers(sub) -> None:
     p.add_argument("--agent", action="store_true", help="Force exposing an agent-bridge agent (overrides a repos.yaml agent:false classification).")
     p.add_argument("--base-repo", action="store_true", help="Adopt in base-repo (no-worktree) mode: the anchor checkout is used directly and no worktree is created. For repos that can't support worktrees (e.g. an enlistment monorepo). Also set repos.<name>.base_repo in the user-local ~/.<project>/config.yaml.")
     p.add_argument("--elevated", action="store_true", help="Record that agent-bridge should run this project's agent in an elevated (admin) context.")
-    p = sub.add_parser("uninstall", help="Remove worktree manager")
-    p.add_argument("--remove-config", action="store_true")
+    p = sub.add_parser(
+        "uninstall",
+        help="Remove worktree manager",
+        description=(
+            "Remove this machine's agent-worktrees runtime. Without "
+            "--remove-config, removes only the deployed runtime (venv, lib, "
+            "wrappers) and this project's own binstub -- config and session "
+            "metadata are preserved (install/register regenerate the runtime "
+            "with zero data loss). With --remove-config, ALSO deletes the "
+            "SHARED ~/.agent-worktrees registry root -- config.yaml, "
+            "repos.yaml, projects.yaml, accounts.yaml, snapshots/, pivots/ -- "
+            "which is shared across EVERY project adopted on this machine, "
+            "not just the one named via --project. This is a machine-wide, "
+            "hard-to-undo action, so --remove-config alone only reports what "
+            "would be deleted (and which other adopted projects share the "
+            "root); pass --yes as well to actually delete it. To deregister "
+            "a single project's own adoption (projects.yaml/repos.yaml entry "
+            "+ binstub) without touching the shared root, use 'unregister' "
+            "instead."
+        ),
+    )
+    p.add_argument(
+        "--remove-config",
+        action="store_true",
+        help=(
+            "ALSO delete the SHARED ~/.agent-worktrees registry "
+            "(config.yaml, repos.yaml, projects.yaml, accounts.yaml, "
+            "snapshots/, pivots/) -- shared across every adopted project on "
+            "this machine, not just this one. Requires --yes to actually run."
+        ),
+    )
+    p.add_argument(
+        "--yes",
+        action="store_true",
+        help=(
+            "Actually perform --remove-config's shared-registry deletion "
+            "(without it, --remove-config only reports what would be removed "
+            "and which other adopted projects would be affected)"
+        ),
+    )
+
+    from . import unregister_cli
+
+    unregister_cli.add_parsers(sub)
+
 
 def _validate_machine_registry(
     repo_dir: Path,
@@ -809,15 +852,59 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
 
     if args.remove_config:
         base = inst.install_dir()
-        if base.exists():
+        other_projects = _other_adopted_projects(project)
+        if not getattr(args, "yes", False):
+            output.warn(
+                f"--remove-config would delete the SHARED registry root "
+                f"{base} (config.yaml, repos.yaml, projects.yaml, "
+                "accounts.yaml, snapshots/, pivots/) -- this is NOT scoped "
+                f"to the '{project}' project."
+            )
+            if other_projects:
+                print(
+                    "    Other projects adopted on this machine share this "
+                    f"registry and would lose their entries too: "
+                    f"{', '.join(other_projects)}"
+                )
+            print("    Re-run with --remove-config --yes to actually delete it.")
+            output.skipped(f"{base} preserved (dry run -- pass --yes to delete)")
+        elif base.exists():
             shutil.rmtree(base, ignore_errors=True)
-            output.changed(f"Removed {base} (config + session metadata)")
+            output.changed(
+                f"Removed {base} (SHARED config + session metadata for "
+                "every adopted project)"
+            )
     else:
         manifest = inst.install_dir() / "deploy-manifest.json"
         if manifest.exists():
             manifest.unlink()
         output.skipped("Config and session metadata preserved")
-        print("    Use --remove-config to delete everything")
+        print("    Use --remove-config --yes to delete the shared registry too")
 
     output.ok("Uninstall complete")
     return 0
+
+
+def _other_adopted_projects(project: str) -> list[str]:
+    """Names of other adopted projects sharing the machine-wide registry."""
+    try:
+        registry = inst.read_projects_registry()
+    except Exception:
+        return []
+    projects = registry.get("projects", {})
+    if not isinstance(projects, dict):
+        return []
+    return sorted(name for name in projects if name != project)
+
+
+def cmd_unregister(args: argparse.Namespace) -> int:
+    """Deregister a project's adoption lifecycle -- never the shared runtime.
+
+    See :mod:`unregister_cli` for the implementation (kept in its own module
+    to stay clear of this one's line-count cap).
+    """
+    from . import unregister_cli
+
+    return unregister_cli.cmd_unregister(args)
+
+

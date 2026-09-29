@@ -18,9 +18,9 @@ the real continuation before anything else. You may also be asked to prepare
 one near the end of a session.
 
 Whether a handoff cuts a successor over live or only stages a brief for a
-human is one switch: `mode` (`auto`, `manual-only`, or `off`) in
-`.context-handoff/config.yaml` (or `~/.context-handoff/config.yaml`). Check
-it, or ask, before assuming either.
+human: `mode` (`auto`/`manual-only`/`off`) in `.context-handoff/config.yaml`
+(or `~/.context-handoff/config.yaml`). Check it, or ask, before assuming
+either.
 
 ## The commands, if the extension is loaded
 
@@ -30,18 +30,31 @@ it, or ask, before assuming either.
 
 ## The same commands as plain CLI, extension loaded or not
 
-The plugin's bundled CLI needs only `node`:
+Bundled CLI, needs only `node`. Every command except `help` accepts `--json`.
+
+| Command | Purpose |
+|---|---|
+| `save` | Store a handoff without requesting pickup yet |
+| `trigger` | Store + signal pickup (arms live-cutover only under `mode: auto`) |
+| `consume --locator "<kind>:<id>"` | Claim and load a stored handoff exactly once |
+| `facts` | Basic extension-free handoff facts for this worktree |
+| `check-heads` | Audit pending-handoff head alignment across worktrees |
+| `retry-cutover` | Refocus a live successor or respawn a stuck cutover |
+| `sync-worktree` | Shared lock/rebase-safe sync (same helper the force tier uses) |
+| `list-sessions` | Recorded handoff chain (needs `agent-worktrees`) |
+| `get-previous-session` | Recorded predecessor (needs `agent-worktrees`) |
+| `abort --locator "<kind>:<id>"` | Cancel before consumption (needs `agent-worktrees`; a task target also needs `agent-dispatch`) |
 
 ```bash
 CH_ROOT="${COPILOT_PLUGIN_ROOT:-$HOME/.copilot/installed-plugins/copilot-extensions/context-handoff}"
 CH="$CH_ROOT/extensions/context-handoff/handoff-cli.mjs"
 node "$CH" save --title "<t>" --prompt-file "<f.md>" --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
-node "$CH" trigger --title "<t>" --prompt-file "<f.md>" --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
-node "$CH" consume --locator "<kind>:<id>" --cwd "$PWD"
 ```
-PowerShell: the same default under
-`$HOME\.copilot\installed-plugins\copilot-extensions\context-handoff`, then
-`node $CH <verb> ...`. The fallback guide below lists every verb and rung.
+Other verbs share that shape; add `--json` for machine output (table above).
+PowerShell: same default
+(`$HOME\.copilot\installed-plugins\copilot-extensions\context-handoff`), run
+`node $CH <verb> ...`. No global binstub exists -- resolve `$CH` by path
+first. The fallback guide below lists every verb and rung.
 
 ## The handoff prompt ("seed") format
 

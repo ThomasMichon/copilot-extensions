@@ -266,16 +266,16 @@ q.reconcile_liveness()
 ### State model
 
 ```
-proposed -> queued -> claimed -> started -> completed        (terminal)
-                ^         |          |
-                +-- decline/yield ---+
-                ^
+proposed -> queued -> claimed -> started -> submitted -> completed
+                ^         |          |            |            (terminal)
+                +-- decline/yield ---+            |
+                ^                                  +-- confirm
                 +-- owner-gone (liveness GC requeue, attempts++)
-started -> suspended -> started                              (resume; same owner)
-               |
-               +-----------> queued                          (release; replacement)
-               +-----------> completed                       (condition resolved)
-   (any non-terminal) --------------------------> abandoned   (terminal, permission-gated)
+started -> suspended -> started
+               |                                   (resume; same owner)
+               +-----------> queued                (release; replacement)
+               +-----------> submitted             (condition resolved)
+   (any non-terminal except completed) -------> abandoned     (terminal, permission-gated)
 ```
 
 - **proposed** -- written but not yet claimable (a draft handoff / undecided idea).
@@ -285,9 +285,13 @@ started -> suspended -> started                              (resume; same owner
 - **suspended** -- previously started but dormant and non-claimable; retains the
   same owner/session, worktree identity, generation, progress, and card while
   clearing active lease/activity.
+- **submitted** -- the worker's provisional completion claim.
 - **completed** / **abandoned** / **dead_letter** -- terminal (abandon requires
   permission; **dead_letter** is where a task lands when GC has requeued it past
   the attempts cap -- its owner kept going gone -- an actionable failure state).
+  `completed`/`submitted` briefly traded names (2026-09-25..2026-09-29) --
+  if you see a stray `confirmed` status anywhere, see
+  [`docs/status-rename-migration-2026-09-29.md`](docs/status-rename-migration-2026-09-29.md).
 - A **liveness** GC pass returns a held task to **queued** only when its owner's
   **session** is *confirmed gone* (keyed on the captured `owner_session_id`, not
   mere worktree occupancy) -- never on elapsed time, so a long-running live
@@ -381,7 +385,7 @@ external deps). `read_payload()` (engine) / `GET /tasks/{id}/payload` /
 `agent-dispatch payload <id> [--raw]` resolve either form transparently; an
 external `payload_ref` (e.g. `pr/123`) is left opaque for the caller.
 `agent-dispatch consume <id>` is the resume-and-consume shortcut: it idempotently
-drives the task to `completed` (approve → claim → start → complete) and then
+drives the task to `submitted` (approve → claim → start → complete) and then
 prints the payload, so a handoff successor's single command both loads the brief
 and spends the baton.
 
@@ -799,7 +803,7 @@ agent-dispatch webhook --config webhook.json --host 127.0.0.1 --port 9331
 A producer puts work on the queue; an **evaluator** decides what happens *next* as
 that work progresses -- the *judgment* half of emitters-and-evaluators. It is
 hook-like: it receives one task **lifecycle event** (the coordinator shape
-`{"type": "task.completed", "task": {...}}`) and returns decisions -- emit a
+`{"type": "task.submitted", "task": {...}}`) and returns decisions -- emit a
 follow-up task, or nothing. A declarative spec of rules matches on the event and
 mints follow-ups from templates, so a standing domain automates a whole cycle
 (reviewer done -> open a conflict-resolution follow-up; a goal met -> the next
@@ -807,7 +811,7 @@ goal) without a bespoke module.
 
 ```bash
 # apply an evaluator to an event read from stdin (a hook/producer pipes it in):
-echo '{"type":"task.completed","task":{"id":"t1","labels":["recipe:reviewer"],"status":"completed","origin_ref":"o/n#42"}}' \
+echo '{"type":"task.submitted","task":{"id":"t1","labels":["recipe:reviewer"],"status":"submitted","origin_ref":"o/n#42"}}' \
   | agent-dispatch evaluate --spec evaluator.json --repo o/n
 agent-dispatch evaluate --spec evaluator.json --event-file event.json --dry-run
 ```
@@ -1237,7 +1241,7 @@ the MCP SDK may normalize a JSON-encoded object string before tool invocation.
 the potentially large value and expose `has_result`; retrieve it with
 `result <id>`, `GET /tasks/<id>/result`, or MCP `dispatch_result`. SSE events
 also expose only `has_result`, never the result body. Initial completion emits
-`task.completed`; a later retry that fills a previously missing result emits
+`task.submitted`; a later retry that fills a previously missing result emits
 `task.result_recorded`. Repeating the identical recorded result is a no-op and
 emits neither event again.
 
@@ -1422,8 +1426,8 @@ a healthy companion; selection and cutover are separate lifecycle increments.
 
 
 **Evaluator pass — advance the loop (`--evaluator <spec>`).** With an evaluator
-spec, each cycle feeds every **newly-terminal** task's lifecycle event
-(`task.completed` / `task.abandoned`) to the evaluator (§ Evaluator) and applies
+spec, each cycle feeds every **newly-concluded** task's lifecycle event
+(`task.submitted` / `task.abandoned`) to the evaluator (§ Evaluator) and applies
 its decisions — emitting a follow-up task. This is the **service-driven** half of
 *a-loop-runs-with-or-without-a-service*: a standing supervisor advances a domain's
 loop (reviewer done → conflict-resolution follow-up; goal met → the next goal)

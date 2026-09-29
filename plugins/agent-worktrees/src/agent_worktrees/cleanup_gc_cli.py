@@ -37,6 +37,7 @@ def _reap_worktree(*args, **kwargs): return _core()._reap_worktree(*args, **kwar
 def reap_one(*args, **kwargs): return _core().reap_one(*args, **kwargs)
 def reap_orphan_launcher_shells(*args, **kwargs): return reap_cli.reap_orphan_launcher_shells(*args, **kwargs)
 def sweep_managed_worktrees(*args, **kwargs): return reap_cli.sweep_managed_worktrees(*args, **kwargs)
+def sweep_finished_session_worktrees(*args, **kwargs): return reap_cli.sweep_finished_session_worktrees(*args, **kwargs)
 
 
 def add_parsers(sub) -> None:
@@ -61,6 +62,12 @@ def add_parsers(sub) -> None:
     p.add_argument("--include-conversations", action="store_true", help="Also reap conversation-only worktrees (no commits but the session held turns); implies --include-unused")
     p.add_argument("--reconcile-prs", action="store_true", help="Refresh tracked PR state from the provider before deciding (heals stale 'open' PRs merged externally)")
     p.add_argument("--max-age-days", type=int, default=7)
+    p = sub.add_parser("sweep-managed", help="Machine-readable managed-worktree leak sweep for external control planes")
+    p.add_argument("--dry-run", action="store_true", help="Report what would be removed without removing anything")
+    p.add_argument("--json", action="store_true", help="Emit the managed sweep result as JSON")
+    p = sub.add_parser("sweep-finished-sessions", help="Machine-readable finished-session auto-clean sweep for external control planes")
+    p.add_argument("--dry-run", action="store_true", help="Report what would be removed without removing anything")
+    p.add_argument("--json", action="store_true", help="Emit the finished-session sweep result as JSON")
 
 def _cleanup_one(args: argparse.Namespace) -> int:
     """``cleanup --worktree-id <id>`` -- thin CLI wrapper over :func:`reap_one`."""
@@ -754,8 +761,29 @@ def cmd_gc(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sweep_managed(args: argparse.Namespace) -> int:
+    payload = sweep_managed_worktrees(dry_run=getattr(args, "dry_run", False))
+    if getattr(args, "json", False):
+        _json_output(payload)
+        return 0
+    removed = payload.get("removed") or []
+    print(f"Removed {len(removed)} managed worktree(s).")
+    return 0
+
+
+def cmd_sweep_finished_sessions(args: argparse.Namespace) -> int:
+    payload = _core_helper(
+        "sweep_finished_session_worktrees",
+        sweep_finished_session_worktrees,
+    )(dry_run=getattr(args, "dry_run", False))
+    if getattr(args, "json", False):
+        _json_output(payload)
+        return 0
+    removed = payload.get("removed") or []
+    print(f"Removed {len(removed)} finished session worktree(s).")
+    return 0
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # sync (fast-forward worktrees to the default branch)
 # ═══════════════════════════════════════════════════════════════════════════
-
-

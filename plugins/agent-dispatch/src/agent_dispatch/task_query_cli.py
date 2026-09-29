@@ -37,33 +37,39 @@ def _core_helper(name: str, local):
 #: distinct from this module's delegated `inbox` CLI path).
 _BOARD_GROUPS = (
     "Blocked",
+    "Paused",
     "Proposed",
     "Started",
     "Queued",
     "Suspended",
+    "Submitted",
     "Completed",
-    "Confirmed",
     "Abandoned",
 )
-_BOARD_TERMINAL = frozenset({"Completed", "Confirmed", "Abandoned"})
+_BOARD_TERMINAL = frozenset({"Submitted", "Completed", "Abandoned"})
 
 
 def _board_group(task: dict) -> str:
     """The display group for a task on the picker board (see ``_BOARD_GROUPS``).
 
-    A **terminal** status (completed / confirmed / abandoned / dead_letter)
+    A **concluded** status (submitted / completed / abandoned / dead_letter)
     wins first -- a task can carry a stale ``awaiting_steer`` flag after being
-    abandoned while blocked, and a finished task is never "Blocked". Otherwise
-    ``awaiting_steer`` (a live task needing the operator's steer) wins over
-    the raw lifecycle state, then proposed/queued/suspended, else any other
-    owned in-flight state reads as *Started*."""
+    abandoned while blocked, and a finished task is never "Blocked". A durable
+    operator-set pause hold (``hold_reason``) is next -- its own group,
+    distinct from system-``Suspended`` and from ``Blocked`` (see
+    `board_cli.py`'s byte-identical `_group`). Otherwise ``awaiting_steer`` (a
+    live task needing the operator's steer) wins over the raw lifecycle
+    state, then proposed/queued/suspended, else any other owned in-flight
+    state reads as *Started*."""
     st = task.get("status")
+    if st == "submitted":
+        return "Submitted"
     if st == "completed":
         return "Completed"
-    if st == "confirmed":
-        return "Confirmed"
     if st in ("abandoned", "dead_letter"):
         return "Abandoned"
+    if task.get("hold_reason"):
+        return "Paused"
     if task.get("awaiting_steer"):
         return "Blocked"
     if st == "proposed":
@@ -248,7 +254,10 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
     if getattr(args, "board", False):
         from . import board_cli as _board_cli
 
-        status = "proposed,queued,claimed,started,suspended,completed,abandoned,dead_letter"
+        status = (
+            "proposed,queued,claimed,started,suspended,"
+            "submitted,completed,abandoned,dead_letter"
+        )
         with _core()._client(args) as c:
             tasks = c.list(repo=None, status=status, label=args.label, limit=args.limit)
             def _relay_fetch_many(
@@ -338,14 +347,14 @@ def _consume_already_spent(task_id: str, task: dict) -> int:
     result_ref = task.get("result_ref")
     result_str = f" (result: {result_ref})" if result_ref else ""
     print(
-        f"[agent-dispatch] Handoff task {task_id} is already COMPLETED"
+        f"[agent-dispatch] Handoff task {task_id} is already spent"
         f"{result_str}.\n"
         f"This handoff was already picked up and its work finished -- NOT "
         f"replaying the brief. Do NOT redo this work; end your turn.\n"
         f"If this is unexpected, inspect with: agent-dispatch show {task_id}"
     )
     print(
-        f"agent-dispatch: handoff {task_id} already consumed (completed); not replayed",
+        f"agent-dispatch: handoff {task_id} already consumed (submitted/completed); not replayed",
         file=sys.stderr,
     )
     return 3
@@ -371,9 +380,9 @@ def _cmd_consume(args: argparse.Namespace) -> int:
 
     Two completion modes:
 
-    - **Baton (default):** drive the task all the way to ``completed`` in one
+    - **Baton (default):** drive the task all the way to ``submitted`` in one
       shot -- loading the brief IS consuming the baton, so a handoff is marked
-      completed the *moment* it is picked up (the classic quick-baton resume:
+      submitted the *moment* it is picked up (the classic quick-baton resume:
       /resume-handoff, a hand-pasted seed). The continuation *work* is tracked
       by its effort/issue, not this task.
     - **Deferred (``--defer-complete``):** approve -> claim -> **start** the task
@@ -381,7 +390,7 @@ def _cmd_consume(args: argparse.Namespace) -> int:
       complete it. This is the *takeover* pickup: a dispatched/embodied successor
       loads the brief, works the task, and calls ``agent-dispatch complete
       <id>`` **explicitly** only when it reaches the handoff's goal -- so
-      ``completed`` means *the work is done*, not *the baton was handed over*.
+      ``submitted`` means *the work is done*, not *the baton was handed over*.
 
     Ordinary transitions are best-effort and idempotent: an already-advanced
     task just prints its payload. Suspended pickup is stricter: deferred mode
@@ -389,15 +398,15 @@ def _cmd_consume(args: argparse.Namespace) -> int:
     baton mode completes only the exact suspended incarnation that was read.
     If either fence loses a race, the payload is not replayed.
 
-    **Replay debounce (a *completed handoff* is spent).** A handoff is a baton:
-    once it has been picked up and its work driven to ``completed``, re-consuming
+    **Replay debounce (a *spent handoff* is spent).** A handoff is a baton:
+    once it has been picked up and its work driven to ``submitted``, re-consuming
     it must NOT re-deliver the brief as if it were fresh. A live-cutover (or any
-    re-seeded successor) that re-runs ``consume <id>`` on an already-completed
+    re-seeded successor) that re-runs ``consume <id>`` on an already-spent
     handoff would otherwise redo finished work. So a completed *handoff* is
     refused here with a clear stop notice (exit ``3``) instead of its payload --
     the single chokepoint every task-backed resume seed flows through. A
     still-in-flight handoff (``started`` -- e.g. a legitimate takeover recovery)
-    is unaffected; only ``completed`` is treated as spent.
+    is unaffected; only ``submitted`` is treated as spent.
     """
     task_id = args.task_id
     defer = getattr(args, "defer_complete", False)
@@ -413,13 +422,13 @@ def _cmd_consume(args: argparse.Namespace) -> int:
             print(f"agent-dispatch: {exc}", file=sys.stderr)
             return 1
         status = task.get("status")
-        # Debounce a spent baton: a *completed handoff* is never replayed.
+        # Debounce a spent baton: a submitted/completed handoff is never replayed.
         is_handoff = ("handoff" in (task.get("labels") or [])) or (
             task.get("source") == "context-handoff"
         )
-        if is_handoff and status in ("completed", "confirmed"):
+        if is_handoff and status in ("submitted", "completed"):
             return _core()._consume_already_spent(task_id, task)
-        if status not in ("completed", "confirmed", "abandoned"):
+        if status not in ("submitted", "completed", "abandoned"):
             owner: str | None = None
             if status == "proposed":
                 try:

@@ -212,6 +212,56 @@ to the final real session. Do not choose by timestamp alone: test probes and
 failed successor shells can be newer than the authoritative agent. A handoff
 whose successor never became usable leaves the predecessor authoritative.
 
+**Why class G happens at all (root cause, not just symptom).**
+`register_session` (the `sessionStart` hook) only *initializes* a worktree's
+head when it has none; by design it **never moves an existing active head**
+once one is set (see `docs/architecture.md` § *Current session, conclusion,
+and succession*). Moving the head normally requires a session to claim its
+*exact* pending handoff token via `bind-session --handoff-token <token>` /
+`link-succession`. So a worktree drifts into class G whenever a later session
+starts in the same directory **without** claiming that token — an informal
+resume, a bare interactive restart, or `embody` with no seed — and just does
+real work. Nothing in the ordinary path ever re-points the head afterward:
+`doctor`'s `session_head_mismatch` scan (`#3307`) detects the resulting
+divergence by diffing the registered head against the session most-recently
+touched on disk, but it is **report-only** — it does not auto-repair, and
+nothing warns at the moment that actually matters (resume time). Expect this
+class to recur in bursts across many worktrees whenever informal resumes are
+common; `handoffs[]` entries stuck at `state: "pending"` with `successor:
+null` are the tell that a handoff was opened but never claimed by whatever
+session actually continued the work. Recovery is exactly the `link-succession`
+call above — promote the real last-working session over the stale head — but
+this is presently a **manual, after-the-fact fix**, not something the engine
+prevents. Tracked upstream: an architecture-level fix (`sessionStart` itself
+staying authoritative for "the most recent legitimately-started session," with
+non-front-door starters such as a bare `copilot -p` invocation or a native
+sub-agent's own `sessionStart` firing guarded out of claiming head, and a
+resume-time discrepancy warning instead of a silent divergence) is proposed on
+[#3716](https://github.com/ThomasMichon/copilot-extensions/issues/3716) — read
+that issue before assuming this is a one-off bug in the local install; it
+generalizes past `embody` to any informal resume. Class **F**'s foreign-cwd
+registration bug has the same "no engine guard yet" shape — see `#1553` above.
+
+**Update: the `/consume-handoff` variant of this gap is now fixed at the
+source, not just repaired after the fact.** `context-handoff`'s
+`consumeFileHandoff`/`consumeDispatchHandoffTask` (the functions behind both
+the CLI `consume` verb and the `consume_handoff` MCP tool) previously did
+nothing to move the worktree's head after a successful consumption — they
+only updated `context-handoff`'s own session-state/task bookkeeping. Since a
+manually-pasted handoff seed never opens an entry in agent-worktrees' own
+`handoffs[]` ledger (that only happens on the `mode: auto` live-cutover path),
+the successor session's `sessionStart` had no token to link against either,
+so the head stuck on the predecessor **permanently** — not just until the
+next repair pass. Both consume functions now call `link-succession` as a
+best-effort backstop immediately after a confirmed consumption, promoting the
+consuming session over whatever the worktree's registered head currently is
+(a no-op if it's already correct, and never fails the consume result if the
+CLI call itself fails). This closes the reproducible case reported as
+"pasting the handoff seed and running `/consume-handoff` still resumes into
+the old session every time." The broader `sessionStart`-level architecture
+proposal in #3716 (a universal, engine-level backstop for *every* start path,
+not just the sanctioned consume path) remains open.
+
 ### Verify which class you're in — cheap structured signals first
 
 Work **cheap → expensive**; most cases resolve without ever touching the
@@ -228,6 +278,42 @@ state root:
    Copilot session store's index for sessions whose `cwd` is the worktree path,
    rather than walking the filesystem — this finds a real in-worktree session
    without any directory iteration.
+
+### Before promoting a class-G candidate, confirm it isn't itself an unconsumed handoff seed
+
+A session with the highest `created_at`/most turns is the right promotion
+target *only if it actually did work* — not merely if it exists. A session
+that only ever received the handoff/continuation-brief prompt and never
+progressed (0-1 turns, `ended_at_marker: null`) is not a legitimate successor;
+promoting it just moves the same problem one hop later. Before running
+`link-succession`, pull that candidate's first and last user-turn content
+(`<project> worktrees session-transcript <id> --json`, or grep its
+`user.message` events if the transcript is large) and confirm both: (a) the
+**first** turn is the expected handoff seed (`Task: ... | Resume:
+/consume-handoff ... | Recovery: context-handoff ...`) — proving it really is
+a successor and not an unrelated session that happens to share the cwd — and
+(b) the **last** turn shows real closing activity (e.g. "finalize worktree",
+a concrete result), not the seed still sitting unanswered. A candidate with
+only the seed and nothing after it means the true successor is a *later*
+session still on the worktree, or a class-E "no local transcript" gap.
+
+### A terminal managed worktree's stale, never-registered handoff successor
+
+`register-session`/`status --resolved` refuse on a terminal (`kind` managed,
+status finalized/complete/completed) worktree by design -- that gate protects
+every live session's sessionStart-hook-critical path from an accidental new
+activation on a worktree that's already done -- and `link-succession` requires
+the successor to already be a tracked `SessionEntry`. When a real successor
+consumed a `pending` handoff and did real work but crashed/raced before its
+own registration step ran, neither path applies, and `pending_handoffs`/
+`resolved_head_session` stay wedged forever, permanently blocking gc's
+managed-worktree recheck. **Never hand-edit the tracking YAML** to route
+around this. Use `resolve-handoff-successor <worktree-id> --token <token>
+--successor <session-id>` instead: it applies the identical class-G evidence
+bar above (cwd match, a real handoff-seed first turn, real turns beyond it,
+not still live) before retroactively registering the successor, linking the
+handoff, and concluding it so the record lands back in the terminal shape gc
+expects.
 
 ### Verify head repair survives reconciliation
 

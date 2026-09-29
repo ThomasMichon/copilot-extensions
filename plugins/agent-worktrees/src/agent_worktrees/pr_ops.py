@@ -443,31 +443,6 @@ def _title_from_commits(worktree_path: str, upstream: str) -> str | None:
     return subject or None
 
 
-def _resolve_caller_role(prcfg, repo_slug: str) -> str | None:
-    """Resolve the caller's live permission on ``repo_slug`` for role-aware PR
-    flow resolution (efforts/active/role-aware-fork-pr-flow, GitHub-only).
-
-    Reuses the already-landed ``providers.actor_viewer_permission()`` (#2433)
-    rather than a second provider-specific primitive -- no extra request shape
-    to maintain. Returns ``None`` (never raises) when the repo's provider
-    isn't ``"github"``, ``repo_slug`` is empty, or the live read is unknown/
-    failed -- callers must treat that exactly like "no role resolved" (the
-    base, non-role-scoped ``PRConfig`` applies), never as a denial.
-    """
-    if prcfg.provider != "github" or not repo_slug:
-        return None
-    from . import providers
-    try:
-        provider = providers.get_provider(prcfg.provider)
-        token = providers.account_token_for_slug(repo_slug, prcfg)
-        permission = providers.actor_viewer_permission(
-            provider, repo_slug, api_base=prcfg.api_base, token=token,
-        )
-    except Exception:
-        return None
-    return permission or None
-
-
 def _ensure_fork_and_remote(worktree_path: str, repo_slug: str, prcfg) -> dict:
     """Ensure the caller's fork of ``repo_slug`` exists and a local git remote
     (``prcfg.fork.remote``) points at it.
@@ -834,9 +809,15 @@ def create_pr(
     publish_remote = remote
     fork_owner = ""
     if prcfg.roles:
-        prcfg = cfg.resolve_role_pr_config(
-            prcfg, _resolve_caller_role(prcfg, default_pr_repo),
+        from . import pr_config
+
+        actor_flow = pr_config.resolve_actor_pr_flow(
+            repo,
+            default_pr_repo,
+            authority_sensitive=False,
         )
+        prcfg = actor_flow.pr_config
+        base["viewer_permission"] = actor_flow.viewer_permission
     if prcfg.fork.enabled:
         if not confirm_fork:
             return {
@@ -1141,7 +1122,7 @@ def create_pr(
     _finish_auto_open(
         result, config, record, target_pr, title=eff_title, body=body,
         worktree_id=worktree_id, head_sha=head_sha, open_pr=open_pr,
-        draft=want_draft, attribution=attribution,
+        draft=want_draft, attribution=attribution, prcfg=prcfg,
     )
     observation_error = refresh_head_observation(
         config, record, target_pr, head_sha
@@ -1288,6 +1269,7 @@ def _open_via_provider(
     worktree_id: str,
     head_sha: str,
     *,
+    prcfg,
     draft: bool = False,
     attribution: SourceAttribution = False,
 ) -> None:
@@ -1295,7 +1277,6 @@ def _open_via_provider(
     from . import providers
     from .providers import attribution as attr
 
-    prcfg = config.default_repo.pr
     machine = record.machine if record else ""
     session = ""
     if record and record.sessions:
@@ -1348,7 +1329,6 @@ def _open_via_provider(
             # so this re-raise is a defense-in-depth backstop for the
             # narrow TOCTOU window between that preflight and this actual
             # backfill, not the primary enforcement mechanism.
-            prcfg = config.default_repo.pr
             try:
                 codename_tracking.ensure_codename(
                     record, cfg.tracking_dir(),
@@ -1449,7 +1429,7 @@ def _open_via_provider(
     if not draft:
         from . import pr_config
 
-        flow = pr_config._pr_flow_profile(config.default_repo)
+        flow = pr_config._profile_for_pr_config(prcfg)
         note = self_merge_bypass_note(
             flow, provider, scope.repo, pull.number,
             api_base=getattr(prcfg, "api_base", "") or "", token=token,
@@ -1662,6 +1642,7 @@ def _finish_auto_open(
     open_pr: bool | None,
     draft: bool,
     attribution: SourceAttribution | None,
+    prcfg,
 ) -> None:
     """Open the PR (when pending) or surface an already-open PR's number/url.
 
@@ -1673,7 +1654,6 @@ def _finish_auto_open(
     * target PR already opened          -> surface its number/url on ``result``
                                            (never re-create -> no duplicate, #1167).
     """
-    prcfg = config.default_repo.pr
     want_open = prcfg.auto_open if open_pr is None else open_pr
     if not want_open or target_pr is None:
         return
@@ -1705,7 +1685,7 @@ def _finish_auto_open(
         want_attribution = tracking.attribution_from_frozen_mode(target_pr)
         _open_via_provider(
             result, config, record, target_pr, title, body, worktree_id,
-            head_sha, draft=draft, attribution=want_attribution,
+            head_sha, prcfg=prcfg, draft=draft, attribution=want_attribution,
         )
         return
     # The PR is already open on the provider -- report it so the caller trusts
@@ -1871,6 +1851,8 @@ def _live_pr_state(
     record: tracking.WorktreeRecord | None,
     active: PRRecord | None,
     config: Config,
+    *,
+    prcfg=None,
 ) -> dict | None:
     """Best-effort live verdict/conflict/merge read for the active PR.
 
@@ -1884,7 +1866,7 @@ def _live_pr_state(
     """
     if active is None or active.number is None:
         return None
-    prcfg = config.default_repo.pr
+    prcfg = prcfg or config.default_repo.pr
     provider_name = active.provider or prcfg.provider
     target_repo = active.repo or ((record.repo if record else "") or "")
     try:
@@ -1926,7 +1908,7 @@ def _live_pr_state(
     if st.merge_state not in ("merged", "closed") and not st.wip and not st.held:
         from . import pr_config
 
-        flow = pr_config._pr_flow_profile(config.default_repo)
+        flow = pr_config._profile_for_pr_config(prcfg)
         self_merge_note = self_merge_bypass_note(
             flow, provider, target_repo, active.number,
             api_base=getattr(prcfg, "api_base", "") or "", token=token,
@@ -2236,21 +2218,18 @@ def pr_ready(
 
 
 def pr_status(worktree_id: str, *, all_prs: bool = False,
-              live: bool = True, config: Config | None = None) -> dict:
+              live: bool = True, config: Config | None = None,
+              prcfg=None) -> dict:
     """Return the tracked PR metadata for a worktree (for pr-status).
 
     Returns the **active** PR by default.  With ``all_prs`` the full ``prs``
     history is included alongside the active one.  ``pr_count`` is always
     present so the orphan-detection probe can key on existence.
 
-    Before reporting, the active PR is reconciled against the provider so a PR
-    merged or closed *externally* (e.g. via the ``auto-merge`` label, bypassing
-    ``finalize``/``pr-watch``) is reported with its true terminal state rather
-    than a stale ``open``.  This is the agent's authoritative "did my PR land?"
-    check; when it lands, the result also carries a **pull-forward
-    recommendation** (``pull_forward_recommended`` + ``next_action``) directing
-    the standard post-merge move -- ``agent-worktrees git sync`` to rebase the
-    worktree onto the updated default branch.
+    With ``live`` (default), the active PR is first reconciled against the
+    provider so a PR merged or closed *externally* is reported with its true
+    terminal state rather than a stale ``open``. ``live=False`` performs no
+    provider reconciliation or snapshot read.
 
     With ``live`` (default), a best-effort ``live`` block is added for the
     active PR carrying its review **verdict**, **conflict**, **merge state**, and
@@ -2265,7 +2244,8 @@ def pr_status(worktree_id: str, *, all_prs: bool = False,
                 "error": f"No tracking record found for '{worktree_id}'."}
     if config is None:
         config = cfg.load_config()
-    _reconcile_active_pr(record, config)
+    if live:
+        _reconcile_active_pr(record, config)
     active = record.active_pr()
     result = {**base, "has_pr": active is not None, "pr_count": len(record.prs)}
     if active is not None:
@@ -2274,7 +2254,7 @@ def pr_status(worktree_id: str, *, all_prs: bool = False,
         if rec:
             result.update(rec)
         if live:
-            live_block = _live_pr_state(record, active, config)
+            live_block = _live_pr_state(record, active, config, prcfg=prcfg)
             if live_block:
                 result.update(live_block)
     if all_prs:
@@ -2542,7 +2522,7 @@ def _push_existing_feature(
     _finish_auto_open(
         result, config, record, target, title=title, body=body,
         worktree_id=worktree_id, head_sha=head_sha, open_pr=open_pr,
-        draft=draft, attribution=attribution,
+        draft=draft, attribution=attribution, prcfg=prcfg,
     )
     observation_error = refresh_head_observation(config, record, target, head_sha)
     if observation_error:

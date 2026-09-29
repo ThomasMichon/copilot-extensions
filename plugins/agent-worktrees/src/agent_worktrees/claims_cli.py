@@ -6,7 +6,16 @@ import argparse
 import json
 from pathlib import Path
 
-from . import activity, claim_handoffs, claims_annotate, claims_find_cli, claims_owner, obligations, output, tracking
+from . import (
+    activity,
+    claims_annotate,
+    claims_find_cli,
+    claims_handoff_cli,
+    claims_owner,
+    obligations,
+    output,
+    tracking,
+)
 from . import config as cfg, state_root as state_root_mod
 
 
@@ -122,7 +131,17 @@ def add_parsers(sub) -> None:
         "machine/project/worktree_id followed by claim refs; "
         "values end at the next option",
     )
-    p.add_argument("--reason", default="", help="with handoff decline/cancel: required explanation")
+    p.add_argument(
+        "--reason",
+        default="",
+        help="with handoff decline/cancel: required explanation",
+    )
+    p.add_argument(
+        "--actor",
+        default="",
+        dest="claim_actor",
+        help=argparse.SUPPRESS,
+    )
     p.add_argument("--all-states", action="store_true", help="with owner: include released claims")
     p.add_argument(
         "--repo",
@@ -267,18 +286,6 @@ def cmd_claims(args: argparse.Namespace) -> int:
         return claims_find_cli.cmd_claims_find(args, target[1:])
     worktree_id = target[0] if target else None
     return _claims_show(args, worktree_id)
-
-
-def _claim_handoff_actor(config: cfg.Config, explicit_worktree: str | None) -> str:
-    worktree_id = _infer_worktree_id(explicit_worktree, config)
-    if not worktree_id:
-        raise claim_handoffs.ClaimHandoffError(
-            "cannot infer the acting worktree; run inside it or pass --worktree"
-        )
-    project = config.repo_name or cfg.project_name()
-    return tracking.format_claim_ref(config.machine, project, worktree_id)
-
-
 def _require_coordination_readiness(
     config: cfg.Config,
     *,
@@ -306,6 +313,15 @@ def _emit_coordination_rejection(
     else:
         output.err(f"{readiness.code}: {readiness.error}")
     return 3
+
+
+def _claim_handoff_actor(config: cfg.Config, explicit_worktree: str | None) -> str:
+    return claims_handoff_cli._claim_handoff_actor(
+        config,
+        explicit_worktree,
+        infer_worktree_id=_infer_worktree_id,
+        format_claim_ref=tracking.format_claim_ref,
+    )
 
 
 class CoordinationReadinessFailure(RuntimeError):
@@ -356,110 +372,15 @@ def _coordination_readiness_for_owner_ref(
 
 
 def _claims_handoff(args: argparse.Namespace, target: list[str]) -> int:
-    """Dispatch same-machine claim-bundle offer/show/decline/cancel."""
-    if not target:
-        msg = "claims handoff: missing action (offer|show|decline|cancel)"
-        if args.json:
-            return _json_error(msg, 2)
-        output.err(msg)
-        return 2
-    action = target[0]
-    if action not in {"offer", "show", "decline", "cancel"}:
-        msg = f"claims handoff: unknown action {action!r} (expected offer|show|decline|cancel)"
-        if args.json:
-            return _json_error(msg)
-        output.err(msg)
-        return 1
-    try:
-        if action == "show":
-            if len(target) != 2:
-                raise claim_handoffs.ClaimHandoffError(
-                    "claims handoff show: usage 'show <bundle-id>'"
-                )
-            bundle = claim_handoffs.show(target[1])
-            created = None
-        else:
-            config = cfg.load_config()
-            if action == "offer":
-                blocked = _require_coordination_readiness(config, json_out=args.json)
-                if blocked is not None:
-                    return blocked
-            actor = _claim_handoff_actor(config, getattr(args, "release_worktree", None))
-            if action == "offer":
-                handoff_values = list(getattr(args, "handoff_to", None) or [])
-                if not handoff_values:
-                    raise claim_handoffs.ClaimHandoffError(
-                        "claims handoff offer requires --to <machine/project/worktree>"
-                    )
-                consumer, *trailing_refs = handoff_values
-                bundle, created = claim_handoffs.offer(
-                    actor,
-                    consumer,
-                    [*target[1:], *trailing_refs],
-                    machine=config.machine,
-                )
-            elif action in {"decline", "cancel"}:
-                if len(target) != 2:
-                    raise claim_handoffs.ClaimHandoffError(
-                        f"claims handoff {action}: usage '{action} <bundle-id> --reason <text>'"
-                    )
-                bundle = claim_handoffs.transition(
-                    target[1],
-                    actor=actor,
-                    action="declined" if action == "decline" else "cancelled",
-                    reason=getattr(args, "reason", "") or "",
-                )
-                created = None
-    except claim_handoffs.ClaimHandoffError as exc:
-        if args.json:
-            return _json_error(str(exc))
-        output.err(str(exc))
-        return 1
-    if action == "offer":
-        activity.log_event(
-            "claim_handoff_offered",
-            worktree_id=bundle.source,
-            bundle_id=bundle.bundle_id,
-            consumer=bundle.consumer,
-            refs=[claim["ref"] for claim in bundle.claims],
-            created=created,
-        )
-    elif action == "decline":
-        activity.log_event(
-            "claim_handoff_declined",
-            worktree_id=bundle.source,
-            bundle_id=bundle.bundle_id,
-            consumer=bundle.consumer,
-            reason=bundle.reason,
-        )
-    elif action == "cancel":
-        activity.log_event(
-            "claim_handoff_cancelled",
-            worktree_id=bundle.source,
-            bundle_id=bundle.bundle_id,
-            consumer=bundle.consumer,
-            reason=bundle.reason,
-        )
-    payload = bundle.to_dict()
-    if created is not None:
-        payload["created"] = created
-    if args.json:
-        _json_output(payload)
-        return 0
-    refs = ", ".join(claim["ref"] for claim in bundle.claims)
-    if action == "show":
-        print(
-            f"Claim bundle {bundle.bundle_id}: {bundle.state}\n"
-            f"  source: {bundle.source}\n"
-            f"  consumer: {bundle.consumer}\n"
-            f"  claims: {refs}"
-        )
-    elif action == "offer":
-        verb = "offered" if created else "already offered"
-        print(f"Claim bundle {bundle.bundle_id} {verb} to {bundle.consumer}: {refs}")
-    else:
-        print(f"Claim bundle {bundle.bundle_id}: {bundle.state}")
-    return 0
+    return claims_handoff_cli.claims_handoff(
+        args,
+        target,
+        require_coordination_readiness=_require_coordination_readiness,
+        infer_worktree_id=_infer_worktree_id,
+        format_claim_ref=tracking.format_claim_ref,
+        json_error=_json_error,
+        json_output=_json_output,
+    )
 
 
 def _resolve_owner_ref_record_path(

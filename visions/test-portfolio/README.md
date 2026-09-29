@@ -146,6 +146,9 @@ force unrelated contributors to debug an entire subsystem.
 ## See Also
 
 - Related vision: [`clean-room-validation`](../clean-room-validation/README.md)
+- Related vision: [`coverage-guided-ci`](../coverage-guided-ci/README.md) —
+  selects *when* an already-justified test runs from this portfolio; never a
+  competing definition of what belongs in it
 - Testing guide: [`TESTING.md`](../../TESTING.md)
 - Current runner: [`tools/run-plugin-tests.py`](../../tools/run-plugin-tests.py)
 - Realization effort:

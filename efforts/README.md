@@ -11,7 +11,6 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [CI Identifier Leak Guard](active/ci-identifier-leak-guard/README.md) | Active | #3923 |
-| [Graceful Cutover — agent-worktrees / worktree-manager / agent-ssh](active/graceful-cutover-worktrees-and-ssh/README.md) | Draft | See effort |
 | [CI Reliability & Flakiness Telemetry](active/ci-flakiness-telemetry-and-reliability/README.md) | Active | _pending_ |
 | [Worktree/Effort Railroad Binding](active/worktree-effort-railroad-binding/README.md) | Draft | #3581 |
 | [Worktree Head-Succession Hardening](active/worktree-head-succession-hardening/README.md) | Draft | #3584 |
@@ -61,6 +60,7 @@ that pattern to this repository.
 | [Authoritative Write-Through Daemon](active/agent-worktrees-authoritative-daemon/README.md) | Active | #3761 |
 | [agent-dispatch Worker Operating Procedures](active/agent-dispatch-worker-operating-procedures/README.md) | Draft | #3897 |
 | [Mux Companion Manual Cutover Diagnostics](active/mux-companion-manual-cutover-diagnostics/README.md) | Active | #4369 |
+| [Coverage-Guided CI Test Selection](active/coverage-guided-ci/README.md) | Draft | #4453 |
 
 
 ## Local conventions

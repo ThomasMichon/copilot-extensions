@@ -1244,6 +1244,111 @@ exit /b %ERRORLEVEL%
     Write-Ok "Binstub: $ps1Path (+ .cmd fallback, setup-gated)"
 }
 
+function Install-ServerVenv {
+    <# agent-index-server-venv-split: provision a sibling SERVER venv inside
+       the current runtime slot ($VenvDir\server), installing the full
+       agent-index[store,server] package -- so `spawn_passive` (and, once its
+       own dispatcher retarget lands, `cmd_start`/`cmd_cell_start`) can run the
+       FastAPI/uvicorn/pydantic service from a venv separate from the
+       client/orchestrator's own, keeping a pure client's install footprint
+       light. This is the exact sibling path `config.server_venv_python()`
+       already resolves (a `server` subdirectory of whichever directory
+       contains the current interpreter's own `Scripts`/`bin` folder) --
+       provisioning here just makes that existing, previously-inert resolver
+       find something.
+
+       Host role only: a client never runs the service, so it never needs
+       this second venv. Provisioning failures are WARN, never FAIL --
+       `config.server_venv_python()` already falls back to `$null` (in-process
+       `serve()`, or the shared venv for `spawn_passive`) when no sibling
+       exists, so a failure here must never block the primary client
+       install/update.
+
+       Prefers a signed base Python via `--copies` (mirroring the main venv's
+       own preference, see `Get-SignedBasePython`'s docstring): the resulting
+       python.exe is BOTH spawnable over a non-interactive SSH logon AND
+       Smart-App-Control-allowed, same rationale as the primary slot. Falls
+       back to `uv venv` (or a bare `python -m venv`) only when no signed base
+       is available. Note this is NOT a latency optimization -- CPython's own
+       Windows venv launcher re-execs the base interpreter as a child process
+       either way (`--copies` and a plain/uv-created venv launcher both do
+       this; confirmed empirically), so preferring the signed base changes
+       SSH/SAC compatibility, not the number of process hops a spawn takes. #>
+    param(
+        [Parameter(Mandatory)][string]$InstallRole,
+        [Parameter(Mandatory)][AllowNull()][string]$PythonCmd
+    )
+    if ($InstallRole -ne 'host') {
+        Write-Skip 'Server venv: skipped (client role never runs the service)'
+        return
+    }
+
+    $serverVenvDir = Join-Path $VenvDir 'server'
+    $serverVenvPython = Join-Path $serverVenvDir 'Scripts\python.exe'
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+
+    if (-not (Test-Path $serverVenvPython)) {
+        $created = $false
+        $signedBase = Get-SignedBasePython
+        if ($signedBase) {
+            & $signedBase -m venv --copies --clear $serverVenvDir 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $serverVenvPython)) {
+                $created = $true
+                Write-Ok "Server venv created from signed Python ($signedBase)"
+            } else {
+                Write-Warn 'Signed-Python server venv creation failed -- falling back to uv'
+            }
+        }
+        if (-not $created) {
+            if (Get-Command uv -ErrorAction SilentlyContinue) {
+                $prevLoc = Get-Location
+                Set-Location "$env:SystemDrive\"
+                try { & uv venv $serverVenvDir --allow-existing 2>&1 | Out-Null } finally { Set-Location $prevLoc }
+            } elseif ($PythonCmd) {
+                & $PythonCmd -m venv $serverVenvDir 2>&1 | Out-Null
+            }
+            if (Test-Path $serverVenvPython) { $created = $true }
+        }
+        if (-not $created) {
+            $ErrorActionPreference = $prevEAP
+            Write-Warn "Server venv creation failed -- $serverVenvPython not found (spawn_passive falls back to the shared venv)"
+            return
+        }
+    }
+
+    $ZddDir = Resolve-Zdd
+    if ($ZddDir) {
+        if (Get-Command uv -ErrorAction SilentlyContinue) {
+            & uv pip install --python $serverVenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet 2>&1 | Out-Null
+        } else {
+            & $serverVenvPython -m pip install "$ZddDir" 2>&1 | Out-Null
+        }
+        if ($LASTEXITCODE -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            Write-Warn "Server venv zdd install failed (exit $LASTEXITCODE) -- spawn_passive falls back to the shared venv"
+            return
+        }
+    }
+    Remove-ConsoleTrampolines -VenvDir $serverVenvDir
+
+    $serverPkgSpec = "$PluginDir[store,server]"
+    if (Get-Command uv -ErrorAction SilentlyContinue) {
+        $srvOut = & uv pip install --python $serverVenvPython $serverPkgSpec 2>&1 | Out-String
+    } else {
+        $srvOut = & $serverVenvPython -m pip install $serverPkgSpec 2>&1 | Out-String
+    }
+    if ($LASTEXITCODE -ne 0) {
+        $ErrorActionPreference = $prevEAP
+        Write-Warn 'Server venv package install failed -- spawn_passive falls back to the shared venv'
+        Write-Host $srvOut
+        return
+    }
+    $ErrorActionPreference = $prevEAP
+    Remove-ConsoleTrampolines -VenvDir $serverVenvDir
+    Write-Ok "Server venv provisioned: $serverVenvDir"
+}
+
 function Install-Runtime {
     if (-not (Test-Path $PkgSrcDir)) { Write-Fail "Package source not found at $PkgSrcDir"; exit 1 }
     $pythonCmd = $null
@@ -1404,6 +1509,25 @@ function Install-Runtime {
         Write-Fail 'Cannot locate zdd library. Reinstall the agent-index plugin from the marketplace (copilot plugin install agent-index@copilot-extensions), then rerun this installer.'
         exit 1
     }
+
+    # agent-procutil is a `uv`-editable canonical reference in a dev
+    # checkout (vendor-pointer-generalization effort: no local copy at
+    # all) and not on PyPI -- pre-install it the same way as zdd above, so
+    # the non-uv (bare-pip) fallback below can still resolve it.
+    $ProcutilDir = Resolve-VendoredLib -LibName 'agent-procutil'
+    if ($ProcutilDir) {
+        if (Get-Command uv -ErrorAction SilentlyContinue) {
+            $procutilOut = & uv pip install --python $VenvPython "$ProcutilDir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet 2>&1
+        } else {
+            $procutilOut = & $VenvPython -m pip install "$ProcutilDir" 2>&1
+        }
+        if ($LASTEXITCODE -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            Write-Fail "agent-procutil install failed (exit $LASTEXITCODE)"
+            if ($procutilOut) { Write-Host ($procutilOut | Out-String) }
+            exit 1
+        }
+    }
     Remove-ConsoleTrampolines -VenvDir $VenvDir
     # A host runs the local indexing/vector-store stack and the FastAPI/uvicorn
     # server, so it needs the [store,server] extras (numpy, pyarrow, lancedb,
@@ -1435,6 +1559,8 @@ function Install-Runtime {
     $ErrorActionPreference = $prevEAP
     Remove-ConsoleTrampolines -VenvDir $VenvDir
     Write-Ok 'Package installed: agent-index'
+
+    Install-ServerVenv -InstallRole $installRole -PythonCmd $pythonCmd
 
     Deploy-SetupGatedBinstub
 
@@ -1650,6 +1776,27 @@ function Install-Engine {
         }
     }
 
+    # agent-procutil is likewise a `uv`-editable canonical reference in a
+    # dev checkout (no local copy, not on PyPI) -- pre-install it the same
+    # way as zdd above. Unlike zdd's own silently-ignored failure, a
+    # failed refresh here must fail the whole engine install: `agent-index`
+    # declares only an UNVERSIONED `agent-procutil` requirement, so the
+    # main-package install below could still "succeed" against a stale
+    # copy already present in a preserved engine venv, silently shipping
+    # old shared code (PR #4465 review).
+    $engRc = 0
+    $ProcutilDir = Resolve-VendoredLib -LibName 'agent-procutil'
+    if ($ProcutilDir) {
+        if (Get-Command uv -ErrorAction SilentlyContinue) {
+            & uv pip install --python $EngineVenvPython "$ProcutilDir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet 2>&1 |
+                ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
+        } else {
+            & $EngineVenvPython -m pip install "$ProcutilDir" 2>&1 |
+                ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
+        }
+        $engRc = $LASTEXITCODE
+    }
+
     # agent-index-engine (plugins/agent-index/server/) -- a SEPARATE, independently
     # installable program that owns the heavy embedding stack, into the DURABLE
     # venv only. It depends on the light `agent-index` base package (index_config,
@@ -1673,7 +1820,12 @@ function Install-Engine {
     #      by the step-1 versions; --no-deps skips re-resolving them through the
     #      blocked host.
     $torchIdx = $env:AGENT_INDEX_TORCH_INDEX
-    if (Get-Command uv -ErrorAction SilentlyContinue) {
+    $engOut = @()
+    if ($engRc -ne 0) {
+        # agent-procutil's own preinstall above already failed -- skip the
+        # rest of the engine install rather than risk silently accepting a
+        # stale copy already present in a preserved engine venv.
+    } elseif (Get-Command uv -ErrorAction SilentlyContinue) {
         $baseOut = & uv pip install --python $EngineVenvPython "$PluginDir" 2>&1
         $engRc = $LASTEXITCODE
         $engOut = @($baseOut)

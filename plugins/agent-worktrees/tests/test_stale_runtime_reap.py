@@ -30,23 +30,27 @@ def test_reap_sweeps_versions_root_excluding_current_slot(monkeypatch, tmp_path)
     )
     seen = {}
 
-    def _fake_terminate(root, *, exclude=None, exclude_pids=None):
+    def _fake_terminate(root, *, exclude=None, exclude_pids=None, protect_ancestors=None):
         seen["root"] = root
         seen["exclude"] = exclude
+        seen["protect_ancestors"] = protect_ancestors
         return [
             {"pid": 111, "name": "python.exe", "executable": "x", "killed": True},
             {"pid": 222, "name": "python.exe", "executable": "y", "killed": False},
         ]
 
+    import agent_worktrees.launch_registry as _launch_registry
     import agent_worktrees.procs as _procs
 
     monkeypatch.setattr(_procs, "terminate_processes_under_executable", _fake_terminate)
+    monkeypatch.setattr(_launch_registry, "active_launch_pids", lambda install_dir: {999})
 
     killed = stale_runtime_reap.reap(_FakeCfg(install_root))
 
     assert killed == [111]  # only the actually-killed pid is reported
     assert seen["root"] == str(install_root / "versions")
     assert seen["exclude"] == os.path.realpath(str(install_root / "versions" / "2.0.0"))
+    assert seen["protect_ancestors"] == {999}  # registered live launcher roots are forwarded
 
 
 def test_reap_degrades_to_empty_on_error(monkeypatch, tmp_path):

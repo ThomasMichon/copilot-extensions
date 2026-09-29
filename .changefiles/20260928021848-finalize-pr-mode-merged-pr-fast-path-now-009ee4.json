@@ -1,9 +1,0 @@
-{
-  "comment": "finalize: PR-mode merged-PR fast path now compares against the live checked-out ref (never a stale feature-branch snapshot) and requires zero commits beyond the tracked PR's merged head, closing five distinct ways post-merge work could be silently discarded",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

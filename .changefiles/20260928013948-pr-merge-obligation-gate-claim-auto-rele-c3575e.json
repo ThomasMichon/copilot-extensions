@@ -1,9 +1,0 @@
-{
-  "comment": "pr-merge-obligation-gate: claim + auto-release a pr resource on open/merge, independent of pr.strategy",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

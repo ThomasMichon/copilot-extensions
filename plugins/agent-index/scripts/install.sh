@@ -1040,6 +1040,75 @@ do_stamp() {
     _ok "Stamped: binstub on PATH; runtime provisions after explicit setup."
 }
 
+_install_server_venv() {
+    # agent-index-server-venv-split: provision a sibling SERVER venv inside
+    # the current runtime slot ($VENV_DIR/server), installing the full
+    # agent-index[store,server] package -- so `spawn_passive` (and, once its
+    # own dispatcher retarget lands, `cmd_start`/`cmd_cell_start`) can run the
+    # FastAPI/uvicorn/pydantic service from a venv separate from the
+    # client/orchestrator's own, keeping a pure client's install footprint
+    # light. This is the exact sibling path `config.server_venv_python()`
+    # already resolves (a `server` subdirectory of whichever directory
+    # contains the current interpreter's own `Scripts`/`bin` folder) --
+    # provisioning here just makes that existing, previously-inert resolver
+    # find something.
+    #
+    # Host role only: a client never runs the service, so it never needs this
+    # second venv. Provisioning failures are WARN, never FAIL --
+    # `config.server_venv_python()` already falls back to `None` (in-process
+    # `serve()`, or the shared venv for `spawn_passive`) when no sibling
+    # exists, so a failure here must never block the primary client
+    # install/update.
+    local install_role="$1" py="$2"
+    if [[ "$install_role" != "host" ]]; then
+        _skip 'Server venv: skipped (client role never runs the service)'
+        return 0
+    fi
+
+    local server_venv_dir="$VENV_DIR/server"
+    local server_venv_python="$server_venv_dir/bin/python3"
+    local have_uv=0
+    command -v uv >/dev/null 2>&1 && have_uv=1
+
+    if [[ ! -x "$server_venv_python" ]]; then
+        if [[ "$have_uv" -eq 1 ]]; then
+            uv venv "$server_venv_dir" --allow-existing >/dev/null 2>&1 \
+                || "$py" -m venv "$server_venv_dir" >/dev/null 2>&1
+        else
+            "$py" -m venv "$server_venv_dir" >/dev/null 2>&1
+        fi
+        if [[ ! -x "$server_venv_python" ]]; then
+            _warn "Server venv creation failed -- $server_venv_python not found (spawn_passive falls back to the shared venv)"
+            return 0
+        fi
+    fi
+
+    local zdd_dir
+    if zdd_dir="$(_resolve_zdd)"; then
+        if [[ "$have_uv" -eq 1 ]]; then
+            uv pip install --python "$server_venv_python" "$zdd_dir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet >/dev/null 2>&1
+        else
+            "$server_venv_python" -m pip install "$zdd_dir" >/dev/null 2>&1
+        fi || {
+            _warn "Server venv zdd install failed -- spawn_passive falls back to the shared venv"
+            return 0
+        }
+    fi
+
+    local srv_out
+    if [[ "$have_uv" -eq 1 ]]; then
+        srv_out="$(uv pip install --python "$server_venv_python" "${PLUGIN_DIR}[store,server]" 2>&1)"
+    else
+        srv_out="$("$server_venv_python" -m pip install "${PLUGIN_DIR}[store,server]" 2>&1)"
+    fi
+    if [[ $? -ne 0 ]]; then
+        _warn 'Server venv package install failed -- spawn_passive falls back to the shared venv'
+        printf '%s\n' "$srv_out" >&2
+        return 0
+    fi
+    _ok "Server venv provisioned: $server_venv_dir"
+}
+
 _ensure_runtime() {
     if [[ ! -d "$PKG_SRC_DIR" ]]; then
         _fail "Package source not found at $PKG_SRC_DIR"
@@ -1143,6 +1212,22 @@ _ensure_runtime() {
         exit 1
     fi
 
+    # agent-procutil is a `uv`-editable canonical reference in a dev
+    # checkout (vendor-pointer-generalization effort: no local copy at
+    # all) and not on PyPI -- pre-install it the same way as zdd above, so
+    # the non-uv (bare-pip) fallback below can still resolve it.
+    local procutil_dir
+    if procutil_dir="$(_resolve_vendored_lib agent-procutil)"; then
+        if [[ "$have_uv" -eq 1 ]]; then
+            uv pip install --python "$VENV_PYTHON" "$procutil_dir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet
+        else
+            "$VENV_PYTHON" -m pip install "$procutil_dir" >/dev/null
+        fi || {
+            _fail "agent-procutil install failed"
+            exit 1
+        }
+    fi
+
     _pip_install() {
         # A host runs the local indexing/vector-store stack and the FastAPI/
         # uvicorn server, so it needs the [store,server] extras (numpy,
@@ -1173,7 +1258,15 @@ _ensure_runtime() {
         printf '%s\n' "$pkg_out" >&2
         exit 1
     fi
+    # _pip_install ran in a command-substitution subshell, so its own
+    # install_role assignment above didn't survive back to this scope --
+    # recompute it directly (cheap, side-effect-free) rather than trying to
+    # thread a subshell result back out.
+    install_role="$(_activation_role)"
+    [[ "$install_role" == "unconfigured" ]] && install_role="$(_machine_role)"
     _ok 'Package installed: agent-index'
+
+    _install_server_venv "$install_role" "$py"
 
     deploy_binstub
 
@@ -1344,6 +1437,24 @@ _install_engine() {
         fi
     fi
 
+    # agent-procutil is likewise a `uv`-editable canonical reference in a
+    # dev checkout (no local copy, not on PyPI) -- pre-install it the same
+    # way as zdd above. Unlike zdd's own silent `|| true`, a failed refresh
+    # here must fail the whole engine install: `agent-index` declares only
+    # an UNVERSIONED `agent-procutil` requirement, so the main-package
+    # install below could still "succeed" against a stale copy already
+    # present in a preserved engine venv, silently shipping old shared
+    # code (PR #4465 review).
+    local rc=0
+    local procutil_dir
+    if procutil_dir="$(_resolve_vendored_lib agent-procutil)"; then
+        if [[ "$have_uv" -eq 1 ]]; then
+            uv pip install --python "$ENGINE_VENV_PYTHON" "$procutil_dir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet >/dev/null 2>&1 || rc=$?
+        else
+            "$ENGINE_VENV_PYTHON" -m pip install "$procutil_dir" >/dev/null 2>&1 || rc=$?
+        fi
+    fi
+
     # agent-index-engine (plugins/agent-index/server/) -- a SEPARATE, independently
     # installable program that owns the heavy embedding stack, into the DURABLE
     # venv only. It depends on the light `agent-index` base package (index_config,
@@ -1362,9 +1473,10 @@ _install_engine() {
     #      (often network-blocked), so we take deps from the reachable default feed
     #      (step 1) and only the reachable CUDA torch wheel here; --no-deps skips
     #      re-resolving the CUDA build's exact dep pins through the blocked host.
-    local rc=0
     local torch_idx="${AGENT_INDEX_TORCH_INDEX:-}"
-    if [[ "$have_uv" -eq 1 ]]; then
+    if [[ "$rc" -ne 0 ]]; then
+        :
+    elif [[ "$have_uv" -eq 1 ]]; then
         uv pip install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR" || rc=$?
         if [[ "$rc" -eq 0 ]]; then
             local uv_args=(pip install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR/server")

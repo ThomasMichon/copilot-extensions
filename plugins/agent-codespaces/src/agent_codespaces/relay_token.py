@@ -74,21 +74,32 @@ def authorize_azure(token: str, action: str, fields: dict[str, str]) -> bool:
     codespace when the token was minted (see :func:`token_for`). Legacy
     string-only entries carry no allowlist and are therefore denied for scoped
     minting -- they must be re-minted (structured) to gain Azure-token access.
+
+    Raises :class:`credential_relay.server.ScopeDenied` -- rather than simply
+    returning ``False`` -- when the token IS a recognized per-codespace secret
+    but the specific resource/scope is not in its allowlist (#4367): the relay
+    gate turns this into an explicit, wire-visible denial for a caller who
+    already holds a valid token, while an unrecognized/garbage token still
+    returns a plain ``False`` and stays fully silent over the wire.
     """
     if action != "get-azure-token" or not token:
         return False
+    from credential_relay.server import ScopeDenied
+
     requested = fields.get("scope") or fields.get("resource") or ""
     normalized = requested.removesuffix("/.default").rstrip("/")
     for entry in _read_tokens().values():
         if not secrets.compare_digest(token, _token_value(entry)):
             continue
         if not isinstance(entry, dict):
-            return False
+            raise ScopeDenied  # legacy string-only entry: no allowlist at all
         allowed = {
             str(value).removesuffix("/.default").rstrip("/")
             for value in entry.get("allowed_resources", [])
         }
-        return "*" in allowed or normalized in allowed
+        if "*" in allowed or normalized in allowed:
+            return True
+        raise ScopeDenied
     return False
 
 

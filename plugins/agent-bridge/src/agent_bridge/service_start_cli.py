@@ -159,6 +159,13 @@ def _cmd_start(args: argparse.Namespace) -> None:
     app.state.single_instance = singleton
     app.state.background_readiness = True
     app.state.publish_on_ready = not passive
+    # Explicit passive marker (distinct from publish_on_ready, which a
+    # create_app()-only caller -- every non-CLI test harness -- never sets
+    # at all; defaulting *that* absence to "treat as passive" broke the
+    # startup reattach scan for every such test, PR #4543 review). Absent
+    # (False) means "run the normal startup reattach scan" -- the safe
+    # default for anything that isn't this CLI's own --passive cutover spawn.
+    app.state.passive = passive
 
     dynamic_port = _dynamic_bind_requested(cfg.port, explicit_port)
     requested_port = 0 if dynamic_port else (cfg.port if cfg.port > 0 else default_port())

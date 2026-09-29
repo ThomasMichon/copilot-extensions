@@ -6,8 +6,10 @@ import json
 from pathlib import Path
 
 from plugin_resolve import (
+    MarketplaceSourceKind,
     load_marketplace,
     marketplace_manifest_path,
+    marketplace_source_kind,
     plugin_dir,
     read_repo_settings,
     resolve_repo_plugins,
@@ -62,6 +64,37 @@ def test_settings_local_overrides_base(tmp_path):
 def test_settings_missing_is_empty(tmp_path):
     s = read_repo_settings(tmp_path / "nope")
     assert s.enabled == {} and s.marketplaces == {}
+
+
+def test_settings_non_boolean_enablement_is_not_truthy(tmp_path):
+    _w(
+        tmp_path / ".github" / "copilot" / "settings.json",
+        {"enabledPlugins": {"quoted@mp": "false", "numeric@mp": 1}},
+    )
+    assert read_repo_settings(tmp_path).enabled == {}
+
+
+def test_marketplace_source_classification_is_typed():
+    settings = read_repo_settings(Path("missing"))
+    settings.marketplaces.update(
+        {
+            "local": {"source": {"source": "directory", "path": "./.ai"}},
+            "remote": {"source": {"source": "github", "repo": "owner/repo"}},
+            "bad": {"source": {"source": "unsupported"}},
+        }
+    )
+    assert (
+        marketplace_source_kind("local", settings)
+        is MarketplaceSourceKind.LOCAL
+    )
+    assert (
+        marketplace_source_kind("remote", settings)
+        is MarketplaceSourceKind.REMOTE
+    )
+    assert (
+        marketplace_source_kind("bad", settings)
+        is MarketplaceSourceKind.INVALID
+    )
 
 
 def test_split_source():
@@ -149,6 +182,101 @@ def test_load_marketplace_missing(tmp_path):
     assert load_marketplace(tmp_path / "nope") is None
 
 
+def test_marketplace_name_must_be_a_string(tmp_path):
+    _w(
+        tmp_path / ".claude-plugin" / "marketplace.json",
+        {"name": 123, "plugins": []},
+    )
+    assert load_marketplace(tmp_path) is None
+
+
+def test_plugin_entry_name_must_be_a_string(tmp_path):
+    _w(
+        tmp_path / ".claude-plugin" / "marketplace.json",
+        {"name": "mp", "plugins": [{"name": 123, "source": "p"}]},
+    )
+    _w(tmp_path / "p" / "plugin.json", {"name": "123"})
+    mp = load_marketplace(tmp_path)
+    assert mp is not None
+    assert mp.plugins == {}
+    assert plugin_dir(mp, "123") is None
+
+
+def test_plugin_source_cannot_escape_marketplace(tmp_path):
+    outside = tmp_path / "outside"
+    market = tmp_path / "market"
+    _w(outside / "plugin.json", {"name": "p"})
+    _w(
+        market / ".claude-plugin" / "marketplace.json",
+        {
+            "name": "mp",
+            "plugins": [{"name": "p", "source": "../../outside"}],
+        },
+    )
+    mp = load_marketplace(market)
+    assert plugin_dir(mp, "p") is None
+
+
+def test_plugin_root_cannot_escape_marketplace(tmp_path):
+    outside = tmp_path / "outside"
+    market = tmp_path / "market"
+    _w(outside / "p" / "plugin.json", {"name": "p"})
+    _w(
+        market / ".claude-plugin" / "marketplace.json",
+        {
+            "name": "mp",
+            "metadata": {"pluginRoot": "../../outside"},
+            "plugins": [{"name": "p", "source": "p"}],
+        },
+    )
+    mp = load_marketplace(market)
+    assert plugin_dir(mp, "p") is None
+
+
+def test_plugin_symlink_cannot_escape_marketplace(tmp_path):
+    outside = tmp_path / "outside"
+    market = tmp_path / "market"
+    _w(outside / "plugin.json", {"name": "p"})
+    _w(
+        market / ".claude-plugin" / "marketplace.json",
+        {"name": "mp", "plugins": [{"name": "p", "source": "p"}]},
+    )
+    try:
+        (market / "p").symlink_to(outside, target_is_directory=True)
+    except OSError:
+        return
+    mp = load_marketplace(market)
+    assert plugin_dir(mp, "p") is None
+
+
+def test_plugin_manifest_name_must_match_marketplace_entry(tmp_path):
+    _w(
+        tmp_path / ".claude-plugin" / "marketplace.json",
+        {"name": "mp", "plugins": [{"name": "p", "source": "p"}]},
+    )
+    _w(tmp_path / "p" / "plugin.json", {"name": "other"})
+    mp = load_marketplace(tmp_path)
+    assert plugin_dir(mp, "p") is None
+
+
+def test_duplicate_plugin_name_is_ambiguous(tmp_path):
+    _w(
+        tmp_path / ".claude-plugin" / "marketplace.json",
+        {
+            "name": "mp",
+            "plugins": [
+                {"name": "p", "source": "first"},
+                {"name": "p", "source": "second"},
+            ],
+        },
+    )
+    _w(tmp_path / "first" / "plugin.json", {"name": "p"})
+    _w(tmp_path / "second" / "plugin.json", {"name": "p"})
+    mp = load_marketplace(tmp_path)
+    assert mp is not None and mp.duplicates == frozenset({"p"})
+    assert plugin_dir(mp, "p") is None
+
+
 # ---------------------------------------------------------------------------
 # resolve_repo_plugins -- the high-level answer.
 # ---------------------------------------------------------------------------
@@ -179,6 +307,25 @@ def test_resolve_repo_plugins_claude_settings(tmp_path):
     })
     res = resolve_repo_plugins(repo)
     assert res.resolved["cps@spo"] == (repo / ".ai" / "cps").resolve()
+
+
+def test_resolve_repo_plugins_requires_marketplace_identity(tmp_path):
+    repo = tmp_path / "repo"
+    _make_ai_marketplace(repo / ".ai", "other", "p")
+    _w(
+        repo / ".github" / "copilot" / "settings.json",
+        {
+            "extraKnownMarketplaces": {
+                "expected": {
+                    "source": {"source": "directory", "path": "./.ai"}
+                }
+            },
+            "enabledPlugins": {"p@expected": True},
+        },
+    )
+    result = resolve_repo_plugins(repo)
+    assert result.resolved == {}
+    assert result.unresolved == ["p@expected"]
 
 
 def test_resolve_repo_plugins_remote_is_unresolved(tmp_path):

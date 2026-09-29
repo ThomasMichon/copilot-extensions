@@ -11,7 +11,7 @@ in any control repo and your agent knows how to **diagnose** the deployed
 runtimes, **contribute** changes to the plugins, and **validate** them on a
 fresh box, without you hand-writing a per-repo guide or installing a runtime.
 
-The plugin declares two checked-in static projections. Adopting
+The plugin declares four checked-in static projections. Adopting
 repositories synchronize them with the
 `customizing-copilot:reviewing-customizations` manager; each remains available
 without a competing `sessionStart` output.
@@ -26,10 +26,25 @@ without a competing `sessionStart` output.
   `argv[0]` from the session command catalog, never a bare PATH lookup), and
   cross-link a local symptom's tracking issue with its upstream
   `ThomasMichon/copilot-extensions` issue/PR in both directions.
+- **`commented-review-verdict`** — a PR review verdict that comes back as a
+  plain comment (not an approval/change-request) is Copilot's normal
+  non-blocking review shape absent a repo-specific override; read it as
+  advisory and land the change rather than chasing a further verdict that
+  may never arrive.
+- **`validate-and-promote-triage`** — a red `validate-and-promote` release
+  gate blocks every pending contributor's work, not just whoever broke it;
+  identify every job that actually failed (a per-plugin fan-out job, or
+  `worktree-manager`/`guards-full-sweep`), and for a fan-out failure
+  classify a known accepted flake apart from a CI-environment-specific test
+  bug apart from a genuine regression, then fix
+  forward. Full runbook in the
+  [diagnosing-validate-and-promote-failures](skills/diagnosing-validate-and-promote-failures/SKILL.md)
+  skill.
 
 | Skill | Priority | Covers |
 |-------|----------|--------|
 | [diagnosing-copilot-extensions](skills/diagnosing-copilot-extensions/SKILL.md) | **Primary (hard guidance)** | Identify what belongs to this system before touching it; never monkey-patch a deployed copy (file a bug upstream, sanitized, or auto-update instead); symptom → cause → action for deployed plugins; key paths, diagnostic commands, and the baseline-reset escape hatch |
+| [diagnosing-validate-and-promote-failures](skills/diagnosing-validate-and-promote-failures/SKILL.md) | Secondary (opt-in) | Diagnose a red `validate-and-promote` release-pipeline run: isolate the failing per-plugin fan-out job via `gh run view --log`, classify a CI-environment-specific test bug apart from a genuine regression, and land the fix forward |
 | [contributing-to-copilot-extensions](skills/contributing-to-copilot-extensions/SKILL.md) | Secondary (opt-in) | Repo layout, the PR-required worktree flow (`create` → `create-pr`/`push-changes` → `pr-merge --now` → `finalize`), the submitter's hard **merged + finalized** completion gate, the **mandatory version bump**, test + install-contract gates, deploy-after-merge, and source-of-truth rules |
 | [validating-in-clean-room](skills/validating-in-clean-room/SKILL.md) | **Run · evaluate · author** clean-room validation (`tools/clean-room/`): fresh-box scenarios, `cr-report.json` + `cr-logs/`, jam taxonomy, Tier-E literal-mode judging, and the scenario contract |
 

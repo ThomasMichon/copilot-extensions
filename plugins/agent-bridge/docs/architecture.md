@@ -233,8 +233,9 @@ GET    /health                           # Service health (no auth); includes ag
 ```
 POST   /api/v1/drain                     # Open the drain gate; wait for busy sessions to settle
 POST   /api/v1/undrain                   # Release the drain gate (cutover rollback)
-POST   /api/v1/shutdown                  # Clean daemon shutdown (retires its own routing-table entry)
+POST   /api/v1/shutdown                  # Clean daemon shutdown (releases this generation's session-host claims, then retires its own routing-table entry)
 POST   /api/v1/relay/adopt               # Bind/adopt the provider-configured credential relay on this daemon
+POST   /api/v1/session-hosts/reattach    # Retry the session-host claim + reattach scan on demand (post-cutover, once the old generation is confirmed exited)
 POST   /api/v1/gc                        # Prune aged terminal/disconnected sessions
 ```
 
@@ -513,9 +514,14 @@ runs a reversible cutover (`zdd.cutover.CutoverOrchestrator`):
 2. wait until it is healthy;
 3. **flip the routing table** -> new `active`, old demoted to `previous`;
 4. **drain** the old daemon (busy-oracle wait, optional `--force`);
-5. **-- commit point --** shut the old daemon down (a clean exit; it
-   `clear_if_owner`s only its own route entry);
-6. best-effort: adopt the credential relay (ephemeral) on the new daemon.
+5. **-- commit point --** shut the old daemon down (`POST /api/v1/shutdown`:
+   releases every session-host claim this generation holds, then a clean
+   exit; it `clear_if_owner`s only its own route entry -- see
+   [Session-host generation handoff](#4-session-host-generation-handoff-claimreleaserecover)
+   below);
+6. best-effort: adopt the credential relay (ephemeral) on the new daemon, and
+   retry the session-host claim scan (`POST /api/v1/session-hosts/reattach`)
+   now that the old generation is confirmed gone.
 
 Any failure **before** the commit point rolls back: re-publish the old endpoint
 as active, undrain the old daemon, and terminate the freshly spawned passive. If
@@ -523,7 +529,11 @@ the route was already flipped and the old daemon is gone, the orchestrator
 **commits forward** to the healthy new daemon rather than strand clients. The
 [single-instance guard](#single-instance-guard) is **port-keyed** so an active
 and a passive daemon can coexist on one config dir during the overlap (two starts
-on the *same* port still collide).
+on the *same* port still collide). A process-wide `zdd.cutover_lock.CutoverLock`
+additionally serializes the whole sequence against a second concurrent
+invocation (two operators, or a `restart` racing an installer-driven `deploy`);
+contention waits (bounded) rather than refusing outright, so a legitimate
+back-to-back trigger still succeeds once the first cutover completes.
 
 **Durable breadcrumb + stale-cutover recovery.** The orchestrator runs in the
 short-lived `agent-bridge deploy` process, separate from the daemons it drives.
@@ -536,6 +546,52 @@ to the cutover that drained it. `agent-bridge deploy` heals such a stale
 breadcrumb on its next run (undraining the stranded survivor); `agent-bridge
 deploy --recover` runs *only* that heal and exits. Combined with the drain
 watchdog (#1757), a stranded survivor self-heals even if no deploy is re-run.
+
+### 4. Session-host generation handoff (claim/release/recover)
+
+The routing table's `active.json` cutover above swaps the *daemon*; each
+session's own **Session Host** child (`HostIndex`, `<config_dir>/hosts/
+index.json`) survives that swap independently and needs its own handoff so
+the new daemon adopts it rather than respawning it or racing the old daemon
+over it:
+
+- Each process computes a **generation id** once at startup
+  (`zdd.claims.generation_id(version, pid)`), never persisted or reused
+  across a restart. A newly-spawned host is registered with this
+  generation's ownership already stamped -- it never looks "unclaimed" to
+  another generation while this one is actively driving it.
+- **A passive cutover instance never reattaches at all.** Reattaching means
+  ATTACHing to the Session Host's socket, and the host's own connection
+  handler unconditionally displaces whatever front already holds it -- so a
+  still-passive daemon reattaching would disconnect the truly active old
+  generation before any cutover gate ever ran. The startup reattach scan
+  (`reattach_session_hosts()`) therefore only runs for a normally-starting
+  (non-passive) daemon; a passive instance's own claim/reattach work is
+  deferred entirely to the post-cutover retry below.
+- **Claim** -- `reattach_session_hosts()` calls `HostIndex.claim(session_id,
+  generation=...)` for every live record before adopting it: a record still
+  claimed by a *live* other generation is left alone (not stolen); one whose
+  owning generation is provably dead is claimed silently (no live handshake
+  needed).
+- **Release** -- `POST /api/v1/shutdown` releases every claim the exiting
+  generation holds (`HostIndex.release_all`), only once a server handle to
+  actually shut down exists, before triggering the clean exit -- the
+  outgoing generation's own initiative, never blocking on the new
+  generation.
+- **Retry** -- `agent-bridge deploy` calls the newly-active daemon's
+  `POST /api/v1/session-hosts/reattach` once the old generation is
+  *confirmed* exited, running the claim+reattach scan for the first time on
+  this (now-active) generation.
+- `HostIndex`'s own mutating methods (`register`/`claim`/`release_all`/...)
+  hold a short-lived cross-process file lock and **reload the latest
+  on-disk state before applying a change** -- the old and new generations
+  each hold their own long-lived in-process `HostIndex` snapshot over the
+  same file during the overlap, so a write from a stale in-memory snapshot
+  must never silently clobber a concurrent write from the other generation.
+  `register()` specifically preserves whatever ownership the durable index
+  already has recorded -- it is a location/metadata update, never an
+  ownership change; only `claim`/`release`/`release_all` mutate ownership.
+
 
 **Windows listener recovery.** A Proactor accept-socket failure can leave the
 uvicorn process alive while its loopback listener no longer serves. The

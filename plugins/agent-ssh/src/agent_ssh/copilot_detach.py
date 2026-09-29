@@ -8,6 +8,7 @@ import os
 import shlex
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -17,8 +18,14 @@ from agent_procutil import (
     windowless_python,
     windowless_python_env,
 )
+from .file_lock import exclusive_file_lock
 from ssh_manager import SSHProfileSource, SupervisedRelayForward, build_remote_exec_args
-from ssh_manager.forward_keeper import KeeperStore, run_supervised_loop, spawn_keeper
+from ssh_manager.forward_keeper import (
+    KeeperStore,
+    process_identity,
+    run_supervised_loop,
+    spawn_keeper,
+)
 from venue_copilot import (
     read_seed,
     resolve_daemon_port,
@@ -32,6 +39,7 @@ _RESERVATION_TTL = 900.0
 _RESERVE_RETRY_WINDOW = 90.0
 _PROBE_ATTEMPTS = 2
 _LEGACY_ROOT = ".agent-ssh"  # marketplace-isolation: allow legacy compatibility root
+_KEEPER_TOKEN_ENV = "AGENT_SSH_KEEPER_TOKEN"
 _STATE_DIR = Path.home() / _LEGACY_ROOT / "forward-keepers"
 _STORE = KeeperStore(_STATE_DIR)
 
@@ -162,45 +170,111 @@ def _state_key(target: str) -> str:
     return target
 
 
+def _state_lock_path(target: str) -> Path:
+    return _STORE.state_path(_state_key(target)).with_suffix(".lock")
+
+
 def read_keeper_state(target: str) -> dict[str, Any] | None:
     return _STORE.read(_state_key(target))
 
 
 def stop_keeper(target: str) -> bool:
-    return _STORE.stop(_state_key(target))
+    with exclusive_file_lock(_state_lock_path(target)):
+        return _STORE.stop(_state_key(target))
+
+
+def _keeper_state(
+    target: str, venue_port: int, mux: str, forwards: list[SupervisedRelayForward] | None = None,
+) -> dict[str, Any]:
+    children = [
+        {"pid": pid, "identity": identity}
+        for forward in (forwards or [])
+        for pid, identity in [(forward.process_pid, forward.process_birth_identity)]
+        if isinstance(pid, int) and pid > 0 and isinstance(identity, str) and identity
+    ]
+    return {
+        "pid": os.getpid(),
+        "pid_identity": process_identity(os.getpid()) or "",
+        "target": target,
+        "venue_port": int(venue_port),
+        "mux": mux,
+        "children": children,
+        "instance_token": os.environ.get(_KEEPER_TOKEN_ENV, ""),
+    }
+
+
+def _write_keeper_state(target: str, payload: dict[str, Any]) -> None:
+    current = read_keeper_state(target)
+    token = payload.get("instance_token")
+    if (
+        current
+        and current.get("instance_token")
+        and current.get("instance_token") != token
+    ):
+        return
+    if (
+        current
+        and current.get("instance_token")
+        and current.get("instance_token") == token
+        and current.get("children")
+        and not payload.get("children")
+    ):
+        payload = {**payload, "children": current["children"]}
+    _STORE.write(_state_key(target), payload)
+
+
+def _remove_keeper_state(target: str, instance_token: str) -> None:
+    current = read_keeper_state(target)
+    if (
+        not current
+        or current.get("instance_token") != instance_token
+    ):
+        return
+    _STORE.remove(_state_key(target))
 
 
 def ensure_keeper(target: str, *, venue_port: int, mux: str) -> dict[str, Any]:
-    state = read_keeper_state(target)
-    if (
-        _STORE.alive(_state_key(target))
-        and state
-        and state.get("mux") == mux
-        and int(state.get("venue_port") or 0) == int(venue_port)
-    ):
-        return {"started": False, "state": state}
-    stop_keeper(target)
-    argv = [
-        windowless_python(),
-        "-m",
-        "agent_ssh",
-        "forward-keeper",
-        target,
-        "--venue-port",
-        str(int(venue_port)),
-        "--mux",
-        mux,
-        "--startup-grace",
-        "300",
-    ]
-    state = spawn_keeper(
-        argv,
-        {**os.environ, **windowless_python_env()},
-        {"target": target, "venue_port": int(venue_port), "mux": mux},
-        popen_kwargs=windowless_daemon_kwargs(breakaway=True),
-    )
-    _STORE.write(_state_key(target), state)
-    return {"started": True, "state": state}
+    with exclusive_file_lock(_state_lock_path(target)):
+        state = read_keeper_state(target)
+        if (
+            _STORE.alive(_state_key(target))
+            and state
+            and state.get("mux") == mux
+            and int(state.get("venue_port") or 0) == int(venue_port)
+        ):
+            return {"started": False, "state": state}
+        _STORE.stop(_state_key(target))
+        argv = [
+            windowless_python(),
+            "-m",
+            "agent_ssh",
+            "forward-keeper",
+            target,
+            "--venue-port",
+            str(int(venue_port)),
+            "--mux",
+            mux,
+            "--startup-grace",
+            "300",
+        ]
+        instance_token = uuid.uuid4().hex
+        state = spawn_keeper(
+            argv,
+            {
+                **os.environ,
+                **windowless_python_env(),
+                _KEEPER_TOKEN_ENV: instance_token,
+            },
+            {
+                "target": target,
+                "venue_port": int(venue_port),
+                "mux": mux,
+                "instance_token": instance_token,
+            },
+            popen_kwargs=windowless_daemon_kwargs(breakaway=True),
+        )
+        _write_keeper_state(target, state)
+        return {"started": True, "state": state}
 
 
 class _SshAdapter:
@@ -302,27 +376,38 @@ def _mux_exists(ssh_config: Any, mux: str) -> bool:
 
 async def _run_forward_keeper(args: argparse.Namespace) -> int:
     ssh_config = _ssh_config(args.target)
+    instance_token = os.environ.get(_KEEPER_TOKEN_ENV, "")
+
+    def write_state() -> None:
+        with exclusive_file_lock(_state_lock_path(args.target)):
+            _write_keeper_state(
+                args.target,
+                _keeper_state(
+                    args.target,
+                    int(args.venue_port),
+                    args.mux,
+                    forwards,
+                ),
+            )
+
+    def remove_state() -> None:
+        with exclusive_file_lock(_state_lock_path(args.target)):
+            _remove_keeper_state(args.target, instance_token)
+
     forwards = [
         SupervisedRelayForward(
             ssh_config,
             int(args.venue_port),
             host_port_resolver=lambda: resolve_daemon_port() or 0,
             monitor_interval=15.0,
+            on_pid_change=write_state,
         )
     ]
     return await run_supervised_loop(
         forwards,
         session_alive=lambda: _mux_exists(ssh_config, args.mux),
-        write_state=lambda: _STORE.write(
-            _state_key(args.target),
-            {
-                "pid": os.getpid(),
-                "target": args.target,
-                "venue_port": int(args.venue_port),
-                "mux": args.mux,
-            },
-        ),
-        remove_state=lambda: _STORE.remove(_state_key(args.target)),
+        write_state=write_state,
+        remove_state=remove_state,
         probe_interval=float(args.probe_interval),
         startup_grace=float(args.startup_grace),
     )

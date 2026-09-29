@@ -10,11 +10,15 @@ it against the providers' EXACT logic across a token matrix.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
+from credential_relay.server import ScopeDenied
 
 from agent_bridge.agent_registry import (
     FileTokenAuthorizer,
@@ -217,10 +221,10 @@ def test_apply_relay_profile_scoped_azure_uses_authorizer(tmp_path):
     assert b.validator is None
     assert isinstance(b.authorizer, FileTokenAuthorizer)
     assert b.authorizer("TOK", "get-azure-token", {"scope": ado}) is True
-    # A resource outside the token's allowlist is denied even for a valid token.
-    assert b.authorizer(
-        "TOK", "get-azure-token", {"scope": "https://graph.microsoft.com/"},
-    ) is False
+    # A resource outside the token's allowlist is denied even for a valid
+    # token -- raising ScopeDenied (#4367), not a plain False.
+    with pytest.raises(ScopeDenied):
+        b.authorizer("TOK", "get-azure-token", {"scope": "https://graph.microsoft.com/"})
     assert b.authorizer("nope", "get-azure-token", {"scope": ado}) is False
 
 
@@ -236,9 +240,12 @@ def test_file_token_authorizer_enforces_per_token_scope(tmp_path):
     assert fa("TOK", "get-azure-token", {"scope": ado + "/.default"}) is True
     assert fa("TOK", "get-azure-token",
               {"resource": "https://storage.azure.com/"}) is True
-    assert fa("TOK", "get-azure-token",
-              {"scope": "https://graph.microsoft.com/.default"}) is False
-    # Non-Azure actions and unknown tokens are never authorized here.
+    # #4367: a recognized token whose specific scope is denied raises
+    # ScopeDenied (a wire-visible denial), not a plain False.
+    with pytest.raises(ScopeDenied):
+        fa("TOK", "get-azure-token", {"scope": "https://graph.microsoft.com/.default"})
+    # Non-Azure actions and unknown tokens are never authorized here (and
+    # never raise: an unrecognized token stays fully silent over the wire).
     assert fa("TOK", "get-github-token", {}) is False
     assert fa("wrong", "get-azure-token", {"scope": ado}) is False
 
@@ -251,8 +258,60 @@ def test_file_token_authorizer_legacy_entry_falls_back_to_static(tmp_path):
     _write_store(store, {"cs-legacy": "LTOK"})
     fa = FileTokenAuthorizer(store, [ado])
     assert fa("LTOK", "get-azure-token", {"scope": ado}) is True
-    assert fa("LTOK", "get-azure-token",
-              {"scope": "https://graph.microsoft.com/"}) is False
+    with pytest.raises(ScopeDenied):
+        fa("LTOK", "get-azure-token", {"scope": "https://graph.microsoft.com/"})
+
+
+@pytest.mark.asyncio
+async def test_cli_profile_scope_denial_is_wire_visible_end_to_end(tmp_path):
+    """#4367: the real CLI-profile path (``_apply_relay_profile`` +
+    ``FileTokenAuthorizer``, exactly what a running bridge installs for a
+    CodeSpace discovered via ``agent-codespaces relay-profile``) must reach a
+    live server round trip that states a known-token/denied-scope response
+    explicitly, while an unknown token stays fully silent."""
+    from credential_relay import RelayBuilder
+    from credential_relay.server import ACCESS_DENIED_RESPONSE
+
+    ado = "499b84ac-1321-427f-aa17-267ca6975798"
+    store = tmp_path / "relay-tokens.json"
+    _write_store(store, {
+        "cs": {"token": "TOK", "repository": "o/r", "allowed_resources": [ado]},
+    })
+    b = RelayBuilder()
+    _apply_relay_profile(b, {
+        "sources": ["git-credential"],
+        "port": 0,
+        "ado_host": None,
+        "azure_resources": [ado],
+        "gated_actions": ["get-azure-token"],
+        "token_store": str(store),
+        "scoped_azure": True,
+    })
+    srv = b.build()
+    await srv.start()
+    srv.port = srv._server.sockets[0].getsockname()[1]
+    try:
+        reader, writer = await asyncio.open_connection(
+            "127.0.0.1", srv.port,
+        )
+        writer.write(
+            b"get-azure-token\nauth=TOK\nscope=https://graph.microsoft.com/\n\n",
+        )
+        await writer.drain()
+        data = await reader.read(4096)
+        writer.close()
+        assert data.decode() == ACCESS_DENIED_RESPONSE
+
+        reader, writer = await asyncio.open_connection(
+            "127.0.0.1", srv.port,
+        )
+        writer.write(f"get-azure-token\nauth=nope\nscope={ado}\n\n".encode())
+        await writer.drain()
+        data = await reader.read(4096)
+        writer.close()
+        assert data == b""  # unknown token: fully silent, no wire response
+    finally:
+        await srv.stop()
 
 
 # --- _relay_profile_via_cli + _register_provider_relay -----------------------

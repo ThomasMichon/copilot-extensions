@@ -7,6 +7,7 @@ import contextlib
 import io
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -600,8 +601,81 @@ def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
     return _serve(cfg, passive=passive)
 
 
+def _dispatch_to_server_venv(
+    args: argparse.Namespace, subcommand: str
+) -> int | None:
+    """Dispatch a FOREGROUND start/serve/__cell-start invocation to the
+    sibling SERVER venv's own interpreter, when one is provisioned
+    (agent-index-server-venv-split). Returns the dispatched child's exit
+    code, or ``None`` when no server venv exists so the caller falls back
+    to running ``serve()`` in-process exactly as before.
+
+    Unlike ``spawn_passive``'s fully-detached background spawn, this is a
+    genuine foreground replacement: it inherits this process's own stdio
+    (so operator-visible output is identical) and deliberately does NOT
+    create a new process group/session, so the terminal's own Ctrl+C
+    (SIGINT) / Ctrl+Break already reaches the child directly, alongside
+    this process -- the OS's own signal fan-out across the inherited
+    console/process group, not a hand-rolled forwarder. A SIGTERM sent to
+    just this process (e.g. by a supervisor, which -- unlike a terminal
+    signal -- targets only this PID) IS explicitly relayed to the child,
+    since nothing else would deliver it there. This process then simply
+    waits for the child and relays its exit code, swallowing its own
+    KeyboardInterrupt from the same terminal signal so it doesn't race the
+    child's own graceful shutdown with a second one.
+    """
+    server_python = server_venv_python()
+    if server_python is None:
+        return None
+
+    cfg = _config_from_args(args)
+    cmd = [
+        str(server_python),
+        "-I",
+        "-X",
+        "utf8",
+        "-m",
+        "agent_index",
+        subcommand,
+        "--host",
+        cfg.host,
+        "--port",
+        str(cfg.port),
+    ]
+    if getattr(args, "passive", False):
+        cmd.append("--passive")
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"PYTHONPATH", "PYTHONHOME"}
+    }
+    process = subprocess.Popen(  # noqa: S603
+        cmd, cwd=str(install_dir().resolve()), env=env
+    )
+
+    def _forward_sigterm(signum: int, _frame: Any) -> None:
+        with contextlib.suppress(OSError):
+            process.terminate()
+
+    previous_handler = signal.signal(signal.SIGTERM, _forward_sigterm)
+    try:
+        while True:
+            try:
+                return process.wait()
+            except KeyboardInterrupt:
+                continue
+    finally:
+        signal.signal(signal.SIGTERM, previous_handler)
+
+
 def cmd_start(args: argparse.Namespace) -> int:
-    """Run the local service in the current interpreter."""
+    """Run the local service -- dispatched to the sibling SERVER venv's own
+    interpreter when one is provisioned (agent-index-server-venv-split),
+    else run in the current interpreter exactly as before."""
+    subcommand = getattr(args, "command", None) or "start"
+    dispatched = _dispatch_to_server_venv(args, subcommand)
+    if dispatched is not None:
+        return dispatched
     serve(_config_from_args(args), passive=bool(getattr(args, "passive", False)))
     return 0
 
@@ -627,6 +701,9 @@ def cmd_cell_start(args: argparse.Namespace) -> int:
     except ServiceOwnershipError as exc:
         print(f"agent-index: {exc}", file=sys.stderr)
         return 2
+    dispatched = _dispatch_to_server_venv(args, "__cell-start")
+    if dispatched is not None:
+        return dispatched
     serve(_config_from_args(args), passive=bool(getattr(args, "passive", False)))
     return 0
 

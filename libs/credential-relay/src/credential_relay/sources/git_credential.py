@@ -31,7 +31,6 @@ _IS_WSL = (
     os.path.exists("/proc/sys/fs/binfmt_misc/WSLInterop")
     or "WSL" in os.environ.get("WSL_DISTRO_NAME", "")
 )
-_POWERSHELL = shutil.which("powershell.exe") if _IS_WSL else None
 
 # Subprocess flags (suppress console windows on Windows)
 _SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -53,6 +52,11 @@ def _noninteractive_env() -> dict[str, str]:
     env = dict(os.environ)
     env.update(_NONINTERACTIVE_ENV)
     return env
+
+
+def _powershell() -> str | None:
+    """Resolve PowerShell lazily so tests can gate PATH access before use."""
+    return shutil.which("powershell.exe") if _IS_WSL else None
 
 
 class GitCredentialSource:
@@ -202,7 +206,7 @@ class GitCredentialSource:
         self, action: str, credential_input: str, *, timeout: float = 30.0,
     ) -> str | None:
         """Run ``git credential <action>`` as a subprocess."""
-        if _IS_WSL and _POWERSHELL and action == "fill":
+        if _IS_WSL and _powershell() and action == "fill":
             return await self._run_via_powershell(credential_input, timeout=timeout)
         return await self._run_directly(action, credential_input, timeout=timeout)
 
@@ -247,7 +251,8 @@ class GitCredentialSource:
         self, credential_input: str, *, timeout: float = 60.0,
     ) -> str | None:
         """Run git credential fill via PowerShell (WSL -> Windows GCM)."""
-        if not _POWERSHELL:
+        powershell = _powershell()
+        if not powershell:
             log.error("PowerShell not found for WSL credential proxy")
             return None
 
@@ -261,7 +266,7 @@ class GitCredentialSource:
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                _POWERSHELL, "-NoProfile", "-Command", ps_cmd,
+                powershell, "-NoProfile", "-Command", ps_cmd,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

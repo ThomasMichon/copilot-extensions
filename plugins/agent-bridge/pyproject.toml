@@ -60,7 +60,7 @@ agent-ssh-manager = { path = "../../libs/ssh-manager", editable = true }
 agent-credential-relay = { path = "../../libs/credential-relay", editable = true }
 # zero-downtime cutover primitives -- the routing table + cutover orchestrator
 # (module ``zdd``), extracted from this plugin so other services reuse them.
-agent-zdd = { path = "libs/zdd" }
+agent-zdd = { path = "../../libs/zdd", editable = true }
 # single-instance lease + supersession self-retire + reconcile-set reaper
 # (module ``single_instance_lease``), extracted from this plugin's singleton /
 # self_retire so other services inherit one correct "one active per host" impl.
@@ -76,7 +76,7 @@ agent-single-instance-lease = { path = "../../libs/single-instance-lease", edita
 agent-config-migrate = { path = "../../libs/config-migrate", editable = true }
 # Copilot CLI + Claude plugin resolution -- marketplaces, plugins, repo settings
 # (module ``plugin_resolve``). Shared with agent-codespaces.
-agent-plugin-resolve = { path = "libs/plugin-resolve" }
+agent-plugin-resolve = { path = "../../libs/plugin-resolve", editable = true }
 # Shared Windows-headless / detached process-spawn kwargs (module
 # ``agent_procutil``). This is a `uv`-editable canonical reference
 # (vendor-pointer-generalization effort, Phase 1 -- converted early as a
@@ -87,9 +87,9 @@ agent-plugin-resolve = { path = "libs/plugin-resolve" }
 # (tools/materialize_main.py) ever gets a real local copy.
 agent-procutil = { path = "../../libs/agent-procutil", editable = true }
 # Resilient tri-state scans/findings for providers.d.
-agent-dropin-registry = { path = "libs/dropin-registry" }
+agent-dropin-registry = { path = "../../libs/dropin-registry", editable = true }
 # Effective plugin enablement and identity-verified root resolution.
-agent-plugin-activation = { path = "libs/plugin-activation" }
+agent-plugin-activation = { path = "../../libs/plugin-activation", editable = true }
 
 [project.scripts]
 agent-bridge = "agent_bridge.__main__:main"

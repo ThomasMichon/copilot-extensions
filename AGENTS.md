@@ -162,6 +162,33 @@ as-is) → **contribution** (this file + the harness skills, how-to-land).
 > step-by-step, and `diagnosing-copilot-extensions` covers a broken plugin or
 > deploy.
 
+### Coding-Agent / Reviewer Alignment
+
+Both roles work from the **same rubric**, not adversarial, independently-derived
+standards — read [`REVIEW.md`](REVIEW.md) and self-check your own diff against
+it *before* opening a PR, rather than treating the first review round as your
+first exposure to what it checks for. When a finding does arrive, fix the bug
+*class* it names everywhere that class recurs in your diff, not only the one
+flagged instance — a per-instance fix just spends the next round rediscovering
+a sibling.
+
+Both roles also share one **stopping rule for Copilot's own verdict** —
+spelled out in full in `CONTRIBUTING.md` § "Waiting for a verdict": `Approve`,
+or a `Comment` verdict with zero Medium/High-severity findings open, satisfies
+that gate (on a Contributor PR, only after one full review loop — a
+first-round clean `Comment` still needs another attempt). A still-open
+Low-severity finding at that point is either genuinely valuable to fix, or
+already considered and dismissed — spinning a further review round solely to
+make the comment thread read zero is chasing a bar that neither this repo's
+contribution flow nor the reviewer's own directives require. Required status
+checks are a separate merge gate, independent of this verdict condition.
+**Satisfying Copilot's verdict is never merge authorization by itself** — a
+Contributor PR still needs a separate Maintainer-approval review before
+merging (see "Review" in `CONTRIBUTING.md`); only the repo owner's own
+bypassed PRs skip that second gate. If you are driving a PR toward merge and
+unsure whether you've reached the applicable point, re-read that section
+before assuming a further round is needed.
+
 ### Test Portfolio
 
 Required pull-request CI must remain a fast, change-scoped contract gate; do not
@@ -209,7 +236,7 @@ still open is never a pass:
    (a timeout, not a review event): skip straight to step 4 -- there's
    nothing to address or push yet.
 2. Contributor PR, `Approve` landed: merge (subject to the separate
-   maintainer-approval gate on a non-maintainer's PR). Owner-authored PR,
+   Maintainer-approval gate on a Contributor's PR). Owner-authored PR,
    `Comment` landed with zero Medium/High findings open: merge -- that's
    the passing verdict here.
 3. `Comment` landed: address genuinely valuable findings (explain/dismiss
@@ -224,12 +251,16 @@ still open is never a pass:
    fresh review" for the exact call) and wait ~5 minutes again -- do not
    just keep pushing small commits hoping the next automatic pass flips on
    its own.
-5. **Narrow maintainer bypass, contributor PRs only:** after at least one
-   full loop, if the *current* `Comment` review's remaining findings are
-   all Low severity, the maintainer may self-merge, stating what was
-   dismissed and why. Any Medium/High finding blocks self-merge regardless
-   of who authored the PR.
-Full mechanics, the re-request API call, and the non-maintainer approval gate
+5. **Narrow verdict-shape exception, Contributor PRs only:** after at least
+   one full loop, if the *current* `Comment` review's remaining findings
+   are all Low severity, Copilot's own verdict requirement (this step) is
+   satisfied without chasing a further `Approve`, stating what was
+   dismissed and why. **This is strictly about Copilot's verdict and never
+   substitutes for the separate, always-required Maintainer-approval gate**
+   on a Contributor's PR -- satisfying this step alone never authorizes a
+   merge by itself. Any Medium/High finding blocks proceeding past this
+   step at all, regardless of who authored the PR.
+Full mechanics, the re-request API call, and the Maintainer-approval gate
 this doesn't override: CONTRIBUTING.md § "Waiting for a verdict". **This is
 agent discipline, not yet tool-enforced** -- `pr-merge --now` does not itself
 check Copilot's verdict before merging (`.agent-worktrees/config.yaml`'s
@@ -437,6 +468,13 @@ cd plugins/agent-bridge
   marketplace + its own installer. agent-bridge deploys via its own
   installer (or a project service framework that wraps it). They are
   different pipelines.
+- **Do not open a cutover/drain/promotion/process-repair PR without
+  self-checking it first.** `docs/patterns/graceful-daemon-cutover.md`'s
+  "Common review findings" section lists the small, recurring set of
+  concurrency-ordering, PID-identity-safety, and cross-platform gaps that
+  cost this repo's own graceful-cutover rollout 6-14 review rounds per PR —
+  check your diff against it before opening the PR, not after the first
+  review round names them.
 
 ---
 

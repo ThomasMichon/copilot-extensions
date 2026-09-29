@@ -55,7 +55,8 @@ class TestCmdCreateCliDispatch:
         assert exc.value.code == 0
         assert seen["argv"] == [
             "/bin/agent-codespaces", "copilot", "friendly-eureka",
-            "--seed", "do the thing",
+            "--seed",
+            f"{targeting._COMPANION_SEED_HEADS_UP}\n\ndo the thing",
         ]
 
     def test_container_target_execs_agent_containers_copilot(
@@ -99,7 +100,8 @@ class TestCmdCreateCliDispatch:
 
         assert seen["argv"] == [
             "/bin/agent-codespaces", "copilot", "cs-1",
-            "--seed", "go", "--driver", "orchestrator",
+            "--seed", f"{targeting._COMPANION_SEED_HEADS_UP}\n\ngo",
+            "--driver", "orchestrator",
         ]
 
     def test_bare_target_is_refused_with_a_helpful_pointer(
@@ -160,7 +162,8 @@ class TestCmdCreateCliDispatch:
 
         assert seen["argv"] == [
             "/bin/agent-codespaces", "copilot", "cs-1",
-            "--seed", "multi\nline\nprompt",
+            "--seed",
+            f"{targeting._COMPANION_SEED_HEADS_UP}\n\nmulti\nline\nprompt",
         ]
 
     def test_ordinary_create_without_cli_is_unaffected(self, monkeypatch) -> None:
@@ -222,7 +225,9 @@ class TestCmdCreateCliDetach:
             "/bin/agent-codespaces", "copilot", "friendly-eureka",
             "--detach", "--seed-file", "-", "--driver", "orchestrator",
         ]
-        assert seen["kwargs"]["input"] == prompt
+        assert seen["kwargs"]["input"] == (
+            f"{targeting._COMPANION_SEED_HEADS_UP}\n\n{prompt}"
+        )
 
     def test_detach_without_prompt_sends_no_seed(self, monkeypatch) -> None:
         seen = self._capture(monkeypatch)
@@ -247,7 +252,9 @@ class TestCmdCreateCliDetach:
             "/bin/agent-containers", "copilot", "repo-1",
             "--detach", "--seed-file", "-",
         ]
-        assert seen["kwargs"]["input"] == prompt
+        assert seen["kwargs"]["input"] == (
+            f"{targeting._COMPANION_SEED_HEADS_UP}\n\n{prompt}"
+        )
 
     def test_detach_requires_cli(self, monkeypatch, capsys) -> None:
         with pytest.raises(SystemExit) as exc:

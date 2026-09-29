@@ -4,32 +4,38 @@ applyTo: "**"
 
 # Context Handoff -- durable fallback guidance
 
-Reflected into the repo so it loads even if `context-handoff` never
-registered. Everything below needs only a shell.
+Loads without `context-handoff`; needs only a shell.
 
 ## Preparing a brief
 
-Never end a turn with outstanding work and no handoff. Before triggering
-(context-pressure path) or once the user agrees (turn-end path), sync the
-worktree: resolve `$CH` as in *CLI fallback* below, then run
-`node "$CH" sync-worktree --json --cwd "$PWD"` (never a bare `git rebase`/
-`agent-worktrees git sync` -- both bypass the force-tier lock/rebase
-guard). A non-`synced` result isn't a blocker -- note the reason and
-continue. Compose: **Original Request/Continuing Objective/Progress/
-Successor Work Roster/Outstanding Background Flows & External State/
-Completion Gates/Re-Handoff Instructions** (or **Active Effort/Next
-Slice/Immediate Session Delta** if effort-backed). Never drop an open
-background flow or owned state (PR, claim) -- name it. Prefer
+Never end a turn with work outstanding, no handoff. Trigger
+on context-pressure (no confirmation), or once agreed on turn-end. Sync:
+resolve `$CH` (*CLI fallback*), run `node "$CH" sync-worktree --json
+--cwd "$PWD"` (never `git rebase`/`agent-worktrees git sync`, which
+bypass the guard); non-`synced` isn't fatal, note why. Self-audit first:
+re-scan turns for open-ended self-flags, confirm each resolved --
+empty means checked, not assumed. Compose **Original Request/Continuing
+Objective/Progress/Successor Work Roster/Outstanding Background Flows &
+External State/Completion Gates/Re-Handoff Instructions** (or if
+effort-backed, **Active Effort/Next Slice/Immediate Session Delta**) --
+route an open self-audit hit into Next Slice, or the active effort if
+outside this leg. Never drop an open flow/owned state -- name it. Prefer
 `generate_handoff_prompt` -> compose -> `save_handoff_prompt` ->
-`trigger_handoff`; otherwise use the CLI below.
+`trigger_handoff`; else the CLI below.
 
-## Consuming a brief + recording yourself as head
+## Consuming a brief + recording head
 
-Prefer `/consume-handoff`. A claimed-handoff response always names the
-claimant session -- state it, never "nothing to do." A disconnect mid-call
-isn't a semantic answer: retry once, then fall back to the CLI. Recording
-head is `agent-worktrees`' job -- if `sessionStart` didn't auto-claim it,
-run `agent-worktrees bind-session --worktree-dir "$PWD"`.
+Prefer `/consume-handoff`; a claimed-handoff names the claimant
+session -- state that id to the user, never "nothing to do." A
+disconnect isn't an answer: retry once, then the CLI. Verify,
+don't trust: spot-check predecessor history (bounded) for open-ended phrases
+before "nothing outstanding", disclose if unchecked. Consume also names
+the worktree if available -- pull `agent-worktrees
+worktree-status-bundle --worktree <id> --json` <!-- marketplace-isolation: allow diagnostic-tooling -->
+for lineage/activity (pruned; title/summary is a theme, not
+proof);
+recording head is `agent-worktrees`'s job; if missed, run
+`agent-worktrees bind-session --worktree-dir "$PWD"`.
 
 ## CLI fallback (tools unavailable)
 
@@ -40,36 +46,32 @@ node "$CH" check-heads --json --cwd "$PWD"
 node "$CH" sync-worktree --json --cwd "$PWD"
 node "$CH" save --title "<t>" --prompt-file "<f.md>" --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 ```
-`trigger`/`consume` share that shape. PowerShell: same resolution, using
-the `COPILOT_PLUGIN_ROOT` variable (default
-`$HOME\.copilot\installed-plugins\copilot-extensions\context-handoff`)
-plus `extensions\context-handoff\handoff-cli.mjs`; run `node $ch <verb> ...`.
+`trigger`/`consume`/`list-sessions`/`get-previous-session`/`abort` share
+that shape. `node "$CH" help` prints every verb and option. PowerShell:
+same, using `COPILOT_PLUGIN_ROOT` (default
+`$HOME\.copilot\installed-plugins\copilot-extensions\context-handoff`),
+run `node $ch <verb> ...`
 
 ## If the plugin failed to load: find it yourself, no tools required
 
-1. Read `instructions/context-handoff/session-guidance.instructions.md` in
-   your session folder, if present -- it may already name a handoff.
-2. List each session's state folder for `files/handoff-*.md`; resume the
-   newest by mtime if found.
-3. `agent-worktrees head-session --worktree "<id>" --json` and
-   `agent-worktrees handoffs-check --worktree-id "<id>" --json` report any
-   pending handoff/seed.
-4. The CLI fallback above, once `node` and this plugin's files are found.
-5. After consuming: bind head with `agent-worktrees bind-session` (above).
-   **Never terminate a predecessor pane by hand** -- run
-   `agent-worktrees handoffs-check --worktree-id "<id>" --execute --json`
-   to confirm genuine staleness first; still stuck? Escalate to a human or
+1. Read (session folder)
+   `instructions/context-handoff/session-guidance.instructions.md` if
+   present; also scan every session's state for `files/handoff-*.md`,
+   resume newest by mtime.
+2. `agent-worktrees head-session --worktree "<id>" --json` /
+   `agent-worktrees handoffs-check --worktree-id "<id>" --json` report a pending seed.
+3. CLI fallback above.
+4. After consuming, `agent-worktrees bind-session`. Never hand-kill
+   a pane -- run `agent-worktrees handoffs-check
+   --worktree-id "<id>" --execute --json`; if stuck, a human or
    `agent-worktrees doctor --fix`.
 
-## Last resort: write the file yourself
-
-No store, no `node`? Write the brief to a `handoff-<slug>.md`
-under your state folder's `files/` directory (create it first), state the
-absolute path, and tell the user: `/clear` then "Read <path> and resume
-the objective it describes." No auto-pickup, no claim tracking.
+No store, no `node`? Write the brief to `handoff-<slug>.md` under state
+folder `files/` (create first, not guaranteed to exist); state absolute
+path; tell the user `/clear`, then "Read <path> and resume the
+objective." No auto-pickup, claim tracking, supersession.
 
 ## Rules
 
-- Never claim auto-pickup; a handoff never auto-loads on restart.
-- The seed is a locator, never the full markdown inline.
-- Consuming is setup, not completion -- keep driving the objective.
+Never claim auto-pickup; seed is locator, not markdown; consuming
+is setup not completion, keep driving

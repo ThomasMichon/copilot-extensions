@@ -184,11 +184,18 @@ installer. Know which kind you are changing.
      `NONBLOCKING_VERDICT_STATES`; every merged owner-authored PR in this
      repo's history has been `Comment`-only, never `Approve`) -- there, a
      `Comment` review with zero Medium/High findings open *is* the passing
-     verdict; do not keep chasing an `Approve` that cannot land. Use
+     verdict; do not keep chasing an `Approve` that cannot land. On a
+     **contributor** PR, actively strive for a genuine `Approve` across up
+     to 3 rounds (each open/push/re-request + wait counts as one round)
+     before a maintainer may short-circuit on a stubborn/overly-cautious
+     reviewer -- that bound exists to cap the loop, not as a target to race
+     toward. Use
      `pr-watch wait <owner>/<repo> <PR> --since <cursor> --until
-     approved,commented,changes_requested --timeout 300` (a bounded
-     ~5-minute window per attempt scoped to actual review transitions only
-     -- `--until any` also wakes on unrelated transitions like checks or
+     approved,commented,changes_requested --timeout 600` (a bounded
+     ~10-minute window per attempt scoped to actual review transitions only
+     -- triggering a review, whether the initial open or an explicit
+     re-request, is not instant, so give it real room to land -- `--until
+     any` also wakes on unrelated transitions like checks or
      conflicts, which is not itself a review result) to wait for the initial
      review, **capturing a fresh `<cursor>` immediately before each wait**
      (`pr-watch cursor <owner>/<repo> <PR>`, or the cursor a prior wait
@@ -206,19 +213,21 @@ installer. Know which kind you are changing.
      `CONTRIBUTING.md` § "Requesting a fresh review" for the exact call,
      including direct evidence that this call genuinely triggers a fresh
      re-review rather than being a no-op)
-     and wait ~5 minutes again -- there's nothing to address or push yet,
+     and wait up to 10 minutes again -- there's nothing to address or push yet,
      so don't invent a commit just to have something to push. On a
      contributor PR's `Approve`, or an owner-authored PR's `Comment` with
      zero Medium/High findings open, merge. Otherwise: address genuinely
      valuable findings; if that requires a real change, push it and wait
-     another ~5 minutes for the automatic post-push review. **If every
+     up to another 10 minutes for the automatic post-push review. **If every
      finding is dismissed/explained with no actual change needed,** skip
      the push (there's nothing new for a re-review to see) and go straight
      to re-requesting. **After the post-push wait, treat a timeout the same
      as a `Comment`** -- neither is a pass by itself, so either way,
      re-request and wait again; do not just push another commit hoping the
      next automatic pass flips on its own. **Narrow bypass, contributor
-     PRs only:** after at least one full loop, if the maintainer is
+     PRs only:** after up to 3 rounds genuinely striving for `Approve`
+     (not at round 1 just because a first pass came back `Comment`), if
+     the maintainer is
      merging and the *current* `Comment` review's remaining findings are
      all Low severity, self-merge is permitted (state what was dismissed
      and why); any Medium/High finding blocks self-merge regardless of who

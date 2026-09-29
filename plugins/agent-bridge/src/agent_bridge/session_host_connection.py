@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import time
 from dataclasses import is_dataclass
 from typing import Any
@@ -277,6 +278,12 @@ class _SessionHostConnectionMixin:
                 nonce=spawned.nonce,
                 boundary=spawned.boundary,
                 endpoint=getattr(spawned, "endpoint", {}) or {},
+                # Stamp this generation's own ownership at spawn time (PR #4543
+                # review): a newly-spawned host must never look "never claimed"
+                # -- that reads as freely recoverable by another generation's
+                # reattach scan -- while this generation is actively driving it.
+                owner_generation=getattr(self, "_generation_id", "") or "",
+                owner_pid=os.getpid(),
                 extra={
                     "remote_authority_v2": spawned.boundary != "local",
                 },

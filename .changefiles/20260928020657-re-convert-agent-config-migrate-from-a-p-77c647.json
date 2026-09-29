@@ -1,9 +1,0 @@
-{
-  "comment": "Re-convert agent-config-migrate from a per-plugin copy to a uv-editable canonical reference (vendor-pointer-generalization effort, Phase 1).",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

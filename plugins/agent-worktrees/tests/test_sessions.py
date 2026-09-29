@@ -1395,6 +1395,41 @@ def test_seed_pane_not_echoed_skips_enter():
     assert driver.enter_sent() is False
 
 
+_DESKTOP_APP_NUDGE = (
+    "│  the CLI, in a GitHub-native desktop app built for managing parallel  │\n"
+    "│  agents.                                                             │\n"
+    "│  Install it now?                                                     │\n"
+    "│  ❯ Yes, install      No, thanks                                     │\n"
+    "  ←/→ to choose · Enter to select · Y / N\n"
+)
+
+
+def test_seed_pane_dismisses_desktop_app_nudge_then_seeds():
+    # A live-confirmed blocker: Copilot's first-run desktop-app nudge waits for
+    # a selection a detached launch can never make. One Escape dismisses it and
+    # the real ready cue then follows -- confirmed live against a real
+    # container (agent-dispatch-worker-operating-procedures Phase 3).
+    seed = "Continue: build multi-account effort"
+    driver = _SeedDriver(
+        ready_caps=[_DESKTOP_APP_NUDGE, "❯", "❯"],
+        echo_caps=[f"❯ {seed}"],
+    )
+    result = _run_seed(driver, seed=seed)
+    assert result["ready"] is True
+    assert result["submitted"] is True
+    assert ["Escape"] in driver.sends
+
+
+def test_seed_pane_dismisses_nudge_at_most_once():
+    # If the nudge (implausibly) keeps reappearing, this never loops on it
+    # forever -- Escape is sent once, then a persisting non-ready state is
+    # just an ordinary timeout like any other stuck pane.
+    driver = _SeedDriver(ready_caps=[_DESKTOP_APP_NUDGE] * 6, echo_caps=[])
+    result = _run_seed(driver)
+    assert result["reason"] == "not-ready-timeout"
+    assert driver.sends.count(["Escape"]) == 1
+
+
 class TestListWorktreeSessionsLifecycle:
     """``list_worktree_sessions`` stamps the ASSERTED lifecycle (``state`` +
     ``is_head``) onto each entry so a consumer (agent-bridge -> Neuron Forge)

@@ -124,4 +124,42 @@ done
 [ $_ok -eq 1 ] || fail "no agent-bridge read verb (agents/machines/sessions/status) exited 0 without the base"
 
 # =========================================================================
+phase 5 "worktree-handle send resolves a session minted with a DIFFERENT id (copilot-extensions#2247)"
+# The regression this guards: `agent-bridge create --worktree-id <handle>`
+# (and, in the wild, `agent-bridge resume <handle>` for a bridge-managed
+# worktree) mints a fresh, random session id independent of the worktree
+# handle -- `session_id = str(uuid.uuid4())[:12]`. Addressing that session
+# by its *worktree handle* immediately afterward (exactly what
+# agent-dispatch's spawn-then-nudge flow does) must resolve to the real
+# session, not be misread as an unknown agent name and trigger a doomed
+# fresh spawn under the handle itself.
+_WT_HANDLE="cr-wt-$(date +%s)"
+_SID_FILE="$HOME/.cr-send-worktree-sid"
+rm -f "$_SID_FILE"
+capture "create-worktree-bound" -- bash -lc \
+    "agent-bridge create smoke-worker --worktree-id '$_WT_HANDLE' --no-wait --session-id-file '$_SID_FILE'" || true
+if [ -s "$_SID_FILE" ]; then
+    _REAL_SID="$(cat "$_SID_FILE")"
+    if [ "$_REAL_SID" = "$_WT_HANDLE" ]; then
+        info "minted session id happens to equal the worktree handle this run -- send would trivially resolve either way; not falsifying"
+    fi
+    pass "worktree-bound session created: handle=$_WT_HANDLE real_session_id=$_REAL_SID"
+    if capture "send-worktree-handle" -- bash -lc "agent-bridge send '$_WT_HANDLE' 'ack' --no-wait"; then
+        if grep -qiE "not a known agent name or session ID" "$CR_LOGDIR/send-worktree-handle.log" 2>/dev/null; then
+            jam "bridge-service" "send '$_WT_HANDLE' exited 0 but still logged the #2247 failure text" "resolution regressed; check _resolve_target's worktree fallback"
+        else
+            pass "send resolved worktree handle '$_WT_HANDLE' to its real session ($_REAL_SID) -- copilot-extensions#2247 does not reproduce"
+        fi
+    else
+        if grep -qiE "not a known agent name or session ID" "$CR_LOGDIR/send-worktree-handle.log" 2>/dev/null; then
+            jam "bridge-service" "send '$_WT_HANDLE' failed: 'not a known agent name or session ID' -- copilot-extensions#2247 REPRODUCED" "apply the _resolve_target worktree-handle fallback (list_sessions() filtered by worktree_id)"
+        else
+            info "send '$_WT_HANDLE' failed for an unrelated reason (see cr-logs/send-worktree-handle.log)"
+        fi
+    fi
+else
+    info "worktree-bound session was not created (see cr-logs/create-worktree-bound.log) -- skipping the #2247 regression check this run"
+fi
+
+# =========================================================================
 cr_finalize

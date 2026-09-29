@@ -218,6 +218,122 @@ def test_stage_no_change_when_download_noop(tmp_path: Path, monkeypatch):
     assert result["plugin_changed"] is False
 
 
+def test_stage_first_run_computes_before_fingerprint_fresh(tmp_path: Path, monkeypatch):
+    """No prior status file yet -- there is nothing to reuse, so the BEFORE
+    fingerprint must be a real, freshly-computed hash (not skipped)."""
+    home = tmp_path / "home"
+    _make_marketplace(home, {"plugin.json": '{"version":"dev1"}'})
+    status = tmp_path / "status.json"
+    lock = tmp_path / "lock"
+    calls = []
+    real_fingerprint = us.fingerprint
+
+    def counting_fingerprint(d):
+        calls.append(d)
+        return real_fingerprint(d)
+
+    monkeypatch.setattr(us, "fingerprint", counting_fingerprint)
+    monkeypatch.setattr(us, "_run_copilot_update", lambda: (True, "already at latest"))
+    result = us.stage(status=status, lock=lock, home=home)
+    assert result["before_fingerprint_source"] == "computed"
+    # Both the BEFORE and AFTER hash were computed for real (2 calls).
+    assert len(calls) == 2
+
+
+def test_stage_reuses_prior_after_fingerprint_as_before(tmp_path: Path, monkeypatch):
+    """The core optimization: a second stage run, immediately following one
+    that recorded a real (non-skipped) AFTER-fingerprint for the SAME
+    plugin_dir, must reuse it as this run's BEFORE-fingerprint instead of
+    re-walking the whole payload tree a second time."""
+    home = tmp_path / "home"
+    _make_marketplace(home, {"plugin.json": '{"version":"dev1"}'})
+    status = tmp_path / "status.json"
+    lock = tmp_path / "lock"
+    monkeypatch.setattr(us, "_run_copilot_update", lambda: (True, "already at latest"))
+
+    first = us.stage(status=status, lock=lock, home=home)
+    assert first["before_fingerprint_source"] == "computed"
+
+    calls = []
+    real_fingerprint = us.fingerprint
+
+    def counting_fingerprint(d):
+        calls.append(d)
+        return real_fingerprint(d)
+
+    monkeypatch.setattr(us, "fingerprint", counting_fingerprint)
+    second = us.stage(status=status, lock=lock, home=home)
+    assert second["before_fingerprint_source"] == "cached"
+    # Only the AFTER hash was computed this run (the BEFORE hash was reused).
+    assert len(calls) == 1
+    assert second["plugin_changed"] is False
+
+
+def test_stage_does_not_reuse_fingerprint_across_a_locked_skip(
+    tmp_path: Path, monkeypatch
+):
+    """A prior run that recorded ``skipped: locked`` (a peer stage owned the
+    lock) never actually computed a fresh AFTER-fingerprint -- reusing it
+    would silently skip real verification. Must fall back to a fresh hash."""
+    home = tmp_path / "home"
+    _make_marketplace(home, {"plugin.json": '{"version":"dev1"}'})
+    status = tmp_path / "status.json"
+    lock = tmp_path / "lock"
+    status.write_text(json.dumps({
+        "stage_done": True, "skipped": "locked", "plugin_changed": False,
+        "plugin_dir": str(us.discover_plugin_dir(home)[0]),
+        "fingerprint": "stale-would-be-wrong",
+    }), encoding="utf-8")
+    monkeypatch.setattr(us, "_run_copilot_update", lambda: (True, "already at latest"))
+
+    result = us.stage(status=status, lock=lock, home=home)
+    assert result["before_fingerprint_source"] == "computed"
+
+
+def test_stage_does_not_reuse_fingerprint_for_a_different_plugin_dir(
+    tmp_path: Path, monkeypatch
+):
+    """A prior recorded fingerprint for a DIFFERENT plugin_dir (e.g. a prior
+    ``direct`` layout, or a relocated install) must never be trusted for the
+    current one."""
+    home = tmp_path / "home"
+    _make_marketplace(home, {"plugin.json": '{"version":"dev1"}'})
+    status = tmp_path / "status.json"
+    lock = tmp_path / "lock"
+    status.write_text(json.dumps({
+        "stage_done": True, "plugin_changed": False,
+        "plugin_dir": str(tmp_path / "somewhere-else"),
+        "fingerprint": "stale-would-be-wrong",
+    }), encoding="utf-8")
+    monkeypatch.setattr(us, "_run_copilot_update", lambda: (True, "already at latest"))
+
+    result = us.stage(status=status, lock=lock, home=home)
+    assert result["before_fingerprint_source"] == "computed"
+
+
+def test_stage_reused_before_fingerprint_still_detects_a_real_change(
+    tmp_path: Path, monkeypatch
+):
+    """The cached path must still correctly flag plugin_changed when the
+    download actually rewrites the payload -- caching BEFORE never weakens
+    the AFTER-hash's ability to detect a genuine change."""
+    home = tmp_path / "home"
+    d = _make_marketplace(home, {"plugin.json": '{"version":"dev1"}'})
+    status = tmp_path / "status.json"
+    lock = tmp_path / "lock"
+    monkeypatch.setattr(us, "_run_copilot_update", lambda: (True, "already at latest"))
+    us.stage(status=status, lock=lock, home=home)  # seed the cache
+
+    def fake_update():
+        (d / "plugin.json").write_text('{"version":"dev2"}', encoding="utf-8")
+        return True, "updated to dev2"
+
+    monkeypatch.setattr(us, "_run_copilot_update", fake_update)
+    result = us.stage(status=status, lock=lock, home=home)
+    assert result["before_fingerprint_source"] == "cached"
+    assert result["plugin_changed"] is True
+
+
 def test_stage_detects_venv_drift_when_payload_ahead(tmp_path: Path, monkeypatch):
     # #2826: the payload already advanced on a prior run (dev2) but the runtime
     # venv is still dev1. The download is a no-op ("already at latest"), so the

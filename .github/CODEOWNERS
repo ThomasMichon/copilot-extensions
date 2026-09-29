@@ -1,16 +1,33 @@
-# Root ownership: every path in this repository defaults to @ThomasMichon
-# unless a more specific pattern below overrides it (CODEOWNERS uses
+# Root ownership: every path in this repository defaults to the Maintainer
+# group below unless a more specific pattern overrides it (CODEOWNERS uses
 # last-match-wins, so more specific patterns after this one take precedence).
 #
 # This is the maintainer-review gate: any PR authored by someone other than
-# ThomasMichon requires ThomasMichon's own approval before merging into a
-# CODEOWNERS-enforced branch, regardless of what any automated reviewer
-# (including Copilot) says. ThomasMichon's own PRs (including agent-authored
-# ones under this same account) bypass that specific gate via the branch
-# ruleset's own admin-role bypass -- see "dev: review required (maintainer
-# bypass)" and the default-branch ruleset -- never via CODEOWNERS itself,
-# which cannot key off PR authorship at all.
-* @ThomasMichon
+# a Maintainer requires approval from ANY ONE of the Maintainers below before
+# merging into a CODEOWNERS-enforced branch (CODEOWNERS review satisfaction
+# is OR across listed owners, never all-of), regardless of what any automated
+# reviewer (including Copilot) says. Each Maintainer bypasses that specific
+# gate on any PR THEY merge via the branch ruleset's own named-actor bypass
+# list -- see "dev branch policy: review required (maintainer bypass)" --
+# never via CODEOWNERS itself, which cannot key off PR authorship at all.
+# NOTE: that ruleset bypass binds to the merging actor, not the PR's author
+# -- it is not literally scoped to "each Maintainer's own PRs" (GitHub's
+# ruleset model has no such concept); see CONTRIBUTING.md's "Contribution
+# flow" section for the accepted residual-trust tradeoff this implies.
+*                      @ThomasMichon @JakeSchieber @anarmawala @namankanakiya
 
-/.github/workflows/ @ThomasMichon
-/.github/CODEOWNERS @ThomasMichon
+# Workflows, actions, and this file itself are additionally locked down to
+# ThomasMichon alone -- not the wider Maintainer group. A Maintainer's PR
+# bypass above covers ordinary review, but never this: a *separate*,
+# required-status-check-based ruleset ("dev branch policy: workflow/CODEOWNERS
+# lockdown") with NO bypass actors at all (not even ThomasMichon) hard-blocks
+# any merge -- Maintainer or not -- that touches these paths unless the PR's
+# registered author (an authenticated GitHub fact, not per-commit git
+# metadata, which is trivially forgeable) is ThomasMichon (see
+# workflow-lockdown-guard.yml; CODEOWNERS review alone can't enforce this
+# since a Maintainer's PR bypasses code-owner review entirely).
+/.github/workflows/    @ThomasMichon
+/.github/actions/      @ThomasMichon
+/.github/CODEOWNERS    @ThomasMichon
+
+

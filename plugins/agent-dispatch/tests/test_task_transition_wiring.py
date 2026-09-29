@@ -150,4 +150,4 @@ def test_complete_from_suspended_still_allowed_after_phase_10_correction(q):
     q.start(claimed.id, "worker-1")
     q.suspend(claimed.id, "worker-1", reason="pausing")
     result = q.complete(claimed.id, "worker-1")
-    assert result.status == Status.COMPLETED
+    assert result.status == Status.SUBMITTED

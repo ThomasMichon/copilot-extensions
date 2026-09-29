@@ -660,6 +660,37 @@ $prevEAP = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 # Pre-strip any locked console-script trampoline so uv can overwrite it (os err 5).
 Remove-ConsoleTrampolines -VenvDir $VenvDir
+
+# -- 2b. Preinstall workspace path deps (non-uv fallback) --------------
+# `agent-credential-relay`/`agent-procutil`/`agent-single-instance-lease`
+# are `uv`-editable canonical references (vendor-pointer-generalization
+# effort, Phase 1: no local copy in a dev checkout at all); `agent-zdd` is
+# a real local copy. All 4 are `[tool.uv.sources]` workspace path deps, so
+# when `uv` is unavailable the fallback below (bare `python -m pip
+# install`) cannot resolve any of them without this explicit preinstall.
+foreach ($lib in @(
+    @{ Dir = 'credential-relay'; Pkg = 'agent-credential-relay' },
+    @{ Dir = 'agent-procutil'; Pkg = 'agent-procutil' },
+    @{ Dir = 'single-instance-lease'; Pkg = 'agent-single-instance-lease' },
+    @{ Dir = 'zdd'; Pkg = 'agent-zdd' }
+)) {
+    $libDir = Join-Path $PluginDir "libs\$($lib.Dir)"
+    if (-not (Test-Path (Join-Path $libDir 'pyproject.toml'))) {
+        $libDir = Join-Path $PluginDir "..\..\libs\$($lib.Dir)"
+    }
+    if (Test-Path (Join-Path $libDir 'pyproject.toml')) {
+        if (Get-Command uv -ErrorAction SilentlyContinue) {
+            Invoke-Hidden uv pip install --python $VenvPython --reinstall-package $lib.Pkg "$libDir" --quiet | Out-Null
+        } else {
+            Invoke-Hidden $VenvPython -m pip install --quiet "$libDir" | Out-Null
+        }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Fail "$($lib.Dir) library install failed"
+            exit 1
+        }
+    }
+}
+
 if (Get-Command uv -ErrorAction SilentlyContinue) {
     Invoke-Hidden uv pip install --python $VenvPython "$PluginDir" --quiet | Out-Null
 } else {
@@ -723,8 +754,20 @@ if ($VersionedRuntime -and -not $env:AGENT_MCP_NO_CUTOVER) {
     $cutoverHealthTimeout = if ($env:AGENT_MCP_CUTOVER_HEALTH_TIMEOUT) { $env:AGENT_MCP_CUTOVER_HEALTH_TIMEOUT } else { '15' }
     $cutoverDrainTimeout = if ($env:AGENT_MCP_CUTOVER_DRAIN_TIMEOUT) { $env:AGENT_MCP_CUTOVER_DRAIN_TIMEOUT } else { '30' }
     try {
-        $cutoverJson = Invoke-Hidden $VenvPython -I -X utf8 -m agent_mcp cutover --require-live --force --json `
-            --health-timeout $cutoverHealthTimeout --drain-timeout $cutoverDrainTimeout
+        # `-ArgList` is passed explicitly (as an array) rather than as bare
+        # positional tokens: `Invoke-Hidden`'s `param()` block uses
+        # `[Parameter(...)]` attributes, which implicitly makes it an
+        # advanced function and enables PowerShell's common parameters
+        # (`-InformationAction`/`-InformationVariable`/etc.). A bare `-I`
+        # token (Python's isolated-mode flag) is ambiguous against those two
+        # common-parameter names and PowerShell throws instead of treating
+        # it as a remaining argument. Binding the whole array to `-ArgList`
+        # by name sidesteps that re-parsing entirely.
+        $cutoverArgs = @(
+            '-I', '-X', 'utf8', '-m', 'agent_mcp', 'cutover', '--require-live', '--force', '--json',
+            '--health-timeout', $cutoverHealthTimeout, '--drain-timeout', $cutoverDrainTimeout
+        )
+        $cutoverJson = Invoke-Hidden -FilePath $VenvPython -ArgList $cutoverArgs
         $cutoverArg = (($cutoverJson | Out-String).Trim())
         if ($cutoverArg) {
             $cutoverResult = $cutoverArg | ConvertFrom-Json

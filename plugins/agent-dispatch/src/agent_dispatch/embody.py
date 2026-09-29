@@ -5,7 +5,7 @@ worker), this spawns a durable, **CLI-backed autopilot** session in a fresh
 parallel worktree on the same machine via ``agent-worktrees embody``. The
 embodied Copilot launches with ``--allow-all-tools`` (tools auto-approved -- no
 per-tool confirmation prompts), claims and starts the task, works it
-autonomously, and marks the task ``completed`` **explicitly** only when it judges
+autonomously, and marks the task ``submitted`` **explicitly** only when it judges
 the goal reached -- *deferred completion*, never stamped at spawn or pickup.
 
 agent-dispatch stays decoupled: it shells out to the ``agent-worktrees`` runtime

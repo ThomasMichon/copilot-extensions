@@ -7,6 +7,12 @@
       "summary": "A PR review verdict came back as a plain comment with no approval/change-request, and it's unclear whether that blocks landing.",
       "pointer": "`commented-review-verdict.instructions.md` -- check the repo's own review policy first; only advisory absent one",
       "markers": ["Commented-verdict review fallback", "never gates a merge"]
+    },
+    {
+      "id": "validate-and-promote-failure",
+      "summary": "The `validate-and-promote` release-pipeline workflow (dev-advanced) is red, blocking dev-to-main promotion for every pending contributor.",
+      "pointer": "`validate-and-promote-triage.instructions.md` -- identify every job that actually failed (a per-plugin `full - <plugin>` fan-out job, or `worktree-manager`/`guards-full-sweep`); for a fan-out failure, classify known-flake vs. CI-test-bug vs. regression and fix forward; full runbook in the `diagnosing-validate-and-promote-failures` skill",
+      "markers": ["validate-and-promote", "full - <plugin>", "fix-forward"]
     }
   ]
 }

@@ -10,6 +10,7 @@ from pathlib import Path
 from . import activity, disposition_history, finalize as fin, git_ops, handoff_trace, locks, prune, procs, sessions, tracking
 from . import claimant as claimant_mod
 from . import config as cfg
+from . import managed_worktree_guard
 
 
 def _core():
@@ -46,6 +47,8 @@ def add_parsers(sub) -> None:
     p = sub.add_parser("reap-sessions", help="Reap leaked tmux/psmux sessions whose worktree is finalized, gone, or untracked AND has been idle past the grace window (never touches attached, active, or busy sessions)")
     p.add_argument("--dry-run", action="store_true", help="Report what would be reaped without killing anything")
     p.add_argument("--id", default=None, help="Target a single worktree id; same spare-attached/active/busy predicate as the full sweep")
+    p.add_argument("--worktree-id", action="append", default=[], help="Limit the sweep to one or more worktree ids; repeatable")
+    p.add_argument("--include-manager-owned", action="store_true", help="Also reap Worktree-Manager-owned mux sessions (for the Manager's own housekeeping lane)")
     p.add_argument("--grace-hours", type=float, default=None, help="Idle window before a finalized/idle session is eligible (default 6h); a busy session is never reaped")
     p.add_argument("--json", action="store_true", help="Emit a single JSON result object")
     p = sub.add_parser("reap-shells", help="Reap orphaned agent-worktrees launcher shells (pwsh/python left by a force-closed terminal). Reports candidates by default; only kills with --yes. Positive-signature + service-safe + idle-gated.")
@@ -425,7 +428,8 @@ def sweep_managed_worktrees(
         norm = _normalize_path(rec.worktree_path) if rec.worktree_path else ""
         has_live_session = norm in session_ctx.active_sessions
 
-        if rec.worktree_path and Path(rec.worktree_path).exists():
+        checkout_exists = bool(rec.worktree_path) and Path(rec.worktree_path).exists()
+        if checkout_exists:
             info = git_ops.classify_worktree(
                 rec.worktree_path,
                 rec.branch,
@@ -460,6 +464,33 @@ def sweep_managed_worktrees(
         )
         if verdict.action == "skip":
             result["skipped"].append({"id": rec.worktree_id, "reason": verdict.reason})
+            continue
+        # Resolved HERE, before any lock is taken (issue #4556 review): a
+        # cross-machine owner probe can take up to the remote-probe timeout,
+        # and doing that while holding the repo lifecycle lock and/or this
+        # record's lock would serialize every other finalize/gc/record-write
+        # caller behind one unreachable remote owner. The locked recheck
+        # below deliberately does NOT reuse this cached verdict (a second
+        # review round: an owner previously observed dead can resume without
+        # this child's own owner_ref field changing, so trusting a stale
+        # cached "dead" across the lock-acquisition window is its own race)
+        # -- it re-resolves fresh, but with `allow_remote=False`, so it never
+        # performs a slow SSH probe while holding a lock either. A genuinely
+        # remote owner therefore stays conservatively blocked at recheck time
+        # even when this pass-1 probe (which does allow remote) confirmed it
+        # dead -- strictly safer than, never worse than, the unconditional
+        # block this whole fix replaces.
+        owner_blocker = managed_worktree_guard.owner_ref_blocker(
+            rec,
+            content_confirmed_merged=(
+                checkout_exists
+                and git_state == git_ops.WorktreeState.COMPLETED.value
+            ),
+        )
+        if owner_blocker:
+            result["skipped"].append(
+                {"id": rec.worktree_id, "reason": "owner-ref-blocked"}
+            )
             continue
         if dry_run:
             result["removed"].append(
@@ -554,13 +585,24 @@ def sweep_managed_worktrees(
                     require_sidecar=True,
                 ):
                     latest = tracking.load_record(yaml_path)
+                    fresh_owner_blocker = managed_worktree_guard.owner_ref_blocker(
+                        latest,
+                        content_confirmed_merged=(
+                            bool(latest.worktree_path)
+                            and Path(latest.worktree_path).exists()
+                            and fresh_git_state == git_ops.WorktreeState.COMPLETED.value
+                        ),
+                        resolve_alive=lambda ref: claimant_mod.resolve_claimant_alive(
+                            ref, allow_remote=False,
+                        ),
+                    )
                     if (
                         latest.worktree_id != yaml_path.stem
                         or latest.worktree_id != current.worktree_id
                         or latest.kind not in tracking.MANAGED_KINDS
                         or latest.follow_up
                         or latest.live_resources
-                        or latest.owner_ref
+                        or fresh_owner_blocker
                         or latest.is_paired
                         or latest.pending_handoffs
                         or latest.resolved_head_session is not None
@@ -828,8 +870,18 @@ def cmd_reap_sessions(args: argparse.Namespace) -> int:
     """
     dry = getattr(args, "dry_run", False)
     only_id = getattr(args, "id", None)
+    worktree_ids = {
+        str(value).strip()
+        for value in getattr(args, "worktree_id", []) or []
+        if str(value).strip()
+    }
     grace_hours = getattr(args, "grace_hours", None)
-    kwargs = {"dry_run": dry, "only_id": only_id}
+    kwargs = {
+        "dry_run": dry,
+        "only_id": only_id,
+        "worktree_ids": worktree_ids or None,
+        "include_manager_owned": getattr(args, "include_manager_owned", False),
+    }
     if grace_hours is not None:
         kwargs["idle_grace_secs"] = float(grace_hours) * 3600
     payload = reap_orphan_mux_sessions(**kwargs)

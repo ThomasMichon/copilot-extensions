@@ -24,16 +24,18 @@ dependencies = [
 # Copilot CLI + Claude plugin resolution -- marketplaces, plugins, repo settings
 # (module ``plugin_resolve``). Vendored byte-identical from libs/plugin-resolve;
 # shared with agent-worktrees / agent-bridge / agent-codespaces.
-agent-plugin-resolve = { path = "libs/plugin-resolve" }
+agent-plugin-resolve = { path = "../../libs/plugin-resolve", editable = true }
 # Strict plugin inventory and activation inspection, removal, and snapshots
 # (module ``plugin_activation``). Vendored byte-identically from
 # libs/plugin-activation.
-agent-plugin-activation = { path = "libs/plugin-activation" }
+agent-plugin-activation = { path = "../../libs/plugin-activation", editable = true }
 # Resilient scan authority and decision types required by plugin-activation.
-agent-dropin-registry = { path = "libs/dropin-registry" }
-# Shared Windows-headless / detached process-spawn kwargs (module
-# ``agent_procutil``). Vendored per plugin; byte-identical src across copies.
-agent-procutil = { path = "libs/agent-procutil" }
+agent-dropin-registry = { path = "../../libs/dropin-registry", editable = true }
+# `path` escapes this plugin's own root and resolves live to
+# `libs/agent-procutil`, so this `dev`-branch checkout has nothing to keep
+# manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
+agent-procutil = { path = "../../libs/agent-procutil", editable = true }
 
 [project.optional-dependencies]
 dev = [

@@ -74,6 +74,18 @@ def test_update_reports_self_update_and_continues(monkeypatch):
     assert "passthrough" in calls  # continues to the harness update regardless
 
 
+def test_update_surfaces_cutover_failure_and_returns_nonzero(monkeypatch):
+    rc, calls, out = _run_update(
+        [],
+        monkeypatch,
+        su_action="updated",
+        su_kwargs={"cutover": {"action": "cutover", "result": {"ok": False, "error": "boom"}}},
+    )
+    assert rc == 1
+    assert "mux-daemon cutover failed" in out
+    assert "passthrough" in calls
+
+
 def test_update_engine_absent_hints_setup(monkeypatch):
     from worktree_manager.self_install import SelfUpdateResult
     monkeypatch.setattr(self_install, "self_update",
@@ -542,9 +554,48 @@ def test_self_update_reports_updated(monkeypatch, tmp_path):
     monkeypatch.setattr(self_install, "self_install",
                         lambda **kw: SelfInstallResult(version="0.1.0-dev9",
                                                        action="installed", root=str(tmp_path)))
+    seen = {}
+
+    def _fake_cutover(**kw):
+        seen.update(kw)
+        return {"action": "cutover", "result": {"ok": True}}
+
+    monkeypatch.setattr("worktree_manager.mux_daemon_cutover.activate_after_update", _fake_cutover)
     res = self_install.self_update(root=tmp_path, dry_run=False)
     assert res.action == "updated"
     assert res.version == "0.1.0-dev9"
+    assert res.cutover == {"action": "cutover", "result": {"ok": True}}
+    assert seen["root"] == tmp_path
+    assert seen["version"] == "0.1.0-dev9"
+    assert seen["slot"] == self_install.version_slot("0.1.0-dev9", tmp_path)
+
+
+def test_self_update_runs_cutover_even_when_already_current(monkeypatch, tmp_path):
+    from worktree_manager.self_install import SelfInstallResult
+
+    monkeypatch.setattr(self_install.shutil, "which", lambda name: "/usr/bin/git")
+    monkeypatch.setattr(
+        self_install.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a[0], 0)
+    )
+    monkeypatch.setattr(self_install.Path, "is_file", lambda self: True)
+    monkeypatch.setattr(
+        self_install,
+        "self_install",
+        lambda **kw: SelfInstallResult(version="0.1.0-dev9", action="already-current", root=str(tmp_path)),
+    )
+    seen = {}
+
+    def _fake_cutover(**kw):
+        seen.update(kw)
+        return {"action": "cutover", "result": {"ok": True}}
+
+    monkeypatch.setattr("worktree_manager.mux_daemon_cutover.activate_after_update", _fake_cutover)
+
+    res = self_install.self_update(root=tmp_path, dry_run=False)
+
+    assert res.action == "already-current"
+    assert res.cutover == {"action": "cutover", "result": {"ok": True}}
+    assert seen["slot"] == self_install.version_slot("0.1.0-dev9", tmp_path)
 
 
 def test_safe_extract_refuses_the_classic_tar_symlink_traversal_attack(tmp_path):

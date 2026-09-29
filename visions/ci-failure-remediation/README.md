@@ -135,6 +135,10 @@ win, it defers to a human rather than defaulting to either "fix the test" or
 - Parent vision: none (leaf; a future broader release-pipeline vision may
   adopt this as a child once authored)
 - Child visions: none
+- Related vision: [`coverage-guided-ci`](../coverage-guided-ci/README.md) —
+  a distinct capability at the same trunk-gate event (this vision reacts to
+  a red run; that one earns and propagates the coverage baseline from a
+  green one)
 - Reality docs: [`tools/ci_failure_watchdog.py`](../../tools/ci_failure_watchdog.py),
   [`.github/workflows/validate-and-promote.yml`](../../.github/workflows/validate-and-promote.yml),
   the `promotion-failure-reactive-fix-agent` effort (realizing work)

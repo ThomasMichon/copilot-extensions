@@ -341,6 +341,25 @@ $CfgMigrateDir   = Join-Path $PluginDir 'libs\config-migrate'
 if (-not (Test-Path (Join-Path $CfgMigrateDir 'pyproject.toml'))) {
     $CfgMigrateDir = Join-Path $RepoRoot 'libs\config-migrate'
 }
+# zdd dir (uv-editable canonical reference in a dev checkout, real copy in a
+# materialized release payload): plugin-vendored or repo-root.
+$ZddDir          = Join-Path $PluginDir 'libs\zdd'
+if (-not (Test-Path (Join-Path $ZddDir 'pyproject.toml'))) {
+    $ZddDir = Join-Path $RepoRoot 'libs\zdd'
+}
+# venue-copilot dir (uv-editable canonical reference in a dev checkout, real
+# copy in a materialized release payload): plugin-vendored or repo-root.
+$VenueCopilotDir = Join-Path $PluginDir 'libs\venue-copilot'
+if (-not (Test-Path (Join-Path $VenueCopilotDir 'pyproject.toml'))) {
+    $VenueCopilotDir = Join-Path $RepoRoot 'libs\venue-copilot'
+}
+# session-liveness-probe dir (uv-editable canonical reference in a dev
+# checkout, real copy in a materialized release payload): plugin-vendored or
+# repo-root.
+$SessionLivenessProbeDir = Join-Path $PluginDir 'libs\session-liveness-probe'
+if (-not (Test-Path (Join-Path $SessionLivenessProbeDir 'pyproject.toml'))) {
+    $SessionLivenessProbeDir = Join-Path $RepoRoot 'libs\session-liveness-probe'
+}
 
 $DeploySourcePaths = @('plugins/agent-codespaces/')
 $InstallerRelPath  = 'plugins/agent-codespaces/scripts/install.ps1'
@@ -592,8 +611,9 @@ function Assert-Uv {
 }
 
 function Install-PackageInto {
-    <# uv pip install the vendored libs (ssh-manager, credential-relay) then
-       agent-codespaces into the given venv python. Non-editable by default;
+    <# uv pip install the vendored libs (ssh-manager, credential-relay, zdd,
+       venue-copilot, session-liveness-probe) then agent-codespaces into the
+       given venv python. Non-editable by default;
        deps resolved from pyproject.toml. The vendored libs are force-reinstalled
        so a local code change propagates even without a version bump (uv
        otherwise skips a same-version path dep, leaving the venv stale).
@@ -615,6 +635,18 @@ function Install-PackageInto {
     }
     if (-not (Test-Path (Join-Path $CfgMigrateDir 'pyproject.toml'))) {
         Write-ServiceErr "config-migrate source not found at $CfgMigrateDir"
+        return $false
+    }
+    if (-not (Test-Path (Join-Path $ZddDir 'pyproject.toml'))) {
+        Write-ServiceErr "zdd source not found at $ZddDir"
+        return $false
+    }
+    if (-not (Test-Path (Join-Path $VenueCopilotDir 'pyproject.toml'))) {
+        Write-ServiceErr "venue-copilot source not found at $VenueCopilotDir"
+        return $false
+    }
+    if (-not (Test-Path (Join-Path $SessionLivenessProbeDir 'pyproject.toml'))) {
+        Write-ServiceErr "session-liveness-probe source not found at $SessionLivenessProbeDir"
         return $false
     }
     # Pre-strip: rename any locked console-script trampoline aside so uv can write
@@ -642,6 +674,27 @@ function Install-PackageInto {
     if ($LASTEXITCODE -ne 0) {
         $ErrorActionPreference = $prevEAP
         Write-ServiceErr "config-migrate install failed"
+        return $false
+    }
+    $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-zdd' })
+    & uv pip install --python $Python @modeArgs "$ZddDir" --quiet 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        $ErrorActionPreference = $prevEAP
+        Write-ServiceErr "zdd install failed"
+        return $false
+    }
+    $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-venue-copilot' })
+    & uv pip install --python $Python @modeArgs "$VenueCopilotDir" --quiet 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        $ErrorActionPreference = $prevEAP
+        Write-ServiceErr "venue-copilot install failed"
+        return $false
+    }
+    $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-session-liveness-probe' })
+    & uv pip install --python $Python @modeArgs "$SessionLivenessProbeDir" --quiet 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        $ErrorActionPreference = $prevEAP
+        Write-ServiceErr "session-liveness-probe install failed"
         return $false
     }
     $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-codespaces' })

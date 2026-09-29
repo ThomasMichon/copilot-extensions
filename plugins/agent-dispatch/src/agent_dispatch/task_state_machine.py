@@ -10,7 +10,7 @@ under. It reconciles Phase 1's original reviewer-flavored state list
 (requested / claimed / analyzing / awaiting-steer / ready / submitted /
 failed / abandoned) with the actual, already-implemented generic task
 states in :class:`agent_dispatch.queue.Status`: the reviewer-flavored names
-were a specific consumer's projection of this same eight-state machine.
+were a specific consumer's projection of this same nine-state machine.
 
 The three recovery modes are exactly Phase 9's taxonomy:
 
@@ -74,8 +74,8 @@ ALL_STATES: frozenset[str] = frozenset(
         Status.CLAIMED,
         Status.STARTED,
         Status.SUSPENDED,
+        Status.SUBMITTED,
         Status.COMPLETED,
-        Status.CONFIRMED,
         Status.ABANDONED,
         Status.DEAD_LETTER,
     }
@@ -175,7 +175,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         #: match the real, already-working behavior rather than the other
         #: way around.
         from_states=frozenset({Status.STARTED, Status.SUSPENDED}),
-        to_state=Status.COMPLETED,
+        to_state=Status.SUBMITTED,
         recovery_mode=RecoveryMode.SAFE_RETRY,
         implemented_by="TaskQueue.complete_with_outcome",
     ),
@@ -186,8 +186,8 @@ TRANSITIONS: tuple[Transition, ...] = (
         #: an operator's explicit review (the Completion Review card's
         #: Confirm action) for self-tracked work with no evaluator. See the
         #: vision's *verify-the-completion-claim* / *The lifecycle*.
-        from_states=frozenset({Status.COMPLETED}),
-        to_state=Status.CONFIRMED,
+        from_states=frozenset({Status.SUBMITTED}),
+        to_state=Status.COMPLETED,
         recovery_mode=RecoveryMode.SAFE_RETRY,
         implemented_by="TaskQueue.confirm",
     ),
@@ -199,17 +199,17 @@ TRANSITIONS: tuple[Transition, ...] = (
         #: wanted), so the task returns to the queue carrying its progress
         #: forward, per *resume-the-goal-not-restart-it* -- never restarting
         #: the goal from nothing.
-        from_states=frozenset({Status.COMPLETED}),
+        from_states=frozenset({Status.SUBMITTED}),
         to_state=Status.QUEUED,
         recovery_mode=RecoveryMode.SAFE_RETRY,
         implemented_by="TaskQueue.reopen_completed",
     ),
     Transition(
         name="abandon",
-        #: Includes ``COMPLETED`` (2026-09-25, sourced from
+        #: Includes ``SUBMITTED`` (2026-09-25, sourced from
         #: ``Status.ABANDONABLE`` directly so this table can't drift from
         #: it): the Completion Review card's Abandon action closes a
-        #: completed-but-unconfirmed task the operator disagrees with.
+        #: submitted-but-not-yet-completed task the operator disagrees with.
         from_states=Status.ABANDONABLE,
         to_state=Status.ABANDONED,
         recovery_mode=RecoveryMode.SAFE_RETRY,

@@ -21,7 +21,10 @@ This tool closes that gap in three modes:
 * ``--restore-canonical``: the safe direction *today*, given that copies are
   the verified-consistent, actually-shipped truth. Copies a lib's first copy
   (after confirming all copies agree) up into the top-level ``libs/<lib>``,
-  syncing ``src/`` and the declared version. Never touches plugin copies.
+  creating that canonical root when missing and replacing its complete
+  filtered lib tree (``src/``, ``tests/`` when present, ``README.md``,
+  ``pyproject.toml``, and any other real tracked files, while still ignoring
+  build/cache cruft). Never touches plugin copies.
 * ``--materialize``: the FUTURE direction once canonical is restored and kept
   current -- copies top-level ``libs/<lib>`` DOWN into every
   ``plugins/<plugin>/libs/<lib>``. This is the shape the dev/main release
@@ -134,7 +137,15 @@ POINTER_NAME = "VENDOR_POINTER.json"
 # instead of each hardcoding "plugins/<x>" and silently missing these.
 _EXTRA_CONSUMER_DIRS = ("worktree-manager",)
 
-_IGNORE_PARTS = {"build", ".venv", "__pycache__", "dist"}
+_IGNORE_PARTS = {
+    ".git",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+}
 _VERSION_RE = re.compile(r'^(\s*version\s*=\s*")([^"]+)(")', re.MULTILINE)
 
 # The generated `src-passthrough` stub template -- split into its own module
@@ -244,6 +255,16 @@ def _copies_agree(paths: list[Path]) -> tuple[bool, list[str]]:
     versions = {str(p): _declared_version(p) for p in paths}
     if len(set(versions.values())) > 1:
         problems.append(f"version skew across copies: {versions}")
+    return (not problems), problems
+
+
+def _full_trees_agree(paths: list[Path]) -> tuple[bool, list[str]]:
+    """True + [] when every copy's complete filtered tree matches."""
+    problems: list[str] = []
+    ref = paths[0]
+    for other in paths[1:]:
+        if not uer.lib_tree_matches(ref, other):
+            problems.append(f"complete filtered tree differs: {ref} vs {other}")
     return (not problems), problems
 
 
@@ -370,6 +391,45 @@ def _copy_tests(src_lib: Path, dst_lib: Path) -> None:
     (non-pointer) copy's own, possibly independently authored
     ``tests/``."""
     _safe_replace_tree(src_lib / "tests", dst_lib / "tests", label=f"{src_lib.name}/tests")
+
+
+def _copy_lib_tree(src_lib: Path, dst_lib: Path) -> None:
+    """Replace ``dst_lib`` with a filtered copy of the whole ``src_lib`` tree."""
+    bad_ancestor = _find_symlinked_ancestor(src_lib, REPO)
+    if bad_ancestor is not None:
+        raise SystemExit(
+            f"{bad_ancestor} is a symlink -- refusing (a canonical lib root, "
+            "and every ancestor between it and the repository root, must be "
+            "a real directory)"
+        )
+    found = _find_symlink(src_lib)
+    if found is not None:
+        where = src_lib.name if found == "." else f"{src_lib.name}/{found}"
+        raise SystemExit(
+            f"{where} is a symlink -- refusing (a vendored lib copy promoted "
+            "to canonical must contain only real files)"
+        )
+    bad_ancestor = _find_symlinked_ancestor(dst_lib, REPO)
+    if bad_ancestor is not None:
+        raise SystemExit(
+            f"{bad_ancestor} is a symlink -- refusing (a canonical lib root, "
+            "and every ancestor between it and the repository root, must be "
+            "a real directory)"
+        )
+    if dst_lib.is_symlink():
+        raise SystemExit(
+            f"libs/{dst_lib.name} (destination) is a symlink -- refusing to "
+            "replace it blindly (a canonical lib root must be a real directory)"
+        )
+    _remove_path(dst_lib)
+
+    def _ignore(_root: str, names: list[str]) -> set[str]:
+        ignored = {name for name in names if name in _IGNORE_PARTS}
+        ignored.update(name for name in names if name.endswith((".pyc", ".pyo")))
+        ignored.update(name for name in names if name.endswith(".egg-info"))
+        return ignored
+
+    shutil.copytree(src_lib, dst_lib, ignore=_ignore)
 
 
 def _sync_version(src_lib: Path, dst_lib: Path) -> None:
@@ -500,7 +560,7 @@ def cmd_restore_canonical() -> int:
                   "(canonical is already the only source)")
             continue
         if len(real) >= 2:
-            ok, problems = _copies_agree(real)
+            ok, problems = _full_trees_agree(real)
             if not ok:
                 print(f"{lib}: SKIPPED -- copies disagree, fix that first:")
                 for p in problems:
@@ -508,11 +568,8 @@ def cmd_restore_canonical() -> int:
                 continue
         truth = real[0]
         canonical = LIBS_DIR / lib
-        if not canonical.is_dir():
-            print(f"{lib}: no top-level libs/{lib}/ to restore into -- skipping")
-            continue
-        _copy_src(truth, canonical)
-        _sync_version(truth, canonical)
+        canonical.parent.mkdir(parents=True, exist_ok=True)
+        _copy_lib_tree(truth, canonical)
         print(f"{lib}: canonical restored from {truth}")
     return 0
 

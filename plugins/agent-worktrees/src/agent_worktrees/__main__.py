@@ -100,6 +100,7 @@ from . import (
     front_door_cli,
     git_ops,
     handoff_trace,
+    launch_registry,
     list_cache,  # noqa: F401 -- compatibility re-export for extracted status-monitor CLI
     locks,
     output,
@@ -194,7 +195,6 @@ _UPDATE_CONTEXT_ENV = "AGENT_WORKTREES_UPDATE_CONTEXT"
 
 def windowless_daemon_kwargs(**kwargs):
     return _windowless_daemon_kwargs_impl(**kwargs)
-
 
 def _env_get(new_name: str) -> str | None:
     """Read an env var by name (an empty value is treated as unset)."""
@@ -2417,72 +2417,6 @@ from .handoff_cutover import (  # noqa: E402 -- re-export position matches origi
     _settle_predecessor_session_claim,  # noqa: F401 -- re-exported for tests
     _wait_for_handoff_candidate,  # noqa: F401 -- re-exported for tests
 )
-
-
-def cmd_copilot(args: argparse.Namespace) -> int:
-    """Deliver a TTY Copilot session to the user in THIS terminal.
-
-    The canonical "___ copilot" verb: ensure a durable, mux-wrapped Copilot
-    session exists for the target worktree (identical create-or-resume
-    semantics to `embody`), then hand this process's own controlling
-    terminal over to it -- this process becomes the mux client, replacing
-    itself via exec so there is no wrapper left holding the TTY. Unlike
-    `embody` (always detached, JSON out, for a programmatic caller), this is
-    the human/TTY-facing counterpart and refuses without one.
-
-    `agent-codespaces`/`agent-containers` implement the same verb
-    (`copilot <name>`) for a remote venue by SSH `-t`'ing in and running
-    this exact command there -- one name, one meaning, everywhere: deliver a
-    TTY Copilot session in the current terminal. The amount of setup needed
-    before that's possible (none locally; venue prep + reverse-forwards
-    remotely) is the only thing that differs.
-    """
-    if not sys.stdin.isatty():
-        output.err(
-            "`copilot` needs a controlling terminal to attach to -- for a "
-            "programmatic/detached launch use `embody` instead."
-        )
-        return 2
-
-    # Reuse embody's full target-resolution/preflight/create-or-resume logic
-    # in-process rather than duplicating it -- only its JSON result is wanted
-    # here, not its stdout (which is about to become the mux client's TTY).
-    # `embody`'s JSON goes through `_json_output`, which deliberately writes
-    # to `sys.__stdout__` (not `sys.stdout`) so it still reaches the real
-    # terminal from inside `output.stdout_to_stderr` -- a plain
-    # `contextlib.redirect_stdout` (which only swaps `sys.stdout`) never
-    # captures it, so `buf.getvalue()` came back empty every single call
-    # (confirmed live, agent-bridge-cli-mode-sessions Phase 4 validation:
-    # 100% reproducible both locally and over a remote venue SSH session --
-    # `copilot` never actually attached to the mux session it had just
-    # created). `output.capture_json_output()` swaps `sys.__stdout__` itself,
-    # the level `_json_output` actually writes to.
-    with output.capture_json_output() as buf:
-        rc = cmd_embody(args)
-    if rc != 0:
-        # embody already wrote its JSON error to buf; surface it for a human
-        # on stderr and exit the same way embody would have.
-        sys.stderr.write(buf.getvalue())
-        return rc
-    try:
-        result = json.loads(buf.getvalue())
-    except (ValueError, TypeError):
-        output.err("copilot: could not parse the embodiment result")
-        return 1
-
-    session_name = result.get("session")
-    if not session_name:
-        output.err("copilot: embodiment result had no session name")
-        return 1
-
-    mux_bin = sessions._mux_bin(getattr(args, "mux", None))
-    argv = [mux_bin, "attach-session", "-t", session_name]
-    try:
-        os.execvp(mux_bin, argv)  # never returns on success
-    except OSError as exc:
-        output.err(f"copilot: could not attach to {session_name!r}: {exc}")
-        return 1
-    return 0  # pragma: no cover -- unreachable after a successful execvp
 
 
 def cmd_resolve(args: argparse.Namespace) -> int:
@@ -4863,6 +4797,8 @@ def reap_orphan_mux_sessions(
     *,
     dry_run: bool = False,
     only_id: str | None = None,
+    worktree_ids: set[str] | None = None,
+    include_manager_owned: bool = False,
     idle_grace_secs: float = REAP_IDLE_GRACE_SECS,
     now: float | None = None,
 ) -> dict:
@@ -4880,23 +4816,17 @@ def reap_orphan_mux_sessions(
     (:func:`_sweep_orphans_on_exit`, #2149) -- so idle orphans are reaped on a
     natural cadence with **no persistent timer or daemon**.
 
-    ``only_id`` restricts the sweep to a **single** worktree's session; the exact
-    same spare-attached/system/active/**busy** predicate is applied.
+    ``only_id`` / ``worktree_ids`` restrict the sweep to specific worktree sessions; the exact same
+    spare-attached/system/active/**busy** predicate is applied. ``include_manager_owned`` lifts the normal
+    "hands off Worktree-Manager-owned mux sessions" guard for the Manager's own cleanup lane only.
 
     **Conservative by design** -- a session is never reaped when:
 
     - a terminal client is **attached** (a human is using it),
-    - Worktree Manager already owns the mux session via ``mux-mapping.json``,
-    - its worktree record is ``kind: system`` (daemon-owned), or
-    - its worktree is still **active** (tracked, dir present), or
-    - it has been **active within the grace window** (fresh pane activity => the Copilot inside is busy), or the activity signal is **unknown** (never risk killing a session we can't prove is idle).
+    - Worktree Manager already owns the mux session via ``mux-mapping.json``, or its worktree record is
+      ``kind: system`` (daemon-owned), still **active** (tracked, dir present), or **busy / unknown** within the grace window (never risk killing a session we can't prove is idle).
 
-    Returns a JSON-ready dict::
-
-        {"available": bool,                  # False when no mux is installed
-         "reaped": ["<id>", ...],
-         "skipped": [{"id": "<id>", "reason": "attached|system|active|busy|activity-unknown|manager-owned"}, ...],
-         "errors":  [{"id": "<id>", "reason": "..."}, ...]}
+    Returns a JSON-ready dict:: {"available": bool, "reaped": ["<id>", ...], "skipped": [{"id": "<id>", "reason": "attached|system|active|busy|activity-unknown|manager-owned"}, ...], "errors": [{"id": "<id>", "reason": "..."}, ...]}
     """
     all_sessions = sessions._list_mux_sessions()
     if all_sessions is None:
@@ -4914,6 +4844,9 @@ def reap_orphan_mux_sessions(
     reaped: list[str] = []
     skipped: list[dict] = []
     errors: list[dict] = []
+    filtered_ids = set(worktree_ids or ())
+    if only_id is not None:
+        filtered_ids.add(only_id)
     for name, attached in all_sessions.items():
         if not name.startswith("wt-"):
             continue
@@ -4921,9 +4854,9 @@ def reap_orphan_mux_sessions(
         # so stripping the prefix would miss a dotted id's record and read as
         # "untracked" below -- which reaps a live, tracked session.
         wt_id = sessions.worktree_id_from_mux_session(name, index=by_session)
-        if only_id is not None and wt_id != only_id:
+        if filtered_ids and wt_id not in filtered_ids:
             continue
-        if managed_mux_registry.live_mapping_for_session(name):
+        if not include_manager_owned and managed_mux_registry.live_mapping_for_session(name):
             skipped.append({"id": wt_id, "reason": "manager-owned"})
             continue
         if attached and attached > 0:
@@ -5489,6 +5422,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     from . import pr_cli, resolve_cli, session_binding_cli, session_inspection_cli, session_tracking_cli
+    from . import handoff_successor_repair_cli
 
     resolve_cli.add_parsers(sub)
 
@@ -5534,7 +5468,7 @@ def build_parser() -> argparse.ArgumentParser:
     pane_lifecycle.register_cli(sub)
     handoff_cli.add_parsers(sub)
 
-    handoff_cli.add_copilot_parser(sub)
+    copilot_cli.add_copilot_parser(sub)
 
     list_cli.add_parsers(sub)
     claims_cli.add_parsers(sub)
@@ -5545,6 +5479,7 @@ def build_parser() -> argparse.ArgumentParser:
     reap_cli.add_parsers(sub)
     reclaim_cli.add_parsers(sub)
     worktree_ops_cli.add_parsers(sub)
+    handoff_successor_repair_cli.add_parsers(sub)
 
     picker_profiles_cli.add_parsers(sub)
     maintenance_cli.add_parsers(sub)
@@ -5583,6 +5518,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     session_binding_cli.add_parsers(sub)
     session_inspection_cli.add_parsers(sub)
+    from . import handoff_cancel_cli
+    handoff_cancel_cli.add_parsers(sub)
 
     session_tracking_cli.add_parsers(sub)
     worktree_status_audit.add_parsers(sub)
@@ -5626,6 +5563,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument(
         "--field", action="append", default=[], help="Extra context as key=value (repeatable)"
     )
+
+    # register-launch -- record this launch's own root pid (internal)
+    launch_registry.add_parsers(sub)
 
     return parser
 
@@ -5765,6 +5705,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'machine-context': ('context_cli', 'cmd_machine_context'),
     'mark-complete': ('finalize_cli', 'cmd_mark_complete'),
     'note-handoff': ('session_binding_cli', 'cmd_note_handoff'),
+    'cancel-handoff': ('handoff_cancel_cli', 'cmd_cancel_handoff'),
     'pane-create': ('pane_lifecycle', 'cmd_pane_create'),
     'pane-terminate': ('pane_lifecycle', 'cmd_pane_terminate'),
     'picker': ('picker_profiles_cli', 'cmd_picker'),
@@ -5777,18 +5718,22 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'pre-launch': ('update_cli', 'cmd_pre_launch'),
     'push-changes': ('finalize_cli', 'cmd_push_changes'),
     'reap-sessions': ('reap_cli', 'cmd_reap_sessions'),
-    'reap-shells': ('reap_cli', 'cmd_reap_shells'),
+    'reap-shells': ('reap_cli', 'cmd_reap_shells'), 'sweep-finished-sessions': ('cleanup_gc_cli', 'cmd_sweep_finished_sessions'), 'sweep-managed': ('cleanup_gc_cli', 'cmd_sweep_managed'),
     'recent-messages': ('session_tracking_cli', 'cmd_recent_messages'),
     'reclaim': ('reclaim_cli', 'cmd_reclaim'),
     'reconcile-binstubs': ('maintenance_cli', 'cmd_reconcile_binstubs'),
     'reconcile-plugins': ('update_cli', 'cmd_reconcile_plugins'),
     'reconcile-sessions': ('status_monitor_runtime', 'cmd_reconcile_sessions'),
     'register': ('installation_cli', 'cmd_register'),
+    'register-launch': ('launch_registry', 'cmd_register_launch'),
     'register-project-entry': ('maintenance_cli', 'cmd_register_project_entry'),
     'register-session': ('session_binding_cli', 'cmd_register_session'),
     'remove-system': ('worktree_ops_cli', 'cmd_remove_system'),
     'remux': ('reclaim_cli', 'cmd_remux'),
     'repair': ('picker_profiles_cli', 'cmd_repair'),
+    'resolve-handoff-successor': (
+        'handoff_successor_repair_cli', 'cmd_resolve_handoff_successor',
+    ),
     'restart': ('reclaim_cli', 'cmd_restart'),
     'run': ('worktree_ops_cli', 'cmd_run'),
     'session-binding': ('session_inspection_cli', 'cmd_session_binding'),
@@ -5809,6 +5754,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'sync': ('worktree_ops_cli', 'cmd_sync'),
     'uninstall': ('installation_cli', 'cmd_uninstall'),
     'uninstall-plugins': ('update_cli', 'cmd_uninstall_plugins'),
+    'unregister': ('installation_cli', 'cmd_unregister'),
     'update': ('update_cli', 'cmd_update'),
     'validate': ('picker_profiles_cli', 'cmd_validate'),
     'worktree-lineage': ('session_tracking_cli', 'cmd_worktree_lineage'),
@@ -5826,7 +5772,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
 # defeat lazy dispatch for every invocation, not just fast-tracked ones.
 # Deliberately excludes manual-dispatch-only verbs that never register an
 # argparse subparser choice at all (delegates, fleet, hook, lease, reconcile,
-# unregister, worktree) -- several of those (worktree, in particular) rely on
+# worktree) -- several of those (worktree, in particular) rely on
 # being ABSENT here so `_canonical_slug()` can still fold the singular
 # "worktree" back to this binstub's own "worktrees" alias; adding them here
 # would silently break that fold-back (found the hard way, via
@@ -5835,7 +5781,7 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
     "services", "repos", "accounts", "copilot-identity", "related", "state-root",
     "coordination-readiness", "config-root", "knowledge", "git",
     "pr-watch", "pr-merge", "pr-research", "pr",
-    "activity", "activity-log", "stage-update", "reconcile-marketplaces",
+    "activity", "activity-log", "register-launch", "stage-update", "reconcile-marketplaces",
     "execution-leg", "copilot", "resolve", "handoff-trace",
 })
 
@@ -5856,8 +5802,11 @@ _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "cleanup_gc_cli",
     "finalize_cli",
     "follow_ups_cli",
+    "handoff_cancel_cli",
     "handoff_cli",
+    "handoff_successor_repair_cli",
     "installation_cli",
+    "launch_registry",
     "list_cli",
     "maintenance_cli",
     "pane_lifecycle",
@@ -5997,35 +5946,39 @@ def _load_full_command_surface() -> None:
     global cmd_effort_focus, cmd_embody, cmd_finalize, cmd_follow_ups, cmd_gc, cmd_get, cmd_git_dispatch, cmd_git_feature_branch, cmd_picker_bootstrap, cmd_picker_paths, cmd_picker_reconcile_local
     global cmd_git_merge_to_feature, cmd_git_sync, cmd_handoff_cutover, cmd_handoff_trace, cmd_handoffs_check, cmd_handoff_cutover_trigger, cmd_head_session, cmd_history_digest, cmd_hygiene
     global cmd_install, cmd_install_status, cmd_installer_readiness, cmd_knowledge_dispatch, cmd_link_succession, cmd_list, cmd_list_sessions, cmd_machine_context, cmd_repair_stale_anchor
-    global cmd_mark_complete, cmd_note_handoff, cmd_picker, cmd_post_exit, cmd_pr_complete, cmd_pr_dispatch, cmd_pr_merge_dispatch, cmd_pr_nudge, cmd_pr_ready
+    global cmd_mark_complete, cmd_note_handoff, cmd_cancel_handoff, cmd_picker, cmd_post_exit, cmd_pr_complete, cmd_pr_dispatch, cmd_pr_merge_dispatch, cmd_pr_nudge, cmd_pr_ready
     global cmd_pr_research_dispatch, cmd_pr_status, cmd_pr_watch_dispatch, cmd_pre_launch, cmd_push_changes, cmd_reap_sessions, cmd_reap_shells
     global cmd_recent_messages, cmd_reclaim, cmd_reconcile_binstubs, cmd_reconcile_marketplaces, cmd_reconcile_plugins, cmd_reconcile_sessions, cmd_register, cmd_register_project_entry
     global cmd_register_session, cmd_related_dispatch, cmd_remove_system, cmd_remux, cmd_repair, cmd_repos_dispatch, cmd_restart, cmd_run
     global cmd_services_dispatch, cmd_session_binding, cmd_session_lifecycle, cmd_session_lineage, cmd_session_lock, cmd_session_recovery, cmd_session_role
     global cmd_session_tail
-    global cmd_session_transcript, cmd_set_pr, cmd_state_root_dispatch, cmd_status, cmd_status_context, cmd_status_monitor, cmd_status_monitor_restart, cmd_status_segment
+    global cmd_session_transcript, cmd_set_pr, cmd_state_root_dispatch, cmd_status, cmd_status_context, cmd_status_monitor, cmd_status_monitor_restart, cmd_status_segment, cmd_sweep_finished_sessions, cmd_sweep_managed
     global cmd_status_updater, cmd_sync, cmd_uninstall, cmd_uninstall_plugins, cmd_update, cmd_validate, cmd_worktree_dispatch
-    global cmd_worktree_lineage, cmd_worktree_status_bundle, context_cli, copilot_identity_cli, finalize_cli, finalize_one, follow_ups_cli, front_door_cli, git_cli
-    global handoff_cli, handoff_diagnostics, installation_cli, list_cli, maintenance_cli, picker_profiles_cli, plan_pre_launch, pr_cli
+    global cmd_worktree_lineage, cmd_worktree_status_bundle, context_cli, copilot_cli, copilot_identity_cli, finalize_cli, finalize_one, follow_ups_cli, front_door_cli, git_cli
+    global handoff_cli, handoff_diagnostics, handoff_successor_repair_cli, installation_cli, list_cli, maintenance_cli, doctor_render, picker_profiles_cli, plan_pre_launch, pr_cli
     global pr_state_cli, reap_cli, reap_orphan_launcher_shells, reclaim_cli, reclaim_one, related_cli, repos_cli, resolve_cli
     global resolve_launch_cli, resolve_machine_cli, resolve_picker_cli, resolve_system_cli, services_cli, session_binding_cli, session_inspection_cli, session_metadata_cli
     global session_tracking_cli, status_bar_cli, status_cli, status_monitor_cli, status_monitor_runtime, status_updater_cli, sweep_finished_session_worktrees
     global sweep_managed_worktrees
-    global sync_one, terminal_conclusion, update_cli, worktree_ops_cli
+    global sync_one, terminal_conclusion, update_cli, worktree_ops_cli, cmd_resolve_handoff_successor, handoff_cancel_cli
     from . import (
         claims_cli,
         cleanup_gc_cli,
         context_cli,
+        copilot_cli,
         copilot_identity_cli,
         finalize_cli,
         follow_ups_cli,
         front_door_cli,
         git_cli,
+        handoff_cancel_cli,
         handoff_cli,
         handoff_diagnostics,
+        handoff_successor_repair_cli,
         installation_cli,
         list_cli,
         maintenance_cli,
+        doctor_render,
         picker_profiles_cli,
         picker_reconcile_cli,
         pr_cli,
@@ -6121,6 +6074,7 @@ def _load_full_command_surface() -> None:
     cmd_session_transcript = session_tracking_cli.cmd_session_transcript
     cmd_session_tail = session_tracking_cli.cmd_session_tail
     cmd_recent_messages = session_tracking_cli.cmd_recent_messages
+    cmd_resolve_handoff_successor = handoff_successor_repair_cli.cmd_resolve_handoff_successor
     terminal_conclusion = session_tracking_cli.terminal_conclusion
     _resolve_worktree_for_read = session_metadata_cli._resolve_worktree_for_read
     _session_role = session_metadata_cli._session_role
@@ -6145,6 +6099,7 @@ def _load_full_command_surface() -> None:
     cmd_bind_session = session_binding_cli.cmd_bind_session
     cmd_bind_nudge = session_binding_cli.cmd_bind_nudge
     cmd_note_handoff = session_binding_cli.cmd_note_handoff
+    cmd_cancel_handoff = handoff_cancel_cli.cmd_cancel_handoff
     cmd_session_lifecycle = session_inspection_cli.cmd_session_lifecycle
     cmd_session_binding = session_inspection_cli.cmd_session_binding
     cmd_session_recovery = session_inspection_cli.cmd_session_recovery
@@ -6286,6 +6241,7 @@ def _load_full_command_surface() -> None:
     _restore_before_resume = handoff_cli._restore_before_resume
     _resolve_codename_anywhere = handoff_cli._resolve_codename_anywhere
     cmd_embody = handoff_cli.cmd_embody
+    cmd_copilot = copilot_cli.cmd_copilot
     cmd_handoffs_check = handoff_cli.cmd_handoffs_check
     cmd_handoff_cutover_trigger = handoff_cli.cmd_handoff_cutover_trigger
     _enumerate_launcher_shells_posix = reap_cli._enumerate_launcher_shells_posix
@@ -6325,6 +6281,7 @@ def _load_full_command_surface() -> None:
     _print_gc_managed = cleanup_gc_cli._print_gc_managed
     _print_gc_shells = cleanup_gc_cli._print_gc_shells
     cmd_gc = cleanup_gc_cli.cmd_gc
+    cmd_sweep_finished_sessions = cleanup_gc_cli.cmd_sweep_finished_sessions; cmd_sweep_managed = cleanup_gc_cli.cmd_sweep_managed
     cmd_picker = picker_profiles_cli.cmd_picker
     cmd_validate = picker_profiles_cli.cmd_validate
     cmd_repair = picker_profiles_cli.cmd_repair
@@ -6335,7 +6292,7 @@ def _load_full_command_surface() -> None:
     cmd_backfill_sessions = maintenance_cli.cmd_backfill_sessions
     cmd_doctor = maintenance_cli.cmd_doctor
     _render_doctor_report = maintenance_cli._render_doctor_report
-    _render_dropin_registry_report = maintenance_cli._render_dropin_registry_report
+    _render_dropin_registry_report = doctor_render.render_dropin_registry_report
     cmd_reconcile_binstubs = maintenance_cli.cmd_reconcile_binstubs
     cmd_register_project_entry = maintenance_cli.cmd_register_project_entry
     cmd_anchor_check = maintenance_cli.cmd_anchor_check
@@ -6437,18 +6394,19 @@ def _load_full_command_surface() -> None:
         "cleanup": cmd_cleanup,
         "gc": cmd_gc,
         "reap-sessions": cmd_reap_sessions,
-        "reap-shells": cmd_reap_shells,
+        "reap-shells": cmd_reap_shells, "sweep-finished-sessions": cmd_sweep_finished_sessions, "sweep-managed": cmd_sweep_managed,
         "reclaim": cmd_reclaim,
         "remux": cmd_remux,
         "restart": cmd_restart,
         "sync": cmd_sync,
         "repair": cmd_repair,
+        "resolve-handoff-successor": cmd_resolve_handoff_successor,
         "picker": cmd_picker,
         "validate": cmd_validate,
         "config-migrate": cmd_config_migrate,
         "install": cmd_install,
         "register": cmd_register,
-        "unregister": cmd_uninstall,
+        "unregister": installation_cli.cmd_unregister,
         "uninstall": cmd_uninstall,
         "update": cmd_update,
         "install-status": cmd_install_status,
@@ -6478,6 +6436,7 @@ def _load_full_command_surface() -> None:
         "bind-nudge": cmd_bind_nudge,
         "history-digest": cmd_history_digest,
         "note-handoff": cmd_note_handoff,
+        "cancel-handoff": cmd_cancel_handoff,
         "session-role": cmd_session_role,
         "backfill-sessions": cmd_backfill_sessions,
         "doctor": cmd_doctor,
@@ -6496,6 +6455,7 @@ def _load_full_command_surface() -> None:
         "anchor-check": cmd_anchor_check,
         "activity": activity.cmd_activity,
         "activity-log": activity.cmd_activity_log,
+        "register-launch": launch_registry.cmd_register_launch,
     }
     _FULL_SURFACE_LOADED = True
 

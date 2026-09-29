@@ -67,6 +67,38 @@ agent-chat-driven flow).
 kept up to date at the end of every session (or handoff point) so a fresh
 session never has to re-derive "what's already done" from the Journal alone.
 
+- **2026-09-29 status, update 2 (row-shape standardization landed; read
+  this first, supersedes the bullet below it):** Phases 0-8 remain
+  COMPLETE. Additionally landed a Phase 3 amendment this session: the
+  Tasks row now uses the SAME two-line shape as Worktrees/CodeSpaces/
+  Containers (columnized stats on line 1, `[tag] repo title - phrase` on
+  line 2) — see Phase 3's own new checklist bullet and the Journal's
+  second 2026-09-29 entry for the full design/heuristic detail. Same
+  worktree, PR not yet opened as of this bullet's own writing — check
+  `pr-status` before starting further work here.
+- **2026-09-29 status (read this bullet first; everything below it in this
+  section is historical and was already stale before this update — trust
+  the Plan checklist's own `[x]`/`[ ]` marks over any prose here that
+  disagrees):** **Phases 0-8 are now ALL COMPLETE.** Phase 7's last two
+  gaps (the `charter` card, and rendering the user-pause hold as its own
+  `"Paused"` phase/badge) landed this session — see the Phase 7 section
+  above for the full detail and the Journal's 2026-09-29 entry. Confirmed
+  via git log that PR #2913 (Phases 1-3), #2979 (Phase 4), #3222/#3234
+  (Phase 5/8) are all merged into `dev`. **What's left: Phase 6 (source-repo
+  filter chip, not started, unscoped), Phase 9 (Registrars viewer/editor,
+  not started), Phase 10 (New Task composer, not started, zero
+  dependencies), Phase 11 (Completion Review card, not started — its
+  dependency, the sibling `agent-dispatch-monitor-and-confirmed-state`
+  effort's `confirm`/`reopen_completed`, landed via PR #3715 on 2026-09-26,
+  so Phase 11 is now unblocked).** Recommended next: Phase 10 or 11 (both
+  ready, no blockers) or Phase 6 (smallest scope, needs its own design
+  pass on what "unscoped" repo-filter UX should look like — read that
+  Phase's Plan bullet first). This worktree
+  (`tmichon-cloud1-win-20260929-011101-363e`) was created fresh for the
+  Phase 7 closure and has not yet been submitted as a PR as of this
+  writing — check `agent-worktrees pr-status` before starting further work
+  in it, and land/finalize Phase 7's own PR before mixing in a new phase's
+  changes.
 - **Worktree:** no single "established driving worktree" anymore — the
   Phase 4 worktree finalized after PR #2979 merged. Create a fresh worktree
   off current `main` via `agent-worktrees -p copilot-extensions create`
@@ -76,7 +108,8 @@ session never has to re-derive "what's already done" from the Journal alone.
   this effort — never run `git stash pop`/`git stash apply` without an
   explicit `stash@{N}` naming the entry you intend, and never clear the
   stash list.
-- **Current phase:** **Phases 0-5 and 8 are now done.** Phases 0-3 landed in
+- **Current phase (STALE — superseded by the 2026-09-29 bullet above):**
+  **Phases 0-5 and 8 are now done.** Phases 0-3 landed in
   PR #2913, Phase 4 in PR #2979, the Tasks-pivot-freeze bug was fixed via
   PRs #2932 / #2970 / #2972, and the accelerator/relay-backed Worktree Status
   + claims work landed in PRs #3222 and #3234 on 2026-09-21. The operator's
@@ -700,6 +733,28 @@ without it.
       operator must be able to tell "no artifacts" from "artifacts column
       unavailable here," per the rubber-duck's column-drop finding.
       **Landed** — see the Runbook above (Phase 3 is now fully complete).
+- [x] **Row-shape standardization (2026-09-29, operator feedback).**
+      Standardize the Tasks row on the SAME two-line shape Worktrees/
+      CodeSpaces/Containers already use: line 1 (`columns`) stays pure
+      columnized stats (`ID`, `PHASE`, `WT`, `LIVE`, `T`, trailing
+      `ARTIFACTS`/claims); the title, repo, and an activity phrase move to
+      line 2 (the manifest's `entry.subtitle`, a single composed field per
+      `_column_subtitle`'s existing generic mechanism — no engine change
+      needed). `TITLE`/`REPO` dropped from `columns` entirely. New
+      `board_cli._subtitle_for_task()` composes
+      `[tag] <repo> <title> - <phrase>` (tag/repo each optional): `_tag`
+      mirrors Worktrees' own `[system]`/`[delegate]`/`[acp]` title-prefix
+      convention (`derive.norm`) — only the NON-default interface gets a
+      mark, so a `"cli"` tag appears only for a heuristically CLI-embodied
+      task (owned + live but no headless `wt_live` signal), never for the
+      default headless/pool case. `_activity_phrase()` supplies the phrase:
+      a real `wt_live` signal always wins; otherwise a hold reason
+      (truncated), awaiting-steer, or the raw lifecycle status supplies a
+      sensible fallback. This is the SAME heuristic ambiguity `wt_live`
+      itself already carries (a blank/CLI-guessed tag means "no headless
+      signal", not a hard guarantee) — a real `embodiment_kind` backend
+      field remains the noted, still-open follow-on if the operator wants
+      it made authoritative.
 
 ### Phase 4 — Worktree cross-link
 - [x] Confirm the WT column round-trips against a live coordinator (not just
@@ -889,13 +944,19 @@ design here.
       `engine.py` work — scope and design it as its own phase once the
       table itself is validated.
 
-### Phase 7 — Task menu: wire lifecycle controls to Phase 2's APIs
+### Phase 7 — Task menu: wire lifecycle controls to Phase 2's APIs — COMPLETE (2026-09-29)
 Everything here is UI wiring against the ALREADY-BUILT Phase 1/2 contracts —
 no lifecycle-control logic invented at this layer.
-- [ ] Land the `charter` `kind:"card"` action. **Still NOT done** as of
-      2026-09-22: the picker-side card machinery is fine, but
-      `board_cli.py` still intentionally publishes `has_charter = False`, so
-      no real `charter.*` payload reaches the card yet.
+- [x] Land the `charter` `kind:"card"` action. **Landed 2026-09-29**: a new
+      `board_cli._charter_for_task()` composes a real `charter.*` payload
+      (title/status/link/body) from fields already on every `Task` --
+      structured metadata (repo, source, registrar/origin, target machine,
+      labels) plus the durable goal/done-criteria when recorded, plus the
+      raw prompt verbatim (fenced code block) so the operator can see both
+      "what this task is" AND its raw content, mirroring how a steering
+      card already shows raw prose. `has_charter` is now `True` for every
+      task (every `Task` carries at least a title + prompt); no more
+      `board_cli._build`-level gate to remove later.
 - [x] Land the `worktree-status` `kind:"card"` action (read-only). This
       ended up landing with the Phase 5/8 relay work once
       `worktree_status.body` was populated from the real accelerator-backed
@@ -910,14 +971,33 @@ no lifecycle-control logic invented at this layer.
 - [x] Wire Pause/Unpause, Force-stop, and Reset-to-Proposed to Phase 2's
       corresponding verbs. This was already landed earlier (PRs #2913/#3008);
       the stale checklist here was overcounting it as still undone.
-- [ ] Render the user-pause hold as its own distinct, visible, filterable
+- [x] Render the user-pause hold as its own distinct, visible, filterable
       phase/badge — never conflated with system-Suspended or
-      Blocked/awaiting-steer (Phase 1's hold design). **Still open** as of
-      2026-09-22: the control wiring exists, but the Tasks pane does not yet
-      surface Pause as its own display state.
+      Blocked/awaiting-steer (Phase 1's hold design). **Landed 2026-09-29**:
+      `board_cli._group()`/`task_query_cli._board_group()` (kept in sync,
+      per their existing "byte-identical" contract) now check `hold_reason`
+      right after the terminal-status checks and before `awaiting_steer` --
+      so a held task always groups as `"Paused"`, taking priority over both
+      system-`Suspended` and `Blocked`, but never over a terminal status (a
+      hold can't be set on a concluded task; `set_hold` already rejects
+      that). New `"Paused"` entry in `GROUPS`/`_BOARD_GROUPS` (right after
+      `Blocked` — both need the operator's attention, but a paused task is
+      waiting to be *unpaused*, not answered) and in `worktree-manager`'s
+      shared `task_phase` palette (`engine_helpers.py`), coloured with
+      `C_STATE["ORPHAN"]` (magenta) — deliberately distinct from
+      `Suspended`'s teal and `Blocked`'s amber. The manifest's `abandon`
+      action's `when.group` list gained `"Paused"` (force-abandon must still
+      work on a paused task — "the user's way to say No" shouldn't be
+      blocked by a hold); `reset-proposed`'s list needed NO change, since
+      `reset()` already `reject_if_held`s and simply no longer matching
+      `Paused` correctly hides the action instead of offering a call that
+      would fail.
 - [x] Force-abandon (already declared in the preview manifest) needs no new
       backend work beyond the Phase 1 concurrency-fencing requirement. This was
       already landed before 2026-09-22; only the checklist lagged behind.
+
+**Phase 7 is now fully COMPLETE — both remaining gaps closed, nothing left
+open in this phase.**
 
 ### Phase 8 — Worktree Status card (implementation)
 - [x] Populate `worktree_status.body` from real session-lineage/claims/
@@ -2680,3 +2760,195 @@ surface). Phase 11 has a real cross-effort dependency: it needs
 try to build the card against an API that doesn't exist yet. Phase 10 has no
 such dependency; it is pure `propose`+`queue` wiring and could start
 independently.
+
+### 2026-09-29 — Phase 7 closed out: charter card + the Paused phase/badge
+Fresh worktree, ramped up via the effort's own Runbook/Plan/Journal (found
+the Runbook itself had gone stale — it still read as of Phase 3 despite
+Phases 4-8 having landed since; added a dated "read this bullet first"
+summary at the top rather than rewriting the whole section). Picked Phase 7
+as the smallest remaining scope that closes out a whole phase, per the
+Runbook's own two open items:
+
+1. **The `charter` card.** `board_cli.py` gained `_charter_for_task()`,
+   composing a real `charter.*` payload from fields every `Task` already
+   carries: structured metadata (repo, source, `origin_ref` as
+   registrar/recipe, target machine, labels) plus the durable `goal`/
+   `done_criteria` when recorded, plus the raw `prompt` verbatim in a fenced
+   code block — deliberately giving the operator BOTH "what this task is"
+   (a description) and its raw content (the exact prompt), the same duality
+   the operator asked for when comparing this to the steering card. Every
+   task now has a title + prompt at minimum, so `has_charter` is simply
+   `True` for every row — no more hard-`False` gate.
+2. **The Paused phase/badge.** `board_cli._group()` (and its byte-identical
+   `task_query_cli._board_group()`, which the module's own comment already
+   flagged as needing to stay in sync) now check `hold_reason` right after
+   the terminal-status checks and before `awaiting_steer`: a held task
+   always reads as `"Paused"`, winning over both system-`Suspended` (a
+   liveness-detected or force-stopped outcome the system can recover from)
+   and `Blocked` (the task itself asking the operator something) — never
+   over a terminal status, since `set_hold` already refuses to hold a
+   concluded task. Added `"Paused"` to `GROUPS`/`_BOARD_GROUPS` right after
+   `Blocked`, and to `worktree-manager`'s shared `task_phase` palette
+   (`engine_helpers.py`) as `C_STATE["ORPHAN"]` (magenta) — deliberately far
+   from `Suspended`'s teal and `Blocked`'s amber so the three never read as
+   the same thing at a glance. Also re-worded `SUSPENDED`'s own palette
+   comment, which previously said "user/system paused" — no longer accurate
+   now that "user paused" has its own distinct value.
+   **One manifest follow-up required:** the `abandon` action's `when.group`
+   list needed `"Paused"` added — force-abandon ("the user's way to say
+   No") must still work on a paused task, and simply stopped matching once
+   held tasks moved out of their old group. `reset-proposed`'s list needed
+   NO change: `reset()` already `reject_if_held`s, so no longer matching
+   `Paused` correctly hides an action that would otherwise fail rather than
+   silently offering a doomed call.
+
+**Design note not obvious from the diff:** whether a *Blocked+held* task
+(rare — the UI only offers Pause on `embodied`/`started` tasks, but the
+hold itself has no status restriction beyond non-terminal) should still
+show its `steer` action was considered and deliberately left as-is: since
+`Paused` now wins the group and `steer`'s `when` still keys off
+`{"group": "Blocked"}`, a paused-while-blocked task's steer card becomes
+temporarily inaccessible until unpaused. This reads as consistent with a
+hold's whole purpose (stop everything until the operator explicitly
+unpauses) rather than a bug, but is worth revisiting if it ever proves
+reachable/confusing in practice.
+
+**Validation (2026-09-29):**
+- New tests: `test_cli.py::TestInboxBoard::test_hold_reason_is_paused_and_wins_over_blocked`,
+  `test_board_cli.py::test_build_group_paused_for_held_task`,
+  `test_board_cli.py::test_build_charter_is_always_populated`,
+  `test_picker_tui.py::test_palette_style_task_phase_distinguishes_paused_from_suspended`.
+- `agent-dispatch`: targeted `test_board_cli.py test_cli.py` — 194/194 passed.
+  Full suite: **3559 passed / 1 pre-existing failed / 20 skipped** (the one
+  failure, `test_supervisor.py::test_idle_headless_fleet_nudge_includes_
+  remote_host`, was verified to fail identically against a clean `git
+  stash`-restored baseline of this same worktree — pre-existing/
+  environmental, not caused by this change).
+- `worktree-manager`: targeted palette tests — 3/3 passed. Full suite:
+  **1554 passed / 5 pre-existing failed / 5 skipped** — all 5 verified
+  either to fail identically against the clean-stashed baseline
+  (`test_registered_pivot_conditional_actions_filter_by_when`,
+  `test_live_mapping_republished_on_a_backstop_cadence_without_a_restart`,
+  both `test_trusted_materializer_parity` tests,
+  `test_fetch_via_tarball_refuses_a_symlinked_extraction_top_dir`) or, for
+  `test_steering_card_and_form_actions_gate_and_drive`, to pass cleanly in
+  isolation (a load-sensitive flake, same class as the ones already logged
+  in this Runbook).
+
+**Phase 7 is now COMPLETE.** Next candidates per the Runbook's updated
+2026-09-29 summary: Phase 10 (New Task composer, zero dependencies) or
+Phase 11 (Completion Review card, unblocked since PR #3715).
+
+### 2026-09-29 (later same day) — Phase 3 amendment: standardize the Tasks row on the shared two-line shape
+Same session, continuing after the Phase 7 PR merged. New operator
+feedback: the Tasks row should follow the SAME two-line convention
+Worktrees/CodeSpaces/Containers already use —
+
+```
+<id##>  STATUS  stat1  stat2  stat3  ...  <claim1>, <claim2>, <claim3>...
+  [tag] <optional-repo?> <succinct title explaining work> - <short phrase describing activity...>
+```
+
+— rather than the Tasks pane's current flat, single-line `columns` table
+(id/PHASE/REPO/TITLE/WT/T/LIVE/ARTIFACTS all crammed into line 1).
+
+**Investigation (read-only, before touching anything):** dispatched a
+background `explore` agent to map exactly how Worktrees/CodeSpaces/
+Containers get this shape today. Finding: it is **not** one shared
+`detail_line`/multi-field manifest contract — `TasksView._column_subtitle()`
+(`engine_views.py`) is a simple single-field lookup: whatever the manifest's
+`entry.subtitle` names, rendered dim on an indented second line. CodeSpaces/
+Containers already opt into exactly this (their own `subtitle` field is a
+fully pre-composed string built in their own board/pool Python, e.g.
+`agent_codespaces/pool.py`'s `_prefixed_subtitle`). Worktrees itself has a
+bespoke (non-generic) `_detail_line()`, but its `[tag]` convention —
+`derive.norm()`'s `_tag` (`"system"`/`"delegate"`/`"acp"`) prefixed onto the
+title — is exactly the shape the operator's ASCII template's `[tag]` means:
+**only the row's NON-default kind gets a bracketed mark**; the common case
+stays untagged. No engine/manifest-schema change was needed at all — this
+whole redesign is a `board_cli.py` (data) + manifest (drop two columns, wire
+one field name) change, reusing machinery that already exists.
+
+**What landed:**
+
+1. **Line 1 (`columns`) now carries stats only:** `ID`, `PHASE`, `WT`,
+   `LIVE`, `T`, trailing `ARTIFACTS` (the claims list — now also the FLEX
+   column by virtue of being last/no `"title"` key present, which happens
+   to suit it well: a claims list is naturally variable-length, the same
+   role `TITLE` used to play). `TITLE` and `REPO` are gone from `columns`
+   entirely.
+2. **Line 2 (`entry.subtitle` -> a new `subtitle` field) carries
+   `[tag] <repo> <title> - <phrase>`:** three new `board_cli.py` functions —
+   `_embodiment_tag()`, `_activity_phrase()`, `_subtitle_for_task()` — compose
+   it. `_embodiment_tag()` mirrors Worktrees' own convention: a confirmed
+   headless liveness signal (`wt_live` non-`None`) is the DEFAULT embodiment
+   for a Task -> no tag; an owned, live task with NO headless signal is
+   assumed CLI-embodied (Phase 1/2's only other embodiment path) -> `"cli"`.
+   **This is explicitly a heuristic, not a new authoritative
+   `embodiment_kind` field** — it reuses the exact same ambiguity `wt_live`
+   itself already documents (a blank/guessed value means "no headless
+   signal available here", not a hard guarantee). A real `embodiment_kind`
+   sourced from the coordinator's `local-body:`/`fleet-body:` spawn-
+   reservation handle (see Phase 1 item 2's `_active_headless_handle`)
+   remains the still-open, more-authoritative follow-on if the operator
+   wants the tag to stop being a guess — tracked here, not built today.
+   `_activity_phrase()` prefers a real `wt_live` signal, else falls back in
+   priority order: hold reason (truncated to 40 chars) -> awaiting-steer ->
+   raw lifecycle status (`"queued"`/`"queued for a worker"` when pooled/
+   `"awaiting approval"`/`"claimed, starting…"`/`"in progress"`/terminal
+   labels).
+3. **Manifest:** `entry.subtitle` renamed from `"repo_name"` to the new
+   `"subtitle"` field (matching the field NAME CodeSpaces/Containers already
+   use for the same mechanism — a naming convention, not a functional
+   requirement). `title`/`repo_name` columns removed; remaining column
+   `priority`s renumbered contiguously (1-5); `artifacts_summary` dropped
+   its now-meaningless declared `priority` (it's the flex column, never
+   dropped, so a declared priority number was dead weight).
+
+**What did NOT change:** `entry.title` stays `"title"` (still needed for
+`{title}` action templating, e.g. the `kick` action, and for the non-
+`columns` fallback render path) — removing a field from `columns` (display)
+never touches `entry.title`/`entry.id` (identity/templating), a distinct,
+unrelated manifest concern confirmed by direct code reading before editing.
+No `worktree-manager` engine code changed at all; `_column_subtitle` already
+did exactly what was needed.
+
+**Validation (2026-09-29):** New tests in `test_board_cli.py`
+(`test_activity_phrase_prioritizes_wt_live_then_hold_then_lifecycle`,
+`test_embodiment_tag_only_marks_the_non_default_cli_interface`,
+`test_subtitle_for_task_assembles_tag_repo_title_and_phrase`,
+`test_build_populates_subtitle_and_drops_title_repo_from_columns`).
+`agent-dispatch` full suite: **3563 passed / 1 pre-existing failed / 20
+skipped** (same lone flake as the prior entry, `test_supervisor.py::
+test_idle_headless_fleet_nudge_includes_remote_host`). `worktree-manager`
+full suite: **1541 passed / 4 pre-existing failed / 5 skipped** — note the
+total is naturally lower than the prior entry's 1554/1564 because this
+session's `git sync` (see below) pulled in 3 new `origin/dev` commits with
+their own test churn, not a regression; `--collect-only` confirmed 1550
+tests collected, matching 1541+4+5 exactly. All 4 failures are the SAME
+pre-existing/environmental ones already logged in the prior Journal entry
+(2 of the previous run's 5 — the `test_registered_pivot_conditional_
+actions_filter_by_when` load-sensitive flake and the `test_steering_card_
+and_form_actions_gate_and_drive` flake — simply didn't reproduce this run,
+consistent with them being flakes, not fixed regressions).
+
+**Side quest, unrelated to this change but blocking `create-pr` on this
+worktree:** `check-vendored-libs-sync` failed with `agent-procutil`
+"COPIES OUT OF SYNC" between `plugins/agent-dispatch/libs/agent-procutil`,
+`worktree-manager/libs/agent-procutil`, and `plugins/agent-worktrees/libs/
+agent-procutil`. Root-caused (not a real repo defect): both non-
+agent-worktrees consumers already use the `--uv-editable` reference form
+(no real committed copy at all -- `git ls-files` confirmed zero tracked
+files under either path); this session's own `uv pip install -e`/`uv sync`
+calls materialized a real LOCAL editable-install cache (`build/`, `*.egg-
+info`) at those exact paths, which `sync-vendored-libs.py --check` then
+mistook for a genuine (empty, missing `__init__.py`) vendored copy and
+flagged as drifted against `agent-worktrees`' real one. Deleting those
+local-only leftover directories (they contained nothing but stale build
+artifacts) made the check pass again -- this will reproduce for ANY
+contributor who runs this effort's own documented build/test commands in a
+fresh worktree before opening a PR; worth a `.gitignore` follow-up in
+`tools/sync-vendored-libs.py`'s own repo if it recurs, but out of scope for
+this effort.
+
+

@@ -352,15 +352,20 @@ def test_engine_runtime_falls_back_to_canonical_libs_for_uv_editable_lib(monkeyp
     (canonical_lib_src / "lazy_cli_dispatch/__init__.py").write_text(
         "x = 1\n", encoding="utf-8"
     )
-    # A different (still real-copy-vendored) lib DOES have a local copy --
-    # confirms the fallback only ever applies when the local copy is
-    # genuinely absent, never overriding one that already exists.
-    # (plugin-resolve, not config-migrate: config-migrate was itself
-    # converted to a uv-editable canonical reference in the
-    # vendor-pointer-generalization effort, so it no longer has a local
-    # copy to exercise this branch with.)
-    local_plugin_resolve_src = plugin_src.parent / "libs/plugin-resolve/src"
-    (local_plugin_resolve_src / "plugin_resolve").mkdir(parents=True)
+    # A different lib from `ensure_engine_runtime()`'s own checked list DOES
+    # have a local copy in this synthetic checkout -- confirms the fallback
+    # only ever applies when the local copy is genuinely absent, never
+    # overriding one that already exists. This is deliberately a fabricated
+    # scenario (a `tmp_path` fixture, not the real repo): `config-migrate`
+    # is itself a `uv`-editable canonical reference for the REAL
+    # `agent-worktrees` today (vendor-pointer-generalization effort), but a
+    # materialized release layout carries a real local copy again, and this
+    # test exercises that "local copy present" branch regardless of which
+    # form the real, live `dev` checkout currently happens to use --
+    # picking any real repo lib name here would otherwise make this test's
+    # own comment go stale every time that lib's conversion status changes.
+    local_lib_src = plugin_src.parent / "libs/config-migrate/src"
+    (local_lib_src / "config_migrate").mkdir(parents=True)
 
     monkeypatch.delenv(engine_runtime.ENGINE_SOURCE_ENV, raising=False)
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
@@ -370,7 +375,7 @@ def test_engine_runtime_falls_back_to_canonical_libs_for_uv_editable_lib(monkeyp
     engine_runtime.ensure_engine_runtime()
 
     assert str(canonical_lib_src) in engine_runtime.sys.path
-    assert str(local_plugin_resolve_src) in engine_runtime.sys.path
+    assert str(local_lib_src) in engine_runtime.sys.path
 
 
 def test_engine_runtime_installed_slot_never_uses_the_checkout_fallback(monkeypatch, tmp_path):

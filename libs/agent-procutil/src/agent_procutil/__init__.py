@@ -34,9 +34,12 @@ Both are no-ops off Windows (``no_window_kwargs`` -> ``{}``; ``detached_kwargs``
         **detached_kwargs(breakaway=True),
     )
 
-Vendored per plugin at ``plugins/<plugin>/libs/agent-procutil``; every copy's
-``src`` tree MUST stay byte-identical (enforced by
-``tools/check-vendored-libs-sync.py``).
+Most consumers reference this canonical source via a `uv`-editable
+pointer in dev, materialized into a real per-plugin copy at release; at
+least one consumer (`agent-worktrees`, per its own self-contained
+build-surface requirement) ships a real local copy in dev too -- see
+this package's own ``README.md`` § Vendoring for the mechanism, and
+``tools/check-vendored-libs-sync.py`` for the enforcement.
 """
 
 from __future__ import annotations

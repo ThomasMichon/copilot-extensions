@@ -94,6 +94,12 @@ repo = "https://github.com/<fork>/copilot-extensions.git"
 ref  = "canary"
 ```
 
+When a live `mux-daemon` is already serving managed sessions, `worktree-manager
+update` now cuts it over in place instead of stacking a stale resident beside
+the new code: the successor starts on a fresh loopback port, status writers
+follow the routed active endpoint first, and the predecessor drains accepted
+status-apply work plus its current republish cycle before retiring.
+
 ## Manage the harness (state views)
 
 Once set up, the Worktree Manager is also the ongoing **Manager** — a read-only

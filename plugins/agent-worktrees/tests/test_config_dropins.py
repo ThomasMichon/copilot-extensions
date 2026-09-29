@@ -17,6 +17,7 @@ from plugin_activation import ActivationReport, ActivePlugin, ActivePluginRoot
 
 from agent_worktrees import config_dropins as dropins
 
+
 def _active_report(
     source: str,
     root: Path,
@@ -600,6 +601,7 @@ def test_scanner_generated_entry_finding_and_no_project_report(tmp_path):
 
 def test_doctor_json_runs_without_project_context(tmp_path, monkeypatch, capfd):
     from agent_worktrees import __main__ as main
+    from agent_worktrees import daemon_health
     from agent_worktrees.picker_support import pivots
 
     pivot_report = pivots.scan_pivot_registry(
@@ -617,6 +619,11 @@ def test_doctor_json_runs_without_project_context(tmp_path, monkeypatch, capfd):
     monkeypatch.setattr(
         pivots, "scan_pivot_registry", lambda **_: pivot_report
     )
+    monkeypatch.setattr(
+        daemon_health,
+        "doctor_report",
+        lambda *, apply: {"mode": "report", "findings": [], "counts": {"total": 0}},
+    )
 
     assert main._is_no_project_invocation(["doctor", "--json"])
     assert main.main(["doctor", "--json"]) == 0
@@ -625,3 +632,36 @@ def test_doctor_json_runs_without_project_context(tmp_path, monkeypatch, capfd):
     assert payload["project_health_available"] is False
     assert payload["config_d"]["authority"] == "absent"
     assert payload["pivots"]["authority"] == "absent"
+    assert payload["daemon_health"]["counts"]["total"] == 0
+
+
+def test_doctor_apply_daemon_health_flag_reaches_report(monkeypatch, tmp_path, capfd):
+    from agent_worktrees import __main__ as main
+    from agent_worktrees import daemon_health
+    from agent_worktrees.picker_support import pivots
+
+    pivot_report = pivots.scan_pivot_registry(
+        tmp_path / "absent-pivots",
+        materialize=False,
+        activation_report=ActivationReport(ScanAuthority.COMPLETE, {}),
+    )
+    monkeypatch.setattr(
+        main.cfg,
+        "project_name",
+        lambda: (_ for _ in ()).throw(RuntimeError("no project")),
+    )
+    monkeypatch.setattr(main, "_find_repo_dir", lambda: None)
+    monkeypatch.setattr(main.reclaim, "find_bare_orphans", lambda: [])
+    monkeypatch.setattr(pivots, "scan_pivot_registry", lambda **_: pivot_report)
+    seen = {}
+
+    def _report(*, apply: bool) -> dict:
+        seen["apply"] = apply
+        return {"mode": "apply" if apply else "report", "findings": [], "counts": {"total": 0}}
+
+    monkeypatch.setattr(daemon_health, "doctor_report", _report)
+
+    assert main.main(["doctor", "--json", "--apply-daemon-health"]) == 0
+    payload = json.loads(capfd.readouterr().out)
+    assert seen["apply"] is True
+    assert payload["daemon_health"]["mode"] == "apply"

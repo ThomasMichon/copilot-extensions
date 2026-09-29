@@ -805,14 +805,35 @@ def _self_merge_flow(**kw):
 
 
 class TestPRReminder:
-    def test_create_pr_self_merge_points_at_pr_merge_now(self):
-        flow = _self_merge_flow()
+    def test_create_pr_self_merge_blocking_review_does_not_infer_approval(self):
+        # review_blocking=True can come from a required status check alone
+        # (derive_policy_matrix), with no distinct "approval required"
+        # signal available -- the GitHub can't-self-approve caveat is no
+        # longer inferred from an unrelated `reviewer` field; the neutral
+        # "required checks/reviews" phrasing is used instead.
+        flow = _self_merge_flow(review_blocking=True)
         r = pc.pr_reminder(flow, "create-pr")
         assert r.ok is True
         assert "pr-merge" in r.next_step and "--now" in r.next_step
         assert "self-approve" not in r.next_step
-        assert "cannot approve their own" in r.next_step
+        assert "cannot approve their own" not in r.next_step
+        assert "required checks/reviews" in r.next_step
         assert r.waiting_on  # waits on the copilot review
+
+    def test_create_pr_self_merge_non_blocking_review_needs_no_approval(self):
+        # review_blocking=False (this repo's own copilot-extensions config,
+        # e.g. an advisory-only Copilot review): only the tooling/provider
+        # gate is waived -- the reminder must say so without implying the
+        # repo's own review-verdict policy can be ignored (that was the
+        # misleading behavior this test guards against).
+        flow = _self_merge_flow(review_blocking=False)
+        r = pc.pr_reminder(flow, "create-pr")
+        assert r.ok is True
+        assert "pr-merge" in r.next_step and "--now" in r.next_step
+        assert "self-approve" not in r.next_step
+        assert "cannot approve their own" not in r.next_step
+        assert "tooling needs no" in r.next_step
+        assert "wait for a clean review verdict" in r.next_step
 
     def test_notes_surface_as_a_caution_line_in_reminder_text(self):
         flow = _self_merge_flow(notes="ask the on-call before merging on Fridays")
@@ -845,10 +866,31 @@ class TestPRReminder:
         assert r.waiting_on
 
     def test_non_github_explicit_self_approval_uses_neutral_gating(self):
-        flow = _self_merge_flow(provider="azure-devops")
+        # review_blocking=True: an approval genuinely gates the merge, so the
+        # phrasing should stay neutral (no GitHub-specific wording) for a
+        # non-GitHub provider.
+        flow = _self_merge_flow(provider="azure-devops", review_blocking=True)
         r = pc.pr_reminder(flow, "create-pr")
         assert "required checks/reviews" in r.next_step
         assert "self-approve" not in r.next_step
+
+    def test_non_blocking_self_approval_needs_no_approval_regardless_of_provider(self):
+        # review_blocking=False: nothing gates the merge, so the "no approval
+        # required" phrasing applies the same way on every provider, not just
+        # GitHub.
+        flow = _self_merge_flow(provider="azure-devops", review_blocking=False)
+        r = pc.pr_reminder(flow, "create-pr")
+        assert "tooling needs no" in r.next_step
+        assert "self-approve" not in r.next_step
+
+    def test_non_blocking_no_reviewer_does_not_mention_a_verdict(self):
+        # review_blocking=False AND no reviewer configured at all: there is
+        # no verdict to wait for, so the reminder must not tell the
+        # submitter to wait for one that will never exist.
+        flow = _self_merge_flow(reviewer="", review_blocking=False)
+        r = pc.pr_reminder(flow, "create-pr")
+        assert "tooling needs no" in r.next_step
+        assert "wait for a clean review verdict" not in r.next_step
 
     def test_blocking_self_merge_reminder_waits_on_approval(self):
         flow = _self_merge_flow(review_blocking=True)

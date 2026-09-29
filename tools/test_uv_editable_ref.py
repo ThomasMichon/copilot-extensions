@@ -133,6 +133,24 @@ def test_lib_tree_matches_ignores_only_relative_build_dir_names(tmp_path: Path):
     assert uer.lib_tree_matches(a, c) is True
 
 
+def test_lib_tree_matches_ignores_egg_info_artifacts(tmp_path: Path):
+    a = _lib(tmp_path / "a", content="x = 1\n", version="0.1.0")
+    b = _lib(tmp_path / "b", content="x = 1\n", version="0.1.0")
+    egg = b / "src" / "agent_shared_lib.egg-info"
+    egg.mkdir(parents=True)
+    (egg / "PKG-INFO").write_text("generated metadata\n", encoding="utf-8")
+    assert uer.lib_tree_matches(a, b) is True
+
+
+def test_lib_tree_matches_ignores_dot_venv_artifacts(tmp_path: Path):
+    a = _lib(tmp_path / "a", content="x = 1\n", version="0.1.0")
+    b = _lib(tmp_path / "b", content="x = 1\n", version="0.1.0")
+    venv = b / ".venv" / "lib"
+    venv.mkdir(parents=True)
+    (venv / "marker.txt").write_text("generated venv\n", encoding="utf-8")
+    assert uer.lib_tree_matches(a, b) is True
+
+
 def test_uv_editable_problems_rejects_a_symlinked_canonical_lib_root(tmp_path: Path, monkeypatch):
     # A symlinked libs/<lib> that happens to resolve to the SAME target the
     # referenced path also resolves to must still be rejected -- comparing

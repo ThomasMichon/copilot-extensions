@@ -19,14 +19,21 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-# Windows-headless process-spawn helpers (module ``agent_procutil``). Vendored
-# per plugin; byte-identical src across copies.
-agent-procutil = { path = "libs/agent-procutil" }
+# `path` escapes this plugin's own root and resolves live to
+# `libs/agent-procutil`, so this `dev`-branch checkout has nothing to keep
+# manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
+agent-procutil = { path = "../../libs/agent-procutil", editable = true }
 # zero-downtime cutover primitives -- routing table + cutover orchestrator +
-# recovery breadcrumb (module ``zdd``). Vendored per plugin; byte-identical src
-# across copies. Lets a vault version bump drain-and-cut-over instead of a hard
-# restart, so the unlocked master secret survives (#743).
-agent-zdd = { path = "libs/zdd" }
+# recovery breadcrumb (module ``zdd``). This is a `uv`-editable canonical
+# reference (vendor-pointer-generalization effort, Phase 1): `path`
+# escapes this plugin's own root and resolves live to `libs/zdd`, so this
+# `dev`-branch checkout has nothing to keep manually in sync -- only a
+# real `main`-branch release (tools/materialize_main.py) ever gets a real
+# local copy. It still lets a vault version bump drain-and-cut-over
+# instead of a hard restart, so the unlocked master secret survives
+# (#743).
+agent-zdd = { path = "../../libs/zdd", editable = true }
 # single-instance lease + supersession self-retire (module
 # ``single_instance_lease``). Guards "one active vault per host" and drives the
 # drained predecessor's self-retire during a cutover (#743). This is a

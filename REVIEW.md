@@ -1,12 +1,14 @@
 # Review guidance — copilot-extensions
 
 This file is read by GitHub Copilot code review specifically (this repo's
-`dev` branch ruleset's `copilot_code_review` rule auto-requests it,
-non-blocking, on every PR targeting `dev` — `main`'s ruleset no longer
-requests Copilot review at all, since only the promotion pipeline's own
-automated snapshot PR ever targets `main`, and re-reviewing regenerated,
-already-validated content there is redundant) — see [Customizing Copilot's
-reviews with custom
+`.github/workflows/copilot-review-gate.yml` requests it, non-blocking, on
+every PR targeting `dev` from an already-invited collaborator — see
+CONTRIBUTING.md's "Contribution flow" for why the ruleset-native
+`copilot_code_review` auto-review rule was removed instead of used;
+`main`'s ruleset never requests Copilot review at all, since only the
+promotion pipeline's own automated snapshot PR ever targets `main`, and
+re-reviewing regenerated, already-validated content there is redundant) —
+see [Customizing Copilot's reviews with custom
 instructions](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#customizing-copilots-reviews-with-custom-instructions).
 Unlike [`.github/copilot-instructions.md`](.github/copilot-instructions.md)
 (which also shapes Chat and the coding agent), this file's guidance is
@@ -97,6 +99,38 @@ specifically when reviewing a pull request, not a replacement for them.
   Documentation-impact statement actually matches the final diff
   (`CONTRIBUTING.md`, "Documentation impact") -- flag a missing or
   inaccurate one.
+- **Graceful cutover impact.** When a PR introduces or materially changes a
+  long-lived resident daemon, confirm the PR description's required
+  **Graceful cutover impact** statement exists and matches the diff
+  (`CONTRIBUTING.md`, "Graceful cutover impact"). Flag a missing statement, a
+  daemon change with no named activation seam/safe cutover point, or an
+  exemption claim that does not fit one of the documented alternatives:
+  `graceful-daemon-cutover`, the lighter
+  `service-lifecycle-supervision` singleton-handoff path, or a demonstrated
+  non-daemon lifecycle governed by another pattern such as
+  `ephemeral-process-reaping`.
+- **Daemon-lifecycle concurrency & ordering.** For a PR touching cutover,
+  drain, promotion, or process-repair logic, check it against
+  `docs/patterns/graceful-daemon-cutover.md`'s "Common review findings"
+  checklist: overlapping cutover attempts must be serialized under one
+  lease/guard; a successor's promotion must be *confirmed* before its
+  predecessor retires (never the reverse); the drain boundary must close
+  admission **and** wait out every already-admitted concurrent request, not
+  just the periodic sweep; and any repair/self-heal path must re-validate its
+  target's identity immediately before acting, not only at snapshot time.
+- **PID-identity-bound destructive code needs a direct test.** Flag any
+  change that terminates or reaps a process by PID without a dedicated unit
+  test proving the terminator (a) matches only a live, identity-verified
+  target and (b) refuses on identity mismatch (stale/reused PID, wrong
+  owner). An end-to-end rehearsal alone does not satisfy this.
+- **Cross-platform completeness beyond installer scripts.** The existing
+  "Cross-platform parity" bullet below covers `install.sh`/`install.ps1`
+  pairs; separately, flag a process-census/liveness primitive that
+  implicitly conflates "POSIX" with "Linux" (e.g. `/proc`- or
+  `pidfd`-based code presented as general POSIX support) — a change
+  claiming cross-platform daemon/process support should name Windows,
+  Linux, and macOS explicitly, each either implemented or explicitly and
+  justifiably exempted.
 - **ruff signal, not noise.** Hold changed Python to at least the `F`/`E9`
   groups; do not block on pre-existing style debt in code the PR did not
   touch.
@@ -125,3 +159,17 @@ specifically when reviewing a pull request, not a replacement for them.
 - **Make every comment count.** Copilot review comments should each be
   actionable and worth the author's attention, whether the review's overall
   verdict ends up `Approve` or `Comment`.
+- **State plainly whether remaining findings are blocking.** When a
+  `Comment` verdict's remaining findings are all Low severity (no Medium or
+  High open), say so explicitly in the overview — e.g. "remaining findings
+  are Low-severity and non-blocking" — rather than leaving severity icons as
+  the only signal. On an **owner-authored PR**, this is Copilot's own passing
+  verdict shape outright. On a **Contributor PR**, note additionally that
+  this reflects only Copilot's verdict gate — it is the accepted
+  stall-breaker after a full review loop, per `CONTRIBUTING.md` § "Waiting
+  for a verdict" step 5, and never substitutes for the separate,
+  always-required Maintainer-approval review. Stating this in plain language
+  removes the need for the author to infer it from severity counts alone,
+  and avoids an unbounded loop of the author chasing zero remaining comments
+  past the point where this repo's own contribution flow already treats
+  Copilot's verdict as satisfied.

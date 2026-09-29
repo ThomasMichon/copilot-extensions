@@ -35,7 +35,6 @@ import hashlib
 import json
 import os
 import subprocess
-import sys
 import tempfile
 import threading
 import time
@@ -43,14 +42,14 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agent_procutil import windowless_daemon_kwargs
 from work_coalescing_singleton import CoalescingServer
-from work_coalescing_singleton import client as wcs_client
+from zdd.diagnostics import process_start_time
 
+from . import mux_daemon_cutover
+from . import mux_daemon_live
+from . import mux_daemon_process
 from .mux_mapping_registry import (
     MuxMappingRegistry,
-    _try_lock_file_once,
-    _unlock_file,
     LIVE_MAPPING_BACKSTOP_INTERVAL_S,
     get_mapping,
     live_mapping_republish_due,
@@ -59,7 +58,7 @@ from .mux_mapping_registry import (
     register_next_mapping,
     remove_mapping,
 )
-from .self_install import default_root
+from .self_install import current_version, default_root
 
 __all__ = [
     "get_mapping",
@@ -67,6 +66,14 @@ __all__ = [
     "remove_mapping",
     "registry_path",
     "MuxMappingRegistry",
+    "read_lock_data",
+    "register_managed_mapping",
+    "remove_managed_mapping",
+    "_daemon_is_live",
+    "_acquire_daemon_lease",
+    "_release_daemon_lease",
+    "_scrub_session_credentials",
+    "_spawn_detached",
 ]
 
 #: The one request kind this daemon serves. Matches the ``mux-status-v1``
@@ -82,8 +89,6 @@ REQUEST_DEADLINE_S = 5.0
 #: ``mux_link.BOOT_WAIT_S``).
 BOOT_WAIT_S = 6.0
 LIVE_KIND = "mux-live-v1"
-LIVE_REQUEST_DEADLINE_S = 2.0
-LIVE_BOOT_WAIT_S = 6.0
 
 LINGER_SECONDS = 5.0
 SUBSCRIBER_TTL_SECONDS = 20.0
@@ -116,6 +121,7 @@ def write_lock_data(path: Path, extra: dict) -> bool:
     shape (temp file in the same directory, then ``os.replace``)."""
     payload = {
         "pid": os.getpid(),
+        "start_time": process_start_time(os.getpid()),
         "created_at": time.time(),
     }
     payload.update(extra)
@@ -150,160 +156,22 @@ def read_lock_data(path: Path) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def _agent_worktrees_root() -> Path | None:
-    from . import agent_plugin_runtime
-
-    slot = agent_plugin_runtime.resolve_installed_plugin_slot("agent-worktrees")
-    if slot is None:
-        return None
-    return slot.parent.parent
-
-
-def _status_monitor_lock_path() -> Path | None:
-    root = _agent_worktrees_root()
-    return None if root is None else root / "status-monitor.lock"
+live_push_key = mux_daemon_live.live_push_key
+mux_live_via_daemon = mux_daemon_live.mux_live_via_daemon
+mux_live_with_boot = mux_daemon_live.mux_live_with_boot
+_status_monitor_lock_path = mux_daemon_live.status_monitor_lock_path
+_status_monitor_generation = mux_daemon_live.status_monitor_generation
+_ensure_status_monitor_running = mux_daemon_live.ensure_status_monitor_running
+_acquire_daemon_lease = mux_daemon_process.acquire_daemon_lease
+_release_daemon_lease = mux_daemon_process.release_daemon_lease
+_scrub_session_credentials = mux_daemon_process.scrub_session_credentials
+_spawn_detached = mux_daemon_process.spawn_detached
 
 
-def _status_monitor_generation(data: dict | None) -> str | None:
-    if not isinstance(data, dict):
-        return None
-    generation = data.get("managed_mux_generation")
-    return generation if isinstance(generation, str) and generation else None
-
-
-def _status_monitor_endpoint_from_rendezvous(data: dict | None) -> tuple[str, int, str] | None:
-    if not isinstance(data, dict):
-        return None
-    endpoint = data.get("managed_mux_endpoint")
-    token = data.get("managed_mux_token")
-    if not isinstance(endpoint, str) or not isinstance(token, str) or not token:
-        return None
-    host, _, port_s = endpoint.partition(":")
-    if not host or not port_s:
-        return None
-    try:
-        port = int(port_s)
-    except ValueError:
-        return None
-    if not 0 < port < 65536:
-        return None
-    return host, port, token
-
-
-def _ensure_status_monitor_running() -> bool:
-    from . import engine_client
-
-    base = engine_client.engine_base_command()
-    if not base:
-        return False
-    # Scrub session credentials before spawning/restarting the resident
-    # status-monitor: this call can run from a launcher/pane-teardown
-    # process that carries `GH_TOKEN`/`GITHUB_TOKEN`/an AHP token, and the
-    # resident monitor is long-lived -- `_engine_environment()` only strips
-    # Python-parent env vars, not auth tokens, so it must not inherit them.
-    # Shares `_spawn_detached`'s own (case-insensitive) scrubbing helper.
-    env = _scrub_session_credentials(engine_client._engine_environment())
-    kwargs: dict = {
-        "capture_output": True,
-        "text": True,
-        "timeout": 30,
-        "check": False,
-        "env": env,
-        "stdin": subprocess.DEVNULL,
-    }
-    if os.name == "nt":
-        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    try:
-        proc = subprocess.run([*base, "status-monitor-restart"], **kwargs)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return proc.returncode == 0
-
-
-def live_push_key(payload: dict) -> str:
-    project = payload.get("project")
-    worktree_id = payload.get("worktree_id")
-    revision = payload.get("mapping_revision")
-    if not isinstance(project, str) or not project:
-        raise ValueError("mux-live-v1 payload missing 'project'")
-    if not isinstance(worktree_id, str) or not worktree_id:
-        raise ValueError("mux-live-v1 payload missing 'worktree_id'")
-    if isinstance(revision, bool) or not isinstance(revision, int):
-        raise ValueError("mux-live-v1 payload missing 'mapping_revision'")
-    return f"{len(project)}:{project}:{len(worktree_id)}:{worktree_id}:{revision}"
-
-
-def mux_live_via_daemon(
-    lock_data: dict | None,
-    *,
-    payload: dict,
-    fallback: Callable[[], dict],
-    request_deadline_s: float = LIVE_REQUEST_DEADLINE_S,
-) -> dict:
-    endpoint = _status_monitor_endpoint_from_rendezvous(lock_data)
-    if endpoint is None:
-        return fallback()
-    key = live_push_key(payload)
-    host, port, token = endpoint
-    client_id = wcs_client.new_client_id()
-    try:
-        return wcs_client.request(
-            host,
-            port,
-            token,
-            kind=LIVE_KIND,
-            key=key,
-            payload=payload,
-            request_deadline_s=request_deadline_s,
-            client_id=client_id,
-        )
-    except wcs_client.DaemonUnavailable:
-        return fallback()
-    finally:
-        wcs_client.release(host, port, token, client_id, timeout=request_deadline_s)
-
-
-def mux_live_with_boot(
-    *,
-    read_lock_data: Callable[[], dict | None],
-    ensure_monitor: Callable[[], bool] | None,
-    payload: dict,
-    fallback: Callable[[], dict],
-    request_deadline_s: float = LIVE_REQUEST_DEADLINE_S,
-    boot_wait_s: float = LIVE_BOOT_WAIT_S,
-    poll_interval_s: float = 0.1,
-) -> dict:
-    started = time.time()
-
-    def _dial() -> tuple[str, int, str] | None:
-        return _status_monitor_endpoint_from_rendezvous(read_lock_data())
-
-    endpoint = _dial()
-    if endpoint is None and ensure_monitor is not None:
-        ensure_monitor()
-        while endpoint is None and time.time() - started < boot_wait_s:
-            time.sleep(poll_interval_s)
-            endpoint = _dial()
-    if endpoint is None:
-        return fallback()
-
-    host, port, token = endpoint
-    client_id = wcs_client.new_client_id()
-    try:
-        return wcs_client.request(
-            host,
-            port,
-            token,
-            kind=LIVE_KIND,
-            key=live_push_key(payload),
-            payload=payload,
-            request_deadline_s=request_deadline_s,
-            client_id=client_id,
-        )
-    except wcs_client.DaemonUnavailable:
-        return fallback()
-    finally:
-        wcs_client.release(host, port, token, client_id, timeout=request_deadline_s)
+def _daemon_is_live(data: dict | None) -> bool:
+    return mux_daemon_process.daemon_is_live(
+        data, endpoint_from_rendezvous=endpoint_from_rendezvous
+    )
 
 
 def _mapping_to_observation(entry: dict) -> dict:
@@ -329,14 +197,14 @@ def publish_live_observation(
     entry: dict,
     *,
     ensure_monitor: bool = True,
-    request_deadline_s: float = LIVE_REQUEST_DEADLINE_S,
-    boot_wait_s: float = LIVE_BOOT_WAIT_S,
+    request_deadline_s: float = mux_daemon_live.LIVE_REQUEST_DEADLINE_S,
+    boot_wait_s: float = mux_daemon_live.LIVE_BOOT_WAIT_S,
 ) -> dict:
     lock = _status_monitor_lock_path()
     if lock is None:
         return _monitor_unavailable()
     return mux_live_with_boot(
-        read_lock_data=lambda: read_lock_data(lock),
+        read_lock_data=lambda: mux_daemon_live.read_lock_data(lock),
         ensure_monitor=_ensure_status_monitor_running if ensure_monitor else None,
         payload=_mapping_to_observation(entry),
         fallback=_monitor_unavailable,
@@ -548,7 +416,9 @@ def _parse_rendered_at(value: str) -> float | None:
 
 
 def build_compute(
-    registry: MuxMappingRegistry, handler_tracker: "_ActiveHandlerTracker | None" = None
+    registry: MuxMappingRegistry,
+    handler_tracker: "_ActiveHandlerTracker | None" = None,
+    runtime: "MuxDaemonRuntime | None" = None,
 ) -> Callable[[str, dict], dict]:
     """Wrap the registry lookup + apply into a ``CoalescingServer``-shaped
     ``compute(kind, payload)`` callback, rejecting any request whose
@@ -591,8 +461,30 @@ def build_compute(
             return lock
 
     def _compute(kind: str, payload: dict) -> dict:
+        if kind == mux_daemon_cutover.health_kind():
+            if runtime is None:
+                raise ValueError("mux_daemon cutover control is unavailable")
+            return runtime.health()
+        if kind == mux_daemon_cutover.drain_kind():
+            if runtime is None:
+                raise ValueError("mux_daemon cutover control is unavailable")
+            return runtime.drain(payload)
+        if kind == mux_daemon_cutover.undrain_kind():
+            if runtime is None:
+                raise ValueError("mux_daemon cutover control is unavailable")
+            return runtime.undrain()
+        if kind == mux_daemon_cutover.shutdown_kind():
+            if runtime is None:
+                raise ValueError("mux_daemon cutover control is unavailable")
+            return runtime.request_shutdown()
+        if kind == mux_daemon_cutover.adopt_kind():
+            if runtime is None:
+                raise ValueError("mux_daemon cutover control is unavailable")
+            return runtime.promote()
         if kind != KIND:
             raise ValueError(f"mux_daemon does not serve kind={kind!r}")
+        if runtime is not None and not runtime.accepting_requests():
+            return {"applied": False, "reason": "draining"}
         project = payload.get("project")
         worktree_id = payload.get("worktree_id")
         values = payload.get("values")
@@ -657,7 +549,7 @@ def build_compute(
                 )
                 tombstone = registry.get(project, worktree_id)
                 if tombstone is not None:
-                    publish_live_observation(tombstone, ensure_monitor=False)
+                    mux_daemon_live.publish_live_observation(tombstone, ensure_monitor=False)
                 return {"applied": False, "reason": "not-live"}
 
             # Recheck immediately before the actual write (Copilot review
@@ -689,17 +581,24 @@ def build_compute(
             if ok:
                 refreshed = registry.get(project, worktree_id)
                 if refreshed is not None:
-                    publish_live_observation(refreshed, ensure_monitor=False)
+                    mux_daemon_live.publish_live_observation(refreshed, ensure_monitor=False)
             return {"applied": ok} if ok else {"applied": False, "reason": "apply-failed"}
 
     return _compute
 
 
-def start_server(compute: Callable[[str, dict], dict]) -> CoalescingServer:
+def start_server(
+    compute: Callable[[str, dict], dict],
+    *,
+    port: int = 0,
+    token: str | None = None,
+) -> CoalescingServer:
     return CoalescingServer(
         compute,
         linger_seconds=LINGER_SECONDS,
         subscriber_ttl=SUBSCRIBER_TTL_SECONDS,
+        bind_port=port,
+        token=token,
     )
 
 
@@ -751,26 +650,159 @@ class MuxDaemonRuntime:
     #: forever on a stuck subprocess call).
     SHUTDOWN_DRAIN_TIMEOUT_S = 20.0
 
-    def __init__(self, registry_path_: Path) -> None:
+    def __init__(
+        self,
+        registry_path_: Path,
+        *,
+        root: Path | None = None,
+        passive: bool = False,
+        listen_port: int | None = None,
+    ) -> None:
         self.server: CoalescingServer | None = None
         self.registry = MuxMappingRegistry(registry_path_)
         self.handler_tracker = _ActiveHandlerTracker()
+        self.root = root if root is not None else default_root()
+        self.passive = passive
+        self.listen_port = listen_port or 0
+        self.admissions_open = not passive
+        self.draining = False
+        self.republish_enabled = True
+        self.shutdown_requested = False
+        self.retire_requested = False
+        self._loop_mutation_active = False
+        self._self_retire_generation: int | None = None
+        self._self_retire_confirms = 0
+        self._self_retire_confirmations = 2
 
     def start(self) -> None:
         try:
-            server = start_server(build_compute(self.registry, self.handler_tracker))
+            server = start_server(
+                build_compute(self.registry, self.handler_tracker, self),
+                port=self.listen_port,
+                token=mux_daemon_cutover.load_or_create_control_token(self.root),
+            )
             self.server = server
             server.start()
         except Exception:
             self.shutdown()
+
+    @property
+    def port(self) -> int | None:
+        if self.server is None:
+            return None
+        rendezvous = self.server.rendezvous()
+        endpoint = str(rendezvous["endpoint"])
+        _, _, port_s = endpoint.rpartition(":")
+        try:
+            return int(port_s)
+        except ValueError:
+            return None
 
     def lock_extra(self) -> dict:
         if self.server is None:
             return {}
         return rendezvous_fields(self.server)
 
+    def accepting_requests(self) -> bool:
+        return self.admissions_open and not self.draining
+
+    def loop_mutation(self):
+        class _LoopMutation:
+            def __init__(self, owner: MuxDaemonRuntime) -> None:
+                self._owner = owner
+
+            def __enter__(self):
+                self._owner._loop_mutation_active = True
+
+            def __exit__(self, exc_type, exc, tb):
+                self._owner._loop_mutation_active = False
+                return False
+
+        return _LoopMutation(self)
+
+    def _is_drained(self, *, exclude_current_request: bool = False) -> bool:
+        if self.server is None:
+            return True
+        active_handlers = self.server.active_handler_count()
+        if exclude_current_request and active_handlers > 0:
+            active_handlers -= 1
+        return (
+            active_handlers == 0
+            and self.handler_tracker.wait_for_drain(0.0)
+            and not self._loop_mutation_active
+        )
+
+    def begin_drain(self) -> None:
+        self.draining = True
+        self.republish_enabled = False
+
+    def begin_retire(self) -> None:
+        self.begin_drain()
+        self.retire_requested = True
+
+    def health(self) -> dict:
+        return {"status": "draining" if self.draining else "ready"}
+
+    def promote(self) -> dict:
+        self.admissions_open = True
+        return {"adopted": True}
+
+    def drain(self, payload: dict) -> dict:
+        self.begin_drain()
+        timeout = float(payload.get("timeout", 0.0) or 0.0)
+        poll = max(0.01, float(payload.get("poll", 0.05) or 0.05))
+        force = bool(payload.get("force"))
+        deadline = time.time() + timeout
+        while not self._is_drained(exclude_current_request=True) and time.time() < deadline:
+            time.sleep(poll)
+        drained = self._is_drained(exclude_current_request=True)
+        if not drained and force:
+            self.shutdown_requested = True
+            return {"drained": True, "clean": False, "forced": True, "busy_sessions": ["busy"]}
+        return {
+            "drained": drained,
+            "clean": drained,
+            "forced": False,
+            "busy_sessions": [] if drained else ["busy"],
+        }
+
+    def undrain(self) -> dict:
+        self.draining = False
+        self.republish_enabled = True
+        self.admissions_open = True
+        self.retire_requested = False
+        self.shutdown_requested = False
+        self._self_retire_confirms = 0
+        return {"draining": False}
+
+    def request_shutdown(self) -> dict:
+        self.shutdown_requested = True
+        return {"shutdown": True}
+
+    def sync_self_retire(self) -> None:
+        if self._self_retire_generation is None:
+            generation = mux_daemon_cutover.active_generation_for_pid(os.getpid(), root=self.root)
+            if generation is not None:
+                self._self_retire_generation = generation
+        if self._self_retire_generation is None:
+            return
+        superseded = mux_daemon_cutover.is_superseded(
+            self.root, os.getpid(), self._self_retire_generation
+        )
+        if superseded:
+            self._self_retire_confirms += 1
+            if self._self_retire_confirms >= self._self_retire_confirmations:
+                self.begin_retire()
+        else:
+            self._self_retire_confirms = 0
+
+    def should_exit(self) -> bool:
+        return self.shutdown_requested or (self.retire_requested and self._is_drained())
+
     def has_active_demand(self) -> bool:
         if self.server is not None and self.server.subscriber_count() > 0:
+            return True
+        if self.server is not None and self.server.active_handler_count() > 0:
             return True
         return self.registry.has_any_live()
 
@@ -784,6 +816,8 @@ class MuxDaemonRuntime:
 def run_daemon_foreground(
     root: Path | None = None,
     *,
+    passive: bool = False,
+    listen_port: int | None = None,
     idle_after_s: float = IDLE_LINGER_S,
     poll_interval_s: float = 1.0,
     max_iterations: int | None = None,
@@ -795,55 +829,84 @@ def run_daemon_foreground(
     active subscriber. ``max_iterations`` is test-only (bounds the loop
     instead of relying on the idle timer alone).
 
-    Acquiring :data:`_spawn_lock_path` as a lease held for this daemon's ENTIRE lifetime (not
-    merely at startup) is a deliberate design choice (Copilot review finding): a briefly-held
-    "check, then spawn" lock (as an earlier revision used) only protects callers that go
-    through it -- a direct ``mux-daemon run`` invocation (manual, or a second supervisor)
-    bypasses that dance entirely, and even between two lock-protected operations there is still
-    a gap where both could believe the lock file is theirs. Holding the SAME lease continuously
-    instead makes mutual exclusion structural rather than timing-dependent: only one process
-    can ever hold it, so a second ``run_daemon_foreground`` call sees it already held and
-    stands down immediately without starting a server or touching the rendezvous file -- and
-    this process's own exit-time cleanup can remove the rendezvous unconditionally, since
-    holding the lease the whole time already proves no other daemon could have published one.
+    A *passive* generation (spawned only by the cutover orchestrator) is the one
+    sanctioned exception to the single-active lease: it starts beside the active
+    daemon without taking the lease or publishing the lock, becomes routed active
+    through the ZDD routing table, then self-promotes by claiming the lease once
+    the old active retires.
     """
     resolved_root = root if root is not None else default_root()
-    lease = _acquire_daemon_lease(resolved_root)
-    if lease is None:
+    lock = lock_path(resolved_root)
+    lease = None if passive else _acquire_daemon_lease(resolved_root)
+    if not passive and lease is None:
         # Another instance already holds the single-instance lease --
         # stand down rather than starting a second daemon.
         return 0
     try:
-        lock = lock_path(resolved_root)
-        runtime = MuxDaemonRuntime(registry_path(resolved_root))
+        runtime = MuxDaemonRuntime(
+            registry_path(resolved_root),
+            root=resolved_root,
+            passive=passive,
+            listen_port=listen_port,
+        )
         runtime.start()
-        if runtime.server is None:
+        if runtime.server is None or runtime.port is None:
             return 1
+        active_version = current_version(resolved_root)
+        if lease is not None:
+            active_endpoint = mux_daemon_cutover.publish_route(
+                runtime.port,
+                root=resolved_root,
+                pid=os.getpid(),
+                version=active_version,
+            )
+            runtime._self_retire_generation = int(active_endpoint.generation)
         idle_since: float | None = None
         iterations = 0
         published_monitor_generation: str | None = None
         last_live_republish_at: float | None = None
         try:
             while True:
-                write_lock_data(lock, runtime.lock_extra())
+                if lease is None:
+                    generation = mux_daemon_cutover.active_generation_for_pid(
+                        os.getpid(), root=resolved_root
+                    )
+                    if generation is not None:
+                        promoted = _acquire_daemon_lease(resolved_root)
+                        if promoted is not None:
+                            lease = promoted
+                            runtime.passive = False
+                            runtime._self_retire_generation = generation
+                if lease is not None:
+                    write_lock_data(lock, runtime.lock_extra())
+                runtime.sync_self_retire()
                 status_monitor_lock = _status_monitor_lock_path()
                 status_monitor_data = (
-                    read_lock_data(status_monitor_lock)
+                    mux_daemon_live.read_lock_data(status_monitor_lock)
                     if status_monitor_lock is not None
                     else None
                 )
                 status_monitor_generation = _status_monitor_generation(status_monitor_data)
                 now = time.monotonic()  # immune to clock steps; diffed only against itself
                 if (
+                    runtime.republish_enabled
+                    and
                     live_mapping_republish_due(
                         status_monitor_generation, published_monitor_generation,
                         last_live_republish_at, now, backstop_interval_s,
                     )
                     and runtime.registry.has_any_live()
-                    and _republish_live_mappings(runtime.registry, ensure_monitor=False)
                 ):
-                    last_live_republish_at = now
-                    published_monitor_generation = status_monitor_generation
+                    with runtime.loop_mutation():
+                        republished = _republish_live_mappings(
+                            runtime.registry,
+                            ensure_monitor=False,
+                        )
+                    if republished:
+                        last_live_republish_at = now
+                        published_monitor_generation = status_monitor_generation
+                if runtime.should_exit():
+                    break
                 if runtime.has_active_demand():
                     idle_since = None
                 elif idle_since is None:
@@ -856,62 +919,18 @@ def run_daemon_foreground(
                 time.sleep(poll_interval_s)
         finally:
             runtime.shutdown()
-            try:
-                lock.unlink()
-            except OSError:
-                pass
+            mux_daemon_cutover.clear_route_if_owner(os.getpid(), root=resolved_root)
+            if lease is not None:
+                data = read_lock_data(lock)
+                if isinstance(data, dict) and data.get("pid") == os.getpid():
+                    try:
+                        lock.unlink()
+                    except OSError:
+                        pass
         return 0
     finally:
-        _release_daemon_lease(lease)
-
-
-def _daemon_is_live(data: dict | None) -> bool:
-    """Prove liveness by actually reaching the endpoint (a real
-    subscribe/release round trip), not merely by trusting the lock file's
-    presence -- a crashed daemon leaves a stale-but-present lock. Cheaper
-    and more direct than a PID/start-time liveness check: it proves the
-    thing that actually matters (the daemon answers), not just that some
-    process with a recorded pid still exists."""
-    endpoint = endpoint_from_rendezvous(data)
-    if endpoint is None:
-        return False
-    host, port, token = endpoint
-    client_id = wcs_client.new_client_id()
-    try:
-        wcs_client.subscribe(host, port, token, client_id, timeout=2.0)
-    except wcs_client.DaemonUnavailable:
-        return False
-    finally:
-        wcs_client.release(host, port, token, client_id, timeout=2.0)
-    return True
-
-
-def _spawn_lock_path(root: Path) -> Path:
-    return root / "mux-daemon.spawn.lock"
-
-
-def _acquire_daemon_lease(root: Path):
-    """Attempt this daemon's single-instance lease: a single non-blocking
-    cross-process file-lock attempt, held for the daemon's entire lifetime
-    (see :func:`run_daemon_foreground`'s own docstring for why). Returns an
-    open file handle the caller must eventually pass to
-    :func:`_release_daemon_lease`, or ``None`` if another instance already
-    holds it."""
-    root.mkdir(parents=True, exist_ok=True)
-    fh = open(_spawn_lock_path(root), "a+b")
-    if _try_lock_file_once(fh):
-        return fh
-    fh.close()
-    return None
-
-
-def _release_daemon_lease(fh) -> None:
-    try:
-        _unlock_file(fh)
-    except OSError:
-        pass
-    fh.close()
-
+        if lease is not None:
+            _release_daemon_lease(lease)
 
 def ensure_daemon_running(
     root: Path | None = None, *, boot_wait_s: float = BOOT_WAIT_S
@@ -938,9 +957,7 @@ def ensure_daemon_running(
     # spawned `mux-daemon run` resolved its own default installation root
     # instead, so this helper would report failure despite successfully
     # spawning a daemon.
-    argv = [sys.executable, "-m", "worktree_manager", "mux-daemon", "run"]
-    if root is not None:
-        argv.append(f"--root={root}")
+    argv = mux_daemon_process.detached_child_argv(root)
     if not _spawn_detached(argv):
         return False
     started = time.time()
@@ -949,51 +966,3 @@ def ensure_daemon_running(
         if _daemon_is_live(read_lock_data(lock)):
             return True
     return False
-
-
-_SESSION_CREDENTIAL_ENV_KEYS = {"GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN"}
-
-
-def _scrub_session_credentials(env: dict[str, str]) -> dict[str, str]:
-    """Environment for a long-lived spawned/restarted process, excluding
-    session credentials (Copilot review finding on PR #3839): Windows
-    environment-variable names are case-insensitive, so a parent carrying
-    ``gh_token``/``github_token``/a differently-cased AHP token must still
-    be scrubbed -- an exact-case set membership check silently misses those.
-    Shared by both the mux companion daemon's own spawn
-    (:func:`_spawn_detached`) and the resident status-monitor restart
-    (:func:`_ensure_status_monitor_running`)."""
-    return {
-        key: value
-        for key, value in env.items()
-        if key.upper() not in _SESSION_CREDENTIAL_ENV_KEYS
-    }
-
-
-def _spawn_detached(argv: list[str]) -> bool:
-    """Spawn a survivable background daemon. Best-effort; never raises.
-
-    This daemon DOES have recurring console-child concerns (per-session,
-    per-tick ``subprocess.run([mux_bin, ...])`` calls in
-    ``apply_status_options``/``_mux_session_alive``): a console-subsystem
-    child spawned from a ``DETACHED_PROCESS`` parent has no console to
-    inherit and allocates a brand new, briefly-visible one per call --
-    observed live as a continuous stream of flashing windows (2026-09-26).
-    Reuse ``agent_procutil.windowless_daemon_kwargs()``, the same helper
-    ``agent_worktrees.status_monitor_runtime._spawn_detached`` relies on for
-    its own recurring-console-child daemon: ``CREATE_NO_WINDOW`` alone (no
-    ``DETACHED_PROCESS``) retains one hidden console those descendants
-    inherit instead of each allocating their own."""
-    env = _scrub_session_credentials(dict(os.environ))
-    kwargs: dict = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-        "env": env,
-    }
-    kwargs.update(windowless_daemon_kwargs(breakaway=True))
-    try:
-        subprocess.Popen(argv, **kwargs)  # detached: fixed, trusted argv
-        return True
-    except Exception:
-        return False

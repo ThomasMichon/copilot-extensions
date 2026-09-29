@@ -43,6 +43,7 @@ from pathlib import Path
 
 from . import (
     activity,
+    env_scrub,
     git_ops,
     hooks,
     obligations,
@@ -386,13 +387,11 @@ def push_changes(
                 record.title if record else None
             )
             # Never invent a commit message here -- a synthetic placeholder
-            # (e.g. one built from worktree_id/its suffix) is still not a
-            # real description, and this message can land directly on a
-            # public default branch (direct-push repos). Require an actual
-            # title instead of guessing one. `normalize_title` checks for
-            # whitespace-only (-> None) WITHOUT truncating -- unlike
-            # `cap_title`, this message is the actual commit subject, not a
-            # Picker/status-bar display string.
+            # (e.g. built from worktree_id) is still not a real description,
+            # and can land directly on a public default branch (direct-push
+            # repos). Require an actual title. `normalize_title` checks for
+            # whitespace-only (-> None) without truncating; unlike `cap_title`,
+            # this is the actual commit subject, not a Picker/status-bar string.
             if not squash_title:
                 output.err(
                     "No usable title could be determined for this squash "
@@ -464,6 +463,7 @@ def push_changes(
             import subprocess
             result = subprocess.run(
                 expanded, capture_output=True, text=True,
+                env=env_scrub.scrub_python_runtime_env(os.environ.copy()),
             )
             if result.returncode != 0:
                 output.warn("Core validation failed. Worktree preserved for fixes.")
@@ -492,7 +492,7 @@ def push_changes(
                     ["pwsh.exe", "-NoProfile", "-File", str(validate_script),
                      "-WorktreePath", worktree_path, "-DefaultBranch", upstream],
                     capture_output=True, text=True,
-                )
+                    env=env_scrub.scrub_python_runtime_env(os.environ.copy()))
                 if result.returncode != 0:
                     output.warn("Core validation failed. Worktree preserved for fixes.")
                     print(result.stdout)

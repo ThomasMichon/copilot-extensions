@@ -40,10 +40,15 @@ agent-dropin-registry = { path = "libs/dropin-registry" }
 # manually in sync -- only a real `main`-branch release
 # (tools/materialize_main.py) ever gets a real local copy.
 agent-ssh-manager = { path = "../../libs/ssh-manager", editable = true }
-# Provider-agnostic detached CLI-mode reservation/launch helpers.
-agent-venue-copilot = { path = "libs/venue-copilot" }
+# Provider-agnostic detached CLI-mode reservation/launch helpers. This is
+# a `uv`-editable canonical reference (vendor-pointer-generalization
+# effort, Phase 1): `path` escapes this plugin's own root and resolves
+# live to `libs/venue-copilot`, so this `dev`-branch checkout has nothing
+# to keep manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
+agent-venue-copilot = { path = "../../libs/venue-copilot", editable = true }
 # Routing-table reader used by venue-copilot for host bridge discovery.
-agent-zdd = { path = "libs/zdd" }
+agent-zdd = { path = "../../libs/zdd", editable = true }
 
 [project.scripts]
 agent-ssh = "agent_ssh.__main__:main"

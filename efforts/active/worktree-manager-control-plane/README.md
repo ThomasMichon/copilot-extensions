@@ -84,7 +84,7 @@ boundary (`agent-worktrees --json`), owning no worktree logic of its own.
 update story (graceful cutover on `worktree-manager update`, generation
 self-retire, so a stale daemon can never stack up after a rapid-fire
 release) is tracked by a separate, dedicated effort —
-[`graceful-cutover-worktrees-and-ssh`](../graceful-cutover-worktrees-and-ssh/README.md)
+[`graceful-cutover-worktrees-and-ssh`](../../2026/09/29 graceful-cutover-worktrees-and-ssh/README.md)
 (covers `agent-worktrees` and `worktree-manager` adopting the same
 pre-existing `zdd`/`graceful-daemon-cutover` pattern already proven by
 `agent-bridge`/`agent-dispatch`/`agent-index`, plus `agent-ssh` as an
@@ -417,7 +417,7 @@ bindings still resolve correctly through the compatibility view.
       path, and the separate built-in progress-envelope follow-up was filed as
       [#4274](https://github.com/ThomasMichon/copilot-extensions/issues/4274).
 
-### Phase 3d — Retire the Picker's in-process engine-module boundary (Done, one residual gap flagged — #3360)
+### Phase 3d — Retire the Picker's in-process engine-module boundary (Done — #3360)
 
 _(agent-recommended scoping below the two linked issues; the issues
 themselves are operator-filed.)_
@@ -592,38 +592,10 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
       `agent_worktrees` import. With Step 7 landed, Groups A/B/C and the full
       Phase 3d plan are complete. See
       [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md).
-      **Residual gap flagged 2026-09-27 (re-audit, not yet fixed):** the
-      Step 7 regression guard proves no `production_picker/*.py` file
-      contains a literal `import agent_worktrees` statement, but
-      `production_picker/housekeeping.py` (the Step 3-ported Picker-owned
-      lifecycle sweeps: `reap_orphan_mux_sessions`, `sweep_managed_on_exit`,
-      `sweep_launcher_shells_on_exit`, `sweep_finished_sessions_on_cadence`)
-      still calls `worktree_manager.agent_worktrees_runtime.engine_module(...)`
-      for `config`/`tracking`/`sessions`/`activity`/`reap_cli`/`gc`/
-      `status_monitor_runtime` — the same dynamic in-process
-      `importlib.import_module("agent_worktrees.<name>")` mechanism
-      `_engine_runtime.py` used, just relocated one module up so the
-      package-scoped regression guard's literal-import scan doesn't trip on
-      it. `agent_worktrees_runtime.py`'s own docstring is candid about this
-      ("a small number of Worktree Manager-owned helpers ... still import
-      selected agent-worktrees modules directly"), but `housekeeping.py` is
-      Picker-owned code by Step 3's own framing, not a legitimately-separate
-      Worktree-Manager-internal concern — so this reads as the phase's
-      stated goal (no in-process `agent_worktrees` access from Picker-owned
-      code) not being fully met, dressed as met by a guard that checks the
-      letter (no direct import *statement* in the package) rather than the
-      substance (no in-process access from Picker-owned code, however
-      indirected). Closing this for real means converting `housekeeping.py`'s
-      7-module usage to `--json` verbs/subprocess calls, which has a genuine,
-      undecided tradeoff: these functions run from process-exit hooks and a
-      background cadence timer, not just Picker refresh cycles, so a
-      subprocess-per-sweep cost profile needs evaluation before committing to
-      that conversion (unlike Group A/B/C's already-established low-frequency
-      or already-async call sites). **Not resolved in this pass** — recorded
-      here rather than silently accepted so a future session (or the
-      operator) can make an informed call: either do the conversion, or
-      explicitly amend the vision's Non-Goal wording to carve out this
-      documented exception on purpose instead of by omission.
+      Step 8 below resolves the 2026-09-27 re-audit gap by draining
+      `housekeeping.py` off `agent_worktrees_runtime.engine_module(...)`
+      too, so the final boundary guard now matches the phase's actual
+      substance rather than only its literal-import wording.
       **Cross-linked 2026-09-27** (`agent-worktrees-authoritative-daemon`
       effort, Phase 4): Step 5's batched verb should register against that
       effort's `tracking_write.py` verb registry
@@ -641,6 +613,20 @@ PR [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278).
       outside it entirely). Any future decision to widen the guard's scope
       to cover `worktree-manager/` too is separate from this migration and
       would need its own coordination.
+- [x] **Step 8 — resolve the flagged `housekeeping.py` residual gap.**
+      Completed in this branch: the startup/exit housekeeping lane now uses
+      public engine verbs or Manager-owned direct file/lock reads for all 7
+      previously-indirected module usages. `config.tracking_dir()` moved to the
+      existing Manager-owned `project_config` reader; the mux orphan reap moved
+      to `reap-sessions --json` extended with repeatable `--worktree-id` and
+      `--include-manager-owned`; launcher-shell and finished/managed-worktree
+      sweeps now call `reap-shells --json --yes`, `sweep-managed --json`, and
+      `sweep-finished-sessions --json`; the finished-session grace constant is
+      local; and Picker monitor-root upkeep now checks the resident
+      status-monitor lock locally, spawning the public `agent-worktrees
+      status-monitor` command only when absent instead of importing
+      `status_monitor_runtime` in-process on every heartbeat. No vision carve-
+      out was needed because no deliberate exception remains.
 
 ### Phase 3e — Relocate terminal-profile handling out of agent-worktrees (Done — #3390)
 
@@ -900,6 +886,77 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-09-29** — Resumed this exact worktree after an interrupted landing
+  pass rather than restarting from scratch. Found one good committed slice
+  already landed locally (`d7d1183d4`, the Step 8 housekeeping cutover) plus a
+  second, uncommitted continuation on top of it: a legitimate follow-on fix in
+  `production_picker.monitor_roots` / `engine_group_d` / related tests, but
+  with the `worktree-manager` version accidentally rolled **backward** from the
+  committed `0.1.0-dev96` to `0.1.0-dev95`. Reconciled that interruption
+  artifact first by restoring the forward-only committed value
+  `0.1.0-dev96` while leaving the actual bump itself promotion-owned via the
+  already-present changefile, matching this repo's versioning workflow.
+  Finished the in-flight fix rather than reverting it: the Manager-owned
+  monitor-root port now treats an existing
+  `status-monitor.lock` as reusable only when it still matches the current
+  `agent-worktrees` runtime prefix **and** the caller's current mux capability,
+  and otherwise respawns `agent-worktrees status-monitor` with the same clean
+  detached environment contract the engine-side helper uses (no inherited
+  session/project argv handoff, no leaked session credentials). This closes the
+  real related bug the interrupted diff was heading toward: after an
+  `agent-worktrees` upgrade or a change from no-mux to mux-capable execution,
+  `ensure_status_monitor_running()` could previously keep deferring forever to
+  a stale or incapable resident monitor just because its PID was still live.
+  Also completed the uncommitted Group D follow-through by forwarding
+  `dry_run` / `idle_grace_secs` through
+  `production_picker.housekeeping.reap_orphan_mux_sessions()` into the public
+  `reap-sessions --json` seam, tightening the targeted test coverage for both
+  the Manager wrappers and the monitor-respawn gating. Phase 3d remains a clean
+  **Done — #3360** with no residual exception wording; the accompanying Step 8
+  plan write-up and engine-picker contract doc now reflect the final landed
+  state rather than the interrupted intermediate one.
+
+- **2026-09-28** — Resolved the residual `housekeeping.py` in-process
+  boundary gap flagged 2026-09-27. Per-call-site outcome, matching the
+  final Step 8 write-up in
+  [`phase-3d-engine-runtime-retirement.md`](phase-3d-engine-runtime-retirement.md):
+  `config.tracking_dir()` moved to the existing Manager-owned
+  `project_config` reader; the Manager-owned row discovery path now scans the
+  tracking YAMLs directly for only the `worktree_id` +
+  `execution_leg.provider` facts it needs; orphan mux-session reap now shells
+  out through the public engine seam once per housekeeping pass
+  (`reap-sessions --json`, additively widened with repeatable
+  `--worktree-id` plus `--include-manager-owned`); managed/finalized sweep
+  wrappers now shell out via focused `sweep-managed --json` /
+  `sweep-finished-sessions --json` commands; launcher-shell reap now uses the
+  existing public `reap-shells --json --yes` verb; the finished-session grace
+  default is local data rather than an imported engine constant; and Picker
+  monitor-root upkeep now stays Manager-owned by checking the resident
+  `status-monitor.lock` locally and spawning the public `status-monitor`
+  command only when absent, instead of importing
+  `status_monitor_runtime._ensure_status_monitor()` on every heartbeat. Added
+  new Worktree Manager regression coverage (`test_engine_group_d.py`,
+  refreshed `test_housekeeping.py` / `test_monitor_roots.py`,
+  tighter `test_production_picker_runtime_boundary.py`) plus agent-worktrees
+  coverage for the widened `reap-sessions` contract and the focused
+  housekeeping commands (`test_reap_orphans.py`, `test_auto_clean.py`). This
+  removes the need for any Picker-vision exception: Phase 3d's header is back
+  to a clean **Done**, and Step 7's old "literal import only" residual note is
+  retired rather than carried as a documented carve-out.
+
+- **2026-09-28** — Claiming the residual `housekeeping.py` in-process
+  boundary gap flagged 2026-09-27 (Phase 3d Step 7's "Done" claim was
+  incomplete). Investigating whether to convert
+  `production_picker/housekeeping.py`'s 7-module in-process usage
+  (`config`/`tracking`/`sessions`/`activity`/`reap_cli`/`gc`/
+  `status_monitor_runtime` via `agent_worktrees_runtime.engine_module(...)`)
+  to `--json` verbs/subprocess calls, weighing the flagged
+  subprocess-per-sweep cost/latency tradeoff for exit-hook/cadence-timer
+  call sites, or documenting a deliberate carve-out if conversion proves
+  unjustified. Working solo per standing operator directive; recorded here
+  per this effort's own Coordination-section claiming discipline since #352
+  is closed.
 
 - **2026-09-27** — Re-audited Phase 3d Step 7's "Done" claim (PR #4357,
   landed concurrently by another session) instead of taking it at face

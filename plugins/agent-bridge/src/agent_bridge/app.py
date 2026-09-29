@@ -424,19 +424,19 @@ async def lifespan(app: FastAPI):
     # immediately; surviving sessions reattach concurrently, moments after
     # startup. The task is cancelled on shutdown.
     async def _reattach_session_hosts_bg() -> None:
+        if getattr(app.state, "passive", False):
+            return  # passive: ATTACHing would disconnect the old generation
         try:
             n = await mgr.reattach_session_hosts()
             if n:
                 logging.getLogger("agent-bridge").info(
-                    "Reattached %d session(s) to surviving Session Hosts", n
-                )
+                    "Reattached %d session(s) to surviving Session Hosts", n)
         except asyncio.CancelledError:
             # Normal on shutdown (the task is cancelled) -- never a failure.
             raise
         except Exception:
             logging.getLogger("agent-bridge").warning(
-                "Session-Host reattach on startup failed", exc_info=True
-            )
+                "Session-Host reattach on startup failed", exc_info=True)
 
     reattach_task = asyncio.create_task(_reattach_session_hosts_bg())
 

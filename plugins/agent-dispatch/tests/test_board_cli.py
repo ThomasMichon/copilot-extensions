@@ -59,8 +59,8 @@ def test_build_orders_started_ahead_of_queued(monkeypatch):
     monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)
     rows = board_cli._build(
         [
+            {"id": "submitted", "status": "submitted", "updated_at": 100},
             {"id": "completed", "status": "completed", "updated_at": 100},
-            {"id": "confirmed", "status": "confirmed", "updated_at": 100},
             {"id": "blocked", "status": "started", "awaiting_steer": True,
              "updated_at": 100},
             {"id": "queued", "status": "queued", "updated_at": 100},
@@ -74,7 +74,7 @@ def test_build_orders_started_ahead_of_queued(monkeypatch):
     )
     assert [row["group"] for row in rows] == [
         "Blocked", "Proposed", "Started", "Queued", "Suspended",
-        "Completed", "Confirmed", "Abandoned",
+        "Submitted", "Completed", "Abandoned",
     ]
 
 
@@ -100,6 +100,134 @@ def test_build_wt_live_reflects_headless_activity_only(monkeypatch):
     assert by_id["cli-embodied"]["wt_live"] is None
 
 
+def test_activity_phrase_prioritizes_wt_live_then_hold_then_lifecycle():
+    """`_activity_phrase` is the Tasks pane's standardized subtitle-line
+    activity text (2026-09-29 row-shape standardization): a real headless
+    liveness signal always wins; otherwise a hold, then awaiting-steer, then
+    the raw lifecycle status supply a sensible fallback phrase."""
+    assert board_cli._activity_phrase({"status": "started"}, "active") == "active"
+    assert board_cli._activity_phrase(
+        {"status": "started", "hold_reason": "operator pause"}, "active"
+    ) == "active"  # wt_live still wins even while held
+    assert board_cli._activity_phrase(
+        {"status": "started", "hold_reason": "operator pause"}, None
+    ) == "paused — operator pause"
+    long_reason = "x" * 60
+    truncated = board_cli._activity_phrase(
+        {"status": "started", "hold_reason": long_reason}, None
+    )
+    assert truncated.startswith("paused — ")
+    assert len(truncated) < len("paused — " + long_reason)
+    assert truncated.endswith("…")
+    assert board_cli._activity_phrase(
+        {"status": "started", "awaiting_steer": True}, None
+    ) == "awaiting your steer"
+    assert board_cli._activity_phrase({"status": "suspended"}, None) == (
+        "suspended — no live session"
+    )
+    assert board_cli._activity_phrase({"status": "queued"}, None) == "queued"
+    assert board_cli._activity_phrase(
+        {"status": "queued", "pool": {"kind": "headless"}}, None
+    ) == "queued for a worker"
+    assert board_cli._activity_phrase({"status": "proposed"}, None) == (
+        "awaiting approval"
+    )
+    assert board_cli._activity_phrase({"status": "claimed"}, None) == (
+        "claimed, starting…"
+    )
+    assert board_cli._activity_phrase({"status": "started"}, None) == "in progress"
+    assert board_cli._activity_phrase({"status": "completed"}, None) == "completed"
+    assert board_cli._activity_phrase({"status": "confirmed"}, None) == "confirmed"
+    assert board_cli._activity_phrase({"status": "abandoned"}, None) == "abandoned"
+
+
+def test_embodiment_tag_only_marks_the_non_default_cli_interface():
+    """`_embodiment_tag` mirrors Worktrees' `[system]`/`[delegate]`/`[acp]`
+    title-prefix convention: only the NON-default interface (CLI, for a
+    Task) is tagged. A confirmed headless liveness signal always wins over
+    the heuristic, and a not-yet-embodied task is never tagged."""
+    # Confirmed headless (a real wt_live signal) -> no tag, regardless of
+    # owner_session_id.
+    assert board_cli._embodiment_tag(
+        {"status": "started", "owner_session_id": "s1"}, "active"
+    ) is None
+    # Owned + live, but NO headless signal -> heuristically CLI.
+    assert board_cli._embodiment_tag(
+        {"status": "started", "owner_session_id": "s1"}, None
+    ) == "cli"
+    assert board_cli._embodiment_tag(
+        {"status": "claimed", "owner_session_id": "s1"}, None
+    ) == "cli"
+    # No owner session yet -> nothing to tag.
+    assert board_cli._embodiment_tag({"status": "started"}, None) is None
+    # Not embodied at all -> nothing to tag.
+    assert board_cli._embodiment_tag(
+        {"status": "queued", "owner_session_id": "s1"}, None
+    ) is None
+
+
+def test_subtitle_for_task_assembles_tag_repo_title_and_phrase():
+    """`_subtitle_for_task` composes the Tasks pane's standardized second
+    line: ``[tag] <repo> <title> - <phrase>`` (tag/repo optional)."""
+    cli_task = {
+        "id": "t-1", "title": "Fix the thing", "status": "started",
+        "owner_session_id": "s1", "repo_name": "example-repo",
+    }
+    assert board_cli._subtitle_for_task(cli_task, wt_live=None) == (
+        "[cli] example-repo Fix the thing - in progress"
+    )
+    headless_task = {
+        "id": "t-2", "title": "Nightly sweep", "status": "started",
+        "owner_session_id": "s2", "repo_name": "example-repo",
+    }
+    assert board_cli._subtitle_for_task(headless_task, wt_live="active") == (
+        "example-repo Nightly sweep - active"
+    )
+    no_repo_task = {"id": "t-3", "title": "Bare task", "status": "queued"}
+    assert board_cli._subtitle_for_task(no_repo_task, wt_live=None) == (
+        "Bare task - queued"
+    )
+    untitled_task = {"id": "t-4", "status": "proposed"}
+    assert board_cli._subtitle_for_task(untitled_task, wt_live=None) == (
+        "t-4 - awaiting approval"
+    )
+
+
+def test_build_populates_subtitle_and_drops_title_repo_from_columns(monkeypatch):
+    """2026-09-29 row-shape standardization: line 1 (`columns`) stays pure
+    stats; the title/repo/activity phrase move to line 2 (`subtitle`), and
+    the manifest no longer declares a `title`/`repo_name` column."""
+    monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)
+    rows = board_cli._build(
+        [
+            {
+                "id": "t-1", "title": "Fix the thing", "status": "started",
+                "owner_session_id": "s1", "repo": "github.com/example/repo",
+                "activity": "ACTIVE", "activity_updated_at": 990.0,
+                "updated_at": 5,
+            },
+        ],
+        machine="m1",
+        recent_mins=120,
+    )
+    row = rows[0]
+    assert row["subtitle"] == "repo Fix the thing - active"
+    assert "title" in row  # still present on the row (for `{title}` action templating)
+    assert "repo_name" in row  # still present (used to compose the subtitle)
+
+    import json
+    from pathlib import Path
+
+    manifest = json.loads(
+        (Path(__file__).parents[1] / "pivots" / "agent-dispatch.json")
+        .read_text(encoding="utf-8")
+    )
+    column_keys = [c["key"] for c in manifest["columns"]]
+    assert "title" not in column_keys
+    assert "repo_name" not in column_keys
+    assert manifest["entry"]["subtitle"] == "subtitle"
+
+
 def test_build_cli_openable_matches_interactive_embody_statuses(monkeypatch):
     monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)
     rows = board_cli._build(
@@ -112,7 +240,7 @@ def test_build_cli_openable_matches_interactive_embody_statuses(monkeypatch):
             {"id": "held", "status": "queued", "hold_reason": "pause", "updated_at": 5},
             {"id": "claimed", "status": "claimed", "updated_at": 4},
             {"id": "started", "status": "started", "updated_at": 3},
-            {"id": "completed", "status": "completed", "updated_at": 2},
+            {"id": "submitted", "status": "submitted", "updated_at": 2},
         ],
         machine="m1",
         recent_mins=120,
@@ -126,7 +254,84 @@ def test_build_cli_openable_matches_interactive_embody_statuses(monkeypatch):
     assert by_id["held"]["cli_openable"] is False
     assert by_id["claimed"]["cli_openable"] is False
     assert by_id["started"]["cli_openable"] is False
-    assert by_id["completed"]["cli_openable"] is False
+    assert by_id["submitted"]["cli_openable"] is False
+
+
+def test_build_group_paused_for_held_task(monkeypatch):
+    """Phase 7 follow-up (2026-09-29): a durable operator-set hold reads as
+    its own ``Paused`` group -- never conflated with system-``Suspended`` or
+    with ``Blocked``/awaiting-steer -- but a terminal status still wins."""
+    monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)
+    rows = board_cli._build(
+        [
+            {"id": "paused-started", "status": "started",
+             "hold_reason": "operator pause", "updated_at": 10},
+            {"id": "paused-blocked", "status": "suspended",
+             "awaiting_steer": True, "hold_reason": "operator pause",
+             "updated_at": 9},
+            {"id": "paused-abandoned", "status": "abandoned",
+             "hold_reason": "operator pause", "updated_at": 8},
+        ],
+        machine="m1",
+        recent_mins=120,
+    )
+    by_id = {row["id"]: row for row in rows}
+    assert by_id["paused-started"]["group"] == "Paused"
+    assert by_id["paused-started"]["held"] is True
+    assert by_id["paused-blocked"]["group"] == "Paused"
+    assert by_id["paused-abandoned"]["group"] == "Abandoned"
+
+
+def test_build_charter_is_always_populated(monkeypatch):
+    """Phase 7's charter card gap: every row now carries a real
+    ``charter.*`` payload (title/status/link/body) instead of a hard-`False`
+    `has_charter` -- structured metadata plus the raw prompt verbatim."""
+    monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)
+    rows = board_cli._build(
+        [
+            {
+                "id": "t-1",
+                "title": "Fix the thing",
+                "status": "queued",
+                "repo": "github.com/example/repo",
+                "source": "registrar:nightly",
+                "origin_ref": "recipe:cleanup",
+                "target_machine": "m1",
+                "labels": ["urgent", "bugfix"],
+                "goal": "Make the thing work again.",
+                "done_criteria": "Tests pass.",
+                "prompt": "Please fix the thing.",
+                "updated_at": 5,
+            },
+            {
+                "id": "t-2",
+                "title": "Bare task",
+                "status": "proposed",
+                "prompt": "Just do it.",
+                "updated_at": 4,
+            },
+        ],
+        machine="m1",
+        recent_mins=120,
+    )
+    by_id = {row["id"]: row for row in rows}
+    full = by_id["t-1"]["charter"]
+    assert by_id["t-1"]["has_charter"] is True
+    assert full["title"] == "Fix the thing"
+    assert full["status"] == "queued"
+    assert "`repo`" in full["body"]
+    assert "registrar:nightly" in full["body"]
+    assert "recipe:cleanup" in full["body"]
+    assert "urgent, bugfix" in full["body"]
+    assert "Make the thing work again." in full["body"]
+    assert "Tests pass." in full["body"]
+    assert "Please fix the thing." in full["body"]
+
+    bare = by_id["t-2"]["charter"]
+    assert by_id["t-2"]["has_charter"] is True
+    assert "no durable goal recorded" in bare["body"]
+    assert "_not specified_" in bare["body"]
+    assert "Just do it." in bare["body"]
 
 
 def test_build_artifacts_summary_reads_claims_from_relay(monkeypatch):

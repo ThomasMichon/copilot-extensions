@@ -130,7 +130,7 @@ def _cmd_claimant(args: argparse.Namespace) -> int:
         task = c.get(args.task_id)
     status = task.get("status")
     owner = task.get("owner")
-    claimed = bool(owner) and status in ("claimed", "started", "suspended", "completed")
+    claimed = bool(owner) and status in ("claimed", "started", "suspended", "submitted")
     if claimed:
         machine, worktree = _core()._split_owner(owner)
         source = "owner"
@@ -311,7 +311,7 @@ def _cmd_confirm(args: argparse.Namespace) -> int:
 
 def _cmd_reopen(args: argparse.Namespace) -> int:
     """The Completion Review card's Re-queue-with-steering action -- return
-    a completed-but-unconfirmed task to queued, progress preserved,
+    a submitted-but-not-yet-completed task to queued, progress preserved,
     optionally attaching new operator steer fields atomically."""
     steer_fields: dict[str, str] | None = None
     if args.field:
@@ -458,4 +458,3 @@ def _cmd_reattach(args: argparse.Namespace) -> int:
             print(f"agent-dispatch reattach: {exc}", file=sys.stderr)
             return 1
     return _core()._emit(result.as_dict())
-
