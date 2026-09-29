@@ -8,12 +8,20 @@
 #
 # So this is enforced as a required status check instead: a check with no
 # bypass actors at all (see the "workflow/CODEOWNERS lockdown" ruleset)
-# fails whenever a protected path is touched by anyone other than
-# ThomasMichon as either the PR's author OR the actor who pushed the latest
-# commit (both checked -- see "Verify protected-file changes by author and
-# sender" review finding: a same-repo Write collaborator can push a
-# follow-up commit onto ANOTHER person's already-open PR branch, so checking
-# only `pull_request.user.login` is not enough).
+# fails whenever a protected path is touched unless EVERY commit making up
+# the PR is attributed to ThomasMichon (both author and committer login).
+#
+# This checks commit provenance, not `pull_request.user.login` /
+# `github.event.sender.login`. An event's `sender` is just whoever triggered
+# THAT webhook delivery, not durable evidence of who pushed code -- e.g. a
+# collaborator's `synchronize` run could legitimately fail this check, then
+# anyone able to close+reopen the same, unchanged PR would fire a new
+# `reopened` event whose `sender` is themselves, re-running this check
+# against the SAME head SHA and laundering a failing result into a passing
+# one with no code having changed. Commit author/committer login is
+# evaluated fresh from the actual commit list every time, regardless of
+# which event/actor triggered this run, so a close+reopen game changes
+# nothing about the outcome.
 #
 # IMPORTANT: this uses `pull_request_target`, not `pull_request`. A plain
 # `pull_request` trigger runs the workflow DEFINITION from the PR's own head
@@ -25,9 +33,9 @@
 # default"), regardless of what the PR head or even `dev` currently
 # contains, and still exposes `github.event.pull_request` metadata for the
 # untrusted head. This job never checks out or executes PR content -- it
-# only reads the PR's file list via the REST API -- so it carries none of
-# the classic `pull_request_target` secret-exfiltration risk (see this
-# repo's own `identifier-leak-guard.yml` for the citation on that risk
+# only reads the PR's file/commit lists via the REST API -- so it carries
+# none of the classic `pull_request_target` secret-exfiltration risk (see
+# this repo's own `identifier-leak-guard.yml` for the citation on that risk
 # class).
 #
 # BOOTSTRAP ORDER MATTERS: because the trusted copy is loaded from `main`,
@@ -59,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check protected-path changes are ThomasMichon-authored
+      - name: Check protected-path changes are ThomasMichon-committed
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
           ALLOWED_LOGIN: ${{ env.ALLOWED_LOGIN }}
@@ -71,22 +79,25 @@ jobs:
             ];
             const protectedExact = new Set([".github/CODEOWNERS"]);
             const allowedLogin = process.env.ALLOWED_LOGIN;
-            // GitHub's "list pull request files" endpoint returns at most
-            // 3000 entries, even across paginated pages -- a PR at or past
-            // that cap could have a protected-path change past the
+            const pullNumber = context.payload.pull_request.number;
+            // GitHub's "list pull request files"/"list commits" endpoints
+            // return at most 3000/250 entries respectively, even across
+            // paginated pages -- a PR at or past either cap could have a
+            // protected-path change or an unattributed commit past the
             // returned window. Fail closed rather than silently missing it.
-            const HARD_CAP = 3000;
+            const FILES_HARD_CAP = 3000;
+            const COMMITS_HARD_CAP = 250;
 
             const files = await github.paginate(github.rest.pulls.listFiles, {
               owner: context.repo.owner,
               repo: context.repo.repo,
-              pull_number: context.payload.pull_request.number,
+              pull_number: pullNumber,
               per_page: 100,
             });
 
-            if (files.length >= HARD_CAP) {
+            if (files.length >= FILES_HARD_CAP) {
               core.setFailed(
-                `This PR's changed-file list hit the GitHub API's ${HARD_CAP}-file ` +
+                `This PR's changed-file list hit the GitHub API's ${FILES_HARD_CAP}-file ` +
                   "cap, so a protected-path change could exist outside the " +
                   "returned window. Failing closed -- split this PR into smaller " +
                   "changes, or have ThomasMichon review it manually.",
@@ -111,19 +122,42 @@ jobs:
               return;
             }
 
-            const author = context.payload.pull_request.user.login;
-            const sender = context.payload.sender?.login;
-            if (author === allowedLogin && sender === allowedLogin) {
-              core.info(
-                `Protected path(s) touched by ${allowedLogin} (author and sender match): ${touched.join(", ")}`,
+            const commits = await github.paginate(github.rest.pulls.listCommits, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pullNumber,
+              per_page: 100,
+            });
+
+            if (commits.length >= COMMITS_HARD_CAP) {
+              core.setFailed(
+                `This PR's commit list hit the GitHub API's ${COMMITS_HARD_CAP}-commit ` +
+                  "cap, so an unattributed commit could exist outside the returned " +
+                  "window. Failing closed -- squash/rebase this PR to fewer commits, " +
+                  "or have ThomasMichon review it manually.",
               );
               return;
             }
 
+            const unattributed = commits.filter(
+              (c) =>
+                c.author?.login !== allowedLogin ||
+                c.committer?.login !== allowedLogin,
+            );
+
+            if (unattributed.length === 0) {
+              core.info(
+                `Protected path(s) touched (${touched.join(", ")}); all ` +
+                  `${commits.length} commit(s) are attributed to ${allowedLogin}.`,
+              );
+              return;
+            }
+
+            const shas = unattributed.map((c) => c.sha.slice(0, 7)).join(", ");
             core.setFailed(
-              `Protected paths (${touched.join(", ")}) were touched, but this event's ` +
-                `author (${author}) and/or sender (${sender}) is not ${allowedLogin}. ` +
-                "Only PRs authored AND pushed by that account may modify workflows, " +
+              `Protected paths (${touched.join(", ")}) were touched, but ${unattributed.length} ` +
+                `commit(s) (${shas}) are not both authored and committed by ${allowedLogin}. ` +
+                "Only commits fully attributed to that account may modify workflows, " +
                 "actions, or CODEOWNERS -- ask them to make this change, or split it " +
                 "out of this PR.",
             );

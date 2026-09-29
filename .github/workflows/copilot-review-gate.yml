@@ -47,21 +47,23 @@ jobs:
           script: |
             const author = context.payload.pull_request.user.login;
 
-            async function hasRepoAccess(username) {
+            // Deliberately NOT `getCollaboratorPermissionLevel` + checking
+            // `permissions.pull`: on a PUBLIC repo, that endpoint reports
+            // `pull: true` (read access) for literally anyone, invited or
+            // not -- public repos grant implicit read to everyone, so
+            // `pull` can never distinguish "invited collaborator" from "any
+            // GitHub user browsing this repo." `checkCollaborator` answers
+            // the actual question ("is this an invited collaborator?"): 204
+            // if yes, 404 if no, independent of the repo's public/private
+            // visibility or the author's permission level.
+            async function isInvitedCollaborator(username) {
               try {
-                const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                await github.rest.repos.checkCollaborator({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   username,
                 });
-                const permissions = data.user?.permissions ?? {};
-                return (
-                  permissions.admin === true ||
-                  permissions.maintain === true ||
-                  permissions.push === true ||
-                  permissions.triage === true ||
-                  permissions.pull === true
-                );
+                return true;
               } catch (error) {
                 if (error.status === 404) {
                   return false;
@@ -70,7 +72,7 @@ jobs:
               }
             }
 
-            const trusted = await hasRepoAccess(author);
+            const trusted = await isInvitedCollaborator(author);
             if (!trusted) {
               core.info(
                 `${author} is not an invited collaborator; skipping automatic Copilot review. ` +

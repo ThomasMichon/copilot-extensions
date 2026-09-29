@@ -1,12 +1,14 @@
 # Review guidance — copilot-extensions
 
 This file is read by GitHub Copilot code review specifically (this repo's
-`dev` branch ruleset's `copilot_code_review` rule auto-requests it,
-non-blocking, on every PR targeting `dev` — `main`'s ruleset no longer
-requests Copilot review at all, since only the promotion pipeline's own
-automated snapshot PR ever targets `main`, and re-reviewing regenerated,
-already-validated content there is redundant) — see [Customizing Copilot's
-reviews with custom
+`.github/workflows/copilot-review-gate.yml` requests it, non-blocking, on
+every PR targeting `dev` from an already-invited collaborator — see
+CONTRIBUTING.md's "Contribution flow" for why the ruleset-native
+`copilot_code_review` auto-review rule was removed instead of used;
+`main`'s ruleset never requests Copilot review at all, since only the
+promotion pipeline's own automated snapshot PR ever targets `main`, and
+re-reviewing regenerated, already-validated content there is redundant) —
+see [Customizing Copilot's reviews with custom
 instructions](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/request-a-code-review/use-code-review#customizing-copilots-reviews-with-custom-instructions).
 Unlike [`.github/copilot-instructions.md`](.github/copilot-instructions.md)
 (which also shapes Chat and the coding agent), this file's guidance is
