@@ -177,11 +177,16 @@ class _SessionHostRecoveryMixin:
                 # A live different generation still owns this record -- do not
                 # reattach out from under it (the effort's own "the next
                 # generation earns the handoff, never assumes it" behavior).
-                # Left as inconclusive rather than a hard failure: a later
-                # reattach pass (the post-cutover claim sweep, or this
-                # generation's own next startup) retries once that generation
-                # actually releases it.
-                self._remote_recovery_inconclusive.add(rec.session_id)
+                # Deliberately NOT added to `_remote_recovery_inconclusive`
+                # (PR #4543 review): that set is checked at the *top* of this
+                # very loop on every later call, so recording a claim
+                # conflict there would permanently block every future
+                # reattach attempt for this session -- including the
+                # post-cutover retry this mechanism exists to make succeed
+                # once the other generation actually releases it. A claim
+                # conflict is retried on the next scan for free; it is not a
+                # terminal "could not authoritatively inspect" outcome the
+                # way remote-recovery inconclusiveness is.
                 continue
             session = self._sessions.get(rec.session_id)
             if session is None or not session.acp_session_id:

@@ -366,6 +366,44 @@ session-host concept):
   transient shared-host `[LIMIT] wall-clock limit exceeded` and a stale
   test-runner lock from an unrelated dead process on this same machine --
   both cleared on retry, neither related to this change).
+- **PR #4543's automated review caught four real gaps, all fixed before
+  merge:**
+  1. HIGH: `HostIndex`'s mutating methods (`register`/`remove`/`claim`/
+     `release_all`/...) wrote from each instance's own in-memory snapshot
+     with no cross-process coordination -- the old and new generations
+     each hold a long-lived `HostIndex` over the *same* file during a
+     cutover, so the outgoing generation's own `release_all()` flush could
+     silently drop a concurrent registration the new generation had just
+     written. Fixed with a short-lived cross-process lock
+     (`single_instance_lease.SingleInstance`, already a direct agent-bridge
+     dependency) around a reload-latest-then-mutate-then-flush cycle in
+     every mutating method -- a mutation now always applies against the
+     freshest on-disk state, not a stale snapshot. New regression tests:
+     `test_a_second_instances_write_is_not_lost_by_a_stale_first_instance`,
+     `test_claim_reloads_latest_state_across_instances`.
+  2. MEDIUM: a claim conflict during the startup reattach scan was recorded
+     in `_remote_recovery_inconclusive` -- a set checked at the *top* of
+     every later call to `reattach_session_hosts()`, so recording it there
+     permanently blocked the post-cutover retry this whole mechanism exists
+     to make succeed. Fixed by not recording claim contention in that set at
+     all (it is retried for free on the next scan, unlike a genuine
+     remote-recovery inconclusiveness). New test:
+     `test_reattach_retries_successfully_once_a_live_claim_is_released`
+     (first pass contended and skipped; the other generation releases;
+     second pass succeeds).
+  3. MEDIUM: `venue_cli.py`'s `old_confirmed_gone` treated `not old.pid`
+     (an unknown pid, e.g. a legacy/partial routing record) the same as a
+     *confirmed* retirement, which could trigger the post-cutover reattach
+     retry while the old frontend might still actually be attached. Fixed
+     to only treat `old is None` (cold start) or a `_ensure_retired_daemon_
+     exited`-confirmed exit as confirmed-gone; an unknown pid is now
+     conservatively left unconfirmed (the retry simply waits for a later
+     opportunity).
+  4. LOW: the new `/api/v1/shutdown` response shape and `/api/v1/
+     session-hosts/reattach` endpoint were missing from `plugins/
+     agent-bridge/docs/architecture.md`'s API list. Added there, plus a new
+     "Session-host generation handoff" subsection summarizing the
+     claim/release/retry flow and the `HostIndex` locking fix above.
 - This effort's own umbrella issue's Phase 4/5 remain: the caller-facing
   mask/routing layer and the two validation drills.
 

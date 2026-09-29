@@ -284,7 +284,19 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
             core._reconcile_service_marker(active.pid, active.version)
             res.steps.append(f"service marker reconciled -> pid {active.pid} (port {active.port})")
         old = res.old_endpoint
-        old_confirmed_gone = old is None or not old.pid or old.pid == (active.pid if active else None)
+        # Confirmed-gone means exactly that -- confirmed, not merely
+        # "we don't have contrary evidence" (PR #4543 review: treating an
+        # unknown pid as confirmed retirement could let the post-cutover
+        # reattach retry below run while a legacy/partial routing record's
+        # old frontend is still actually attached).
+        if old is None:
+            old_confirmed_gone = True  # cold start -- no predecessor to wait for
+        elif not old.pid:
+            old_confirmed_gone = False  # pid unknown -- cannot confirm either way
+        elif active is not None and old.pid == active.pid:
+            old_confirmed_gone = True  # "old" IS the new active -- nothing to retire
+        else:
+            old_confirmed_gone = False  # confirmed below, or left False
         if old is not None and old.pid and (active is None or old.pid != active.pid):
             exited, forced = core._ensure_retired_daemon_exited(old.pid)
             if exited:

@@ -22,10 +22,13 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from single_instance_lease import AlreadyRunningError, SingleInstance
 from zdd.claims import ClaimConflict, decide_acquire
 
 __all__ = ["ClaimConflict", "HostIndex", "HostRecord"]
@@ -99,7 +102,31 @@ class HostRecord:
 
 
 class HostIndex:
-    """Atomic, JSON-backed ``session_id -> HostRecord`` map."""
+    """Atomic, JSON-backed ``session_id -> HostRecord`` map.
+
+    **Cross-process write safety (PR #4543 review).** The old and new
+    daemon generations each hold their own in-process ``HostIndex`` instance
+    over the *same* on-disk file during a cutover -- the new one registers
+    or updates records for sessions it is adopting/spawning while the old
+    one is still draining. Every mutating method therefore acquires an
+    exclusive cross-process lock, **reloads the latest on-disk state**
+    into ``self._records`` (discarding this process's now-possibly-stale
+    in-memory snapshot), applies the mutation, and flushes -- all before
+    releasing the lock. Without the reload, a mutation from a
+    longer-lived instance (a snapshot taken at process startup) could
+    silently overwrite a concurrent write from the other generation.
+    Query-only methods (``get``, ``all``, ``live_records``, ...) still read
+    the in-process cache directly -- that staleness is the existing,
+    accepted tradeoff (a fresher read is always available by constructing
+    a new ``HostIndex``); only writes needed this guarantee.
+    """
+
+    # How long a mutating call waits for a contending process's lock before
+    # giving up. Generous relative to how long one reload+mutate+flush cycle
+    # takes (milliseconds), tight enough that a genuinely wedged holder is
+    # still noticed quickly rather than hanging a request indefinitely.
+    _LOCK_TIMEOUT_S = 5.0
+    _LOCK_POLL_S = 0.02
 
     def __init__(self, path: str | os.PathLike[str]) -> None:
         self._path = Path(path)
@@ -108,6 +135,10 @@ class HostIndex:
 
     # -- persistence -------------------------------------------------------
     def _load(self) -> None:
+        """(Re)populate ``self._records`` from disk, discarding any prior
+        in-memory state -- always safe to call again later, not just once
+        at construction (see :meth:`_locked_reload`)."""
+        self._records = {}
         if not self._path.exists():
             return
         try:
@@ -134,15 +165,46 @@ class HostIndex:
             if os.path.exists(tmp):
                 os.unlink(tmp)
 
+    @contextmanager
+    def _locked_reload(self):
+        """Hold a cross-process lock for one reload -> mutate -> flush cycle.
+
+        ``single_instance_lease.SingleInstance`` is normally a whole-process
+        lease; here it is acquired and released around a single short
+        operation, retried (blocking, bounded by ``_LOCK_TIMEOUT_S``) on
+        contention rather than failing immediately -- a mutation should wait
+        out a few milliseconds of contention from a concurrent writer, not
+        refuse outright.
+        """
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        lease = SingleInstance(
+            self._path.parent, service="agent-bridge-host-index",
+            lock_name=self._path.name + ".lock",
+        )
+        deadline = time.monotonic() + self._LOCK_TIMEOUT_S
+        while True:
+            try:
+                lease.acquire()
+                break
+            except AlreadyRunningError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(self._LOCK_POLL_S)
+        try:
+            self._load()
+            yield
+            self._flush()
+        finally:
+            lease.release()
+
     # -- mutation ----------------------------------------------------------
     def register(self, record: HostRecord) -> None:
-        self._records[record.session_id] = record
-        self._flush()
+        with self._locked_reload():
+            self._records[record.session_id] = record
 
     def remove(self, session_id: str) -> bool:
-        existed = self._records.pop(session_id, None) is not None
-        if existed:
-            self._flush()
+        with self._locked_reload():
+            existed = self._records.pop(session_id, None) is not None
         return existed
 
     def set_resume_flag(self, session_id: str, value: bool) -> bool:
@@ -152,20 +214,19 @@ class HostIndex:
         turn we cancelled, so the restarted frontend knows to resume it. Returns
         True if the record existed and was updated.
         """
-        rec = self._records.get(session_id)
-        if rec is None or rec.resume_on_reattach == value:
-            return False
-        rec.resume_on_reattach = value
-        self._flush()
+        with self._locked_reload():
+            rec = self._records.get(session_id)
+            if rec is None or rec.resume_on_reattach == value:
+                return False
+            rec.resume_on_reattach = value
         return True
 
     def prune_dead(self, is_alive: Callable[[int], bool]) -> list[HostRecord]:
         """Drop records whose host process is gone. Returns the pruned records."""
-        dead = [r for r in self._records.values() if not is_alive(r.host_pid)]
-        if dead:
+        with self._locked_reload():
+            dead = [r for r in self._records.values() if not is_alive(r.host_pid)]
             for r in dead:
                 self._records.pop(r.session_id, None)
-            self._flush()
         return dead
 
     # -- generation-scoped claims (effort agent-bridge-unified-zdd-cutover,
@@ -192,15 +253,15 @@ class HostIndex:
         (claiming is about taking over an *existing* record -- use
         :meth:`register` to create one).
         """
-        rec = self._records[session_id]
-        decide_acquire(
-            rec, key=session_id, generation=generation, owner_pid=owner_pid,
-            pid_alive=pid_alive, force=force,
-        )
-        if rec.owner_generation != generation or rec.owner_pid != owner_pid:
-            rec.owner_generation = generation
-            rec.owner_pid = owner_pid
-            self._flush()
+        with self._locked_reload():
+            rec = self._records[session_id]
+            decide_acquire(
+                rec, key=session_id, generation=generation, owner_pid=owner_pid,
+                pid_alive=pid_alive, force=force,
+            )
+            if rec.owner_generation != generation or rec.owner_pid != owner_pid:
+                rec.owner_generation = generation
+                rec.owner_pid = owner_pid
         return rec
 
     def release(self, session_id: str, generation: str) -> bool:
@@ -212,12 +273,12 @@ class HostIndex:
         racing an already-superseded release must not clobber the new
         owner). Returns True if a release happened.
         """
-        rec = self._records.get(session_id)
-        if rec is None or rec.owner_generation != generation:
-            return False
-        rec.owner_generation = ""
-        rec.owner_pid = 0
-        self._flush()
+        with self._locked_reload():
+            rec = self._records.get(session_id)
+            if rec is None or rec.owner_generation != generation:
+                return False
+            rec.owner_generation = ""
+            rec.owner_pid = 0
         return True
 
     def release_all(self, generation: str) -> list[str]:
@@ -228,15 +289,14 @@ class HostIndex:
         waiting for that generation to notice the owner died. Returns the
         released session ids.
         """
-        released = [
-            sid for sid, r in self._records.items() if r.owner_generation == generation
-        ]
-        if released:
+        with self._locked_reload():
+            released = [
+                sid for sid, r in self._records.items() if r.owner_generation == generation
+            ]
             for sid in released:
                 rec = self._records[sid]
                 rec.owner_generation = ""
                 rec.owner_pid = 0
-            self._flush()
         return released
 
     def claims_owned_by(self, generation: str) -> list[HostRecord]:

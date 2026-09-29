@@ -123,7 +123,51 @@ async def test_reattach_skips_a_record_still_claimed_by_a_live_generation(
 
     assert await mgr.reattach_session_hosts(remote_recovery_timeout=1.0) == 0
     attach.assert_not_awaited()
-    assert session.session_id in mgr._remote_recovery_inconclusive
+    # Deliberately NOT marked inconclusive (PR #4543 review): that would
+    # permanently block a later retry (the post-cutover claim sweep) for
+    # this session, defeating the exact mechanism it exists to make work.
+    assert session.session_id not in mgr._remote_recovery_inconclusive
+
+
+@pytest.mark.asyncio
+async def test_reattach_retries_successfully_once_a_live_claim_is_released(
+    tmp_path, monkeypatch,
+) -> None:
+    """The retry path this whole mechanism exists for: a first pass sees the
+    record claimed by a live other generation and skips it; a second pass,
+    after that generation releases the claim, succeeds."""
+    mgr = _session_manager(tmp_path)
+    session = Session("session-1", "agent", SpawnTarget(type="local", cwd=str(tmp_path)))
+    session.status = SessionStatus.STOPPED
+    session.acp_session_id = "acp-1"
+    mgr._sessions[session.session_id] = session
+    _register(mgr, session.session_id)
+    mgr._host_index.claim(
+        session.session_id, generation="some-other-generation", owner_pid=os.getpid(),
+        pid_alive=lambda p: True,
+    )
+    rec = SimpleNamespace(
+        session_id=session.session_id, protocol_version=1, host_version="test",
+        host_pid=123, child_pid=456, created_at=time.time(),
+        resume_on_reattach=False, boundary="local",
+    )
+    attach = AsyncMock(return_value=True)
+    monkeypatch.setattr(mgr, "_recover_remote_host_records", AsyncMock(return_value=0))
+    monkeypatch.setattr(mgr, "_prune_dead_hosts", lambda: None)
+    monkeypatch.setattr(mgr, "_live_host_records", lambda: [rec])
+    monkeypatch.setattr(mgr, "_rec_child_alive", lambda _rec: True)
+    monkeypatch.setattr(mgr, "_reattach_one", attach)
+
+    # First pass: contended, skipped.
+    assert await mgr.reattach_session_hosts(remote_recovery_timeout=1.0) == 0
+    attach.assert_not_awaited()
+
+    # The other generation releases its claim (its own exit contract).
+    mgr._host_index.release("session-1", "some-other-generation")
+
+    # Second pass (the post-cutover retry): now succeeds.
+    assert await mgr.reattach_session_hosts(remote_recovery_timeout=1.0) == 1
+    attach.assert_awaited_once()
 
 
 @pytest.mark.asyncio
