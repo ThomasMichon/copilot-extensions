@@ -122,3 +122,5 @@ This sequencing policy is intentionally retained in the stable
 the always-on compatibility/fallback explicit and idempotently reconcilable;
 future plugin injection may shrink it through that same marker, but must not
 silently remove the ordering invariant.
+
+<!-- repro-4552-probe: 2026-09-29T00:37:12.1179262-07:00 -->
