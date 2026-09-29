@@ -477,9 +477,9 @@ statement in the PR description.
    [`docs/patterns/graceful-daemon-cutover.md`](docs/patterns/graceful-daemon-cutover.md)'s
    "Common review findings" checklist **before** opening the PR — it enumerates
    the small set of concurrency-ordering, PID-identity-safety, and
-   cross-platform gaps that recurred across every phase of this repo's own
-   graceful-cutover rollout (6-14 review rounds each). Catching them here is
-   materially cheaper than a review round.
+   cross-platform gaps that recurred across this repo's own four
+   graceful-cutover implementation PRs (6-14 review rounds each). Catching
+   them here is materially cheaper than a review round.
 
 Reviewers treat a missing or hand-wavy statement as unfinished work.
 

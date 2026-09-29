@@ -472,12 +472,15 @@ cheaper than a review round.
    one does (implemented, or an explicit, justified exemption) rather than
    letting "POSIX" silently mean "Linux, untested elsewhere."
 8. **Bookkeeping findings are the cheapest to prevent and the most common to
-   ship anyway** — before opening the PR, re-check: every plugin/library
-   whose vendored/shared code actually changed is named in the changefile
-   (not only the primary plugin); the PR's Documentation impact statement
-   matches the final diff, not an earlier draft; no unrelated
-   generated/vendored directory rode along in the diff (`git status`/`git
-   diff --stat` against your intended file list before pushing); and if the
+   ship anyway** — before opening the PR, re-check: when a change touches a
+   vendored/shared library, the changefile names every **consuming plugin**
+   whose payload actually changed as a result (never the shared library
+   itself — a library like `zdd`/`ssh-manager` isn't independently released;
+   see CONTRIBUTING.md's changefile requirement); the PR's Documentation
+   impact statement matches the final diff, not an earlier draft; no
+   unrelated generated/vendored directory rode along in the diff (`git
+   status`/`git diff --stat` against your intended file list before
+   pushing); and if the
    PR touches an effort README, its Journal's completion claims are checked
    against that same phase's own Validation Plan items, not asserted
    independently.
