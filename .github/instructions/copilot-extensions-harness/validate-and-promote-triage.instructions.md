@@ -1,6 +1,7 @@
 ---
 applyTo: "**"
 ---
+<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/copilot-extensions-harness/validate-and-promote-triage.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.0-dev47","renderedBytes":1981,"schema":"copilot-extensions.instruction-projection","sourceId":"validate-and-promote-triage","template":"instructions/validate-and-promote-triage.instructions.md","templateBytes":1382,"templateSha256":"91c2c8e9929f6d81e117ff49d019b493db89e95233995ad1f5065ef1990bdffb","version":1} -->
 
 # `validate-and-promote` failure triage fallback
 
