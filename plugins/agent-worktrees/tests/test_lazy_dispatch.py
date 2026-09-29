@@ -47,7 +47,7 @@ import _core_cluster_scan  # noqa: E402 -- must follow the sys.path insert above
 _ADD_PARSERS_MODULES = [
     "resolve_cli", "finalize_cli", "pr_state_cli", "status_cli", "status_bar_cli",
     "status_updater_cli", "status_monitor_cli", "status_monitor_runtime",
-    "pane_lifecycle", "handoff_cli", "list_cli", "claims_cli", "follow_ups_cli",
+    "pane_lifecycle", "handoff_cli", "handoff_successor_repair_cli", "list_cli", "claims_cli", "follow_ups_cli",
     "session_metadata_cli", "cleanup_gc_cli", "reap_cli", "reclaim_cli",
     "worktree_ops_cli", "picker_profiles_cli", "maintenance_cli",
     "installation_cli", "update_cli", "context_cli", "services_cli",

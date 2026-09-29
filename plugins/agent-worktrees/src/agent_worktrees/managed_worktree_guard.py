@@ -44,6 +44,48 @@ def _resolve_repo(config, record):
     return None
 
 
+def owner_ref_blocker(
+    rec, *, content_confirmed_merged: bool, resolve_alive=None,
+) -> str | None:
+    """Return a blocker string when ``rec``'s inbound ``owner_ref`` claim still
+    looks live, or ``None`` when it's safe to ignore.
+
+    Shared by :func:`blockers_for` (``remove-system``'s guard) and
+    ``reap_cli``'s managed-worktree gc recheck, so both apply the identical
+    "provably moved on" bar (``rec.status == "finalized"`` or
+    ``content_confirmed_merged``, else :func:`claimant.resolve_claimant_alive`)
+    instead of one path treating a set ``owner_ref`` as an unconditional,
+    permanent block regardless of whether the owner itself is still resolvable.
+
+    ``resolve_alive`` (default: :func:`claimant.resolve_claimant_alive`) is
+    injectable so a caller that already resolved liveness OUTSIDE a lock
+    (``reap_cli``'s pass-1 sweep, before it acquires either the repo
+    lifecycle lock or the record lock) can pass a cheap ``lambda ref:
+    cached_value`` for its locked recheck instead of re-running a genuine
+    cross-machine SSH probe (up to the remote-probe timeout) while holding
+    both locks -- which would otherwise serialize every other finalize/gc/
+    record-write caller behind a single unreachable remote owner.
+    """
+    if not rec.owner_ref:
+        return None
+    owner_moved_on = rec.status == "finalized" or content_confirmed_merged
+    if owner_moved_on:
+        return None
+    if resolve_alive is None:
+        from . import claimant
+
+        resolve_alive = claimant.resolve_claimant_alive
+
+    alive = resolve_alive(rec.owner_ref)
+    if alive is not False:
+        why = "claimant alive" if alive else "claimant liveness unconfirmed"
+        return (
+            f"owned as a resource by {rec.owner_ref} ({why}) -- removing "
+            "it could discard a resource its owner still expects"
+        )
+    return None
+
+
 def blockers_for(rec, repo) -> list[str]:
     """Reasons a managed (system/bridge) worktree is not safe to discard.
 
@@ -170,17 +212,9 @@ def blockers_for(rec, repo) -> list[str]:
         git_ops.WorktreeState.UNUSED,
         git_ops.WorktreeState.CONVO,
     )
-    owner_moved_on = rec.status == "finalized" or content_confirmed_merged
-    if rec.owner_ref and not owner_moved_on:
-        from . import claimant
-
-        alive = claimant.resolve_claimant_alive(rec.owner_ref)
-        if alive is not False:
-            why = "claimant alive" if alive else "claimant liveness unconfirmed"
-            blockers.append(
-                f"owned as a resource by {rec.owner_ref} ({why}) -- removing "
-                "it could discard a resource its owner still expects"
-            )
+    owner_blocker = owner_ref_blocker(rec, content_confirmed_merged=content_confirmed_merged)
+    if owner_blocker:
+        blockers.append(owner_blocker)
     if rec.kind == "bridge" and blockers:
         blockers.append(
             "this is a bridge-owned worktree -- its owning agent-bridge session "

@@ -1,0 +1,9 @@
+{
+  "comment": "Fix owner_ref unconditionally blocking managed-worktree gc reap (issue #4556), and add a resolve-handoff-successor repair verb for a terminal managed worktree's stale handoff successor (issue #4557).",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

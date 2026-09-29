@@ -138,3 +138,131 @@ def apply_session_link_succession(args: dict) -> dict:
 
 tracking_write.register_verb("session_conclude", apply_session_conclude)
 tracking_write.register_verb("session_link_succession", apply_session_link_succession)
+
+
+def apply_resolve_handoff_successor(args: dict) -> dict:
+    """Registered as the ``session_resolve_handoff_successor`` verb --
+    the retroactive-registration repair for issue #4557: a terminal
+    (``kind`` in ``tracking.MANAGED_KINDS``, ``status`` finalized/complete/
+    completed) worktree whose pending handoff was actually consumed by a
+    real successor session that was never ``register-session``'d (a
+    crash/race in that step), leaving the record wedged forever in gc's
+    ``recheck-record-changed`` bucket (``pending_handoffs``/
+    ``resolved_head_session`` never clear).
+
+    Deliberately its OWN verb rather than relaxing ``session_register``'s
+    terminal-and-managed gate: that gate protects the sessionStart-hook-
+    critical path shared by every live session launch, and this is a
+    one-shot closing/reconciling edit on an already-dead worktree, not a
+    new activation. Scoped tightly to that exact class -- refuses on a
+    non-terminal or non-managed record (the ordinary ``register-session``/
+    ``link-succession`` path already covers those) and on anything but a
+    still-``pending`` handoff naming an already-tracked predecessor and a
+    NOT-yet-tracked successor (an already-tracked successor is exactly what
+    ``link-succession`` is for).
+
+    The caller (``handoff_successor_repair_cli.cmd_resolve_handoff_successor``)
+    is responsible for the on-disk evidence check (a real, non-detached
+    session transcript whose recorded cwd matches this worktree) BEFORE
+    calling this verb -- this transaction only re-validates the tracking-
+    record-side invariants under the lock, since the evidence check reads a
+    different store (session-state) that this record lock does not cover.
+    ``expected_worktree_path`` is the ``record.worktree_path`` the caller's
+    cwd check actually verified against; re-checked here under the lock so a
+    concurrent record repair/move between that unlocked read and this
+    dispatch can't register/conclude a session against a worktree_path that
+    has since changed out from under the verified evidence.
+    """
+    worktree_id = args["worktree_id"]
+    yaml_path = Path(args["yaml_path"])
+    handoff_token = args["handoff_token"]
+    successor_id = args["successor_id"]
+    linked_at = args.get("linked_at")
+    expected_worktree_path = args.get("expected_worktree_path")
+
+    with tracking._RecordLock(yaml_path):
+        record = tracking.load_record(yaml_path)
+        if record.kind not in tracking.MANAGED_KINDS or record.status not in (
+            "complete", "completed", "finalized",
+        ):
+            return {
+                "error": "lifecycle",
+                "message": (
+                    f"worktree {worktree_id} is not a terminal managed "
+                    "worktree; use register-session/link-succession instead"
+                ),
+            }
+        if (
+            expected_worktree_path is not None
+            and record.worktree_path != expected_worktree_path
+        ):
+            return {
+                "error": "lifecycle",
+                "message": (
+                    f"worktree {worktree_id}'s worktree_path changed since "
+                    "the successor's cwd was verified against it -- refusing "
+                    "a possibly-stale evidence match"
+                ),
+            }
+        handoff = next(
+            (h for h in record.handoffs if h.token == handoff_token), None,
+        )
+        if handoff is None:
+            return {
+                "error": "lifecycle",
+                "message": f"handoff token {handoff_token} is not tracked on worktree {worktree_id}",
+            }
+        if handoff.state != "pending":
+            return {
+                "error": "lifecycle",
+                "message": f"handoff token {handoff_token} is {handoff.state}, not pending",
+            }
+        if record.session_entry(successor_id) is not None:
+            return {
+                "error": "lifecycle",
+                "message": (
+                    f"successor {successor_id} is already tracked on worktree "
+                    f"{worktree_id}; use link-succession instead"
+                ),
+            }
+        event_at = linked_at or tracking._now_iso()
+        record.sessions = record.sessions or []
+        record.sessions.append(
+            tracking.SessionEntry(
+                session_id=successor_id,
+                started_at=event_at,
+                activations=[
+                    tracking.SessionActivation(
+                        ordinal=1,
+                        started_at=event_at,
+                        start_recorded_at=event_at,
+                        start_source="retroactive-repair",
+                    )
+                ],
+            )
+        )
+        try:
+            tracking.link_handoff(
+                record, handoff_token, successor_id, linked_at=event_at, save=False,
+            )
+            tracking.conclude_session(
+                record, successor_id, state="concluded", save=False,
+            )
+        except tracking.SessionLifecycleError as exc:
+            return {"error": "lifecycle", "message": str(exc)}
+        tracking.save_record(record, yaml_path)
+
+    record = tracking.load_record(yaml_path)
+    return {
+        "ok": True,
+        "worktree_id": record.worktree_id or worktree_id,
+        "handoff_token": handoff_token,
+        "successor": successor_id,
+        "pending_handoffs": [dataclasses.asdict(h) for h in record.pending_handoffs],
+        "resolved_head_session": record.resolved_head_session,
+    }
+
+
+tracking_write.register_verb(
+    "session_resolve_handoff_successor", apply_resolve_handoff_successor,
+)

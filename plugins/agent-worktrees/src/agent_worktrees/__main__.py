@@ -5422,6 +5422,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     from . import pr_cli, resolve_cli, session_binding_cli, session_inspection_cli, session_tracking_cli
+    from . import handoff_successor_repair_cli
 
     resolve_cli.add_parsers(sub)
 
@@ -5478,6 +5479,7 @@ def build_parser() -> argparse.ArgumentParser:
     reap_cli.add_parsers(sub)
     reclaim_cli.add_parsers(sub)
     worktree_ops_cli.add_parsers(sub)
+    handoff_successor_repair_cli.add_parsers(sub)
 
     picker_profiles_cli.add_parsers(sub)
     maintenance_cli.add_parsers(sub)
@@ -5726,6 +5728,9 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'remove-system': ('worktree_ops_cli', 'cmd_remove_system'),
     'remux': ('reclaim_cli', 'cmd_remux'),
     'repair': ('picker_profiles_cli', 'cmd_repair'),
+    'resolve-handoff-successor': (
+        'handoff_successor_repair_cli', 'cmd_resolve_handoff_successor',
+    ),
     'restart': ('reclaim_cli', 'cmd_restart'),
     'run': ('worktree_ops_cli', 'cmd_run'),
     'session-binding': ('session_inspection_cli', 'cmd_session_binding'),
@@ -5795,6 +5800,7 @@ _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "finalize_cli",
     "follow_ups_cli",
     "handoff_cli",
+    "handoff_successor_repair_cli",
     "installation_cli",
     "launch_registry",
     "list_cli",
@@ -5945,12 +5951,12 @@ def _load_full_command_surface() -> None:
     global cmd_session_transcript, cmd_set_pr, cmd_state_root_dispatch, cmd_status, cmd_status_context, cmd_status_monitor, cmd_status_monitor_restart, cmd_status_segment, cmd_sweep_finished_sessions, cmd_sweep_managed
     global cmd_status_updater, cmd_sync, cmd_uninstall, cmd_uninstall_plugins, cmd_update, cmd_validate, cmd_worktree_dispatch
     global cmd_worktree_lineage, cmd_worktree_status_bundle, context_cli, copilot_cli, copilot_identity_cli, finalize_cli, finalize_one, follow_ups_cli, front_door_cli, git_cli
-    global handoff_cli, handoff_diagnostics, installation_cli, list_cli, maintenance_cli, doctor_render, picker_profiles_cli, plan_pre_launch, pr_cli
+    global handoff_cli, handoff_diagnostics, handoff_successor_repair_cli, installation_cli, list_cli, maintenance_cli, doctor_render, picker_profiles_cli, plan_pre_launch, pr_cli
     global pr_state_cli, reap_cli, reap_orphan_launcher_shells, reclaim_cli, reclaim_one, related_cli, repos_cli, resolve_cli
     global resolve_launch_cli, resolve_machine_cli, resolve_picker_cli, resolve_system_cli, services_cli, session_binding_cli, session_inspection_cli, session_metadata_cli
     global session_tracking_cli, status_bar_cli, status_cli, status_monitor_cli, status_monitor_runtime, status_updater_cli, sweep_finished_session_worktrees
     global sweep_managed_worktrees
-    global sync_one, terminal_conclusion, update_cli, worktree_ops_cli
+    global sync_one, terminal_conclusion, update_cli, worktree_ops_cli, cmd_resolve_handoff_successor
     from . import (
         claims_cli,
         cleanup_gc_cli,
@@ -5963,6 +5969,7 @@ def _load_full_command_surface() -> None:
         git_cli,
         handoff_cli,
         handoff_diagnostics,
+        handoff_successor_repair_cli,
         installation_cli,
         list_cli,
         maintenance_cli,
@@ -6062,6 +6069,7 @@ def _load_full_command_surface() -> None:
     cmd_session_transcript = session_tracking_cli.cmd_session_transcript
     cmd_session_tail = session_tracking_cli.cmd_session_tail
     cmd_recent_messages = session_tracking_cli.cmd_recent_messages
+    cmd_resolve_handoff_successor = handoff_successor_repair_cli.cmd_resolve_handoff_successor
     terminal_conclusion = session_tracking_cli.terminal_conclusion
     _resolve_worktree_for_read = session_metadata_cli._resolve_worktree_for_read
     _session_role = session_metadata_cli._session_role
@@ -6386,6 +6394,7 @@ def _load_full_command_surface() -> None:
         "restart": cmd_restart,
         "sync": cmd_sync,
         "repair": cmd_repair,
+        "resolve-handoff-successor": cmd_resolve_handoff_successor,
         "picker": cmd_picker,
         "validate": cmd_validate,
         "config-migrate": cmd_config_migrate,
