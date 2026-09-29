@@ -207,6 +207,22 @@ layer — is the operator's own, captured verbatim in Request.)_
   same way), not bolted onto agent-bridge alone — the same shape helps any
   of `zdd`'s other 7 consumers that host long-lived children across an
   update.
+- [ ] **Cutover-wide serialization** (surfaced by PR #4478's review, not a
+  Phase 1 regression: `agent-bridge deploy` was already directly invocable
+  and racy before this effort — Phase 1 only widens exposure by making
+  `service restart`, an operator-facing routine command, funnel into the
+  same path): the shared deploy/cutover path
+  (`venue_cli._cmd_deploy`/`CutoverOrchestrator.run`) has no process-wide
+  lock. Installer-driven deploys serialize via the installers' own
+  `.install.lock`; a direct `agent-bridge deploy`/`service restart`
+  invocation does not, so two concurrent invocations (two operators, or a
+  restart racing an installer deploy) can both read the same predecessor
+  breadcrumb/routing state and race — one can demote the other's new
+  generation while both report success, or roll back against state the
+  other invocation owns. Needs a dedicated cross-platform cutover lock
+  (likely a `libs/zdd` primitive, same reasoning as the claim/release/
+  recover primitive above) plus a process-level contention regression
+  test.
 
 ### Phase 3 — The liveness gate and the outgoing generation's exit contract
 - [ ] A new generation, after starting, durably marks itself live (the
@@ -365,6 +381,22 @@ sequencing will be drafted here once the design is reviewed._
   a single valid JSON object. Also corrected a test docstring that named a
   nonexistent `agent-bridge service deploy --json` command (`deploy` is a
   top-level verb, not a `service` action).
+- A sixth review pass raised a real HIGH-severity architectural gap —
+  the shared deploy/cutover path has no process-wide cutover lock, so two
+  concurrent invocations (two operators, or a restart racing an installer
+  deploy) can race the same breadcrumb/routing state — but assessed and
+  scoped rather than folded into Phase 1: `agent-bridge deploy` was already
+  directly invocable and exposed to this exact race before this effort;
+  Phase 1 only widens exposure by routing `service restart` (a routine,
+  actively-recommended operator command) onto the same path. Building a
+  correct **cross-platform** lock (the installers' own `.install.lock` only
+  covers installer-driven deploys, and Windows/POSIX file-locking semantics
+  differ enough to need real design) plus a process-level contention
+  regression test is squarely Phase 2/3's remit — the effort's own Plan
+  already reserves that phase for the generation-scoped claim/release/
+  recover primitive this concern is the same shape as. Captured as an
+  explicit Phase 2 checklist item (see above) instead of rushed into this
+  PR under review pressure.
 - Phase 0's one open item (the opt-in reconcile-gate design fork) remains
   genuinely undecided — flagged for the operator, not resolved here.
 
