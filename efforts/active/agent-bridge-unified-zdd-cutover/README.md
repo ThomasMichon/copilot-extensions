@@ -288,30 +288,51 @@ reliability assertion (did the daemon-level mechanism preserve a live turn
 across a cutover) that holds or fails independent of what the driven agent
 knows or does. The right verdict mechanism is almost certainly a
 **programmatic evidence comparator** (before/after transcript + event-log
-+ generation-change proof), not an LLM judge -- but it still needs Tier-E's
-container + real-ACP-registration machinery to get an actual model turn in
-flight, since a stdlib probe (like Phase 5's `abrupt-kill-recovery`) cannot
-fake one.
++ generation-change proof), not an LLM judge.
 
-**Open design question (resolve before committing to a scenario shape).**
-Does the harness's existing `-Mode eval` runner support a scenario that
-skips (or trivially auto-passes) the `clean-room-judge` step in favor of a
-`post_check.sh`-only verdict? If not, evaluate two paths: (a) extend the
-runner with an "objective-only" eval mode other plugins could reuse for
-similar infra-reliability drills, or (b) write this as a bespoke script
-that only reuses `bridge_register.py`'s registration primitive directly,
-outside the standard scenario-manifest/judge pipeline. Read
-`tools/clean-room/ARCHITECTURE.md` and `TIER-E-EXECUTION.md` in full
-before deciding -- this session's read was partial.
+**Critical topology correction (review-caught, kept documented here so it
+is not relitigated).** The obvious-looking approach -- registering the box
+as a Tier-E provider via `bridge_register.py` (a `command`-type provider,
+`docker exec ... copilot --acp --stdio`) -- is the **wrong** transport for
+this drill. Per `session_start.py`: only a **local** target
+(`target.type == "local"`) enters `_connect_via_session_host` (goal 1/3's
+survivable-child path Phases 2/3 actually built); `ssh`/`command`/spawn
+providers route through a separate frontend-owned process path that has
+**no host-boundary spawner** and is never reattached across a cutover --
+during `deploy`'s drain, such a session either blocks the drain until it
+finishes or gets forcibly terminated, but its transport was never tracked
+in `HostIndex` at all. A `command`-registered Tier-E provider session
+would therefore prove *nothing* about session-host reattachment -- worse,
+it could produce a **false pass** (turn completes fine because it drained
+normally, not because it survived a real generation handoff). The correct
+shape is a **local target**: run `agent-bridge` inside the box as its own
+daemon (exactly like the existing `agent-bridge-cutover` Tier-P scenario
+already does) and create the test session via `agent-bridge create
+<local-repo-path>` against a real local repo/worktree in the box -- this
+is the only path that spawns a real Session-Host child and durably
+registers it in `HostIndex`. This likely means the Tier-E harness's
+provider-registration machinery (`bridge_register.py`) is NOT needed at
+all for this drill -- it is closer in shape to the existing Tier-P
+`agent-bridge-cutover` probe, just using a real `agent-bridge create`
+session (real Copilot, real model calls, real credits) instead of a bare
+daemon with zero sessions. Re-evaluate whether this needs the "Tier E"
+label at all, or is better framed as a credits-consuming *extension* of
+the Tier-P scenario -- resolve this before writing a manifest.
 
-**Concrete design sketch.**
+**Concrete design sketch (topology corrected above).**
 1. **Box.** A base image with `agent-bridge` installed + provisioned (the
    existing `agent-bridge-cutover` scenario's own `setup.sh` is a starting
-   point).
-2. **A real driven session-host-backed session** -- register the box as a
-   live agent-bridge provider and start a session via `agent-bridge
-   create` against a real repo/worktree inside the box (not the doc-audit
-   flavor's bare ACP registration).
+   point) -- a real Copilot auth context is also needed here (the existing
+   Tier-P scenario's probe never makes a real model call; this drill
+   does).
+2. **A real, local Session-Host-backed session** -- inside the box,
+   with the box's own `agent-bridge` daemon running (`spawn_serve`-style,
+   as the existing Tier-P probe already does), create a session via
+   `agent-bridge create <local-repo-path>` against a real local repo/
+   worktree in the box. `target.type == "local"` is what actually spawns a
+   real Session-Host child and registers it in `HostIndex` -- confirm this
+   in the created session's own routing/host-index state before
+   proceeding, not just by trusting the CLI's exit code.
 3. **A genuinely long-running prompt** -- something spanning several
    model round-trips/tool calls (tens of seconds, not one instant reply),
    giving a real window to land the cutover mid-turn. Needs tuning: long
@@ -324,13 +345,16 @@ before deciding -- this session's read was partial.
    log/transcript spanning before and after the deploy. Assert: the same
    session id throughout, the turn actually completes (a `turn_complete`/
    assistant reply reaches the client), no gap corresponding to a
-   dropped or duplicated event, AND (critically) that the cutover
-   *actually happened* (a new active endpoint, the old generation's pid
-   gone) -- a "pass" where the cutover silently no-op'd or landed outside
-   the turn's window is a false pass, not a real proof.
+   dropped or duplicated event, the Session-Host claim was actually
+   reattached to the new generation (not merely that the session
+   survived by luck), AND (critically) that the cutover *actually
+   happened* (a new active endpoint, the old generation's pid gone) -- a
+   "pass" where the cutover silently no-op'd or landed outside the turn's
+   window is a false pass, not a real proof.
 6. **Programmatic verdict** -- a dedicated evidence comparator (not an LLM
-   judge): confirms the generation genuinely changed, the transcript shows
-   a clean uninterrupted completion, and explicitly fails (rather than
+   judge): confirms the generation genuinely changed, the session-host
+   claim was reattached under the new generation, the transcript shows a
+   clean uninterrupted completion, and explicitly fails (rather than
    silently passing) if the timing race missed the window.
 
 **Feasibility / cost notes.** Consumes real AI credits per run (a genuine
@@ -455,6 +479,28 @@ test that closes the gap.
 - No code changed this round; planning-only. Handing off for
   implementation in a fresh session/worktree per the operator's own
   request ("plan it out, then tackle it in a handoff").
+- **Corrected after automated review (a plan-saving catch).** The initial
+  design sketch proposed registering the box as a `command`-type Tier-E
+  provider (`bridge_register.py`'s `docker exec ... copilot --acp --stdio`),
+  mirroring the doc-audit scenarios. Review correctly caught that this
+  transport **bypasses the Session-Host mechanism entirely**:
+  `session_start.py` only routes a **`local`**-type target through
+  `_connect_via_session_host` (the survivable-child path Phases 2/3
+  actually built and durably tracks in `HostIndex`); `ssh`/`command`/spawn
+  providers use a separate frontend-owned process path with no
+  host-boundary spawner, never reattached across a cutover. A
+  `command`-registered Tier-E session would have proven nothing about
+  session-host reattachment -- worse, it risked a **false pass** (the
+  session surviving because it drained normally, not because a real
+  generation handoff reattached it). Corrected the design sketch to use a
+  **local** `agent-bridge create <local-repo-path>` session instead (the
+  only path that actually spawns and durably registers a real Session-Host
+  child), which likely means this drill doesn't need Tier-E's
+  provider-registration machinery at all -- it's closer in shape to
+  extending the existing Tier-P `agent-bridge-cutover` probe with a real,
+  credits-consuming session instead of a bare daemon. Re-flagged whether
+  the "Tier E" label even applies as an open question for whoever
+  implements this.
 
 ### 2026-09-29 — Phase 5 landed partially (abrupt-termination drill + clean-room extension; live-turn drill deferred) ([#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586))
 - **What's real here (final implementation).** Extended the pre-existing
