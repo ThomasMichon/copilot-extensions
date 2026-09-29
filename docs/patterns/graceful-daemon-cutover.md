@@ -315,16 +315,17 @@ agent-bridge needs.
 
 ## Invariants (binding)
 
-0. **Any long-lived resident daemon in an `agent-*` plugin MUST adopt this
-   pattern.** The obvious case is the
+0. **Any long-lived resident daemon in the suite MUST adopt this pattern.** The
+   common case is an `agent-*` plugin in the
    [`Runtime service`](README.md#plugin-shapes) shape, but the obligation is
-   behavioral, not nominal: if an `agent-*` plugin adds a resident daemon under
-   any other label, that daemon still owes graceful cutover semantics. "It
-   isn't classified as a runtime service" is not an exemption. The only valid
-   alternative is to show that the process is **not** a long-lived resident
-   daemon at all and belongs under a different lifecycle pattern instead (for
-   example [`ephemeral-process-reaping`](ephemeral-process-reaping.md) for a
-   detached helper).
+   behavioral, not nominal: if any suite component (including a sibling runtime
+   such as `worktree-manager`) adds a resident daemon under some other label,
+   that daemon still owes graceful cutover semantics. "It isn't classified as a
+   runtime service" is not an exemption. The only valid alternative is to show
+   that the process is **not** a long-lived resident daemon at all and belongs
+   under a different lifecycle pattern instead (for example
+   [`ephemeral-process-reaping`](ephemeral-process-reaping.md) for a detached
+   helper).
 1. **Cutover is installer-driven and automatic — there is NO externally-driven
    `deploy` command.** The installer's `update`/activation (and first-use
    `provision`) performs the cutover in-process whenever it detects a live

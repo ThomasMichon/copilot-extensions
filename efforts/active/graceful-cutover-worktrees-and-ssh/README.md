@@ -431,8 +431,9 @@ _Pending._
 ### 2026-09-29 — Phase 5 made graceful cutover a binding audit point
 Phase 5 closed the "adoption is optional" gap at all three non-code audit
 surfaces. `docs/patterns/graceful-daemon-cutover.md` now says explicitly that
-**any `agent-*` plugin with a long-lived resident daemon must adopt this
-pattern**, even if the daemon is introduced under some other shape label.
+**any long-lived resident daemon in the suite must adopt this pattern**, even
+if it is introduced outside an `agent-*` plugin or under some other shape
+label.
 `docs/patterns/README.md` now surfaces that obligation at the design-time
 classification seam itself: the **Runtime service** plugin-shape row and Design
 principle 4 both point directly at `graceful-daemon-cutover` so "we added a
