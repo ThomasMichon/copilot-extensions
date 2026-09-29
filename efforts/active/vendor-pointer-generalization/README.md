@@ -2328,10 +2328,16 @@ _Pending._
   (249 passed), `agent-dispatch` (806 passed), `agent-mcp` (359 passed),
   `agent-logger`, `agent-machines`, `agent-index` (633 passed, 2 skipped)
   all green; `worktree-manager`'s own full suite (1455 passed, 4
-  skipped) and its version-specific tests (19 passed) also green after
-  bumping its `pyproject.toml`/`__init__.py` version surfaces (its
+  skipped) and its version-specific tests (19 passed) also green (its
   `agent-procutil` dependency annotation had also gone stale, describing
   the pre-conversion "vendored per plugin" state -- fixed alongside).
+  **Note (superseded later in this same leg, split-PR round 11):** an
+  earlier round of this leg hand-bumped `pyproject.toml`/`__init__.py`'s
+  version surfaces directly -- that hand-edit was reverted once the
+  split PR #4514 taught the promotion pipeline to detect and bump
+  standalone consumers itself; contributors never hand-edit these
+  generated versions (CONTRIBUTING.md), and the pending changefile alone
+  now correctly produces the bump at promotion time.
 - **Investigated and did NOT reproduce** an external, unverified report
   (relayed via this session's inherited handoff) that PR #4420 broke
   `check-vendored-libs-sync.py` repo-wide for `agent-dispatch`: a fresh
@@ -2351,4 +2357,40 @@ _Pending._
   `src-passthrough` (once nothing uses it -- `plugin-activation`'s
   `customizing-copilot` copy stays `src-passthrough` forever, see
   earlier entry). Then Phase 2/3.
+- **Closing note for this leg (PR #4465, review went 11 rounds):**
+  `tools/check-version-bump.py`'s consumer-discovery generalization and
+  `tools/accumulate_bumps.py`/`tools/promote_release.py`'s new
+  standalone-consumer bump/promotion support were split into their own
+  standalone PR (#4514) partway through review, since they were
+  justified on their own merits independent of the agent-procutil
+  conversion and the split cut #4465's own review-round churn. #4514
+  itself went 12 further rounds -- almost entirely legitimate,
+  progressively narrower TOML-parsing edge cases in the new standalone-
+  consumer version read/write path (quotes, inline comments,
+  indentation, quoted table names), until the review's own round-12
+  finding named the actual structural gap: `apply()`'s caller silently
+  consumed a changefile even when the computed bump was never actually
+  written. `promote_release.py` now aborts with a clear error whenever
+  that happens, closing the whole class of future format edge cases at
+  once rather than chasing each one individually. #4514 merged first,
+  #4465 was rebased onto the result (dropping its own now-redundant
+  duplicate check-version-bump.py hunks) and merged after one further
+  round (a hand-edited worktree-manager version bump, made
+  unnecessary and actively harmful by #4514's own new promotion support,
+  had to be reverted). Both merges used the maintainer's documented
+  admin-role-scoped bypass path (CONTRIBUTING.md's own normal mechanism
+  for the maintainer's own PRs, not an emergency override) after the
+  automated `copilot-pull-request-reviewer`'s own review approved both.
+  **Facility-process note, not part of this effort's own scope:** a
+  concurrent, uncoordinated peer session was found independently
+  reworking the same PR mid-leg (a stray worktree from an earlier,
+  un-handed-off attempt) -- it stood down once contacted. Separately,
+  this leg's own predecessor had been posting `@copilot review` PR
+  comments across earlier rounds, which the repo's own
+  CONTRIBUTING.md/AGENTS.md ban (it misroutes to the GitHub Cloud coding
+  agent instead of nudging the review bot) -- the operator disabled
+  Cloud Agents org-wide because of it mid-session, and the automated
+  reviewer stopped firing repo-wide for roughly two hours until it
+  recovered on its own; this leg switched to plain pushes (which already
+  trigger a fresh review pass) for the remainder.
 
