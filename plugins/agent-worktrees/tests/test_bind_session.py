@@ -580,6 +580,48 @@ class TestCancelHandoff:
         after = m.tracking.load_record(yaml_path)
         assert after.lifecycle_revision > before
         assert after.handoffs[0].state == "cancelled"
+        # Round 8 finding: cancelling must not permanently strand the
+        # worktree headless -- sess-pred was moved to "yielded" when the
+        # handoff opened; since no successor ever took over, it must be
+        # restored to "active" and reclaim head.
+        assert after.session_entry("sess-pred").state == "active"
+        assert after.resolved_head_session == "sess-pred"
+
+    def test_does_not_reclaim_head_for_a_predecessor_a_successor_already_superseded(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        """The headless-recovery restoration above must never clobber a
+        LEGITIMATE newer head: if a successor already claimed head some
+        other way (not by consuming THIS handoff), cancelling a stale
+        handoff must leave that successor as head and the original
+        predecessor still yielded.
+
+        Built directly via tracking primitives (not register_session/
+        cmd_note_handoff) so the successor's head claim never routes through
+        register_session's own broad "rebind" auto-cancel heuristic --
+        that would cancel this handoff itself before cmd_cancel_handoff ever
+        runs, testing that heuristic instead of cancel_handoff's own guard.
+        """
+        yaml_path = tmp_tracking_dir / "wt-hd.yaml"
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+        monkeypatch.setattr(m, "_json_output", lambda o: None)
+        m.tracking.register_session("wt-hd", "sess-pred", source="handoff")
+        m.tracking.register_session("wt-hd", "sess-successor", source="handoff")
+
+        with m.tracking._RecordLock(yaml_path):
+            record = m.tracking.load_record(yaml_path)
+            m.tracking.open_handoff(record, "sess-pred", "task-superseded", save=False)
+            record.session_entry("sess-successor").state = "active"
+            m.tracking._append_head_transition(record, "sess-successor", reason="test-setup")
+            m.tracking.save_record(record, yaml_path)
+
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task-superseded", worktree_dir="/tmp/src/wt-hd", worktree_id=None))
+        assert rc == 0
+        after = m.tracking.load_record(yaml_path)
+        assert after.handoffs[0].state == "cancelled"
+        assert after.resolved_head_session == "sess-successor"
+        assert after.session_entry("sess-pred").state == "yielded"
 
     def test_explicit_worktree_id_activates_its_owning_project_first(
         self, tmp_tracking_dir, monkeypatch_config, monkeypatch

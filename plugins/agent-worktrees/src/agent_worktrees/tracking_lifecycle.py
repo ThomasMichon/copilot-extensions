@@ -286,14 +286,35 @@ def cancel_handoff(record: tracking.WorktreeRecord, token: str) -> bool:
     for handoff in record.handoffs:
         if handoff.token == token and handoff.state == "pending":
             handoff.state = "cancelled"
-            # Advance lifecycle_revision (matching open_handoff and the
-            # other existing cancellation paths) -- save_record()'s
-            # optimistic-concurrency check only preserves newer session/
-            # handoff data when the revision increases, so skipping this
-            # would let an unrelated writer holding a pre-cancellation
-            # snapshot later save with the same revision and silently
-            # restore this handoff to pending.
-            _next_lifecycle_revision(record, handoff.predecessor)
+            predecessor = record.session_entry(handoff.predecessor)
+            # open_handoff() moved an active predecessor to "yielded" when
+            # this handoff was opened. In the normal pre-consumption abort
+            # case no successor has taken over, so leaving it "yielded"
+            # would strand the worktree permanently headless even though
+            # the predecessor is still alive/resumable. Restore it to
+            # "active" and record a head transition -- but ONLY when the
+            # worktree is genuinely headless right now (no successor since
+            # claimed head some other way); never clobber a legitimate
+            # newer head.
+            if (
+                predecessor is not None
+                and predecessor.state == "yielded"
+                and record.resolved_head_session is None
+            ):
+                predecessor.state = "active"
+                _append_head_transition(
+                    record, handoff.predecessor, reason="handoff-cancelled",
+                    handoff_ordinal=handoff.ordinal,
+                )
+            else:
+                # Advance lifecycle_revision (matching open_handoff and the
+                # other existing cancellation paths) -- save_record()'s
+                # optimistic-concurrency check only preserves newer
+                # session/handoff data when the revision increases, so
+                # skipping this would let an unrelated writer holding a
+                # pre-cancellation snapshot later save with the same
+                # revision and silently restore this handoff to pending.
+                _next_lifecycle_revision(record, handoff.predecessor)
             return True
     return False
 
