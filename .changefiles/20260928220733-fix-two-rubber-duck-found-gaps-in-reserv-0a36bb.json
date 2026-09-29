@@ -1,0 +1,9 @@
+{
+  "comment": "Fix two rubber-duck-found gaps in reservation/task-status reconciliation: (1) Supervisor._TERMINAL never included CONFIRMED, so reconcile() never settled a still-active reservation once a task reached the true completion terminal, fencing its exclusive_key forever; (2) recover_gone() only scans SPAWNED reservations, so a COLD reservation on a DEAD_LETTER task was never settled either -- added recover_dead_lettered_cold_reservations() to close it. Also switched recover_stranded_cold_reservations() from fail_spawn to defer_spawn so repeatedly repairing a benign cross-FSM inconsistency never consumes a task's dead-letter budget, and corrected that function's docstring, which asserted an unconfirmed root cause (no live code path actually reclaims a SUSPENDED task via lease-expiry GC).",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
