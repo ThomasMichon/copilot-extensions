@@ -43,6 +43,7 @@ import {
   writeSessionStateHandoff,
   readSessionStateHandoff,
   markSessionStateHandoffConsumed,
+  noteHandoffInRecord,
   promoteSuccessorHead,
 } from "../extensions/context-handoff/handoff-core.mjs";
 import { extractRecoveryLocatorFromPrompt } from "../extensions/context-handoff/cutover-seed.mjs";
@@ -763,6 +764,49 @@ test("formatConsumeResult without a known claimant does not fabricate a bug offe
   assert.doesNotMatch(text, /offer to file a bug/i);
 });
 
+test("noteHandoffInRecord returns the CLI's confirmed outcome, not the request", () => {
+  const execute = (bin, argv) => {
+    assert.equal(bin, "agent-worktrees");
+    assert.deepEqual(argv, [
+      "note-handoff", "--task", "handoff-1", "--title", "Fix the widget",
+      "--session-id", "predecessor-1", "--live-cutover",
+    ]);
+    return JSON.stringify({
+      noted: true, worktree_id: "wt-1", session: "predecessor-1",
+      task: "handoff-1", handoff_ordinal: 1, live_cutover: true,
+    });
+  };
+  const result = noteHandoffInRecord(
+    "C:\\repo", "predecessor-1", "handoff-1", "Fix the widget", true, execute,
+  );
+  assert.equal(result.noted, true);
+  assert.equal(result.liveCutover, true);
+  assert.equal(result.error, null);
+  assert.equal(result.raw.worktree_id, "wt-1");
+});
+
+test("noteHandoffInRecord reports noted:false for an untracked worktree instead of assuming success", () => {
+  // Copilot review finding on PR #4493: the CLI itself reports noted:false
+  // for an untracked worktree (still exit 0) -- a caller that only checks
+  // "did the subprocess throw" would wrongly conclude the handoff was
+  // recorded.
+  const execute = () => JSON.stringify({ noted: false, reason: "not a tracked worktree" });
+  const result = noteHandoffInRecord("C:\\repo", "sid", "handoff-1", "t", true, execute);
+  assert.equal(result.noted, false);
+  assert.equal(result.liveCutover, false);
+  assert.equal(result.raw.reason, "not a tracked worktree");
+});
+
+test("noteHandoffInRecord degrades to noted:false with an error instead of throwing on a CLI failure", () => {
+  const execute = () => { throw new Error("agent-worktrees unreachable"); };
+  assert.doesNotThrow(() => {
+    const result = noteHandoffInRecord("C:\\repo", "sid", "handoff-1", "t", false, execute);
+    assert.equal(result.noted, false);
+    assert.equal(result.liveCutover, false);
+    assert.match(result.error, /agent-worktrees unreachable/);
+  });
+});
+
 test("promoteSuccessorHead links succession over the expected predecessor head", () => {
   const calls = [];
   const execute = (bin, argv, opts) => {
@@ -1344,6 +1388,7 @@ test("triggerHandoff under the default (manual-only) mode never wires up automat
     writeSessionState: ({ seed }) => ({ ok: true, path: "C:\\state\\handoff-request.json", seed }),
     noteHandoff: (...args) => {
       calls.push(["note-handoff", ...args]);
+      return { noted: true, liveCutover: args.at(-1), raw: {}, error: null };
     },
     logActivity: (...args) => {
       calls.push(["activity", ...args]);
@@ -1419,7 +1464,10 @@ test("triggerHandoff force=true arms live-cutover signaling even under manual-on
       metadata: { worktree: "wt-example", title: "Parser follow-up" },
     }),
     writeSessionState: ({ seed }) => ({ ok: true, path: "C:\\state\\handoff-request.json", seed }),
-    noteHandoff: (...args) => { calls.push(["note-handoff", ...args]); },
+    noteHandoff: (...args) => {
+      calls.push(["note-handoff", ...args]);
+      return { noted: true, liveCutover: args.at(-1), raw: {}, error: null };
+    },
     logActivity: (...args) => {
       calls.push(["activity", ...args]);
       return { logged: true };
@@ -1471,7 +1519,10 @@ test("triggerHandoff omitting force still notes the handoff (lineage tracking), 
       metadata: { worktree: "wt-example", title: "Parser follow-up" },
     }),
     writeSessionState: ({ seed }) => ({ ok: true, path: "C:\\state\\handoff-request.json", seed }),
-    noteHandoff: (...args) => { calls.push(["note-handoff", ...args]); },
+    noteHandoff: (...args) => {
+      calls.push(["note-handoff", ...args]);
+      return { noted: true, liveCutover: args.at(-1), raw: {}, error: null };
+    },
     logActivity: (...args) => { calls.push(["activity", ...args]); return { logged: true }; },
     requestBridge: (...args) => { calls.push(["bridge", ...args]); return { attempted: true, accepted: true }; },
     readPickupSignals: () => ({

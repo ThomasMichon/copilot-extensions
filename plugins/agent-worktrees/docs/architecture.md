@@ -378,8 +378,8 @@ integers allocated under the record lock determine ordering:
   monitor's own spawn-eligibility gate
   (`status_monitor_runtime._monitor_pending_handoff_request`) requires this
   field to be `True`, not merely the entry's existence (context-handoff's
-  `mode: manual` vs `auto` maps directly to this flag, not to whether the entry
-  gets recorded at all — see the `context-handoff` plugin's own `triggerHandoff`
+  `mode: manual-only` vs `auto` maps directly to this flag, not to whether the
+  entry gets recorded at all — see the `context-handoff` plugin's own `triggerHandoff`
   for the caller side).
 - **`head_transitions[]` / `lifecycle_revision`** — the authoritative,
   replayable changes to the current session. `head_session` and `head_revision`

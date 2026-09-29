@@ -117,6 +117,13 @@ def open_handoff(
             raise SessionLifecycleError(
                 f"handoff token {token} already belongs to predecessor {existing.predecessor}"
             )
+        # A retry may arm live-cutover on an entry first recorded without it
+        # (e.g. manual-only, then retried under auto/--force) -- promote
+        # False -> True, but never downgrade an already-armed entry.
+        if live_cutover and not existing.live_cutover:
+            existing.live_cutover = True
+            if save:
+                tracking.save_record(record)
         return existing
     _ensure_head_ledger(record)
     for existing in record.handoffs:

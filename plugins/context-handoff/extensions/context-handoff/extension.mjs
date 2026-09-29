@@ -867,27 +867,29 @@ const session = await joinSession({
         "session's most recently saved handoff or store fresh markdown passed as " +
         "`prompt_text` / `prompt`. It always: (1) drops the full handoff " +
         "markdown in this session's session-state folder; (2) durably stores " +
-        "it (agent-dispatch task or worktree-state file). ONLY when " +
-        "`.context-handoff/config.yaml`'s `mode` is `auto` (the default is " +
-        "`manual-only`) does it additionally: (3) note it in the worktree's " +
-        "own record (creates a pending-handoff entry agent-worktrees' " +
-        "resident monitor can discover and claim on its own -- gated " +
-        "identically to the two triggers below, not merely advisory), and " +
-        "refresh worktree-visible PENDING-HANDOFF state when agent-worktrees " +
-        "is available; (4) best-effort ping agent-bridge if present; (5) wait " +
-        "up to 30 seconds for the CUTOVER to start (a status-monitor " +
-        "`handoff_cutover_spawn` acknowledgement) -- not for the successor to " +
-        "fully finish cold-starting and consume the handoff, which " +
-        "legitimately takes longer and is not worth blocking on. Regardless " +
-        "of mode, it always: (6) checks once whether a cutover is already " +
-        "under way, already fully picked up, or neither (under `manual-only` " +
-        "this is a single check, not a polling wait -- steps 3-5 are the " +
-        "only ones actually skipped); and (7) prints manual fallback " +
-        "guidance -- distinctly worded when automatic cutover is simply " +
-        "disabled by mode versus when it was attempted and nothing happened " +
-        "-- and (8) ALWAYS ends with the final short handoff prompt/seed. " +
-        "It NEVER checks panes or PIDs, spawns or retires sessions, or " +
-        "performs any cutover itself.",
+        "it (agent-dispatch task or worktree-state file); (3) notes it in the " +
+        "worktree's own record (creates a pending-handoff entry so a " +
+        "manually-consuming successor can still be promoted to head later -- " +
+        "this step runs under ANY mode except `off`). ONLY when " +
+        "`.context-handoff/config.yaml`'s `mode` is `auto` does that same note " +
+        "additionally arm live-cutover (the default, `manual-only`, records " +
+        "the entry but never arms it): (4) the pending-handoff entry becomes " +
+        "one agent-worktrees' resident monitor may discover and claim on its " +
+        "own, and worktree-visible PENDING-HANDOFF state refreshes when " +
+        "agent-worktrees is available; (5) best-effort ping agent-bridge if " +
+        "present; (6) wait up to 30 seconds for the CUTOVER to start (a " +
+        "status-monitor `handoff_cutover_spawn` acknowledgement) -- not for " +
+        "the successor to fully finish cold-starting and consume the " +
+        "handoff, which legitimately takes longer and is not worth blocking " +
+        "on. Regardless of mode, it always: (7) checks once whether a " +
+        "cutover is already under way, already fully picked up, or neither " +
+        "(under `manual-only` this is a single check, not a polling wait -- " +
+        "steps 4-6 are the only ones actually skipped); and (8) prints " +
+        "manual fallback guidance -- distinctly worded when automatic " +
+        "cutover is simply disabled by mode versus when it was attempted " +
+        "and nothing happened -- and (9) ALWAYS ends with the final short " +
+        "handoff prompt/seed. It NEVER checks panes or PIDs, spawns or " +
+        "retires sessions, or performs any cutover itself.",
       skipPermission: true,
       parameters: {
         type: "object",

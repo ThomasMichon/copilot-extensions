@@ -2667,22 +2667,41 @@ export function buildResumePrompt(
 }
 
 // Mirror the stored handoff into the worktree's own record (best-effort).
-// `liveCutover` arms agent-worktrees' resident status-monitor to consider
+// `liveCutover` requests agent-worktrees' resident status-monitor consider
 // this entry for an automatic spawn-and-retire cutover (see
 // SessionHandoff.live_cutover's own docstring on the Python side) --
 // recording the handoff at all (so a manually-consuming successor can later
 // be promoted to head via a matching --handoff-token, and so tooling can
 // see a handoff is in flight) must NOT by itself risk an unwanted auto
-// spawn, so this defaults to false and callers arm it explicitly.
-export function noteHandoffInRecord(cwd, sid, ref, title, liveCutover = false) {
+// spawn, so this defaults to false and callers arm it explicitly. Returns
+// the CLI's own confirmed outcome (never assumed): `{ noted, liveCutover,
+// raw, error }` -- `noted`/`liveCutover` reflect what the CLI actually
+// reported (e.g. `noted: false` for an untracked worktree, or a subprocess
+// failure), not merely what was requested.
+export function noteHandoffInRecord(
+  cwd, sid, ref, title, liveCutover = false, execute = runCli,
+) {
+  const argv = ["note-handoff"];
+  if (ref) argv.push("--task", ref);
+  if (title) argv.push("--title", title);
+  if (sid) argv.push("--session-id", sid);
+  if (liveCutover) argv.push("--live-cutover");
   try {
-    const argv = ["note-handoff"];
-    if (ref) argv.push("--task", ref);
-    if (title) argv.push("--title", title);
-    if (sid) argv.push("--session-id", sid);
-    if (liveCutover) argv.push("--live-cutover");
-    runCli("agent-worktrees", argv, { cwd, timeout: 5000 }); // marketplace-isolation: allow agent-worktrees-management
-  } catch { /* history is advisory */ }
+    const raw = JSON.parse(
+      execute("agent-worktrees", argv, { cwd, timeout: 5000 }), // marketplace-isolation: allow agent-worktrees-management
+    );
+    return {
+      noted: Boolean(raw?.noted),
+      liveCutover: Boolean(raw?.live_cutover),
+      raw,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      noted: false, liveCutover: false, raw: null,
+      error: describeCliError(error),
+    };
+  }
 }
 
 function logHandoffActivity(
@@ -3308,7 +3327,7 @@ export async function triggerHandoff(
   // to be true. So this call is unconditional, but `liveCutover` -- passed
   // as `autoEnabled` -- is what actually decides whether the monitor may
   // ever act on it.
-  noteHandoff(
+  const noteResult = noteHandoff(
     cwd, sid, stored.id, stored.metadata?.title || title, autoEnabled,
   );
   // Only "auto" mode emits the `handoff_requested` activity event
@@ -3361,12 +3380,14 @@ export async function triggerHandoff(
     // "signaled" when neither live-cutover trigger point ever ran).
     automaticCutoverDisabled: !autoEnabled,
     worktreeSignal: {
-      // `noted` now means exactly what it says: the handoff was recorded in
-      // the worktree's own ledger. That always happens (see the call
-      // above); it is `liveCutoverArmed` -- not `noted` -- that reflects
-      // whether the monitor may actually act on it.
-      noted: true,
-      liveCutoverArmed: autoEnabled,
+      // `noted`/`liveCutoverArmed` reflect what agent-worktrees actually
+      // confirmed (Copilot review finding on PR #4493: these used to report
+      // the requested state unconditionally -- true even when the CLI call
+      // failed or the worktree was untracked, which the caller could never
+      // detect). `noteResult.error` carries the failure detail when present.
+      noted: Boolean(noteResult?.noted),
+      liveCutoverArmed: Boolean(noteResult?.liveCutover),
+      noteError: noteResult?.error ?? null,
       activity,
     },
     bridge,

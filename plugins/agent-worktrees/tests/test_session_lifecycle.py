@@ -439,6 +439,32 @@ class TestExactHandoffLedger:
         rec = load_record(tmp_tracking_dir / "wt-1.yaml")
         assert rec.handoffs[1].live_cutover is True
 
+    def test_open_handoff_retry_upgrades_live_cutover_but_never_downgrades(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        """A handoff first recorded under manual-only (live_cutover=False)
+        and later retried with --force / mode:auto for the SAME token must
+        have its existing entry armed (Copilot review finding on PR #4493:
+        the idempotent-return-existing branch previously ignored a
+        newly-passed live_cutover=True entirely, permanently stranding the
+        handoff as un-armed). A later unarmed retry must never downgrade an
+        already-armed entry back to False."""
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.open_handoff(rec, "old", "token-retry")
+        assert rec.handoffs[0].live_cutover is False
+
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.open_handoff(rec, "old", "token-retry", live_cutover=True)
+        assert rec.handoffs[0].live_cutover is True
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.handoffs[0].live_cutover is True
+
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.open_handoff(rec, "old", "token-retry", live_cutover=False)
+        assert rec.handoffs[0].live_cutover is True
+
     def test_linked_token_is_idempotent_for_same_successor(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):
