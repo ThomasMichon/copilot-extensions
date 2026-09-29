@@ -39,11 +39,11 @@ protected_branches: [main, dev]
 #      to `dev` from a worktree and block pushing a worktree branch directly.
 #      The legitimate `create-pr` / `push-changes` push bypasses the pre-push
 #      guard via `AGENT_WORKTREES_PR_PUSH=1`.
-#   2. A GitHub repository ruleset ("Default-branch policy: PR-required +
-#      non-blocking Copilot review", id 18553911) with a `pull_request` rule --
-#      the FORMAL branch policy that blocks direct pushes to `dev` server-side,
-#      so the enforcement holds even for a tool/path that predates or bypasses
-#      layer 1. (One nuance: a commit that is the head of an OPEN PR can still
+#   2. A GitHub repository ruleset ("dev branch policy: PR-required",
+#      id 23904550) with a `pull_request` rule -- the FORMAL branch policy
+#      that blocks direct pushes to `dev` server-side, so the enforcement
+#      holds even for a tool/path that predates or bypasses layer 1. (One
+#      nuance: a commit that is the head of an OPEN PR can still
 #      fast-forward `dev` because GitHub counts it as "made through a PR"; an
 #      unassociated direct commit is rejected. Layer 1 keeps agents off that
 #      path regardless.)

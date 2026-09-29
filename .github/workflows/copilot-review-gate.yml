@@ -13,6 +13,13 @@
 # (including an outsider's) via the normal "Reviewers" sidebar or the REST
 # API at any time -- this workflow only controls the *automatic* path.
 #
+# `edited` is included in `types` below: a PR originally opened against a
+# different base branch and later RETARGETED to `dev` fires `edited` (with
+# `changes.base` present), not any of the other listed types -- without it,
+# such a PR would never get its automatic review. The job itself only acts
+# when `changes.base` is actually present, so an ordinary title/body/label
+# edit doesn't trigger a redundant re-review request.
+#
 # Uses `pull_request_target`, not `pull_request`: a same-repo Write
 # collaborator's own PR would otherwise run their edited copy of this file
 # (which requests `pull-requests: write` and calls a write API), and a
@@ -28,7 +35,7 @@ name: Copilot review gate
 on:
   pull_request_target:
     branches: [dev]
-    types: [opened, reopened, ready_for_review, synchronize]
+    types: [opened, reopened, ready_for_review, synchronize, edited]
 
 permissions:
   contents: read
@@ -37,7 +44,9 @@ permissions:
 jobs:
   request-review:
     name: request-review-if-collaborator
-    if: github.event.pull_request.draft == false
+    if: >-
+      github.event.pull_request.draft == false &&
+      (github.event.action != 'edited' || github.event.changes.base != null)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

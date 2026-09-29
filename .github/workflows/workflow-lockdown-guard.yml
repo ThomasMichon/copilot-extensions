@@ -66,12 +66,20 @@
 # `disabled`, and is only flipped to `active` after confirming a real PR's
 # `workflow-lockdown-guard` check actually reports post-promotion -- never
 # enabled speculatively ahead of that.
+#
+# `edited` is included in `types` below alongside the usual opened/reopened/
+# synchronize: a PR originally opened against a different base branch and
+# later RETARGETED to `dev` fires `edited` (with `changes.base` present),
+# not any of the other types -- without `edited` here, a retargeted PR
+# would sit forever waiting on a required check that never runs. Re-running
+# on every other `edited` PR field (title, body, labels) too is harmless --
+# the check is small, fast, and always recomputes the same correct result.
 name: Workflow lockdown guard
 
 on:
   pull_request_target:
     branches: [dev]
-    types: [opened, reopened, synchronize]
+    types: [opened, reopened, synchronize, edited]
 
 permissions:
   contents: read
@@ -117,9 +125,9 @@ jobs:
             if (files.length >= FILES_HARD_CAP) {
               core.setFailed(
                 `This PR's changed-file list hit the GitHub API's ${FILES_HARD_CAP}-file ` +
-                  "cap, so a protected-path change could exist outside the " +
-                  "returned window. Failing closed -- split this PR into smaller " +
-                  "changes, or have ThomasMichon review it manually.",
+                  "cap, so a protected-path change could exist outside the returned " +
+                  "window. Failing closed -- this ruleset has no bypass actors, so the " +
+                  "only way to clear this check is to split this PR into smaller changes.",
               );
               return;
             }
@@ -152,8 +160,9 @@ jobs:
               core.setFailed(
                 `This PR's commit list hit the GitHub API's ${COMMITS_HARD_CAP}-commit ` +
                   "cap, so an unattributed commit could exist outside the returned " +
-                  "window. Failing closed -- squash/rebase this PR to fewer commits, " +
-                  "or have ThomasMichon review it manually.",
+                  "window. Failing closed -- this ruleset has no bypass actors, so the " +
+                  "only way to clear this check is to squash/rebase this PR to fewer " +
+                  "commits.",
               );
               return;
             }
