@@ -2013,9 +2013,9 @@ export function consumeFileHandoffOnce(
 }
 
 // --- agent-dispatch task store --------------------------------------------
-export function agentDispatchJson(argv, cwd) {
+export function agentDispatchJson(argv, cwd, execute = runCli) {
   try {
-    return JSON.parse(runCli("agent-dispatch", argv, { cwd, timeout: 15000 })); // marketplace-isolation: allow agent-dispatch-management
+    return JSON.parse(execute("agent-dispatch", argv, { cwd, timeout: 15000 })); // marketplace-isolation: allow agent-dispatch-management
   } catch {
     return null;
   }
@@ -3009,12 +3009,17 @@ function worktreePromptReceived(cwd, stored, execute = runCli) {
   return { received: false, worktreeId };
 }
 
-function dispatchTaskConsumed(cwd, taskId) {
+export function dispatchTaskConsumed(cwd, taskId, execute = runCli) {
   if (!taskId) return { consumed: false, task: null };
-  const task = agentDispatchJson(["show", taskId], cwd);
+  const task = agentDispatchJson(["show", taskId], cwd, execute);
   const status = String(task?.status || "");
+  // `abandoned` is what an ABORT sets via `agent-dispatch abandon` (see
+  // abortHandoffTask) -- it must never be confused with a genuine successor
+  // pickup, or triggerHandoff()'s bounded wait could observe an in-flight
+  // abort mid-race and report "pickup acknowledged", suppressing manual
+  // fallback even though nobody actually consumed the handoff.
   return {
-    consumed: Boolean(task && !["proposed", "queued"].includes(status)),
+    consumed: Boolean(task && !["proposed", "queued", "abandoned"].includes(status)),
     task,
   };
 }
@@ -3059,12 +3064,17 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function pickupSignals(cwd, sid, stored, sessionStatePath, execute = runCli) {
+export function pickupSignals(cwd, sid, stored, sessionStatePath, execute = runCli) {
   const found = readSessionStateHandoff(sid);
-  const sessionConsumed = Boolean(found?.record?.consumed);
+  // Exclude a record an abort marked `aborted: true` -- abortHandoffTask/
+  // abortFileHandoff both set `consumed: true` on the session-state marker
+  // (see markSessionStateHandoffConsumed) purely so a later lookup stops
+  // reporting a stale `consumed: false`, never to mean a successor actually
+  // picked this handoff up.
+  const sessionConsumed = Boolean(found?.record?.consumed) && !found?.record?.aborted;
   const worktree = worktreeSuccessorRecorded(cwd, stored, sid, execute);
   const dispatch = stored.storage === "agent-dispatch"
-    ? dispatchTaskConsumed(cwd, stored.id)
+    ? dispatchTaskConsumed(cwd, stored.id, execute)
     : { consumed: false, task: null };
   const via = [];
   if (sessionConsumed) via.push("session-state-consumed");

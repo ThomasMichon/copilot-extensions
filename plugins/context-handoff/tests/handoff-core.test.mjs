@@ -43,6 +43,8 @@ import {
   writeSessionStateHandoff,
   readSessionStateHandoff,
   markSessionStateHandoffConsumed,
+  dispatchTaskConsumed,
+  pickupSignals,
   noteHandoffInRecord,
   promoteSuccessorHead,
   listWorktreeSessions,
@@ -2158,4 +2160,47 @@ test("abortFileHandoff refuses to abort while a real consume holds the lock (nev
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("dispatchTaskConsumed does not treat an abandoned (aborted) task as picked up", () => {
+  // Real regression this guards (PR #4570 review round 7): abandoning a task
+  // via abort is indistinguishable from a genuine successor pickup unless
+  // "abandoned" is excluded -- otherwise triggerHandoff()'s bounded wait
+  // could observe an in-flight abort mid-race and report pickup
+  // acknowledged, suppressing manual fallback even though nobody consumed
+  // anything.
+  const execute = () => JSON.stringify({ id: "task-1", status: "abandoned" });
+  const result = dispatchTaskConsumed("C:\\repo", "task-1", execute);
+  assert.equal(result.consumed, false);
+});
+
+test("dispatchTaskConsumed still reports a genuine pickup as consumed", () => {
+  const execute = () => JSON.stringify({ id: "task-1", status: "claimed" });
+  const result = dispatchTaskConsumed("C:\\repo", "task-1", execute);
+  assert.equal(result.consumed, true);
+});
+
+test("pickupSignals excludes a session-state record an abort marked aborted", () => {
+  // Real regression this guards (PR #4570 review round 7): abortHandoffTask/
+  // abortFileHandoff both set consumed:true on the session-state marker
+  // (markSessionStateHandoffConsumed) purely to stop a later lookup
+  // reporting a stale consumed:false -- pickupSignals must not read that as
+  // a genuine successor pickup.
+  withTempHome(() => {
+    writeSessionStateHandoff({
+      sid: "predecessor-1",
+      promptText: "stored markdown",
+      stored: { storage: "agent-dispatch", id: "task-1" },
+      seed: "seed text",
+    });
+    markSessionStateHandoffConsumed("predecessor-1", {
+      handoffId: "task-1", aborted: true, abortReason: "changed my mind",
+    });
+    const execute = () => JSON.stringify({ id: "task-1", status: "abandoned" });
+    const stored = { storage: "agent-dispatch", id: "task-1", metadata: {} };
+    const result = pickupSignals("C:\\repo", "predecessor-1", stored, null, execute);
+    assert.equal(result.pickedUp, false);
+    assert.equal(result.sessionState.consumed, false);
+    assert.deepEqual(result.via, []);
+  });
 });
