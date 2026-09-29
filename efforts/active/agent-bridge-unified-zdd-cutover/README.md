@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 5 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 5 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581))
+- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 5 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 5 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 5 partially landed — TBD, live-turn drill deferred to a tracked follow-up)
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
@@ -252,10 +252,15 @@ layer — is the operator's own, captured verbatim in Request.)_
 - [ ] A real, driven cutover drill: start a session-host-carrying daemon,
   trigger the one canonical update path, and confirm the session's Copilot
   process never observes a disruption (no dropped turn, no lost event) while
-  the daemon itself fully changes generation.
-- [ ] A forced-abrupt-termination drill: kill the old generation before it
+  the daemon itself fully changes generation. **Partially covered** -- the
+  pre-existing `agent-bridge-cutover` Tier-P `routing-flip-retire` check
+  already proves the daemon-level mechanism a live-turn survival depends on
+  (nothing hard-killed, clean beside-not-in-place handoff); a *fully live*
+  assertion needs a real model/ACP child in the loop and remains Tier-E scope
+  (tracked, not delivered here -- see Journal).
+- [x] A forced-abrupt-termination drill: kill the old generation before it
   releases its claims, and confirm a later generation recovers them cleanly.
-- [ ] Extend or add a clean-room scenario (Tier P, `agent-bridge-solo` or a
+- [x] Extend or add a clean-room scenario (Tier P, `agent-bridge-solo` or a
   new `agent-bridge-cutover` companion) that exercises this on a real fresh
   machine.
 
@@ -328,6 +333,33 @@ entry below for what was inspected, what was already covered, and the one new
 test that closes the gap.
 
 ## Journal
+
+### 2026-09-29 — Phase 5 landed partially (abrupt-termination drill + clean-room extension; live-turn drill deferred) (TBD)
+- **What's real here.** Extended the pre-existing `tools/clean-room/scenarios/
+  agent-bridge-cutover` Tier-P scenario (found already covering the daemon-level
+  routing-flip/drain-gate/breadcrumb-recovery mechanism, predating this effort)
+  with a new `abrupt-kill-recovery` check in `fixtures/cutover_probe.py`:
+  seeds a durable session-host claim via the real `HostIndex`/`HostRecord`
+  classes with `owner_pid` set to an actually-dead process, SIGKILLs a real
+  running daemon (no drain, no `/api/v1/shutdown` handshake -- the exit
+  contract's own release path never runs), starts a fresh generation, and
+  confirms via the on-disk index that the fresh generation's own startup
+  reattach scan claimed-or-reaped the stale record rather than leaving it
+  wedged under a dead owner. Sanity-checked by fault-injecting an inverted
+  `zdd.claims.is_recoverable` and confirming the check correctly FAILS (it's
+  a real assertion, not a tautology); reverted immediately. Ran the full
+  4-check probe 3x locally with no flakiness.
+- **What's honestly NOT delivered.** The Plan's first bullet asks for a live
+  session's Copilot *turn* to survive a cutover with zero observed
+  disruption -- that needs a real model/ACP child in the loop synchronized
+  with the cutover, which is a materially different (and much larger) build
+  than a stdlib-only probe can provide. The pre-existing `routing-flip-retire`
+  check's own FIDELITY NOTE already drew this exact line: Tier P proves the
+  cutover *mechanism* the guarantee is built on; a fully live turn-survival
+  assertion is Tier E. This PR does not build that Tier-E harness -- it is
+  left as tracked, deliberately deferred scope, not silently dropped.
+- Full suite: `python3 tools/run-plugin-tests.py agent-bridge` and the
+  4-check clean-room probe both green throughout.
 
 ### 2026-09-29 — Phase 4 landed ([#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581))
 - **No new production mechanism was needed.** Reading `client.py`'s

@@ -11,7 +11,7 @@
     "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
     "CR_MARKETPLACE_NAME": "copilot-extensions",
     "CR_UV_INDEX": "(opt-in uv-index fixture)",
-    "CR_CUTOVER_CHECKS": "comma-separated subset of: routing-flip-retire,drain-gate,breadcrumb-recover"
+    "CR_CUTOVER_CHECKS": "comma-separated subset of: routing-flip-retire,drain-gate,breadcrumb-recover,abrupt-kill-recovery"
   },
   "expected_artifacts": [
     "~/.copilot/installed-plugins/<marketplace>/agent-bridge",

@@ -33,6 +33,12 @@ Checks (each prints ``PROBE: <name> PASS|FAIL <detail>``):
                        waited on); `undrain` releases it
   breadcrumb-recover   an aborted cutover strands a DRAINED survivor; recovery
                        (`deploy --recover`) undrains it (not stuck closed)
+  abrupt-kill-recovery a generation is SIGKILLed with no graceful shutdown --
+                       never releasing a session-host claim it held (the exit
+                       contract's own release path, #4543, never runs) -- and a
+                       fresh generation started afterward still comes up clean
+                       and does not sit stuck behind the dead generation's stale
+                       claim (agent-bridge-unified-zdd-cutover Phase 5)
 
 Usage:
     python cutover_probe.py --python <agent_bridge-venv-python> [--checks a,b]
@@ -53,7 +59,10 @@ import time
 import types
 import urllib.request
 
-ALL_CHECKS = ["routing-flip-retire", "drain-gate", "breadcrumb-recover"]
+ALL_CHECKS = [
+    "routing-flip-retire", "drain-gate", "breadcrumb-recover",
+    "abrupt-kill-recovery",
+]
 
 
 class Ctx:
@@ -329,10 +338,117 @@ def check_breadcrumb_recover(python):
         shutil.rmtree(cfg, ignore_errors=True)
 
 
+def check_abrupt_kill_recovery(python):
+    """A generation is SIGKILLed before it can run its own exit contract (the
+    ``/api/v1/shutdown`` release-every-claim path, #4543) -- the "kill the old
+    generation before it releases its claims" drill this effort's Phase 5
+    calls for. A stale session-host claim it never released must not wedge a
+    later generation's own startup reattach scan behind a `ClaimConflict`
+    forever: ``zdd.claims.is_recoverable`` treats a claim whose owner pid is
+    dead as free for the taking, no live handshake required (Phase 2's
+    contract) -- this proves that holds for a REAL killed process, not just
+    the pure-function unit tests in ``libs/zdd/tests/test_claims.py``.
+    """
+    r = Result("abrupt-kill-recovery")
+    cfg = tempfile.mkdtemp(prefix="abcv-ak-")
+    c = Ctx(python, cfg)
+    proc = None
+    proc2 = None
+    dead_proc = None
+    alive_dummy = None
+    session_id = "abrupt-kill-sim-session"
+    try:
+        # A pid that is guaranteed dead (started, waited-on, reaped) --
+        # standing in for the killed generation's own recorded owner_pid,
+        # exactly as `owner_pid` durably records the CLAIMING generation's
+        # process, never the session-host child's.
+        dead_proc = subprocess.Popen([python, "-c", "pass"])
+        dead_proc.wait(timeout=10)
+        # A pid that stays alive for the check's duration -- standing in for
+        # the session-host child itself (`host_pid`/`child_pid`), so the
+        # record isn't pruned outright as a dead HOST before the ownership
+        # claim/recover contract is even exercised.
+        alive_dummy = subprocess.Popen([python, "-c", "import time; time.sleep(300)"])
+        index_path = os.path.join(c.root, "hosts", "index.json")
+        seed_snip = (
+            "from agent_bridge.session_host.host_index import HostIndex, HostRecord;"
+            f"idx = HostIndex({index_path!r});"
+            "idx.register(HostRecord("
+            f"session_id={session_id!r}, port=59999, host_pid={alive_dummy.pid}, "
+            f"child_pid={alive_dummy.pid}, owner_generation='stale-gen-sim', "
+            f"owner_pid={dead_proc.pid}))"
+        )
+        seed = subprocess.run([python, "-c", seed_snip], env=c.env,
+                               capture_output=True, text=True, timeout=30)
+        r.check(seed.returncode == 0,
+                f"seeded a stale session-host claim, owner pid already dead "
+                f"(rc={seed.returncode}; {seed.stderr.strip()[:160]})")
+
+        proc = c.spawn_serve()
+        a = c.active()
+        if not r.check(a is not None, "daemon up before the abrupt kill"):
+            return r
+        old = a["port"]
+        r.check(_listening(old), f"generation to be killed is listening on :{old}")
+
+        # The abrupt kill itself: SIGKILL, no drain, no /api/v1/shutdown
+        # handshake -- the exit contract's own release_all() never runs.
+        proc.kill()
+        proc.wait(timeout=10)
+        r.check(not _listening(old), f"killed generation's :{old} is gone (no graceful exit ran)")
+
+        proc2 = c.spawn_serve()
+        # `active()` returns the first entry it sees, including a stale one
+        # the killed generation never cleared (SIGKILL skips its own
+        # clear-on-shutdown) -- poll until the table actually shows a
+        # DIFFERENT port (the new generation's own dead-port watchdog clears
+        # the stale entry, then publishes its own, asynchronously).
+        a2 = None
+        deadline = time.monotonic() + 25.0
+        while time.monotonic() < deadline:
+            candidate = c.active(tries=1)
+            if candidate and candidate.get("port") != old:
+                a2 = candidate
+                break
+            time.sleep(0.25)
+        r.check(
+            a2 is not None and a2.get("port") != old,
+            "a fresh generation starts cleanly after the abrupt kill and "
+            "publishes a new active endpoint -- no manual fix needed",
+        )
+        time.sleep(1.0)
+        check_snip = (
+            "from agent_bridge.session_host.host_index import HostIndex;"
+            f"idx = HostIndex({index_path!r});"
+            f"rec = idx.get({session_id!r});"
+            "print(rec.owner_generation if rec else '<reaped>')"
+        )
+        out = subprocess.run([python, "-c", check_snip], env=c.env,
+                              capture_output=True, text=True, timeout=30)
+        owner_after = (out.stdout or "").strip()
+        r.check(
+            owner_after != "stale-gen-sim",
+            "the fresh generation's own startup reattach scan claimed or "
+            f"reaped the killed generation's stale claim (was 'stale-gen-sim', "
+            f"now {owner_after!r}) -- it did not sit stuck behind a dead owner",
+        )
+        return r
+    finally:
+        for p in (proc, proc2, dead_proc, alive_dummy):
+            try:
+                if p is not None and p.poll() is None:
+                    p.terminate()
+            except Exception:
+                pass
+        time.sleep(0.5)
+        shutil.rmtree(cfg, ignore_errors=True)
+
+
 CHECKS = {
     "routing-flip-retire": check_routing_flip_retire,
     "drain-gate": check_drain_gate,
     "breadcrumb-recover": check_breadcrumb_recover,
+    "abrupt-kill-recovery": check_abrupt_kill_recovery,
 }
 
 
