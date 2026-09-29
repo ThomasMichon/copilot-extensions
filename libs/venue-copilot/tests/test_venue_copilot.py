@@ -188,6 +188,14 @@ class TestBuildCopilotRemoteCommand:
             "--seed explore --ensure-mux'"
         )
 
+    def test_seed_ready_timeout_is_forwarded_for_seeded_launch(self) -> None:
+        cmd = build_copilot_remote_command(
+            "wt-A",
+            seed="do the thing",
+            seed_ready_timeout=600.0,
+        )
+        assert "--seed-ready-timeout 600.0" in cmd
+
 
 class TestRunVenueCopilot:
     def test_reserves_connects_and_releases_on_success(self) -> None:
@@ -640,6 +648,48 @@ class TestDetachedRunner:
         assert "seed was not submitted" in payload["error"]
         assert adapter.keeper_stopped is True
         assert any("tmux kill-session" in command for kind, command in adapter.calls if kind == "run")
+
+    def test_detached_launch_uses_180_second_seed_ready_timeout_floor(self, monkeypatch) -> None:
+        from venue_copilot import detached
+
+        self._patch_bridge(monkeypatch)
+        adapter = _Adapter()
+
+        rc, _payload = detached.launch_detached(
+            adapter,
+            self._plan(),
+            seed="do it",
+            driver=None,
+            copilot_args=[],
+            ensure_mux=True,
+            register_timeout=30.0,
+            progress=lambda *a: None,
+        )
+
+        assert rc == 0
+        launch = next(command for kind, command in adapter.calls if kind == "launch")
+        assert "--seed-ready-timeout 180.0" in launch
+
+    def test_detached_launch_uses_register_timeout_when_larger(self, monkeypatch) -> None:
+        from venue_copilot import detached
+
+        self._patch_bridge(monkeypatch)
+        adapter = _Adapter()
+
+        rc, _payload = detached.launch_detached(
+            adapter,
+            self._plan(),
+            seed="do it",
+            driver=None,
+            copilot_args=[],
+            ensure_mux=True,
+            register_timeout=600.0,
+            progress=lambda *a: None,
+        )
+
+        assert rc == 0
+        launch = next(command for kind, command in adapter.calls if kind == "launch")
+        assert "--seed-ready-timeout 600.0" in launch
 
     def test_stop_detached_verifies_releases_and_deregisters(self, monkeypatch) -> None:
         from venue_copilot import detached

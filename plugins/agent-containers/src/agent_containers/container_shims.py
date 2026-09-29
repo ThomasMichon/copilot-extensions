@@ -32,6 +32,7 @@ ADO_HELPER_PATH = f"{_BIN}/ado-auth-helper"
 AGENT_WORKTREES_PATH = f"{_BIN}/agent-worktrees"
 _AW_RUNTIME_REL = ".agent-worktrees"
 _AW_PAYLOAD_PARENT_REL = f"{_AW_RUNTIME_REL}/payload-src"
+_AW_PAYLOAD_READY_MARKER = ".payload-sync-complete"
 _PATH_SPEC = re.compile(r'path\s*=\s*"([^"]+)"')
 
 # Generic relay client: speaks the credential-relay wire protocol to the host,
@@ -227,8 +228,10 @@ def _agent_worktrees_payload_paths(home: str) -> tuple[str, str]:
 
 
 def _agent_worktrees_payload_ready(container: str, *, user: str, home: str) -> bool:
-    _parent, payload = _agent_worktrees_payload_paths(home)
-    return _docker_exists(container, f"{payload}/plugin.json", user=user)
+    parent, payload = _agent_worktrees_payload_paths(home)
+    return _docker_exists(container, f"{parent}/{_AW_PAYLOAD_READY_MARKER}", user=user) and (
+        _docker_exists(container, f"{payload}/plugin.json", user=user)
+    )
 
 
 def _agent_containers_source_root() -> Path:
@@ -379,6 +382,17 @@ def _sync_agent_worktrees_payload(container: str, *, user: str, home: str) -> st
         raise RuntimeError(
             f"could not assign the staged agent-worktrees payload to '{user}' in '{container}': "
             f"{chowned.stderr.strip() or chowned.stdout.strip() or f'exit {chowned.returncode}'}"
+        )
+    marked = _docker_exec(
+        container,
+        f"touch {str(PurePosixPath(stage_root, _AW_PAYLOAD_READY_MARKER))!r}",
+        user=user,
+        timeout=120.0,
+    )
+    if marked.returncode != 0:
+        raise RuntimeError(
+            f"could not mark the staged agent-worktrees payload ready in '{container}': "
+            f"{marked.stderr.strip() or marked.stdout.strip() or f'exit {marked.returncode}'}"
         )
     return _copied_path(stage_root, payload_root, common_root=common_root)
 

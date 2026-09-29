@@ -148,6 +148,7 @@ agent-procutil = { path = "libs/agent-procutil" }
         command.startswith("rm -rf '/home/vscode/.agent-worktrees/payload-src'")
         for _, command in exec_calls
     )
+    assert any(".payload-sync-complete" in command for _, command in exec_calls)
 
 
 def test_ensure_agent_worktrees_surfaces_install_failures(monkeypatch):
@@ -239,14 +240,14 @@ def test_ensure_agent_worktrees_workspace_registered_runs_idempotent_register(mo
     container_shims.ensure_agent_worktrees_workspace_registered(
         "repo-1",
         user="vscode",
-        workspace_folder="/workspaces/odsp-web",
+        workspace_folder="/workspaces/example-web",
     )
 
     assert calls == [
         (
             "repo-1",
             "vscode",
-            "set -euo pipefail; cd '/workspaces/odsp-web'; "
-            "'/usr/local/bin/agent-worktrees' register 'odsp-web' --repo-dir '/workspaces/odsp-web'",
+            "set -euo pipefail; cd '/workspaces/example-web'; "
+            "'/usr/local/bin/agent-worktrees' register 'example-web' --repo-dir '/workspaces/example-web'",
         )
     ]
