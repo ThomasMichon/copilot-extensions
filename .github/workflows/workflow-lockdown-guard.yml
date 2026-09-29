@@ -23,6 +23,25 @@
 # which event/actor triggered this run, so a close+reopen game changes
 # nothing about the outcome.
 #
+# KNOWN, ACCEPTED RESIDUAL RISK (deliberately not fixed further):
+# `author.login` / `committer.login` are GitHub's resolution of the
+# commit's plain-text git identity (name + email) against an account -- not
+# a cryptographic proof. An already-invited Write collaborator could
+# deliberately set
+# `git commit --author="ThomasMichon <NNN+ThomasMichon@users.noreply.github.com>"`
+# locally and pass this check without ThomasMichon's real involvement. A
+# cryptographically verified commit signature (`commit.verification.verified`,
+# scoped to a key actually registered to ThomasMichon's account) would close
+# this gap, but this repo has decided against setting up commit signing
+# (too much operational hassle for the residual risk it closes) -- see
+# ThomasMichon/copilot-extensions#4519, declined. This check still closes
+# the much more common/likely gaps (a Contributor's own commits, an
+# accidental push, a close+reopen game) -- it just doesn't defend against a
+# Maintainer-tier collaborator deliberately forging git identity metadata,
+# which requires an already-trusted person to actively cheat (and the forged
+# commit remains permanently visible in history for after-the-fact audit),
+# not an arbitrary outsider.
+#
 # IMPORTANT: this uses `pull_request_target`, not `pull_request`. A plain
 # `pull_request` trigger runs the workflow DEFINITION from the PR's own head
 # commit -- so a Write collaborator could edit *this file* within their own

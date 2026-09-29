@@ -144,11 +144,23 @@ explicit admin escalation).** This is enforced on four layers that agree:
    (`workflow-lockdown-guard`, from `.github/workflows/workflow-lockdown-guard.yml`,
    run via `pull_request_target` so a PR can't neuter its own trusted
    definition) in its own ruleset ("dev branch policy: workflow/CODEOWNERS
-   lockdown") fails whenever a protected path is touched by a PR whose
-   author **and** most recent pusher are not both ThomasMichon (checking
-   only the author would miss a same-repo Write collaborator pushing a
-   follow-up commit onto someone else's already-open PR — see
-   `.github/workflows/trusted-ci.yml`'s identical author+sender pattern).
+   lockdown") fails whenever a protected path is touched unless **every
+   commit making up the PR** has both author and committer login attributed
+   to ThomasMichon — checked per-commit via the API, not the PR's overall
+   author or the triggering event's `sender` (an event's `sender` is only
+   whoever triggered *that* webhook delivery, not durable evidence of who
+   pushed code — e.g. a Contributor's failing `synchronize` run could be
+   laundered into a pass by anyone closing+reopening the same, unchanged PR;
+   `.github/workflows/trusted-ci.yml`'s author+sender pattern is a
+   *different*, narrower mechanism used for a different purpose and is not
+   what this guard does). This is not airtight: `author`/`committer` login
+   is GitHub's resolution of the commit's plain-text git identity, not a
+   cryptographic proof — an already-invited Write collaborator could
+   deliberately forge it. Closing that gap needs verified commit signing,
+   which this repo has decided against setting up (too much operational
+   hassle for the residual risk — see
+   ThomasMichon/copilot-extensions#4519, declined); the forged commit still
+   remains permanently visible in history for after-the-fact audit.
    This ruleset has **no bypass actors at all** — not even ThomasMichon —
    because the check's own pass condition already grants exactly the
    intended exemption; a bypass actor here would let the exemption apply to
