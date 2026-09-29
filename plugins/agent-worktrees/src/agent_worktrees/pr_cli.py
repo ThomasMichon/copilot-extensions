@@ -190,9 +190,10 @@ def _pr_watch_review_blocking(config, args, *, actor_flow=None) -> bool:
     A ``pr-self-merge`` repo whose review is marked non-blocking (e.g. GitHub
     Copilot code review, which cannot render APPROVED/CHANGES_REQUESTED on an
     owner-authored PR) only skips waiting for a real verdict for an actor who
-    keeps the effective self-merge flow. A live-authority demotion or an
-    explicit role override that removes self-merge restores the contributor's
-    human-review wait. Unknown permission fails open to the configured flow.
+    keeps the effective self-merge flow. A confident live-authority demotion
+    restores the contributor's human-review wait; an explicit role override
+    keeps its effective ``review_blocking`` policy. Unknown permission fails
+    open to the configured flow.
     """
     from . import pr_config
     if actor_flow is None:
