@@ -303,19 +303,20 @@ session-host concept):
    `should_exit=True` ever triggers lifespan teardown. This is the "it never
    waits on a Copilot turn or a client" half: releasing is synchronous,
    local, and never blocks on anything the new generation does.
-2. **Claim (new generation, never assumes ownership)**: the existing startup
-   reattach scan (`reattach_session_hosts()`) now calls
-   `HostIndex.claim(...)` for each live record before adopting it. A record
-   still claimed by a *live* other generation is skipped (not stolen); one
-   whose owning generation is dead is claimed silently (Phase 2's
-   claim/release/recover contract, no live handshake). Because this
-   generation's own startup reattach pass runs while it is still *passive*
-   (well before the old generation has released anything), it will
-   routinely see every record as contended on that first pass. The cutover
-   CLI (`_cmd_deploy`) therefore retries the scan via a new `/api/v1/
-   session-hosts/reattach` endpoint once the old generation is *confirmed*
-   exited -- mirroring the existing post-commit relay-adoption step's own
-   shape, not a new mechanism.
+2. **Claim (new generation, never assumes ownership)**: `reattach_session_hosts()`
+   calls `HostIndex.claim(...)` for each live record before adopting it. A
+   record still claimed by a *live* other generation is skipped (not
+   stolen); one whose owning generation is dead is claimed silently (Phase
+   2's claim/release/recover contract, no live handshake). A passive
+   cutover instance never runs this scan at all -- ATTACHing to a Session
+   Host unconditionally displaces whatever front already holds it (a
+   real, review-caught hazard: a passive daemon reattaching would
+   disconnect the truly active old generation before any cutover gate
+   ever ran), so all claim/reattach work for it is deferred to the
+   post-cutover retry below. The cutover CLI (`_cmd_deploy`) retries the
+   scan via a new `/api/v1/session-hosts/reattach` endpoint once the old
+   generation is *confirmed* exited -- mirroring the existing post-commit
+   relay-adoption step's own shape, not a new mechanism.
 
 ## Journal
 
@@ -454,6 +455,64 @@ session-host concept):
      removed entirely. Added a genuinely overlapping (thread + barrier
      synchronized) concurrent-writer test that only passes if the lock
      actually excludes one writer while the other is mid reload-mutate-flush.
+- **A third automated review pass caught the deepest gap of all, plus three
+  more real bugs and a policy violation:**
+  1. **HIGH -- the actual architectural miss**: `claim_hosts=False` only
+     suppressed the *durable claim*; it did **not** stop the passive
+     instance's startup scan from reaching `_reattach_one()` and physically
+     ATTACHing to each Session Host. `SessionHost._handle_front()`
+     unconditionally displaces whatever front already holds a host the
+     moment a new one connects -- so a still-**passive**, not-yet-promoted
+     daemon's own "harmless" reattach-and-warm-up was actually
+     **disconnecting the truly active old generation**, before the
+     verified-retirement gate ever ran. This was strictly worse than the
+     claim-only gap Phase 3 started with. Fixed properly this time: the
+     entire startup reattach *task* is now skipped for a passive instance
+     (a new explicit `app.state.passive` flag, distinct from
+     `publish_on_ready` -- see finding 4 below for why); only the
+     post-cutover retry ever reattaches for it.
+  2. HIGH: newly-**spawned** hosts (`register()` at session-host launch, not
+     via reattach) were never stamped with this generation's own ownership
+     -- they looked "never claimed" (freely recoverable) to any other
+     generation's reattach scan the moment they were created, and
+     `release_all()` could never find them to release. Fixed: the spawn
+     path now stamps `owner_generation`/`owner_pid` at registration time.
+  3. HIGH: `_load()`'s reload-before-mutate rewrite reset `self._records`
+     to `{}` *before* attempting the read, so a transient `OSError` or a
+     momentarily-partial read on an *existing* index left the in-memory
+     state empty -- and `_locked_reload()` would then flush that empty
+     state, erasing every other host record on the very next mutation.
+     Fixed: parse into a temporary map first; only replace `self._records`
+     on a fully successful read, and a stricter `_load_or_raise()` variant
+     used specifically inside `_locked_reload()` now **aborts the mutation
+     entirely** (never reaches `_flush()`) on a read failure, rather than
+     silently proceeding against stale state.
+  4. HIGH: `register()` blindly overwrote a record's `owner_generation`/
+     `owner_pid` with whatever the caller's copy carried -- and a caller
+     refreshing a remote forward's port (`_ensure_forward()`) can easily be
+     holding a copy from *before* a concurrent `claim()`, silently
+     reverting a just-written claim. Fixed: `register()` now always
+     preserves the durably-recorded ownership fields when updating an
+     *existing* record -- it is a location/metadata update, never an
+     ownership change; only `claim`/`release`/`release_all` mutate
+     ownership.
+  5. Fixing finding 1 broke `getattr(app.state, "publish_on_ready", False)`
+     as a passive-detection signal for anything **other** than the real
+     `agent-bridge start` CLI: `publish_on_ready` is only ever set there,
+     so every test harness that builds `create_app()` directly (i.e. nearly
+     every existing test) defaulted to "looks passive" and silently stopped
+     reattaching at all -- three previously-green tests regressed. Fixed
+     with a new, explicit `app.state.passive` flag (defaults `False`
+     everywhere it isn't set, the safe default), and updated the two
+     regressed tests (`test_reattach_session_hosts_on_restart`,
+     `test_reattach_reaps_orphaned_host`) to explicitly simulate the
+     outgoing generation's own exit-contract release
+     (`HostIndex.release_all`) they'd been implicitly relying on skipping.
+  6. Policy: widening `tools/module-size-baseline.json` is reserved for the
+     scheduled/post-merge baseline workflow, not an ordinary feature PR.
+     Reverted the earlier widening; trimmed `app.py`'s own net addition to
+     exactly zero lines instead (compacted comments/log calls already in
+     the touched function -- no unrelated code moved).
 - This effort's own umbrella issue's Phase 4/5 remain: the caller-facing
   mask/routing layer and the two validation drills.
 

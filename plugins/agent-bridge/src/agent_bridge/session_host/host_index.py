@@ -135,21 +135,41 @@ class HostIndex:
 
     # -- persistence -------------------------------------------------------
     def _load(self) -> None:
-        """(Re)populate ``self._records`` from disk, discarding any prior
-        in-memory state -- always safe to call again later, not just once
-        at construction (see :meth:`_locked_reload`)."""
-        self._records = {}
-        if not self._path.exists():
-            return
+        """(Re)populate ``self._records`` from disk.
+
+        Safe to call again later, not just once at construction (see
+        :meth:`refresh`/:meth:`_locked_reload`). Parses into a fresh
+        temporary map first and only replaces ``self._records`` on a fully
+        successful read (PR #4543 review): a transient read failure or
+        corrupt/partial write on an *existing* index file must never be
+        treated as "empty". A missing file (no index has ever been written
+        yet) is the one legitimate "actually empty" case. This lenient
+        variant is for construction/:meth:`refresh` (a read failure there
+        simply keeps whatever was already in memory); :meth:`_locked_reload`
+        uses the stricter :meth:`_load_or_raise` instead, since silently
+        proceeding to mutate-and-flush a stale snapshot after a read failure
+        risks clobbering a concurrent writer's just-written state.
+        """
         try:
-            raw = json.loads(self._path.read_text())
+            self._load_or_raise()
         except (json.JSONDecodeError, OSError):
+            pass
+
+    def _load_or_raise(self) -> None:
+        """Like :meth:`_load`, but raises on a read failure of an existing
+        file instead of silently keeping stale in-memory state."""
+        if not self._path.exists():
+            self._records = {}
             return
+        raw = json.loads(self._path.read_text())
+        records: dict[str, HostRecord] = {}
         for sid, rec in raw.get("hosts", {}).items():
             try:
-                self._records[sid] = HostRecord(**rec)
+                records[sid] = HostRecord(**rec)
             except TypeError:
                 continue
+        self._records = records
+        self._records = records
 
     def _flush(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -191,7 +211,7 @@ class HostIndex:
                     raise
                 time.sleep(self._LOCK_POLL_S)
         try:
-            self._load()
+            self._load_or_raise()
             yield
             self._flush()
         finally:
@@ -216,7 +236,25 @@ class HostIndex:
         self._load()
 
     def register(self, record: HostRecord) -> None:
+        """Register (or update the location/metadata of) a Session Host.
+
+        ``register()`` is never an ownership change -- ``claim()``/
+        ``release()``/``release_all()`` are the only ownership mutation
+        paths (PR #4543 review). A caller updating an *existing* record's
+        location (e.g. refreshing a remote forward's port) may be holding a
+        stale in-memory copy whose ``owner_generation``/``owner_pid`` predate
+        a concurrent claim; overwriting the durable, just-reloaded ownership
+        with that stale copy would silently clobber it. Preserve whatever
+        this durable index currently has recorded for ownership when the
+        record already exists; a genuinely new record keeps its own
+        caller-stamped ownership (the initial-spawn path stamps its own
+        generation at registration time).
+        """
         with self._locked_reload():
+            existing = self._records.get(record.session_id)
+            if existing is not None:
+                record.owner_generation = existing.owner_generation
+                record.owner_pid = existing.owner_pid
             self._records[record.session_id] = record
 
     def remove(self, session_id: str) -> bool:

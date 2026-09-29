@@ -557,28 +557,40 @@ over it:
 
 - Each process computes a **generation id** once at startup
   (`zdd.claims.generation_id(version, pid)`), never persisted or reused
-  across a restart.
-- **Claim** -- the startup reattach scan (`reattach_session_hosts()`) calls
-  `HostIndex.claim(session_id, generation=...)` for every live record before
-  adopting it: a record still claimed by a *live* other generation is left
-  alone (not stolen); one whose owning generation is provably dead is
-  claimed silently (no live handshake needed). Because this scan runs while
-  the daemon is still **passive** (before the old generation has released
-  anything), it typically finds every record contended on its first pass.
+  across a restart. A newly-spawned host is registered with this
+  generation's ownership already stamped -- it never looks "unclaimed" to
+  another generation while this one is actively driving it.
+- **A passive cutover instance never reattaches at all.** Reattaching means
+  ATTACHing to the Session Host's socket, and the host's own connection
+  handler unconditionally displaces whatever front already holds it -- so a
+  still-passive daemon reattaching would disconnect the truly active old
+  generation before any cutover gate ever ran. The startup reattach scan
+  (`reattach_session_hosts()`) therefore only runs for a normally-starting
+  (non-passive) daemon; a passive instance's own claim/reattach work is
+  deferred entirely to the post-cutover retry below.
+- **Claim** -- `reattach_session_hosts()` calls `HostIndex.claim(session_id,
+  generation=...)` for every live record before adopting it: a record still
+  claimed by a *live* other generation is left alone (not stolen); one whose
+  owning generation is provably dead is claimed silently (no live handshake
+  needed).
 - **Release** -- `POST /api/v1/shutdown` releases every claim the exiting
-  generation holds (`HostIndex.release_all`) before triggering the clean
-  exit -- the outgoing generation's own initiative, never blocking on the
-  new generation.
+  generation holds (`HostIndex.release_all`), only once a server handle to
+  actually shut down exists, before triggering the clean exit -- the
+  outgoing generation's own initiative, never blocking on the new
+  generation.
 - **Retry** -- `agent-bridge deploy` calls the newly-active daemon's
   `POST /api/v1/session-hosts/reattach` once the old generation is
-  *confirmed* exited, re-running the claim scan now that it is no longer
-  contended.
+  *confirmed* exited, running the claim+reattach scan for the first time on
+  this (now-active) generation.
 - `HostIndex`'s own mutating methods (`register`/`claim`/`release_all`/...)
   hold a short-lived cross-process file lock and **reload the latest
   on-disk state before applying a change** -- the old and new generations
   each hold their own long-lived in-process `HostIndex` snapshot over the
   same file during the overlap, so a write from a stale in-memory snapshot
   must never silently clobber a concurrent write from the other generation.
+  `register()` specifically preserves whatever ownership the durable index
+  already has recorded -- it is a location/metadata update, never an
+  ownership change; only `claim`/`release`/`release_all` mutate ownership.
 
 
 **Windows listener recovery.** A Proactor accept-socket failure can leave the
