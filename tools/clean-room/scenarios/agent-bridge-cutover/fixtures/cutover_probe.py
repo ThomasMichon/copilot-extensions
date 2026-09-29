@@ -392,25 +392,45 @@ def check_abrupt_kill_recovery(python):
         return subprocess.run([python, "-c", snip], env=c.env,
                                capture_output=True, text=True, timeout=timeout)
 
+    class _IndexReadError(RuntimeError):
+        """A read attempt failed or was unparseable -- NEVER treated as "the
+        record is absent"; the caller must retry or fail the check, not
+        silently pass through as if reaping had been observed."""
+
     def _index_get(sid):
         """Read one record's (owner_generation, owner_pid) via the real
-        HostIndex class, or None if absent/unreadable."""
+        HostIndex class's STRICT load path, or None only when the read
+        genuinely succeeded and the record does not exist.
+
+        Uses ``_load_or_raise()`` (not the lenient ``get()``/``_load()``
+        path ``HostIndex`` uses internally elsewhere, which deliberately
+        *suppresses* JSON/OSError load failures to stay availability-first
+        for the real daemon) -- a corrupt or momentarily-locked index file
+        must surface as a read failure here, never as a false "GONE".
+        """
         snip = (
             "from agent_bridge.session_host.host_index import HostIndex\n"
             f"idx = HostIndex({index_path!r})\n"
-            f"rec = idx.get({sid!r})\n"
+            "idx._load_or_raise()\n"
+            f"rec = idx._records.get({sid!r})\n"
             "print((rec.owner_generation, rec.owner_pid) if rec else 'GONE')\n"
         )
         out = _run_snip(snip)
         if out.returncode != 0:
-            return None
+            raise _IndexReadError(
+                f"index read subprocess failed (rc={out.returncode}): "
+                f"{out.stderr.strip()[:200]}"
+            )
         text = out.stdout.strip()
-        if text == "GONE" or not text:
+        if text == "GONE":
             return None
+        if not text:
+            raise _IndexReadError("index read subprocess produced no output")
         try:
             return eval(text, {"__builtins__": {}})  # noqa: S307 -- our own tuple literal
-        except Exception:
-            return None
+        except Exception as exc:
+            raise _IndexReadError(f"unparseable index read output {text!r}") from exc
+
 
     try:
         # A disposable dummy standing in for the sentinel's session-host
@@ -447,15 +467,26 @@ def check_abrupt_kill_recovery(python):
 
         # Poll until the sentinel is gone -- the real, observable signal
         # that this generation's one-shot startup reattach scan has actually
-        # run to completion (never a fixed sleep guess).
+        # run to completion (never a fixed sleep guess). A read FAILURE
+        # (corrupt/locked index, subprocess crash) is never treated as
+        # "gone" -- retry within the same deadline; a read that never
+        # succeeds is a genuine check failure, not a silent pass.
         sentinel_gone = False
+        last_read_error = None
         deadline = time.monotonic() + 60.0
         while time.monotonic() < deadline:
-            if _index_get(sentinel_id) is None:
-                sentinel_gone = True
-                break
+            try:
+                if _index_get(sentinel_id) is None:
+                    sentinel_gone = True
+                    break
+            except _IndexReadError as exc:
+                last_read_error = str(exc)
             time.sleep(0.25)
-        if not r.check(sentinel_gone, "sentinel orphan reaped -- one-shot startup scan has run"):
+        if not r.check(
+            sentinel_gone,
+            "sentinel orphan reaped -- one-shot startup scan has run"
+            + (f" (last read error: {last_read_error})" if last_read_error and not sentinel_gone else ""),
+        ):
             return r
 
         # A FRESH, still-alive dummy for the real test record -- never the
@@ -498,12 +529,17 @@ def check_abrupt_kill_recovery(python):
             f"itself (rc={claim1.returncode}, stdout={claim1.stdout.strip()!r}, "
             f"stderr={claim1.stderr.strip()[:160]})",
         )
-        before = _index_get(session_id)
-        r.check(
-            before is not None and before[1] == proc.pid,
-            f"claim durably recorded owner_pid={proc.pid} before the kill "
-            f"(read back {before!r})",
-        )
+        try:
+            before = _index_get(session_id)
+        except _IndexReadError as exc:
+            before = None
+            r.check(False, f"read back the claim before the kill (index read failed: {exc})")
+        else:
+            r.check(
+                before is not None and before[1] == proc.pid,
+                f"claim durably recorded owner_pid={proc.pid} before the kill "
+                f"(read back {before!r})",
+            )
 
         # The abrupt kill itself: SIGKILL, no drain, no /api/v1/shutdown
         # handshake -- the exit contract's own release_all() never runs, so
@@ -545,12 +581,17 @@ def check_abrupt_kill_recovery(python):
         # require absence, not "claimed OR reaped".
         recovered = False
         after = None
+        last_read_error = None
         deadline = time.monotonic() + 30.0
         while time.monotonic() < deadline:
-            after = _index_get(session_id)
-            if after is None:
-                recovered = True
-                break
+            try:
+                after = _index_get(session_id)
+            except _IndexReadError as exc:
+                last_read_error = str(exc)
+            else:
+                if after is None:
+                    recovered = True
+                    break
             time.sleep(0.25)
         r.check(
             recovered,
@@ -558,7 +599,8 @@ def check_abrupt_kill_recovery(python):
             f"reaped the stale claim (record now {after!r}) -- never left "
             f"wedged under killed pid {proc.pid}, and not silently retained "
             "under the fresh daemon either (this fixture has no adoptable "
-            "session, so a lingering claim would itself be a bug)",
+            "session, so a lingering claim would itself be a bug)"
+            + (f" (last read error: {last_read_error})" if last_read_error and not recovered else ""),
         )
         return r
     finally:

@@ -271,7 +271,7 @@ layer — is the operator's own, captured verbatim in Request.)_
   one verb).
 - [ ] A live cutover drill (Phase 5) shows zero session disruption across a
   real generation change.
-- [ ] An abrupt-termination drill shows a stale claim is recovered by the
+- [x] An abrupt-termination drill shows a stale claim is recovered by the
   next generation without manual intervention.
 - [ ] Reconcile staleness is observable via a status command, independent of
   whether Phase 0's opt-in-gate question is resolved to keep or remove it.
