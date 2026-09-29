@@ -37,6 +37,13 @@ _BLOCKS = {
     ),
 }
 
+# A wider span than `_BLOCKS["engine"]`: includes the `$engRc`-gate and the
+# start of the main-package install call, so a test can prove a failed
+# `agent-procutil` preinstall actually SKIPS the main install rather than
+# merely being logged (PR #4465 review).
+_ENGINE_WITH_GATE_START = _BLOCKS["engine"][0]
+_ENGINE_WITH_GATE_END = "\n            $srvOut = & uv @pipArgs 2>&1"
+
 
 def _extract(text: str, start: str, end: str) -> str:
     return start + text.split(start, 1)[1].split(end, 1)[0]
@@ -185,3 +192,64 @@ def test_procutil_preinstall_is_a_noop_when_neither_copy_exists(
     proc, marker = _run(pwsh, block_name, plugin_dir, have_uv, isolated_home=tmp_path / "home")
     assert proc.returncode == 0, proc.stderr
     assert _install_path(marker) is None
+
+
+def test_engine_skips_main_install_when_procutil_preinstall_fails(tmp_path: Path):
+    """`agent-index` declares only an UNVERSIONED `agent-procutil`
+    requirement, so if the preinstall refresh fails, the subsequent main-
+    package install could otherwise still "succeed" against a stale copy
+    already present in a preserved engine venv (PR #4465 review). Proves
+    the main install is genuinely SKIPPED, not merely logged."""
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+
+    text = INSTALLER.read_text(encoding="utf-8")
+    block = _extract(text, _ENGINE_WITH_GATE_START, _ENGINE_WITH_GATE_END)
+    block += "\n        }\n    }"
+    block = block.replace("$EngineVenvPython", "$TheVenvPython")
+
+    plugin_dir = tmp_path / "plugins" / "agent-index"
+    lib_dir = plugin_dir / "libs" / "agent-procutil"
+    lib_dir.mkdir(parents=True)
+    (lib_dir / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    marker = tmp_path / "marker.txt"
+
+    script = f"""
+function Write-Fail {{ param([string]$Message) }}
+function Write-Host {{ param([Parameter(ValueFromPipeline=$true)]$Object, [string]$ForegroundColor) }}
+function uv {{
+    Add-Content -Path '{marker}' -Value ("UV_CALL:" + ($args -join ' '))
+    if (($args -join ' ') -match 'agent-procutil') {{
+        $global:LASTEXITCODE = 1
+    }} else {{
+        $global:LASTEXITCODE = 0
+    }}
+}}
+function Resolve-VendoredLib {{
+    param([string]$LibName)
+    $candidate = Join-Path $PluginDir "libs\\$LibName"
+    if (Test-Path (Join-Path $candidate 'pyproject.toml')) {{ return $candidate }}
+    return $null
+}}
+function Invoke-StubVenvPython {{ $global:LASTEXITCODE = 0 }}
+$TheVenvPython = 'Invoke-StubVenvPython'
+$PluginDir = '{plugin_dir}'
+$Upgrade = $false
+$prevEAP = 'Continue'
+$ErrorActionPreference = 'Continue'
+{block}
+"""
+    proc = subprocess.run(
+        [pwsh, "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={**os.environ, "HOME": str(tmp_path / "home"), "USERPROFILE": str(tmp_path / "home")},
+        timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr
+    calls = marker.read_text(encoding="utf-8").splitlines() if marker.exists() else []
+    uv_calls = [line for line in calls if line.startswith("UV_CALL:")]
+    assert len(uv_calls) == 1, uv_calls
+    assert "agent-procutil" in uv_calls[0]

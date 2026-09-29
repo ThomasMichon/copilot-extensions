@@ -1762,7 +1762,13 @@ function Install-Engine {
 
     # agent-procutil is likewise a `uv`-editable canonical reference in a
     # dev checkout (no local copy, not on PyPI) -- pre-install it the same
-    # way as zdd above.
+    # way as zdd above. Unlike zdd's own silently-ignored failure, a
+    # failed refresh here must fail the whole engine install: `agent-index`
+    # declares only an UNVERSIONED `agent-procutil` requirement, so the
+    # main-package install below could still "succeed" against a stale
+    # copy already present in a preserved engine venv, silently shipping
+    # old shared code (PR #4465 review).
+    $engRc = 0
     $ProcutilDir = Resolve-VendoredLib -LibName 'agent-procutil'
     if ($ProcutilDir) {
         if (Get-Command uv -ErrorAction SilentlyContinue) {
@@ -1772,6 +1778,7 @@ function Install-Engine {
             & $EngineVenvPython -m pip install "$ProcutilDir" 2>&1 |
                 ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
         }
+        $engRc = $LASTEXITCODE
     }
 
     # agent-index-engine (plugins/agent-index/server/) -- a SEPARATE, independently
@@ -1797,7 +1804,12 @@ function Install-Engine {
     #      by the step-1 versions; --no-deps skips re-resolving them through the
     #      blocked host.
     $torchIdx = $env:AGENT_INDEX_TORCH_INDEX
-    if (Get-Command uv -ErrorAction SilentlyContinue) {
+    $engOut = @()
+    if ($engRc -ne 0) {
+        # agent-procutil's own preinstall above already failed -- skip the
+        # rest of the engine install rather than risk silently accepting a
+        # stale copy already present in a preserved engine venv.
+    } elseif (Get-Command uv -ErrorAction SilentlyContinue) {
         $baseOut = & uv pip install --python $EngineVenvPython "$PluginDir" 2>&1
         $engRc = $LASTEXITCODE
         $engOut = @($baseOut)

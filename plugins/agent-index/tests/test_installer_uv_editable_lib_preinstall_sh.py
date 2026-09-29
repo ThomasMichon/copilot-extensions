@@ -36,6 +36,13 @@ _BLOCKS = {
     ),
 }
 
+# A wider span than `_BLOCKS["engine"]`: includes the `rc`-gate and the
+# start of the main-package install call, so a test can prove a failed
+# `agent-procutil` preinstall actually SKIPS the main install rather than
+# merely being logged (PR #4465 review).
+_ENGINE_WITH_GATE_START = _BLOCKS["engine"][0]
+_ENGINE_WITH_GATE_END = '\n            uv "${uv_args[@]}" || rc=$?'
+
 
 def _extract(text: str, start: str, end: str) -> str:
     return start + text.split(start, 1)[1].split(end, 1)[0]
@@ -165,3 +172,67 @@ def test_procutil_preinstall_is_a_noop_when_neither_copy_exists(
     proc, marker = _run(bash, block_name, plugin_dir, have_uv, isolated_home=tmp_path / "home")
     assert proc.returncode == 0, proc.stderr
     assert _install_path(marker) is None
+
+
+def test_engine_skips_main_install_when_procutil_preinstall_fails(tmp_path: Path):
+    """`agent-index` declares only an UNVERSIONED `agent-procutil`
+    requirement, so if the preinstall refresh fails, the subsequent main-
+    package install could otherwise still "succeed" against a stale copy
+    already present in a preserved engine venv (PR #4465 review). Proves
+    the main install is genuinely SKIPPED, not merely logged."""
+    bash = shutil.which("bash")
+    if os.name == "nt" or not bash:
+        pytest.skip("native POSIX bash is unavailable")
+
+    text = INSTALLER.read_text(encoding="utf-8")
+    block = _extract(text, _ENGINE_WITH_GATE_START, _ENGINE_WITH_GATE_END)
+    block += "\n        fi\n    fi"
+    block = block.replace("$ENGINE_VENV_PYTHON", "$THE_VENV_PYTHON")
+
+    plugin_dir = tmp_path / "plugins" / "agent-index"
+    lib_dir = plugin_dir / "libs" / "agent-procutil"
+    lib_dir.mkdir(parents=True)
+    (lib_dir / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    marker = tmp_path / "marker.txt"
+
+    script = f"""
+set -uo pipefail
+_fail() {{ echo "FAIL:$1"; exit 1; }}
+uv() {{
+    echo "UV_CALL:$*" >> '{marker}'
+    if [[ "$1 $2" == "pip install" && "$*" == *"agent-procutil"* ]]; then
+        return 1
+    fi
+    return 0
+}}
+THE_VENV_PYTHON=venv_python_stub
+venv_python_stub() {{ echo "PIP_CALL:$*" >> '{marker}'; return 0; }}
+_resolve_vendored_lib() {{
+    local candidate="$PLUGIN_DIR/libs/$1"
+    if [[ -f "$candidate/pyproject.toml" ]]; then
+        echo "$candidate"
+        return 0
+    fi
+    return 1
+}}
+run_it() {{
+    local PLUGIN_DIR='{plugin_dir}'
+    local have_uv=1
+    local upgrade=0
+{block}
+}}
+run_it
+"""
+    proc = subprocess.run(
+        [bash, "-c", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={**os.environ, "HOME": str(tmp_path / "home")},
+        timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr
+    calls = marker.read_text(encoding="utf-8").splitlines() if marker.exists() else []
+    uv_calls = [line for line in calls if line.startswith("UV_CALL:")]
+    assert len(uv_calls) == 1, uv_calls
+    assert "agent-procutil" in uv_calls[0]

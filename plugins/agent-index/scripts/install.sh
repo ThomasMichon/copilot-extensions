@@ -1439,13 +1439,19 @@ _install_engine() {
 
     # agent-procutil is likewise a `uv`-editable canonical reference in a
     # dev checkout (no local copy, not on PyPI) -- pre-install it the same
-    # way as zdd above.
+    # way as zdd above. Unlike zdd's own silent `|| true`, a failed refresh
+    # here must fail the whole engine install: `agent-index` declares only
+    # an UNVERSIONED `agent-procutil` requirement, so the main-package
+    # install below could still "succeed" against a stale copy already
+    # present in a preserved engine venv, silently shipping old shared
+    # code (PR #4465 review).
+    local rc=0
     local procutil_dir
     if procutil_dir="$(_resolve_vendored_lib agent-procutil)"; then
         if [[ "$have_uv" -eq 1 ]]; then
-            uv pip install --python "$ENGINE_VENV_PYTHON" "$procutil_dir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet >/dev/null 2>&1 || true
+            uv pip install --python "$ENGINE_VENV_PYTHON" "$procutil_dir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet >/dev/null 2>&1 || rc=$?
         else
-            "$ENGINE_VENV_PYTHON" -m pip install "$procutil_dir" >/dev/null 2>&1 || true
+            "$ENGINE_VENV_PYTHON" -m pip install "$procutil_dir" >/dev/null 2>&1 || rc=$?
         fi
     fi
 
@@ -1467,9 +1473,10 @@ _install_engine() {
     #      (often network-blocked), so we take deps from the reachable default feed
     #      (step 1) and only the reachable CUDA torch wheel here; --no-deps skips
     #      re-resolving the CUDA build's exact dep pins through the blocked host.
-    local rc=0
     local torch_idx="${AGENT_INDEX_TORCH_INDEX:-}"
-    if [[ "$have_uv" -eq 1 ]]; then
+    if [[ "$rc" -ne 0 ]]; then
+        :
+    elif [[ "$have_uv" -eq 1 ]]; then
         uv pip install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR" || rc=$?
         if [[ "$rc" -eq 0 ]]; then
             local uv_args=(pip install --python "$ENGINE_VENV_PYTHON" "$PLUGIN_DIR/server")
