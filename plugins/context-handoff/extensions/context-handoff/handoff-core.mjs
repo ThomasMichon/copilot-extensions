@@ -3681,6 +3681,21 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
   // claimed the task in between) never leaves the ledger showing
   // "cancelled" over a task that's still alive (PR #4570 review round 18).
   const peek = cancelHandoffInRecord(cwd, predecessorSessionId, taskId, execute, { dryRun: true });
+  if (!peek.checked) {
+    // Fail CLOSED, not open: a peek failure (worktree id didn't resolve,
+    // the CLI call errored, its output didn't parse) is NOT the same as a
+    // definitive "no candidate" answer -- proceeding on an unchecked fence
+    // could destroy a handoff whose ledger genuinely has an associated
+    // successor candidate (PR #4570 review round 19).
+    return {
+      ok: false,
+      id: taskId,
+      kind: "task",
+      error: `Could not verify whether task ${taskId}'s handoff has an associated successor ` +
+        `candidate (${peek.reason || "the ledger fence could not be checked"}) -- refusing to ` +
+        "abandon it until the ledger can be inspected.",
+    };
+  }
   if (peek.raw?.candidate) {
     return {
       ok: false,
@@ -3753,11 +3768,26 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
 // restored to head) even when that action then failed -- e.g. a race
 // consumer claimed the task in between, or the file write hit an I/O error
 // (PR #4570 review round 18).
+//
+// `checked` distinguishes "the ledger was genuinely inspected" (true --
+// including a definitive "no matching pending entry" answer) from "the
+// inspection itself could not be completed" (false -- worktree id didn't
+// resolve, the CLI call failed, or its output didn't parse). A DRY-RUN
+// caller must fail closed on `checked: false`: collapsing every such
+// failure into `raw: null` and treating "not candidate-associated" the same
+// as "couldn't tell" would let a transiently unavailable fence (a timeout,
+// a version skew before this CLI supported --dry-run, a lock/JSON error)
+// silently wave through a handoff whose ledger genuinely has an associated
+// successor candidate (PR #4570 review round 19). The COMMIT call (the
+// non-dry-run cancellation after the destructive action already succeeded)
+// deliberately stays best-effort/fail-open -- there is nothing left to
+// protect by then.
 export function cancelHandoffInRecord(cwd, sessionId, token, execute = runCli, { dryRun = false } = {}) {
   const worktreeId = agentWorktreesGet("worktree-id", cwd, sessionId, execute);
   if (!worktreeId) {
     return {
       cancelled: false,
+      checked: false,
       reason: "could not resolve a worktree id for this cwd to target the cancellation",
       raw: null,
     };
@@ -3775,12 +3805,14 @@ export function cancelHandoffInRecord(cwd, sessionId, token, execute = runCli, {
     );
     return {
       cancelled: Boolean(raw?.cancelled),
+      checked: true,
       reason: raw?.cancelled ? null : (raw?.reason || "token was not a pending ledger entry"),
       raw,
     };
   } catch (error) {
     return {
       cancelled: false,
+      checked: false,
       reason: describeCliError(error) || "agent-worktrees cancel-handoff failed",
       raw: null,
     };
@@ -3872,6 +3904,18 @@ export function abortFileHandoff(
     // head) while the file record remains genuinely unconsumed (PR #4570
     // review round 18).
     const peek = cancelHandoffInRecord(cwd, current.record.sessionId, handoffId, execute, { dryRun: true });
+    if (!peek.checked) {
+      // Fail CLOSED, not open -- see the identical note on the task path
+      // above (PR #4570 review round 19).
+      return {
+        ok: false,
+        kind: "file",
+        id: current.record.id,
+        message: `Could not verify whether handoff ${current.record.id || current.path} has an ` +
+          `associated successor candidate (${peek.reason || "the ledger fence could not be checked"}) ` +
+          "-- refusing to abort it until the ledger can be inspected.",
+      };
+    }
     if (peek.raw?.candidate) {
       return {
         ok: false,

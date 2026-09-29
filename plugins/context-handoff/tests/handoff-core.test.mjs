@@ -2093,6 +2093,34 @@ test("abortHandoffTask refuses to abandon when the ledger already has an associa
   assert.equal(abandonCalled, false);
 });
 
+test("abortHandoffTask fails closed (refuses to abandon) when the ledger fence itself cannot be checked", () => {
+  // Real regression this guards (PR #4570 review round 19): collapsing
+  // every dry-run failure (timeout, version skew, lock/JSON error, an
+  // unresolvable worktree id) into the same `raw: null` shape the "no
+  // matching entry" case also produces would let a transiently unavailable
+  // fence wave an abort through even though the ledger genuinely has an
+  // associated successor candidate. A peek that could not be completed
+  // must refuse the WHOLE abort, not proceed as if it had cleanly found
+  // nothing.
+  let abandonCalled = false;
+  const execute = (bin, argv) => {
+    if (argv[0] === "show") {
+      return JSON.stringify({ id: "task-42", labels: ["handoff"], source: "context-handoff", status: "queued" });
+    }
+    if (argv[0] === "payload") return "";
+    if (argv[0] === "abandon") { abandonCalled = true; return "{}"; }
+    if (bin === "agent-worktrees" && argv[0] === "get") return "wt-1";
+    if (bin === "agent-worktrees" && argv[0] === "cancel-handoff") {
+      throw new Error("agent-worktrees: request timed out");
+    }
+    return "{}";
+  };
+  const result = abortHandoffTask("C:\\repo", "task-42", null, execute);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /could not be checked|Could not verify/);
+  assert.equal(abandonCalled, false);
+});
+
 test("abortHandoffTask never commits the ledger cancellation when abandon itself fails", () => {
   // Real regression this guards (PR #4570 review round 18): the peek is
   // read-only, so a clean peek does not by itself prove the abandon that
@@ -2252,6 +2280,46 @@ test("abortFileHandoff refuses to abort when the ledger already has an associate
     );
     assert.equal(result.ok, false);
     assert.match(result.message, /successor-1/);
+    const onDisk = JSON.parse(readFileSync(path, "utf-8"));
+    assert.equal(onDisk.consumed, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("abortFileHandoff fails closed (refuses to abort) when the ledger fence itself cannot be checked", () => {
+  // Real regression this guards (PR #4570 review round 19): a peek failure
+  // (worktree id didn't resolve, CLI error, unparseable output) must not be
+  // treated the same as a definitive "no candidate" answer -- otherwise a
+  // transiently unavailable fence could destroy a handoff whose ledger
+  // genuinely has an associated successor candidate.
+  const dir = mkdtempSync(join(tmpdir(), "context-handoff-abort-unchecked-"));
+  try {
+    const path = join(dir, "handoff-unchecked.json");
+    writeJsonAtomic(path, {
+      kind: "context-handoff",
+      version: 2,
+      id: "handoff-unchecked",
+      storage: "file",
+      sessionId: "predecessor-1",
+      cwd: "C:\\repo",
+      promptText: "stored markdown",
+      consumed: false,
+      consumedAt: null,
+    });
+    const execute = (bin, argv) => {
+      if (bin === "agent-worktrees" && argv[0] === "get") return "wt-1";
+      if (bin === "agent-worktrees" && argv[0] === "cancel-handoff") {
+        throw new Error("agent-worktrees: request timed out");
+      }
+      throw new Error(`unexpected CLI call: ${bin} ${argv.join(" ")}`);
+    };
+    const result = abortFileHandoff(
+      "C:\\repo", "aborting-session", "handoff-unchecked", path, "changed my mind",
+      { execute },
+    );
+    assert.equal(result.ok, false);
+    assert.match(result.message, /could not be checked|Could not verify/);
     const onDisk = JSON.parse(readFileSync(path, "utf-8"));
     assert.equal(onDisk.consumed, false);
   } finally {
