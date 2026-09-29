@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from work_coalescing_singleton import CoalescingServer
-from zdd import routing
+from zdd import breadcrumb, routing
 
 from worktree_manager import mux_daemon
 from worktree_manager import mux_daemon_cutover as mdc
@@ -300,6 +300,57 @@ def test_activate_after_update_is_noop_when_already_at_target_version(tmp_path, 
     live.force_terminate()
 
 
+def test_activate_after_update_runs_recovery_despite_stale_breadcrumb_at_target_version(
+    tmp_path, monkeypatch
+):
+    """A stale (non-terminal) breadcrumb from a crashed prior cutover must
+    never be masked by the same-version no-op path: the routed daemon can
+    already be healthy and on the target version while a stranded old
+    survivor or abandoned passive from that aborted attempt still needs
+    recovery/reaping (aperture-labs #5195 gap; #5344 follow-up). Neither the
+    lock-free pre-check nor the under-lock re-check may return "noop" until
+    recovery has actually run."""
+    route_dir = mdc.routing_dir(tmp_path)
+    route_dir.mkdir(parents=True)
+    token = mdc.load_or_create_control_token(tmp_path)
+
+    live = _FakeMuxDaemon(101, token=token)
+    live.start(mdc.pick_free_port())
+    routing.publish_active(
+        route_dir, bind="127.0.0.1", port=live.port, pid=live.pid, version="2.0.0"
+    )
+    # A breadcrumb left in a non-terminal state marks an aborted cutover --
+    # as if the orchestrator that produced today's healthy "2.0.0" daemon had
+    # crashed right after flipping but before ever reaching "committed".
+    breadcrumb.write_breadcrumb(
+        route_dir,
+        state="draining",
+        old={"bind": "127.0.0.1", "port": 12345},
+        new_port=live.port,
+        new_pid=live.pid,
+    )
+
+    def _spawn(*a, **k):
+        raise AssertionError(
+            "no real cutover is needed: the routed daemon already serves "
+            "the target version -- only recovery/reaping should run"
+        )
+
+    monkeypatch.setattr(mdc, "spawn_passive", _spawn)
+
+    result = mdc.activate_after_update(root=tmp_path, slot=tmp_path / "slot", version="2.0.0")
+
+    # The stale breadcrumb must have forced the locked path -- recovery and
+    # abandoned-passive reaping actually ran -- rather than short-circuiting
+    # through either no-op shortcut before they could.
+    assert "recovery" in result
+    assert "passive_reap" in result
+    assert result["action"] == "noop"
+    assert result["reason"] == "already-active-version"
+
+    live.force_terminate()
+
+
 def test_activate_after_update_same_version_second_caller_converges_without_spawn(
     tmp_path, monkeypatch
 ):
@@ -353,6 +404,26 @@ def test_activate_after_update_same_version_second_caller_converges_without_spaw
 
     monkeypatch.setattr(mdc, "spawn_passive", _spawn)
 
+    # Deterministic hand-off (no sleep-based timing): the first caller already
+    # holds the cutover lock by the time the second caller is started below,
+    # so the *second* ever call into ``_acquire_cutover_lock`` is provably the
+    # second caller committing to the contended-lock path -- exactly the
+    # moment it is safe to release the first caller and know the intended
+    # race (second sees "old" pre-lock, blocks on the lock, then re-checks
+    # post-lock) was actually exercised.
+    real_acquire_lock = mdc._acquire_cutover_lock
+    acquire_call_count = 0
+    second_reached_lock = threading.Event()
+
+    def _acquire_and_signal(root_arg, **kwargs):
+        nonlocal acquire_call_count
+        acquire_call_count += 1
+        if acquire_call_count == 2:
+            second_reached_lock.set()
+        return real_acquire_lock(root_arg, **kwargs)
+
+    monkeypatch.setattr(mdc, "_acquire_cutover_lock", _acquire_and_signal)
+
     first_result: dict[str, object] = {}
 
     def _run_first() -> None:
@@ -379,10 +450,14 @@ def test_activate_after_update_same_version_second_caller_converges_without_spaw
     second_thread = threading.Thread(target=_run_second, daemon=True)
     second_thread.start()
 
-    # Give the second caller a real chance to pass its own pre-lock check
-    # (still "old") and start blocking on the contended cutover lock before
-    # the first caller is allowed to proceed to the flip.
-    time.sleep(0.3)
+    # Block until the second caller has provably fallen through its own
+    # lock-free pre-check (still "old", asserted above) and committed to
+    # waiting on the contended cutover lock -- only then release the first
+    # caller to proceed to the flip.
+    assert second_reached_lock.wait(timeout=10), (
+        "second caller never reached the contended cutover lock -- "
+        "the pre-lock/under-lock race this test targets was not exercised"
+    )
     release_first.set()
 
     first_thread.join(timeout=10)
