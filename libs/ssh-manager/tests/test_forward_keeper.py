@@ -7,19 +7,36 @@ from ssh_manager import forward_keeper as fk
 
 def test_keeper_store_state_and_stop(tmp_path, monkeypatch):
     store = fk.KeeperStore(tmp_path)
-    alive = {123: True, 456: True}
+    identities = {123: "keep-123", 456: "relay-456"}
     killed = []
-    monkeypatch.setattr(fk, "pid_alive", lambda pid: alive.get(pid, False))
+    monkeypatch.setattr(fk, "process_identity", lambda pid: identities.get(pid))
     monkeypatch.setattr(fk, "_terminate_pid", lambda pid: killed.append(pid))
 
-    store.write("target:one", {"pid": 123, "mux": "wt-x", "child_pids": [456]})
+    store.write(
+        "target:one",
+        {
+            "pid": 123,
+            "pid_identity": "keep-123",
+            "mux": "wt-x",
+            "children": [{"pid": 456, "identity": "relay-456"}],
+        },
+    )
 
     assert store.state_path("target:one").name == "target-one.json"
-    assert store.read("target:one") == {"pid": 123, "mux": "wt-x", "child_pids": [456]}
     assert store.alive("target:one") is True
     assert store.stop("target:one") is True
     assert killed == [123, 456]
     assert store.read("target:one") is None
+
+
+def test_keeper_store_ignores_reused_pid_without_identity_match(tmp_path, monkeypatch):
+    store = fk.KeeperStore(tmp_path)
+    monkeypatch.setattr(fk, "process_identity", lambda pid: "someone-else")
+
+    store.write("target:one", {"pid": 123, "pid_identity": "keep-123", "mux": "wt-x"})
+
+    assert store.alive("target:one") is False
+    assert store.stop("target:one") is False
 
 
 def test_keeper_store_ignores_bad_json(tmp_path):
@@ -31,8 +48,9 @@ def test_keeper_store_ignores_bad_json(tmp_path):
     assert store.stop("x") is False
 
 
-def test_spawn_keeper_detaches_and_returns_state():
+def test_spawn_keeper_detaches_and_returns_state(monkeypatch):
     seen = {}
+    monkeypatch.setattr(fk, "process_identity", lambda pid: f"proc-{pid}")
 
     class Proc:
         pid = 456
@@ -51,6 +69,7 @@ def test_spawn_keeper_detaches_and_returns_state():
     )
 
     assert state["pid"] == 456 and state["key"] == "target"
+    assert state["pid_identity"] == "proc-456"
     assert state["started_at"] > 0
     assert seen["argv"] == ["python", "-m", "x"]
     assert seen["kwargs"]["stdin"] is not None
@@ -59,12 +78,18 @@ def test_spawn_keeper_detaches_and_returns_state():
 
 def test_keeper_store_reaps_child_pids_when_keeper_pid_is_gone(tmp_path, monkeypatch):
     store = fk.KeeperStore(tmp_path)
-    alive = {456: True}
     killed = []
-    monkeypatch.setattr(fk, "pid_alive", lambda pid: alive.get(pid, False))
+    monkeypatch.setattr(fk, "process_identity", lambda pid: {456: "relay-456"}.get(pid))
     monkeypatch.setattr(fk, "_terminate_pid", lambda pid: killed.append(pid))
 
-    store.write("target:one", {"pid": 123, "child_pids": [456]})
+    store.write(
+        "target:one",
+        {
+            "pid": 123,
+            "pid_identity": "keep-123",
+            "children": [{"pid": 456, "identity": "relay-456"}],
+        },
+    )
 
     assert store.stop("target:one") is True
     assert killed == [456]

@@ -8,6 +8,7 @@ import os
 import shlex
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,12 @@ from agent_procutil import (
     windowless_python_env,
 )
 from ssh_manager import SSHProfileSource, SupervisedRelayForward, build_remote_exec_args
-from ssh_manager.forward_keeper import KeeperStore, run_supervised_loop, spawn_keeper
+from ssh_manager.forward_keeper import (
+    KeeperStore,
+    process_identity,
+    run_supervised_loop,
+    spawn_keeper,
+)
 from venue_copilot import (
     read_seed,
     resolve_daemon_port,
@@ -32,6 +38,7 @@ _RESERVATION_TTL = 900.0
 _RESERVE_RETRY_WINDOW = 90.0
 _PROBE_ATTEMPTS = 2
 _LEGACY_ROOT = ".agent-ssh"  # marketplace-isolation: allow legacy compatibility root
+_KEEPER_TOKEN_ENV = "AGENT_SSH_KEEPER_TOKEN"
 _STATE_DIR = Path.home() / _LEGACY_ROOT / "forward-keepers"
 _STORE = KeeperStore(_STATE_DIR)
 
@@ -173,18 +180,34 @@ def stop_keeper(target: str) -> bool:
 def _keeper_state(
     target: str, venue_port: int, mux: str, forwards: list[SupervisedRelayForward] | None = None,
 ) -> dict[str, Any]:
-    child_pids = [
-        pid
-        for pid in (forward.process_pid for forward in (forwards or []))
-        if isinstance(pid, int) and pid > 0
+    children = [
+        {"pid": pid, "identity": identity}
+        for forward in (forwards or [])
+        for pid, identity in [(forward.process_pid, forward.process_birth_identity)]
+        if isinstance(pid, int) and pid > 0 and isinstance(identity, str) and identity
     ]
     return {
         "pid": os.getpid(),
+        "pid_identity": process_identity(os.getpid()) or "",
         "target": target,
         "venue_port": int(venue_port),
         "mux": mux,
-        "child_pids": child_pids,
+        "children": children,
+        "instance_token": os.environ.get(_KEEPER_TOKEN_ENV, ""),
     }
+
+
+def _write_keeper_state(target: str, payload: dict[str, Any]) -> None:
+    current = read_keeper_state(target)
+    if (
+        current
+        and current.get("instance_token")
+        and current.get("instance_token") == payload.get("instance_token")
+        and current.get("children")
+        and not payload.get("children")
+    ):
+        payload = {**payload, "children": current["children"]}
+    _STORE.write(_state_key(target), payload)
 
 
 def ensure_keeper(target: str, *, venue_port: int, mux: str) -> dict[str, Any]:
@@ -210,13 +233,23 @@ def ensure_keeper(target: str, *, venue_port: int, mux: str) -> dict[str, Any]:
         "--startup-grace",
         "300",
     ]
+    instance_token = uuid.uuid4().hex
     state = spawn_keeper(
         argv,
-        {**os.environ, **windowless_python_env()},
-        {"target": target, "venue_port": int(venue_port), "mux": mux},
+        {
+            **os.environ,
+            **windowless_python_env(),
+            _KEEPER_TOKEN_ENV: instance_token,
+        },
+        {
+            "target": target,
+            "venue_port": int(venue_port),
+            "mux": mux,
+            "instance_token": instance_token,
+        },
         popen_kwargs=windowless_daemon_kwargs(breakaway=True),
     )
-    _STORE.write(_state_key(target), state)
+    _write_keeper_state(target, state)
     return {"started": True, "state": state}
 
 
@@ -320,8 +353,8 @@ def _mux_exists(ssh_config: Any, mux: str) -> bool:
 async def _run_forward_keeper(args: argparse.Namespace) -> int:
     ssh_config = _ssh_config(args.target)
     def write_state() -> None:
-        _STORE.write(
-            _state_key(args.target),
+        _write_keeper_state(
+            args.target,
             _keeper_state(
                 args.target,
                 int(args.venue_port),

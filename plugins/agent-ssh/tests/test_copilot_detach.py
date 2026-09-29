@@ -210,6 +210,7 @@ def test_forward_keeper_rewrites_state_when_relay_pid_changes(tmp_path, monkeypa
     store = detach.KeeperStore(tmp_path)
     monkeypatch.setattr(detach, "_STORE", store)
     monkeypatch.setattr(detach, "_ssh_config", lambda target: object())
+    monkeypatch.setenv(detach._KEEPER_TOKEN_ENV, "tok")
 
     class Forward:
         def __init__(self, *_args, on_pid_change=None, **_kwargs):
@@ -219,6 +220,10 @@ def test_forward_keeper_rewrites_state_when_relay_pid_changes(tmp_path, monkeypa
         @property
         def process_pid(self):
             return self._pid
+
+        @property
+        def process_birth_identity(self):
+            return None if self._pid is None else f"id-{self._pid}"
 
         async def start(self):
             self._pid = 111
@@ -236,6 +241,7 @@ def test_forward_keeper_rewrites_state_when_relay_pid_changes(tmp_path, monkeypa
     async def fake_loop(forwards, **kwargs):
         kwargs["write_state"]()
         await forwards[0].start()
+        kwargs["write_state"]()
         forwards[0].restart()
         return 0
 
@@ -251,4 +257,4 @@ def test_forward_keeper_rewrites_state_when_relay_pid_changes(tmp_path, monkeypa
     )
 
     assert asyncio.run(detach._run_forward_keeper(args)) == 0
-    assert store.read("devbox")["child_pids"] == [222]
+    assert store.read("devbox")["children"] == [{"pid": 222, "identity": "id-222"}]

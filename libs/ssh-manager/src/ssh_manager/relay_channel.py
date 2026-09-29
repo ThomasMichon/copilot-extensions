@@ -24,6 +24,7 @@ from dataclasses import dataclass
 
 from .config_sources import SSHConfig
 from .forward import build_forward_ssh_args
+from .locks import process_identity
 from .process import terminate_ssh_process_tree
 from .proxy import create_ssh_subprocess
 
@@ -106,6 +107,11 @@ class SupervisedRelayForward:
             return None
         pid = getattr(proc, "pid", None)
         return pid if isinstance(pid, int) and pid > 0 else None
+
+    @property
+    def process_birth_identity(self) -> str | None:
+        pid = self.process_pid
+        return process_identity(pid) if isinstance(pid, int) and pid > 0 else None
 
     def _notify_pid_change(self) -> None:
         callback = self._on_pid_change
@@ -355,11 +361,10 @@ class SupervisedRelayForward:
 
     async def _cancel_process(self) -> None:
         proc = self._proc
-        self._proc = None
-        if proc is not None:
-            self._notify_pid_change()
         if proc is not None:
             await self._kill(proc)
+            self._proc = None
+            self._notify_pid_change()
 
     @staticmethod
     async def _drain_stderr(proc: asyncio.subprocess.Process) -> str:

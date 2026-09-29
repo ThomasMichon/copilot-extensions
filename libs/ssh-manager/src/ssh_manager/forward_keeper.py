@@ -14,7 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .locks import pid_alive
+from .locks import pid_alive, process_identity
 
 
 def _safe(key: str) -> str:
@@ -76,19 +76,27 @@ class KeeperStore:
     def alive(self, key: str) -> bool:
         state = self.read(key)
         try:
-            return bool(state and pid_alive(int(state.get("pid") or 0)))
+            if not state:
+                return False
+            pid = int(state.get("pid") or 0)
         except (TypeError, ValueError):
             return False
+        if pid <= 0:
+            return False
+        identity = state.get("pid_identity")
+        if isinstance(identity, str) and identity:
+            return process_identity(pid) == identity
+        return pid_alive(pid)
 
     def stop(self, key: str) -> bool:
         state = self.read(key)
         if not state:
             return False
         live = False
-        for pid in _state_pids(state):
-            if pid_alive(pid):
+        for record in _state_process_records(state):
+            if _record_is_live(record):
                 live = True
-                _terminate_pid(pid)
+                _terminate_pid(int(record["pid"]))
         self.remove(key)
         return live
 
@@ -110,7 +118,13 @@ def spawn_keeper(
         env=env,
         **(popen_kwargs or {}),
     )
-    return {**state, "pid": int(proc.pid), "started_at": time.time()}
+    pid = int(proc.pid)
+    return {
+        **state,
+        "pid": pid,
+        "pid_identity": process_identity(pid),
+        "started_at": time.time(),
+    }
 
 
 async def run_supervised_loop(
@@ -145,16 +159,43 @@ async def run_supervised_loop(
         remove_state()
 
 
-def _state_pids(state: dict[str, Any]) -> list[int]:
+def _state_process_records(state: dict[str, Any]) -> list[dict[str, str | int | None]]:
+    records: list[dict[str, str | int | None]] = []
+    records.append({"pid": state.get("pid"), "identity": state.get("pid_identity")})
+    children = state.get("children")
+    if isinstance(children, list):
+        for child in children:
+            if isinstance(child, dict):
+                records.append(
+                    {"pid": child.get("pid"), "identity": child.get("identity")}
+                )
+    else:
+        child_values = state.get("child_pids")
+        if isinstance(child_values, list):
+            for value in child_values:
+                records.append({"pid": value, "identity": None})
+    normalized: list[dict[str, str | int | None]] = []
     pids: list[int] = []
-    child_values = state.get("child_pids")
-    if not isinstance(child_values, list):
-        child_values = []
-    for value in [state.get("pid"), *child_values]:
+    for record in records:
         try:
-            pid = int(value or 0)
+            pid = int(record.get("pid") or 0)
         except (TypeError, ValueError):
             continue
         if pid > 0 and pid not in pids:
             pids.append(pid)
-    return pids
+            identity = record.get("identity")
+            normalized.append(
+                {
+                    "pid": pid,
+                    "identity": identity if isinstance(identity, str) and identity else None,
+                }
+            )
+    return normalized
+
+
+def _record_is_live(record: dict[str, str | int | None]) -> bool:
+    pid = int(record["pid"])
+    identity = record.get("identity")
+    if isinstance(identity, str) and identity:
+        return process_identity(pid) == identity
+    return False
