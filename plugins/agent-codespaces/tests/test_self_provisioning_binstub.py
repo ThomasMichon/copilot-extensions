@@ -170,3 +170,15 @@ def test_windows_binstubs_share_safe_resolution_and_locking() -> None:
     assert "System.Threading.Mutex" in ps1
     assert 'agent-codespaces.ps1" %*' in cmd
     assert "powershell" in cmd
+
+
+def test_installers_preinstall_zdd_workspace_dependency() -> None:
+    install_sh = INSTALL_SH.read_text(encoding="utf-8")
+    install_ps1 = INSTALL_PS1.read_text(encoding="utf-8")
+
+    assert 'ZDD_DIR="$PLUGIN_DIR/libs/zdd"' in install_sh
+    assert '--editable "$ZDD_DIR"' in install_sh
+    assert '--reinstall-package agent-zdd "$ZDD_DIR"' in install_sh
+    assert "Join-Path $PluginDir 'libs\\zdd'" in install_ps1
+    assert "'agent-zdd'" in install_ps1
+    assert '"$ZddDir"' in install_ps1

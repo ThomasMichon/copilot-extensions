@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "copilot-extensions-worktree-manager"
-version = "0.2.1-dev1"
+version = "0.2.2-dev1"
 description = "Standalone, out-of-plugin control plane (installer, configurator & worktree launcher) for the copilot-extensions harness."
 readme = "README.md"
 license = "MIT"
@@ -53,8 +53,10 @@ dependencies = [
     # ``agent_worktrees.mux_link``'s own use of the same shared library.
     "agent-work-coalescing-singleton",
     # Zero-downtime active/passive cutover primitives (routing table +
-    # orchestrator), vendored byte-identically per the graceful-cutover
-    # rollout. Used by the resident mux-daemon update path.
+    # orchestrator). This is a `uv`-editable canonical reference on `dev`
+    # (shared with the runtime plugins), and only a materialized `main`
+    # payload carries the real local vendored tree. Used by the resident
+    # mux-daemon update path.
     "agent-zdd",
 ]
 
@@ -84,8 +86,12 @@ agent-plugin-activation = { path = "libs/plugin-activation" }
 # a real `main`-branch release (tools/materialize_main.py) ever gets a real
 # local copy.
 agent-work-coalescing-singleton = { path = "libs/work-coalescing-singleton" }
-# Zero-downtime active/passive cutover primitives (module ``zdd``). Vendored
-# per the same byte-identical-in-consumer rule as the runtime plugins.
+# Zero-downtime active/passive cutover primitives (module ``zdd``). This is a
+# `uv`-editable canonical reference (vendor-pointer-generalization effort,
+# Phase 1): `path` escapes this project's own root and resolves live to
+# `libs/zdd`, so this `dev`-branch checkout has nothing to keep manually in
+# sync -- only a real `main`-branch release (tools/materialize_main.py)
+# ever gets a real local copy.
 agent-zdd = { path = "libs/zdd" }
 
 [project.scripts]

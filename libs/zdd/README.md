@@ -83,6 +83,14 @@ follow the table -- short-lived clients re-read `active.json` directly; a servic
 behind a fixed external port (e.g. reached through a reverse tunnel) instead has
 a hop watch the table and re-point at the live port.
 
+## Vendoring
+
+On `dev`, consumers may reference `libs/zdd` canonically via
+`[tool.uv.sources]` with `editable = true` instead of carrying a local
+`plugins/<plugin>/libs/zdd` copy. Promotion materializes that canonical
+reference back into a real local `libs/zdd/` tree for shipped `main` payloads,
+so development stays DRY without weakening the self-contained release payload.
+
 ## Development
 
 ```bash

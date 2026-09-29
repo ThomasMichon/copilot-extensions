@@ -69,6 +69,7 @@ raise SystemExit(1)
 }
 _resolve_ssh_manager() { _resolve_vendored_lib ssh-manager; }
 _resolve_agent_procutil() { _resolve_vendored_lib agent-procutil; }
+_resolve_zdd() { _resolve_vendored_lib zdd; }
 
 _install_agent_ssh_package() {
     if [[ "$HAVE_UV" -eq 1 ]]; then
@@ -78,7 +79,7 @@ _install_agent_ssh_package() {
         _step 'uv package install failed -- falling back to python -m pip'
     fi
 
-    local agent_procutil_dir ssh_manager_dir
+    local agent_procutil_dir ssh_manager_dir zdd_dir
     agent_procutil_dir="$(_resolve_agent_procutil)" || {
         _fail 'Cannot locate agent-procutil library'
         return 1
@@ -87,12 +88,16 @@ _install_agent_ssh_package() {
         _fail 'Cannot locate ssh-manager library'
         return 1
     }
+    zdd_dir="$(_resolve_zdd)" || {
+        _fail 'Cannot locate zdd library'
+        return 1
+    }
     "$VENV_PYTHON" -m pip install --quiet \
         "$agent_procutil_dir" \
         "$PLUGIN_DIR/libs/dropin-registry" \
         "$ssh_manager_dir" \
         "$PLUGIN_DIR/libs/venue-copilot" \
-        "$PLUGIN_DIR/libs/zdd" \
+        "$zdd_dir" \
         "$PLUGIN_DIR" 2>/dev/null
 }
 

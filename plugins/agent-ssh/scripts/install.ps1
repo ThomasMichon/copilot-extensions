@@ -293,6 +293,7 @@ raise SystemExit(1)
 # no `$PluginDir\libs\<lib>` copy for either one.
 function Resolve-SshManager { return (Resolve-VendoredLib -LibName 'ssh-manager') }
 function Resolve-AgentProcutil { return (Resolve-VendoredLib -LibName 'agent-procutil') }
+function Resolve-Zdd { return (Resolve-VendoredLib -LibName 'zdd') }
 
 $PluginDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $PkgSrcDir = Join-Path $PluginDir 'src\agent_ssh'
@@ -764,12 +765,17 @@ if (-not $sshManagerDir) {
     Write-Fail 'Cannot locate ssh-manager library'
     exit 1
 }
+$zddDir = Resolve-Zdd
+if (-not $zddDir) {
+    Write-Fail 'Cannot locate zdd library'
+    exit 1
+}
 $vendoredDependencies = @(
     $agentProcutilDir,
     (Join-Path $PluginDir 'libs\dropin-registry'),
     $sshManagerDir,
     (Join-Path $PluginDir 'libs\venue-copilot'),
-    (Join-Path $PluginDir 'libs\zdd')
+    $zddDir
 )
 $pkgInstalled = Install-AgentSshPackage `
     -Python $VenvPython `

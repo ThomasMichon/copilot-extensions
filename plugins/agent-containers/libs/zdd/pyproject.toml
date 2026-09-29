@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=83.0.0"]
+requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-zdd"
 version = "0.1.0-dev6"
-description = "Zero-downtime active/passive cutover primitives (routing table + orchestrator) for Copilot CLI plugins and multi-machine services"
+description = "Zero-downtime active/passive cutover primitives (routing table + orchestrator) for Copilot CLI plugins and facility services"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -24,7 +24,7 @@ line-length = 99
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=9.1.1",
+    "pytest>=8.0",
 ]
 
 [tool.ruff.lint]

@@ -135,6 +135,8 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
     (plugin / "libs" / "dropin-registry").mkdir(parents=True)
     (plugin / "libs" / "ssh-manager").mkdir(parents=True)
     (plugin / "libs" / "ssh-manager" / "pyproject.toml").write_text("", encoding="utf-8")
+    (plugin / "libs" / "zdd").mkdir(parents=True)
+    (plugin / "libs" / "zdd" / "pyproject.toml").write_text("", encoding="utf-8")
     marker = tmp_path / "pip-fallback-ran"
     fake_python = tmp_path / "python"
     fake_python.write_text(
@@ -153,6 +155,7 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
                 resolve_vendored_lib,
                 "_resolve_ssh_manager() { _resolve_vendored_lib ssh-manager; }",
                 "_resolve_agent_procutil() { _resolve_vendored_lib agent-procutil; }",
+                "_resolve_zdd() { _resolve_vendored_lib zdd; }",
                 install_package,
                 "HAVE_UV=0",
                 f"VENV_PYTHON='{fake_python}'",
@@ -178,6 +181,7 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
     assert str(plugin / "libs" / "agent-procutil") in fallback_args
     assert str(plugin / "libs" / "dropin-registry") in fallback_args
     assert str(plugin / "libs" / "ssh-manager") in fallback_args
+    assert str(plugin / "libs" / "zdd") in fallback_args
     assert str(plugin) in fallback_args
 
 
@@ -209,6 +213,9 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
     canonical_agent_procutil = repo_root / "libs" / "agent-procutil"
     canonical_agent_procutil.mkdir(parents=True)
     (canonical_agent_procutil / "pyproject.toml").write_text("", encoding="utf-8")
+    canonical_zdd = repo_root / "libs" / "zdd"
+    canonical_zdd.mkdir(parents=True)
+    (canonical_zdd / "pyproject.toml").write_text("", encoding="utf-8")
 
     marker = tmp_path / "pip-fallback-ran"
     fake_python = tmp_path / "python"
@@ -228,6 +235,7 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
                 resolve_vendored_lib,
                 "_resolve_ssh_manager() { _resolve_vendored_lib ssh-manager; }",
                 "_resolve_agent_procutil() { _resolve_vendored_lib agent-procutil; }",
+                "_resolve_zdd() { _resolve_vendored_lib zdd; }",
                 install_package,
                 "HAVE_UV=0",
                 f"VENV_PYTHON='{fake_python}'",
@@ -252,3 +260,12 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
     fallback_args = marker.read_text(encoding="ascii")
     assert str(canonical_ssh_manager.resolve()) in fallback_args
     assert str(canonical_agent_procutil.resolve()) in fallback_args
+    assert str(canonical_zdd.resolve()) in fallback_args
+
+
+def test_powershell_installer_resolves_zdd_via_shared_helper() -> None:
+    installer = INSTALLER.read_text(encoding="utf-8")
+
+    assert "function Resolve-Zdd" in installer
+    assert "Resolve-VendoredLib -LibName 'zdd'" in installer
+    assert "$zddDir = Resolve-Zdd" in installer

@@ -34,6 +34,18 @@ def test_installers_fall_back_and_preserve_bounded_diagnostics() -> None:
     assert "falling back to the base package" in posix
 
 
+def test_installers_preinstall_zdd_workspace_dependency() -> None:
+    powershell = (PLUGIN / "scripts" / "init.ps1").read_text(encoding="utf-8")
+    posix = (PLUGIN / "scripts" / "init.sh").read_text(encoding="utf-8")
+
+    assert "agent-zdd" in powershell
+    assert "$ZddDir = Join-Path $PluginDir 'libs\\zdd'" in powershell
+    assert "zdd install failed" in powershell
+    assert "agent-zdd" in posix
+    assert 'ZDD_DIR="$PLUGIN_DIR/libs/zdd"' in posix
+    assert "zdd install failed" in posix
+
+
 def test_windows_management_binstub_resolves_powershell_without_path() -> None:
     powershell = (PLUGIN / "scripts" / "init.ps1").read_text(encoding="utf-8")
 

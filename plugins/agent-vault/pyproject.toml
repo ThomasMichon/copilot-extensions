@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-vault"
-version = "0.1.9-dev1"
+version = "0.1.10-dev1"
 description = "Local KeePassXC-backed secret store for Copilot CLI agents."
 readme = "README.md"
 license = "MIT"
@@ -25,9 +25,14 @@ dependencies = [
 # (tools/materialize_main.py) ever gets a real local copy.
 agent-procutil = { path = "libs/agent-procutil" }
 # zero-downtime cutover primitives -- routing table + cutover orchestrator +
-# recovery breadcrumb (module ``zdd``). Vendored per plugin; byte-identical src
-# across copies. Lets a vault version bump drain-and-cut-over instead of a hard
-# restart, so the unlocked master secret survives (#743).
+# recovery breadcrumb (module ``zdd``). This is a `uv`-editable canonical
+# reference (vendor-pointer-generalization effort, Phase 1): `path`
+# escapes this plugin's own root and resolves live to `libs/zdd`, so this
+# `dev`-branch checkout has nothing to keep manually in sync -- only a
+# real `main`-branch release (tools/materialize_main.py) ever gets a real
+# local copy. It still lets a vault version bump drain-and-cut-over
+# instead of a hard restart, so the unlocked master secret survives
+# (#743).
 agent-zdd = { path = "libs/zdd" }
 # single-instance lease + supersession self-retire (module
 # ``single_instance_lease``). Guards "one active vault per host" and drives the

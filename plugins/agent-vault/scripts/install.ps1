@@ -788,13 +788,14 @@ function Install-Runtime {
     Remove-ConsoleTrampolines -VenvDir $VenvDir
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    # Every `[tool.uv.sources]` workspace path dep -- both the real local
-    # copy (`agent-zdd`) and the `uv`-editable canonical references
-    # (`agent-procutil`, `agent-single-instance-lease`: vendor-pointer-
-    # generalization effort, Phase 1) -- needs an explicit pre-install
-    # here: `uv` resolves `[tool.uv.sources]` fine when installing the
-    # main package directly, but the non-uv (bare `pip install`) fallback
-    # below ignores that table entirely.
+    # Every `[tool.uv.sources]` workspace path dep -- both the zdd
+    # canonical-on-dev / materialized-on-release reference and the other
+    # `uv`-editable canonical references (`agent-procutil`,
+    # `agent-single-instance-lease`: vendor-pointer-generalization effort,
+    # Phase 1) -- needs an explicit pre-install here: `uv` resolves
+    # `[tool.uv.sources]` fine when installing the main package directly,
+    # but the non-uv (bare `pip install`) fallback below ignores that
+    # table entirely.
     foreach ($lib in @('zdd', 'agent-procutil', 'single-instance-lease')) {
         $libDir = Join-Path $PluginDir "libs\$lib"
         if (-not (Test-Path (Join-Path $libDir 'pyproject.toml'))) {

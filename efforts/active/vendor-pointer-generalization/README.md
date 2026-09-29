@@ -486,13 +486,15 @@ shape before committing to a design)_
                   depends on `agent-dropin-registry`/`agent-plugin-resolve`
                   -- apply the ordering caveat above too.**
       - [ ] Remaining real lib copies never yet converted at all
-            (`agent-procutil`, `dropin-registry`, `plugin-resolve`,
-            `session-liveness-probe`, `venue-copilot`, `zdd`) — convert
-            directly to this form, skipping `src-passthrough` entirely.
+            (`session-liveness-probe`, `venue-copilot`) — convert directly
+            to this form, skipping `src-passthrough` entirely.
             `session-liveness-probe`/`venue-copilot` have no top-level
             canonical `libs/<lib>/` yet (confirmed via `sync-vendored-libs
             .py --check`'s advisory drift note) — needs a canonical-
             promotion step before either is eligible for any conversion.
+            `zdd` was finished later (2026-09-29) for every real consumer
+            **except** deliberately-excluded `agent-worktrees`; see the
+            Journal entry below for the rationale.
 - [x] **Build the conversion tool**: a script performing the rewrite above
       across every real consumer of a given lib in one pass (a new tool,
       or a new mode on `sync-vendored-libs.py` — this repo currently has
@@ -2396,3 +2398,95 @@ _Pending._
   recovered on its own; this leg switched to plain pushes (which already
   trigger a fresh review pass) for the remainder.
 
+### 2026-09-29 — Phase 1: converted `zdd`'s in-scope consumers (9 converted, `agent-worktrees` excluded)
+
+- Re-derived the consumer set from a fresh `libs/zdd` grep before
+  touching anything. Current `pyproject.toml` consumers were:
+  `agent-ssh`, `agent-vault`, `agent-dispatch`, `agent-containers`,
+  `agent-index`, `agent-mcp`, `agent-bridge`, `agent-codespaces`,
+  `agent-worktrees`, and `worktree-manager` -- **10 total**, not the
+  inherited 9. `agent-worktrees` stayed deliberately out of scope per PR
+  #4447's explicit "make the shipped dependency copies part of the plugin
+  build surface" decision, so this leg converted the other 9.
+- `python3 tools/sync-vendored-libs.py --check` still reported zdd as
+  "in sync" because it only guards `src/`; the first actual
+  `--uv-editable agent-vault zdd` conversion refusal exposed the REAL
+  full-tree drift this recipe warns about:
+  - stale `README.md`/`pyproject.toml` in every real zdd copy,
+  - missing canonical `tests/` in most copies (and missing
+    `test_diagnostics.py` in the few copies that did vendor tests),
+  - stray `build/` / `*.egg-info` cruft in a couple of consumers.
+  Backfilled canonical `README.md`/`pyproject.toml`/`tests/` and removed
+  the build cruft for the **9 in-scope consumers only**, then re-ran the
+  conversion. `agent-worktrees`'s zdd copy was intentionally left
+  untouched despite carrying the same drift.
+- Converted these 9 consumers from real copies to `uv`-editable canonical
+  references:
+  `agent-vault`, `agent-mcp`, `agent-ssh`, `agent-index`,
+  `agent-dispatch`, `agent-containers`, `agent-codespaces`,
+  `agent-bridge`, and `worktree-manager`.
+- Install-script audit findings/fixes:
+  - `agent-ssh`'s non-uv pip fallback still hardcoded
+    `"$PLUGIN_DIR/libs/zdd"` / `Join-Path $PluginDir 'libs\zdd'`, unlike
+    its already-generic ssh-manager/agent-procutil resolvers. Added the
+    shared zdd resolver on both shell variants and extended the fallback
+    guard tests.
+  - `agent-containers`' `init.sh`/`init.ps1` preinstalled only
+    `credential-relay` + `config-migrate`; once zdd became `uv`-editable,
+    the installer needed the same explicit preinstall for it too. Added
+    the zdd source fallback + guarded `agent-zdd` install to both
+    scripts, with dependency-contract assertions.
+  - `agent-codespaces` had the same omission in both `install.sh` and
+    `install.ps1` (`ssh-manager`/`credential-relay`/`config-migrate`
+    only). Added `zdd` to both editable-dev and non-editable install
+    paths, with matching guard assertions.
+  - `agent-vault`, `agent-dispatch`, `agent-index`, `agent-mcp`, and
+    `agent-bridge` already had valid zdd coverage; no install-script
+    changes were needed there.
+- `agent-index`'s installation-cell zdd handling was **not actually
+  generic yet**, despite the prior leg's assumption: its snapshot backfill
+  still hardcoded only `agent-procutil`, and `_payload_routing_module()`
+  assumed a payload-local `libs/zdd/src` always existed. Generalized the
+  snapshot backfill over every escaping `[tool.uv.sources]` entry, taught
+  the routing import seam to fall back to repo-root canonical `libs/zdd`
+  in a dev checkout, and extended `test_installation_cells.py`
+  accordingly.
+- Validation/verification completed:
+  - full repo gate green:
+    `sync-vendored-libs.py --check`,
+    `check-vendored-libs-sync.py`,
+    `check-install-contract.py`,
+    `check-version-consistency.py`,
+    `check-module-size.py`,
+    `check-docs-consistency.py`,
+    `check-changefile-presence.py --base origin/dev`
+  - converted plugin suites green:
+    `agent-vault`, `agent-mcp`, `agent-ssh`, `agent-containers`,
+    `agent-codespaces`, `agent-bridge`, `agent-dispatch`, `agent-index`
+  - `worktree-manager` (no `run-plugin-tests.py` wrapper of its own):
+    raw `test-supervisor -- worktree-manager/.venv-ci/bin/python -m pytest
+    worktree-manager/tests` green, 1463 passed / 4 skipped
+  - fresh non-editable probe install: `uv pip install --no-cache
+    plugins/agent-vault` resolved `zdd.__file__` to canonical
+    `libs/zdd/src/zdd/__init__.py`
+  - quiet full-tree `materialize_main.py --dest ../materialized-zdd-check`
+    round-trip verified `plugins/agent-vault` rewrites
+    `agent-zdd = { path = "libs/zdd" }`, strips `editable = true`, and
+    restores the real vendored `README.md`/`pyproject.toml`/`src/`/`tests/`
+    tree for zdd in the materialized payload
+- Also added `libs/zdd/README.md`'s missing Vendoring note so it no longer
+  implies only the historical "every consumer ships a real local copy"
+  shape.
+- Validation surfaced one unrelated-but-real pre-existing regression in
+  `libs/credential-relay`: `git_credential.py` resolved
+  `powershell.exe` at import time, which broke `agent-containers`' own
+  peer-governance refusal test once that suite re-imported the source in a
+  stricter PATH-sanitized sandbox. Fixed by resolving PowerShell lazily at
+  first use instead of at import time; this was required to get the
+  mandated full consumer-suite validation green, not part of zdd's design.
+- **Still not done after this leg:** `agent-worktrees`' zdd copy remains a
+  real vendored copy by deliberate maintainer choice (same evidence trail
+  toward Phase 2 as its earlier `agent-procutil` exclusion); `session-
+  liveness-probe` and `venue-copilot` still need canonical promotion
+  before any Phase 1 conversion; `src-passthrough` retirement and Phase
+  2/3 remain outstanding.

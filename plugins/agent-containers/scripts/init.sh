@@ -271,6 +271,12 @@ CFG_MIGRATE_DIR="$PLUGIN_DIR/libs/config-migrate"
 if [[ ! -f "$CFG_MIGRATE_DIR/pyproject.toml" ]]; then
     CFG_MIGRATE_DIR="$(cd "$PLUGIN_DIR/../.." && pwd)/libs/config-migrate"
 fi
+# zdd dir (uv-editable canonical reference in a dev checkout, real copy in a
+# materialized release payload): plugin-vendored or repo-root.
+ZDD_DIR="$PLUGIN_DIR/libs/zdd"
+if [[ ! -f "$ZDD_DIR/pyproject.toml" ]]; then
+    ZDD_DIR="$(cd "$PLUGIN_DIR/../.." && pwd)/libs/zdd"
+fi
 
 # --- self-provisioning (runtime-self-provisioning pattern) -------------------
 # Vendor a standalone uv when absent (pristine box has neither uv nor pip/venv).
@@ -487,8 +493,9 @@ print_package_diagnostics() {
 }
 
 if [[ "$HAVE_UV" -eq 1 ]]; then
-    # credential-relay first (vendored lib), force-reinstalled so local code
-    # changes propagate even without a version bump; then agent-containers.
+    # credential-relay/config-migrate/zdd first (workspace path deps), force-
+    # reinstalled so local code changes propagate even without a version bump;
+    # then agent-containers.
     if [[ ! -f "$CRED_RELAY_DIR/pyproject.toml" ]]; then
         _fail "credential-relay source not found at $CRED_RELAY_DIR"
         exit 1
@@ -506,6 +513,16 @@ if [[ "$HAVE_UV" -eq 1 ]]; then
     run_bounded_package_command uv pip install --python "$VENV_PYTHON" --reinstall-package agent-config-migrate "$CFG_MIGRATE_DIR" --quiet
     if [[ "$PACKAGE_STATUS" -ne 0 ]]; then
         _fail 'config-migrate install failed'
+        print_package_diagnostics
+        exit 1
+    fi
+    if [[ ! -f "$ZDD_DIR/pyproject.toml" ]]; then
+        _fail "zdd source not found at $ZDD_DIR"
+        exit 1
+    fi
+    run_bounded_package_command uv pip install --python "$VENV_PYTHON" --reinstall-package agent-zdd "$ZDD_DIR" --quiet
+    if [[ "$PACKAGE_STATUS" -ne 0 ]]; then
+        _fail 'zdd install failed'
         print_package_diagnostics
         exit 1
     fi

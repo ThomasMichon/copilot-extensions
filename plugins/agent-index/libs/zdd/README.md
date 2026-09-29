@@ -47,6 +47,17 @@ retire it. The sequence is reversible up to an explicit commit point, with
 rollback and commit-forward (if the old endpoint is unreachable, it commits to
 the healthy new one rather than stranding clients).
 
+### `zdd.diagnostics` -- daemon-health audit + repair
+
+`audit_daemon_health()` and `apply_daemon_health()` let a consumer surface the
+field-proven abnormal cutover states uniformly through its own doctor/health
+command: duplicate resident daemons, stranded old survivors from an aborted
+cutover, never-promoted abandoned passives, and stale superseded generations
+that should already have self-retired. Destructive repairs are gated on the
+same two rules everywhere: first confirm a validated live owner from the
+consumer's lock/routing state, then terminate only through an identity-bound
+OS handle tied to the target process's start time.
+
 ## Consumer contract
 
 Every side-effecting collaborator is **injected**, so a consuming service stays
@@ -71,6 +82,14 @@ it safe to retire the old daemon?) and an **edge adapter** that makes its client
 follow the table -- short-lived clients re-read `active.json` directly; a service
 behind a fixed external port (e.g. reached through a reverse tunnel) instead has
 a hop watch the table and re-point at the live port.
+
+## Vendoring
+
+On `dev`, consumers may reference `libs/zdd` canonically via
+`[tool.uv.sources]` with `editable = true` instead of carrying a local
+`plugins/<plugin>/libs/zdd` copy. Promotion materializes that canonical
+reference back into a real local `libs/zdd/` tree for shipped `main` payloads,
+so development stays DRY without weakening the self-contained release payload.
 
 ## Development
 

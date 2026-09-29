@@ -282,6 +282,12 @@ $CfgMigrateDir = Join-Path $PluginDir 'libs\config-migrate'
 if (-not (Test-Path (Join-Path $CfgMigrateDir 'pyproject.toml'))) {
     $CfgMigrateDir = Join-Path (Split-Path -Parent (Split-Path -Parent $PluginDir)) 'libs\config-migrate'
 }
+# zdd dir (uv-editable canonical reference in a dev checkout, real copy in a
+# materialized release payload): plugin-vendored or repo-root.
+$ZddDir = Join-Path $PluginDir 'libs\zdd'
+if (-not (Test-Path (Join-Path $ZddDir 'pyproject.toml'))) {
+    $ZddDir = Join-Path (Split-Path -Parent (Split-Path -Parent $PluginDir)) 'libs\zdd'
+}
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 
 # === install-contract:v3 strip-trampolines -- keep byte-identical across plugins ===
@@ -697,8 +703,9 @@ $ErrorActionPreference = 'Continue'
 # Pre-strip any locked console-script trampoline so uv can overwrite it (os err 5).
 Remove-ConsoleTrampolines -VenvDir $VenvDir
 if (Get-Command uv -ErrorAction SilentlyContinue) {
-    # credential-relay first (vendored lib), force-reinstalled so local code
-    # changes propagate even without a version bump; then agent-containers.
+    # credential-relay/config-migrate/zdd first (workspace path deps),
+    # force-reinstalled so local code changes propagate even without a
+    # version bump; then agent-containers.
     if (Test-Path (Join-Path $CredRelayDir 'pyproject.toml')) {
         $result = Invoke-BoundedPackageCommand -Executable 'uv' -Arguments @(
             'pip', 'install', '--python', $VenvPython, '--reinstall-package',
@@ -728,6 +735,22 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
         }
     } else {
         Write-Fail "config-migrate source not found at $CfgMigrateDir"
+        $ErrorActionPreference = $prevEAP
+        exit 1
+    }
+    if (Test-Path (Join-Path $ZddDir 'pyproject.toml')) {
+        $result = Invoke-BoundedPackageCommand -Executable 'uv' -Arguments @(
+            'pip', 'install', '--python', $VenvPython, '--reinstall-package',
+            'agent-zdd', "$ZddDir", '--quiet'
+        )
+        if ($result.Code -ne 0) {
+            Write-Fail 'zdd install failed'
+            Write-PackageDiagnostics $result.Tail
+            $ErrorActionPreference = $prevEAP
+            exit 1
+        }
+    } else {
+        Write-Fail "zdd source not found at $ZddDir"
         $ErrorActionPreference = $prevEAP
         exit 1
     }

@@ -720,23 +720,15 @@ def _copy_payload(source: Path, destination: Path) -> None:
     shutil.copytree(source, destination, dirs_exist_ok=True)
 
 
-def _rewrite_uv_source_to_local(pyproject: Path, lib: str) -> bool:
-    """Surgically rewrite `pyproject`'s `[tool.uv.sources]` entry for
-    `lib` to the local, non-editable `{ path = "libs/<lib>" }` form --
-    mirroring `tools/materialize_main.py`'s own promotion-time rewrite
-    (duplicated in miniature here rather than imported, since this
-    runtime script must stay self-contained in a real release payload
-    with no `tools/` directory at all). Scoped to the
-    `[tool.uv.sources]` table's own span so an identical-looking value
-    elsewhere is never touched. Returns whether a rewrite happened."""
+def _rewrite_uv_source_to_local(pyproject: Path, source_name: str, lib: str | None = None) -> bool:
+    """Rewrite one `[tool.uv.sources]` entry back to `libs/<lib>`."""
+    if lib is None: lib = source_name
     text = pyproject.read_text(encoding="utf-8")
     header = re.search(r"^\[tool\.uv\.sources\]\s*$", text, re.MULTILINE)
-    if header is None:
-        return False
+    if header is None: return False
     start = header.end()
-    next_header = re.search(r"^\[", text[start:], re.MULTILINE)
-    end = start + next_header.start() if next_header else len(text)
-    escaped = re.escape(lib)
+    next_header = re.search(r"^\[", text[start:], re.MULTILINE); end = start + next_header.start() if next_header else len(text)
+    escaped = re.escape(source_name)
     key = r'(?:"' + escaped + r'"|\'' + escaped + r"'|" + escaped + r")"
     pattern = re.compile(r'^([ \t]*' + key + r'\s*=\s*)\{[^}]*\}[ \t]*(?:#.*)?$', re.MULTILINE)
     new_body, count = pattern.subn(
@@ -747,18 +739,33 @@ def _rewrite_uv_source_to_local(pyproject: Path, lib: str) -> bool:
     pyproject.write_text(text[:start] + new_body + text[end:], encoding="utf-8")
     return True
 
+def _escaping_uv_source_libs(pyproject: Path, root: Path) -> list[tuple[str, str]]:
+    """Escaping `[tool.uv.sources]` `(source name, lib)` refs in `pyproject`."""
+    text = pyproject.read_text(encoding="utf-8")
+    header = re.search(r"^\[tool\.uv\.sources\]\s*$", text, re.MULTILINE)
+    if header is None:
+        return []
+    start = header.end()
+    next_header = re.search(r"^\[", text[start:], re.MULTILINE); end = start + next_header.start() if next_header else len(text)
+    entry_re = re.compile(r"""(?mx)^[ \t]*(?:"(?P<dqkey>[^"]+)"|'(?P<sqkey>[^']+)'|(?P<barekey>[A-Za-z0-9_.-]+))\s*=\s*\{(?P<body>[^}]*)\}""")
+    path_re = re.compile(r"""path\s*=\s*(?:"(?P<dq>[^"]+)"|'(?P<sq>[^']+)')""")
+    libs: list[tuple[str, str]] = []; root_resolved = root.resolve()
+    for match in entry_re.finditer(text[start:end]):
+        path_match = path_re.search(match.group("body"));  # noqa: E702
+        if path_match is None: continue
+        raw_path = path_match.group("dq") or path_match.group("sq")
+        candidate = (root / raw_path).resolve()
+        if candidate == root_resolved or root_resolved in candidate.parents: continue
+        name = match.group("dqkey") or match.group("sqkey") or match.group("barekey")
+        lib = Path(raw_path).name
+        if lib and lib not in (".", "..") and Path(lib).name == lib: libs.append((name, lib))
+    return libs
 
 def _backfill_canonical_vendored_libs(payload_root: Path, snapshot: Path) -> None:
-    """`agent-procutil` is `uv`-editable in a dev checkout (vendor-pointer-
-    generalization effort) -- no local copy under `libs/` at all -- so
-    `_copy_payload` never snapshots it. A release always bakes in a real
-    copy, so this only fires for a dev-checkout payload: back-fill from
-    the repo-root canonical `libs/agent-procutil` (local-then-canonical
-    fallback, mirroring the install scripts), then rewrite the snapshotted
-    `pyproject.toml`'s own `[tool.uv.sources]` entry to the local form --
-    its `../../libs/agent-procutil` path escapes the snapshot root
-    entirely and no longer resolves from there."""
-    for lib in ("agent-procutil",):
+    """Back-fill every uv-editable canonical lib absent from a dev snapshot."""
+    pyproject = snapshot / "pyproject.toml"
+    if not pyproject.is_file(): return
+    for source_name, lib in _escaping_uv_source_libs(pyproject, snapshot):
         if (snapshot / "libs" / lib).exists():
             continue
         canonical_libs = payload_root.parents[1] / "libs"
@@ -769,20 +776,10 @@ def _backfill_canonical_vendored_libs(payload_root: Path, snapshot: Path) -> Non
             or canonical.is_symlink()
             or _is_reparse(canonical)
         ):
-            # `Path.is_dir()` below follows a symlink/reparse point --
-            # `_copy_payload()` only rejects a link found *inside* its own
-            # source tree, so a symlinked `libs/` or `libs/agent-procutil`
-            # component itself would slip through undetected and
-            # `copytree()` would then dereference it, copying external
-            # files into the published snapshot and breaking the
-            # snapshot's no-link invariant (PR #4465 review).
-            raise CellError(
-                f"canonical vendored-lib path contains a link or reparse "
-                f"point: {canonical}"
-            )
+            raise CellError(f"canonical vendored-lib path contains a link or reparse point: {canonical}")
         if canonical.is_dir():
             _copy_payload(canonical, snapshot / "libs" / lib)
-            _rewrite_uv_source_to_local(snapshot / "pyproject.toml", lib)
+            _rewrite_uv_source_to_local(pyproject, source_name, lib)
 
 
 def _snapshot_owner(marketplace_id: str, version: str) -> str:
@@ -2739,7 +2736,9 @@ def _undrain_owned_instance(
 
 
 def _payload_routing_module():
-    library = Path(__file__).resolve().parent.parent / "libs" / "zdd" / "src"
+    payload_root = Path(__file__).resolve().parent.parent
+    library = payload_root / "libs" / "zdd" / "src"
+    if not library.is_dir(): library = payload_root.parents[1] / "libs" / "zdd" / "src"
     _assert_directory(library, "payload zdd library")
     value = str(library)
     if value not in sys.path:
