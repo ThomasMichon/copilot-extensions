@@ -179,20 +179,28 @@ def _vendored_consumers() -> dict[str, list[str]]:
         if extra_libs.is_dir():
             for lib in sorted(x for x in extra_libs.iterdir() if x.is_dir()):
                 consumers.setdefault(lib.name, []).append(extra)
-    for name, consumer_dir in uer.iter_consumer_dirs():
+    # `iter_consumer_dirs()` filters candidates by `pyproject.toml.is_file()`,
+    # which returns False for a symlink to a directory OR a dangling symlink
+    # (broken target) -- both would silently vanish from its results before
+    # ever reaching the symlink check below, contradicting the guarantee
+    # that ANY symlinked manifest is rejected, not just one that also
+    # happens to resolve to a real file (PR #4514 review). Scan every
+    # candidate manifest path directly first, unfiltered.
+    candidate_dirs = []
+    if PLUGINS_DIR.is_dir():
+        candidate_dirs.extend((p.name, p) for p in sorted(PLUGINS_DIR.iterdir()) if p.is_dir())
+    candidate_dirs.extend(
+        (extra, REPO / extra) for extra in uer._EXTRA_CONSUMER_DIRS if (REPO / extra).is_dir()
+    )
+    for name, consumer_dir in candidate_dirs:
         pyproject = consumer_dir / "pyproject.toml"
         if pyproject.is_symlink():
-            # `find_uv_editable_refs()` itself treats a symlinked manifest
-            # as an explicit refusal (returns `[]`, never raises) -- a
-            # caller that doesn't check separately would silently drop
-            # this consumer's pointers from the map, exactly the
-            # fail-open bug `ManifestUnreadable` handling below exists to
-            # prevent (PR #4465 review).
             raise SystemExit(
                 f"check-version-bump: {pyproject} is a symlink -- cannot "
                 f"safely determine {name}'s uv-editable consumers; "
                 "replace it with a real file."
             )
+    for name, consumer_dir in uer.iter_consumer_dirs():
         try:
             refs = uer.find_uv_editable_refs(consumer_dir)
         except uer.ManifestUnreadable as exc:
@@ -234,7 +242,12 @@ def _plugins_needing_bump(changed: list[str], consumers: dict[str, list[str]]) -
     """Map ``plugin -> {reasons}`` for every plugin whose content changed.
 
     A path under ``plugins/<p>/`` charges ``<p>``; a path under a top-level
-    shared ``libs/<lib>/`` charges every plugin that vendors ``<lib>``."""
+    shared ``libs/<lib>/`` charges every plugin that vendors ``<lib>``; a
+    path under a recognized standalone consumer's own top-level tree (e.g.
+    ``worktree-manager/``) charges that consumer directly -- without this,
+    a direct payload change to a standalone consumer was invisible to both
+    this guard and `check-changefile-presence.py`/`compute_from_diff()`,
+    which both depend on this same map (PR #4514 review)."""
     needing: dict[str, set[str]] = {}
     for path in changed:
         parts = tuple(path.split("/"))
@@ -255,6 +268,12 @@ def _plugins_needing_bump(changed: list[str], consumers: dict[str, list[str]]) -
                 continue
             for plugin in consumers.get(lib, ()):
                 needing.setdefault(plugin, set()).add(f"libs/{lib}/ (vendored)")
+        elif parts[0] in uer._EXTRA_CONSUMER_DIRS and (REPO / parts[0] / "pyproject.toml").exists():
+            consumer = parts[0]
+            inner = parts[1:]
+            if inner and _is_ignored(inner, parts[-1]):
+                continue
+            needing.setdefault(consumer, set()).add(f"{consumer}/")
     return needing
 
 

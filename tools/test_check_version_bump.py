@@ -281,6 +281,33 @@ def test_shared_lib_change_passes_when_out_of_plugin_consumer_bumps_its_own_vers
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_direct_change_to_standalone_consumer_needs_bump(repo: Path):
+    """A direct payload change under a recognized standalone consumer's OWN
+    top-level tree (mirroring `worktree-manager`, no shared-lib involved at
+    all) must be detected the same way `plugins/<p>/` is -- previously
+    `_plugins_needing_bump()` only recognized `plugins/*` and top-level
+    `libs/*`, so `worktree-manager/src/worktree_manager/app.py` produced an
+    empty `needing` map and both this guard and
+    `check-changefile-presence.py`/`compute_from_diff()` (which share this
+    map) missed the change entirely (PR #4514 review)."""
+    _write(repo, "worktree-manager/pyproject.toml",
+           '[project]\nname = "worktree-manager"\nversion = "9.0.0-dev1"\n')
+    _write(repo, "worktree-manager/src/worktree_manager/__init__.py", "x = 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add worktree-manager")
+    wtm_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", wtm_sha)
+
+    _write(repo, "worktree-manager/src/worktree_manager/app.py", "def f():\n    return 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "worktree-manager feature, no bump")
+    result = _run(repo)
+    assert result.returncode == 1
+    assert "worktree-manager" in result.stderr
+
+
 def test_shared_lib_change_charges_out_of_plugin_real_copy_consumer(repo: Path):
     """A top-level, out-of-plugin consumer (mirroring `worktree-manager`)
     with a REAL vendored copy under its own top-level `libs/` (not a
@@ -355,6 +382,29 @@ def test_symlinked_pyproject_fails_closed_instead_of_dropping_consumer(repo: Pat
     (repo / "plugins" / "gamma" / "pyproject.toml").symlink_to(real)
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "add gamma with a symlinked pyproject.toml")
+    result = _run(repo, "--list")
+    assert result.returncode != 0
+    assert "gamma" in result.stderr
+    assert "symlink" in result.stderr.lower()
+
+
+def test_dangling_symlinked_pyproject_fails_closed_instead_of_being_filtered_out(repo: Path):
+    """A symlinked `pyproject.toml` whose target does NOT exist (or resolves
+    to a directory) must still be rejected -- `iter_consumer_dirs()` filters
+    candidates by `pyproject.toml.is_file()`, which returns `False` for a
+    dangling symlink (or one pointing at a directory), silently vanishing
+    the whole consumer from its results BEFORE the loop's own symlink check
+    ever runs, contradicting the "any symlinked manifest is rejected"
+    guarantee (PR #4514 review). The pre-filter scan below must catch this
+    class regardless of where the link points."""
+    _write(repo, "plugins/gamma/plugin.json",
+           json.dumps({"name": "gamma", "version": "3.0.0-dev1"}) + "\n")
+    _write(repo, "plugins/gamma/src/gamma/__init__.py", "x = 1\n")
+    (repo / "plugins" / "gamma" / "pyproject.toml").symlink_to(
+        repo / "plugins" / "gamma" / "does-not-exist.toml"
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add gamma with a dangling symlinked pyproject.toml")
     result = _run(repo, "--list")
     assert result.returncode != 0
     assert "gamma" in result.stderr
