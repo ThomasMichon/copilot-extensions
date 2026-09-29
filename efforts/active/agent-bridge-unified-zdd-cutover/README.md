@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 5 submitted for review)
+- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 5 submitted for review -- [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543))
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
@@ -319,7 +319,7 @@ session-host concept):
 
 ## Journal
 
-### 2026-09-28 — Phase 3 landed
+### 2026-09-28 — Phase 3 landed ([#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543))
 - **Generation identity**: `SessionManager` (via `_SessionCoreMixin.__init__`)
   computes `self._generation_id = zdd.claims.generation_id(version=
   __version__, pid=os.getpid())` once per process lifetime -- never
