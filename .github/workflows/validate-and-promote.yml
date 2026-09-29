@@ -729,4 +729,24 @@ jobs:
             echo "::error::PR #$pr_number diff touches paths outside .changefiles/ -- refusing to admin-merge." >&2
             exit 1
           fi
+          # `--admin` bypasses the review-required rule above (a named
+          # bypass actor on that specific ruleset), but `dev`'s separate
+          # "workflow/CODEOWNERS lockdown" ruleset (workflow-lockdown-guard.yml,
+          # #4503) enforces its required_status_checks rule with NO bypass
+          # actors at all, by design -- `--admin` cannot skip a required
+          # check that simply hasn't reported yet; it has to actually
+          # complete. That guard triggers async on PR creation and takes a
+          # few seconds to tens of seconds to report, so merging
+          # immediately after `gh pr create` above races it and fails with
+          # "Required status check \"workflow-lockdown-guard\" is expected"
+          # (confirmed live: two consecutive real promotions both hit this
+          # exact race). This diff is changefiles-only (asserted above), so
+          # the guard is expected to pass trivially -- wait for it to
+          # physically report rather than skip waiting. Bounded to 6
+          # minutes (the guard's own job timeout is 5) so a genuinely
+          # broken/hung check fails this step instead of hanging the job.
+          if ! timeout 360 gh pr checks "$pr_number" --watch --required --interval 10; then
+            echo "::error::Required checks did not report success for PR #$pr_number within the wait window -- leaving for manual review; never force past a required status check." >&2
+            exit 1
+          fi
           gh pr merge "$pr_number" --squash --admin
