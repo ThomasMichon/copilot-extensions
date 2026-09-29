@@ -3129,7 +3129,8 @@ export function manualFallbackInstructions(
       "command is unavailable, use the context-handoff payload-local CLI and " +
       "pass only the trailing `task:<id>` or `file:<id>` token to " +
       "`consume --locator`.\n\n" +
-      "Copy only the following short handoff prompt/seed:\n\n" +
+      "You MUST give the user the following handoff seed prompt VERBATIM " +
+      "-- do not paraphrase, summarize, or invent your own wording:\n\n" +
       "```text\n" +
       `${seed}\n` +
       "```"
@@ -3147,7 +3148,8 @@ export function manualFallbackInstructions(
       "`/consume-handoff` in the successor session yourself, or use the " +
       "context-handoff payload-local CLI and pass only the trailing " +
       "`task:<id>` or `file:<id>` token to `consume --locator`.\n\n" +
-      "Copy only the following short handoff prompt/seed:\n\n" +
+      "You MUST give the user the following handoff seed prompt VERBATIM " +
+      "-- do not paraphrase, summarize, or invent your own wording:\n\n" +
       "```text\n" +
       `${seed}\n` +
       "```"
@@ -3159,8 +3161,11 @@ export function manualFallbackInstructions(
     "in this worktree (or ask your control plane to pick up the pending handoff), " +
     "then run `/consume-handoff`. If that command is unavailable, use the " +
     "context-handoff payload-local CLI and pass only the trailing `task:<id>` " +
-    "or `file:<id>` token to `consume --locator`.\n\n" +
-    "Copy only the following short handoff prompt/seed:\n\n" +
+    "or `file:<id>` token to `consume --locator`. If you're waiting on an " +
+    "automatic cutover and don't see a new successor appear within about a " +
+    "minute, stop waiting and use the seed below yourself.\n\n" +
+    "You MUST give the user the following handoff seed prompt VERBATIM " +
+    "-- do not paraphrase, summarize, or invent your own wording:\n\n" +
     "```text\n" +
     `${seed}\n` +
     "```"

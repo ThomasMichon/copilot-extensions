@@ -143,7 +143,7 @@ test("manual fallback instructions stay manual and seed-focused", () => {
   assert.match(text, /No control system acknowledged the request/);
   assert.match(text, /run `\/consume-handoff`/);
   assert.match(text, /consume --locator/);
-  assert.match(text, /Copy only the following short handoff prompt\/seed/);
+  assert.match(text, /VERBATIM/);
   assert.match(text, new RegExp(seed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 

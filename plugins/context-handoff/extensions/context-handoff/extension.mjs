@@ -64,7 +64,7 @@ import {
 } from "./force-tier.mjs";
 import {
   automaticHandoffEnabled,
-  manualHandoffEnabled,
+  automaticPressureHandlingEnabled,
 } from "./mode.mjs";
 import {
   contextPressure,
@@ -117,18 +117,14 @@ const handoffConfigPromise = loadContextHandoffConfigAsync(process.cwd()).then(
 );
 handoffConfigPromise.catch(() => {}); // loadContextHandoffConfigAsync never rejects; guard anyway.
 
-// Phase 4 judgment call: `mode: off` is a repo-level opt-out of the handoff
-// mechanism itself, not only the automatic pressure monitor. Refuse every
-// extension-provided manual entry point as well so the repository owner gets a
-// true disable instead of a "still works if you know the tool names" loophole.
-function handoffDisabledResult() {
-  return (
-    "Context handoff is disabled for this repository " +
-    "(configured `mode: off` in .context-handoff/config.yaml or " +
-    "~/.context-handoff/config.yaml). Re-enable it to generate, store, " +
-    "trigger, or consume handoffs here."
-  );
-}
+// Design decision (revised from the original Phase 4 judgment call): `mode:
+// off` disables only automatic/unprompted behavior -- context-pressure
+// soft/hard nudges and the force tier's own auto-draft/store/trigger (see
+// `automaticPressureHandlingEnabled` in mode.mjs). Manual entry points
+// (generate/save/trigger/consume_handoff and their slash-command wrappers)
+// are always available in every mode, including `off` -- a session or
+// operator who explicitly reaches for the mechanism gets it, regardless of
+// what the repo's automatic-behavior policy is configured to.
 const state = {
   turnCount: 0,
   sessionId: null,
@@ -541,9 +537,6 @@ const session = await joinSession({
       handler: async (args, invocation) => {
         ensureState(invocation);
         await handoffConfigPromise;
-        if (!manualHandoffEnabled(handoffConfig.mode)) {
-          return handoffDisabledResult();
-        }
         const sid = state.sessionId || invocation?.sessionId || "unknown";
         const { data: handoffData, modifiedEntries } = collectHandoffData(sid, args);
 
@@ -699,9 +692,6 @@ const session = await joinSession({
       handler: async (args, invocation) => {
         ensureState(invocation);
         await handoffConfigPromise;
-        if (!manualHandoffEnabled(handoffConfig.mode)) {
-          return handoffDisabledResult();
-        }
         const sid = state.sessionId || invocation?.sessionId;
         if (!sid || sid === "unknown") {
           return "Cannot save handoff prompt: sessionId is unavailable.";
@@ -793,12 +783,6 @@ const session = await joinSession({
       handler: async (args, invocation) => {
         ensureState(invocation);
         await handoffConfigPromise;
-        if (!manualHandoffEnabled(handoffConfig.mode)) {
-          return {
-            textResultForLlm: handoffDisabledResult(),
-            resultType: "error",
-          };
-        }
         const cwd = state.cwd || process.cwd();
         const sid = state.sessionId || invocation?.sessionId || null;
         const taskId = (args?.task_id ?? "").toString().trim();
@@ -888,8 +872,10 @@ const session = await joinSession({
         "manual fallback guidance -- distinctly worded when automatic " +
         "cutover is simply disabled by mode versus when it was attempted " +
         "and nothing happened -- and (9) ALWAYS ends with the final short " +
-        "handoff prompt/seed. It NEVER checks panes or PIDs, spawns or " +
-        "retires sessions, or performs any cutover itself.",
+        "handoff prompt/seed, with an explicit instruction that YOU MUST " +
+        "relay that seed to the user VERBATIM (never paraphrase, summarize, " +
+        "or invent your own wording for it). It NEVER checks panes or PIDs, " +
+        "spawns or retires sessions, or performs any cutover itself.",
       skipPermission: true,
       parameters: {
         type: "object",
@@ -922,9 +908,6 @@ const session = await joinSession({
       handler: async (args, invocation) => {
         ensureState(invocation);
         await handoffConfigPromise;
-        if (!manualHandoffEnabled(handoffConfig.mode)) {
-          return handoffDisabledResult();
-        }
         const text = (args?.prompt_text ?? args?.prompt ?? "").toString().trim();
         const cwd = state.cwd || process.cwd();
         const sid = state.sessionId || invocation?.sessionId;
@@ -977,17 +960,20 @@ const session = await joinSession({
         if (result.automaticCutoverDisabled) {
           return (
             `Handoff stored (automatic cutover disabled) for ${result.stored.storage} ` +
-            `baton ${result.stored.id}. None of the live-cutover triggers ran ` +
-            "-- not the worktree-record note, not the `handoff_requested` " +
-            "activity event agent-worktrees' resident monitor watches for, " +
-            "and not an agent-bridge ping -- because `.context-handoff/" +
-            "config.yaml`'s `mode` is not `auto`. No successor pane will be " +
-            "spawned automatically.\n\n" +
+            `baton ${result.stored.id}. The handoff was recorded in the ` +
+            "worktree's own ledger (so a manually-consuming successor can " +
+            "still be promoted to head), but live-cutover was never armed " +
+            "-- neither the `handoff_requested` activity event agent-worktrees' " +
+            "resident monitor watches for, nor an agent-bridge ping, were " +
+            "sent -- because `.context-handoff/config.yaml`'s `mode` is not " +
+            "`auto`. No successor pane will be spawned automatically.\n\n" +
             `${result.manualInstructions
               || "A manually-launched successor already appears to have " +
                 "picked this up. Keep the same seed available in case a " +
                 "human or tool still needs to resume it manually.\n"}\n\n` +
-            "Final short handoff prompt/seed:\n\n" +
+            "Final short handoff prompt/seed -- you MUST relay it to the " +
+            "user VERBATIM, with no paraphrasing, summarizing, or invented " +
+            "wording:\n\n" +
             "```text\n" +
             `${result.seed}\n` +
             "```"
@@ -1002,7 +988,17 @@ const session = await joinSession({
               ? `${result.manualInstructions}\n\n`
               : "A control system appears to have picked the request up. Keep the same seed available in case a human or tool needs to resume it manually.\n\n"
           ) +
-          "Final short handoff prompt/seed:\n\n" +
+          (
+            pickedUp
+              ? ""
+              : "Live cutover has been requested. If you don't see a new " +
+                "successor session/pane appear within about a minute, " +
+                "stop waiting and use the exact handoff seed prompt below " +
+                "yourself.\n\n"
+          ) +
+          "Final short handoff prompt/seed -- you MUST relay it to the " +
+          "user VERBATIM, with no paraphrasing, summarizing, or invented " +
+          "wording:\n\n" +
           "```text\n" +
           `${result.seed}\n` +
           "```"
@@ -1025,10 +1021,6 @@ const session = await joinSession({
       handler: async (ctx) => {
         void ctx;
         await handoffConfigPromise;
-        if (!manualHandoffEnabled(handoffConfig.mode)) {
-          await session.log(handoffDisabledResult(), { level: "warning" });
-          return;
-        }
         await session.send({
           prompt:
             "Perform a handoff now (the operator invoked /handoff-continue, " +
@@ -1071,10 +1063,6 @@ const session = await joinSession({
         "handoff task if present, else the newest matching worktree handoff file.",
       handler: async (ctx) => {
         await handoffConfigPromise;
-        if (!manualHandoffEnabled(handoffConfig.mode)) {
-          await session.log(handoffDisabledResult(), { level: "warning" });
-          return;
-        }
         const cwd = state.cwd || process.cwd();
         const sid = state.sessionId || ctx?.sessionId || "unknown";
 
@@ -1177,10 +1165,6 @@ const session = await joinSession({
         "the canonical stored-handoff consumer.",
       handler: async () => {
         await handoffConfigPromise;
-        if (!manualHandoffEnabled(handoffConfig.mode)) {
-          await session.log(handoffDisabledResult(), { level: "warning" });
-          return;
-        }
         await session.send({
           prompt:
             "Invoke /consume-handoff now to load this worktree's pending " +
@@ -1391,12 +1375,13 @@ session.on("session.usage_info", async (event) => {
   state.lastUtilization = d.tokenLimit > 0 ? d.currentTokens / d.tokenLimit : 0;
   const usage = formatContextUsage(d.currentTokens, d.tokenLimit);
   await handoffConfigPromise;
-  // Context-pressure warnings/nudges are informational only -- they belong
-  // to "manual-only" (mode !== "off"), not "auto" (mode === "auto"). Only
-  // the force-tier's own AUTOMATIC trigger (below) stays gated on
+  // Context-pressure warnings/nudges are automatic/unprompted behavior --
+  // `off` disables exactly this (manual entry points stay available in every
+  // mode; see `automaticPressureHandlingEnabled`'s own docstring). Only the
+  // force-tier's own AUTOMATIC trigger (below) stays gated separately on
   // automaticHandoffEnabled -- restoring these warnings must never silently
   // re-enable live cutover.
-  if (!manualHandoffEnabled(handoffConfig.mode)) {
+  if (!automaticPressureHandlingEnabled(handoffConfig.mode)) {
     persistState();
     return;
   }

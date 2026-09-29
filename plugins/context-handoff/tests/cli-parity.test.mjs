@@ -86,7 +86,13 @@ test("trigger --force is parsed as a boolean flag and reaches triggerHandoff", (
   assert.match(source, /force: Boolean\(args\.force\)/);
 });
 
-test("CLI handoff commands refuse mode=off repositories", () => {
+test("CLI handoff commands are never refused for mode=off -- only for unrelated reasons", () => {
+  // Revised design decision: `mode: off` disables only automatic/unprompted
+  // behavior (pressure nudges, the force tier), never the manual entry
+  // points a session/operator explicitly invokes. These commands may still
+  // fail here for OTHER reasons this sandbox doesn't set up (no adopted
+  // agent-worktrees state, no stored handoff to find/retry) -- the only
+  // thing under test is that "disabled" is never the reason.
   withRepository((root) => {
     mkdirSync(join(root, ".context-handoff"));
     writeFileSync(
@@ -106,8 +112,11 @@ test("CLI handoff commands refuse mode=off repositories", () => {
           encoding: "utf8",
           env: { ...process.env, ...homeEnv },
         });
-        assert.equal(result.status, 1, `${args[0]}: ${result.stderr}`);
-        assert.match(result.stderr, /context handoff is disabled/i);
+        assert.doesNotMatch(
+          result.stderr,
+          /context handoff is disabled/i,
+          `${args[0]} was refused for mode:off, but manual entry points must always work`,
+        );
       }
     });
   });

@@ -1150,6 +1150,125 @@ def test_cold_resume_missing_worktree_release_failure_backs_off(
     assert q.get(blocked.id).status == Status.SUSPENDED
 
 
+# -- recover_stranded_cold_reservations: the queued+cold orphan gap ---------
+#
+# Confirmed live (aperture-labs PR #7759's stall, 5+ hours, survived a full
+# supervisor restart): a COLD reservation whose task ends up QUEUED/unowned
+# instead of the SUSPENDED-with-owner shape release_resumed_cold_tasks()
+# expects is a permanent orphan no other sweep ever revisits --
+# release_resumed_cold_tasks() requires resume_requested (set only by a
+# steer landing while the task is STILL suspended) and requires status ==
+# SUSPENDED with a live owner; recover_gone() only looks at SPAWNED
+# reservations and explicitly skips SUSPENDED; reconcile() only settles
+# TERMINAL tasks. None of them ever touch this combination.
+
+
+def test_recover_stranded_cold_reservation_releases_confirmed_gone_body(q, client):
+    """A reservation can go COLD (a pure reservation-state operation, see
+    ``record_cold``) independent of its task's own status -- exactly the gap
+    this sweep closes: whatever upstream path leaves a queued/unowned task
+    paired with a stale COLD reservation for its exclusive_key, nothing else
+    ever revisits it."""
+    blocked = q.create("needs operator", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:blocked-session"
+    )
+    q.record_cold(reservation.key)
+    assert q.get(blocked.id).status == Status.QUEUED
+    assert q.get(blocked.id).owner is None
+    assert q.get_reservation(reservation.key).state == SpawnState.COLD
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        local_body_verdict_fn=lambda _sid: "gone",
+    )
+
+    assert sup.recover_stranded_cold_reservations() == 1
+    assert q.get_reservation(reservation.key).state == SpawnState.FAILED
+
+    # Freed for a fresh attempt on the very next cycle.
+    assert sup.poll_once() == [blocked.id]
+    assert q.latest_reservation(blocked.id).state == SpawnState.SPAWNED
+    assert q.latest_reservation(blocked.id).attempt == 2
+
+
+def test_recover_stranded_cold_reservation_ignores_unconfirmed_liveness(q, client):
+    """Never act on an unknown/live verdict -- only a CONFIRMED-gone (or
+    cold-probe-confirmed) body is released."""
+    blocked = q.create("needs operator", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:blocked-session"
+    )
+    q.record_cold(reservation.key)
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        local_body_verdict_fn=lambda _sid: "unknown",
+        local_cold_fn=lambda _sid: False,
+    )
+
+    assert sup.recover_stranded_cold_reservations() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.COLD
+
+
+def test_recover_stranded_cold_reservation_ignores_still_suspended_tasks(q, client):
+    """A reservation that's COLD because its task is genuinely still
+    SUSPENDED (the normal, intentional dormancy) is release_resumed_cold_tasks's
+    job, never this sweep's -- even with a confirmed-gone body."""
+    blocked = q.create("needs operator", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:blocked-session"
+    )
+    q.claim_one("headless-owner", task_id=blocked.id)
+    q.start(blocked.id, "headless-owner")
+    q.suspend(blocked.id, "headless-owner", reason="turn ended")
+    q.record_cold(reservation.key)
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        local_body_verdict_fn=lambda _sid: "gone",
+    )
+
+    assert sup.recover_stranded_cold_reservations() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.COLD
+    assert q.get(blocked.id).status == Status.SUSPENDED
+
+
+def test_recover_stranded_cold_reservation_ignores_terminal_tasks(q, client):
+    blocked = q.create("needs operator", labels=["review"])
+    reservation, _ = q.reserve_spawn(blocked.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:blocked-session"
+    )
+    q.record_cold(reservation.key)
+    q.claim_one("headless-owner-2", task_id=blocked.id)
+    q.start(blocked.id, "headless-owner-2")
+    q.complete(blocked.id, "headless-owner-2", result_ref="done")
+
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        labels=["review"],
+        local_body_verdict_fn=lambda _sid: "gone",
+    )
+
+    assert sup.recover_stranded_cold_reservations() == 0
+    assert q.get_reservation(reservation.key).state == SpawnState.COLD
+
+
 def test_pool_reservations_transient_transport_error_does_not_abort_cycle(
     q, client, monkeypatch
 ):

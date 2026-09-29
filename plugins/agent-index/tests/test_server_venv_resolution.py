@@ -1,12 +1,21 @@
 """agent-index-server-venv-split: sibling SERVER venv interpreter resolution.
 
 ``config.server_venv_python()`` is deliberately inert scaffolding today --
-no installer yet provisions a ``.venv-server`` sibling, so every existing
+no installer yet provisions a ``server`` sibling, so every existing
 single-venv layout must keep resolving to ``None`` and every caller must keep
 falling back to its current behavior unchanged. These tests pin both that
 inertness and the resolution convention itself, so a future installer change
 can start actually provisioning the sibling venv with no further code changes
 needed here.
+
+The convention is deliberately name-agnostic about the venv root (a
+``server`` subdirectory of whatever directory contains the current
+interpreter's own ``Scripts``/``bin`` folder) -- a real deployed process
+never runs from a directory literally named ``.venv`` (marker-only
+activation pins the interpreter straight to ``versions/<version>/Scripts``
+or ``.../bin``; see ``Invoke-VersionedActivate``'s own ``--no-link``), so
+the resolver must not assume that name, only the ``Scripts``/``bin`` shape
+one level up.
 """
 
 from __future__ import annotations
@@ -36,11 +45,11 @@ def test_returns_none_with_no_env_override_and_no_sibling_venv(monkeypatch, tmp_
     assert config.server_venv_python() is None
 
 
-def test_resolves_sibling_venv_server_when_present(monkeypatch, tmp_path):
+def test_resolves_sibling_server_venv_when_present(monkeypatch, tmp_path):
     monkeypatch.delenv(config.SERVER_VENV_PYTHON_ENV, raising=False)
     fake_python = tmp_path / ".venv" / "bin" / "python3"
     _make_executable(fake_python)
-    server_python = tmp_path / ".venv-server" / "bin" / "python3"
+    server_python = tmp_path / ".venv" / "server" / "bin" / "python3"
     _make_executable(server_python)
     monkeypatch.setattr(sys, "executable", str(fake_python))
 
@@ -48,11 +57,11 @@ def test_resolves_sibling_venv_server_when_present(monkeypatch, tmp_path):
     assert resolved == server_python.resolve()
 
 
-def test_resolves_sibling_venv_server_windows_shape(monkeypatch, tmp_path):
+def test_resolves_sibling_server_venv_windows_shape(monkeypatch, tmp_path):
     monkeypatch.delenv(config.SERVER_VENV_PYTHON_ENV, raising=False)
     fake_python = tmp_path / ".venv" / "Scripts" / "python.exe"
     _make_executable(fake_python)
-    server_python = tmp_path / ".venv-server" / "Scripts" / "python.exe"
+    server_python = tmp_path / ".venv" / "server" / "Scripts" / "python.exe"
     _make_executable(server_python)
     monkeypatch.setattr(sys, "executable", str(fake_python))
 
@@ -60,10 +69,29 @@ def test_resolves_sibling_venv_server_windows_shape(monkeypatch, tmp_path):
     assert resolved == server_python.resolve()
 
 
-def test_ignores_non_dot_venv_parent_directory_name(monkeypatch, tmp_path):
-    # A running interpreter that isn't itself inside a directory literally
-    # named ".venv" (e.g. a system Python, or a differently-named venv) has
-    # no defined sibling convention -- never guess.
+def test_resolves_sibling_server_venv_under_real_deployed_versions_layout(
+    monkeypatch, tmp_path
+):
+    """A real installed runtime is pinned directly to
+    ``versions/<version>/Scripts`` (or ``.../bin``) via marker-only
+    activation -- there is no ``.venv``-named directory anywhere in a
+    deployed process's own path. The resolver must work from this shape
+    too, not just a plain local dev venv."""
+    monkeypatch.delenv(config.SERVER_VENV_PYTHON_ENV, raising=False)
+    fake_python = tmp_path / "versions" / "1.2.3" / "Scripts" / "python.exe"
+    _make_executable(fake_python)
+    server_python = tmp_path / "versions" / "1.2.3" / "server" / "Scripts" / "python.exe"
+    _make_executable(server_python)
+    monkeypatch.setattr(sys, "executable", str(fake_python))
+
+    resolved = config.server_venv_python()
+    assert resolved == server_python.resolve()
+
+
+def test_returns_none_when_no_server_subdirectory_exists_regardless_of_root_name(
+    monkeypatch, tmp_path
+):
+    # No installer has provisioned a "server" sibling yet -- never guess.
     monkeypatch.delenv(config.SERVER_VENV_PYTHON_ENV, raising=False)
     fake_python = tmp_path / "some-other-venv" / "bin" / "python3"
     _make_executable(fake_python)

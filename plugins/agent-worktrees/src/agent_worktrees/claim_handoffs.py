@@ -3,29 +3,35 @@
 A bundle is an offer, never an ownership authority. Until a later acceptance
 transaction commits, the source worktree's ordinary claim ledger remains the
 single source of truth. This module owns only the machine-local intent/state
-needed to offer, inspect, decline, and cancel an exact bundle safely.
+needed to offer, inspect, accept, decline, and cancel an exact bundle safely.
 """
 
 from __future__ import annotations
 
 import secrets
-from dataclasses import dataclass
+from collections.abc import Callable
+from contextlib import ExitStack
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Callable
 
 import yaml
 
 from . import config as cfg
 from . import tracking
-
+from .lease_config import load_lease_settings
+from .lease_store import GitLeaseStore, LeaseLost
 
 REGISTRY_VERSION = 1
 BUNDLE_VERSION = 1
 STATES = frozenset({
-    "offering", "offered", "accepted",
+    "offering", "offered", "accepting", "accepted",
     "declining", "declined", "cancelling", "cancelled",
 })
 TERMINAL_STATES = frozenset({"accepted", "declined", "cancelled"})
+_LEASEABLE_KINDS = frozenset({"codespace", "container", "task"})
+_LEDGER_ONLY_KINDS = frozenset({"pr", "workdir"})
+_SUPPORTED_ACCEPT_KINDS = frozenset({"worktree", *_LEASEABLE_KINDS, *_LEDGER_ONLY_KINDS})
+_PROVENANCE_PREFIX = "prior owner: "
 
 
 class ClaimHandoffError(RuntimeError):
@@ -229,6 +235,99 @@ def _claim_snapshot(claim: tracking.ResourceClaim) -> dict[str, str]:
     }
 
 
+def _bundle_state(bundle: ClaimBundle, state: str, *, reason: str | None = None) -> ClaimBundle:
+    return replace(
+        bundle,
+        state=state,
+        updated_at=tracking._now_iso(),
+        reason=bundle.reason if reason is None else reason,
+    )
+
+
+def _load_record_from_path(path: Path, *, role: str) -> tracking.WorktreeRecord:
+    try:
+        record = tracking.load_record(path)
+    except (OSError, ValueError, TypeError, KeyError, yaml.YAMLError) as exc:
+        raise ClaimHandoffError(
+            f"cannot read {role} worktree record {path}: {exc}"
+        ) from exc
+    if record.status in {"finalizing", "orphaned"}:
+        raise ClaimHandoffError(
+            f"{role} worktree "
+            f"{tracking.format_claim_ref(record.machine, record.repo, record.worktree_id)} "
+            f"is {record.status}"
+        )
+    return record
+
+
+def _ordered_lock_paths(*paths: Path) -> tuple[Path, ...]:
+    unique: dict[str, Path] = {}
+    for path in paths:
+        unique[str(path)] = path
+    return tuple(unique[key] for key in sorted(unique))
+
+
+def _note_with_provenance(note: str, source: str) -> str:
+    marker = f"{_PROVENANCE_PREFIX}{source}"
+    if marker in note:
+        return note
+    return f"{note}; {marker}" if note else marker
+
+
+def _transferred_claim(
+    snapshot: dict[str, str], *, source: str
+) -> tracking.ResourceClaim:
+    return tracking.ResourceClaim(
+        kind=snapshot["kind"],
+        ref=snapshot["ref"],
+        created_at=snapshot.get("created_at", ""),
+        state="active",
+        note=_note_with_provenance(snapshot.get("note", ""), source),
+    )
+
+
+def _claim_matches(
+    claim: tracking.ResourceClaim, snapshot: dict[str, str], *, source: str
+) -> bool:
+    return (
+        claim.kind == snapshot["kind"]
+        and claim.ref == snapshot["ref"]
+        and claim.created_at == snapshot.get("created_at", "")
+        and claim.state == "active"
+        and claim.note == _note_with_provenance(snapshot.get("note", ""), source)
+        and not claim.handoff_bundle
+    )
+
+
+def _accept_child_path(
+    snapshot: dict[str, str], *, bundle_consumer: tracking.ClaimRef
+) -> Path:
+    parsed = tracking.parse_claim_ref(snapshot["ref"])
+    if parsed is None or not parsed.is_qualified:
+        raise ClaimHandoffError(
+            "worktree claim ref must be qualified "
+            f"machine/project/worktree_id (got {snapshot['ref']!r})"
+        )
+    if parsed.machine != bundle_consumer.machine:
+        raise ClaimHandoffError(
+            f"worktree claim {snapshot['ref']} targets machine {parsed.machine}, "
+            f"but bundle consumer lives on {bundle_consumer.machine}"
+        )
+    return _record_path(parsed)
+
+
+def _validate_supported_claims(bundle: ClaimBundle) -> None:
+    unsupported = sorted({
+        snapshot["kind"]
+        for snapshot in bundle.claims
+        if snapshot["kind"] not in _SUPPORTED_ACCEPT_KINDS
+    })
+    if unsupported:
+        raise ClaimHandoffError(
+            "claim bundle contains unsupported claim kinds: " + ", ".join(unsupported)
+        )
+
+
 def offer(
     source: str,
     consumer: str,
@@ -402,6 +501,205 @@ def show(bundle_id: str) -> ClaimBundle:
     if match is None:
         raise ClaimHandoffError(f"claim bundle not found: {bundle_id}")
     return match
+
+
+def accept(
+    bundle_id: str,
+    *,
+    actor: str,
+    machine: str,
+) -> ClaimBundle:
+    """Accept a bundle as its consumer and atomically transfer ownership."""
+    if not bundle_id:
+        raise ClaimHandoffError("missing claim-bundle id")
+    path = registry_path()
+    try:
+        with tracking._RecordLock(path, require_sidecar=True):
+            bundles = _load_registry_strict(path)
+            index = next(
+                (i for i, bundle in enumerate(bundles) if bundle.bundle_id == bundle_id),
+                None,
+            )
+            if index is None:
+                raise ClaimHandoffError(f"claim bundle not found: {bundle_id}")
+            bundle = bundles[index]
+            if not _same_worktree(actor, bundle.consumer):
+                raise ClaimHandoffError(
+                    f"only bundle consumer {bundle.consumer} may accept it"
+                )
+            if bundle.state == "accepted":
+                return bundle
+            if bundle.state in {"declined", "cancelled"}:
+                raise ClaimHandoffError(
+                    f"claim bundle {bundle_id} is already {bundle.state}"
+                )
+            if bundle.state not in {"offered", "accepting"}:
+                raise ClaimHandoffError(
+                    f"claim bundle {bundle_id} is {bundle.state}, not offered"
+                )
+            _validate_supported_claims(bundle)
+            source_ref = _qualified_ref(bundle.source, "bundle source")
+            consumer_ref = _qualified_ref(bundle.consumer, "bundle consumer")
+            if source_ref.machine != machine or consumer_ref.machine != machine:
+                raise ClaimHandoffError(
+                    "cross-machine claim-bundle acceptance is not yet supported "
+                    "by the machine-local registry"
+                )
+            source_path = _record_path(source_ref)
+            consumer_path = _record_path(consumer_ref)
+            if not source_path.exists():
+                raise ClaimHandoffError(f"source worktree not found: {bundle.source}")
+            if not consumer_path.exists():
+                raise ClaimHandoffError(f"consumer worktree not found: {bundle.consumer}")
+            child_paths = [
+                _accept_child_path(snapshot, bundle_consumer=consumer_ref)
+                for snapshot in bundle.claims
+                if snapshot["kind"] == "worktree"
+            ]
+            if bundle.state == "offered":
+                bundle = _bundle_state(bundle, "accepting")
+                bundles[index] = bundle
+                _save_registry(path, bundles)
+
+            with ExitStack() as stack:
+                for record_path in _ordered_lock_paths(
+                    source_path, consumer_path, *child_paths
+                ):
+                    stack.enter_context(
+                        tracking._RecordLock(record_path, require_sidecar=True)
+                    )
+                source_record = _load_record_from_path(source_path, role="source")
+                consumer_record = _load_record_from_path(consumer_path, role="consumer")
+                child_records = {
+                    str(child_path): _load_record_from_path(child_path, role="child")
+                    for child_path in child_paths
+                }
+                source_by_ref = {claim.ref: claim for claim in source_record.resources}
+                consumer_by_ref = {
+                    claim.ref: claim for claim in consumer_record.resources
+                }
+                stores: dict[str, GitLeaseStore] = {}
+
+                for snapshot in bundle.claims:
+                    ref = snapshot["ref"]
+                    kind = snapshot["kind"]
+                    source_claim = source_by_ref.get(ref)
+                    consumer_claim = consumer_by_ref.get(ref)
+                    source_has = source_claim is not None
+                    consumer_has = consumer_claim is not None
+
+                    if source_has:
+                        if source_claim.handoff_bundle not in {"", bundle.bundle_id}:
+                            raise ClaimHandoffError(
+                                f"source claim {ref} is reserved by another bundle"
+                            )
+                        if _claim_snapshot(source_claim) != snapshot:
+                            raise ClaimHandoffError(
+                                f"bundle source claim metadata changed: {ref}"
+                            )
+                    if consumer_has and not _claim_matches(
+                        consumer_claim, snapshot, source=bundle.source
+                    ):
+                        raise ClaimHandoffError(
+                            f"consumer already holds a conflicting claim: {ref}"
+                        )
+                    if not source_has and not consumer_has:
+                        raise ClaimHandoffError(
+                            f"claim {ref} is missing from both source and consumer ledgers"
+                        )
+
+                    if kind == "worktree":
+                        child_path = str(
+                            _accept_child_path(snapshot, bundle_consumer=consumer_ref)
+                        )
+                        child_record = child_records[child_path]
+                        owner_ref = child_record.owner_ref or ""
+                        if owner_ref not in {bundle.source, bundle.consumer}:
+                            raise ClaimHandoffError(
+                                f"child worktree {snapshot['ref']} is owned by "
+                                f"{owner_ref or 'nobody'}, "
+                                "not this bundle's source/consumer"
+                            )
+                    elif kind in _LEASEABLE_KINDS:
+                        store = stores.setdefault(kind, GitLeaseStore(load_lease_settings()))
+                        try:
+                            lease = store.inspect(kind, ref)
+                        except Exception as exc:
+                            raise ClaimHandoffError(
+                                f"cannot inspect {kind} lease {ref}: {exc}"
+                            ) from exc
+                        if lease is None:
+                            raise ClaimHandoffError(
+                                f"{kind} claim {ref} has no mirrored lease to transfer"
+                            )
+                        if lease.record.holder not in {bundle.source, bundle.consumer}:
+                            raise ClaimHandoffError(
+                                f"{kind} lease {ref} is held by "
+                                f"{lease.record.holder}, not this bundle's "
+                                "source/consumer"
+                            )
+                        if lease.record.holder == bundle.source:
+                            try:
+                                store.transfer(
+                                    kind,
+                                    ref,
+                                    lease.oid,
+                                    bundle.consumer,
+                                    context=lease.record.context,
+                                )
+                            except LeaseLost as exc:
+                                raise ClaimHandoffError(
+                                    f"cannot transfer {kind} lease {ref}: {exc}"
+                                ) from exc
+                    else:
+                        # Supported non-leaseable kinds need no resource-side
+                        # mutation beyond the ledger move.
+                        pass
+
+                for snapshot in bundle.claims:
+                    claim = source_by_ref.get(snapshot["ref"])
+                    if claim is not None and claim in source_record.resources:
+                        source_record.resources.remove(claim)
+                    if snapshot["ref"] not in consumer_by_ref:
+                        transferred = _transferred_claim(snapshot, source=bundle.source)
+                        tracking.add_resource_claim(
+                            consumer_record,
+                            transferred,
+                            save=False,
+                        )
+                        consumer_by_ref[transferred.ref] = transferred
+                    if snapshot["kind"] == "worktree":
+                        child_path = str(
+                            _accept_child_path(snapshot, bundle_consumer=consumer_ref)
+                        )
+                        child_records[child_path].owner_ref = bundle.consumer
+
+                tracking.save_record(
+                    consumer_record,
+                    consumer_path,
+                    preserve_handoff_reservations=False,
+                )
+                for child_path, child_record in child_records.items():
+                    tracking.save_record(
+                        child_record,
+                        Path(child_path),
+                        preserve_handoff_reservations=False,
+                    )
+                tracking.save_record(
+                    source_record,
+                    source_path,
+                    preserve_handoff_reservations=False,
+                )
+                accepted = _bundle_state(bundle, "accepted")
+                bundles[index] = accepted
+                _save_registry(path, bundles)
+                return accepted
+    except ClaimHandoffError:
+        raise
+    except Exception as exc:
+        raise ClaimHandoffError(
+            f"cannot accept claim bundle {bundle_id}: {exc}"
+        ) from exc
 
 
 def active_bundle_ids_for_source(source: str) -> tuple[str, ...]:

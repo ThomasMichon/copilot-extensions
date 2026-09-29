@@ -490,6 +490,10 @@ def test_parser_accepts_claim_handoff_surface():
     ])
     assert offered.target == ["handoff", "offer"]
     assert offered.handoff_to == [CONSUMER, "child-ref"] and offered.json is True
+    accepted = parser.parse_args([
+        "claims", "handoff", "accept", "bundle-1"
+    ])
+    assert accepted.target == ["handoff", "accept", "bundle-1"]
     declined = parser.parse_args([
         "claims", "handoff", "decline", "bundle-1", "--reason", "busy"
     ])
@@ -630,5 +634,5 @@ def test_cli_offer_show_decline_cancel(handoff_state, monkeypatch, capfd):
 
 
 def test_cli_reports_invalid_action_as_json(handoff_state, capfd):
-    assert m.cmd_claims(_args(["handoff", "accept", "bundle-1"])) == 1
+    assert m.cmd_claims(_args(["handoff", "adopt", "bundle-1"])) == 1
     assert "unknown action" in json.loads(capfd.readouterr().out)["error"]

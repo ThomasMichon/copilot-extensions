@@ -355,3 +355,77 @@ def test_rollback_to_old_when_old_alive_and_drain_raises(tmp_path: Path,
     # Route restored to the old (still-alive) daemon.
     assert routing.read_table(tmp_path)["active"]["port"] == 9281
 
+
+# -- cutover-wide serialization (effort agent-bridge-unified-zdd-cutover,
+# Phase 2: two concurrent invocations must never race the same breadcrumb/
+# routing state) -------------------------------------------------------------
+
+
+def test_run_refuses_once_the_wait_budget_is_exhausted(tmp_path: Path):
+    from zdd.cutover_lock import CutoverLock
+
+    registry: dict = {}
+    orch, _handle = _make(tmp_path, healthy_ports={9290}, registry=registry)
+
+    held = CutoverLock(tmp_path)
+    held.acquire()
+    try:
+        # A small explicit lock_timeout keeps this test fast; run() still
+        # *waits* (does not refuse instantly) -- see
+        # test_run_waits_for_a_contended_lock_then_succeeds for the case
+        # where the holder releases before the budget is exhausted.
+        res = orch.run(health_timeout=1, drain_timeout=1, lock_timeout=0.3)
+    finally:
+        held.release()
+
+    assert res.ok is False
+    assert res.rolled_back is False
+    assert res.committed is False
+    assert "already in progress" in (res.error or "")
+    # Refused before ever touching the routing table.
+    assert routing.read_active_endpoint(tmp_path) is None
+
+
+def test_run_waits_for_a_contended_lock_then_succeeds(tmp_path: Path):
+    """A legitimate back-to-back trigger (a fast second update superseding a
+    first still in flight) must succeed once the first releases the lock --
+    not be flatly refused. This is the exact shape of
+    worktree-manager's mux-daemon-cutover convergence flow."""
+    import threading
+    import time as _time
+
+    from zdd.cutover_lock import CutoverLock
+
+    registry: dict = {}
+    orch, _handle = _make(tmp_path, healthy_ports={9290}, registry=registry)
+
+    held = CutoverLock(tmp_path)
+    held.acquire()
+
+    def _release_shortly() -> None:
+        _time.sleep(0.2)
+        held.release()
+
+    threading.Thread(target=_release_shortly, daemon=True).start()
+
+    res = orch.run(health_timeout=1, drain_timeout=1, lock_timeout=5.0)
+    assert res.ok is True
+
+
+def test_run_releases_lock_after_completion(tmp_path: Path):
+    from zdd.cutover_lock import CutoverLock, lock_path
+
+    registry: dict = {}
+    orch, _handle = _make(tmp_path, healthy_ports={9290}, registry=registry)
+    res = orch.run(health_timeout=1, drain_timeout=1)
+    assert res.ok is True
+
+    # The lock is free again -- a second cutover attempt can proceed.
+    contender = CutoverLock(tmp_path)
+    contender.acquire()
+    try:
+        assert contender.held
+        assert lock_path(tmp_path).exists()
+    finally:
+        contender.release()
+

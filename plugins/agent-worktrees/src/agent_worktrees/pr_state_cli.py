@@ -256,15 +256,41 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         return core._json_error(msg) if use_json else (output.err(msg) or 1)
     worktree_id = core._resolve_worktree_id(worktree_id)
 
+    repo_cfg = config.default_repo
+    configured_flow = pr_config._pr_flow_profile(repo_cfg)
+    actor_flow = pr_config.ActorPRFlow(
+        pr_config=repo_cfg.pr,
+        configured_flow=configured_flow,
+        flow=configured_flow,
+    )
+    live_requested = not getattr(args, "no_live", False)
+    if live_requested:
+        try:
+            record = tracking.load_record(cfg.tracking_dir() / f"{worktree_id}.yaml")
+            active = record.active_pr()
+            target_repo = (
+                (active.repo if active else "")
+                or record.repo
+                or ""
+            )
+        except Exception:
+            target_repo = ""
+        if target_repo:
+            actor_flow = pr_config.resolve_actor_pr_flow(repo_cfg, target_repo)
+
     result = pr_ops.pr_status(
         worktree_id,
         all_prs=getattr(args, "all", False),
-        live=not getattr(args, "no_live", False),
+        live=live_requested,
         config=config,
+        prcfg=actor_flow.pr_config,
     )
-    flow = pr_config._pr_flow_profile(config.default_repo)
+    flow = actor_flow.flow
     result["flow"] = {
         "profile": flow.profile,
+        "configured_profile": actor_flow.configured_flow.profile,
+        "resolution": actor_flow.resolution,
+        "viewer_permission": actor_flow.viewer_permission,
         "requires_pr": flow.requires_pr,
         "merge_mode": flow.merge_mode,
         "applicable_verbs": list(flow.applicable_verbs),
@@ -292,6 +318,7 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
         state=state,
         ok=not result.get("error"),
         reason=(live.get("self_merge_note") or "") if isinstance(live_block, dict) else "",
+        flow=flow,
     )
     if reminder is not None:
         result["reminder"] = reminder.as_dict()
@@ -308,7 +335,14 @@ def cmd_pr_status(args: argparse.Namespace) -> int:
     if result.get("error"):
         output.err(result["error"])
         return 1
-    print(f"  flow:     {flow.profile} -- {flow.summary}")
+    flow_detail = flow.profile
+    if actor_flow.resolution != "configured":
+        permission = actor_flow.viewer_permission or "unknown"
+        flow_detail += (
+            f" (configured: {actor_flow.configured_flow.profile}; "
+            f"permission: {permission}; {actor_flow.resolution})"
+        )
+    print(f"  flow:     {flow_detail} -- {flow.summary}")
     if reminder is not None:
         print(reminder.text(), file=sys.stderr)
     if not result.get("has_pr"):

@@ -206,7 +206,7 @@ def parse_record(message: str, expected: Resource | None = None) -> LeaseRecord:
     event = raw["event"]
     if state not in {"leased", "released"}:
         raise ProtocolError("lease state must be 'leased' or 'released'")
-    if event not in {"acquire", "takeover", "renew", "release"}:
+    if event not in {"acquire", "takeover", "renew", "transfer", "release"}:
         raise ProtocolError("lease event is invalid")
     if (state == "released") != (event == "release"):
         raise ProtocolError("release events and released state must match")

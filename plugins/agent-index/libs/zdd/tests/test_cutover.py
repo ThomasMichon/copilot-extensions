@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from zdd import routing
+from zdd import breadcrumb, routing
 from zdd.cutover import CutoverOrchestrator
 
 
@@ -147,6 +147,52 @@ def test_rollback_when_new_unhealthy(tmp_path: Path, monkeypatch):
     old_client = registry.get("http://127.0.0.1:9281")
     if old_client is not None:
         assert not any(c.startswith("drain(") for c in old_client.calls)
+    # #5195: the rolled-back breadcrumb still names the passive's own pid, so
+    # a caller that also wants reap_abandoned_passive's backstop can find it
+    # even though _rollback already terminated it in-process here.
+    record = breadcrumb.read_breadcrumb(tmp_path)
+    assert record is not None
+    assert record["new_pid"] == handle.pid
+
+
+def test_breadcrumb_records_new_pid_immediately_after_spawn(
+    tmp_path: Path, monkeypatch,
+):
+    """#5195: if the orchestrator process dies right after spawn_passive
+    returns (before the health gate even starts), the breadcrumb must already
+    carry the passive's pid -- not just the port -- so a later
+    reap_abandoned_passive pass can find and retire it."""
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    registry: dict = {}
+    seen_mid_flight: dict = {}
+
+    handle = FakeHandle(pid=9999)
+
+    def spawn_passive(port):
+        return handle
+
+    def health_check(host, port):
+        # Capture the breadcrumb the instant the health gate is consulted --
+        # simulates a crash immediately after spawn, before health passes.
+        seen_mid_flight["record"] = breadcrumb.read_breadcrumb(tmp_path)
+        return False
+
+    orch = CutoverOrchestrator(
+        tmp_path, bind="127.0.0.1", version="1.0.0",
+        spawn_passive=spawn_passive,
+        health_check=health_check,
+        make_client=lambda base_url: registry.setdefault(
+            base_url, FakeClient(base_url, registry)
+        ),
+        pick_free_port=lambda: 9290,
+        sleep=lambda _s: None,
+        clock=_fake_clock(),
+    )
+    orch.run(health_timeout=0.05, drain_timeout=1, poll=0.01)
+    record = seen_mid_flight["record"]
+    assert record is not None
+    assert record["new_pid"] == 9999
+    assert record["state"] == "started"
 
 
 # -- drain times out, no force -> rollback (route restored) ------------------
@@ -208,6 +254,23 @@ def test_cold_start_no_old_daemon(tmp_path: Path):
     assert res.committed is True
     assert res.old_endpoint is None
     assert routing.read_table(tmp_path)["active"]["port"] == 9290
+
+
+def test_base_url_brackets_ipv6_bind(tmp_path: Path):
+    """Regression test: an orchestrator bound to a wildcard IPv6 address
+    (client_host "::1") must bracket it when forming the client base URL --
+    unbracketed ("http://::1:1234") is not a valid URL and breaks
+    make_client()/urlparse on the host's own colons."""
+    orch = CutoverOrchestrator(
+        tmp_path, bind="::", version="1.0.0",
+        spawn_passive=lambda p: FakeHandle(),
+        health_check=lambda host, p: True,
+        make_client=lambda base_url: base_url,
+        pick_free_port=lambda: 9290,
+        sleep=lambda _s: None,
+        clock=_fake_clock(),
+    )
+    assert orch._base_url(9290) == "http://[::1]:9290"
 
 
 # -- drain RAISES after the flip, old daemon now dead -> commit forward -------
@@ -291,4 +354,78 @@ def test_rollback_to_old_when_old_alive_and_drain_raises(tmp_path: Path,
     assert handle.terminated is True  # new daemon torn down
     # Route restored to the old (still-alive) daemon.
     assert routing.read_table(tmp_path)["active"]["port"] == 9281
+
+
+# -- cutover-wide serialization (effort agent-bridge-unified-zdd-cutover,
+# Phase 2: two concurrent invocations must never race the same breadcrumb/
+# routing state) -------------------------------------------------------------
+
+
+def test_run_refuses_once_the_wait_budget_is_exhausted(tmp_path: Path):
+    from zdd.cutover_lock import CutoverLock
+
+    registry: dict = {}
+    orch, _handle = _make(tmp_path, healthy_ports={9290}, registry=registry)
+
+    held = CutoverLock(tmp_path)
+    held.acquire()
+    try:
+        # A small explicit lock_timeout keeps this test fast; run() still
+        # *waits* (does not refuse instantly) -- see
+        # test_run_waits_for_a_contended_lock_then_succeeds for the case
+        # where the holder releases before the budget is exhausted.
+        res = orch.run(health_timeout=1, drain_timeout=1, lock_timeout=0.3)
+    finally:
+        held.release()
+
+    assert res.ok is False
+    assert res.rolled_back is False
+    assert res.committed is False
+    assert "already in progress" in (res.error or "")
+    # Refused before ever touching the routing table.
+    assert routing.read_active_endpoint(tmp_path) is None
+
+
+def test_run_waits_for_a_contended_lock_then_succeeds(tmp_path: Path):
+    """A legitimate back-to-back trigger (a fast second update superseding a
+    first still in flight) must succeed once the first releases the lock --
+    not be flatly refused. This is the exact shape of
+    worktree-manager's mux-daemon-cutover convergence flow."""
+    import threading
+    import time as _time
+
+    from zdd.cutover_lock import CutoverLock
+
+    registry: dict = {}
+    orch, _handle = _make(tmp_path, healthy_ports={9290}, registry=registry)
+
+    held = CutoverLock(tmp_path)
+    held.acquire()
+
+    def _release_shortly() -> None:
+        _time.sleep(0.2)
+        held.release()
+
+    threading.Thread(target=_release_shortly, daemon=True).start()
+
+    res = orch.run(health_timeout=1, drain_timeout=1, lock_timeout=5.0)
+    assert res.ok is True
+
+
+def test_run_releases_lock_after_completion(tmp_path: Path):
+    from zdd.cutover_lock import CutoverLock, lock_path
+
+    registry: dict = {}
+    orch, _handle = _make(tmp_path, healthy_ports={9290}, registry=registry)
+    res = orch.run(health_timeout=1, drain_timeout=1)
+    assert res.ok is True
+
+    # The lock is free again -- a second cutover attempt can proceed.
+    contender = CutoverLock(tmp_path)
+    contender.acquire()
+    try:
+        assert contender.held
+        assert lock_path(tmp_path).exists()
+    finally:
+        contender.release()
 

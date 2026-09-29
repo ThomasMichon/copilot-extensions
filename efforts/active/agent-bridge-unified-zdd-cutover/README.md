@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478))
+- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 submitted for review -- [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522))
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
@@ -26,7 +26,7 @@ visions:
   (sibling effort — session terminal-state truthfulness; this effort is the
   daemon-generation cutover mechanism those sessions ride through) ·
   [`libs/zdd`](../../../libs/zdd/README.md) (the shared cutover/routing
-  library this effort extends, used by 8 plugins)
+  library this effort extends, used by 9 plugins)
 
 ## Guiding Intent
 
@@ -87,9 +87,11 @@ reaching for the "obvious" restart verb gets the unsafe path by default.
   file-based, client-read `active.json` table with self-healing readers and
   a `reap_stale_active` watchdog; `zdd.cutover.CutoverOrchestrator` driving
   spawn → health-gate → flip → drain → retire, with rollback and
-  commit-forward). Used by 8 plugins today (agent-ssh, agent-vault,
+  commit-forward). Used by 9 plugins today (agent-ssh, agent-vault,
   agent-dispatch, agent-containers, agent-index, agent-mcp, agent-bridge,
-  agent-codespaces). **This effort extends `zdd`, it does not fork it** —
+  agent-codespaces, agent-worktrees — the last was undercounted in the
+  original design notes, confirmed by directory listing during Phase 2).
+  **This effort extends `zdd`, it does not fork it** —
   every consumer benefits from a real session-host handoff primitive, not
   only agent-bridge.
 - **`agent_bridge.session_host.host_index.HostIndex`** — already a durable,
@@ -192,22 +194,22 @@ layer — is the operator's own, captured verbatim in Request.)_
   bootstrap-check scripts, any other plugin's activation hook) and route
   them onto the same one path too.
 
-### Phase 2 — Generation-scoped session-host claims in `zdd`/`HostIndex`
-- [ ] Extend `HostRecord` (or a sibling durable structure) with an explicit
+### Phase 2 — Generation-scoped session-host claims in `zdd`/`HostIndex` ✅
+- [x] Extend `HostRecord` (or a sibling durable structure) with an explicit
   **owning generation** field (not just `host_version` as evidence) —
   something a new generation can query and a stale one can be proven not to
   hold anymore.
-- [ ] Add the **claim/release/recover** primitive: a new generation
+- [x] Add the **claim/release/recover** primitive: a new generation
   acquires a specific host's claim; the prior generation releases claims it
   actually held, one host at a time, as it hands off; a claim whose owning
   generation is provably dead (not just "the daemon restarted") is
   recoverable by whichever generation next queries it — no live handshake
   with the dead process required.
-- [ ] This belongs in `libs/zdd` (or a sibling shared primitive vendored the
+- [x] This belongs in `libs/zdd` (or a sibling shared primitive vendored the
   same way), not bolted onto agent-bridge alone — the same shape helps any
-  of `zdd`'s other 7 consumers that host long-lived children across an
+  of `zdd`'s other 8 consumers that host long-lived children across an
   update.
-- [ ] **Cutover-wide serialization** (surfaced by PR #4478's review, not a
+- [x] **Cutover-wide serialization** (surfaced by PR #4478's review, not a
   Phase 1 regression: `agent-bridge deploy` was already directly invocable
   and racy before this effort — Phase 1 only widens exposure by making
   `service restart`, an operator-facing routine command, funnel into the
@@ -277,6 +279,114 @@ _Pending — Phase 2's claim/release/recover schema and Phase 3's exit-contract
 sequencing will be drafted here once the design is reviewed._
 
 ## Journal
+
+### 2026-09-28 — Phase 2 landed ([#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522))
+- **`zdd.claims`** (new, canonical `libs/zdd`): storage-agnostic
+  claim/release/recover decision logic. `decide_acquire(record, key=...,
+  generation=..., owner_pid=..., pid_alive=...)` is the one entry point:
+  free record -> acquire; same generation -> idempotent no-op; a *live*
+  different generation -> raises `ClaimConflict`; a *dead* owning
+  generation -> recovers silently (no live handshake with the dead process,
+  per the Plan's own wording). `is_recoverable()` and `generation_id()` are
+  the two supporting helpers. Deliberately does not define its own durable
+  manifest -- HostIndex already is one (see below) and the Plan says to use
+  it, not invent a new one.
+- **`agent_bridge.session_host.host_index.HostRecord`** gained
+  `owner_generation: str` and `owner_pid: int` (the *daemon's* pid, never
+  the session-host child's -- `host_pid`/`child_pid` already track the
+  child). `HostIndex` gained `claim`, `release`, `release_all`,
+  `claims_owned_by`, and `recoverable_claims`, all thin wrappers over
+  `zdd.claims` that persist through the index's existing atomic-JSON
+  storage -- no new manifest, no migration.
+- **Cutover-wide serialization**: `zdd.cutover_lock.CutoverLock`, a
+  stdlib-only (no new package dependency -- `zdd`'s own pyproject declares
+  zero runtime deps and this keeps it that way) cross-platform
+  (`fcntl.flock`/`msvcrt.locking`, mirroring `single_instance_lease`'s
+  proven approach but scoped to one `run()` call rather than a whole daemon
+  lifetime) exclusive lock. `CutoverOrchestrator.run()` now acquires it for
+  the full cutover sequence and, on contention, returns a normal
+  `CutoverResult(ok=False, error=...)` naming the holder's pid rather than
+  raising -- so `_cmd_deploy`'s existing result-handling needed no changes.
+  This closes the exact gap PR #4478's sixth review pass flagged: two
+  concurrent `deploy`/`service restart` invocations can no longer race the
+  same breadcrumb/routing state.
+- **A ninth `zdd` consumer, previously uncounted**: `check-vendored-libs-
+  sync.py` found `plugins/agent-worktrees/libs/zdd` alongside the 8 the
+  effort's Guiding Intent and Context sections named -- corrected
+  throughout (see Context above). **A tenth was found after that**:
+  `worktree-manager` (a top-level project, not under `plugins/`) also
+  vendors `libs/zdd` -- missed by an initial `find plugins -name zdd`
+  sweep. All 10 copies (plus canonical `libs/zdd`) were bumped to
+  `0.1.0-dev6` and re-synced byte-identical via `rsync`
+  (`tools/sync-vendored-libs.py --materialize` was tried first but also
+  touches unrelated pointer-vendored libs on a bare `--materialize` run
+  with no per-lib filter; reverted that incidental side effect and did the
+  zdd-only sync by hand instead). `check-vendored-libs-sync.py` confirms
+  `OK` afterward.
+- **A real bug caught by CI, not by any of the manual suite runs above**:
+  `worktree-manager`'s own `mux_daemon_cutover.py` (PR #4497, independent
+  of this effort) already ships a bespoke bounded-wait cutover lock
+  (`_acquire_cutover_lock`/`_CutoverLease`) at
+  `<routing_dir>/cutover.lock`. The new `zdd.cutover_lock.CutoverLock`
+  originally used that same bare filename -- so the moment a consumer
+  wraps `CutoverOrchestrator.run()` in its own outer serialization (exactly
+  what `worktree-manager` does), the orchestrator's own inner lock
+  acquisition opened a *second* file handle on the identical path and
+  self-deadlocked against the lock its own caller already held (POSIX
+  `flock` is per-open-file-description, so this doesn't self-resolve).
+  CI's `worktree-manager (out-of-plugin)` job caught it;
+  `test_activate_after_update_cuts_over_and_converges` hung/failed even on
+  its *first* (uncontended by anything external) cutover. Fixed by
+  namespacing the lock filename to `zdd-cutover.lock`, documented in the
+  module docstring alongside the collision it avoids. A future phase may
+  consolidate `worktree-manager` onto this shared primitive instead of its
+  own hand-rolled copy; the two are independent and harmless together in
+  the meantime.
+- **A related design correction, caught by the same failure**: the first
+  version of `CutoverLock.acquire()` refused outright on *any* contention.
+  `worktree-manager`'s own convergence test deliberately fires a second
+  cutover while a first is still draining, expecting the second to
+  *succeed once the first finishes* -- exactly the shape a "cutover-wide
+  serialization" primitive should support, not merely refuse. Redesigned
+  `acquire()` to **wait** (bounded, poll-retrying) up to a `timeout`
+  before raising `CutoverLockedError`; `CutoverOrchestrator.run()` now
+  waits up to `health_timeout + drain_timeout + 60` by default rather than
+  failing instantly on any contention.
+- New tests: `libs/zdd/tests/test_claims.py` (10 cases),
+  `libs/zdd/tests/test_cutover_lock.py` (10 cases, including the
+  bounded-wait-then-succeed and wait-then-exhausted paths, POSIX-only
+  where they rely on flock's per-open-file-description semantics,
+  mirroring `single_instance_lease`'s own same-process test), `libs/zdd/
+  tests/test_cutover.py` gained 2 lock-integration cases (refuse only
+  after the wait budget, and wait-then-succeed once the holder releases),
+  and `plugins/agent-bridge/tests/test_host_index_claims.py` (13 cases)
+  for the `HostIndex` wrapper. `libs/zdd`'s own suite: 83 passed (60
+  pre-existing + 23 new). `agent-bridge`'s full suite (2766 tests, 7
+  sub-suites): all green. `worktree-manager`'s own suite (1560 tests, run
+  via its real CI invocation `uv run --extra dev pytest -q`): all green
+  after the lock-filename fix. All 8 other `zdd` consumers' own suites run
+  individually: agent-worktrees (522 passed), agent-vault (359 passed),
+  agent-mcp (258 passed, 6 skipped), agent-dispatch (634 passed, 1
+  skipped), agent-codespaces (294 passed) all green. Two pre-existing,
+  unrelated failures found and confirmed (by reproducing against
+  unmodified `dev` with this change stashed) to predate this effort
+  entirely: `agent-ssh`'s
+  `test_dtssh_apply_updates_existing_binary_without_login` (a host-restore/
+  subprocess-mocking assertion, nothing to do with `zdd`) and
+  `agent-containers`'s `test_relay_profile_cannot_replace_refusal_with_
+  default_allowlist` (a `credential_relay`/`shutil.which` PATH-selection
+  assertion). `agent-index`'s suite hit the shared host's `[LIMIT]
+  temporary-storage limit exceeded (2048 MiB)` containment ceiling on both
+  the modified and the unmodified tree -- an environment/resource
+  constraint, not a code regression.
+- Phase 3's liveness gate and exit-contract sequencing were deliberately
+  **not** started here: wiring `HostIndex.release_all`/`claim` into the
+  real `_cmd_deploy`/`session_core.py` call sites needs the liveness gate
+  (Phase 3) as a prerequisite -- the outgoing generation's exit contract is
+  explicitly "confirm the next generation is live" *first*. Building a
+  partial wire-up now would ship a mechanism that cannot actually complete
+  a handoff yet. Phase 2's own checklist (claim/release/recover primitive +
+  cutover-wide lock) is fully closed; Phase 3 picks up the call-site wiring.
 
 ### 2026-09-28 — Phase 1 landed
 - `agent-bridge service restart` now routes through `_cmd_deploy` directly

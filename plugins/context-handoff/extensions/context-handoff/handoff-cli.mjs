@@ -53,7 +53,6 @@ import {
   attemptWorktreeSync,
   waitForWorktreeSyncToSettle,
 } from "./handoff-core.mjs";
-import { manualHandoffEnabled } from "./mode.mjs";
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -123,17 +122,11 @@ function requireSid(command, args) {
   process.exit(2);
 }
 
-function requireManualHandoffsEnabled(command, cwd) {
-  const config = loadContextHandoffConfig(cwd);
-  if (manualHandoffEnabled(config.mode)) {
-    return config;
-  }
-  process.stderr.write(
-    `handoff-cli ${command}: context handoff is disabled for this repository ` +
-    "(configured `mode: off` in .context-handoff/config.yaml or " +
-    "~/.context-handoff/config.yaml)\n",
-  );
-  process.exit(1);
+// Manual entry points are always available, in every mode including `off`
+// (see mode.mjs's `manualHandoffEnabled` docstring) -- this just resolves the
+// config every command needs, with no mode-based gate.
+function resolveHandoffConfig(cwd) {
+  return loadContextHandoffConfig(cwd);
 }
 
 function cmdSave(args) {
@@ -144,7 +137,6 @@ function cmdSave(args) {
   }
   const sid = requireSid("save", args);
   const cwd = args.cwd || process.cwd();
-  requireManualHandoffsEnabled("save", cwd);
   const stored = storeHandoff({
     promptText,
     sid,
@@ -183,7 +175,7 @@ function cmdSave(args) {
 async function cmdTrigger(args) {
   const sid = requireSid("trigger", args);
   const cwd = args.cwd || process.cwd();
-  const config = requireManualHandoffsEnabled("trigger", cwd);
+  const config = resolveHandoffConfig(cwd);
   const promptText = readPrompt(args);
   if (!promptText && !args["handoff-token"]) {
     process.stderr.write(
@@ -241,7 +233,6 @@ const CLI_CONSUME_SYNC_START_GRACE_MS = 500;
 async function cmdConsume(args) {
   const cwd = args.cwd || process.cwd();
   const sid = requireSid("consume", args);
-  requireManualHandoffsEnabled("consume", cwd);
   let taskId = args["task-id"];
   let handoffId = args["handoff-id"];
   let deferComplete = Boolean(args["defer-complete"]);
@@ -356,7 +347,6 @@ function cmdCheckHeads(args) {
 function cmdRetryCutover(args) {
   const cwd = args.cwd || process.cwd();
   const sid = requireSid("retry-cutover", args);
-  requireManualHandoffsEnabled("retry-cutover", cwd);
   const result = retryStoredHandoffCutover(cwd, sid);
   if (!result.ok) {
     process.stderr.write(

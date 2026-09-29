@@ -164,24 +164,27 @@ continue to work unchanged.
 The `pr-*` family drives PR-gated landing (config `pr.enabled` / `pr.required` —
 see [config-reference.md § PR workflow](config-reference.md)). `push-changes`
 then targets the *feature* branch, never the default branch. The verbs are
-self-describing: `pr-status` prints the active `flow:` profile, and `pr-merge`
-refuses (naming the reason) on a repo where no consent label is bound. Full
-narrative in [worktree-lifecycle.md § Landing the change](worktree-lifecycle.md).
+self-describing: `pr-status` prints the active actor-effective `flow:` profile,
+and `pr-merge` refuses (naming the reason) on a repo where the effective flow
+does not authorize that action. Full narrative in
+[worktree-lifecycle.md § Landing the change](worktree-lifecycle.md).
 
-On a `pr-self-merge` repo, `pr-merge --now` also checks the acting identity's
-own **live** provider permission before merging (general multi-maintainer
-comprehension: the repo's config says the flow is self-merge, but that's a
-maintainer's choice — it never grants every submitter merge rights). A
-confident read-only/no-access read refuses with a reminder pointing at the
-contributor path (open the PR, wait for a maintainer); an unknown/unreadable
-permission fails open, unchanged from before this check existed.
+Networked actor-specific commands resolve a shared **effective actor profile**:
+configured/base `PRConfig` + live provider permission + a matching GitHub
+`pr.roles` override. Thus a conservative base can become `pr-self-merge` for a
+configured maintainer role, while an explicitly non-self-merge Read/Write role
+remains on its review path. A confident read-only permission also demotes an
+otherwise unscoped self-merge profile. An unknown/unreadable permission falls
+back to the configured base: conservative bases fail closed, while a legacy
+base that is itself self-merge preserves the historical fail-open contract.
+Repos without `pr.roles` and non-GitHub providers keep their prior behavior.
 
 | Subcommand | Description |
 |------------|-------------|
 | `create-pr` (alias `pr-create`) | Squash the worktree's commits, publish the PR head branch, and open the PR. Flags: `--title`, `--body`/`--body-file`, `--draft` (open not-ready-for-review), `--new` (force a fresh head branch for a parallel PR), `--no-open` (push only), `--hold` (deprecated alias for `--draft`) |
 | `pr-ready` | Move a draft PR **out of draft** — request review |
 | `set-pr` | Record PR metadata (`--url`, `--number`) when the PR was opened out of band by a provider sub-agent |
-| `pr-status` | Show tracked PR metadata + live verdict / conflict / merge state; prints the `flow:` profile and flags pull-forward once merged |
+| `pr-status` | Show tracked PR metadata + live verdict / conflict / merge state; prints the effective actor `flow:` plus the configured profile/resolution source and flags pull-forward once merged. `--no-live` stays offline and reports the configured profile. |
 | `pr-nudge` | Ask this repo's bound automated reviewer (`pr.reviewer`, e.g. GitHub Copilot) to (re-)review the active PR. Nothing to nudge (unconfigured/unsupported) is reported, not an error; a successful request is async -- poll `pr-status`/`pr-watch` for a fresh verdict |
 | `pr-watch` | Block until the PR moves (`wait <repo> <pr> [--until …]`) and wake the caller with a race-proof cursor; `cursor <repo> <pr>` prints the current baseline |
 | `pr-merge` | Signal **merge consent** on an approved PR (applies the bound `automerge_label`); the review gate merges when satisfied. `--all` / `--loop` for sweeps |
@@ -189,9 +192,11 @@ permission fails open, unchanged from before this check existed.
 | `attribution-audit` | Config-only check: flags this repo's `pr.head_pattern` for the branch-name leak class (embeds `{machine}` while `pr.source_attribution` isn't `true`; `{worktree_id}` is never flagged -- it isn't part of `pr_head_name`'s rendering contract, so it can't actually leak). Plain mode prints findings and exits 1 if any are found (0 if none); `--json` exits 0 whenever it can report findings (empty or not). A configuration-load failure exits 1 in both modes |
 | `pr` | Namespace grouping the `pr-*` verbs |
 
-`get pr-profile` / `get pr-required` / `get pr-provider` report the repo's PR
-disposition (`direct` | `pr-human-merge` | `pr-agent-merge` |
-`pr-self-merge`) so you know which verbs apply before signing off.
+`get pr-profile` / `get pr-required` / `get pr-provider` are deliberately
+network-free configuration queries. `get pr-profile` reports the configured
+base disposition (`direct` | `pr-human-merge` | `pr-agent-merge` |
+`pr-self-merge`); use live `pr-status` for the acting identity's effective
+profile when `pr.roles` or live merge authority can change which verbs apply.
 
 
 

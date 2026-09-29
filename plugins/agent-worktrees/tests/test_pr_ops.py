@@ -872,10 +872,27 @@ class TestCreatePRRoleResolution:
         class _FakeProvider:
             name = "github"
 
+            def __init__(self):
+                self.policy_calls = 0
+
             def get_repo_policy(self, repo, *, api_base="", token=None):
+                self.policy_calls += 1
                 return SimpleNamespace(
                     supported=supported, viewer_permission=viewer_permission,
                 )
+
+            def create_pull(self, scope, *, token=None):
+                return SimpleNamespace(
+                    url="https://example/pulls/17",
+                    number=17,
+                    state="open",
+                    label_error="",
+                )
+
+            def pull_review_gate(
+                self, repo, number, *, api_base="", token=None,
+            ):
+                return True, True
 
         return _FakeProvider()
 
@@ -938,6 +955,38 @@ class TestCreatePRRoleResolution:
         assert res["success"] is True, res
         assert "needs_confirmation" not in res
         assert res["remote"] == "origin"
+
+    def test_maintain_auto_open_uses_effective_self_merge_flow(
+        self, pr_repo, monkeypatch,
+    ):
+        """Auto-open must use the already-resolved Maintain flow for its live
+        bypass note, not reclassify the conservative base config."""
+        import dataclasses
+
+        config, wid, _wt_path, _remote_dir = pr_repo
+        config = self._roles_config(
+            config,
+            maintain=cfg.PRRoleOverride(
+                merge_actor="submitter-direct",
+            ),
+        )
+        repo = config.repos["ext"]
+        config = dataclasses.replace(
+            config,
+            repos={
+                "ext": dataclasses.replace(
+                    repo,
+                    pr=dataclasses.replace(repo.pr, auto_open=True),
+                ),
+            },
+        )
+        fake = self._patch_live_permission(monkeypatch, "maintain")
+
+        res = pr_ops.create_pr(wid, config, target_repo="acme/ext")
+
+        assert res["pr_opened"] is True
+        assert "Maintainer bypass" in res["self_merge_note"]
+        assert fake.policy_calls == 1
 
     def test_live_permission_with_no_matching_role_is_unaffected(
         self, pr_repo, monkeypatch,
@@ -2778,6 +2827,7 @@ class TestPRFinalizeAndPush:
             result, false_config, record, pr, title="Add feature", body=None,
             worktree_id=wid, head_sha="deadbeef" * 5, open_pr=None,
             draft=False, attribution=None,
+            prcfg=false_config.default_repo.pr,
         )
         assert calls["count"] == 1
 
@@ -3595,13 +3645,35 @@ class TestPRStatusLive:
         config = self._config_with_binding(config)
         pr_ops.set_pr(wid, number=7, state="open", provider="gitea")
 
-        def _boom(name):
-            raise AssertionError("provider must not be consulted when live=False")
-
-        from agent_worktrees import providers
-        monkeypatch.setattr(providers, "get_provider", _boom)
+        monkeypatch.setattr(
+            pr_ops,
+            "_reconcile_active_pr",
+            lambda *a, **k: (_ for _ in ()).throw(
+                AssertionError("reconciliation must not run when live=False")
+            ),
+        )
         res = pr_ops.pr_status(wid, live=False, config=config)
         assert "live" not in res
+
+    def test_live_enabled_still_reconciles(self, pr_repo, monkeypatch):
+        config, wid, _wt, _ = pr_repo
+        config = self._config_with_binding(config)
+        pr_ops.set_pr(
+            wid,
+            url="https://example/pulls/unresolved",
+            state="open",
+            provider="gitea",
+        )
+        calls = []
+        monkeypatch.setattr(
+            pr_ops,
+            "_reconcile_active_pr",
+            lambda record, loaded: calls.append(loaded),
+        )
+
+        pr_ops.pr_status(wid, live=True, config=config)
+
+        assert calls == [config]
 
     def test_live_best_effort_on_provider_error(self, pr_repo, monkeypatch):
         config, wid, _wt, _ = pr_repo

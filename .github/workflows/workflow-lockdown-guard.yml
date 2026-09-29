@@ -1,0 +1,183 @@
+# Enforces the "only ThomasMichon modifies workflows/actions/CODEOWNERS"
+# policy (governance: maintainer-tier access model). Branch rulesets alone
+# can't express this on a personal (non-Enterprise) account: the
+# `file_path_restriction` rule type that would do it natively returns
+# `Validation Failed` here (Enterprise-only), and CODEOWNERS review
+# requirements are skipped entirely for any actor already bypassing PR
+# review (all Maintainers, by design, for req #2's self-merge).
+#
+# So this is enforced as a required status check instead: a check with no
+# bypass actors at all (see the "workflow/CODEOWNERS lockdown" ruleset)
+# fails whenever a protected path is touched by a PR whose registered
+# author (`pull_request.user.login`) is not ThomasMichon.
+#
+# This deliberately validates the PR's SUBMITTER, not individual commit
+# authorship. Per-commit `author.login`/`committer.login` are just GitHub's
+# resolution of the commit's plain-text git identity (name + email) against
+# an account -- not a cryptographic proof. Any contributor can locally set
+# `git commit --author="ThomasMichon <NNN+ThomasMichon@users.noreply.github.com>"`
+# and have it resolve to that same login with zero access to the real
+# account, so validating commit metadata would buy nothing but complexity. A
+# PR's `user.login`, by contrast, is an authenticated fact set once by
+# GitHub itself at PR-creation time (you cannot open a PR as another
+# account) -- there is no equivalent way to forge it, and it doesn't change
+# on close/reopen the way an event's `sender` can be gamed into laundering a
+# stale failing result into a passing one.
+#
+# KNOWN, ACCEPTED RESIDUAL RISK: this checks who OPENED the PR, not who
+# pushed every commit in it. An already-invited Write collaborator with
+# push access to the same repo could push a follow-up commit directly onto
+# ThomasMichon's own already-open PR branch, and this check would still
+# pass (the PR's author is unchanged). Closing that gap fully would need
+# either commit-signature verification (this repo has decided against
+# setting up commit signing -- too much operational hassle for the
+# residual risk it closes -- see ThomasMichon/copilot-extensions#4519,
+# declined) or restricting push access to PR branches, neither of which is
+# enforced here. This requires an already-trusted collaborator to actively
+# push an unwanted commit onto someone else's PR, which is a narrower and
+# more unusual threat than an arbitrary outsider or even a Contributor's own
+# PR -- both of which this check does fully close.
+#
+# KNOWN, ACCEPTED STRUCTURAL LIMITATION: GitHub's `required_status_checks`
+# ruleset rule matches a check purely by its CONTEXT NAME
+# ("workflow-lockdown-guard"), not by which workflow file produced it, and
+# does not distinguish between check runs reported by different workflows
+# under the same GitHub Actions app identity. A Write Maintainer could
+# therefore modify an EXISTING, untrusted-`pull_request`-triggered workflow
+# (e.g. `ci.yml`) within their own PR to add a trivial job also named
+# `workflow-lockdown-guard` that always succeeds; whether that forged
+# success can satisfy the ruleset instead of (or alongside) this guard's own
+# correctly-failing result is a real ambiguity in how GitHub resolves
+# same-named concurrent checks, not something this workflow can control.
+# Closing this fully would need the check reported by a distinct, separately
+# trusted GitHub App/integration pinned in the ruleset by `integration_id`
+# -- not just "any GitHub Actions run in this repo," which forger and
+# defender share equally. That's real additional infrastructure (a GitHub
+# App, or an external CI system) this repo has not built. Until it does,
+# treat this lockdown as a strong deterrent and an accidental-misuse guard
+# (it fully stops an ordinary Contributor's PR, an unsophisticated mistake,
+# or a Maintainer who isn't actively trying to defeat it), NOT a
+# cryptographically hard guarantee against a Write Maintainer deliberately
+# trying to forge it -- the same category of trust already accepted
+# elsewhere in this governance model (see CONTRIBUTING.md's actor-vs-author
+# bypass note).
+#
+# IMPORTANT: this uses `pull_request_target`, not `pull_request`. A plain
+# `pull_request` trigger runs the workflow DEFINITION from the PR's own head
+# commit -- so a Write collaborator could edit *this file* within their own
+# PR to neuter the check, and the neutered version is exactly what would
+# run. `pull_request_target` always runs the trusted definition from the
+# repository's ACTUAL default branch (`main` here -- confirmed via the repo
+# API; NOT the `dev` branch this repo treats as its own "contribution
+# default"), regardless of what the PR head or even `dev` currently
+# contains, and still exposes `github.event.pull_request` metadata for the
+# untrusted head. This job never checks out or executes PR content -- it
+# only reads the PR's file list via the REST API -- so it carries none of
+# the classic `pull_request_target` secret-exfiltration risk (see this
+# repo's own `identifier-leak-guard.yml` for the citation on that risk
+# class).
+#
+# BOOTSTRAP ORDER MATTERS: because the trusted copy is loaded from `main`,
+# this check cannot report on any PR -- including the one that first adds
+# this file to `dev` -- until `main` itself has a copy, which only happens
+# after this repo's own promotion pipeline next promotes `dev` to `main`
+# (routinely ~10-20 minutes after a `dev` merge). The enforcing ruleset
+# ("dev branch policy: workflow/CODEOWNERS lockdown") is therefore created
+# `disabled`, and is only flipped to `active` after confirming a real PR's
+# `workflow-lockdown-guard` check actually reports post-promotion -- never
+# enabled speculatively ahead of that.
+#
+# `edited` is included in `types` below alongside the usual opened/reopened/
+# synchronize: a PR originally opened against a different base branch and
+# later RETARGETED to `dev` fires `edited` (with `changes.base` present),
+# not any of the other types -- without `edited` here, a retargeted PR
+# would sit forever waiting on a required check that never runs. Re-running
+# on every other `edited` PR field (title, body, labels) too is harmless --
+# the check is small, fast, and always recomputes the same correct result.
+name: Workflow lockdown guard
+
+on:
+  pull_request_target:
+    branches: [dev]
+    types: [opened, reopened, synchronize, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  ALLOWED_LOGIN: ThomasMichon
+
+jobs:
+  workflow-lockdown-guard:
+    name: workflow-lockdown-guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check protected-path changes are ThomasMichon-submitted
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          ALLOWED_LOGIN: ${{ env.ALLOWED_LOGIN }}
+        with:
+          script: |
+            const protectedPrefixes = [
+              ".github/workflows/",
+              ".github/actions/",
+            ];
+            const protectedExact = new Set([".github/CODEOWNERS"]);
+            const allowedLogin = process.env.ALLOWED_LOGIN;
+            const pullNumber = context.payload.pull_request.number;
+            // GitHub's "list pull request files" endpoint returns at most
+            // 3000 entries, even across paginated pages -- a PR at or past
+            // that cap could have a protected-path change past the
+            // returned window. Fail closed rather than silently missing it.
+            const FILES_HARD_CAP = 3000;
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pullNumber,
+              per_page: 100,
+            });
+
+            if (files.length >= FILES_HARD_CAP) {
+              core.setFailed(
+                `This PR's changed-file list hit the GitHub API's ${FILES_HARD_CAP}-file ` +
+                  "cap, so a protected-path change could exist outside the returned " +
+                  "window. Failing closed -- this ruleset has no bypass actors, so the " +
+                  "only way to clear this check is to split this PR into smaller changes.",
+              );
+              return;
+            }
+
+            const isProtected = (name) =>
+              protectedExact.has(name) ||
+              protectedPrefixes.some((prefix) => name.startsWith(prefix));
+
+            // A rename reports the new path as `filename` and the old path
+            // as `previous_filename` -- checking only `filename` would miss
+            // a protected file being renamed OUT of a protected path (the
+            // change to that protected file's history still happened).
+            const touched = files
+              .flatMap((f) => [f.filename, f.previous_filename].filter(Boolean))
+              .filter(isProtected);
+
+            if (touched.length === 0) {
+              core.info("No protected paths touched; nothing to enforce.");
+              return;
+            }
+
+            const author = context.payload.pull_request.user.login;
+            if (author === allowedLogin) {
+              core.info(
+                `Protected path(s) touched (${touched.join(", ")}); PR submitted by ${allowedLogin}.`,
+              );
+              return;
+            }
+
+            core.setFailed(
+              `Protected paths (${touched.join(", ")}) were touched, but this PR was ` +
+                `submitted by ${author}, not ${allowedLogin}. Only a PR opened by that ` +
+                "account may modify workflows, actions, or CODEOWNERS -- ask them to " +
+                "make this change, or split it out of this PR.",
+            );

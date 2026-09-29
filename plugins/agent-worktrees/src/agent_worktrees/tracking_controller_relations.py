@@ -7,7 +7,7 @@ with no behavior change, from ``tracking.py``.
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from .tracking import (
     _MAX_CONTROLLER_RELATIONS,
@@ -284,6 +284,47 @@ def _derive_initial_controller_relations(
     if caller_worktree:
         caller_ref = caller_worktree
         parsed_caller = parse_claim_ref(caller_worktree)
+        caller_ref_unresolved_path = False
+        if (
+            parsed_caller is not None
+            and not parsed_caller.is_qualified
+            and any(sep in parsed_caller.worktree_id for sep in ("\\", "/"))
+        ):
+            # Some legacy records stored `caller_worktree` as a raw
+            # filesystem path (e.g. an absolute Windows worktree checkout
+            # path) rather than a path-safe worktree id -- reduce it to its
+            # final path component, the same tolerance
+            # `delegate_cli._caller_lookup_tokens` already applies when
+            # reading this field, instead of letting the raw path reach
+            # `_normalize_controller_ref` and trip its path-safety check.
+            # Always parse with `PureWindowsPath`, never the platform-
+            # dependent `Path`/`PosixPath`: a legacy Windows-style path
+            # (backslash-separated) is a cross-machine value that can be
+            # read back on a Linux host, where plain `Path` treats
+            # backslash as an ordinary character and leaves the whole raw
+            # path unsplit -- confirmed live: this silently defeated the
+            # reduction below on any non-Windows reader, leaving the raw,
+            # non-path-safe string to reach `_normalize_controller_ref` and
+            # raise, which the caller then swallowed into an empty
+            # (0-relation) controller list. `PureWindowsPath` also accepts
+            # forward slashes, so it stays a safe superset for the
+            # already-POSIX-style raw paths this same branch has to cover.
+            bare_id = PureWindowsPath(parsed_caller.worktree_id).name
+            if bare_id:
+                parsed_caller = ClaimRef(
+                    worktree_id=bare_id,
+                    machine=parsed_caller.machine,
+                    project=parsed_caller.project,
+                    session=parsed_caller.session,
+                )
+                caller_ref = bare_id
+            else:
+                # Could not reduce the path to a usable bare id (e.g. a
+                # root path). Nothing safe to derive from this field;
+                # owner_ref/parent_session already carry the
+                # authoritative relation in that case.
+                parsed_caller = None
+                caller_ref_unresolved_path = True
         matches_richer_owner = bool(
             parsed_caller is not None
             and not parsed_caller.is_qualified
@@ -310,7 +351,8 @@ def _derive_initial_controller_relations(
                 parsed_caller.worktree_id,
                 parsed_caller.session,
             )
-        add_reference("caller-worktree", caller_ref)
+        if not caller_ref_unresolved_path:
+            add_reference("caller-worktree", caller_ref)
     if parent_session:
         matching = next((relation for relation in relations
                          if relation.source == "caller-worktree"), None)

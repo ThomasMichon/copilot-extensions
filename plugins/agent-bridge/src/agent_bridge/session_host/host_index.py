@@ -26,6 +26,10 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from zdd.claims import ClaimConflict, decide_acquire
+
+__all__ = ["ClaimConflict", "HostIndex", "HostRecord"]
+
 
 @dataclass
 class HostRecord:
@@ -53,6 +57,19 @@ class HostRecord:
     # ``session_host.endpoints``.
     endpoint: dict = field(default_factory=dict)
     extra: dict = field(default_factory=dict)
+    # Generation-scoped ownership claim (effort
+    # agent-bridge-unified-zdd-cutover, Phase 2): which agent-bridge daemon
+    # *generation* currently owns this session-host record, and the pid to
+    # probe for that generation's liveness. This is the frontend daemon's own
+    # pid, never the session-host child's -- ``host_pid``/``child_pid`` above
+    # already track the child; this pair tracks which daemon instance may
+    # hand it off. Empty/zero means "never claimed" (a record from before
+    # this field existed, or one a generation registered but has not yet
+    # explicitly claimed) -- ``zdd.claims.is_recoverable`` treats that the
+    # same as a claim whose owner is dead: free for the taking, no live
+    # handshake required.
+    owner_generation: str = ""
+    owner_pid: int = 0
 
     @classmethod
     def from_state_file(cls, session_id: str, state_file: str | os.PathLike[str],
@@ -150,6 +167,94 @@ class HostIndex:
                 self._records.pop(r.session_id, None)
             self._flush()
         return dead
+
+    # -- generation-scoped claims (effort agent-bridge-unified-zdd-cutover,
+    # Phase 2) --------------------------------------------------------------
+    def claim(
+        self,
+        session_id: str,
+        *,
+        generation: str,
+        owner_pid: int,
+        pid_alive: Callable[[int], bool],
+        force: bool = False,
+    ) -> HostRecord:
+        """Claim ``session_id`` for ``generation``, or raise :class:`ClaimConflict`.
+
+        A live generation's claim on a record it still owns is refused (the
+        exact race this primitive exists to prevent: two daemon generations
+        each believing they own the same session-host); a claim whose owning
+        generation is provably dead (``pid_alive`` is false for its recorded
+        ``owner_pid``) is recovered silently -- no live handshake with the
+        dead generation is needed. ``force=True`` overrides a live conflict
+        (an explicit operator escape hatch; not used by the normal handoff
+        path). Raises ``KeyError`` if no record exists for ``session_id``
+        (claiming is about taking over an *existing* record -- use
+        :meth:`register` to create one).
+        """
+        rec = self._records[session_id]
+        decide_acquire(
+            rec, key=session_id, generation=generation, owner_pid=owner_pid,
+            pid_alive=pid_alive, force=force,
+        )
+        if rec.owner_generation != generation or rec.owner_pid != owner_pid:
+            rec.owner_generation = generation
+            rec.owner_pid = owner_pid
+            self._flush()
+        return rec
+
+    def release(self, session_id: str, generation: str) -> bool:
+        """Release ``session_id``'s claim, but only if ``generation`` holds it.
+
+        This is the outgoing generation's exit-contract half of claim/release/
+        recover: it releases claims it actually held, one host at a time, as
+        it hands off -- never another generation's claim (a stale caller
+        racing an already-superseded release must not clobber the new
+        owner). Returns True if a release happened.
+        """
+        rec = self._records.get(session_id)
+        if rec is None or rec.owner_generation != generation:
+            return False
+        rec.owner_generation = ""
+        rec.owner_pid = 0
+        self._flush()
+        return True
+
+    def release_all(self, generation: str) -> list[str]:
+        """Release every claim ``generation`` holds (the exit-contract sweep).
+
+        Called by an outgoing generation as it hands off, so every record it
+        held becomes immediately recoverable by the next generation without
+        waiting for that generation to notice the owner died. Returns the
+        released session ids.
+        """
+        released = [
+            sid for sid, r in self._records.items() if r.owner_generation == generation
+        ]
+        if released:
+            for sid in released:
+                rec = self._records[sid]
+                rec.owner_generation = ""
+                rec.owner_pid = 0
+            self._flush()
+        return released
+
+    def claims_owned_by(self, generation: str) -> list[HostRecord]:
+        """Records currently claimed by ``generation``."""
+        return [r for r in self._records.values() if r.owner_generation == generation]
+
+    def recoverable_claims(
+        self, pid_alive: Callable[[int], bool]
+    ) -> list[HostRecord]:
+        """Records whose owning generation is provably dead (or never claimed).
+
+        Candidates a new generation may claim outright via :meth:`claim`
+        without contention -- no live handshake with a dead process required.
+        """
+        return [
+            r for r in self._records.values()
+            if not r.owner_generation or not r.owner_pid or not pid_alive(r.owner_pid)
+        ]
 
     # -- query -------------------------------------------------------------
     def get(self, session_id: str) -> HostRecord | None:

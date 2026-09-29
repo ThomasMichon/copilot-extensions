@@ -207,7 +207,12 @@ class TestPrMergeDispatcherInference:
             raise AssertionError("inference must not run when a slug is explicit")
         monkeypatch.setattr(pr_merge_cli, "_infer_active_repo_slug", _must_not_call)
         # Halt just past the inference point so we never hit the network.
-        monkeypatch.setattr(pr_config, "_pr_flow_profile",
+        # `cmd_pr_merge_dispatch` resolves flow via
+        # `pr_config.resolve_actor_pr_flow`, which classifies the *configured*
+        # flow through `_profile_for_pr_config` unconditionally and before any
+        # network/provider call (#4480) -- `_pr_flow_profile` is no longer on
+        # this call path, so patching it here no longer halts anything.
+        monkeypatch.setattr(pr_config, "_profile_for_pr_config",
                             lambda repo_cfg: (_ for _ in ()).throw(_Stop()))
 
         with pytest.raises(_Stop):

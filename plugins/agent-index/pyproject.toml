@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-index"
-version = "0.2.1-dev2"
+version = "0.3.0-dev1"
 description = "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem."
 readme = "README.md"
 license = "MIT"
@@ -74,16 +74,22 @@ store = [
 server = [
     # The FastAPI/uvicorn/pydantic HTTP service shell (`agent_index.server`):
     # the actual `/search`/`/reindex`/drain/cutover-routing HTTP surface.
-    # Provisioned into its own SERVER venv only (agent-index-server-venv-split)
-    # -- a pure client never installs this, and it is version-coupled (not
-    # durable) since the server's own index/query logic changes in lockstep
-    # with client code. Distinct from the separate agent-index-engine package's
-    # own tiny RPC shim (agent_index_engine.app, plugins/agent-index/server/ --
-    # note the directory-name collision with THIS extra, purely coincidental:
-    # agent-index-engine is the durable embedding daemon, this [server] extra
-    # is the version-coupled index/query HTTP service), which declares its own
-    # fastapi/uvicorn/pydantic dependency directly rather than relying on this
-    # extra.
+    # Extracted out of BASE so a pure client never installs it -- but as of
+    # this extras split, `[server]` is still installed into the SAME shared
+    # per-version host venv as `[store]` (`Install-Runtime`'s host role
+    # installs `[store,server]` together; see `install.ps1`/`install.sh`).
+    # The dedicated, separately-provisioned sibling SERVER venv described by
+    # agent-index-server-venv-split (a version-coupled venv distinct from the
+    # client/orchestrator venv, not durable like the embedding engine) is
+    # still a separate, not-yet-implemented Plan item -- `config.
+    # server_venv_python()` is inert scaffolding for it today. Distinct from
+    # the separate agent-index-engine package's own tiny RPC shim
+    # (agent_index_engine.app, plugins/agent-index/server/ -- note the
+    # directory-name collision with THIS extra, purely coincidental:
+    # agent-index-engine is the durable embedding daemon, this [server]
+    # extra is the version-coupled index/query HTTP service), which
+    # declares its own fastapi/uvicorn/pydantic dependency directly rather
+    # than relying on this extra.
     "fastapi>=0.110",
     "uvicorn>=0.52.3",
     "pydantic>=2.0",

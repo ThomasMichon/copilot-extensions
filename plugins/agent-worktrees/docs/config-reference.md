@@ -394,7 +394,7 @@ in-repo overlay (below); the in-repo version wins when both are present.
 | `bypass_policy` | bool | `false` | Complete the PR **past** branch policies when requesting auto-complete (Azure DevOps). Needed for a default branch whose policy never auto-satisfies for our own PRs (e.g. a central governance **status** policy). Only set true where we are authorized to self-complete. |
 | `bypass_reason` | string | *(empty)* | Reason recorded on the policy bypass. |
 | `fork` | object | *(disabled)* | Role-aware fork-PR flow (see `efforts/active/role-aware-fork-pr-flow`, GitHub-only). `{enabled, remote, owner}` — repo-wide default for whether `create-pr` publishes through a personal fork instead of a direct push. `enabled` (bool, default `false`); `remote` (string, default `"fork"`) — the local git remote name pointed at the fork; `owner` (string, default `""`) — override the fork-owner login used to build the `<owner>:<branch>` PR head (default: whoever the resolved token belongs to). Disabled by default — an unconfigured repo's push/PR flow is unchanged. |
-| `roles` | map | `{}` | Per-**live-permission-level** overrides layered onto this `PRConfig`, keyed by one of `read` / `triage` / `write` / `maintain` / `admin` (GitHub's own `role_name` vocabulary — the same one the GitHub Inside Microsoft ACL policy's `role:` field uses). Each entry may set any of `reviewer`, `review_blocking`, `self_approve`, `merge_actor`, `fork` — omitted fields inherit the base `PRConfig` unchanged. `create-pr`/`pr-merge` resolve the caller's live GitHub permission on the repo (reusing `pr-merge --now`'s existing live-permission read, #2433) and layer the matching role's overrides before doing anything else. Empty (the default) means every caller gets the same flow — today's behavior. Example: a `write`-permission "Contributor" role clears `merge_actor` and turns on `fork`, while a `maintain`-permission "Maintainer" role keeps the repo's direct-push `submitter-direct` flow. |
+| `roles` | map | `{}` | Per-**live-permission-level** overrides layered onto this `PRConfig`, keyed by one of `read` / `triage` / `write` / `maintain` / `admin` (GitHub's permission vocabulary). Each entry may set any of `reviewer`, `review_blocking`, `self_approve`, `merge_actor`, `fork` — omitted fields inherit the base `PRConfig` unchanged. Networked actor-specific surfaces (`create-pr`, `pr-status`, `pr-watch wait`, and `pr-merge`) resolve the caller's live GitHub permission and layer the matching role before classifying or acting. Empty (the default) keeps the single configured flow. Example: a conservative base can omit `merge_actor`, while `maintain` adds `merge_actor: submitter-direct`; conversely, a `write` override can explicitly clear an inherited self-merge actor. |
 | `notes` | string | *(empty)* | Free-text, repo-specific guidance surfaced as an extra `Note:` line on every `pr_reminder()` (the "Reminder [...]" text every `pr-*` verb and `push-changes` already print). Exists because an agent interacts with PR config through `agent-worktrees repos get`/the `pr-*` verbs, not by reading this file's own comments — a comment explaining a non-obvious repo choice (e.g. why a bypass mode is `pull_request` and not `always`/`exempt`) never reaches a calling agent unless it rides along through a command's own output. Keep it short — one or two sentences. |
 
 > **`pr.fork`/`pr.roles` confirmation gate.** When the resolved flow for a
@@ -405,6 +405,23 @@ in-repo overlay (below); the in-repo version wins when both are present.
 > --confirm-fork` (or `confirm_fork=True`) once they agree. Only that
 > confirmed call creates/verifies the fork (idempotent — a caller who already
 > has one is untouched) and points the local `fork` remote at it.
+
+> **Configured profile vs. effective actor profile.** The base `PRConfig`
+> always has a pure, network-free **configured profile**. `get pr-profile`
+> reports that configured profile and never contacts a provider. Networked
+> commands that make actor-specific decisions resolve an **effective actor
+> profile** from the base config + live permission + matching `pr.roles`
+> override. `pr-status` reports both (`flow.configured_profile` and the
+> effective `flow.profile`) plus its resolution source; `pr-status --no-live`
+> remains offline and reports the configured profile only.
+>
+> Permission lookup is fail-open to the configured base, not to a synthesized
+> role. This makes fallback follow the repository's chosen safety posture: a
+> conservative base remains non-self-merge when permission is unknown, while a
+> legacy repo whose base itself is `pr-self-merge` preserves the historical
+> fail-open behavior. A confident read-only permission demotes an otherwise
+> unscoped self-merge profile for operational commands. Non-GitHub providers
+> ignore `pr.roles` and retain their existing configured behavior.
 
 > **"Request auto-complete" is the first-class concept; the label is an
 > implementation detail.** `pr-merge` asks the provider to *auto-complete* the
@@ -427,12 +444,13 @@ in-repo overlay (below); the in-repo version wins when both are present.
 > nor a hold label, the classifier ignores it. See the `pr-command-family` effort in
 > test-chamber.
 
-Query the effective (post-merge) values at runtime:
+Query configured (post-overlay, network-free) values at runtime:
 
 ```bash
 agent-worktrees get pr-enabled    # true | false
 agent-worktrees get pr-required   # true | false
 agent-worktrees get pr-provider   # gitea | github | azure-devops (empty when off)
+agent-worktrees get pr-profile    # configured/base profile; no provider read
 ```
 
 See the `worktree` skill § PR Workflow for the end-to-end flow

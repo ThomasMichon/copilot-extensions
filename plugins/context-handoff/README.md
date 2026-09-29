@@ -164,10 +164,10 @@ It always:
 3. notes it in the worktree's own record via `agent-worktrees note-handoff`
    (this creates a `pending_handoffs` entry -- lineage/tracking state, so a
    manually-consuming successor can later be promoted to head via
-   `link-succession` regardless of mode). This step runs under **both**
-   `manual-only` and `auto` -- only `mode: off` skips it entirely (see
-   `note-handoff --live-cutover` below for the piece that's actually
-   mode-gated).
+   `link-succession` regardless of mode). This step runs in **every** mode,
+   including `off` -- `off` disables only automatic/unprompted behavior, never
+   a manually-invoked `trigger_handoff` (see `note-handoff --live-cutover`
+   below for the piece that's actually mode-gated).
 
 **Only when `.context-handoff/config.yaml`'s `mode` is `auto`** (the default
 is `manual-only`) does it additionally arm **live-cutover**:
@@ -758,9 +758,15 @@ monitor's live-cutover (the `note-handoff` ledger entry itself is still
 recorded under `manual-only`; only its `--live-cutover` flag is `mode: auto`
 gated -- this is what lets a manually-consumed successor still be promoted
 to the worktree's head regardless of mode).
-`mode: off` disables both automatic behavior and the extension/CLI handoff
-entry points for that repo entirely (only the last-resort manual file write
-remains reachable, since it depends on nothing this plugin owns).
+`mode: off` disables only automatic/unprompted behavior -- the soft/hard
+context-pressure nudges above, and the force tier's own auto-draft/store/
+trigger. It does **not** disable the manual entry points: `generate_handoff_
+prompt`, `save_handoff_prompt`, `trigger_handoff`, `consume_handoff`, and
+their `/handoff-continue` / `/consume-handoff` / `/resume-handoff` slash
+commands all keep working exactly as under `manual-only`, including
+`trigger_handoff`'s ledger note. A session or operator who explicitly reaches
+for the mechanism gets it, regardless of the repo's automatic-behavior
+policy; `off` only means "don't nudge me, and don't ever act on my behalf."
 
 Each threshold tier may use either `<tier>_percent` or `<tier>_tokens`. Mixed
 configs are allowed per tier; percent tiers resolve against the live session

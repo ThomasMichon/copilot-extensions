@@ -66,19 +66,26 @@ def server_venv_python() -> Path | None:
     runs in -- so the server's own heavy deps never load into a pure client
     install. Until the installer actually provisions that sibling venv
     (still a separate Plan item), this returns ``None`` for every existing
-    single-venv layout, and callers fall back to running the server
-    in-process exactly as before -- this resolver is inert scaffolding, not
-    a behavior change on its own.
+    layout today, and callers fall back to running the server in-process
+    exactly as before -- this resolver is inert scaffolding, not a behavior
+    change on its own.
 
     Resolution order:
       1. ``AGENT_INDEX_SERVER_VENV_PYTHON`` -- an explicit interpreter path
          override, honored unconditionally (test/dev convenience, or an
          unconventional layout).
-      2. The convention: a ``.venv-server`` directory alongside whichever
-         ``.venv`` directory owns the currently-running interpreter, using
-         the same ``Scripts``/``bin`` and executable-name shape as the
-         current interpreter (so this works unchanged on both Windows and
-         POSIX layouts without hardcoding either).
+      2. The convention: a ``server`` subdirectory of whichever venv root
+         owns the currently-running interpreter (the directory containing
+         the ``Scripts``/``bin`` folder), using the same shape as the
+         current interpreter. Deliberately does **not** assume that root is
+         named ``.venv`` -- a real installed runtime is pinned directly to
+         ``versions/<version>/Scripts`` (or ``versions/<version>/bin``) via
+         marker-only activation (``Invoke-VersionedActivate``'s own
+         ``--no-link``); there is no ``.venv``-named directory anywhere in
+         a deployed process's own path. A plain local dev venv (``uv venv
+         .venv``) has its ``Scripts``/``bin`` directly under ``.venv``
+         too, so the same ``<venv-root>/server/...`` convention resolves
+         correctly there as well, without a separate case.
     """
     override = os.environ.get(SERVER_VENV_PYTHON_ENV)
     if override:
@@ -87,10 +94,8 @@ def server_venv_python() -> Path | None:
 
     current = Path(sys.executable).resolve()
     venv_bin = current.parent
-    venv_dir = venv_bin.parent
-    if venv_dir.name != ".venv":
-        return None
-    candidate = venv_dir.with_name(".venv-server") / venv_bin.name / current.name
+    venv_root = venv_bin.parent
+    candidate = venv_root / "server" / venv_bin.name / current.name
     return candidate if candidate.is_file() else None
 
 
