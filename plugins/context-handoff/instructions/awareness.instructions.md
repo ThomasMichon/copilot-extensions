@@ -46,7 +46,7 @@ output; `help` always prints the plain-text option reference, ignoring
 | `sync-worktree` | Shared lock/rebase-safe worktree sync (same helper the force tier uses) |
 | `list-sessions` | This worktree's sessions + recorded handoff chain (needs `agent-worktrees`) |
 | `get-previous-session` | This (or a named) session's recorded predecessor (needs `agent-worktrees`) |
-| `abort --locator "<kind>:<id>"` | Cancel a pending handoff before anyone consumes it |
+| `abort --locator "<kind>:<id>"` | Cancel a pending handoff before anyone consumes it (needs `agent-worktrees`; a task-backed target additionally needs `agent-dispatch`) |
 
 ```bash
 CH_ROOT="${COPILOT_PLUGIN_ROOT:-$HOME/.copilot/installed-plugins/copilot-extensions/context-handoff}"

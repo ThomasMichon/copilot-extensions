@@ -3903,7 +3903,7 @@ export function abortFileHandoff(
     // ledger showing "cancelled" (and the predecessor possibly restored to
     // head) while the file record remains genuinely unconsumed (PR #4570
     // review round 18).
-    const peek = cancelHandoffInRecord(cwd, current.record.sessionId, handoffId, execute, { dryRun: true });
+    const peek = cancelHandoffInRecord(cwd, current.record.sessionId, current.record.id, execute, { dryRun: true });
     if (!peek.checked) {
       // Fail CLOSED, not open -- see the identical note on the task path
       // above (PR #4570 review round 19).
@@ -3943,7 +3943,7 @@ export function abortFileHandoff(
     // https://github.com/ThomasMichon/copilot-extensions/issues/4619, and
     // this commit call will itself decline to cancel (reporting
     // `cancelled: false`) rather than silently succeeding over it.
-    const ledger = cancelHandoffInRecord(cwd, current.record.sessionId, handoffId, execute);
+    const ledger = cancelHandoffInRecord(cwd, current.record.sessionId, current.record.id, execute);
     // Best-effort: the file record's own `sessionId` IS the predecessor
     // session -- mark its session-state handoff-request marker aborted too
     // (see the identical note on the task path above and cancelHandoffInRecord).

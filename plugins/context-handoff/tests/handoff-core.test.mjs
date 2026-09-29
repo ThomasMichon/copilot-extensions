@@ -2249,6 +2249,52 @@ test("abortFileHandoff marks an unconsumed file handoff aborted, never claiming 
   });
 });
 
+test("abortFileHandoff fences the ledger with the record's own id when only --path (a null handoffId) was given", () => {
+  // Real regression this guards (PR #4570 review round 20): --path is
+  // accepted as the sole file target, so handoffId is null in that mode
+  // even though the record contains its canonical id. Passing the null
+  // param straight through to the ledger fence produced an invalid --token
+  // argument, failing every path-only abort before the file was ever
+  // marked. Must fence with current.record.id, not the (possibly null)
+  // handoffId parameter.
+  const dir = mkdtempSync(join(tmpdir(), "context-handoff-abort-path-only-"));
+  try {
+    const path = join(dir, "handoff-path-only.json");
+    writeJsonAtomic(path, {
+      kind: "context-handoff",
+      version: 2,
+      id: "handoff-path-only",
+      storage: "file",
+      sessionId: "predecessor-1",
+      cwd: "C:\\repo",
+      promptText: "stored markdown",
+      consumed: false,
+      consumedAt: null,
+    });
+    const tokens = [];
+    const execute = (bin, argv) => {
+      if (bin === "agent-worktrees" && argv[0] === "get") return "wt-1";
+      if (bin === "agent-worktrees" && argv[0] === "cancel-handoff") {
+        tokens.push(argv[argv.indexOf("--token") + 1]);
+        return JSON.stringify({ cancelled: true, candidate: null });
+      }
+      throw new Error(`unexpected CLI call: ${bin} ${argv.join(" ")}`);
+    };
+    const result = abortFileHandoff(
+      "C:\\repo", "aborting-session", null, path, "changed my mind",
+      { execute },
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.record.aborted, true);
+    // Both the peek and the commit must use the record's own id, never the
+    // null handoffId parameter (which would serialize as the literal
+    // string "null" or crash argument parsing).
+    assert.deepEqual(tokens, ["handoff-path-only", "handoff-path-only"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("abortFileHandoff refuses to abort when the ledger already has an associated candidate", () => {
   // Real regression this guards (PR #4570 review round 17): fencing only
   // after the destructive write would still let a successor's in-flight
