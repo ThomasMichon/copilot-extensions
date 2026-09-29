@@ -49,6 +49,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import uv_editable_ref as uer  # noqa: E402
+
+try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
+    # 3.10 support floor -- mirrors uv_editable_ref's own identical fallback.
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised only on 3.10
+    import tomli as tomllib
+
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
 LIBS_DIR = REPO / "libs"
@@ -101,17 +110,114 @@ def _plugin_json_version_at(ref: str, plugin: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _pyproject_project_version_at(ref: str, rel_pyproject: str) -> str | None:
+    """The ``[project].version`` field of ``rel_pyproject`` (a repo-relative
+    path) at ``ref`` -- for a top-level, out-of-plugin consumer (e.g.
+    ``worktree-manager``) that has no ``plugin.json`` at all and instead
+    carries its own release version directly in its ``pyproject.toml``.
+    ``None`` on a missing file, unparseable TOML, or a manifest with no
+    ``[project].version`` -- same "skip, don't crash" contract as
+    ``_plugin_json_version_at``."""
+    r = _git("show", f"{ref}:{rel_pyproject}")
+    if r.returncode != 0:
+        return None
+    try:
+        data = tomllib.loads(r.stdout)
+    except tomllib.TOMLDecodeError:
+        return None
+    version = data.get("project", {}).get("version")
+    return version if isinstance(version, str) else None
+
+
+def _consumer_version_at(ref: str, consumer: str) -> str | None:
+    """The release version for any consumer `_vendored_consumers()` can
+    name -- a ``plugins/<consumer>`` plugin (``plugin.json``) or a
+    top-level, out-of-plugin consumer tree like ``worktree-manager`` (its
+    own ``pyproject.toml`` ``[project].version``, since it has no
+    ``plugin.json`` at all)."""
+    if (PLUGINS_DIR / consumer).is_dir():
+        return _plugin_json_version_at(ref, consumer)
+    return _pyproject_project_version_at(ref, f"{consumer}/pyproject.toml")
+
+
 def _vendored_consumers() -> dict[str, list[str]]:
-    """Map ``lib name -> [plugins that vendor it]`` from ``plugins/*/libs/*``."""
+    """Map ``lib name -> [consumers that vendor it]`` -- both an ordinary
+    in-tree ``<consumer>/libs/*`` real copy AND a `uv`-editable canonical-
+    reference pointer in a consumer's own ``pyproject.toml`` (vendor-
+    pointer-generalization effort, Phase 1: no local copy at all in a dev
+    checkout). A consumer using only the pointer form still gets `<lib>`'s
+    payload materialized into it at promotion time
+    (`tools/materialize_main.py`), so it must be charged for a bump the
+    same as a real-copy consumer -- skipping this half missed every
+    editable-pointer consumer from the version-bump guard entirely (PR
+    #4465 review).
+
+    The real-copy half scans EVERY ``plugins/*`` directory directly
+    (never ``uv_editable_ref.iter_consumer_dirs()``, which requires a
+    root ``pyproject.toml`` and so silently drops a payload-only plugin
+    like `customizing-copilot` that ships real vendored copies with no
+    ``pyproject.toml`` of its own at all -- PR #4465 review). The
+    editable-ref half legitimately needs `iter_consumer_dirs()` (plugins
+    with a ``pyproject.toml`` + every top-level, out-of-plugin consumer
+    tree, e.g. ``worktree-manager``) since a pointer can only ever live
+    inside a real ``pyproject.toml``."""
     consumers: dict[str, list[str]] = {}
-    if not PLUGINS_DIR.is_dir():
-        return consumers
-    for plugin in sorted(p for p in PLUGINS_DIR.iterdir() if p.is_dir()):
-        libs = plugin / "libs"
-        if not libs.is_dir():
-            continue
-        for lib in sorted(x for x in libs.iterdir() if x.is_dir()):
-            consumers.setdefault(lib.name, []).append(plugin.name)
+    if PLUGINS_DIR.is_dir():
+        for plugin in sorted(p for p in PLUGINS_DIR.iterdir() if p.is_dir()):
+            libs = plugin / "libs"
+            if libs.is_dir():
+                for lib in sorted(x for x in libs.iterdir() if x.is_dir()):
+                    consumers.setdefault(lib.name, []).append(plugin.name)
+    # Out-of-plugin consumer trees (e.g. `worktree-manager`) can carry
+    # real vendored copies under their own top-level `libs/` too -- the
+    # `plugins/*` scan above never reaches them, so a canonical lib
+    # change would otherwise ship without charging them (mirrors
+    # `check-vendored-libs-sync.py`'s own identical extra-consumer scan,
+    # PR #4465 review).
+    for extra in uer._EXTRA_CONSUMER_DIRS:
+        extra_libs = REPO / extra / "libs"
+        if extra_libs.is_dir():
+            for lib in sorted(x for x in extra_libs.iterdir() if x.is_dir()):
+                consumers.setdefault(lib.name, []).append(extra)
+    # `iter_consumer_dirs()` filters candidates by `pyproject.toml.is_file()`,
+    # which returns False for a symlink to a directory OR a dangling symlink
+    # (broken target) -- both would silently vanish from its results before
+    # ever reaching the symlink check below, contradicting the guarantee
+    # that ANY symlinked manifest is rejected, not just one that also
+    # happens to resolve to a real file (PR #4514 review). Scan every
+    # candidate manifest path directly first, unfiltered.
+    candidate_dirs = []
+    if PLUGINS_DIR.is_dir():
+        candidate_dirs.extend((p.name, p) for p in sorted(PLUGINS_DIR.iterdir()) if p.is_dir())
+    candidate_dirs.extend(
+        (extra, REPO / extra) for extra in uer._EXTRA_CONSUMER_DIRS if (REPO / extra).is_dir()
+    )
+    for name, consumer_dir in candidate_dirs:
+        pyproject = consumer_dir / "pyproject.toml"
+        if pyproject.is_symlink():
+            raise SystemExit(
+                f"check-version-bump: {pyproject} is a symlink -- cannot "
+                f"safely determine {name}'s uv-editable consumers; "
+                "replace it with a real file."
+            )
+    for name, consumer_dir in uer.iter_consumer_dirs():
+        try:
+            refs = uer.find_uv_editable_refs(consumer_dir)
+        except uer.ManifestUnreadable as exc:
+            # Fail closed, never silently drop this consumer from the
+            # map -- an unreadable manifest could genuinely reference
+            # `<lib>`, and skipping it would let a shared-lib change
+            # ship without charging a real consumer (PR #4465 review).
+            raise SystemExit(
+                f"check-version-bump: {exc} -- cannot safely determine "
+                f"{name}'s uv-editable consumers; fix its pyproject.toml "
+                "[tool.uv.sources] table."
+            ) from exc
+        for _name, _raw_path, lib, _editable in refs:
+            if name not in consumers.get(lib, ()):
+                consumers.setdefault(lib, []).append(name)
+    for lib in consumers:
+        consumers[lib] = sorted(consumers[lib])
     packaged_peers = [
         plugin for plugin in (
             "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
@@ -136,7 +242,12 @@ def _plugins_needing_bump(changed: list[str], consumers: dict[str, list[str]]) -
     """Map ``plugin -> {reasons}`` for every plugin whose content changed.
 
     A path under ``plugins/<p>/`` charges ``<p>``; a path under a top-level
-    shared ``libs/<lib>/`` charges every plugin that vendors ``<lib>``."""
+    shared ``libs/<lib>/`` charges every plugin that vendors ``<lib>``; a
+    path under a recognized standalone consumer's own top-level tree (e.g.
+    ``worktree-manager/``) charges that consumer directly -- without this,
+    a direct payload change to a standalone consumer was invisible to both
+    this guard and `check-changefile-presence.py`/`compute_from_diff()`,
+    which both depend on this same map (PR #4514 review)."""
     needing: dict[str, set[str]] = {}
     for path in changed:
         parts = tuple(path.split("/"))
@@ -157,6 +268,12 @@ def _plugins_needing_bump(changed: list[str], consumers: dict[str, list[str]]) -
                 continue
             for plugin in consumers.get(lib, ()):
                 needing.setdefault(plugin, set()).add(f"libs/{lib}/ (vendored)")
+        elif parts[0] in uer._EXTRA_CONSUMER_DIRS and (REPO / parts[0] / "pyproject.toml").exists():
+            consumer = parts[0]
+            inner = parts[1:]
+            if inner and _is_ignored(inner, parts[-1]):
+                continue
+            needing.setdefault(consumer, set()).add(f"{consumer}/")
     return needing
 
 
@@ -190,18 +307,21 @@ def check(base_ref: str, head_ref: str) -> tuple[int, list[str]]:
 
     violations: list[str] = []
     for plugin in sorted(needing):
-        head_ver = _plugin_json_version_at(head, plugin)
-        base_ver = _plugin_json_version_at(mbase, plugin)
+        head_ver = _consumer_version_at(head, plugin)
+        base_ver = _consumer_version_at(mbase, plugin)
         if head_ver is None or base_ver is None:
             # Plugin added or removed across the range -- no bump obligation.
             continue
         if head_ver == base_ver:
             reasons = ", ".join(sorted(needing[plugin]))
-            violations.append(
-                f"{plugin}: content changed ({reasons}) but version is still "
-                f"{head_ver} -- bump it (plugin.json + pyproject.toml + "
-                "marketplace.json, per CONTRIBUTING.md)."
-            )
+            if (PLUGINS_DIR / plugin).is_dir():
+                fix = "bump it (plugin.json + pyproject.toml + marketplace.json, per CONTRIBUTING.md)"
+            else:
+                # A standalone, out-of-plugin consumer (e.g. worktree-manager)
+                # has neither a plugin.json nor a marketplace entry -- naming
+                # them here would prescribe an impossible fix (PR #4514 review).
+                fix = "bump its own pyproject.toml [project].version (+ source __version__ fallback)"
+            violations.append(f"{plugin}: content changed ({reasons}) but version is still {head_ver} -- {fix}.")
     return (1 if violations else 0), violations
 
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-dispatch"
-version = "0.7.0-dev1"
+version = "0.7.1-dev1"
 description = "Portable agent task-queue + per-host coordinator: a single-writer SQLite work queue so agents coordinate without push latency or an account per agent."
 readme = "README.md"
 license = "MIT"
@@ -30,8 +30,10 @@ dependencies = [
 # (module ``zdd``), vendored byte-identically (like versioned_runtime.py) so the
 # installer-driven graceful daemon cutover reuses the shared library.
 agent-zdd = { path = "libs/zdd" }
-# Shared Windows-headless / detached process-spawn kwargs (module
-# ``agent_procutil``). Vendored per plugin; byte-identical src across copies.
+# `path` escapes this plugin's own root and resolves live to
+# `libs/agent-procutil`, so this `dev`-branch checkout has nothing to keep
+# manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
 agent-procutil = { path = "libs/agent-procutil" }
 # Resilient tri-state scans/findings for registrar.d.
 agent-dropin-registry = { path = "libs/dropin-registry" }

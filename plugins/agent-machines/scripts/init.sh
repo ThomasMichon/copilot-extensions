@@ -1600,17 +1600,19 @@ else
 fi
 
 # -- 2b. Preinstall uv-editable canonical libs (non-uv fallback) -------
-# `agent-dropin-registry`/`agent-plugin-resolve`/`agent-plugin-activation`
-# are `uv`-editable canonical references (vendor-pointer-generalization
-# effort, Phase 1: no local copy in a dev checkout at all). When `uv` is
-# unavailable, the fallback below uses bare `python -m pip install`, which
-# does NOT honor `[tool.uv.sources]` -- without a preinstall, that path
-# cannot resolve these dependencies and may instead try (and fail) to
-# resolve same-named index packages. `plugin-activation` is installed LAST
-# since it imports `dropin_registry`/`plugin_resolve` at module load time.
+# `agent-dropin-registry`/`agent-plugin-resolve`/`agent-plugin-activation`/
+# `agent-procutil` are `uv`-editable canonical references (vendor-pointer-
+# generalization effort, Phase 1: no local copy in a dev checkout at all).
+# When `uv` is unavailable, the fallback below uses bare `python -m pip
+# install`, which does NOT honor `[tool.uv.sources]` -- without a
+# preinstall, that path cannot resolve these dependencies and may instead
+# try (and fail) to resolve same-named index packages. `plugin-activation`
+# is installed LAST since it imports `dropin_registry`/`plugin_resolve` at
+# module load time.
 for _lib_entry in \
     'dropin-registry:agent-dropin-registry' \
     'plugin-resolve:agent-plugin-resolve' \
+    'agent-procutil:agent-procutil' \
     'plugin-activation:agent-plugin-activation'; do
     _lib_dir_name="${_lib_entry%%:*}"
     _lib_pkg_name="${_lib_entry#*:}"

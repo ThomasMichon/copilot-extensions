@@ -35,7 +35,7 @@ from .harness_state import (
     user_enabled_plugins,
 )
 from .model import Model, build_model, coverage, effective_prereqs
-from .prereqs import current_os, detect_baseline, missing
+from .prereqs import detect_baseline, missing
 from .provision import apply as provision_apply
 from .provision import plan as provision_plan
 from .provision import restart_needed
@@ -1362,60 +1362,6 @@ def _run_launch(req) -> int:
             return _run_relocated_mux_launch(req, plan, script)
     return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
 
-
-
-def _prereq_line(s) -> str:
-    if not s.present:
-        state = "optional, absent" if s.optional else "MISSING"
-        mark = "○" if s.optional else "✗"
-    elif not s.satisfied:
-        state = f"{s.version or '?'} < required {s.min_required}"
-        mark = "✗"
-    else:
-        ver = f" {s.version}" if s.version else ""
-        state = f"ok{ver}"
-        mark = "✓"
-    return f"    {mark} {s.name.ljust(9)} {state}"
-
-
-def _cmd_doctor() -> int:
-    statuses = detect_baseline()
-    core = core_status()
-    print()
-    print(f"  {_BANNER} — doctor  (os: {current_os()})")
-    print()
-    print("  prerequisites:")
-    for s in statuses:
-        print(_prereq_line(s))
-    print()
-    print("  agent-worktrees core:")
-    print(f"    state: {core.state}")
-    print(f"    runtime: {core.runtime_dir} "
-          f"({'present' if core.runtime_present else 'absent'}"
-          f"{', venv' if core.venv_present else ''})")
-    print(f"    binstub: {core.binstub or 'not found in ~/.local/bin'}")
-    print()
-    selfst = self_status()
-    print("  worktree-manager (self):")
-    print(f"    installed version: {selfst.installed_version or '(not versioned-installed)'}")
-    print(f"    running version:   {__version__}")
-    print(f"    binstub: {selfst.binstub or 'not found in ~/.local/bin'}")
-    print(f"    root: {selfst.root}")
-    from . import source_config as _sc
-    _cfg_repo, _cfg_ref = _sc.configured_source()
-    print(f"    update source: {_sc.resolved_repo()} @ {_sc.resolved_ref()}"
-          f"{' (default)' if not (_cfg_repo or _cfg_ref) else ' (configured)'}")
-    print()
-    gaps = missing(statuses)
-    if gaps or not core.installed:
-        print("  → not fully set up. Run `worktree-manager setup` to see the plan "
-              "(add --apply to execute).")
-    else:
-        print("  ✓ prerequisites satisfied and the core is installed.")
-    print()
-    return 0 if (not gaps and core.installed) else 1
-
-
 def _cmd_setup(rest: list[str]) -> int:
     do_apply = "--apply" in rest
     statuses = detect_baseline()
@@ -1674,7 +1620,8 @@ def main(argv: list[str] | None = None) -> int:
         print("commands:")
         print("  (no args)              show the app banner + build-out roadmap")
         print("  --project NAME         launch NAME's interactive Picker (binstub seam)")
-        print("  doctor                 report prerequisites + the agent-worktrees core")
+        print("  doctor [--json] [--apply-daemon-health]")
+        print("                         report prerequisites + the agent-worktrees core")
         print("  setup [--apply]        plan (default) or run prereq provisioning + core install")
         print("  self-install [--apply] version the app: current-version marker + ~/.local/bin binstub")
         print("  source                 show the self-update source (git repo + ref/branch)")
@@ -1735,7 +1682,9 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "mux-daemon":
         return _cmd_mux_daemon(args[1:])
     if args and args[0] == "doctor":
-        return _cmd_doctor()
+        from . import doctor_cli
+
+        return doctor_cli.cmd_doctor(args[1:])
     if args and args[0] == "setup":
         return _cmd_setup(args[1:])
     if args and args[0] == "self-install":

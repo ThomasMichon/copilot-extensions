@@ -9,7 +9,8 @@ import sys
 from pathlib import Path
 
 from . import config as cfg
-from . import installer as inst, output, reclaim, sessions, tracking
+from . import installer as inst
+from . import output, reclaim, sessions, tracking
 
 
 def _core():
@@ -166,6 +167,13 @@ def add_parsers(sub) -> None:
         "(destructive; never touches an operator-authored or "
         "indeterminate manifest -- explicit opt-in, off by "
         "default even with --fix).",
+    )
+    sp.add_argument(
+        "--apply-daemon-health",
+        action="store_true",
+        dest="apply_daemon_health",
+        help="Apply the resident status-monitor daemon-health repair path "
+        "(identity-bound duplicate/stale generation reap). Default: report only.",
     )
     sp.add_argument("--json", action="store_true", help="Emit the health report as JSON.")
     sp.add_argument(
@@ -406,6 +414,7 @@ def cmd_doctor(args) -> int:
     apply = getattr(args, "fix", False)
     do_gc = getattr(args, "gc_sessions", False)
     do_prune_pivots = getattr(args, "prune_pivots", False)
+    apply_daemon_health = getattr(args, "apply_daemon_health", False)
     json_mode = getattr(args, "json", False)
     projection_budget = getattr(args, "projection_budget", 256)
 
@@ -543,7 +552,7 @@ def cmd_doctor(args) -> int:
     except Exception:
         runtime_lag = []
 
-    from . import config_dropins
+    from . import config_dropins, daemon_health
     from .picker_support import pivots as pivot_registry
 
     pivot_report = pivot_registry.scan_pivot_registry(materialize=False)
@@ -627,6 +636,7 @@ def cmd_doctor(args) -> int:
             },
         },
         "config_d": config_d_report.to_dict(),
+        "daemon_health": daemon_health.doctor_report(apply=apply_daemon_health),
     }
 
     if json_mode:
@@ -645,6 +655,8 @@ def cmd_doctor(args) -> int:
 def _render_doctor_report(
     report: dict, *, applied: bool, gc_applied: bool, prune_pivots_applied: bool = False
 ) -> None:
+    from . import doctor_render
+
     chk = "\u2713"
     print(f"Worktree/session doctor ({'fix' if applied else 'report-only'})")
     if not report.get("project_health_available", True):
@@ -716,9 +728,9 @@ def _render_doctor_report(
             f"{'repaired' if applied else 'repairable'}"
         )
         for item in pairs["items"][:8]:
-            mark = (
-                "fixed" if item["repaired"] else ("needs --fix" if item["repairable"] else "manual")
-            )
+            mark = "fixed"
+            if not item["repaired"]:
+                mark = "needs --fix" if item["repairable"] else "manual"
             print(f"      - {item['worktree_id']} [{mark}] {item['detail']}")
     else:
         print(f"  {chk} Pair records are stored in their owning project registries")
@@ -750,6 +762,8 @@ def _render_doctor_report(
               f"{'fixed' if applied else 'found'} -> {ids}")
     else:
         print(f"  {chk} No active records disagree with their real state")
+
+    doctor_render.render_daemon_health_report(report.get("daemon_health") or {})
 
     empty_sessions = report["empty_sessions"]
     if empty_sessions["count"]:
@@ -829,7 +843,7 @@ def _render_doctor_report(
     else:
         print("  \u2713 Runtime services match installed payload")
 
-    _render_dropin_registry_report("Picker pivots", report.get("pivots") or {})
+    doctor_render.render_dropin_registry_report("Picker pivots", report.get("pivots") or {})
     pruned = (report.get("pivots") or {}).get("pruned") or {}
     if pruned.get("found"):
         removed = pruned.get("removed", 0)
@@ -844,26 +858,7 @@ def _render_doctor_report(
                 f"      {found} pivot finding(s) are prunable -- "
                 "run `doctor --fix --prune-pivots` to remove them"
             )
-    _render_dropin_registry_report("Project config.d", report.get("config_d") or {})
-
-
-def _render_dropin_registry_report(label: str, report: dict) -> None:
-    """Render one exhaustive report-only drop-in registry section."""
-    authority = report.get("authority", "indeterminate")
-    active = report.get("active_entries") or []
-    findings = report.get("findings") or []
-    if not findings:
-        print(f"  \u2713 {label}: {len(active)} active, authority={authority}")
-        return
-    print(
-        f"  ! {label}: {len(active)} active, {len(findings)} finding(s), "
-        f"authority={authority} (report-only)"
-    )
-    for finding in findings:
-        target = f" target={finding['target']}" if finding.get("target") else ""
-        print(f"      - {finding.get('entry', '?')}: {finding.get('reason', 'unknown')}{target}")
-        if finding.get("remedy"):
-            print(f"        -> {finding['remedy']}")
+    doctor_render.render_dropin_registry_report("Project config.d", report.get("config_d") or {})
 
 
 def cmd_reconcile_binstubs(args) -> int:

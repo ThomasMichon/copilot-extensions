@@ -2194,3 +2194,205 @@ _Pending._
 - No code change proposed here; this is evidence for scheduling/
   prioritizing Phase 2, not a mechanism decision -- left for this
   effort's driver per its own coordination note above.
+
+### 2026-09-28 — Phase 1: converted `agent-procutil`'s remaining 7 consumers (PR #4465)
+
+- Converted `agent-vault`, `agent-dispatch`, `agent-index`, `agent-mcp`,
+  `agent-logger`, `agent-machines`, and `worktree-manager` from real
+  copies to `uv`-editable canonical references. Combined with the 4
+  consumers already converted alongside `ssh-manager` earlier this
+  effort, **11 of 12 `agent-procutil` consumers are now converted**.
+- **`agent-worktrees` deliberately excluded, discovered mid-leg via a
+  rebase conflict**: this leg's own working branch had already converted
+  `agent-worktrees` too (matching the "8 remaining, not 7" re-derivation
+  below), but rebasing onto a moved `origin/dev` conflicted on
+  `agent-worktrees/pyproject.toml` against PR #4447 ("add graceful
+  status-monitor cutover"), which explicitly reverted `plugin-resolve`/
+  `dropin-registry`/`plugin-activation` from `uv`-editable BACK to real
+  local copies and added `zdd` as a new real-copy dependency too --
+  commit message: "make the shipped dependency copies part of the
+  plugin build surface." This is a deliberate, human-authored design
+  decision for `agent-worktrees` specifically (its new cutover feature
+  apparently needs a physically self-contained dependency snapshot, not
+  a live dev-checkout reference) -- converting `agent-procutil` for this
+  one consumer would have silently fought that decision. Dropped
+  `agent-worktrees` entirely from this PR's scope; its `agent-procutil`
+  stays the real local copy it already was. **This is now the 2nd
+  concrete piece of evidence for this effort's own Phase 2 (a canonical-
+  reference form for the installer engine itself)** -- see the prior
+  entry above about the same plugin's bespoke resolver drifting; PR
+  #4447's justified-but-blunt "just vendor real copies again" reaction
+  is exactly the kind of workaround Phase 2 exists to make unnecessary.
+- **Did not trust the inherited "7 remaining" count**: the previous
+  handoff's own consumer tally missed `agent-dispatch` (still a real
+  copy) -- re-derived the consumer set from a fresh anchored grep per the
+  recipe's own step 1 and found 8 (including `agent-worktrees`, since
+  discovered above to need exclusion), not 7. Converted 7 of those 8 in
+  this PR.
+- `src/` was byte-identical across all 7 copies; only `tests/conftest.py`
+  had drifted (canonical had it, the copies didn't) -- backported before
+  converting, per the established recipe.
+- **New instance of the recurring non-uv-pip-fallback finding**, this
+  time missed on the FIRST pass and only caught by 3 separate reviewer
+  findings across 3 more review rounds -- audit every consumer's
+  install script BEFORE claiming done, not just the ones already known
+  to have a curated per-lib loop:
+  - `agent-machines`' `init.sh`/`init.ps1` preinstall loop (added for
+    `dropin-registry`/`plugin-resolve`/`plugin-activation` in PR #4420)
+    didn't cover `agent-procutil` -- added it to the loop (before
+    `plugin-activation`, matching the loop's own ordering comment) and
+    updated both guard tests to assert 4 libs instead of 3.
+  - `agent-dispatch`'s `install.ps1` preinstall loop (same shape) also
+    didn't cover `agent-procutil` -- same fix, same test update (this
+    was caught only by an explicit reviewer finding, not by this leg's
+    own first-pass audit, which incorrectly assumed checking `install.sh`
+    was sufficient without separately checking `install.ps1`).
+  - `agent-index` preinstalls only `zdd` in both `install.sh` and
+    `install.ps1`, at TWO call sites each (service-runtime venv +
+    durable-engine-runtime venv) -- `agent-procutil` is the FIRST
+    `uv`-editable lib this plugin has ever had (its other 3 libs are
+    still real copies), so this gap had never been exercised before.
+    Added a matching preinstall block at all 4 call sites. No existing
+    test covered this pattern for `agent-index` at all -- added new
+    `test_installer_uv_editable_lib_preinstall_sh.py`/`_ps1.py` (24 new
+    test cases: local-copy resolution, canonical fallback, no-op, x2
+    runtimes x2 uv/non-uv paths).
+  - `agent-worktrees`' `install.ps1` `Deploy-Package` also lacked an
+    `agent-procutil` preinstall block when this was originally found --
+    moot once `agent-worktrees` was excluded above (its `install.sh`
+    counterpart structurally requires `uv` with no fallback branch at
+    all, confirmed via a fresh `uv`-only probe install).
+  - `agent-vault`/`agent-mcp` had the SAME systemic gap for their OTHER
+    already-converted libs (tracked under #3905/#4410, confirmed
+    pre-existing by inspection, not assumed) -- fixed later in this same
+    leg: a preinstall loop was added to all 4 scripts (`agent-vault`
+    `install.sh`/`install.ps1`, `agent-mcp` `init.sh`/`init.ps1`)
+    covering every escaping `[tool.uv.sources]` dependency, not just
+    `agent-procutil`, with 16 new guard-test cases. Verified:
+    `agent-vault` (251 passed, 6 skipped) and `agent-mcp` (359 passed,
+    1 skipped) full suites both green afterward.
+  - `libs/payload-invocation/tests/test_generate.py` ALSO hardcoded
+    `payload/libs/agent-procutil/src` at 5 call sites, for both the
+    `agent-machines` AND `agent-worktrees` fixtures it copies from the
+    real repo tree -- caught by the automated reviewer's own CI-failure
+    watchdog auto-remediation commit (4 of 5 sites) plus a follow-up
+    reviewer finding for the 5th (`agent-worktrees`'s Windows-only
+    helper). Left this fix in place even after excluding `agent-worktrees`
+    from conversion -- harmless (local-copy-first resolver behaves
+    identically when a real local copy always exists) and more robust
+    regardless.
+- **New finding, not previously seen for this effort**: `agent-index`'s
+  `tests/test_runtime_gate.py` hardcoded
+  `PLUGIN / "libs" / "agent-procutil" / "src"` into a fake-runtime
+  `PYTHONPATH` at 3 call sites -- a test-only hardcoded path to the
+  plugin's own now-deleted local copy. Confirmed via a fresh clean rerun
+  that the observed 3 real test failures (not the separate, pre-existing
+  `[LIMIT] temporary-storage limit exceeded` sub-suite-splitting
+  artifact, confirmed unrelated by rerunning with a larger sub-suite
+  batch to completion: 633 passed, 2 skipped) disappeared once fixed.
+  Added a `_procutil_src()` resolver (local-copy-then-canonical-fallback,
+  mirroring the install scripts' own pattern) rather than hardcoding the
+  canonical path directly, so it stays correct if a local copy is ever
+  reintroduced. **Lesson for the next lib conversion**: grep every
+  consumer's `tests/` directory for a hardcoded `libs/<lib>` path, not
+  just install scripts (recipe step 16 already said "beyond install
+  scripts and tests" -- this is the first time a *test* itself, not
+  runtime code, was the hit).
+- **Another new finding**: `agent-index`'s installation-cell mechanism
+  (`cell-runtime.py`'s `_ensure_snapshot`/`_copy_payload`) snapshots ONLY
+  what's physically present under the plugin's own tree -- with
+  `agent-procutil` no longer a real local copy, the snapshot silently
+  lacked it, and `_build_runtime` unconditionally installed from
+  `snapshot_root/libs/agent-procutil`. Added
+  `_backfill_canonical_vendored_libs()` (copies the canonical lib into
+  the snapshot when the payload didn't have it) AND
+  `_rewrite_uv_source_to_local()` (a self-contained miniature of
+  `materialize_main.py`'s own promotion-time rewrite -- this runtime
+  script must stay `tools/`-independent since a real release payload
+  doesn't ship `tools/`), since the snapshotted `pyproject.toml`'s own
+  `../../libs/agent-procutil` source entry escapes the snapshot root and
+  never resolves from there either. Widened `cell-runtime.py`'s
+  module-size-baseline entry three times across this leg (5145 -> 5161
+  -> 5193 -> 5211, the last for round 9's symlink-reject fix) -- the
+  file was already at its grandfathered ceiling before this leg touched
+  it at all.
+- Also updated `libs/agent-procutil/README.md` § Vendoring and its
+  module docstring -- both still described the pre-this-leg "every
+  plugin carries a local copy" state, caught by reviewer inspection
+  (mirrors `single-instance-lease`'s own README wording from an earlier
+  leg).
+- Re-validated: fresh `uv venv` + `uv pip install --no-cache` probes for
+  all 7 consumers resolve `agent_procutil.__file__` to canonical;
+  `materialize_main.py --dest <tmp>` round-trips byte-identical with
+  `editable = true` correctly stripped. Full suites green: `agent-vault`
+  (249 passed), `agent-dispatch` (806 passed), `agent-mcp` (359 passed),
+  `agent-logger`, `agent-machines`, `agent-index` (633 passed, 2 skipped)
+  all green; `worktree-manager`'s own full suite (1455 passed, 4
+  skipped) and its version-specific tests (19 passed) also green (its
+  `agent-procutil` dependency annotation had also gone stale, describing
+  the pre-conversion "vendored per plugin" state -- fixed alongside).
+  **Note (superseded later in this same leg, split-PR round 11):** an
+  earlier round of this leg hand-bumped `pyproject.toml`/`__init__.py`'s
+  version surfaces directly -- that hand-edit was reverted once the
+  split PR #4514 taught the promotion pipeline to detect and bump
+  standalone consumers itself; contributors never hand-edit these
+  generated versions (CONTRIBUTING.md), and the pending changefile alone
+  now correctly produces the bump at promotion time.
+- **Investigated and did NOT reproduce** an external, unverified report
+  (relayed via this session's inherited handoff) that PR #4420 broke
+  `check-vendored-libs-sync.py` repo-wide for `agent-dispatch`: a fresh
+  `git reset --hard origin/dev` + a clean run of the check both came
+  back OK, and `plugins/agent-dispatch/libs/{dropin-registry,plugin-
+  resolve,plugin-activation}` are correctly absent (not empty/broken).
+  Most likely a rebase-conflict artifact local to the reporting agent's
+  own worktree/branch, not a repo-wide regression -- no further action
+  taken since it wasn't reproducible from a clean checkout.
+- **Not yet done**: `agent-worktrees`' `agent-procutil` (excluded above,
+  pending Phase 2 or a fresh maintainer call on the cutover-vs-canonical-
+  reference tradeoff); `zdd` (not yet converted for ANY consumer, and now
+  `agent-worktrees` has a NEW real-copy dependency on it too, per PR
+  #4447 -- re-check `zdd`'s consumer count before starting that
+  conversion, it may have grown); `session-liveness-probe`/
+  `venue-copilot` still need canonical-promotion first. Then retire
+  `src-passthrough` (once nothing uses it -- `plugin-activation`'s
+  `customizing-copilot` copy stays `src-passthrough` forever, see
+  earlier entry). Then Phase 2/3.
+
+### 2026-09-29 — Closing out the #4465/#4514 split-PR leg
+
+- `tools/check-version-bump.py`'s consumer-discovery generalization and
+  `tools/accumulate_bumps.py`/`tools/promote_release.py`'s new
+  standalone-consumer bump/promotion support were split into their own
+  standalone PR (#4514) partway through review, since they were
+  justified on their own merits independent of the agent-procutil
+  conversion and the split cut #4465's own review-round churn. #4514
+  itself went 12 further rounds -- almost entirely legitimate,
+  progressively narrower TOML-parsing edge cases in the new standalone-
+  consumer version read/write path (quotes, inline comments,
+  indentation, quoted table names), until the review's own round-12
+  finding named the actual structural gap: `apply()`'s caller silently
+  consumed a changefile even when the computed bump was never actually
+  written. `promote_release.py` now aborts with a clear error whenever
+  that happens, closing the whole class of future format edge cases at
+  once rather than chasing each one individually. #4514 merged first,
+  #4465 was rebased onto the result (dropping its own now-redundant
+  duplicate check-version-bump.py hunks) and merged after one further
+  round (a hand-edited worktree-manager version bump, made
+  unnecessary and actively harmful by #4514's own new promotion support,
+  had to be reverted). Both merges used the maintainer's documented
+  admin-role-scoped bypass path (CONTRIBUTING.md's own normal mechanism
+  for the maintainer's own PRs, not an emergency override) after the
+  automated `copilot-pull-request-reviewer`'s own review approved both.
+- **Facility-process note, not part of this effort's own scope:** a
+  concurrent, uncoordinated peer session was found independently
+  reworking the same PR mid-leg (a stray worktree from an earlier,
+  un-handed-off attempt) -- it stood down once contacted. Separately,
+  this leg's own predecessor had been posting `@copilot review` PR
+  comments across earlier rounds, which the repo's own
+  CONTRIBUTING.md/AGENTS.md ban (it misroutes to the GitHub Cloud coding
+  agent instead of nudging the review bot) -- the operator disabled
+  Cloud Agents org-wide because of it mid-session, and the automated
+  reviewer stopped firing repo-wide for roughly two hours until it
+  recovered on its own; this leg switched to plain pushes (which already
+  trigger a fresh review pass) for the remainder.
+

@@ -20,6 +20,21 @@ def _result(state: str, detail: str) -> dict[str, Any]:
     }
 
 
+def should_check_gh_auth(*, configured: bool) -> bool:
+    """Whether the gh-auth/codespace-scope preflight is even worth running.
+
+    Only when this plugin is actually configured/adopted somewhere: an
+    unattended maintenance sweep (agent-machines' ``runtime-spot-check``)
+    probes every INSTALLED runtime plugin regardless of per-repo
+    enablement, so a machine that has never adopted CodeSpaces must not be
+    forced to hold a CodeSpace-scoped gh token (or even gh itself) just to
+    report healthy. This only gates whether the preflight runs at all --
+    :func:`evaluate`'s own ``failed`` vs. ``configuration-empty`` priority
+    is unrelated and unchanged.
+    """
+    return configured
+
+
 def evaluate(
     *,
     auth_findings: Sequence[str],
@@ -40,9 +55,12 @@ def evaluate(
     if not configured:
         result = _result(
             "configuration-empty",
-            "The runtime and GitHub authentication are healthy, but no adopted "
-            "repository or active plugin/config.d contribution is configured. "
-            "A live CodeSpace is not required for runtime readiness.",
+            "The runtime is healthy, but no adopted repository or active "
+            "plugin/config.d contribution is configured, so GitHub "
+            "authentication (including the codespace scope) was not "
+            "checked -- it is not required until this plugin is actually "
+            "configured/adopted somewhere. A live CodeSpace is not "
+            "required for runtime readiness.",
         )
     else:
         result = _result(

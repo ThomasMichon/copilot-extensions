@@ -132,6 +132,14 @@ def add_copilot_parser(sub) -> None:
         help="Override the mux binary used to attach (default: auto-detect "
         "tmux/psmux, same resolution as the rest of agent-worktrees)",
     )
+    p.add_argument(
+        "--headed", action="store_true",
+        help="Attach in a brand-new, VISIBLE terminal window instead of "
+        "THIS one -- for a caller (e.g. the Worktree Manager Picker) that "
+        "wants to keep running while a separate window shows the session. "
+        "Does not require a controlling terminal (the --headed window is "
+        "its own controlling terminal, not this process's).",
+    )
     add_launch_passthrough_args(p)
 
 

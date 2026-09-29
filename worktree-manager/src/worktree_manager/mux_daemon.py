@@ -43,6 +43,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from work_coalescing_singleton import CoalescingServer
+from zdd.diagnostics import process_start_time
 
 from . import mux_daemon_cutover
 from . import mux_daemon_live
@@ -120,6 +121,7 @@ def write_lock_data(path: Path, extra: dict) -> bool:
     shape (temp file in the same directory, then ``os.replace``)."""
     payload = {
         "pid": os.getpid(),
+        "start_time": process_start_time(os.getpid()),
         "created_at": time.time(),
     }
     payload.update(extra)
@@ -160,13 +162,16 @@ mux_live_with_boot = mux_daemon_live.mux_live_with_boot
 _status_monitor_lock_path = mux_daemon_live.status_monitor_lock_path
 _status_monitor_generation = mux_daemon_live.status_monitor_generation
 _ensure_status_monitor_running = mux_daemon_live.ensure_status_monitor_running
-_daemon_is_live = lambda data: mux_daemon_process.daemon_is_live(
-    data, endpoint_from_rendezvous=endpoint_from_rendezvous
-)
 _acquire_daemon_lease = mux_daemon_process.acquire_daemon_lease
 _release_daemon_lease = mux_daemon_process.release_daemon_lease
 _scrub_session_credentials = mux_daemon_process.scrub_session_credentials
 _spawn_detached = mux_daemon_process.spawn_detached
+
+
+def _daemon_is_live(data: dict | None) -> bool:
+    return mux_daemon_process.daemon_is_live(
+        data, endpoint_from_rendezvous=endpoint_from_rendezvous
+    )
 
 
 def _mapping_to_observation(entry: dict) -> dict:

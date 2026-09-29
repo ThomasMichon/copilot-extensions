@@ -2194,18 +2194,20 @@ if ($Force -or -not (Test-Path $VenvPython)) {
 }
 
 # -- 2b. Preinstall uv-editable canonical libs (non-uv fallback) -------
-# `agent-dropin-registry`/`agent-plugin-resolve`/`agent-plugin-activation`
-# are `uv`-editable canonical references (vendor-pointer-generalization
-# effort, Phase 1: no local copy in a dev checkout at all). When `uv` is
-# unavailable, the fallback below uses bare `python -m pip install`, which
-# does NOT honor `[tool.uv.sources]` -- without a preinstall, that path
-# cannot resolve these dependencies and may instead try (and fail) to
-# resolve same-named index packages. `plugin-activation` is installed LAST
-# since it imports `dropin_registry`/`plugin_resolve` at module load time.
+# `agent-dropin-registry`/`agent-plugin-resolve`/`agent-plugin-activation`/
+# `agent-procutil` are `uv`-editable canonical references (vendor-pointer-
+# generalization effort, Phase 1: no local copy in a dev checkout at all).
+# When `uv` is unavailable, the fallback below uses bare `python -m pip
+# install`, which does NOT honor `[tool.uv.sources]` -- without a
+# preinstall, that path cannot resolve these dependencies and may instead
+# try (and fail) to resolve same-named index packages. `plugin-activation`
+# is installed LAST since it imports `dropin_registry`/`plugin_resolve` at
+# module load time.
 $haveUv = [bool](Get-Command uv -ErrorAction SilentlyContinue)
 foreach ($lib in @(
     @{ Dir = 'dropin-registry'; Pkg = 'agent-dropin-registry' },
     @{ Dir = 'plugin-resolve'; Pkg = 'agent-plugin-resolve' },
+    @{ Dir = 'agent-procutil'; Pkg = 'agent-procutil' },
     @{ Dir = 'plugin-activation'; Pkg = 'agent-plugin-activation' }
 )) {
     $libDir = Join-Path $PluginDir "libs\$($lib.Dir)"

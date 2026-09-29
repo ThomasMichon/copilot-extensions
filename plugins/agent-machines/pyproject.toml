@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-machines"
-version = "0.1.13-dev1"
+version = "0.1.14-dev1"
 description = "Portable machine setup and restore for Copilot CLI."
 readme = "README.md"
 license = "MIT"
@@ -31,8 +31,10 @@ agent-plugin-resolve = { path = "libs/plugin-resolve" }
 agent-plugin-activation = { path = "libs/plugin-activation" }
 # Resilient scan authority and decision types required by plugin-activation.
 agent-dropin-registry = { path = "libs/dropin-registry" }
-# Shared Windows-headless / detached process-spawn kwargs (module
-# ``agent_procutil``). Vendored per plugin; byte-identical src across copies.
+# `path` escapes this plugin's own root and resolves live to
+# `libs/agent-procutil`, so this `dev`-branch checkout has nothing to keep
+# manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
 agent-procutil = { path = "libs/agent-procutil" }
 
 [project.optional-dependencies]

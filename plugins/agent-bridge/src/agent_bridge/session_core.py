@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import time
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -156,6 +157,17 @@ class _SessionCoreMixin:
             sd = _Path(self._db.db_path).expanduser().parent / "hosts"
         sd.mkdir(parents=True, exist_ok=True)
         self._host_index = HostIndex(sd / "index.json")
+        # This process's own generation identity (effort
+        # agent-bridge-unified-zdd-cutover, Phase 3): the outgoing generation
+        # releases every session-host claim it holds under this id as part of
+        # its shutdown exit-contract (routes/admin.py's shutdown handler); the
+        # reattach scan below claims records under it so a live different
+        # generation's claim is never silently stolen. Computed once per
+        # process -- never persisted, never reused across a restart.
+        from . import __version__
+        from zdd.claims import generation_id
+
+        self._generation_id = generation_id(version=__version__, pid=os.getpid())
         self._thresholds = context_thresholds or ContextThresholds()
         # Context-pressure handoff policy (off by default). When enabled, a
         # session crossing the critical threshold rolls the worktree in place

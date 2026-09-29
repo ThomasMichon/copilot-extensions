@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-logger"
-version = "0.1.13-dev1"
+version = "0.1.14-dev1"
 description = "Reusable Copilot CLI session logging -- segmenter, log writer, local/rescue session-sync, and orchestrator"
 readme = "README.md"
 license = "MIT"
@@ -27,8 +27,10 @@ dependencies = [
 # effort, Phase 1): `path` escapes this plugin's own root and resolves live
 # to `libs/config-migrate`, so every consumer shares one canonical copy.
 agent-config-migrate = { path = "libs/config-migrate" }
-# Windows-headless process-spawn helpers (module ``agent_procutil``). Vendored
-# per plugin; byte-identical src across copies.
+# `path` escapes this plugin's own root and resolves live to
+# `libs/agent-procutil`, so this `dev`-branch checkout has nothing to keep
+# manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
 agent-procutil = { path = "libs/agent-procutil" }
 # Canonical git-remote identity normalization (module ``plugin_activation``);
 # vendored per plugin; byte-identical src across copies.

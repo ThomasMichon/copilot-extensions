@@ -154,26 +154,39 @@ def _seed_versions_from_main(scratch: Path, main_head: str, *, acc, repo: Path) 
     agent-bridge 0.4.1-dev1 -> 0.4.0-dev551) -- that fix was necessary but
     not sufficient on its own; this seed step is the other required half."""
     plugins_dir = scratch / "plugins"
-    if not plugins_dir.is_dir():
-        return
     seed_result: dict[str, tuple[str, str]] = {}
-    for plugin_dir in sorted(plugins_dir.iterdir()):
-        if not plugin_dir.is_dir():
-            continue
-        plugin = plugin_dir.name
-        main_pj_raw = _git(
-            ["show", f"{main_head}:plugins/{plugin}/plugin.json"], cwd=repo, check=False,
-        )
-        if not main_pj_raw:
+    if plugins_dir.is_dir():
+        for plugin_dir in sorted(plugins_dir.iterdir()):
+            if not plugin_dir.is_dir():
+                continue
+            plugin = plugin_dir.name
+            main_pj_raw = _git(
+                ["show", f"{main_head}:plugins/{plugin}/plugin.json"], cwd=repo, check=False,
+            )
+            if not main_pj_raw:
+                continue  # never shipped on main yet -- dev's own literal stands as-is
+            try:
+                main_version = json.loads(main_pj_raw)["version"]
+            except (json.JSONDecodeError, KeyError):
+                continue
+            dev_version = acc.read_plugin_json_version(plugin)
+            if dev_version is None or dev_version == main_version:
+                continue
+            seed_result[plugin] = (dev_version, main_version)
+    # A standalone, out-of-plugin consumer (e.g. `worktree-manager`) ships
+    # its own `pyproject.toml` [project].version instead of a plugin.json --
+    # it needs the exact same main-is-truth seeding, or a promotion round
+    # with no new changefile for it would regress it back to dev's stale
+    # literal (or repeat an already-shipped bump) the same way an
+    # un-seeded plugin would (PR #4514 review).
+    for consumer in acc.iter_standalone_consumer_names():
+        main_version = acc._project_version_at(main_head, f"{consumer}/pyproject.toml")
+        if main_version is None:
             continue  # never shipped on main yet -- dev's own literal stands as-is
-        try:
-            main_version = json.loads(main_pj_raw)["version"]
-        except (json.JSONDecodeError, KeyError):
-            continue
-        dev_version = acc.read_plugin_json_version(plugin)
+        dev_version = acc.read_consumer_version(consumer)
         if dev_version is None or dev_version == main_version:
             continue
-        seed_result[plugin] = (dev_version, main_version)
+        seed_result[consumer] = (dev_version, main_version)
     if seed_result:
         acc.apply(seed_result)
 
@@ -286,6 +299,21 @@ def consume_pending_changes(
                 grouped.setdefault(change["plugin"], []).append(change["type"])
         computed = acc.compute(grouped)
         applied = acc.apply(computed) if computed else []
+        unapplied = sorted(set(computed) - set(applied))
+        if unapplied:
+            # A computed bump that `apply()` could not actually write (a
+            # manifest-format edge case `apply()` doesn't recognize, a
+            # missing file, etc.) must never be silently accepted --
+            # consuming the changefile below regardless would ship the OLD
+            # version on `main` while permanently discarding the bump
+            # intent (PR #4514 review, a recurring finding across several
+            # prior rounds' individual TOML-format fixes; this is the
+            # structural fix instead of another one-off format patch).
+            raise PromotionError(
+                f"promotion refused: computed a version bump for "
+                f"{', '.join(unapplied)} but apply() could not write it -- "
+                "fix the underlying manifest(s) before promoting again."
+            )
         if all_changefiles:
             # Delete every changefile physically present, not just the ones
             # that drove a bump this round -- an already-consumed changefile

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import time
 from typing import Any
 
@@ -28,10 +29,54 @@ def _core() -> Any:
 class _SessionHostRecoveryMixin:
     """Session Host authority recovery and reattach helpers."""
 
+    def _claim_host_record(self, rec: Any) -> bool:
+        """Claim ``rec`` for this process's own generation (Phase 3).
+
+        Returns True when this generation now owns the claim (either it
+        already did, or it just recovered a stale one -- no live handshake
+        needed) and False when a live *different* generation still holds it,
+        in which case the caller must not reattach. A missing/no-op host
+        index or generation id (should not happen outside a stripped-down
+        test double) is treated as "claim not required" -- True -- so this
+        never blocks a caller that predates Phase 3's claim wiring.
+        """
+        if self._host_index is None or not getattr(self, "_generation_id", None):
+            return True
+        from .session_host.host_index import ClaimConflict
+        from .session_host.osutil import pid_alive
+
+        try:
+            self._host_index.claim(
+                rec.session_id,
+                generation=self._generation_id,
+                owner_pid=os.getpid(),
+                pid_alive=pid_alive,
+            )
+        except ClaimConflict as exc:
+            log.info(
+                "Not reattaching %s: still claimed by a live generation "
+                "(pid=%s) -- will retry once it releases",
+                rec.session_id, exc.held_by_pid,
+            )
+            return False
+        except KeyError:
+            # ``rec.session_id`` isn't tracked in this process's own
+            # ``HostIndex`` -- in real operation every record reaching this
+            # point came from ``self._host_index.all()`` in the first place,
+            # so this is unreachable there; it only happens with a
+            # lightweight test double that supplies records without
+            # registering them. Treat it as "claim not applicable" (permit
+            # the reattach) rather than blocking, since the safety net this
+            # method exists for -- a durably tracked claim -- simply isn't in
+            # play for an untracked record.
+            return True
+        return True
+
     async def reattach_session_hosts(
         self,
         *,
         remote_recovery_timeout: float = 60.0,
+        claim_hosts: bool = True,
     ) -> int:
         """Reconnect to every surviving Session Host on startup (goal 3).
 
@@ -41,6 +86,23 @@ class _SessionHostRecoveryMixin:
         reattached loopback endpoint and **adopts** the existing ACP session --
         no child respawn, no lost session. Dead hosts are pruned. Returns the
         count reattached. No-op when no host index exists.
+
+        ``claim_hosts=False`` (PR #4543 review) skips the generation-claim
+        step entirely -- used for a **passive** cutover instance's own
+        startup scan. A record with no recorded owner is, correctly,
+        "recoverable" by design (Phase 2's claim/release/recover contract),
+        but on this repo's first rollout of Phase 3 -- and for any record a
+        generation registered without ever claiming its own writes -- that
+        would let a still-passive, not-yet-promoted daemon claim (and
+        reattach to) a Session Host the truly active old generation is still
+        live and driving, before the verified-retirement gate ever runs. A
+        passive instance therefore still warms up its ACP connections (the
+        pre-Phase-3, goal-3 behavior, unchanged) but does not touch claim
+        state; the post-cutover retry (``/api/v1/session-hosts/reattach``,
+        called only once the old generation is *confirmed* exited) is the
+        sole place claiming happens for a promoted generation. A normal
+        (non-passive) cold start still claims at startup as before -- there
+        is no other live generation to race in that case.
 
         **Version-mux (Phase 4).** A host advertising a wire-envelope protocol
         this frontend no longer speaks (a rare breaking host-layer change) is
@@ -52,6 +114,13 @@ class _SessionHostRecoveryMixin:
         """
         if self._host_index is None:
             return 0
+        # Reload from the latest on-disk state before scanning (PR #4543
+        # review): this process's own in-memory snapshot can predate a
+        # concurrent writer's registration -- most importantly the other
+        # daemon generation during a cutover -- and a per-record `claim()`
+        # reload cannot discover a session id absent from the stale scan
+        # below in the first place.
+        self._host_index.refresh()
         from .session_host.version_mux import HostDisposition, plan_host
 
         loop = asyncio.get_running_loop()
@@ -128,6 +197,21 @@ class _SessionHostRecoveryMixin:
             if plan.disposition in (HostDisposition.REAP_STOPPED,
                                     HostDisposition.FORCE_REAP):
                 self._reap_host_record(rec, plan.reason)
+                continue
+            if claim_hosts and not self._claim_host_record(rec):
+                # A live different generation still owns this record -- do not
+                # reattach out from under it (the effort's own "the next
+                # generation earns the handoff, never assumes it" behavior).
+                # Deliberately NOT added to `_remote_recovery_inconclusive`
+                # (PR #4543 review): that set is checked at the *top* of this
+                # very loop on every later call, so recording a claim
+                # conflict there would permanently block every future
+                # reattach attempt for this session -- including the
+                # post-cutover retry this mechanism exists to make succeed
+                # once the other generation actually releases it. A claim
+                # conflict is retried on the next scan for free; it is not a
+                # terminal "could not authoritatively inspect" outcome the
+                # way remote-recovery inconclusiveness is.
                 continue
             session = self._sessions.get(rec.session_id)
             if session is None or not session.acp_session_id:

@@ -34,7 +34,7 @@ def _ns(**kwargs) -> argparse.Namespace:
     defaults = {
         "worktree_id": None, "new": False, "codename": None, "seed": None,
         "seed_ready_timeout": 180.0, "driver": None, "recovery": False,
-        "ensure_mux": False, "mux": None,
+        "ensure_mux": False, "mux": None, "headed": False,
     }
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
@@ -175,3 +175,69 @@ class TestCmdCopilot:
         assert rc == 0
         assert seen["mux"] == "psmux"
         assert execed["argv"][0] == "psmux"
+
+
+class TestCmdCopilotHeaded:
+    """`--headed`: attach in a new, separate window instead of THIS
+    terminal -- no controlling-terminal requirement, no `os.execvp` (this
+    process must survive and return normally, e.g. the Picker calling it)."""
+
+    def test_does_not_require_a_controlling_terminal(self, monkeypatch):
+        monkeypatch.setattr(m.sys.stdin, "isatty", lambda: False)
+
+        def fake_embody(args):
+            output._json_output({"ok": True, "session": "wt-abc", "worktree_id": "abc"})
+            return 0
+
+        monkeypatch.setattr(m, "cmd_embody", fake_embody)
+        monkeypatch.setattr(m.sessions, "_mux_bin", lambda mux=None: "tmux")
+        monkeypatch.setattr(
+            m.headed_launch, "spawn_headed_attach",
+            lambda mux_bin, session, title=None: {"spawner": "xterm", "pid": 123},
+        )
+        rc = m.cmd_copilot(_ns(worktree_id="abc", headed=True))
+        assert rc == 0
+
+    def test_spawns_headed_attach_instead_of_execvp(self, monkeypatch, capfd):
+        monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True)
+
+        def fake_embody(args):
+            output._json_output({"ok": True, "session": "wt-abc", "worktree_id": "abc"})
+            return 0
+
+        monkeypatch.setattr(m, "cmd_embody", fake_embody)
+        monkeypatch.setattr(m.sessions, "_mux_bin", lambda mux=None: "tmux")
+
+        def boom(*a, **kw):
+            raise AssertionError("must not exec this process's own terminal when --headed")
+
+        monkeypatch.setattr(m.os, "execvp", boom)
+        spawn_calls = []
+
+        def fake_spawn(mux_bin, session, title=None):
+            spawn_calls.append((mux_bin, session, title))
+            return {"spawner": "wt.exe", "pid": 999}
+
+        monkeypatch.setattr(m.headed_launch, "spawn_headed_attach", fake_spawn)
+        rc = m.cmd_copilot(_ns(worktree_id="abc", headed=True))
+        assert rc == 0
+        assert spawn_calls == [("tmux", "wt-abc", "abc")]
+        assert "wt.exe" in capfd.readouterr().out
+
+    def test_spawn_failure_is_reported_not_raised(self, monkeypatch, capfd):
+        monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True)
+
+        def fake_embody(args):
+            output._json_output({"ok": True, "session": "wt-abc", "worktree_id": "abc"})
+            return 0
+
+        monkeypatch.setattr(m, "cmd_embody", fake_embody)
+        monkeypatch.setattr(m.sessions, "_mux_bin", lambda mux=None: "tmux")
+
+        def fake_spawn(mux_bin, session, title=None):
+            raise m.headed_launch.HeadedLaunchError("no visible terminal spawner found")
+
+        monkeypatch.setattr(m.headed_launch, "spawn_headed_attach", fake_spawn)
+        rc = m.cmd_copilot(_ns(worktree_id="abc", headed=True))
+        assert rc == 1
+        assert "no visible terminal spawner found" in capfd.readouterr().out

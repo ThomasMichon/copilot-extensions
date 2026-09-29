@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-vault"
-version = "0.1.8-dev1"
+version = "0.1.9-dev1"
 description = "Local KeePassXC-backed secret store for Copilot CLI agents."
 readme = "README.md"
 license = "MIT"
@@ -19,8 +19,10 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-# Windows-headless process-spawn helpers (module ``agent_procutil``). Vendored
-# per plugin; byte-identical src across copies.
+# `path` escapes this plugin's own root and resolves live to
+# `libs/agent-procutil`, so this `dev`-branch checkout has nothing to keep
+# manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
 agent-procutil = { path = "libs/agent-procutil" }
 # zero-downtime cutover primitives -- routing table + cutover orchestrator +
 # recovery breadcrumb (module ``zdd``). Vendored per plugin; byte-identical src

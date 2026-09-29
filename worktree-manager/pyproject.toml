@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "copilot-extensions-worktree-manager"
-version = "0.1.0-dev95"
+version = "0.1.1-dev1"
 description = "Standalone, out-of-plugin control plane (installer, configurator & worktree launcher) for the copilot-extensions harness."
 readme = "README.md"
 license = "MIT"
@@ -28,9 +28,13 @@ dependencies = [
     # agent-bridge stages a repo's plugin stack for a standalone launch.
     "agent-plugin-resolve",
     # Shared Windows-headless / detached process-spawn kwargs (module
-    # ``agent_procutil``). Vendored per plugin; byte-identical src across
-    # copies. Used by the production Picker's SSH/maintenance/task subprocess
-    # spawns (copilot-extensions#3359).
+    # ``agent_procutil``). This is a `uv`-editable canonical reference
+    # (vendor-pointer-generalization effort, Phase 1): `path` escapes this
+    # plugin's own root and resolves live to `libs/agent-procutil`, so this
+    # `dev`-branch checkout has nothing to keep manually in sync -- only a
+    # real `main`-branch release (tools/materialize_main.py) ever gets a
+    # real local copy. Used by the production Picker's SSH/maintenance/task
+    # subprocess spawns (copilot-extensions#3359).
     "agent-procutil",
     # Resilient scan authority, entry decisions, and bounded warning tracking
     # for filesystem registries (module ``dropin_registry``). Used by the
@@ -61,8 +65,10 @@ dependencies = [
 # (dotfiles#929); kept byte-identical to every other copy by
 # tools/check-vendored-libs-sync.py.
 agent-plugin-resolve = { path = "libs/plugin-resolve" }
-# Shared Windows-headless / detached process-spawn kwargs (module
-# ``agent_procutil``). Vendored per plugin; byte-identical src across copies.
+# `path` escapes this plugin's own root and resolves live to
+# `libs/agent-procutil`, so this `dev`-branch checkout has nothing to keep
+# manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
 agent-procutil = { path = "libs/agent-procutil" }
 # Resilient scan authority, entry decisions, and bounded warning tracking for
 # filesystem registries (module ``dropin_registry``).

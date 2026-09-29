@@ -8,6 +8,7 @@ tests cover the claim/release/recover primitive layered on top of it via
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -142,3 +143,95 @@ def test_recoverable_claims_finds_dead_and_never_claimed(tmp_path: Path):
     # Now the owning generation's pid dies too.
     recoverable = idx.recoverable_claims(pid_alive=lambda p: False)
     assert {r.session_id for r in recoverable} == {"s1", "s2", "s3"}
+
+
+# -- cross-process write safety (PR #4543 review) -----------------------
+
+
+def test_a_second_instances_write_is_not_lost_by_a_stale_first_instance(tmp_path: Path):
+    """The exact race two daemon generations hit during a cutover: two
+    ``HostIndex`` instances over the same file, one (the old generation)
+    holding a stale in-memory snapshot from before the other (the new
+    generation) registered a fresh record. The stale instance's own later
+    write must not silently drop the fresh one."""
+    path = tmp_path / "hosts.json"
+    old_generation = HostIndex(path)
+    _register(old_generation, "s1")  # old generation's own session
+
+    # New generation opens its own instance (loads the same on-disk state)
+    # and registers a session the old generation never saw.
+    new_generation = HostIndex(path)
+    _register(new_generation, "s2")
+
+    # Old generation now performs its own exit-contract release -- a plain
+    # mutation, same as any other -- while its in-memory snapshot still only
+    # knows about "s1".
+    old_generation.claim("s1", generation="old-gen", owner_pid=1, pid_alive=lambda p: True)
+    released = old_generation.release_all("old-gen")
+    assert released == ["s1"]
+
+    # s2 (the new generation's own write) must have survived the old
+    # generation's later flush.
+    reloaded = HostIndex(path)
+    assert reloaded.get("s1") is not None
+    assert reloaded.get("s2") is not None
+
+
+def test_claim_reloads_latest_state_across_instances(tmp_path: Path):
+    """A claim decision must be made against the LATEST on-disk claim state,
+    not a stale in-memory snapshot from before another process's claim."""
+    path = tmp_path / "hosts.json"
+    a = HostIndex(path)
+    _register(a, "s1")
+
+    b = HostIndex(path)
+    b.claim("s1", generation="gen-b", owner_pid=os.getpid(), pid_alive=lambda p: True)
+
+    # `a`'s in-memory snapshot predates `b`'s claim -- its own claim attempt
+    # must still see `b`'s live claim (via a reload), not silently win.
+    with pytest.raises(ClaimConflict):
+        a.claim("s1", generation="gen-a", owner_pid=os.getpid(), pid_alive=lambda p: True)
+
+
+def test_concurrent_writers_from_two_instances_do_not_lose_updates(tmp_path: Path):
+    """A genuinely overlapping-in-time write from two ``HostIndex`` instances
+    over the same file (PR #4543 review: the sequential tests above prove
+    reload-before-write is correct, but would still pass even if the
+    cross-process lock were removed entirely -- this test forces real
+    temporal overlap via a barrier, so it only passes if the lock actually
+    excludes one writer while the other is mid reload-mutate-flush)."""
+    import threading
+
+    path = tmp_path / "hosts.json"
+    seed = HostIndex(path)
+    for i in range(20):
+        _register(seed, f"s{i}")
+
+    barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
+
+    def _writer(idx: int) -> None:
+        try:
+            barrier.wait(timeout=5.0)
+            hi = HostIndex(path)
+            for i in range(20):
+                hi.set_resume_flag(f"s{i}", value=(idx == 0))
+        except BaseException as exc:  # noqa: BLE001 -- surfaced by the assertion below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_writer, args=(i,)) for i in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    assert not errors, errors
+    assert not any(t.is_alive() for t in threads)
+
+    # Every record must still be present -- neither writer's flush dropped
+    # the other's records, regardless of which one's `resume_on_reattach`
+    # value "won" the final write for each session.
+    final = HostIndex(path)
+    assert len(final.all()) == 20
+    for i in range(20):
+        assert final.get(f"s{i}") is not None

@@ -720,6 +720,71 @@ def _copy_payload(source: Path, destination: Path) -> None:
     shutil.copytree(source, destination, dirs_exist_ok=True)
 
 
+def _rewrite_uv_source_to_local(pyproject: Path, lib: str) -> bool:
+    """Surgically rewrite `pyproject`'s `[tool.uv.sources]` entry for
+    `lib` to the local, non-editable `{ path = "libs/<lib>" }` form --
+    mirroring `tools/materialize_main.py`'s own promotion-time rewrite
+    (duplicated in miniature here rather than imported, since this
+    runtime script must stay self-contained in a real release payload
+    with no `tools/` directory at all). Scoped to the
+    `[tool.uv.sources]` table's own span so an identical-looking value
+    elsewhere is never touched. Returns whether a rewrite happened."""
+    text = pyproject.read_text(encoding="utf-8")
+    header = re.search(r"^\[tool\.uv\.sources\]\s*$", text, re.MULTILINE)
+    if header is None:
+        return False
+    start = header.end()
+    next_header = re.search(r"^\[", text[start:], re.MULTILINE)
+    end = start + next_header.start() if next_header else len(text)
+    escaped = re.escape(lib)
+    key = r'(?:"' + escaped + r'"|\'' + escaped + r"'|" + escaped + r")"
+    pattern = re.compile(r'^([ \t]*' + key + r'\s*=\s*)\{[^}]*\}[ \t]*(?:#.*)?$', re.MULTILINE)
+    new_body, count = pattern.subn(
+        lambda m: f'{m.group(1)}{{ path = "libs/{lib}" }}', text[start:end], count=1
+    )
+    if count != 1:
+        return False
+    pyproject.write_text(text[:start] + new_body + text[end:], encoding="utf-8")
+    return True
+
+
+def _backfill_canonical_vendored_libs(payload_root: Path, snapshot: Path) -> None:
+    """`agent-procutil` is `uv`-editable in a dev checkout (vendor-pointer-
+    generalization effort) -- no local copy under `libs/` at all -- so
+    `_copy_payload` never snapshots it. A release always bakes in a real
+    copy, so this only fires for a dev-checkout payload: back-fill from
+    the repo-root canonical `libs/agent-procutil` (local-then-canonical
+    fallback, mirroring the install scripts), then rewrite the snapshotted
+    `pyproject.toml`'s own `[tool.uv.sources]` entry to the local form --
+    its `../../libs/agent-procutil` path escapes the snapshot root
+    entirely and no longer resolves from there."""
+    for lib in ("agent-procutil",):
+        if (snapshot / "libs" / lib).exists():
+            continue
+        canonical_libs = payload_root.parents[1] / "libs"
+        canonical = canonical_libs / lib
+        if (
+            canonical_libs.is_symlink()
+            or _is_reparse(canonical_libs)
+            or canonical.is_symlink()
+            or _is_reparse(canonical)
+        ):
+            # `Path.is_dir()` below follows a symlink/reparse point --
+            # `_copy_payload()` only rejects a link found *inside* its own
+            # source tree, so a symlinked `libs/` or `libs/agent-procutil`
+            # component itself would slip through undetected and
+            # `copytree()` would then dereference it, copying external
+            # files into the published snapshot and breaking the
+            # snapshot's no-link invariant (PR #4465 review).
+            raise CellError(
+                f"canonical vendored-lib path contains a link or reparse "
+                f"point: {canonical}"
+            )
+        if canonical.is_dir():
+            _copy_payload(canonical, snapshot / "libs" / lib)
+            _rewrite_uv_source_to_local(snapshot / "pyproject.toml", lib)
+
+
 def _snapshot_owner(marketplace_id: str, version: str) -> str:
     return "\n".join(
         (
@@ -786,6 +851,7 @@ def _ensure_snapshot(
     (stage / owner_name).write_text(expected_owner, encoding="utf-8", newline="\n")
     try:
         _copy_payload(payload_root, stage)
+        _backfill_canonical_vendored_libs(payload_root, stage)
         if snapshot_root.exists() or snapshot_root.is_symlink():
             raise CellError("cell snapshot appeared during publication")
         os.rename(stage, snapshot_root)

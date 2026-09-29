@@ -595,6 +595,28 @@ _ensure_runtime() {
         _skip 'Venv already exists'
     fi
 
+    # Every `[tool.uv.sources]` workspace path dep -- both the real local
+    # copies (``agent-zdd``) and the `uv`-editable canonical references
+    # (``agent-procutil``, ``agent-single-instance-lease``: vendor-pointer-
+    # generalization effort, Phase 1) -- needs an explicit pre-install here:
+    # `uv` resolves `[tool.uv.sources]` fine when installing the main
+    # package directly, but the non-uv (bare `pip install`) fallback below
+    # ignores that table entirely and would otherwise try (and fail) to
+    # resolve each as an ordinary index package.
+    for _lib in zdd agent-procutil single-instance-lease; do
+        _lib_dir="$PLUGIN_DIR/libs/$_lib"
+        if [[ ! -f "$_lib_dir/pyproject.toml" ]]; then
+            _lib_dir="$(cd "$PLUGIN_DIR/../.." && pwd)/libs/$_lib"
+        fi
+        if [[ -f "$_lib_dir/pyproject.toml" ]]; then
+            if [[ "$have_uv" -eq 1 ]]; then
+                uv pip install --python "$VENV_PYTHON" "$_lib_dir" --quiet
+            else
+                "$VENV_PYTHON" -m pip install --quiet "$_lib_dir"
+            fi || { _fail "$_lib library install failed"; exit 1; }
+        fi
+    done
+
     if [[ "$have_uv" -eq 1 ]]; then
         uv pip install --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null \
             || { _fail 'Failed to install agent-vault package into venv'; exit 1; }

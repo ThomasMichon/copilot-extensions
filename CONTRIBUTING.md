@@ -453,6 +453,40 @@ Reviewers confirm that the statement and documentation match the final diff.
 Treat a missing assessment or inaccurate affected documentation as unfinished
 work.
 
+### Graceful cutover impact (required for resident-daemon changes)
+
+Any PR that introduces or materially changes a **long-lived resident daemon**
+— usually a Runtime service plugin, but also any other plugin/tooling that adds
+an always-on local process — must include a **Graceful cutover impact**
+statement in the PR description.
+
+1. Name the daemon(s) and the installer/update/activation seam that owns their
+   rollout.
+2. State how the change satisfies
+   [`docs/patterns/graceful-daemon-cutover.md`](docs/patterns/graceful-daemon-cutover.md),
+   including the safe cutover/drain boundary; or, if claiming an exemption,
+   explain either **why the process is not a long-lived resident daemon** and
+   which lifecycle pattern governs it instead, **or** why it fits the
+   documented lighter
+   [`service-lifecycle-supervision`](docs/patterns/service-lifecycle-supervision.md)
+   singleton-handoff path (no shared endpoint and no in-flight request to
+   drain).
+3. Link the doc/effort updates that record the contract, or explain why
+   existing documentation remains accurate and complete.
+
+Reviewers treat a missing or hand-wavy statement as unfinished work.
+
+There is intentionally **no CI guard for this today**. This repo has no
+reliable static signal for "a new resident daemon was introduced": heuristics
+over names like `serve`/`daemon`, `while True` loops, vendored `zdd`, or
+`plugin.json["zeroDowntimeUpdate"]` would both miss real daemon introductions
+and flag unrelated code, while legitimate adopters already span plugin and
+non-plugin surfaces (`worktree-manager`) plus both `install.*` and `init.*`
+activation seams. Until the suite gains a manifest-level daemon declaration,
+this PR-description statement is the review-time gate; reviewers also enforce
+that any claimed singleton-handoff exception really matches the documented
+`service-lifecycle-supervision` criteria above.
+
 ## Release & Versioning
 
 ### Marketplace architecture
@@ -581,6 +615,24 @@ edits directly.
 > `CONTRIBUTING.md`, `README.md`) need no changefile. Build artifacts under a
 > plugin are ignored.
 >
+> **`worktree-manager` follows the same rule, even though it is not a
+> marketplace plugin.** It is a top-level, out-of-plugin consumer tree with
+> no `plugin.json` at all — its release version lives directly in its own
+> `pyproject.toml` (`[project].version`), and its `src/*/__init__.py`
+> `__version__` fallback is the "fourth file" equivalent above. A change to
+> **any file under `worktree-manager/`**, or to a **shared lib it consumes
+> in either form** — a real, vendored `libs/<lib>/` copy, **or** a `uv`-editable
+> canonical-reference pointer in its own `pyproject.toml`
+> `[tool.uv.sources]` (an escaping `{ path = "../libs/<lib>", editable =
+> true }` entry -- no local copy at all; see `tools/uv_editable_ref.py`'s
+> own module docstring for the full mechanism, part of the
+> vendor-pointer-generalization effort) — requires a changefile naming `worktree-manager` the same
+> way a plugin's own content change does (`python tools/changefile.py add
+> --plugin worktree-manager --type patch --comment "..."` — the `--plugin`
+> flag name is historical; it accepts any recognized consumer identifier).
+> It has no `marketplace.json` entry and no instruction-projection
+> ownership, so those two surfaces never apply to it.
+>
 > **Before editing a shared lib, find every REAL copy first: `python
 > tools/check-vendored-libs-sync.py --list`.** A shared lib such as
 > `ssh-manager` is vendored **per consuming plugin**, at
@@ -589,13 +641,26 @@ edits directly.
 > plugin's own `pyproject.toml`). Some repos also carry a legacy top-level
 > `libs/<lib>/` directory alongside these — it is easy to mistake for "the"
 > source since it sits next to the lib's own `tests/`, but `--list` only
-> enumerates the `plugins/*/libs/*` copies it keeps in sync; a top-level
-> `libs/<lib>/src` that isn't one of the listed copies is **not consumed by any
-> plugin at runtime**, and editing it silently does nothing. Edit every listed
-> copy identically (or edit one and copy it to the rest byte-for-byte), then
-> re-run `check-vendored-libs-sync.py` to confirm — it fails loudly on drift
-> between copies, but it cannot warn you about editing an unlisted, unvendored
-> directory.
+> enumerates the **real, physical** consumer-local copies it keeps in
+> sync (`plugins/*/libs/*`, plus a registered standalone consumer's own
+> top-level `libs/*`, e.g. `worktree-manager/libs/*`) — it is a real-copy
+> inventory, not the complete consumer map. **A top-level canonical
+> `libs/<lib>/` is not automatically inert just because `--list` doesn't
+> name it as a copy**: for a lib with any `uv`-editable pointer-only
+> consumer (vendor-pointer-generalization effort, e.g. `worktree-manager`'s
+> `plugin-resolve`), that canonical tree IS the real
+> source materialized into those consumers at promotion time
+> (`tools/materialize_main.py`) — editing it changes their real, shipped
+> payload. Find pointer-only consumers with `python
+> tools/check-version-bump.py --list` (their entry names appear even without
+> a local copy) or by grepping every `pyproject.toml`'s
+> `[tool.uv.sources]` for an escaping `path`. Only a lib with NO pointer-only
+> consumers at all is truly inert outside `--list`'s own copies — edit every
+> listed real copy identically (or edit one and copy it to the rest
+> byte-for-byte), then re-run `check-vendored-libs-sync.py` to confirm — it
+> fails loudly on drift between real copies, but it cannot warn you about a
+> pointer-only consumer's canonical source, which has no "copy" to drift
+> from at all.
 
 **agent-worktrees:**
 

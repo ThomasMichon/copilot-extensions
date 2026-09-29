@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522))
+- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 5 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 5 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581))
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
@@ -226,12 +226,12 @@ layer — is the operator's own, captured verbatim in Request.)_
   recover primitive above) plus a process-level contention regression
   test.
 
-### Phase 3 — The liveness gate and the outgoing generation's exit contract
-- [ ] A new generation, after starting, durably marks itself live (the
+### Phase 3 — The liveness gate and the outgoing generation's exit contract ✅
+- [x] A new generation, after starting, durably marks itself live (the
   operator's "another lock file" idea, or an equivalent durable marker) —
   this is the signal the prior generation waits for before doing anything
   destructive.
-- [ ] Codify the outgoing generation's **exact** obligations before it may
+- [x] Codify the outgoing generation's **exact** obligations before it may
   terminate: confirm the next generation is live; hand off (or durably
   mark stale-recoverable) every session-host claim it held; ensure the
   handoff/claim state itself is durably recorded; notify its own ZDD
@@ -239,13 +239,13 @@ layer — is the operator's own, captured verbatim in Request.)_
   wire. Nothing else blocks its exit — in particular, it never waits on a
   Copilot turn or a client.
 
-### Phase 4 — The caller-facing mask/routing layer
-- [ ] Confirm (or extend) that upstream callers of agent-bridge resolve
+### Phase 4 — The caller-facing mask/routing layer ✅
+- [x] Confirm (or extend) that upstream callers of agent-bridge resolve
   through the existing `zdd.routing` `active.json` discovery the same way
   session-host clients already tolerate a session-host changeover — a
   cutover in flight should look like a brief, buffered pause to every
   caller, never a hard error.
-- [ ] Validate the buffering/retry behavior at the actual call sites that
+- [x] Validate the buffering/retry behavior at the actual call sites that
   matter in practice (CLI `send`/`read`/`wait`, not only the HTTP layer).
 
 ### Phase 5 — Validation
@@ -275,10 +275,333 @@ layer — is the operator's own, captured verbatim in Request.)_
 
 ## Proposal
 
-_Pending — Phase 2's claim/release/recover schema and Phase 3's exit-contract
-sequencing will be drafted here once the design is reviewed._
+**Phase 3's liveness gate — a design decision, not new code.** A dedicated
+"another lock file" (the operator's own phrasing in Request) turned out to be
+unnecessary: `zdd.routing`'s existing `active.json` table already *is* the
+durable liveness marker the vision calls for, for two independent reasons
+confirmed by reading `libs/zdd/src/zdd/routing.py` and `cutover.py`: (1)
+`CutoverOrchestrator.run()` only calls `publish_active()` **after** its own
+health gate passes -- so an entry in `active.json` already proves the new
+generation started and answered a live health probe, not merely that its
+process exists; (2) the same orchestrator re-confirms that health
+immediately before retiring the old daemon (the "verify-before-retire" gate),
+so the old generation never destroys itself on the strength of a
+liveness signal that could have gone stale between the flip and the retire.
+Introducing a second, parallel liveness file would only duplicate this
+signal, not strengthen it. Phase 3 therefore reuses `active.json` as-is and
+spends its own effort on the piece that genuinely didn't exist: the
+session-host claim half of the exit contract (below).
+
+**Phase 3's exit-contract sequencing.** Claim/release plugs into the
+*existing* cutover sequence at two points, both agent-bridge-specific (never
+touching `zdd`'s own generic surface, since not every `zdd` consumer has a
+session-host concept):
+1. **Release (outgoing generation, its own initiative)**: the `/api/v1/
+   shutdown` handler -- called by `CutoverOrchestrator` only after flip +
+   drain + the verify-before-retire gate all passed -- releases every claim
+   this generation holds (`HostIndex.release_all(generation_id)`) before
+   `should_exit=True` ever triggers lifespan teardown. This is the "it never
+   waits on a Copilot turn or a client" half: releasing is synchronous,
+   local, and never blocks on anything the new generation does.
+2. **Claim (new generation, never assumes ownership)**: `reattach_session_hosts()`
+   calls `HostIndex.claim(...)` for each live record before adopting it. A
+   record still claimed by a *live* other generation is skipped (not
+   stolen); one whose owning generation is dead is claimed silently (Phase
+   2's claim/release/recover contract, no live handshake). A passive
+   cutover instance never runs this scan at all -- ATTACHing to a Session
+   Host unconditionally displaces whatever front already holds it (a
+   real, review-caught hazard: a passive daemon reattaching would
+   disconnect the truly active old generation before any cutover gate
+   ever ran), so all claim/reattach work for it is deferred to the
+   post-cutover retry below. The cutover CLI (`_cmd_deploy`) retries the
+   scan via a new `/api/v1/session-hosts/reattach` endpoint once the old
+   generation is *confirmed* exited -- mirroring the existing post-commit
+   relay-adoption step's own shape, not a new mechanism.
+
+**Phase 4 — validated, not built.** The caller-facing mask this phase's
+checklist calls for already existed before this effort started, predating it
+by years (`#23`/`#46.6`, `#893`, `#900`, `#3179` in the Journal below) --
+Phase 4's real job turned out to be confirming that machinery is intact after
+Phases 1-3's changes and closing the one genuine validation gap: proof at the
+*CLI call site*, not only at the `BridgeClient` request level. See the Journal
+entry below for what was inspected, what was already covered, and the one new
+test that closes the gap.
 
 ## Journal
+
+### 2026-09-29 — Phase 4 landed ([#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581))
+- **No new production mechanism was needed.** Reading `client.py`'s
+  `BridgeClient._request()` and the CLI `send`/`read`/`wait` call sites
+  confirmed the caller-facing mask Phase 4's checklist describes was already
+  built and already thoroughly tested, well before this effort:
+  - `_get_client()` (the *sole* client-construction path for every CLI
+    command, including `send`/`read`/`wait`) always calls
+    `BridgeClient.from_config()`, which installs a live `_reresolve` callback
+    against `zdd.routing`'s `active.json` -- there is no CLI code path that
+    constructs an un-reresolving client for ordinary use.
+  - The **drain-refusal 503** (#3179) is real but narrower than this
+    journal entry first assumed: only `POST /api/v1/sessions` (brand-new
+    session creation, `routes/sessions.py`) checks `is_draining` and refuses
+    with it. `post_live_message` (`routes/live_sessions.py`, the route
+    `send` actually hits once a target already has a live session -- the
+    common case) has **no draining gate at all**: delivering into an
+    already-registered live session is cheap local-DB work, not new agent
+    work, so the retiring generation keeps serving it normally throughout
+    its own drain window. (Caught by automated PR review on the first
+    version of this PR's test, which had wrongly generalized the
+    session-creation drain-503 to the live-message delivery path -- see
+    below.)
+  - The real risk window for `send` mid-cutover is therefore not a graceful
+    503 at all -- it's the retiring generation's HTTP listener actually
+    closing post-shutdown. That produces a *plain connection refusal*
+    (`ECONNREFUSED`, wrapped as `urllib.error.URLError`, not
+    `ConnectionResetError`), which `_request()` follows to the routing
+    table's successor and retries for **any** HTTP method, including this
+    non-idempotent POST -- safe because a clean refusal proves the dead
+    process never received the request, unlike an in-flight reset.
+    Covered generically for GET by `TestReresolveOnRejection` in
+    `test_client_connect.py`.
+  - A genuine **connection reset** (the process accepted the connection,
+    then died mid-request) during a non-idempotent method is deliberately
+    **not** auto-retried (`BridgeConnectionError`) -- the correctness-safe
+    boundary for the abrupt-kill case Phase 5's own drill exists to
+    exercise, not a gap: an unacknowledged POST could double-deliver if
+    blindly retried without the caller's own `--idempotency-key` opt-in
+    (`send_live_message`/`submit_prompt` already thread one through when
+    given).
+  - `_stream_feed()` (the engine behind `read`/`wait`) already reconnects
+    across a connection error and resumes from the caller's acked cursor
+    (`#23`/`#46.6`, `#893`, `#900`), tested by `test_reconnect.py`'s eight
+    scenarios including a worktree-handoff follow and a settled-404 report.
+- **The one genuine gap**: every existing test above drives `BridgeClient`
+  or the streaming engine directly -- none drove the actual CLI `_cmd_send`
+  entry point end-to-end through a cutover. Added
+  `test_send_transparent_cutover.py::test_send_cli_survives_connection_refused_mid_delivery`,
+  which builds a real `BridgeClient` (mocked `urlopen`, not a fake
+  in-memory client), makes the retiring generation's port answer with a
+  clean connection refusal (matching the route's real behavior, not an
+  invented 503), and asserts `agent-bridge send`'s real code path
+  (`_cmd_send` -> `resolve_live_session` -> `send_live_message`) prints a
+  normal delivery confirmation -- never a traceback or hard failure -- after
+  transparently following the routing table to the successor.
+- **Full suite**: `python3 tools/run-plugin-tests.py agent-bridge` stayed
+  green throughout, confirming none of Phases 1-3's changes disturbed this
+  pre-existing machinery.
+- Test-only change; no production code touched. Phase 4's own checklist is
+  now fully validated with concrete evidence, closing it without new
+  runtime mechanism.
+
+### 2026-09-28 — Phase 3 landed ([#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543))
+- **Generation identity**: `SessionManager` (via `_SessionCoreMixin.__init__`)
+  computes `self._generation_id = zdd.claims.generation_id(version=
+  __version__, pid=os.getpid())` once per process lifetime -- never
+  persisted, never reused across a restart, matching `zdd.claims`' own
+  contract from Phase 2.
+- **Claim wiring**: `_SessionHostRecoveryMixin._claim_host_record(rec)` (new)
+  wraps `HostIndex.claim()` with the three outcomes Phase 2's primitive
+  already defines -- already-owned (idempotent), a live other generation
+  (skip, don't steal), a dead one (recover silently) -- plus a fourth,
+  Phase-3-specific outcome for an untracked record (permit; keeps every
+  pre-Phase-3 reattach test that fabricates a bare record without
+  registering it in a real `HostIndex` working unchanged). Wired into
+  `reattach_session_hosts()`'s per-record loop right after the version-mux
+  plan is resolved and before the record is ever adopted.
+- **Release wiring (the exit contract)**: `routes/admin.py`'s `/api/v1/
+  shutdown` handler now calls `HostIndex.release_all(generation_id)` before
+  setting `server.should_exit = True`, and returns the released session ids
+  in its response. Best-effort (a release failure never blocks the shutdown
+  it's guarding against outliving).
+- **Post-cutover claim retry**: a new `/api/v1/session-hosts/reattach`
+  endpoint re-runs `reattach_session_hosts()` on demand. `venue_cli.py`'s
+  `_cmd_deploy` calls it on the newly-active daemon (via `BridgeClient
+  ._request` directly, not a new named client method -- `client.py` was
+  already sitting at its grandfathered 1686-line module-size ceiling; the
+  pre-push module-size guard caught this on the first push attempt) once
+  the old generation is *confirmed* exited (the same point that already
+  reconciles the service marker and verifies the retired pid) -- see
+  Proposal above for why this two-step claim dance (an early,
+  mostly-contended pass at startup; a retry once the old generation is
+  provably gone) is necessary rather than a single pass sufficing.
+- New tests: `plugins/agent-bridge/tests/test_session_host_claims_phase3.py`
+  (15 cases: generation-id computation/stability, `_claim_host_record`'s
+  four outcomes, and two `reattach_session_hosts()` integration cases for
+  the live-conflict-skips / dead-claim-recovers paths) and
+  `plugins/agent-bridge/tests/test_admin_routes_phase3.py` (4 route-level
+  cases for `/shutdown`'s release and `/session-hosts/reattach`). Two
+  existing reattach tests initially regressed (`test_startup_reattach_
+  resumes_session_stopped_while_starting`, `test_startup_reattach_leaves_
+  prior_idle_session_idle`) because they fabricate a bare `SimpleNamespace`
+  record without ever registering it in a real `HostIndex` -- fixed by
+  `_claim_host_record` treating an untracked record as "claim not
+  applicable" rather than a block (see above). Full `agent-bridge` suite
+  (2766+ tests, 7 sub-suites): green on two full runs (one prior run hit a
+  transient shared-host `[LIMIT] wall-clock limit exceeded` and a stale
+  test-runner lock from an unrelated dead process on this same machine --
+  both cleared on retry, neither related to this change).
+- **PR #4543's automated review caught four real gaps, all fixed before
+  merge:**
+  1. HIGH: `HostIndex`'s mutating methods (`register`/`remove`/`claim`/
+     `release_all`/...) wrote from each instance's own in-memory snapshot
+     with no cross-process coordination -- the old and new generations
+     each hold a long-lived `HostIndex` over the *same* file during a
+     cutover, so the outgoing generation's own `release_all()` flush could
+     silently drop a concurrent registration the new generation had just
+     written. Fixed with a short-lived cross-process lock
+     (`single_instance_lease.SingleInstance`, already a direct agent-bridge
+     dependency) around a reload-latest-then-mutate-then-flush cycle in
+     every mutating method -- a mutation now always applies against the
+     freshest on-disk state, not a stale snapshot. New regression tests:
+     `test_a_second_instances_write_is_not_lost_by_a_stale_first_instance`,
+     `test_claim_reloads_latest_state_across_instances`.
+  2. MEDIUM: a claim conflict during the startup reattach scan was recorded
+     in `_remote_recovery_inconclusive` -- a set checked at the *top* of
+     every later call to `reattach_session_hosts()`, so recording it there
+     permanently blocked the post-cutover retry this whole mechanism exists
+     to make succeed. Fixed by not recording claim contention in that set at
+     all (it is retried for free on the next scan, unlike a genuine
+     remote-recovery inconclusiveness). New test:
+     `test_reattach_retries_successfully_once_a_live_claim_is_released`
+     (first pass contended and skipped; the other generation releases;
+     second pass succeeds).
+  3. MEDIUM: `venue_cli.py`'s `old_confirmed_gone` treated `not old.pid`
+     (an unknown pid, e.g. a legacy/partial routing record) the same as a
+     *confirmed* retirement, which could trigger the post-cutover reattach
+     retry while the old frontend might still actually be attached. Fixed
+     to only treat `old is None` (cold start) or a `_ensure_retired_daemon_
+     exited`-confirmed exit as confirmed-gone; an unknown pid is now
+     conservatively left unconfirmed (the retry simply waits for a later
+     opportunity).
+  4. LOW: the new `/api/v1/shutdown` response shape and `/api/v1/
+     session-hosts/reattach` endpoint were missing from `plugins/
+     agent-bridge/docs/architecture.md`'s API list. Added there, plus a new
+     "Session-host generation handoff" subsection summarizing the
+     claim/release/retry flow and the `HostIndex` locking fix above.
+- **A second automated review pass caught five more real gaps** (the fixture
+  #1 fix above wasn't wrong, just incomplete -- the write path was safe, the
+  ordering and the passive-startup window around it were not):
+  1. HIGH: `/api/v1/shutdown` released every claim *before* confirming a
+     server handle existed to actually shut down -- a still-live daemon
+     (shutdown couldn't be initiated) would have abandoned ownership it
+     still held. Fixed: check for the server handle first; release only on
+     the path that actually shuts down.
+  2. HIGH: on Phase 3's first rollout (and for any record its own active
+     generation never itself claimed -- i.e. every normal `register()`),
+     an unclaimed record is *correctly* "recoverable" by Phase 2's own
+     contract, which let a still-**passive**, not-yet-promoted daemon's
+     startup reattach scan claim (and reattach to) a Session Host the truly
+     active old generation was still driving, before the verified-retirement
+     gate ever ran. Fixed: `reattach_session_hosts(claim_hosts=...)` -- a
+     passive instance (`publish_on_ready=False`) still warms up its ACP
+     connections (unchanged, pre-Phase-3 behavior) but never touches claim
+     state; claiming happens only via the post-cutover retry once the old
+     generation is confirmed exited, or at a normal (non-passive) cold
+     start, which has no other live generation to race.
+  3. MEDIUM: query methods (`all()`/`live_records()`) still read each
+     process's own in-memory cache, so the post-cutover reattach sweep could
+     miss a session id registered by the other generation *after* this
+     `HostIndex` was constructed -- a per-record `claim()` reload cannot
+     discover an id absent from a stale enumeration in the first place.
+     Fixed: new `HostIndex.refresh()`, called before every reattach scan.
+  4. Contract: the new endpoint introduces a client-detectable capability
+     with no matching protocol bump. **Attempted, then reverted**: bumping
+     `HTTP_PROTOCOL_VERSION` requires new contract-registry evidence whose
+     own `captured_from.commit` must reference a real, resolvable commit --
+     but every commit on a PR branch here gets rewritten (squashed/rebased)
+     by this repo's own `push-changes` flow before it ever reaches origin,
+     so no commit on an in-flight PR branch can ever durably reference
+     itself. The repo's own precedent (`registry.json`'s existing
+     `a1612599f2...` provenance entries) confirms this: that commit is
+     itself an *already-merged* PR, meaning the established pattern is a
+     **separate follow-up PR** *after* the functional change merges, not
+     doing both atomically. Reverted the version bump and the
+     `daemon_supports()` gate; the post-cutover reattach call is
+     unconditional best-effort instead, mirroring the existing relay-adopt
+     post-cutover step (`/api/v1/relay/adopt`), which itself has never
+     carried a protocol-version gate either. A follow-up PR bumping
+     `HTTP_PROTOCOL_VERSION` and capturing the new evidence, once this PR's
+     merge commit exists to reference, is a reasonable Phase 4/5 or
+     standalone follow-up -- not a blocker for Phase 3 itself.
+  5. Test quality: the original two-instance `HostIndex` tests were
+     sequential, so they would still pass even with the cross-process lock
+     removed entirely. Added a genuinely overlapping (thread + barrier
+     synchronized) concurrent-writer test that only passes if the lock
+     actually excludes one writer while the other is mid reload-mutate-flush.
+- **A third automated review pass caught the deepest gap of all, plus three
+  more real bugs and a policy violation:**
+  1. **HIGH -- the actual architectural miss**: `claim_hosts=False` only
+     suppressed the *durable claim*; it did **not** stop the passive
+     instance's startup scan from reaching `_reattach_one()` and physically
+     ATTACHing to each Session Host. `SessionHost._handle_front()`
+     unconditionally displaces whatever front already holds a host the
+     moment a new one connects -- so a still-**passive**, not-yet-promoted
+     daemon's own "harmless" reattach-and-warm-up was actually
+     **disconnecting the truly active old generation**, before the
+     verified-retirement gate ever ran. This was strictly worse than the
+     claim-only gap Phase 3 started with. Fixed properly this time: the
+     entire startup reattach *task* is now skipped for a passive instance
+     (a new explicit `app.state.passive` flag, distinct from
+     `publish_on_ready` -- see finding 4 below for why); only the
+     post-cutover retry ever reattaches for it.
+  2. HIGH: newly-**spawned** hosts (`register()` at session-host launch, not
+     via reattach) were never stamped with this generation's own ownership
+     -- they looked "never claimed" (freely recoverable) to any other
+     generation's reattach scan the moment they were created, and
+     `release_all()` could never find them to release. Fixed: the spawn
+     path now stamps `owner_generation`/`owner_pid` at registration time.
+  3. HIGH: `_load()`'s reload-before-mutate rewrite reset `self._records`
+     to `{}` *before* attempting the read, so a transient `OSError` or a
+     momentarily-partial read on an *existing* index left the in-memory
+     state empty -- and `_locked_reload()` would then flush that empty
+     state, erasing every other host record on the very next mutation.
+     Fixed: parse into a temporary map first; only replace `self._records`
+     on a fully successful read, and a stricter `_load_or_raise()` variant
+     used specifically inside `_locked_reload()` now **aborts the mutation
+     entirely** (never reaches `_flush()`) on a read failure, rather than
+     silently proceeding against stale state.
+  4. HIGH: `register()` blindly overwrote a record's `owner_generation`/
+     `owner_pid` with whatever the caller's copy carried -- and a caller
+     refreshing a remote forward's port (`_ensure_forward()`) can easily be
+     holding a copy from *before* a concurrent `claim()`, silently
+     reverting a just-written claim. Fixed: `register()` now always
+     preserves the durably-recorded ownership fields when updating an
+     *existing* record -- it is a location/metadata update, never an
+     ownership change; only `claim`/`release`/`release_all` mutate
+     ownership.
+  5. Fixing finding 1 broke `getattr(app.state, "publish_on_ready", False)`
+     as a passive-detection signal for anything **other** than the real
+     `agent-bridge start` CLI: `publish_on_ready` is only ever set there,
+     so every test harness that builds `create_app()` directly (i.e. nearly
+     every existing test) defaulted to "looks passive" and silently stopped
+     reattaching at all -- three previously-green tests regressed. Fixed
+     with a new, explicit `app.state.passive` flag (defaults `False`
+     everywhere it isn't set, the safe default), and updated the two
+     regressed tests (`test_reattach_session_hosts_on_restart`,
+     `test_reattach_reaps_orphaned_host`) to explicitly simulate the
+     outgoing generation's own exit-contract release
+     (`HostIndex.release_all`) they'd been implicitly relying on skipping.
+  6. Policy: widening `tools/module-size-baseline.json` is reserved for the
+     scheduled/post-merge baseline workflow, not an ordinary feature PR.
+     Reverted the earlier widening; trimmed `app.py`'s own net addition to
+     exactly zero lines instead (compacted comments/log calls already in
+     the touched function -- no unrelated code moved).
+- **A fourth pass** found three small process nits (changefile `type` should
+  default to `patch`, not `minor`, absent explicit maintainer direction;
+  `routes/admin.py`'s reattach-endpoint docstring still described the
+  pre-fix "runs while passive, contended" shape; the PR description needed
+  this repo's specific **Graceful cutover impact** statement, distinct from
+  the generic Documentation impact one already added) -- all fixed -- plus
+  one genuine **known, deliberately scoped-out limitation**: a legacy/partial
+  routing record with no recorded `pid` makes `old_confirmed_gone` stay
+  `False` forever (correctly conservative -- see finding 3 in the second
+  pass above), but nothing then *retries* the post-cutover reattach for that
+  one case; a surviving Session Host under a legacy record can be left
+  unattached until an unrelated recovery path eventually runs. Building a
+  periodic/background retry specifically for this edge case is real work in
+  its own right (this effort's Plan already earmarks Phase 5 for the two
+  validation drills that would surface exactly this kind of gap) -- tracked
+  here rather than rushed in.
+- This effort's own umbrella issue's Phase 4/5 remain: the caller-facing
+  mask/routing layer and the two validation drills.
 
 ### 2026-09-28 — Phase 2 landed ([#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522))
 - **`zdd.claims`** (new, canonical `libs/zdd`): storage-agnostic

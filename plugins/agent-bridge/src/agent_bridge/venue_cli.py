@@ -284,10 +284,24 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
             core._reconcile_service_marker(active.pid, active.version)
             res.steps.append(f"service marker reconciled -> pid {active.pid} (port {active.port})")
         old = res.old_endpoint
+        # Confirmed-gone means exactly that -- confirmed, not merely
+        # "we don't have contrary evidence" (PR #4543 review: treating an
+        # unknown pid as confirmed retirement could let the post-cutover
+        # reattach retry below run while a legacy/partial routing record's
+        # old frontend is still actually attached).
+        if old is None:
+            old_confirmed_gone = True  # cold start -- no predecessor to wait for
+        elif not old.pid:
+            old_confirmed_gone = False  # pid unknown -- cannot confirm either way
+        elif active is not None and old.pid == active.pid:
+            old_confirmed_gone = True  # "old" IS the new active -- nothing to retire
+        else:
+            old_confirmed_gone = False  # confirmed below, or left False
         if old is not None and old.pid and (active is None or old.pid != active.pid):
             exited, forced = core._ensure_retired_daemon_exited(old.pid)
             if exited:
                 res.steps.append(f"old daemon exited pid={old.pid}" + (" (forced tree reap)" if forced else ""))
+                old_confirmed_gone = True
             else:
                 res.steps.append(f"FAILED: retired daemon pid={old.pid} is still alive")
                 res.ok = False
@@ -295,6 +309,28 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
                     f"retired daemon pid={old.pid} survived graceful and forced process-tree retirement; "
                     "split-brain is possible"
                 )
+        if res.ok and old_confirmed_gone and active is not None:
+            # Phase 3's "the next generation earns the handoff, never assumes
+            # it": the new daemon's own startup reattach pass ran while the
+            # old generation still held its session-host claims (it was still
+            # passive at that point), so it likely skipped every live record
+            # as contended. Now that the old generation is *confirmed* exited
+            # (its own /shutdown handler already released every claim it
+            # held), retry the scan so surviving session-hosts are actually
+            # adopted rather than left stranded until some later opportunity.
+            # Best-effort, mirroring the existing relay-adopt post-cutover step
+            # (which similarly calls its endpoint unconditionally rather than
+            # gating on a protocol-version capability check).
+            try:
+                active_url = f"http://{routing.format_authority(host, active.port)}"
+                reattach = make_client(active_url)._request(
+                    "POST", "/api/v1/session-hosts/reattach"
+                ) or {}
+                res.steps.append(
+                    f"post-cutover reattach: {reattach.get('reattached', 0)} session(s)"
+                )
+            except Exception as exc:  # noqa: BLE001 -- best-effort, never fails the cutover
+                res.steps.append(f"post-cutover reattach failed (non-fatal): {exc}")
 
     if args.json:
         core._json_out(res.to_dict())

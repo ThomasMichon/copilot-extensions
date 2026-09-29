@@ -48,3 +48,22 @@ def test_render_tolerates_missing_key(capfd):
     del rep["bare_orphans"]
     m._render_doctor_report(rep, applied=False, gc_applied=False)
     assert "No bare (un-muxed) Copilot orphans" in capfd.readouterr().out
+
+
+def test_render_lists_daemon_health_findings(capfd):
+    rep = _report(
+        daemon_health={
+            "mode": "report",
+            "findings": [
+                {
+                    "kind": "duplicate_resident",
+                    "summary": "more than one live daemon matches the resident active slot",
+                    "targets": [{"pid": 22068, "start_time": "dup"}],
+                }
+            ],
+        }
+    )
+    m._render_doctor_report(rep, applied=False, gc_applied=False)
+    out = capfd.readouterr().out
+    assert "Resident daemon health (report-only): 1 finding(s)" in out
+    assert "pid 22068" in out

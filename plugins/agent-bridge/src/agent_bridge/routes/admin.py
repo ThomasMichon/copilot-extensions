@@ -93,11 +93,50 @@ async def shutdown(request: Request):
     Used by the cutover orchestrator to retire the *old* daemon once the route
     has flipped and it has drained. Triggers uvicorn's clean shutdown (lifespan
     runs, sessions stop, routing claim is retracted) -- a clean exit, so a
-    systemd unit with Restart=on-failure does NOT resurrect it."""
+    systemd unit with Restart=on-failure does NOT resurrect it.
+
+    Releases every session-host claim this generation holds (effort
+    agent-bridge-unified-zdd-cutover, Phase 3's exit contract) -- but only
+    once shutdown can actually be initiated. Releasing first and *then*
+    discovering there is no server handle to shut down would leave a still-
+    live daemon with no claims -- exactly the split ownership this whole
+    mechanism exists to prevent (PR #4543 review). Best-effort within that
+    ordering -- a release failure must never block the shutdown it's
+    guarding against outliving.
+    """
     server = getattr(request.app.state, "uvicorn_server", None)
     if server is None:
-        return {"shutting_down": False, "reason": "no server handle"}
+        return {"shutting_down": False, "reason": "no server handle",
+                "released_claims": []}
+
+    mgr: SessionManager = request.app.state.session_manager
+    released: list[str] = []
+    try:
+        host_index = getattr(mgr, "_host_index", None)
+        generation = getattr(mgr, "_generation_id", None)
+        if host_index is not None and generation:
+            released = host_index.release_all(generation)
+    except Exception:  # noqa: BLE001 -- release is best-effort, never blocks shutdown
+        pass
     server.should_exit = True
-    return {"shutting_down": True}
+    return {"shutting_down": True, "released_claims": released}
+
+
+@router.post("/session-hosts/reattach")
+async def reattach_hosts(request: Request):
+    """Re-run the Session Host reattach + claim scan on demand.
+
+    A passive cutover instance skips the startup reattach task entirely
+    (ATTACHing would disconnect the still-active old generation -- see
+    ``app.py``'s own ``_reattach_session_hosts_bg``), so it never even
+    attempts this scan until now. The cutover CLI calls this endpoint on the
+    newly-active daemon once the old generation is *confirmed* exited, so
+    this is the *first* reattach/claim pass for it, run once claims are no
+    longer contended (Phase 3's "the next generation earns the handoff,
+    never assumes it"). Returns the number of sessions (re)attached.
+    """
+    mgr: SessionManager = request.app.state.session_manager
+    reattached = await mgr.reattach_session_hosts()
+    return {"reattached": reattached}
 
 

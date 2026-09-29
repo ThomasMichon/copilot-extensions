@@ -17,7 +17,7 @@ The library carries no service-specific logic; see ``cutover``'s
 ``CutoverOrchestrator`` for the consumer contract.
 """
 
-from . import breadcrumb, claims, cutover, cutover_lock, routing
+from . import breadcrumb, claims, cutover, cutover_lock, diagnostics, routing
 from .breadcrumb import (
     clear_breadcrumb,
     read_breadcrumb,
@@ -27,6 +27,15 @@ from .breadcrumb import (
 from .claims import ClaimConflict, Claimable, decide_acquire, generation_id, is_recoverable
 from .cutover import CutoverError, CutoverOrchestrator, CutoverResult
 from .cutover_lock import CutoverLock, CutoverLockedError
+from .diagnostics import (
+    DaemonCandidate,
+    DiagnosticContext,
+    apply_daemon_health,
+    audit_daemon_health,
+    lock_data_is_live,
+    process_start_time,
+    terminate_pid_if_identity,
+)
 from .routing import (
     Endpoint,
     clear_if_owner,
@@ -45,7 +54,11 @@ __all__ = [
     "CutoverLockedError",
     "CutoverOrchestrator",
     "CutoverResult",
+    "DaemonCandidate",
+    "DiagnosticContext",
     "Endpoint",
+    "apply_daemon_health",
+    "audit_daemon_health",
     "breadcrumb",
     "claims",
     "clear_breadcrumb",
@@ -53,8 +66,11 @@ __all__ = [
     "cutover",
     "cutover_lock",
     "decide_acquire",
+    "diagnostics",
     "generation_id",
     "is_recoverable",
+    "lock_data_is_live",
+    "process_start_time",
     "publish_active",
     "read_active_endpoint",
     "read_breadcrumb",
@@ -63,5 +79,6 @@ __all__ = [
     "recover_stale_cutover",
     "routing",
     "routing_table_path",
+    "terminate_pid_if_identity",
     "write_breadcrumb",
 ]

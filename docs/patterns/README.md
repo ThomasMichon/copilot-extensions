@@ -32,7 +32,7 @@ Choose the simplest shape that fits; don't impose structure a plugin doesn't nee
 |-------|-----------|----------|
 | **Payload-only** | Skills / hooks / a session extension; enabling the plugin is the whole install — no runtime | efforts, visions, context-handoff, customizing-copilot, harness-* |
 | **Runtime CLI** | Target: installation-cell runtime + payload-local shim, invoked on demand; legacy implementations still use a global binstub during migration | agent-mcp, agent-containers (migration targets) |
-| **Runtime service** | Runtime CLI **plus** a long-lived local service under platform-native supervision | agent-bridge, agent-dispatch, agent-vault |
+| **Runtime service** | Runtime CLI **plus** a long-lived local service under platform-native supervision. Choosing this shape — or adding an equivalent resident daemon under any other label — must reconcile to [`graceful-daemon-cutover`](graceful-daemon-cutover.md); the cutover contract is a design invariant, not a follow-up enhancement. | agent-bridge, agent-dispatch, agent-vault |
 | **Namespace-provider** | A plugin that registers a namespace with a sibling service via a filesystem **manifest** (its binstub driven over a process boundary), rather than running its own daemon | agent-codespaces / agent-containers (providers to agent-bridge) |
 | **Managed companion capability** | An explicitly configured optional heavyweight capability whose attributed runtime declaration is materialized only by an already-running trusted supervisor | agent-ssh dtssh host through agent-dispatch |
 
@@ -56,7 +56,10 @@ Choose the simplest shape that fits; don't impose structure a plugin doesn't nee
    its own installer per the install contract. Nothing at run time depends on a
    git checkout of this repo, and a bare plugin name never selects mutable state.
 4. **Right-size the surface.** Payload-only < runtime CLI < runtime service.
-   Don't add a daemon, a port, or a resolver a plugin doesn't need.
+   Don't add a daemon, a port, or a resolver a plugin doesn't need. If you do
+   add a long-lived resident daemon under any shape, you have taken on the
+   [`graceful-daemon-cutover`](graceful-daemon-cutover.md) obligation at design
+   time and must justify any claimed exemption explicitly.
 5. **Cross-platform parity is a feature.** A plugin behaves the same on Windows
    and Linux/WSL; platform differences are handled at the edges (installer,
    binstub, supervision), never leaked into behavior.
@@ -324,6 +327,7 @@ the exemplars, and the vision it serves):
 | [work-coalescing-singleton](work-coalescing-singleton.md) | How many callers of the **same cheap, idempotent, shareable** work fold onto one warm, refcounted daemon instead of fanning out one worker per caller — the generalized `hook_ipc.py` wire protocol, the boot-wait/request-deadline timeout budgets, the ref-count/linger idle-exit algorithm, and the always-correct inline fallback, applied to agent-worktrees' resident classify/list accelerator and agent-mcp's per-`(host, server)` multiplexer |
 | [cold-spawn-latency-budget](cold-spawn-latency-budget.md) | Measured Windows cold-start cost per process kind (`node`/`python`/`powershell`/`pwsh`/warm-daemon-IPC), why hook *count* (not body size) drives `powershell.exe` spawns, why concurrent batches spike tail latency non-linearly, and the priority order for cutting cost: merge sibling hook entries, route through `work-coalescing-singleton` first, prefer a native wire-protocol client over a second cold interpreter, and optimize extension time-to-ready rather than chasing a language swap |
 | [mutable-dev-slot](mutable-dev-slot.md) | The one narrow, worktree-scoped exception to immutable versioned runtimes: a claimed, single-owner `dev` slot an installer may rebuild in place, GC-protected only while claimed, so validating a real unmerged change against the actual deployed CLI no longer needs a throwaway hot-patch |
+| [dev-main-promotion-pipeline](dev-main-promotion-pipeline.md) | The reusable, repo-portable template for this repo's own `dev`→`main` split: a stable zero-review `main` gated by content-shape (not identity) rather than a redundant second review, a changefile-driven version-bump system, the wholesale-tree-replace promotion mechanic, and the two ruleset misconfigurations that jammed it in production and why |
 
 The **runtime deploy contract** (venv + binstub + manifest, `uv`, marketplace-vs-
 runtime split) is its own established pattern doc:

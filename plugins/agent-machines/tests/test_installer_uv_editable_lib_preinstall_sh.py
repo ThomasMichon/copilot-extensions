@@ -1,12 +1,12 @@
 """Guard for init.sh's non-uv (bare-pip) preinstall loop covering the
 uv-editable canonical-reference libs (vendor-pointer-generalization effort):
-dropin-registry, plugin-resolve, plugin-activation. Exercises the loop via
-real bash execution for both the uv path and the bare-pip fallback path,
-confirming plugin-local/repo-root-canonical resolution and the required
-dropin-registry/plugin-resolve-before-plugin-activation install order -- a
-regression here would still pass every other installer guard while
-silently reintroducing the bare-pip dependency failure Copilot's review
-caught on PR #4420."""
+dropin-registry, plugin-resolve, agent-procutil, plugin-activation.
+Exercises the loop via real bash execution for both the uv path and the
+bare-pip fallback path, confirming plugin-local/repo-root-canonical
+resolution and the required dropin-registry/plugin-resolve-before-
+plugin-activation install order -- a regression here would still pass
+every other installer guard while silently reintroducing the bare-pip
+dependency failure Copilot's review caught on PR #4420."""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ HAVE_UV={1 if have_uv else 0}
 
 
 def _make_libs(root: Path) -> None:
-    for lib in ("dropin-registry", "plugin-resolve", "plugin-activation"):
+    for lib in ("dropin-registry", "plugin-resolve", "agent-procutil", "plugin-activation"):
         lib_dir = root / lib
         lib_dir.mkdir(parents=True)
         (lib_dir / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
@@ -81,7 +81,7 @@ def test_preinstall_loop_resolves_plugin_local_copy_and_orders_correctly(
         for line in proc.stdout.splitlines()
         if line.startswith(marker)
     ]
-    assert len(installs) == 3
+    assert len(installs) == 4
     order = [Path(p).name for p in installs]
     assert order.index("plugin-activation") > order.index("dropin-registry")
     assert order.index("plugin-activation") > order.index("plugin-resolve")
@@ -109,6 +109,6 @@ def test_preinstall_loop_falls_back_to_repo_root_canonical_when_absent(
         for line in proc.stdout.splitlines()
         if line.startswith(marker)
     ]
-    assert len(installs) == 3
+    assert len(installs) == 4
     for resolved in installs:
         assert os.path.realpath(resolved).startswith(os.path.realpath(str(canonical)))

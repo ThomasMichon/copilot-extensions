@@ -109,3 +109,22 @@ def test_server_venv_provisioning_is_called_after_the_main_package_install():
     assert "deploy_binstub" in after_sh.split(
         '_install_server_venv "$install_role"', 1
     )[1]
+
+
+def test_server_venv_prefers_signed_python_copies_mode_before_uv_fallback():
+    """Mirrors the main venv's own preference (SSH-invocable + Smart App
+    Control-allowed, see Get-SignedBasePython's docstring) -- Windows only;
+    install.sh has no equivalent concept. NOT a latency optimization: both
+    a --copies venv and a uv-created one re-exec the base interpreter as a
+    child process on Windows (confirmed empirically), so this changes
+    SSH/SAC compatibility, not spawn hop count."""
+    ps, _sh = _read_scripts()
+    ps_fn = ps.split("function Install-ServerVenv {", 1)[1].split(
+        "\nfunction Install-Runtime {", 1
+    )[0]
+    signed_idx = ps_fn.index("Get-SignedBasePython")
+    copies_idx = ps_fn.index("-m venv --copies --clear $serverVenvDir")
+    uv_idx = ps_fn.index("uv venv $serverVenvDir")
+    assert signed_idx < copies_idx < uv_idx
+    assert "Server venv created from signed Python" in ps_fn
+    assert "falling back to uv" in ps_fn

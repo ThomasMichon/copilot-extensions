@@ -19,7 +19,7 @@ import pytest
 
 TOOLS_DIR = Path(__file__).resolve().parent
 SCRIPT = TOOLS_DIR / "check-changefile-presence.py"
-DEP_SCRIPTS = ["check-version-bump.py", "changefile.py"]
+DEP_SCRIPTS = ["check-version-bump.py", "changefile.py", "uv_editable_ref.py"]
 
 
 def _git(repo: Path, *args: str) -> None:
