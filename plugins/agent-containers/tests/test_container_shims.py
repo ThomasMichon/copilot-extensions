@@ -78,6 +78,61 @@ def test_ensure_agent_worktrees_is_noop_when_already_ready(monkeypatch):
     container_shims.ensure_agent_worktrees("repo-1", user="vscode")
 
 
+def test_agent_worktrees_ready_requires_the_launch_script_too(monkeypatch):
+    # A live-confirmed bug: `agent-worktrees --version` succeeding is NOT
+    # sufficient -- the lean `install.sh provision` mode deploys only the CLI,
+    # never `scripts/launch-command.sh`, which `embody`'s own detached-launch
+    # command names directly. Without it every detached launch failed with an
+    # opaque not-ready-timeout (the launch command itself never ran).
+    exec_calls: list[str] = []
+    exists_checks: list[str] = []
+
+    monkeypatch.setattr(
+        container_shims,
+        "_docker_exec",
+        lambda container, command, *, user, env=None, timeout=30.0: (
+            exec_calls.append(command)
+            or types.SimpleNamespace(returncode=0, stdout="", stderr="")
+        ),
+    )
+
+    def fake_exists(container, path, *, user="0", timeout=30.0):
+        exists_checks.append(path)
+        return "launch-command.sh" in path
+
+    monkeypatch.setattr(container_shims, "_docker_exists", fake_exists)
+
+    assert container_shims._agent_worktrees_ready(
+        "repo-1", user="vscode", home="/home/vscode",
+    ) is True
+    assert any("--version" in c for c in exec_calls)
+    assert "/home/vscode/.agent-worktrees/scripts/launch-command.sh" in exists_checks
+
+
+def test_agent_worktrees_ready_false_when_launch_script_missing():
+    exists_calls: list[str] = []
+
+    class _Container:
+        pass
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            container_shims,
+            "_docker_exec",
+            lambda *a, **k: types.SimpleNamespace(returncode=0, stdout="", stderr=""),
+        )
+        mp.setattr(
+            container_shims,
+            "_docker_exists",
+            lambda *a, **k: exists_calls.append(a) or False,
+        )
+        ready = container_shims._agent_worktrees_ready(
+            "repo-1", user="vscode", home="/home/vscode",
+        )
+    assert ready is False
+    assert exists_calls  # the launch-script check actually ran
+
+
 def test_ensure_agent_worktrees_persists_local_payload_and_external_uv_sources(
     monkeypatch, tmp_path
 ):
@@ -140,7 +195,7 @@ agent-procutil = { path = "libs/agent-procutil" }
     assert payload_targets[payload_root] == "/home/vscode/.agent-worktrees/payload-src/plugins"
     assert payload_targets[libs_root] == "/home/vscode/.agent-worktrees/payload-src"
     install = next(
-        command for user, command in exec_calls if "bash scripts/install.sh provision" in command
+        command for user, command in exec_calls if "bash scripts/install.sh install" in command
     )
     assert "cd '/home/vscode/.agent-worktrees/payload-src/plugins/agent-worktrees'" in install
     assert "--install-dir '/home/vscode/.agent-worktrees'" in install
@@ -174,13 +229,13 @@ def test_ensure_agent_worktrees_surfaces_install_failures(monkeypatch):
 
     def fake_exec(container, command, *, user, env=None, timeout=30.0):
         exec_calls.append(command)
-        if "bash scripts/install.sh provision" in command:
+        if "bash scripts/install.sh install" in command:
             return types.SimpleNamespace(returncode=23, stdout="", stderr="network down")
         return types.SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(container_shims, "_docker_exec", fake_exec)
 
-    with pytest.raises(RuntimeError, match="could not provision agent-worktrees"):
+    with pytest.raises(RuntimeError, match="could not install agent-worktrees"):
         container_shims.ensure_agent_worktrees("repo-1", user="vscode")
 
     assert any(
@@ -225,7 +280,7 @@ def test_ensure_agent_worktrees_repairs_old_ready_install_without_reinstall(monk
     container_shims.ensure_agent_worktrees("repo-1", user="vscode")
 
     assert wrappers == [("repo-1", "/payload-root")]
-    assert not any("bash scripts/install.sh provision" in command for command in exec_calls)
+    assert not any("bash scripts/install.sh install" in command for command in exec_calls)
 
 
 def test_ensure_agent_worktrees_workspace_registered_runs_idempotent_register(monkeypatch):

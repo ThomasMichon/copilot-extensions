@@ -214,9 +214,23 @@ def _docker_exists(container: str, path: str, *, user: str = "0", timeout: float
     return result.returncode == 0
 
 
-def _agent_worktrees_ready(container: str, *, user: str, timeout: float = 60.0) -> bool:
+def _agent_worktrees_ready(container: str, *, user: str, home: str, timeout: float = 60.0) -> bool:
+    """``agent-worktrees --version`` alone is not sufficient: the lean
+    ``install.sh provision`` mode deploys only the CLI tool itself, never
+    the launcher/wrapper scripts (``scripts/launch-command.sh``,
+    ``scripts/default-setup.sh``) that ``embody``'s own detached-launch
+    command actually depends on. Confirmed live: without them, every
+    detached launch fails opaquely with ``not-ready-timeout`` (the launch
+    command itself never runs -- ``bash: .../launch-command.sh: No such
+    file or directory``, tmux's pane exits before the readiness poll can
+    see anything). So readiness here requires BOTH the CLI and the
+    deployed launcher script.
+    """
     result = _docker_exec(container, "agent-worktrees --version", user=user, timeout=timeout)
-    return result.returncode == 0
+    if result.returncode != 0:
+        return False
+    launch_script = str(PurePosixPath(home, _AW_RUNTIME_REL, "scripts", "launch-command.sh"))
+    return _docker_exists(container, launch_script, user=user)
 
 
 def _agent_worktrees_payload_paths(home: str) -> tuple[str, str]:
@@ -402,14 +416,17 @@ def _deploy_agent_worktrees_wrapper(container: str, payload_root: str | None = N
 
 
 def ensure_agent_worktrees(container: str, *, user: str) -> None:
-    """Ensure ``agent-worktrees`` is runnable on the detached-launch PATH."""
+    """Ensure ``agent-worktrees`` -- including its launcher scripts, which
+    ``embody``'s detached-launch command depends on -- is runnable in the
+    container.
+    """
     home = _container_home(container, user=user)
     payload_root = (
         _agent_worktrees_payload_paths(home)[1]
         if _agent_worktrees_payload_ready(container, user=user, home=home)
         else None
     )
-    if _agent_worktrees_ready(container, user=user) and payload_root:
+    if _agent_worktrees_ready(container, user=user, home=home) and payload_root:
         _deploy_agent_worktrees_wrapper(container, payload_root)
         return
     user_binstub = str(PurePosixPath(home, ".local/bin/agent-worktrees"))
@@ -417,17 +434,24 @@ def ensure_agent_worktrees(container: str, *, user: str) -> None:
         payload_root = _sync_agent_worktrees_payload(container, user=user, home=home)
     if _docker_exists(container, user_binstub, user=user):
         _deploy_agent_worktrees_wrapper(container, payload_root)
-        if _agent_worktrees_ready(container, user=user):
+        if _agent_worktrees_ready(container, user=user, home=home):
             return
     install_dir = str(PurePosixPath(home, _AW_RUNTIME_REL))
     host_uv_index = _host_uv_index()
     install_env = {"UV_DEFAULT_INDEX": host_uv_index} if host_uv_index else None
+    # The full `install` action (not the lean `provision`) is required: only
+    # `install` calls `deploy_wrappers`, which writes `scripts/launch-
+    # command.sh` / `scripts/default-setup.sh` -- `embody`'s own detached
+    # launch command names them directly. `provision` deliberately skips
+    # them (its own comment: "tools only, no launcher/hooks"), which is
+    # exactly why an ostensibly-successful provision here still left every
+    # detached embody launch failing with an opaque not-ready-timeout.
     install = _docker_exec(
         container,
         (
             "set -euo pipefail; "
             f"cd {payload_root!r}; "
-            f"bash scripts/install.sh provision --install-dir {install_dir!r}"
+            f"bash scripts/install.sh install --install-dir {install_dir!r}"
         ),
         user=user,
         env=install_env,
@@ -438,13 +462,13 @@ def ensure_agent_worktrees(container: str, *, user: str) -> None:
             install.stderr.strip() or install.stdout.strip() or f"exit {install.returncode}"
         )[-3000:]
         raise RuntimeError(
-            "could not provision agent-worktrees in the container with "
-            f"`bash scripts/install.sh provision --install-dir {install_dir}`: {detail}"
+            "could not install agent-worktrees in the container with "
+            f"`bash scripts/install.sh install --install-dir {install_dir}`: {detail}"
         )
     _deploy_agent_worktrees_wrapper(container, payload_root)
-    if not _agent_worktrees_ready(container, user=user):
+    if not _agent_worktrees_ready(container, user=user, home=home):
         raise RuntimeError(
-            "agent-worktrees finished provisioning but still is not runnable on the "
+            "agent-worktrees finished installing but still is not runnable on the "
             "container PATH"
         )
 
