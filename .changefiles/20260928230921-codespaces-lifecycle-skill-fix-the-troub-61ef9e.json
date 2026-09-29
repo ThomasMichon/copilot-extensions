@@ -1,0 +1,9 @@
+{
+  "comment": "codespaces-lifecycle skill: fix the troubleshooting note to reference the canonical .copilot-extensions/agent-codespaces/config.yaml path (PR #4368 review round 2, landed post-merge)",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
