@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 submitted for review)
+- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 submitted for review -- [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522))
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
@@ -280,7 +280,7 @@ sequencing will be drafted here once the design is reviewed._
 
 ## Journal
 
-### 2026-09-28 — Phase 2 landed
+### 2026-09-28 — Phase 2 landed ([#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522))
 - **`zdd.claims`** (new, canonical `libs/zdd`): storage-agnostic
   claim/release/recover decision logic. `decide_acquire(record, key=...,
   generation=..., owner_pid=..., pid_alive=...)` is the one entry point:
