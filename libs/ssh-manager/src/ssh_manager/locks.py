@@ -91,7 +91,7 @@ def pid_alive(pid: int) -> bool:
 
 def process_identity(pid: int) -> str | None:
     """Return a stable birth-identity token for ``pid`` while it remains live."""
-    if pid <= 0:
+    if pid <= 0 or not pid_alive(pid):
         return None
     if sys.platform == "win32":
         import ctypes
@@ -127,8 +127,6 @@ def process_identity(pid: int) -> str | None:
                 ctypes.byref(user),
             )
             if not ok:
-                return None
-            if exit_.dwHighDateTime or exit_.dwLowDateTime:
                 return None
             ticks = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
             return f"windows-filetime:{ticks}"

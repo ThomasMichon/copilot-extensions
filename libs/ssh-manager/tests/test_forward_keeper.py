@@ -115,14 +115,14 @@ def test_terminate_pid_reaps_posix_process_group(monkeypatch):
 
     monkeypatch.setattr(fk.sys, "platform", "linux")
     monkeypatch.setattr(fk, "pid_alive", lambda pid: next(alive))
-    monkeypatch.setattr(fk.os, "getpgid", lambda pid: 4321)
+    monkeypatch.setattr(fk.os, "getpgid", lambda pid: 123)
     monkeypatch.setattr(fk.os, "killpg", lambda pgid, sig: calls.append((pgid, sig)))
     monkeypatch.setattr(fk.time, "sleep", lambda delay: None)
     monkeypatch.setattr(fk.time, "monotonic", lambda: 0.0)
 
     fk._terminate_pid(123)
 
-    assert calls and calls[0][0] == 4321
+    assert calls and calls[0][0] == 123
 
 
 def test_run_supervised_loop_waits_for_startup_then_exits_when_session_gone(monkeypatch):

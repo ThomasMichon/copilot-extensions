@@ -53,7 +53,7 @@ def _terminate_pid(pid: int) -> None:
     except OSError:
         pgid = None
     try:
-        if pgid is not None:
+        if pgid == pid:
             os.killpg(pgid, signal.SIGTERM)
         else:
             os.kill(pid, signal.SIGTERM)
@@ -67,7 +67,7 @@ def _terminate_pid(pid: int) -> None:
     if not pid_alive(pid):
         return
     try:
-        if pgid is not None:
+        if pgid == pid:
             os.killpg(pgid, signal.SIGKILL)
         else:
             os.kill(pid, signal.SIGKILL)

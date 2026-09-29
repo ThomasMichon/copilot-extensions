@@ -48,6 +48,7 @@ class TestProcessIdentity:
     def test_procfs_start_time_identity(self, monkeypatch):
         tokens = ["S"] + ["0"] * 18 + ["12345"]
         monkeypatch.setattr(locks_mod.sys, "platform", "linux")
+        monkeypatch.setattr(locks_mod, "pid_alive", lambda pid: True)
         monkeypatch.setattr(
             locks_mod.Path,
             "read_text",
@@ -58,6 +59,7 @@ class TestProcessIdentity:
     def test_procfs_zombie_has_no_identity(self, monkeypatch):
         tokens = ["Z"] + ["0"] * 18 + ["12345"]
         monkeypatch.setattr(locks_mod.sys, "platform", "linux")
+        monkeypatch.setattr(locks_mod, "pid_alive", lambda pid: True)
         monkeypatch.setattr(
             locks_mod.Path,
             "read_text",
@@ -67,6 +69,7 @@ class TestProcessIdentity:
 
     def test_ps_fallback_identity(self, monkeypatch):
         monkeypatch.setattr(locks_mod.sys, "platform", "linux")
+        monkeypatch.setattr(locks_mod, "pid_alive", lambda pid: True)
 
         def fail_proc(*_args, **_kwargs):
             raise OSError("missing procfs")
