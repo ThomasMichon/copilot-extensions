@@ -15,9 +15,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from work_coalescing_singleton import client as wcs_client
+from zdd import routing
 
 KIND = "mux-status-v1"
 REQUEST_DEADLINE_S = 5.0
+_ROUTING_DIRNAME = "mux-daemon-routing"
+_TOKEN_FILENAME = "mux-daemon.token"
 
 
 def _default_root() -> Path:
@@ -30,6 +33,25 @@ def _default_root() -> Path:
 
 def lock_path(root: Path | None = None) -> Path:
     return (root if root is not None else _default_root()) / "mux-daemon.lock"
+
+
+def routing_dir(root: Path | None = None) -> Path:
+    return (root if root is not None else _default_root()) / _ROUTING_DIRNAME
+
+
+def control_token_path(root: Path | None = None) -> Path:
+    return (root if root is not None else _default_root()) / _TOKEN_FILENAME
+
+
+def load_control_token(root: Path | None = None) -> str | None:
+    path = control_token_path(root)
+    try:
+        token = path.read_text(encoding="utf-8").strip()
+        if token:
+            return token
+    except OSError:
+        pass
+    return None
 
 
 def read_lock_data(path: Path | None = None) -> dict | None:
@@ -90,7 +112,12 @@ def push_status_via_daemon(
     lock_data: dict | None = None,
     request_deadline_s: float = REQUEST_DEADLINE_S,
 ) -> dict:
-    endpoint = endpoint_from_rendezvous(lock_data if lock_data is not None else read_lock_data())
+    route = routing.read_active_endpoint(routing_dir())
+    token = load_control_token()
+    if route is not None and token is not None:
+        endpoint = (route.client_host, route.port, token)
+    else:
+        endpoint = endpoint_from_rendezvous(lock_data if lock_data is not None else read_lock_data())
     if endpoint is None:
         return {"applied": False, "reason": "daemon-unavailable"}
     key = status_push_key(payload)

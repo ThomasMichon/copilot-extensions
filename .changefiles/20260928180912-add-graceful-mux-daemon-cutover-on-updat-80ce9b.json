@@ -1,0 +1,9 @@
+{
+  "comment": "Add graceful mux-daemon cutover on update",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
