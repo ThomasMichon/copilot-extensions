@@ -43,6 +43,7 @@ import {
   writeSessionStateHandoff,
   readSessionStateHandoff,
   markSessionStateHandoffConsumed,
+  promoteSuccessorHead,
 } from "../extensions/context-handoff/handoff-core.mjs";
 import { extractRecoveryLocatorFromPrompt } from "../extensions/context-handoff/cutover-seed.mjs";
 
@@ -760,6 +761,229 @@ test("formatConsumeResult without a known claimant does not fabricate a bug offe
     message: "File-backed handoff was not found.",
   });
   assert.doesNotMatch(text, /offer to file a bug/i);
+});
+
+test("promoteSuccessorHead links succession over the expected predecessor head", () => {
+  const calls = [];
+  const execute = (bin, argv, opts) => {
+    calls.push({ bin, argv, opts });
+    if (argv[0] === "head-session") {
+      return JSON.stringify({
+        tracked: true,
+        head_session: "predecessor-x",
+      });
+    }
+    if (argv[0] === "link-succession") return JSON.stringify({ ok: true });
+    throw new Error(`unexpected CLI call: ${bin} ${argv.join(" ")}`);
+  };
+  const result = promoteSuccessorHead(
+    "C:\\repo", "wt-1", "predecessor-x", "successor-x", execute,
+  );
+  assert.deepEqual(result, {
+    promoted: true,
+    predecessor: "predecessor-x",
+    successor: "successor-x",
+  });
+  const linkCall = calls.find((c) => c.argv[0] === "link-succession");
+  assert.ok(linkCall, "expected a link-succession call");
+  assert.deepEqual(linkCall.argv, [
+    "link-succession",
+    "--worktree", "wt-1",
+    "--predecessor", "predecessor-x",
+    "--successor", "successor-x",
+    "--predecessor-state", "handed-off",
+    "--json",
+  ]);
+});
+
+test("promoteSuccessorHead is a no-op when this session is already the recorded head", () => {
+  const calls = [];
+  const execute = (bin, argv) => {
+    calls.push(argv[0]);
+    return JSON.stringify({ tracked: true, head_session: "successor-x" });
+  };
+  const result = promoteSuccessorHead(
+    "C:\\repo", "wt-1", "predecessor-x", "successor-x", execute,
+  );
+  assert.deepEqual(result, { promoted: false, reason: "already-head" });
+  assert.deepEqual(calls, ["head-session"]);
+});
+
+test("promoteSuccessorHead never guesses a substitute predecessor when the live head has diverged", () => {
+  // The handoff's own recorded author is "predecessor-x", but something
+  // else already made "someone-else" the live head (e.g. an unrelated
+  // succession, or a race with another consumer). Superseding that would
+  // wrongly conclude an unrelated session's lineage -- must be a no-op.
+  const execute = (bin, argv) => {
+    if (argv[0] === "head-session") {
+      return JSON.stringify({ tracked: true, head_session: "someone-else" });
+    }
+    throw new Error(`unexpected CLI call: ${argv.join(" ")}`);
+  };
+  const result = promoteSuccessorHead(
+    "C:\\repo", "wt-1", "predecessor-x", "successor-x", execute,
+  );
+  assert.deepEqual(result, {
+    promoted: false,
+    reason: "head-diverged",
+    currentHead: "someone-else",
+    expectedPredecessor: "predecessor-x",
+  });
+});
+
+test("promoteSuccessorHead is a no-op when the worktree has no recorded head at all", () => {
+  const execute = () => JSON.stringify({ tracked: true, head_session: null });
+  const result = promoteSuccessorHead(
+    "C:\\repo", "wt-1", "predecessor-x", "successor-x", execute,
+  );
+  assert.deepEqual(result, {
+    promoted: false,
+    reason: "head-diverged",
+    currentHead: null,
+    expectedPredecessor: "predecessor-x",
+  });
+});
+
+test("promoteSuccessorHead is a no-op when the worktree is untracked", () => {
+  const execute = () => JSON.stringify({ tracked: false });
+  const result = promoteSuccessorHead(
+    "C:\\repo", "wt-1", "predecessor-x", "successor-x", execute,
+  );
+  assert.deepEqual(result, { promoted: false, reason: "untracked" });
+});
+
+test("promoteSuccessorHead is a no-op without a known predecessor to supersede", () => {
+  const execute = () => {
+    throw new Error("must not call the CLI without a predecessor id");
+  };
+  const result = promoteSuccessorHead(
+    "C:\\repo", "wt-1", null, "successor-x", execute,
+  );
+  assert.deepEqual(result, { promoted: false, reason: "missing-ids" });
+});
+
+test("promoteSuccessorHead degrades to link-failed instead of throwing on a CLI error", () => {
+  const execute = (bin, argv) => {
+    if (argv[0] === "head-session") {
+      return JSON.stringify({ tracked: true, head_session: "predecessor-x" });
+    }
+    throw new Error("agent-worktrees unreachable");
+  };
+  const result = promoteSuccessorHead(
+    "C:\\repo", "wt-1", "predecessor-x", "successor-x", execute,
+  );
+  assert.equal(result.promoted, false);
+  assert.equal(result.reason, "link-failed");
+  assert.match(result.error, /agent-worktrees unreachable/);
+});
+
+test("file-backed consume promotes the successor session to worktree head (best-effort backstop)", () => {
+  withTempHome((home) => {
+    const stateDir = join(home, "wt-state");
+    const handoffDir = join(stateDir, "handoff");
+    mkdirSync(handoffDir, { recursive: true });
+    const handoffPath = join(handoffDir, "handoff-promo-1.json");
+    writeJsonAtomic(handoffPath, {
+      kind: "context-handoff",
+      version: 2,
+      id: "handoff-promo-1",
+      storage: "file",
+      sessionId: "predecessor-promo",
+      cwd: "C:\\repo",
+      title: "Continue",
+      stateDir,
+      promptText: "stored markdown",
+      consumed: false,
+      consumedAt: null,
+      worktree: "wt-promo-1",
+    });
+
+    const promoteCalls = [];
+    const consumed = consumeFileHandoff(
+      "C:\\repo",
+      "successor-promo",
+      "handoff-promo-1",
+      handoffPath,
+      { promoteHead: (...args) => { promoteCalls.push(args); } },
+    );
+    assert.equal(consumed.ok, true);
+    assert.deepEqual(
+      promoteCalls,
+      [["C:\\repo", "wt-promo-1", "predecessor-promo", "successor-promo"]],
+    );
+  });
+});
+
+test("file-backed consume never lets a throwing head-promotion backstop fail the consume result", () => {
+  withTempHome((home) => {
+    const stateDir = join(home, "wt-state");
+    const handoffDir = join(stateDir, "handoff");
+    mkdirSync(handoffDir, { recursive: true });
+    const handoffPath = join(handoffDir, "handoff-promo-2.json");
+    writeJsonAtomic(handoffPath, {
+      kind: "context-handoff",
+      version: 2,
+      id: "handoff-promo-2",
+      storage: "file",
+      sessionId: "predecessor-promo-2",
+      cwd: "C:\\repo",
+      title: "Continue",
+      stateDir,
+      promptText: "stored markdown",
+      consumed: false,
+      consumedAt: null,
+      worktree: "wt-promo-2",
+    });
+
+    assert.doesNotThrow(() => {
+      const consumed = consumeFileHandoff(
+        "C:\\repo",
+        "successor-promo-2",
+        "handoff-promo-2",
+        handoffPath,
+        {
+          promoteHead: () => { throw new Error("agent-worktrees unreachable"); },
+        },
+      );
+      assert.equal(consumed.ok, true);
+    });
+  });
+});
+
+test("task-backed consume promotes the successor session to worktree head using the task's own metadata", () => {
+  const dir = mkdtempSync(join(tmpdir(), "context-handoff-promo-task-"));
+  const metadata = {
+    stateDir: dir,
+    sessionId: "predecessor-task-promo",
+    worktree: "wt-task-promo",
+    title: "Continue parser fix",
+  };
+  const payload = encodeHandoffPayload("full brief", metadata);
+  const promoteCalls = [];
+  try {
+    const result = consumeDispatchHandoffTask(
+      "C:\\repo",
+      "task-promo-1",
+      "successor-task-promo",
+      true,
+      {
+        readPayload: () => payload,
+        consumeTask: () => payload,
+        stateDirResolver: () => dir,
+        promoteHead: (...args) => { promoteCalls.push(args); },
+      },
+    );
+    assert.equal(result.ok, true);
+    assert.deepEqual(
+      promoteCalls,
+      [[
+        "C:\\repo", "wt-task-promo", "predecessor-task-promo",
+        "successor-task-promo",
+      ]],
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("task-backed consume checkpoints payload before one-time consume and survives same-session retry", () => {

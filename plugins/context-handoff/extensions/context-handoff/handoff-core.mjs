@@ -2510,6 +2510,7 @@ export function consumeDispatchHandoffTask(
     readPayload = readTaskPayloadRaw,
     consumeTask = runAgentDispatchConsume,
     stateDirResolver = agentWorktreesGet,
+    promoteHead = promoteSuccessorHead,
   } = {},
 ) {
   const before = decodeHandoffPayload(readPayload(cwd, taskId));
@@ -2560,6 +2561,13 @@ export function consumeDispatchHandoffTask(
     decoded.metadata?.sessionId || checkpoint.predecessorSession || null,
     { consumedBySession: sid, handoffId: taskId },
   );
+  safePromoteHead(
+    promoteHead,
+    cwd,
+    decoded.metadata?.worktree || null,
+    decoded.metadata?.sessionId || checkpoint.predecessorSession || null,
+    sid,
+  );
   return {
     ok: true,
     id: taskId,
@@ -2578,8 +2586,9 @@ export function consumeFileHandoff(
   explicitPath = null,
   options = {},
 ) {
+  const { promoteHead = promoteSuccessorHead, ...onceOptions } = options;
   const consumed = consumeFileHandoffOnce(
-    cwd, sid, handoffId, explicitPath, options,
+    cwd, sid, handoffId, explicitPath, onceOptions,
   );
   if (!consumed.ok) return consumed;
   const record = consumed.record;
@@ -2587,6 +2596,7 @@ export function consumeFileHandoff(
     record.sessionId || null,
     { consumedBySession: sid, handoffId: record.id },
   );
+  safePromoteHead(promoteHead, cwd, record.worktree || null, record.sessionId || null, sid);
   return {
     ok: true,
     id: record.id,
@@ -2721,6 +2731,87 @@ function worktreeHeadState(cwd, worktreeId, execute = runCli) {
     );
   } catch {
     return null;
+  }
+}
+
+// Best-effort backstop: promote THIS (successor) session to the worktree's
+// tracked head immediately after a confirmed handoff consumption.
+//
+// Without this, `resolved_head_session` -- and every resume path derived
+// from it (`resolve_resume_target`, the Picker's Resume, a bare
+// `--resume=<id>`) -- stays pinned on the stale predecessor session
+// indefinitely. `register_session` (the ordinary `sessionStart` hook)
+// deliberately never moves an existing active head (see the
+// `repairing-worktrees` skill's class G), and only moves it when handed a
+// `--handoff-token` that matches a *pending* entry in agent-worktrees' own
+// `handoffs[]` ledger. That ledger entry is only ever opened on the
+// live-cutover (`mode: auto`) path -- a manually-pasted handoff seed
+// (`/consume-handoff`, or this same CLI/MCP path run by hand) never creates
+// one, so the successor's own `sessionStart` has nothing to link to and the
+// head silently never advances, even though consumption itself succeeded.
+//
+// `link-succession` sidesteps that gap entirely: it only requires that both
+// session ids are already tracked (true here -- the predecessor was head,
+// and this session's own `sessionStart` already registered it, just not as
+// head), not a pending ledger token. Called only once consumption is
+// already confirmed, so a failure here never blocks or corrupts the
+// consume result -- it only leaves the pre-existing (already-broken) resume
+// behavior in place, exactly as before this backstop existed.
+//
+// `predecessorSessionId` MUST be the handoff's own recorded authoring
+// session (`record.sessionId` for a file handoff; the task metadata's
+// `sessionId` for a dispatch handoff) -- never merely "whatever the
+// worktree's current head happens to be." The live head can have drifted
+// for reasons unrelated to this handoff (a different, unrelated succession
+// already happened, a live-cutover already fixed it, a race with another
+// consumer) between when the handoff was created and when it's consumed
+// here; treating that drifted value as "the predecessor" would incorrectly
+// conclude an unrelated session's lineage as `handed-off` to this one. So
+// this only proceeds when the *live* head still matches the *expected*
+// predecessor -- anything else is left untouched rather than guessed at.
+export function promoteSuccessorHead(
+  cwd, worktreeId, predecessorSessionId, sid, execute = runCli,
+) {
+  if (!worktreeId || !predecessorSessionId || !sid) {
+    return { promoted: false, reason: "missing-ids" };
+  }
+  const head = worktreeHeadState(cwd, worktreeId, execute);
+  if (!head?.tracked) return { promoted: false, reason: "untracked" };
+  const currentHead = head.head_session || null;
+  if (currentHead === sid) return { promoted: false, reason: "already-head" };
+  if (currentHead !== predecessorSessionId) {
+    // The live head is neither us nor the session that authored this
+    // handoff -- something else already changed it (or it was never set).
+    // Never guess at a substitute predecessor; leave it for a manual
+    // repair pass (repairing-worktrees skill, class G) instead.
+    return {
+      promoted: false,
+      reason: "head-diverged",
+      currentHead,
+      expectedPredecessor: predecessorSessionId,
+    };
+  }
+  try {
+    execute("agent-worktrees", [
+      "link-succession",
+      "--worktree", worktreeId,
+      "--predecessor", predecessorSessionId,
+      "--successor", sid,
+      "--predecessor-state", "handed-off",
+      "--json",
+    ], { cwd, timeout: 10000 });
+    return { promoted: true, predecessor: predecessorSessionId, successor: sid };
+  } catch (error) {
+    return { promoted: false, reason: "link-failed", error: describeCliError(error) };
+  }
+}
+
+
+function safePromoteHead(promoteHead, cwd, worktreeId, predecessorSessionId, sid) {
+  try {
+    return promoteHead(cwd, worktreeId, predecessorSessionId, sid);
+  } catch (error) {
+    return { promoted: false, reason: "promote-head-threw", error: describeCliError(error) };
   }
 }
 
