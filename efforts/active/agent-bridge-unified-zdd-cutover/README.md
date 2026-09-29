@@ -258,8 +258,14 @@ layer — is the operator's own, captured verbatim in Request.)_
   (nothing hard-killed, clean beside-not-in-place handoff); a *fully live*
   assertion needs a real model/ACP child in the loop and remains Tier-E scope
   (tracked, not delivered here -- see Journal).
-- [x] A forced-abrupt-termination drill: kill the old generation before it
+- [ ] A forced-abrupt-termination drill: kill the old generation before it
   releases its claims, and confirm a later generation recovers them cleanly.
+  **Partially covered** -- proves the underlying dead-pid-recovery primitive
+  against a genuinely killed real process; the claim is stamped with a
+  test-chosen generation label, not the killed daemon's own real
+  `_generation_id` (no API exposes it -- see Journal's honest scope note),
+  so this does not yet demonstrate a claim *actually owned by that daemon
+  generation* being interrupted and recovered.
 - [x] Extend or add a clean-room scenario (Tier P, `agent-bridge-solo` or a
   new `agent-bridge-cutover` companion) that exercises this on a real fresh
   machine.
@@ -271,8 +277,10 @@ layer — is the operator's own, captured verbatim in Request.)_
   one verb).
 - [ ] A live cutover drill (Phase 5) shows zero session disruption across a
   real generation change.
-- [x] An abrupt-termination drill shows a stale claim is recovered by the
-  next generation without manual intervention.
+- [ ] An abrupt-termination drill shows a stale claim is recovered by the
+  next generation without manual intervention. **Partially covered** -- the
+  claim is stamped with a test-chosen label, not the daemon's own real
+  generation identity (see Journal).
 - [ ] Reconcile staleness is observable via a status command, independent of
   whether Phase 0's opt-in-gate question is resolved to keep or remove it.
 - [ ] Full plugin test suite (`python tools/run-plugin-tests.py agent-bridge`)

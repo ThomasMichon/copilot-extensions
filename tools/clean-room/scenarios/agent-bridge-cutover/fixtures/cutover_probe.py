@@ -621,6 +621,27 @@ def check_abrupt_kill_recovery(python):
             "session, so a lingering claim would itself be a bug)"
             + (f" (last read error: {last_read_error})" if last_read_error and not recovered else ""),
         )
+
+        # A full reap doesn't just drop the index row -- `_reap_host_record`
+        # also best-effort kills the record's own host/child process
+        # (`session_host_connection.py`). Index disappearance alone doesn't
+        # prove that ran; confirm `alive_dummy` (standing in for that
+        # process) actually exited too, so a leaked orphan process can't
+        # hide behind a passing index check.
+        if recovered:
+            dummy_exited = False
+            deadline = time.monotonic() + 10.0
+            while time.monotonic() < deadline:
+                if alive_dummy.poll() is not None:
+                    dummy_exited = True
+                    break
+                time.sleep(0.25)
+            r.check(
+                dummy_exited,
+                "the reap also terminated the record's own host/child "
+                f"process (pid {alive_dummy.pid}) -- not just the index row, "
+                "so no orphan process is left behind",
+            )
         return r
     finally:
         for p in (proc, proc2, alive_dummy, sentinel_dummy):
