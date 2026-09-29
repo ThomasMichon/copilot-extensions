@@ -31,6 +31,21 @@ Cross-platform:
   offset that holds no data, mirroring ``single_instance_lease``'s approach
   (mandatory Windows locks would otherwise block a contender's read of the
   holder's pid at offset 0).
+
+The lock file is named ``zdd-cutover.lock``, deliberately namespaced rather
+than a bare ``cutover.lock`` -- ``worktree-manager``'s own
+``mux_daemon_cutover.py`` already ships an equivalent bespoke lock
+(``_acquire_cutover_lock``/``_CutoverLease``) at exactly
+``<routing_dir>/cutover.lock`` (added in #4497, independently of this
+effort). A bare name would have opened the SAME file under a second, distinct
+``open()`` in the same process the moment a consumer wraps
+``CutoverOrchestrator.run()`` in its own outer serialization -- POSIX
+``flock`` is per-open-file-description, so this orchestrator's own lock
+acquisition would then contend with (and, with a blocking wait, deadlock
+against) a lock its own caller already held on the identical path. A future
+phase may consolidate ``worktree-manager`` onto this shared primitive
+instead of its own hand-rolled copy; until then the distinct filename keeps
+the two independent and harmless to use together.
 """
 
 from __future__ import annotations
@@ -39,7 +54,7 @@ import os
 import sys
 from pathlib import Path
 
-_LOCK_FILENAME = "cutover.lock"
+_LOCK_FILENAME = "zdd-cutover.lock"
 _PID_FIELD_WIDTH = 20
 _WIN_LOCK_OFFSET = 1 << 30
 
@@ -108,7 +123,7 @@ class CutoverLock:
             with CutoverLock(config_dir):
                 orchestrator.run(...)
         except CutoverLockedError as exc:
-            ...  # another cutover is already in progress; report and exit
+            ...  # lock still held after the wait budget; report and exit
 
     Unlike :class:`single_instance_lease.SingleInstance`, this lock is meant
     to be acquired and released **within a single call** (one cutover
@@ -116,14 +131,42 @@ class CutoverLock:
     orchestrator releases it immediately (the kernel frees the OS lock when
     the holding process dies), and a later cutover in the same process is
     free to acquire it again.
+
+    ``acquire`` **waits** (poll-retries) up to ``timeout`` seconds rather
+    than failing on first contention -- a deliberate choice, not merely a
+    convenience: a legitimate caller may trigger a second cutover while a
+    first is still in flight (a fast second update superseding a first, or
+    two operators acting close together) and expects the second to
+    *succeed once the first finishes*, not to be flatly refused. Only
+    exhausting the full wait budget without ever acquiring the lock raises
+    :class:`CutoverLockedError`. ``timeout=0`` (the default) preserves the
+    original fail-immediately behavior for a caller that wants that instead.
     """
 
     def __init__(self, config_dir: str | os.PathLike[str]) -> None:
         self.path = lock_path(config_dir)
         self._fh = None
 
-    def acquire(self) -> None:
-        """Acquire the lock or raise :class:`CutoverLockedError`."""
+    def acquire(self, *, timeout: float = 0.0, poll: float = 0.2) -> None:
+        """Acquire the lock, waiting up to ``timeout`` seconds on contention.
+
+        Raises :class:`CutoverLockedError` only once ``timeout`` has elapsed
+        without ever acquiring the lock (or immediately, for the default
+        ``timeout=0``).
+        """
+        import time
+
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                self._try_acquire()
+                return
+            except CutoverLockedError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(poll)
+
+    def _try_acquire(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(str(self.path), os.O_RDWR | os.O_CREAT, 0o644)
         fh = os.fdopen(fd, "r+", encoding="ascii")

@@ -203,29 +203,45 @@ class CutoverOrchestrator:
         drain_timeout: float = 300.0,
         force: bool = False,
         poll: float = 0.5,
+        lock_timeout: float | None = None,
     ) -> CutoverResult:
         """Drive one cutover attempt, serialized against concurrent attempts.
 
-        Two invocations against the same ``config_dir`` (two operators, or a
-        ``restart`` racing an installer-driven ``deploy``) must never run this
+        Two invocations against the same ``config_dir`` (two operators, a
+        ``restart`` racing an installer-driven ``deploy``, or a fast second
+        update triggered while a first is still draining) must never run this
         sequence at once -- both would read the same predecessor breadcrumb/
-        routing state and race, so a lock (:class:`zdd.cutover_lock.CutoverLock`)
-        scoped to exactly this call serializes them. A contended lock is not an
-        exceptional condition for a caller that already handles ``CutoverResult``
-        failures uniformly, so it is reported the same way (``ok=False``, a
-        populated ``error``) rather than raised -- see the Phase 2 checklist in
-        ``efforts/active/agent-bridge-unified-zdd-cutover``.
+        routing state and race. A lock
+        (:class:`zdd.cutover_lock.CutoverLock`) scoped to exactly this call
+        serializes them -- but a *contended* lock is not refused outright:
+        the second caller **waits** (bounded by ``lock_timeout``, which
+        defaults to ``health_timeout + drain_timeout + 60`` -- generous
+        enough to cover a full cutover it may be queued behind) so a
+        legitimate back-to-back trigger (a fast second update superseding a
+        first) still succeeds once the first completes, instead of being
+        flatly rejected. Only exhausting the full wait without ever
+        acquiring the lock is reported as a failure -- and even then the
+        same way a caller already handles every other ``CutoverResult``
+        failure (``ok=False``, a populated ``error``), not raised -- see the
+        Phase 2 checklist in ``efforts/active/agent-bridge-unified-zdd-cutover``.
         """
         from zdd.cutover_lock import CutoverLock, CutoverLockedError
 
+        if lock_timeout is None:
+            lock_timeout = health_timeout + drain_timeout + 60.0
+
         try:
-            with CutoverLock(self.config_dir):
+            lock = CutoverLock(self.config_dir)
+            lock.acquire(timeout=lock_timeout)
+            try:
                 return self._run_locked(
                     health_timeout=health_timeout,
                     drain_timeout=drain_timeout,
                     force=force,
                     poll=poll,
                 )
+            finally:
+                lock.release()
         except CutoverLockedError as exc:
             result = CutoverResult(ok=False, error=str(exc))
             result.steps.append(f"refused: {exc}")

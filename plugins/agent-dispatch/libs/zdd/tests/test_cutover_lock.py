@@ -75,3 +75,67 @@ def test_error_names_lock_path(tmp_path: Path):
         assert str(lock_path(tmp_path)) in str(exc_info.value)
     finally:
         first.release()
+
+
+def test_default_timeout_is_zero_fails_immediately(tmp_path: Path):
+    """Default (no timeout) preserves fail-fast semantics -- callers that
+    want immediate rejection on contention (rather than a bounded wait) get
+    it without passing anything extra."""
+    if sys.platform == "win32":
+        pytest.skip("flock semantics -- POSIX only")
+    import time
+
+    first = CutoverLock(tmp_path)
+    first.acquire()
+    try:
+        second = CutoverLock(tmp_path)
+        started = time.monotonic()
+        with pytest.raises(CutoverLockedError):
+            second.acquire()
+        assert time.monotonic() - started < 0.5
+    finally:
+        first.release()
+
+
+def test_acquire_waits_for_a_released_lock_within_timeout(tmp_path: Path):
+    """A caller with a nonzero timeout waits out contention instead of
+    failing immediately -- the piece that lets a legitimate back-to-back
+    cutover trigger succeed once the first releases."""
+    if sys.platform == "win32":
+        pytest.skip("flock semantics -- POSIX only")
+    import threading
+    import time
+
+    first = CutoverLock(tmp_path)
+    first.acquire()
+
+    def _release_shortly() -> None:
+        time.sleep(0.2)
+        first.release()
+
+    threading.Thread(target=_release_shortly, daemon=True).start()
+
+    second = CutoverLock(tmp_path)
+    second.acquire(timeout=5.0, poll=0.05)
+    try:
+        assert second.held
+    finally:
+        second.release()
+
+
+def test_acquire_raises_once_timeout_is_exhausted(tmp_path: Path):
+    if sys.platform == "win32":
+        pytest.skip("flock semantics -- POSIX only")
+    import time
+
+    first = CutoverLock(tmp_path)
+    first.acquire()
+    try:
+        second = CutoverLock(tmp_path)
+        started = time.monotonic()
+        with pytest.raises(CutoverLockedError):
+            second.acquire(timeout=0.3, poll=0.05)
+        elapsed = time.monotonic() - started
+        assert elapsed >= 0.3
+    finally:
+        first.release()

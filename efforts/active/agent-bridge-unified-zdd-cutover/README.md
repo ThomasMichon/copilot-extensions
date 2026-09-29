@@ -313,26 +313,64 @@ sequencing will be drafted here once the design is reviewed._
 - **A ninth `zdd` consumer, previously uncounted**: `check-vendored-libs-
   sync.py` found `plugins/agent-worktrees/libs/zdd` alongside the 8 the
   effort's Guiding Intent and Context sections named -- corrected
-  throughout (see Context above). All 9 copies (plus canonical
-  `libs/zdd`) were bumped to `0.1.0-dev6` and re-synced byte-identical via
-  `rsync` (`tools/sync-vendored-libs.py --materialize` was tried first but
-  also touches unrelated pointer-vendored libs on a bare `--materialize`
-  run with no per-lib filter; reverted that incidental side effect and did
-  the zdd-only sync by hand instead). `check-vendored-libs-sync.py`
-  confirms `OK` afterward.
+  throughout (see Context above). **A tenth was found after that**:
+  `worktree-manager` (a top-level project, not under `plugins/`) also
+  vendors `libs/zdd` -- missed by an initial `find plugins -name zdd`
+  sweep. All 10 copies (plus canonical `libs/zdd`) were bumped to
+  `0.1.0-dev6` and re-synced byte-identical via `rsync`
+  (`tools/sync-vendored-libs.py --materialize` was tried first but also
+  touches unrelated pointer-vendored libs on a bare `--materialize` run
+  with no per-lib filter; reverted that incidental side effect and did the
+  zdd-only sync by hand instead). `check-vendored-libs-sync.py` confirms
+  `OK` afterward.
+- **A real bug caught by CI, not by any of the manual suite runs above**:
+  `worktree-manager`'s own `mux_daemon_cutover.py` (PR #4497, independent
+  of this effort) already ships a bespoke bounded-wait cutover lock
+  (`_acquire_cutover_lock`/`_CutoverLease`) at
+  `<routing_dir>/cutover.lock`. The new `zdd.cutover_lock.CutoverLock`
+  originally used that same bare filename -- so the moment a consumer
+  wraps `CutoverOrchestrator.run()` in its own outer serialization (exactly
+  what `worktree-manager` does), the orchestrator's own inner lock
+  acquisition opened a *second* file handle on the identical path and
+  self-deadlocked against the lock its own caller already held (POSIX
+  `flock` is per-open-file-description, so this doesn't self-resolve).
+  CI's `worktree-manager (out-of-plugin)` job caught it;
+  `test_activate_after_update_cuts_over_and_converges` hung/failed even on
+  its *first* (uncontended by anything external) cutover. Fixed by
+  namespacing the lock filename to `zdd-cutover.lock`, documented in the
+  module docstring alongside the collision it avoids. A future phase may
+  consolidate `worktree-manager` onto this shared primitive instead of its
+  own hand-rolled copy; the two are independent and harmless together in
+  the meantime.
+- **A related design correction, caught by the same failure**: the first
+  version of `CutoverLock.acquire()` refused outright on *any* contention.
+  `worktree-manager`'s own convergence test deliberately fires a second
+  cutover while a first is still draining, expecting the second to
+  *succeed once the first finishes* -- exactly the shape a "cutover-wide
+  serialization" primitive should support, not merely refuse. Redesigned
+  `acquire()` to **wait** (bounded, poll-retrying) up to a `timeout`
+  before raising `CutoverLockedError`; `CutoverOrchestrator.run()` now
+  waits up to `health_timeout + drain_timeout + 60` by default rather than
+  failing instantly on any contention.
 - New tests: `libs/zdd/tests/test_claims.py` (10 cases),
-  `libs/zdd/tests/test_cutover_lock.py` (6 cases, POSIX-only same-process
-  contention test mirroring `single_instance_lease`'s own),
-  `libs/zdd/tests/test_cutover.py` gained 2 lock-integration cases, and
-  `plugins/agent-bridge/tests/test_host_index_claims.py` (13 cases) for the
-  `HostIndex` wrapper. `libs/zdd`'s own suite: 79 passed (60 pre-existing +
-  19 new). `agent-bridge`'s full suite (2766 tests, 7 sub-suites): all
-  green. All 8 other `zdd` consumers' own suites run individually:
-  agent-worktrees (522 passed), agent-vault (359 passed), agent-mcp (258
-  passed, 6 skipped), agent-dispatch (634 passed, 1 skipped), agent-
-  codespaces (294 passed) all green. Two pre-existing, unrelated failures
-  found and confirmed (by reproducing against unmodified `dev` with this
-  change stashed) to predate this effort entirely: `agent-ssh`'s
+  `libs/zdd/tests/test_cutover_lock.py` (10 cases, including the
+  bounded-wait-then-succeed and wait-then-exhausted paths, POSIX-only
+  where they rely on flock's per-open-file-description semantics,
+  mirroring `single_instance_lease`'s own same-process test), `libs/zdd/
+  tests/test_cutover.py` gained 2 lock-integration cases (refuse only
+  after the wait budget, and wait-then-succeed once the holder releases),
+  and `plugins/agent-bridge/tests/test_host_index_claims.py` (13 cases)
+  for the `HostIndex` wrapper. `libs/zdd`'s own suite: 83 passed (60
+  pre-existing + 23 new). `agent-bridge`'s full suite (2766 tests, 7
+  sub-suites): all green. `worktree-manager`'s own suite (1560 tests, run
+  via its real CI invocation `uv run --extra dev pytest -q`): all green
+  after the lock-filename fix. All 8 other `zdd` consumers' own suites run
+  individually: agent-worktrees (522 passed), agent-vault (359 passed),
+  agent-mcp (258 passed, 6 skipped), agent-dispatch (634 passed, 1
+  skipped), agent-codespaces (294 passed) all green. Two pre-existing,
+  unrelated failures found and confirmed (by reproducing against
+  unmodified `dev` with this change stashed) to predate this effort
+  entirely: `agent-ssh`'s
   `test_dtssh_apply_updates_existing_binary_without_login` (a host-restore/
   subprocess-mocking assertion, nothing to do with `zdd`) and
   `agent-containers`'s `test_relay_profile_cannot_replace_refusal_with_
