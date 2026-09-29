@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from . import env_scrub
+from . import env_scrub, push_timeout
 
 log = logging.getLogger("agent-worktrees")
 
@@ -153,6 +153,7 @@ def git(
     capture: bool = True,
     timeout: float | None = None,
     no_hooks: bool = False,
+    kill_tree: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Run a git command with consistent error handling.
 
@@ -173,23 +174,20 @@ def git(
             this** (#3561): a real pre-push release guard (e.g. ``check-changefile-presence.py``)
             must be allowed to block a non-compliant push (not ``--no-verify``; scopes the
             disable to internal git ops). #3707.
-
+        kill_tree: If True (real timeout), kill the whole tree on a stall -- :mod:`push_timeout`.
     Returns:
         CompletedProcess with stdout/stderr as strings.
     """
     prefix = ["-c", f"core.hooksPath={_NO_HOOKS_PATH}"] if no_hooks else []
     cmd = ["git", *prefix, *args]
     env = env_scrub.scrub_python_runtime_env({**os.environ, "GIT_TERMINAL_PROMPT": "0"})
-    result = subprocess.run(
-        cmd,
-        cwd=cwd,
-        capture_output=capture,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        env=env,
-        timeout=timeout,
-    )
+    if kill_tree and timeout is not None:
+        result = push_timeout.run_bounded(cmd, cwd=cwd, env=env, timeout=timeout)
+    else:
+        result = subprocess.run(
+            cmd, cwd=cwd, capture_output=capture, text=True,
+            encoding="utf-8", errors="replace", env=env, timeout=timeout,
+        )
     if check and result.returncode != 0:
         raise GitError(cmd, result.returncode, result.stderr.strip())
     return result
@@ -854,6 +852,7 @@ def push(
     *,
     cwd: str | Path,
     force_with_lease: bool = False,
+    timeout: float | None = push_timeout.DEFAULT_PUSH_TIMEOUT,
 ) -> PushResult:
     """Push a branch to remote. Returns a :class:`PushResult` (truthy on success).
 
@@ -868,6 +867,7 @@ def push(
     caller's retry loop can surface the real error (a pre-push hook decline, an
     auth 403, a protected-branch block) and fail fast instead of masking every
     failure as a generic "rejected" and retrying a doomed push (#993).
+    Bounded by ``timeout`` (:mod:`push_timeout`); a stall kills the whole process tree.
 
     Unlike ``rebase``, this is NEVER given ``no_hooks=True`` (#3561): a real
     pre-push release guard must be allowed to block a non-compliant push.
@@ -875,27 +875,20 @@ def push(
     """
     extra = ["--force-with-lease"] if force_with_lease else []
     auth_args = _auth_config_args(remote, cwd=cwd)
-    result = git(
-        *auth_args,
-        "push", remote, branch, *extra, "--quiet",
-        cwd=cwd, check=False,
-    )
-    if result.returncode == 0:
-        return PushResult(ok=True)
-    last_stderr = result.stderr or ""
-    # Defense-in-depth: if we injected a cross-account token and the push
-    # still failed, the injected gh OAuth token may lack push scope (#900).
-    # Retry once *without* the override so the default credential helper
-    # (git-credential-vault / GCM) can authenticate -- which often succeeds
-    # where the OAuth token 403s.
-    if auth_args:
-        retry = git(
-            "push", remote, branch, *extra, "--quiet",
-            cwd=cwd, check=False,
-        )
-        if retry.returncode == 0:
+    # Retry without an injected auth override on failure (#900).
+    attempts = [auth_args, []] if auth_args else [[]]
+    last_stderr = ""
+    for prefix in attempts:
+        try:
+            result = git(
+                *prefix, "push", remote, branch, *extra, "--quiet",
+                cwd=cwd, check=False, timeout=timeout, kill_tree=True,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return PushResult(ok=False, stderr=push_timeout.message(exc, timeout))
+        if result.returncode == 0:
             return PushResult(ok=True)
-        last_stderr = retry.stderr or last_stderr
+        last_stderr = result.stderr or last_stderr
     return PushResult(ok=False, stderr=last_stderr)
 
 

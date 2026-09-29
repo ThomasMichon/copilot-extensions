@@ -1,0 +1,9 @@
+{
+  "comment": "push: bound with a 180s timeout (default) so a pre-push hook self-provisioning stall (e.g. a self-update racing the runtime-slot swap, #4547) surfaces an actionable diagnostic instead of hanging create-pr/push-changes indefinitely",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
