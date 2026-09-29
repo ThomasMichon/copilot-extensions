@@ -202,10 +202,24 @@ def fingerprint(plugin_dir: Path) -> str:
     string) agreed nothing needed reinstalling. Hashing the source tree too
     closes that gap the same way :func:`install.ps1's Get-PayloadHash /
     install.sh's _payload_hash <#2609>` already were.
+
+    Uses BLAKE2b (via ``hashlib``, no new dependency) rather than SHA-256:
+    this is a pure local change-detector, never compared against an
+    externally-supplied or attacker-controlled value, so SHA-256's
+    collision-resistance guarantee is unused overhead here -- BLAKE2b is
+    materially faster per byte on typical CPUs for the same "did this change"
+    question. Deliberately NOT mirrored into ``install.ps1``'s
+    ``Get-PayloadHash`` / ``install.sh``'s ``_payload_hash``: .NET's
+    ``System.Security.Cryptography`` has no built-in BLAKE2b (only MD5, which
+    risks tripping security scanners/policy for a change unrelated to any
+    actual security need), and POSIX ``b2sum`` isn't reliably present on
+    every platform ``sha256sum`` already is. Those two independently hash a
+    different file set for a different purpose (a persisted, cross-run
+    completion-marker comparison) and are unaffected by this choice.
     """
     import hashlib
 
-    h = hashlib.sha256()
+    h = hashlib.blake2b()
     for rel in _FINGERPRINT_FILES:
         fp = plugin_dir / rel
         if fp.exists():
