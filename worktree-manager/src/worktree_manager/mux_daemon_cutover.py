@@ -490,6 +490,24 @@ def _legacy_lock_cutover(
     return summary
 
 
+def _already_at_version(route: routing.Endpoint | None, version: str, *, root: Path) -> bool:
+    """True if ``route`` is already serving ``version`` and is actually healthy.
+
+    A cutover attempt is only ever necessary on a genuine version change; a
+    caller that reconciles on every session launch (self_update runs at the
+    start of each one) will otherwise call in with the *same* target version
+    far more often than the underlying payload actually changes -- a rapid-
+    development harness in particular sees both new mux sessions and new
+    published versions "fairly often", and this is the fast path that keeps
+    the two from compounding into a cutover on every launch (#5344).
+    """
+    return (
+        route is not None
+        and route.version == version
+        and _health_check(_BIND, route.port, root=root)
+    )
+
+
 def activate_after_update(
     *,
     root: Path | None = None,
@@ -503,11 +521,27 @@ def activate_after_update(
 
     from . import mux_daemon
 
+    # Fast, lock-free skip: don't even contend the cutover lock for a no-op
+    # reconciliation call -- the common case when sessions launch often.
+    pre_route = routed_endpoint(resolved_root)
+    if _already_at_version(pre_route, version, root=resolved_root):
+        summary["reason"] = "already-active-version"
+        summary["route"] = {
+            "port": pre_route.port, "pid": pre_route.pid, "version": pre_route.version,
+        }
+        return summary
+
     lease = _acquire_cutover_lock(resolved_root)
     try:
         load_or_create_control_token(resolved_root)
         lock_data = mux_daemon.read_lock_data(mux_daemon.lock_path(resolved_root))
         route = routed_endpoint(resolved_root)
+        # Re-check under the lock: another caller may have just finished
+        # cutting over to this exact version while we were waiting for it.
+        if _already_at_version(route, version, root=resolved_root):
+            summary["reason"] = "already-active-version"
+            summary["route"] = {"port": route.port, "pid": route.pid, "version": route.version}
+            return summary
         if route is None:
             if not _lock_data_is_live(lock_data):
                 summary["reason"] = "no-live-daemon"

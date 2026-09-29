@@ -262,3 +262,51 @@ def test_activate_after_update_bootstraps_a_legacy_lock_only_daemon(tmp_path, mo
 
     for daemon in daemons.values():
         daemon.force_terminate()
+
+
+def test_activate_after_update_is_noop_when_already_at_target_version(tmp_path, monkeypatch):
+    """A reconcile call with the already-active version must never spawn,
+    drain, or even contend the cutover lock -- the fast path a launcher
+    calling in on every session start (and every self-update check, whether
+    or not the payload actually changed) relies on to stay cheap (#5344).
+    """
+    route_dir = mdc.routing_dir(tmp_path)
+    route_dir.mkdir(parents=True)
+    token = mdc.load_or_create_control_token(tmp_path)
+
+    live = _FakeMuxDaemon(101, token=token)
+    live.start(mdc.pick_free_port())
+    routing.publish_active(route_dir, bind="127.0.0.1", port=live.port, pid=live.pid, version="1.2.3")
+
+    def _spawn(*a, **k):
+        raise AssertionError("spawn_passive must not be called for a no-op reconcile")
+
+    monkeypatch.setattr(mdc, "spawn_passive", _spawn)
+
+    result = mdc.activate_after_update(root=tmp_path, slot=tmp_path / "slot", version="1.2.3")
+
+    assert result["action"] == "noop"
+    assert result["reason"] == "already-active-version"
+    assert result["route"]["pid"] == live.pid
+    assert routing.read_active_endpoint(route_dir, verify_listener=False).pid == live.pid
+
+    # The cutover lock must not have been touched -- a concurrent real
+    # cutover (a different version) should never have had to wait behind it.
+    assert not mdc._cutover_lock_path(tmp_path).exists() or _try_uncontended(
+        mdc._cutover_lock_path(tmp_path)
+    )
+
+    live.force_terminate()
+
+
+def _try_uncontended(path) -> bool:
+    from worktree_manager.mux_mapping_registry import _try_lock_file_once, _unlock_file
+
+    handle = open(path, "a+b")
+    try:
+        acquired = _try_lock_file_once(handle)
+        if acquired:
+            _unlock_file(handle)
+        return acquired
+    finally:
+        handle.close()
