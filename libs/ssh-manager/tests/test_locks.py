@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+import ctypes
 from types import SimpleNamespace
 
 import pytest
@@ -45,6 +46,36 @@ class TestPidAlive:
 
 
 class TestProcessIdentity:
+    def test_windows_creation_time_identity(self, monkeypatch):
+        class Fn:
+            def __init__(self, func):
+                self.func = func
+                self.argtypes = None
+                self.restype = None
+
+            def __call__(self, *args):
+                return self.func(*args)
+
+        def get_process_times(handle, creation, exit_, kernel, user):
+            creation.dwHighDateTime = 1
+            creation.dwLowDateTime = 2
+            exit_.dwHighDateTime = 0
+            exit_.dwLowDateTime = 0
+            return 1
+
+        kernel32 = SimpleNamespace(
+            OpenProcess=Fn(lambda access, inherit, pid: 99),
+            CloseHandle=Fn(lambda handle: 1),
+            GetProcessTimes=Fn(get_process_times),
+        )
+
+        monkeypatch.setattr(locks_mod.sys, "platform", "win32")
+        monkeypatch.setattr(locks_mod, "pid_alive", lambda pid: True)
+        monkeypatch.setattr(ctypes, "WinDLL", lambda name, use_last_error=True: kernel32)
+        monkeypatch.setattr(ctypes, "byref", lambda value: value)
+
+        assert process_identity(123) == "windows-filetime:4294967298"
+
     def test_procfs_start_time_identity(self, monkeypatch):
         tokens = ["S"] + ["0"] * 18 + ["12345"]
         monkeypatch.setattr(locks_mod.sys, "platform", "linux")
