@@ -1,9 +1,0 @@
-{
-  "comment": "vendor-pointer-generalization: worktree-manager now correctly detected as an agent-procutil consumer by tools/check-version-bump.py's extended _vendored_consumers(); adding the changefile check-changefile-presence.py (which reuses that same detection) now requires",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "dev"
-    }
-  ]
-}

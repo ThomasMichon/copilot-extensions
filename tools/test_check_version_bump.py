@@ -281,6 +281,33 @@ def test_shared_lib_change_passes_when_out_of_plugin_consumer_bumps_its_own_vers
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_shared_lib_change_charges_out_of_plugin_real_copy_consumer(repo: Path):
+    """A top-level, out-of-plugin consumer (mirroring `worktree-manager`)
+    with a REAL vendored copy under its own top-level `libs/` (not a
+    `uv`-editable pointer) must still be charged for a shared-lib change
+    (PR #4465/#4514 review): the real-copy scan was restricted to
+    `plugins/*` directly, so `worktree-manager/libs/<lib>` was invisible to
+    it even though `worktree-manager` itself remains a real consumer for
+    libs it hasn't converted (e.g. `zdd`, per PR #4465's own effort
+    journal)."""
+    _write(repo, "worktree-manager/pyproject.toml",
+           '[project]\nname = "worktree-manager"\nversion = "9.0.0-dev1"\n')
+    _write(repo, "worktree-manager/libs/shared-lib/src/shared_lib/__init__.py", "shared = 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add worktree-manager with a real vendored copy")
+    wtm_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", wtm_sha)
+
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "shared = 2\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "shared lib change, no bumps")
+    result = _run(repo)
+    assert result.returncode == 1
+    assert "worktree-manager" in result.stderr
+
+
 def test_symlinked_pyproject_fails_closed_instead_of_dropping_consumer(repo: Path):
     """A plugin whose `pyproject.toml` is a SYMLINK must never be silently
     dropped from the consumer map either (PR #4465 review):

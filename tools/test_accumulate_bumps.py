@@ -81,6 +81,7 @@ def _marketplace(root: Path, entries: dict[str, str], *, metadata_version: str) 
 @pytest.fixture()
 def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = tmp_path / "repo"
+    monkeypatch.setattr(acc, "REPO", root)
     monkeypatch.setattr(acc, "PLUGINS_DIR", root / "plugins")
     monkeypatch.setattr(acc, "MARKETPLACE", root / ".github" / "plugin" / "marketplace.json")
     monkeypatch.setattr(changefile, "CHANGEFILES_DIR", root / ".changefiles")
@@ -162,6 +163,76 @@ def test_skips_plugin_with_no_plugin_json(isolated: Path, capsys):
     result = acc.compute(acc.pending_bumps())
     assert result == {}
     assert "no plugin.json" in capsys.readouterr().err
+
+
+# --- standalone (out-of-plugin) consumers, e.g. worktree-manager -----------
+
+def _standalone(root: Path, name: str, version: str) -> None:
+    """A top-level, out-of-plugin consumer tree (e.g. ``worktree-manager``):
+    its own ``pyproject.toml`` ``[project].version``, no ``plugin.json`` at
+    all -- distinct from `_plugin()`'s `plugins/<name>` shape."""
+    d = root / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "pyproject.toml").write_text(
+        f'[project]\nname = "{name}"\nversion = "{version}"\n', encoding="utf-8"
+    )
+
+
+def test_is_standalone_consumer_detects_out_of_plugin_tree(isolated: Path):
+    _plugin(isolated, "agent-bridge", "1.0.0")
+    _standalone(isolated, "worktree-manager", "0.1.0-dev95")
+    assert acc.is_standalone_consumer("agent-bridge") is False
+    assert acc.is_standalone_consumer("worktree-manager") is True
+
+
+def test_compute_and_apply_bumps_a_standalone_consumer(isolated: Path):
+    _standalone(isolated, "worktree-manager", "0.1.0-dev95")
+    changefile.write_changefile([{"plugin": "worktree-manager", "type": "dev"}], "convert a lib")
+
+    result = acc.compute(acc.pending_bumps())
+    assert result == {"worktree-manager": ("0.1.0-dev95", "0.1.0-dev96")}
+
+    applied = acc.apply(result)
+    assert applied == ["worktree-manager"]
+    pp = (isolated / "worktree-manager/pyproject.toml").read_text()
+    assert 'version = "0.1.0-dev96"' in pp
+
+
+def test_apply_rewrites_standalone_consumer_source_fallback(isolated: Path):
+    _standalone(isolated, "worktree-manager", "0.1.0-dev95")
+    init = isolated / "worktree-manager/src/worktree_manager/__init__.py"
+    init.parent.mkdir(parents=True)
+    init.write_text('"""pkg."""\n__version__ = "0.1.0-dev95"\n', encoding="utf-8")
+
+    acc.apply({"worktree-manager": ("0.1.0-dev95", "0.1.0-dev96")})
+
+    assert '__version__ = "0.1.0-dev96"' in init.read_text(encoding="utf-8")
+
+
+def test_from_diff_bumps_a_standalone_consumer_of_a_changed_lib(diff_repo, monkeypatch):
+    root, git = diff_repo
+    # Land worktree-manager on `main` too (not just the feature branch) --
+    # otherwise `_version_at(base, ...)` sees a brand-new file with no base
+    # version, and `_next_after_base` correctly treats that as "new on this
+    # branch, no forced bump" rather than the "existing consumer whose
+    # vendored lib changed" scenario this test actually exercises.
+    git("checkout", "-q", "main")
+    _standalone(root, "worktree-manager", "0.1.0-dev95")
+    git("add", "-A")
+    git("commit", "-q", "-m", "add worktree-manager")
+    git("checkout", "-q", "-B", "feature", "main")
+
+    # Stub the guard's consumer map directly rather than depending on its
+    # own filesystem real-copy scan resolving against this isolated repo --
+    # this test's own contract is "compute_from_diff correctly bumps
+    # whichever standalone consumer the guard names", not a re-test of the
+    # guard's own scan (that lives in test_check_version_bump.py).
+    guard = acc._version_bump_guard()
+    monkeypatch.setattr(guard, "_vendored_consumers", lambda: {"shared-lib": ["worktree-manager"]})
+    monkeypatch.setattr(acc, "_changed_libs", lambda changed: {"shared-lib"})
+
+    plugins, _libs = acc.compute_from_diff("main")
+    assert plugins.get("worktree-manager") == ("0.1.0-dev95", "0.1.0-dev96")
 
 
 # --- source fallbacks + --from-diff -----------------------------------------

@@ -111,6 +111,52 @@ def read_plugin_json_version(plugin: str) -> str | None:
     return m.group(2) if m else None
 
 
+# Top-level consumer trees outside `plugins/` that still participate in the
+# bump/changefile mechanism (e.g. `worktree-manager`) are detected
+# dynamically below (`is_standalone_consumer`/`_consumer_root` -- no
+# `plugin.json` under `plugins/<consumer>` means it's a standalone,
+# out-of-plugin tree) rather than via a duplicated hardcoded list.
+
+
+def is_standalone_consumer(consumer: str) -> bool:
+    """True when ``consumer`` is a top-level, out-of-plugin consumer tree
+    (e.g. ``worktree-manager``) with no ``plugin.json`` at all -- its
+    release version lives directly in its own ``pyproject.toml``
+    ``[project].version`` instead."""
+    return not (PLUGINS_DIR / consumer / "plugin.json").exists()
+
+
+def _consumer_root(consumer: str) -> Path:
+    """The consumer's own root dir -- ``plugins/<consumer>`` for an ordinary
+    plugin, or the top-level ``<consumer>/`` tree for a standalone one."""
+    if (PLUGINS_DIR / consumer).is_dir():
+        return PLUGINS_DIR / consumer
+    return REPO / consumer
+
+
+def read_pyproject_project_version(root: Path) -> str | None:
+    pp = root / "pyproject.toml"
+    if not pp.exists():
+        return None
+    m = _TOML_VERSION_RE.search(pp.read_text(encoding="utf-8"))
+    return m.group(2) if m else None
+
+
+def read_consumer_version(consumer: str) -> str | None:
+    """The release version for any consumer `_vendored_consumers()`/
+    `pending_bumps()` can name -- a ``plugins/<consumer>`` plugin
+    (``plugin.json``) or a standalone, out-of-plugin consumer tree (its own
+    ``pyproject.toml`` ``[project].version``). Generalizes
+    `read_plugin_json_version` so `compute()`/`apply()` can actually update
+    a standalone consumer's version surfaces instead of silently skipping
+    it (PR #4465/#4514 review: a shared-lib bump could pass the
+    changefile-presence gate while a standalone consumer like
+    `worktree-manager` kept its old version)."""
+    if is_standalone_consumer(consumer):
+        return read_pyproject_project_version(_consumer_root(consumer))
+    return read_plugin_json_version(consumer)
+
+
 def _write_version(path: Path, pattern: re.Pattern[str], new_version: str, *, count: int = 1) -> bool:
     if not path.exists():
         return False
@@ -125,11 +171,14 @@ def _write_version(path: Path, pattern: re.Pattern[str], new_version: str, *, co
 _FALLBACK_ASSIGNMENT = r'^(\s*(?:__version__|_FALLBACK_VERSION)\s*(?::\s*str\s*)?=\s*["\'])'
 
 
-def _write_source_fallbacks(plugin: str, old_version: str, new_version: str) -> int:
-    """Rewrite literal ``__version__``/``_FALLBACK_VERSION`` fallbacks equal to ``old_version``."""
+def _write_source_fallbacks(base_dir: Path, old_version: str, new_version: str) -> int:
+    """Rewrite literal ``__version__``/``_FALLBACK_VERSION`` fallbacks equal to
+    ``old_version`` under ``base_dir/src/*/*.py`` -- ``base_dir`` is a
+    plugin's own root (``PLUGINS_DIR / plugin``) or a standalone consumer's
+    top-level root (``REPO / consumer``), both laid out the same way."""
     pattern = re.compile(_FALLBACK_ASSIGNMENT + re.escape(old_version) + r'(["\'])', re.MULTILINE)
     written = 0
-    for path in sorted((PLUGINS_DIR / plugin / "src").glob("*/*.py")):
+    for path in sorted((base_dir / "src").glob("*/*.py")):
         if path.name not in {"__init__.py", "_build_info.py"}:
             continue
         text = path.read_text(encoding="utf-8")
@@ -212,37 +261,60 @@ def _write_marketplace_entry(plugin: str, new_version: str, *, also_metadata: bo
 
 
 def compute(grouped: dict[str, list[str]]) -> dict[str, tuple[str, str]]:
-    """Map ``plugin -> (old_version, new_version)`` for every pending plugin."""
+    """Map ``consumer -> (old_version, new_version)`` for every pending
+    consumer -- an ordinary ``plugins/*`` plugin or a standalone,
+    out-of-plugin consumer tree like ``worktree-manager`` (PR #4465/#4514
+    review: `check-changefile-presence.py` already requires a changefile
+    for a standalone consumer's own content/vendored-lib changes, but this
+    used to only know how to compute a bump for a `plugin.json`-bearing
+    plugin, silently skipping every standalone one instead)."""
     result: dict[str, tuple[str, str]] = {}
-    for plugin, types in sorted(grouped.items()):
-        current = read_plugin_json_version(plugin)
+    for consumer, types in sorted(grouped.items()):
+        current = read_consumer_version(consumer)
         if current is None:
-            print(f"accumulate-bumps: skipping {plugin} -- no plugin.json/version found",
-                  file=sys.stderr)
+            print(f"accumulate-bumps: skipping {consumer} -- no plugin.json/pyproject "
+                  "version found", file=sys.stderr)
             continue
         new_version = bump_version(current, highest_bump(types))
-        result[plugin] = (current, new_version)
+        result[consumer] = (current, new_version)
     return result
 
 
 def apply(result: dict[str, tuple[str, str]]) -> list[str]:
-    """Write the computed versions; return the list of successfully-applied plugins."""
+    """Write the computed versions; return the list of successfully-applied consumers."""
     applied: list[str] = []
-    for plugin, (old, new_version) in result.items():
-        pj = PLUGINS_DIR / plugin / "plugin.json"
-        pp = PLUGINS_DIR / plugin / "pyproject.toml"
+    for consumer, (old, new_version) in result.items():
+        if is_standalone_consumer(consumer):
+            # A standalone consumer (e.g. `worktree-manager`) has no
+            # `plugin.json` and is never in the marketplace catalog or an
+            # instruction-projection owner -- only its own `pyproject.toml`
+            # [project].version and source `__version__` fallbacks apply.
+            root = _consumer_root(consumer)
+            ok_pp = _write_version(root / "pyproject.toml", _TOML_VERSION_RE, new_version)
+            _write_source_fallbacks(root, old, new_version)
+            if ok_pp:
+                applied.append(consumer)
+            else:
+                print(
+                    f"accumulate-bumps: {consumer} (standalone) failed to write "
+                    "pyproject.toml version",
+                    file=sys.stderr,
+                )
+            continue
+        pj = PLUGINS_DIR / consumer / "plugin.json"
+        pp = PLUGINS_DIR / consumer / "pyproject.toml"
         ok_pj = _write_version(pj, _JSON_VERSION_RE, new_version)
         ok_pp = _write_version(pp, _TOML_VERSION_RE, new_version) if pp.exists() else True
         ok_mkt = _write_marketplace_entry(
-            plugin, new_version, also_metadata=plugin in CATALOG_METADATA_PLUGINS
+            consumer, new_version, also_metadata=consumer in CATALOG_METADATA_PLUGINS
         )
-        _write_source_fallbacks(plugin, old, new_version)
-        _write_instruction_projection_owners(plugin, old, new_version)
+        _write_source_fallbacks(PLUGINS_DIR / consumer, old, new_version)
+        _write_instruction_projection_owners(consumer, old, new_version)
         if ok_pj and ok_pp and ok_mkt:
-            applied.append(plugin)
+            applied.append(consumer)
         else:
             print(
-                f"accumulate-bumps: {plugin} partially applied "
+                f"accumulate-bumps: {consumer} partially applied "
                 f"(plugin.json={ok_pj} pyproject={ok_pp} marketplace={ok_mkt})",
                 file=sys.stderr,
             )
@@ -323,20 +395,24 @@ def lib_bumps_from_diff(base: str, changed: list[str]) -> dict[Path, tuple[str, 
 
 
 def compute_from_diff(base: str) -> tuple[dict[str, tuple[str, str]], dict[Path, tuple[str, str]]]:
-    """Plugin and lib bumps this branch needs relative to ``base`` (idempotent)."""
+    """Consumer and lib bumps this branch needs relative to ``base`` (idempotent)."""
     guard = _version_bump_guard()
     changed = _changed_since(base)
     consumers = guard._vendored_consumers()
     needing = set(guard._plugins_needing_bump(changed, consumers))
-    for lib in _changed_libs(changed):  # every copy of a changed lib ships in its plugin
+    for lib in _changed_libs(changed):  # every copy of a changed lib ships in its consumer
         needing |= set(consumers.get(lib, ()))
     plugins: dict[str, tuple[str, str]] = {}
-    for plugin in sorted(needing):
-        current = read_plugin_json_version(plugin)
-        base_version = _version_at(base, f"plugins/{plugin}/plugin.json", _JSON_VERSION_RE)
+    for consumer in sorted(needing):
+        current = read_consumer_version(consumer)
+        if is_standalone_consumer(consumer):
+            rel_pyproject = f"{consumer}/pyproject.toml"
+            base_version = _version_at(base, rel_pyproject, _TOML_VERSION_RE)
+        else:
+            base_version = _version_at(base, f"plugins/{consumer}/plugin.json", _JSON_VERSION_RE)
         new = _next_after_base(current, base_version) if current else None
         if new:
-            plugins[plugin] = (current, new)
+            plugins[consumer] = (current, new)
     return plugins, lib_bumps_from_diff(base, changed)
 
 

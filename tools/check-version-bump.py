@@ -168,6 +168,17 @@ def _vendored_consumers() -> dict[str, list[str]]:
             if libs.is_dir():
                 for lib in sorted(x for x in libs.iterdir() if x.is_dir()):
                     consumers.setdefault(lib.name, []).append(plugin.name)
+    # Out-of-plugin consumer trees (e.g. `worktree-manager`) can carry
+    # real vendored copies under their own top-level `libs/` too -- the
+    # `plugins/*` scan above never reaches them, so a canonical lib
+    # change would otherwise ship without charging them (mirrors
+    # `check-vendored-libs-sync.py`'s own identical extra-consumer scan,
+    # PR #4465 review).
+    for extra in uer._EXTRA_CONSUMER_DIRS:
+        extra_libs = REPO / extra / "libs"
+        if extra_libs.is_dir():
+            for lib in sorted(x for x in extra_libs.iterdir() if x.is_dir()):
+                consumers.setdefault(lib.name, []).append(extra)
     for name, consumer_dir in uer.iter_consumer_dirs():
         pyproject = consumer_dir / "pyproject.toml"
         if pyproject.is_symlink():
