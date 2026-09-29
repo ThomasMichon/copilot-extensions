@@ -367,13 +367,15 @@ def check_abrupt_kill_recovery(python):
          DAEMON's own background task, not by a disconnected direct
          ``HostIndex.claim()`` call standing in for "a new generation" --
          otherwise the check can pass while the real daemon's own recovery
-         path silently does nothing. This check polls the on-disk index
-         after the fresh daemon starts and requires either the record to be
-         gone (reaped, no adoptable session) or reclaimed with
-         ``owner_pid == proc2.pid`` (the fresh daemon's own real pid) --
-         never merely "some different value" (`old_port` is even reused by
-         the OS in principle, so pid identity, not port difference, is what
-         is actually verified below).
+         path silently does nothing. This fixture creates no adoptable DB
+         session, so the production path's only valid terminal outcome is a
+         full reap (claim, then remove -- "no adoptable session on
+         reattach"); this check polls the on-disk index after the fresh
+         daemon starts and requires the record to be **gone**, never
+         "claimed under the fresh daemon's pid" as an alternate pass --
+         that would let the check observe the intermediate claim write and
+         pass even if the record's subsequent removal then silently fails
+         (removal is itself best-effort/suppressed in production).
     """
     r = Result("abrupt-kill-recovery")
     cfg = tempfile.mkdtemp(prefix="abcv-ak-")
@@ -512,10 +514,10 @@ def check_abrupt_kill_recovery(python):
 
         # A real fresh daemon -- its own startup reattach scan (the SAME
         # production code path, not a synthetic stand-in) must recover this
-        # record: either reap it (no adoptable session, but no longer
-        # wedged under a dead owner) or reclaim it under its OWN real pid.
-        # Never accept "some different value" -- identify recovery by
-        # proc2's own real pid specifically.
+        # record. This fixture creates no adoptable session, so the only
+        # valid outcome is a full reap (claim, then remove); see the
+        # dedicated check below for why "still claimed under proc2" is
+        # deliberately NOT accepted as an alternate pass.
         proc2 = c.spawn_serve()
         a2 = None
         deadline = time.monotonic() + 25.0
@@ -532,21 +534,31 @@ def check_abrupt_kill_recovery(python):
             "fix needed",
         )
 
+        # This fixture deliberately creates no adoptable DB session, so the
+        # production path's ONLY valid terminal outcome is reap (claim, then
+        # remove -- `session_host_recovery.py`'s "no adoptable session on
+        # reattach" branch); it never legitimately stays claimed under this
+        # fresh daemon's own pid. Accepting `owner_pid == proc2.pid` as an
+        # alternate pass would let the check observe the intermediate claim
+        # write and pass even if the subsequent removal then silently fails
+        # (that removal is itself best-effort/suppressed in production) --
+        # require absence, not "claimed OR reaped".
         recovered = False
         after = None
         deadline = time.monotonic() + 30.0
         while time.monotonic() < deadline:
             after = _index_get(session_id)
-            if after is None or after[1] == proc2.pid:
+            if after is None:
                 recovered = True
                 break
             time.sleep(0.25)
         r.check(
             recovered,
-            "the fresh daemon's OWN real startup reattach scan recovered the "
-            f"stale claim -- record now {after!r} (reaped, or reclaimed under "
-            f"its own real pid {proc2.pid}), never left wedged under killed "
-            f"pid {proc.pid}",
+            "the fresh daemon's OWN real startup reattach scan claimed then "
+            f"reaped the stale claim (record now {after!r}) -- never left "
+            f"wedged under killed pid {proc.pid}, and not silently retained "
+            "under the fresh daemon either (this fixture has no adoptable "
+            "session, so a lingering claim would itself be a bug)",
         )
         return r
     finally:
