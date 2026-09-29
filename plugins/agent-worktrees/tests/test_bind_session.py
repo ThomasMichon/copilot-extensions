@@ -623,17 +623,22 @@ class TestCancelHandoff:
         assert after.resolved_head_session == "sess-successor"
         assert after.session_entry("sess-pred").state == "yielded"
 
-    def test_explicit_worktree_id_activates_its_owning_project_first(
+    def test_explicit_worktree_id_always_activates_its_owning_project(
         self, tmp_tracking_dir, monkeypatch_config, monkeypatch
     ):
-        """An explicit --worktree-id (no cwd resolution at all) must still
+        """An explicit --worktree-id (no cwd resolution at all) must always
         activate that worktree's OWNING project before touching
-        cfg.tracking_dir() -- otherwise a neutral/unadopted cwd would read
-        the wrong (or no) project's tracking directory entirely."""
+        cfg.tracking_dir() -- unconditionally, not only when no project is
+        active yet. Real regression this guards (PR #4570 review round 13):
+        if a DIFFERENT project already happens to be active (e.g. abort
+        running from inside a different adopted checkout), skipping
+        relocation would read cfg.tracking_dir() for the wrong project
+        entirely."""
         _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
         monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
         monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
-        monkeypatch.setattr(m.cfg, "active_project", lambda: None)
+        # A DIFFERENT project is already active -- activation must still run.
+        monkeypatch.setattr(m.cfg, "active_project", lambda: "some-other-project")
         activated = []
         monkeypatch.setattr(
             m, "_activate_project_for_worktree_id",

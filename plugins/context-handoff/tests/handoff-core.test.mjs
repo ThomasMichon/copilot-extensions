@@ -39,6 +39,7 @@ import {
   sanitizedGitEnv,
   sessionBindingForSession,
   triggerHandoff,
+  recoverStoredHandoff,
   writeJsonAtomic,
   writeSessionStateHandoff,
   readSessionStateHandoff,
@@ -2201,6 +2202,40 @@ test("abortFileHandoff refuses to abort while a real consume holds the lock (nev
     assert.ok(existsSync(`${path}.consume.lock`));
     const onDisk = JSON.parse(readFileSync(path, "utf-8"));
     assert.equal(onDisk.consumed, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an aborted file handoff can never be recovered/retriggered again", () => {
+  // Real regression this guards (PR #4570 review round 13): marking a file
+  // handoff consumed/aborted did not stop recoverStoredHandoff's explicit-
+  // token path from selecting it again -- loadStoredFileHandoff returned any
+  // readable record with no consumed/aborted check, so `trigger
+  // --handoff-token <aborted-id>` would rewrite a fresh unconsumed session
+  // request for a token abort was supposed to make permanently non-reusable.
+  const dir = mkdtempSync(join(tmpdir(), "context-handoff-abort-reuse-"));
+  try {
+    const path = join(dir, "handoff-reuse.json");
+    writeJsonAtomic(path, {
+      kind: "context-handoff",
+      version: 2,
+      id: "handoff-reuse",
+      storage: "file",
+      sessionId: "predecessor-1",
+      cwd: "C:\\repo",
+      promptText: "stored markdown",
+      consumed: false,
+      consumedAt: null,
+    });
+    const aborted = abortFileHandoff(
+      "C:\\repo", "aborting-session", "handoff-reuse", path, "changed my mind",
+      { execute: ledgerExecuteStub() },
+    );
+    assert.equal(aborted.ok, true);
+
+    const recovered = recoverStoredHandoff("C:\\repo", "predecessor-1", "handoff-reuse", path);
+    assert.equal(recovered, null);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -80,7 +80,13 @@ def cmd_cancel_handoff(args: argparse.Namespace) -> int:
     wt_id = getattr(args, "worktree_id", None)
     wdir = getattr(args, "worktree_dir", None) or os.getcwd()
     if wt_id:
-        if not cfg.active_project() and not _activate_project_for_worktree_id(wt_id):
+        # Always (re)activate the OWNING project for an explicit ID -- never
+        # only when no project is active. If a DIFFERENT project already
+        # happens to be active (e.g. abort running from inside a different
+        # adopted checkout), skipping relocation would read cfg.tracking_dir()
+        # for the wrong project and either miss the exact ledger entry or
+        # target a coincidentally matching id in the wrong project.
+        if not _activate_project_for_worktree_id(wt_id):
             _json_output({
                 "cancelled": False,
                 "reason": f"could not find the adopted project that owns worktree '{wt_id}'",

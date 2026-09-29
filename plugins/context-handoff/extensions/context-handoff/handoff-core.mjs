@@ -2463,9 +2463,16 @@ function loadStoredTaskHandoff(cwd, taskId) {
   };
 }
 
-function loadStoredFileHandoff(cwd, sid, handoffId) {
-  const found = readFileHandoff(cwd, sid, handoffId);
+function loadStoredFileHandoff(cwd, sid, handoffId, explicitPath = null, fileOpts = {}) {
+  const found = readFileHandoff(cwd, sid, handoffId, explicitPath, fileOpts);
   if (!found?.record) return null;
+  // A consumed OR aborted record must never be reused to arm a fresh
+  // trigger -- both set `consumed: true` (abort also sets `aborted: true`;
+  // see abortFileHandoff/markSessionStateHandoffConsumed). Without this, an
+  // explicit `trigger --handoff-token <aborted-id>` would rewrite a fresh
+  // unconsumed session request for a token abort was supposed to make
+  // permanently non-reusable (PR #4570 review round 13).
+  if (found.record.consumed) return null;
   return {
     storage: "file",
     id: found.record.id,
@@ -2475,7 +2482,13 @@ function loadStoredFileHandoff(cwd, sid, handoffId) {
   };
 }
 
-export function recoverStoredHandoff(cwd, sid, handoffToken = null) {
+// `explicitFilePath`/`fileOpts` exist purely as a testability seam for the
+// file-backed lookup (readFileHandoff's own `explicitPath`/`{ get, execute }`
+// options) -- production callers never pass them; discovery still runs
+// exactly as before.
+export function recoverStoredHandoff(
+  cwd, sid, handoffToken = null, explicitFilePath = null, fileOpts = {},
+) {
   const explicitKinds = handoffToken && handoffToken.startsWith("handoff-")
     ? ["file", "agent-dispatch"]
     : ["agent-dispatch", "file"];
@@ -2484,7 +2497,7 @@ export function recoverStoredHandoff(cwd, sid, handoffToken = null) {
     for (const kind of explicitKinds) {
       const loaded = kind === "agent-dispatch"
         ? loadStoredTaskHandoff(cwd, handoffToken)
-        : loadStoredFileHandoff(cwd, sid, handoffToken);
+        : loadStoredFileHandoff(cwd, sid, handoffToken, explicitFilePath, fileOpts);
       if (loaded) return loaded;
     }
     return null;
