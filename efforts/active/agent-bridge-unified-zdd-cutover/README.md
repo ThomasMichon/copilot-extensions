@@ -283,9 +283,11 @@ sequencing will be drafted here once the design is reviewed._
   HostIndex recovery works even without a ZDD handoff; left untouched.
   `routes/worktrees.py`'s `"restart"` is an unrelated verb (restarting a
   worktree's mux-launched Copilot session, not the agent-bridge daemon).
-- Added `tests/test_service_restart_zdd.py` (3 tests) locking in that
-  `restart` calls `_cmd_deploy` and never the raw stop/start pair, and that
-  its argparse Namespace carries every attribute `_cmd_deploy` reads.
+- Added `tests/test_service_restart_zdd.py` (grew to 6 tests across the
+  three review passes below) locking in that `restart` calls `_cmd_deploy`
+  and never the raw stop/start pair, that its argparse Namespace carries
+  every attribute `_cmd_deploy` reads, that `--recover` stays deploy-only,
+  and that the shared `--json` flag never shadows the global one.
 - Full `agent-bridge` suite green (`tools/run-plugin-tests.py agent-bridge`).
 - Filed the umbrella issue,
   [#4477](https://github.com/ThomasMichon/copilot-extensions/issues/4477).
@@ -332,6 +334,20 @@ sequencing will be drafted here once the design is reviewed._
   restart path, but the scheduled task is registered `-MultipleInstances
   IgnoreNew`, so a bare `/Run` while active is simply ignored -- reworded to
   name the actual equivalent (`schtasks /End` then `/Run`).
+- A fourth review pass caught one real bug and one public-safety nit, both
+  fixed: `add_deploy_cutover_flags()`'s `--json` used `default=False`,
+  which — being a subparser flag sharing the top-level `--json`'s `json`
+  dest — silently overwrote the canonical `agent-bridge --json service
+  restart`/`--json deploy` invocation back to `False` (the exact
+  argparse-Namespace-collision class already documented and guarded in
+  `tests/test_session_selection.py`'s
+  `test_global_json_flag_survives_into_resume_namespace`). Switched to
+  `default=argparse.SUPPRESS`, matching the existing `parity_p` pattern in
+  the same file; a new test parses through the real `build_parser()` to
+  cover both invocation orders. Also removed an accidental downstream-private
+  project name (a "dotfiles#1362" reference — this repo's own public
+  `#1362`) from the new test file's docstring per this repo's
+  public-artifact policy (`AGENTS.md`).
 - Phase 0's one open item (the opt-in reconcile-gate design fork) remains
   genuinely undecided — flagged for the operator, not resolved here.
 

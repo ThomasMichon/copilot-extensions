@@ -1,5 +1,5 @@
-"""``service restart`` must be the same ZDD cutover as ``deploy`` (dotfiles
-#1362 / efforts/active/agent-bridge-unified-zdd-cutover Phase 1).
+"""``service restart`` must be the same ZDD cutover as ``deploy`` (#1362 /
+efforts/active/agent-bridge-unified-zdd-cutover Phase 1).
 
 Before this, ``service restart`` was a raw ``_service_stop()`` +
 ``_service_start()`` -- no cutover orchestrator, no health gate, no drain,
@@ -72,10 +72,42 @@ def test_service_restart_args_have_every_attribute_cmd_deploy_reads():
     # `_cmd_deploy` accesses `.json` directly (not via getattr) in several
     # branches; a restart-built Namespace missing it would AttributeError
     # deep inside a real cutover instead of failing this cheap parse check.
-    parser = _build_parser()
+    # Uses the real `build_parser()` (not the standalone `_build_parser()`
+    # helper above) because `.json` is only guaranteed present once the
+    # top-level `--json` flag has run -- see
+    # test_service_restart_json_does_not_shadow_global_json below.
+    parser = core.build_parser()
     args = parser.parse_args(["service", "restart"])
     for attr in ("health_timeout", "drain_timeout", "force", "json"):
         assert hasattr(args, attr), f"service restart args missing .{attr}"
+
+
+def test_service_restart_json_does_not_shadow_global_json():
+    # Regression guard, same class as
+    # test_session_selection.py's
+    # test_global_json_flag_survives_into_resume_namespace: a subparser that
+    # redeclares `--json` with `default=False` silently overwrites the
+    # top-level `--json` flag's already-True value once the subparser
+    # applies its own default, because both share the Namespace's `json`
+    # dest. `add_deploy_cutover_flags()` must use
+    # `default=argparse.SUPPRESS` so `agent-bridge --json service restart`
+    # (the canonical global-flag-before-command form) keeps `args.json is
+    # True`, and `agent-bridge service deploy --json` (flag given at the
+    # subcommand) still works too.
+    parser = core.build_parser()
+
+    args = parser.parse_args(["--json", "service", "restart"])
+    assert args.json is True
+
+    args = parser.parse_args(["service", "restart", "--json"])
+    assert args.json is True
+
+    args = parser.parse_args(["service", "restart"])
+    assert args.json is False
+
+    # `deploy` itself must show the same fix, not just `restart`.
+    args = parser.parse_args(["--json", "deploy"])
+    assert args.json is True
 
 
 def test_service_restart_does_not_expose_recover():

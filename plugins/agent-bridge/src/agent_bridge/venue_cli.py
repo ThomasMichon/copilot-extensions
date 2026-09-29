@@ -325,7 +325,15 @@ def add_deploy_cutover_flags(
     parser.add_argument("--force", action="store_true", help="Proceed with cutover even if the old daemon does not fully drain.")
     if include_recover:
         parser.add_argument("--recover", action="store_true", help="Only heal a prior aborted cutover: undrain a survivor left drained by a cutover that never completed, then exit. Does not start a new cutover.")
-    parser.add_argument("--json", action="store_true", help="Emit JSON.")
+    # `default=argparse.SUPPRESS`, not `False`: the top-level `--json` flag
+    # (`build_parser()`) already sets `args.json` in the shared Namespace
+    # before this subparser is applied. A `False` default here would
+    # silently overwrite a `agent-bridge --json deploy`/`--json service
+    # restart` invocation back to `False` (the exact regression documented
+    # in `tests/test_session_selection.py`'s
+    # `test_global_json_flag_survives_into_resume_namespace`). SUPPRESS lets
+    # this local `--json` only ever *add* the flag, never blank it.
+    parser.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Emit JSON.")
 
 
 def register_venue_commands(sub: argparse._SubParsersAction) -> None:
