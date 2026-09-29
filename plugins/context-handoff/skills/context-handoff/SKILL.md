@@ -346,7 +346,7 @@ Don't stop at confirming a brief's claims are *true* -- confirm it's
 *complete*. `consume_handoff`'s own response now names the immediate
 predecessor session (a `**Predecessor session:**` line); when
 `agent-worktrees` is available it also names the worktree, so you can pull
-`agent-worktrees worktree-status-bundle --worktree <id> --json` for the full
+`agent-worktrees worktree-status-bundle --worktree <id> --json` <!-- marketplace-isolation: allow diagnostic-tooling --> for the full
 session lineage, this worktree's disposition (title/summary), and a
 timestamped cross-session activity history -- all cheaper than reading raw
 transcripts. Treat any title/summary you find as a theme, never an

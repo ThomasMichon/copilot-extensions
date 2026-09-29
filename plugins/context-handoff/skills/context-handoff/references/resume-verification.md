@@ -66,7 +66,7 @@ response names the worktree when it is), pull it before deciding the brief is
 sufficient:
 
 ```bash
-agent-worktrees worktree-status-bundle --worktree <worktree-id> --json
+agent-worktrees worktree-status-bundle --worktree <worktree-id> --json  # marketplace-isolation: allow diagnostic-tooling
 ```
 
 This single call returns, among other facts: `disposition.value.title` /
