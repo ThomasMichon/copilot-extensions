@@ -1,9 +1,0 @@
-{
-  "comment": "agent-bridge-unified-zdd-cutover Phase 4: test-only -- validate CLI send/read/wait already survive a graceful daemon cutover transparently (new test_send_transparent_cutover.py drives _cmd_send through a real BridgeClient across the retired generation's post-shutdown connection refusal, followed by a routing-table reresolve); no production code change.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "dev"
-    }
-  ]
-}

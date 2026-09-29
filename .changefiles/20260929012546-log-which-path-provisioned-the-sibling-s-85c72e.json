@@ -1,9 +1,0 @@
-{
-  "comment": "Log which path provisioned the sibling SERVER venv (signed-Python --copies vs uv fallback), matching the main venv's own observability, and add regression coverage that the signed-Python path is preferred first.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}
