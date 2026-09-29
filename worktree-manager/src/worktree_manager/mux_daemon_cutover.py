@@ -490,6 +490,35 @@ def _legacy_lock_cutover(
     return summary
 
 
+def _already_at_version(route: routing.Endpoint | None, version: str, *, root: Path) -> bool:
+    """True if ``route`` is already serving ``version`` and is actually healthy.
+
+    A cutover attempt is only ever necessary on a genuine version change; a
+    caller that reconciles on every session launch (self_update runs at the
+    start of each one) will otherwise call in with the *same* target version
+    far more often than the underlying payload actually changes -- a rapid-
+    development harness in particular sees both new mux sessions and new
+    published versions "fairly often", and this is the fast path that keeps
+    the two from compounding into a cutover on every launch (#5344).
+    """
+    return (
+        route is not None
+        and route.version == version
+        and _health_check(_BIND, route.port, root=root)
+    )
+
+
+def _stale_cutover_in_progress(root: Path) -> bool:
+    """True if the durable breadcrumb marks an aborted prior cutover.
+
+    Only used to gate the *lock-free* pre-check below: it cannot safely run
+    recovery itself (no lock held), so while a cutover looks aborted it must
+    fall through to the locked path, where recovery always runs before any
+    no-op decision is made.
+    """
+    return breadcrumb.is_stale(breadcrumb.read_breadcrumb(routing_dir(root)))
+
+
 def activate_after_update(
     *,
     root: Path | None = None,
@@ -502,6 +531,23 @@ def activate_after_update(
     summary: dict[str, object] = {"action": "noop", "root": str(resolved_root)}
 
     from . import mux_daemon
+
+    # Fast, lock-free skip: don't even contend the cutover lock for a no-op
+    # reconciliation call -- the common case when sessions launch often. Only
+    # while there is no stale breadcrumb: a stale one must always fall
+    # through to the locked path below, where recovery/reaping runs before
+    # any no-op decision (a crashed prior cutover must never be masked by
+    # "the target version is already active" -- the same abandoned-passive
+    # gap `zdd.breadcrumb`'s module docstring describes; #5344 follow-up).
+    pre_route = routed_endpoint(resolved_root)
+    if not _stale_cutover_in_progress(resolved_root) and _already_at_version(
+        pre_route, version, root=resolved_root
+    ):
+        summary["reason"] = "already-active-version"
+        summary["route"] = {
+            "port": pre_route.port, "pid": pre_route.pid, "version": pre_route.version,
+        }
+        return summary
 
     lease = _acquire_cutover_lock(resolved_root)
     try:
@@ -519,6 +565,11 @@ def activate_after_update(
                 lock_data=lock_data or {},
                 health_timeout=health_timeout,
             )
+        # Always run stale-cutover recovery and abandoned-passive reaping
+        # before deciding anything -- including the same-version no-op check
+        # right below -- so a crashed prior cutover's stranded old daemon or
+        # abandoned passive is never masked by an early "already active"
+        # return.
         pre_recovery = breadcrumb.read_breadcrumb(routing_dir(resolved_root))
         summary["recovery"] = breadcrumb.recover_stale_cutover(
             routing_dir(resolved_root),
@@ -526,6 +577,17 @@ def activate_after_update(
             health_check=lambda host, port: _health_check(host, port, root=resolved_root),
         )
         summary["passive_reap"] = _reap_abandoned_passive(resolved_root, pre_recovery)
+
+        # Re-check now, under the lock and after recovery/reap: another
+        # caller may have already cut over to this exact version while we
+        # waited for the lock, or the recovery above may just have healed
+        # the last aborted attempt back onto it.
+        route = routed_endpoint(resolved_root)
+        if _already_at_version(route, version, root=resolved_root):
+            summary["reason"] = "already-active-version"
+            summary["route"] = {"port": route.port, "pid": route.pid, "version": route.version}
+            return summary
+
         orch = CutoverOrchestrator(
             routing_dir(resolved_root),
             bind=_BIND,

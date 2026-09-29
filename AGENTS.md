@@ -441,6 +441,13 @@ cd plugins/agent-bridge
   marketplace + its own installer. agent-bridge deploys via its own
   installer (or a project service framework that wraps it). They are
   different pipelines.
+- **Do not open a cutover/drain/promotion/process-repair PR without
+  self-checking it first.** `docs/patterns/graceful-daemon-cutover.md`'s
+  "Common review findings" section lists the small, recurring set of
+  concurrency-ordering, PID-identity-safety, and cross-platform gaps that
+  cost this repo's own graceful-cutover rollout 6-14 review rounds per PR —
+  check your diff against it before opening the PR, not after the first
+  review round names them.
 
 ---
 

@@ -473,6 +473,13 @@ statement in the PR description.
    drain).
 3. Link the doc/effort updates that record the contract, or explain why
    existing documentation remains accurate and complete.
+4. Self-check the diff against
+   [`docs/patterns/graceful-daemon-cutover.md`](docs/patterns/graceful-daemon-cutover.md)'s
+   "Common review findings" checklist **before** opening the PR — it enumerates
+   the small set of concurrency-ordering, PID-identity-safety, and
+   cross-platform gaps that recurred across this repo's own four
+   graceful-cutover implementation PRs (6-14 review rounds each). Catching
+   them here is materially cheaper than a review round.
 
 Reviewers treat a missing or hand-wavy statement as unfinished work.
 
@@ -1247,6 +1254,16 @@ Review requires evidence at the real divergence seam, not only a mocked
 Keep this live Windows check focused; the required CI guard remains static and
 fast.
 
+### "POSIX" Is Not "Linux" — Name macOS Explicitly
+
+A process-census or liveness primitive written against `/proc` or Linux
+`pidfd` APIs is **Linux-specific**, not general POSIX support — macOS is
+POSIX but has neither. If a change claims cross-platform daemon/process
+coverage, name **Windows, Linux, and macOS** explicitly and state what each
+one does: implemented, or an explicit and justified exemption (e.g. "no macOS
+runners in this suite yet; falls back to X"). Do not let "POSIX" silently
+stand in for "tested on Linux only."
+
 ### Ephemeral Process Reaping
 
 Launching a background/detached process invisibly (the section above) is only
@@ -1296,6 +1313,25 @@ must additionally answer:
    must never be reaped mid-flight) — see the pattern doc's *Variant*
    section and `agent_mcp.session.BridgeSession.has_pending` /
    `agent_mcp.bridge.Bridge.run`'s idle branch for a worked example.
+
+### PID-Identity-Bound Termination Needs a Direct Test
+
+Any code path that terminates or reaps a process by PID — a stale-daemon
+reaper, a cutover repair action, a self-heal/`doctor` apply mode — must ship a
+dedicated unit test in the **same PR** covering two separate safety layers:
+(a) **identity-bound termination** — `zdd.diagnostics.process_start_time` /
+`zdd.diagnostics.terminate_pid_if_identity` bind the actual signal to a
+PID/start-time token and refuse on any mismatch (a stale or reused PID) — but
+this pair alone does **not** validate ownership; and (b) **owner
+validation** — confirming the candidate is the legitimate target, not merely
+some other live process, which is the responsibility of the higher-level
+`zdd.diagnostics.audit_daemon_health`/`apply_daemon_health` path. Reuse these
+shared primitives rather than re-deriving a parallel mechanism — a
+plugin-private equivalent (e.g. `agent_worktrees.locks`/`agent_worktrees.procs`)
+is not importable from another plugin and should not be cited as *the* thing
+to reuse. An end-to-end rehearsal test that happens to exercise the happy
+path is **not** sufficient evidence of this on its own — both safety layers
+need a direct test.
 
 They are **not active until wired** per clone (git does not auto-enable a
 committed hooks dir). Run the helper once per checkout:
