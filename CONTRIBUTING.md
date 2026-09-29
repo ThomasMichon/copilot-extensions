@@ -84,7 +84,11 @@ explicit admin escalation).** This is enforced on four layers that agree:
    all; a Maintainer can still request one manually via the "Reviewers"
    sidebar at any time. (The ruleset-native `copilot_code_review` auto-review
    rule has no such condition — it would fire for literally anyone — so this
-   repo does not use it; see "Everyone else" below for why that matters.)
+   repo has removed that rule; see "Everyone else" below for why that
+   matters.) Like `workflow-lockdown-guard.yml` above, this workflow runs on
+   `pull_request_target`, so it can't fire until its own file has reached
+   `main` via a promotion — request a review manually for any PR opened
+   before that first promotion completes.
    Whether a review (Copilot's or anyone else's) must formally *approve* the
    PR before merge is governed by a second ruleset ("dev branch policy:
    review required (maintainer bypass)") plus `.github/CODEOWNERS`
@@ -104,28 +108,28 @@ explicit admin escalation).** This is enforced on four layers that agree:
      Copilot is deliberately **not** listed in CODEOWNERS, so its approval
      alone can never satisfy the codeowner-specific half of the requirement
      for a Contributor's PR.
-   - Each Maintainer's own PRs (including agent-authored work under their
-     account) bypass that specific review-count/codeowner requirement via a
-     standing, named-`User`-actor `bypass_actors` entry on the ruleset
-     (`bypass_mode: pull_request` — still requires a real PR and all required
-     status checks; only the *review* requirement is exempted). Deliberately,
-     this bypass is a per-`User` ruleset entry, **not** a bump to GitHub's
-     `Maintain`/`Admin` repository role — a Maintainer here keeps their
-     ordinary `Write` permission (no repo-settings, Actions-secret, or
-     collaborator-management access) and gains only the self-merge
-     capability.
-     > **This bypass is bound to the *merging* actor, not the PR's author —
-     > read that precisely.** GitHub ruleset bypass has no "only my own PRs"
-     > concept: `bypass_mode: pull_request` means "when this named actor
-     > performs the merge, this rule doesn't apply to them," full stop —
-     > regardless of whose PR it is. In practice this means any Maintainer
-     > *could* merge a Contributor's still-unapproved PR themselves, bypassing
-     > the review-count/codeowner requirement meant for that Contributor. This
-     > is not new to this change — it was already true for ThomasMichon alone
-     > before Maintainers existed — this PR only extends the same structural
-     > trust to three more named accounts. There is no GitHub-side technical
-     > control for "bypass only when merging your own PR"; the mitigation is
-     > the same one that already applied to the sole owner: Maintainers are
+   - Each Maintainer is a named `User`-actor `bypass_actors` entry on the
+     ruleset (`bypass_mode: pull_request` — still requires a real PR and all
+     required status checks; only the *review* requirement is exempted),
+     which in practice lets them self-merge their own PRs without a second
+     approving review. Deliberately, this bypass is a per-`User` ruleset
+     entry, **not** a bump to GitHub's `Maintain`/`Admin` repository role —
+     a Maintainer here keeps their ordinary `Write` permission (no
+     repo-settings, Actions-secret, or collaborator-management access) and
+     gains only the self-merge capability.
+     > **Read the bypass mechanism precisely: it is bound to the *merging*
+     > actor, never to the PR's author.** GitHub ruleset bypass has no "only
+     > my own PRs" concept: `bypass_mode: pull_request` means "when this
+     > named actor performs the merge, this rule doesn't apply to them," full
+     > stop — regardless of whose PR it is. In practice this means any
+     > Maintainer *could* merge a Contributor's still-unapproved PR
+     > themselves, bypassing the review-count/codeowner requirement meant
+     > for that Contributor. This is not new to this change — it was already
+     > true for ThomasMichon alone before Maintainers existed — this PR only
+     > extends the same structural trust to three more named accounts. There
+     > is no GitHub-side technical control for "bypass only when merging your
+     > own PR"; the mitigation is the same one that already applied to the
+     > sole owner: Maintainers are
      > trusted not to merge past a Contributor's required review, and every
      > bypass is visible in the ruleset insights / audit log after the fact.
    - Required CI status checks (`PR gate`, a fixed-name aggregate — see its
@@ -157,6 +161,19 @@ explicit admin escalation).** This is enforced on four layers that agree:
    workaround, not GitHub's native `file_path_restriction` ruleset rule: that
    rule type returns `Validation Failed` on this personal, non-Enterprise
    account — it's an Enterprise-only feature.)
+   > **Rollout note:** `workflow-lockdown-guard.yml` runs on
+   > `pull_request_target`, which always executes the workflow definition
+   > from the repository's ACTUAL default branch — **`main`**, per GitHub's
+   > own repo settings, not `dev` (this repo's separate "contribution
+   > default" convention). That means the check structurally cannot report
+   > at all until `main` has its own copy, which only happens after this
+   > repo's own promotion pipeline next promotes `dev` to `main` (routinely
+   > ~10-20 minutes after a `dev` merge — see "The wait, and how to preview
+   > past it" below). The enforcing ruleset is created but left `disabled`
+   > until after that promotion completes and a subsequent PR confirms the
+   > check actually reports `workflow-lockdown-guard` successfully — only
+   > then is it flipped to `active`. Until that flip, this specific
+   > lockdown is docs-and-workflow-only, not yet server-enforced.
 
 **Everyone else — anyone who hasn't been invited as a collaborator at all —
 gets no automatic CI, no automatic Copilot review, and no agentic-workflow

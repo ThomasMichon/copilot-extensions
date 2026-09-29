@@ -6,8 +6,8 @@
 # requirements are skipped entirely for any actor already bypassing PR
 # review (all Maintainers, by design, for req #2's self-merge).
 #
-# So this is enforced as a required status check instead: a check with NO
-# bypass except ThomasMichon (see the "workflow/CODEOWNERS lockdown" ruleset)
+# So this is enforced as a required status check instead: a check with no
+# bypass actors at all (see the "workflow/CODEOWNERS lockdown" ruleset)
 # fails whenever a protected path is touched by anyone other than
 # ThomasMichon as either the PR's author OR the actor who pushed the latest
 # commit (both checked -- see "Verify protected-file changes by author and
@@ -20,12 +20,25 @@
 # commit -- so a Write collaborator could edit *this file* within their own
 # PR to neuter the check, and the neutered version is exactly what would
 # run. `pull_request_target` always runs the trusted definition from the
-# repository's default branch, regardless of what the PR head contains, and
-# still exposes `github.event.pull_request` metadata for the untrusted head.
-# This job never checks out or executes PR content -- it only reads the
-# PR's file list via the REST API -- so it carries none of the classic
-# `pull_request_target` secret-exfiltration risk (see this repo's own
-# `identifier-leak-guard.yml` for the citation on that risk class).
+# repository's ACTUAL default branch (`main` here -- confirmed via the repo
+# API; NOT the `dev` branch this repo treats as its own "contribution
+# default"), regardless of what the PR head or even `dev` currently
+# contains, and still exposes `github.event.pull_request` metadata for the
+# untrusted head. This job never checks out or executes PR content -- it
+# only reads the PR's file list via the REST API -- so it carries none of
+# the classic `pull_request_target` secret-exfiltration risk (see this
+# repo's own `identifier-leak-guard.yml` for the citation on that risk
+# class).
+#
+# BOOTSTRAP ORDER MATTERS: because the trusted copy is loaded from `main`,
+# this check cannot report on any PR -- including the one that first adds
+# this file to `dev` -- until `main` itself has a copy, which only happens
+# after this repo's own promotion pipeline next promotes `dev` to `main`
+# (routinely ~10-20 minutes after a `dev` merge). The enforcing ruleset
+# ("dev branch policy: workflow/CODEOWNERS lockdown") is therefore created
+# `disabled`, and is only flipped to `active` after confirming a real PR's
+# `workflow-lockdown-guard` check actually reports post-promotion -- never
+# enabled speculatively ahead of that.
 name: Workflow lockdown guard
 
 on:
@@ -81,13 +94,17 @@ jobs:
               return;
             }
 
+            const isProtected = (name) =>
+              protectedExact.has(name) ||
+              protectedPrefixes.some((prefix) => name.startsWith(prefix));
+
+            // A rename reports the new path as `filename` and the old path
+            // as `previous_filename` -- checking only `filename` would miss
+            // a protected file being renamed OUT of a protected path (the
+            // change to that protected file's history still happened).
             const touched = files
-              .map((f) => f.filename)
-              .filter(
-                (name) =>
-                  protectedExact.has(name) ||
-                  protectedPrefixes.some((prefix) => name.startsWith(prefix)),
-              );
+              .flatMap((f) => [f.filename, f.previous_filename].filter(Boolean))
+              .filter(isProtected);
 
             if (touched.length === 0) {
               core.info("No protected paths touched; nothing to enforce.");
