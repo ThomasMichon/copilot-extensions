@@ -18,7 +18,8 @@ classify three ways: a **known, tracked flake/transient failure** (link its
 issue, per `contributing-to-copilot-extensions`'s flake exception); a
 **CI-environment-specific test bug** (e.g. a Windows-only `subprocess`
 constant referenced on the Linux runner); or a **genuine regression**. The
-latter two are owed a real fix -- **fix-forward, never pre-existing**. Land
+latter two are owed a real, versioned **fix-forward** fix, even if the
+failure predates your own change -- never dismissed as pre-existing. Land
 it via the normal worktree/PR flow against `dev`, never `main` directly, and
 never force-retry the pipeline as a substitute for a fix. See the
 `diagnosing-validate-and-promote-failures` skill for the exact commands.

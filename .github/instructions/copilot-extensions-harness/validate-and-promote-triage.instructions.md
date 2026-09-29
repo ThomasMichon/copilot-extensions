@@ -1,7 +1,7 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/copilot-extensions-harness/validate-and-promote-triage.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.0-dev47","renderedBytes":1981,"schema":"copilot-extensions.instruction-projection","sourceId":"validate-and-promote-triage","template":"instructions/validate-and-promote-triage.instructions.md","templateBytes":1382,"templateSha256":"91c2c8e9929f6d81e117ff49d019b493db89e95233995ad1f5065ef1990bdffb","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/copilot-extensions-harness/validate-and-promote-triage.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.0-dev47","renderedBytes":2050,"schema":"copilot-extensions.instruction-projection","sourceId":"validate-and-promote-triage","template":"instructions/validate-and-promote-triage.instructions.md","templateBytes":1451,"templateSha256":"89bebb09582d19588a2e7d2635b2bd2e8db911aef71d2728a333e2e8d02a86bd","version":1} -->
 
 # `validate-and-promote` failure triage fallback
 
@@ -19,7 +19,8 @@ classify three ways: a **known, tracked flake/transient failure** (link its
 issue, per `contributing-to-copilot-extensions`'s flake exception); a
 **CI-environment-specific test bug** (e.g. a Windows-only `subprocess`
 constant referenced on the Linux runner); or a **genuine regression**. The
-latter two are owed a real fix -- **fix-forward, never pre-existing**. Land
+latter two are owed a real, versioned **fix-forward** fix, even if the
+failure predates your own change -- never dismissed as pre-existing. Land
 it via the normal worktree/PR flow against `dev`, never `main` directly, and
 never force-retry the pipeline as a substitute for a fix. See the
 `diagnosing-validate-and-promote-failures` skill for the exact commands.
