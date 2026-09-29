@@ -343,98 +343,149 @@ def check_abrupt_kill_recovery(python):
     ``/api/v1/shutdown`` release-every-claim path, #4543) -- the "kill the old
     generation before it releases its claims" drill this effort's Phase 5
     calls for. A stale session-host claim it never released must not wedge a
-    later generation's own startup reattach scan behind a `ClaimConflict`
-    forever: ``zdd.claims.is_recoverable`` treats a claim whose owner pid is
-    dead as free for the taking, no live handshake required (Phase 2's
-    contract) -- this proves that holds for a REAL killed process, not just
-    the pure-function unit tests in ``libs/zdd/tests/test_claims.py``.
+    later generation's own claim attempt behind a `ClaimConflict` forever:
+    ``zdd.claims.is_recoverable`` treats a claim whose owner pid is dead as
+    free for the taking, no live handshake required (Phase 2's contract) --
+    this proves that holds for a REAL killed daemon process (its actual own
+    pid, actually SIGKILLed), not just the pure-function unit tests in
+    ``libs/zdd/tests/test_claims.py``.
+
+    Deliberately exercises ``HostIndex.claim()`` directly (the same call
+    ``_claim_host_record`` makes) rather than the full startup
+    ``reattach_session_hosts()`` scan: that scan also requires an adoptable
+    DB session row and a live, ATTACH-able Session Host child to avoid
+    reaping/pruning the record before the claim/recover contract is even
+    exercised (a real one needs a full session-host child process, out of
+    reach for a stdlib-only probe -- see the module docstring's FIDELITY
+    NOTE). This still proves the ownership-transfer contract for real: a
+    genuinely-dead daemon pid (not a synthetic one) is recognized as
+    recoverable and a fresh generation's claim succeeds where a live
+    generation's would correctly raise ``ClaimConflict``.
     """
     r = Result("abrupt-kill-recovery")
     cfg = tempfile.mkdtemp(prefix="abcv-ak-")
     c = Ctx(python, cfg)
     proc = None
     proc2 = None
-    dead_proc = None
     alive_dummy = None
     session_id = "abrupt-kill-sim-session"
+    index_path = os.path.join(c.root, "hosts", "index.json")
+
+    def _run_snip(snip, timeout=30):
+        return subprocess.run([python, "-c", snip], env=c.env,
+                               capture_output=True, text=True, timeout=timeout)
+
     try:
-        # A pid that is guaranteed dead (started, waited-on, reaped) --
-        # standing in for the killed generation's own recorded owner_pid,
-        # exactly as `owner_pid` durably records the CLAIMING generation's
-        # process, never the session-host child's.
-        dead_proc = subprocess.Popen([python, "-c", "pass"])
-        dead_proc.wait(timeout=10)
+        proc = c.spawn_serve()
+        a = c.active()
+        if not r.check(a is not None, "generation-to-be-killed's daemon is up"):
+            return r
+        old_port = a["port"]
+        r.check(_listening(old_port), f"generation to be killed is listening on :{old_port}")
+
+        # The daemon's own ONE-SHOT startup reattach scan (a background task,
+        # never periodic -- app.py's `_reattach_session_hosts_bg`) would reap
+        # an orphan record (no adoptable DB session) the instant it runs.
+        # Registering only after that one pass has had time to finish means
+        # nothing else ever revisits this record for the rest of this
+        # generation's life -- it's simulating a record that arrived
+        # (a session started) *after* startup, not one already stale at boot.
+        time.sleep(1.5)
+
         # A pid that stays alive for the check's duration -- standing in for
-        # the session-host child itself (`host_pid`/`child_pid`), so the
-        # record isn't pruned outright as a dead HOST before the ownership
-        # claim/recover contract is even exercised.
+        # the session-host child itself (`host_pid`/`child_pid`); irrelevant
+        # to this check (it calls `claim()` directly, not the full
+        # host-liveness-gated reattach scan) but kept realistic.
         alive_dummy = subprocess.Popen([python, "-c", "import time; time.sleep(300)"])
-        index_path = os.path.join(c.root, "hosts", "index.json")
-        seed_snip = (
+        register_snip = (
             "from agent_bridge.session_host.host_index import HostIndex, HostRecord;"
             f"idx = HostIndex({index_path!r});"
             "idx.register(HostRecord("
             f"session_id={session_id!r}, port=59999, host_pid={alive_dummy.pid}, "
-            f"child_pid={alive_dummy.pid}, owner_generation='stale-gen-sim', "
-            f"owner_pid={dead_proc.pid}))"
+            f"child_pid={alive_dummy.pid}))"
         )
-        seed = subprocess.run([python, "-c", seed_snip], env=c.env,
-                               capture_output=True, text=True, timeout=30)
-        r.check(seed.returncode == 0,
-                f"seeded a stale session-host claim, owner pid already dead "
-                f"(rc={seed.returncode}; {seed.stderr.strip()[:160]})")
+        reg = _run_snip(register_snip)
+        r.check(reg.returncode == 0,
+                f"registered an unclaimed session-host record "
+                f"(rc={reg.returncode}; {reg.stderr.strip()[:160]})")
 
-        proc = c.spawn_serve()
-        a = c.active()
-        if not r.check(a is not None, "daemon up before the abrupt kill"):
-            return r
-        old = a["port"]
-        r.check(_listening(old), f"generation to be killed is listening on :{old}")
+        # This generation claims the record for itself, using its OWN real
+        # pid as owner_pid -- exactly what `_claim_host_record` does inside
+        # the real daemon, invoked directly here since there's no live
+        # session-host child to let the full async reattach scan complete
+        # without reaping/pruning the record first (see docstring).
+        claim1_snip = (
+            "from agent_bridge.session_host.host_index import HostIndex;"
+            "from agent_bridge.session_host.osutil import pid_alive;"
+            f"idx = HostIndex({index_path!r});"
+            f"idx.claim({session_id!r}, generation='real-gen-1', "
+            f"owner_pid={proc.pid}, pid_alive=pid_alive);"
+            f"print(idx.get({session_id!r}).owner_generation)"
+        )
+        claim1 = _run_snip(claim1_snip)
+        r.check(
+            claim1.returncode == 0 and claim1.stdout.strip() == "real-gen-1",
+            f"the live generation (real pid {proc.pid}) claimed the record for "
+            f"itself (rc={claim1.returncode}, stdout={claim1.stdout.strip()!r}, "
+            f"stderr={claim1.stderr.strip()[:160]})",
+        )
 
         # The abrupt kill itself: SIGKILL, no drain, no /api/v1/shutdown
-        # handshake -- the exit contract's own release_all() never runs.
+        # handshake -- the exit contract's own release_all() never runs, so
+        # the claim above is durably stranded exactly as recorded.
         proc.kill()
         proc.wait(timeout=10)
-        r.check(not _listening(old), f"killed generation's :{old} is gone (no graceful exit ran)")
+        r.check(not _listening(old_port), f"killed generation's :{old_port} is gone (no graceful exit ran)")
 
+        # A fresh generation's own claim attempt -- must succeed (no
+        # ClaimConflict) because the recorded owner_pid is now genuinely
+        # dead, and must durably transfer ownership.
+        claim2_snip = (
+            "from agent_bridge.session_host.host_index import HostIndex, ClaimConflict\n"
+            "from agent_bridge.session_host.osutil import pid_alive\n"
+            "import os\n"
+            f"idx = HostIndex({index_path!r})\n"
+            "try:\n"
+            f"    idx.claim({session_id!r}, generation='real-gen-2', "
+            "owner_pid=os.getpid(), pid_alive=pid_alive)\n"
+            f"    print('claimed:' + idx.get({session_id!r}).owner_generation)\n"
+            "except ClaimConflict as exc:\n"
+            "    print('conflict:' + str(exc.held_by_pid))\n"
+        )
+        claim2 = _run_snip(claim2_snip)
+        r.check(
+            claim2.returncode == 0,
+            f"fresh generation's claim attempt ran without crashing "
+            f"(rc={claim2.returncode}; {claim2.stderr.strip()[:160]})",
+        )
+        r.check(
+            claim2.stdout.strip() == "claimed:real-gen-2",
+            "the fresh generation's claim succeeded (no ClaimConflict against "
+            f"the killed generation's dead pid {proc.pid}) and durably "
+            f"transferred ownership (got {claim2.stdout.strip()!r})",
+        )
+
+        # And: a real fresh daemon isn't blocked/wedged by this stale claim
+        # sitting in the index -- it starts cleanly and publishes its own
+        # new active endpoint, exactly as the abrupt-termination drill's
+        # "confirm a later generation recovers them cleanly" asks for.
         proc2 = c.spawn_serve()
-        # `active()` returns the first entry it sees, including a stale one
-        # the killed generation never cleared (SIGKILL skips its own
-        # clear-on-shutdown) -- poll until the table actually shows a
-        # DIFFERENT port (the new generation's own dead-port watchdog clears
-        # the stale entry, then publishes its own, asynchronously).
         a2 = None
         deadline = time.monotonic() + 25.0
         while time.monotonic() < deadline:
             candidate = c.active(tries=1)
-            if candidate and candidate.get("port") != old:
+            if candidate and candidate.get("port") != old_port:
                 a2 = candidate
                 break
             time.sleep(0.25)
         r.check(
-            a2 is not None and a2.get("port") != old,
-            "a fresh generation starts cleanly after the abrupt kill and "
+            a2 is not None and a2.get("port") != old_port,
+            "a real fresh daemon starts cleanly after the abrupt kill and "
             "publishes a new active endpoint -- no manual fix needed",
-        )
-        time.sleep(1.0)
-        check_snip = (
-            "from agent_bridge.session_host.host_index import HostIndex;"
-            f"idx = HostIndex({index_path!r});"
-            f"rec = idx.get({session_id!r});"
-            "print(rec.owner_generation if rec else '<reaped>')"
-        )
-        out = subprocess.run([python, "-c", check_snip], env=c.env,
-                              capture_output=True, text=True, timeout=30)
-        owner_after = (out.stdout or "").strip()
-        r.check(
-            owner_after != "stale-gen-sim",
-            "the fresh generation's own startup reattach scan claimed or "
-            f"reaped the killed generation's stale claim (was 'stale-gen-sim', "
-            f"now {owner_after!r}) -- it did not sit stuck behind a dead owner",
         )
         return r
     finally:
-        for p in (proc, proc2, dead_proc, alive_dummy):
+        for p in (proc, proc2, alive_dummy):
             try:
                 if p is not None and p.poll() is None:
                     p.terminate()

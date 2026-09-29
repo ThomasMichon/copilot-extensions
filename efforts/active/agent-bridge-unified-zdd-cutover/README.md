@@ -338,17 +338,42 @@ test that closes the gap.
 - **What's real here.** Extended the pre-existing `tools/clean-room/scenarios/
   agent-bridge-cutover` Tier-P scenario (found already covering the daemon-level
   routing-flip/drain-gate/breadcrumb-recovery mechanism, predating this effort)
-  with a new `abrupt-kill-recovery` check in `fixtures/cutover_probe.py`:
-  seeds a durable session-host claim via the real `HostIndex`/`HostRecord`
-  classes with `owner_pid` set to an actually-dead process, SIGKILLs a real
-  running daemon (no drain, no `/api/v1/shutdown` handshake -- the exit
-  contract's own release path never runs), starts a fresh generation, and
-  confirms via the on-disk index that the fresh generation's own startup
-  reattach scan claimed-or-reaped the stale record rather than leaving it
-  wedged under a dead owner. Sanity-checked by fault-injecting an inverted
-  `zdd.claims.is_recoverable` and confirming the check correctly FAILS (it's
-  a real assertion, not a tautology); reverted immediately. Ran the full
-  4-check probe 3x locally with no flakiness.
+  with a new `abrupt-kill-recovery` check in `fixtures/cutover_probe.py`: a
+  real daemon registers an unclaimed session-host record for itself (after
+  its own one-shot startup reattach scan has already run, so it survives),
+  claims it for its own real, live pid; is then SIGKILLed (no drain, no
+  `/api/v1/shutdown` handshake -- the exit contract's own release path never
+  runs); and a fresh generation's own claim attempt against that now-dead pid
+  is asserted to succeed (no `ClaimConflict`) and durably transfer ownership,
+  invoking the real `HostIndex.claim()` contract directly (the exact call
+  `_claim_host_record` makes). Also confirms a real fresh daemon starts
+  cleanly afterward and publishes its own new active endpoint. Sanity-checked
+  by fault-injecting an inverted `zdd.claims.is_recoverable` (with
+  `PYTHONPATH` correctly forcing the daemon subprocess to import the edited
+  source, not its installed venv copy -- an earlier sanity run without this
+  silently exercised the unmodified installed copy and gave a false PASS,
+  caught before landing) and confirming the check correctly FAILS; reverted
+  immediately. Ran the full 4-check probe 5x locally with no flakiness.
+- **Corrected after automated review.** The first version of this check
+  seeded the record *before* spawning the daemon and stamped its
+  `owner_generation`/`owner_pid` with synthetic placeholders (a fabricated
+  "stale-gen-sim" string, a separately-started-and-waited dead pid) rather
+  than the daemon's own real identity. Review correctly caught that this
+  record was reaped by the daemon's own one-shot startup reattach scan
+  (any session-host record with no adoptable DB session gets reaped the
+  instant that scan runs, whether the record predates startup or is written
+  moments before it) *before* the simulated "abrupt kill" ever touched a
+  claim that mattered -- the check could pass without ever exercising real
+  recovery. Also caught: the ownership-transfer assertion trusted raw
+  subprocess stdout without first requiring the subprocess to have actually
+  succeeded, so a crashed check-snippet (empty stdout) could false-PASS
+  merely by not being byte-identical to the stale placeholder string. Fixed
+  both: the record is now registered *after* the daemon's one-shot startup
+  scan has had time to run (so nothing ever revisits it for the rest of that
+  generation's life), claimed with the *real* daemon's own real pid, and
+  every downstream check gates on `returncode == 0` *and* an exact expected
+  stdout match -- there is no path left where a crash or a no-op can read as
+  a pass.
 - **What's honestly NOT delivered.** The Plan's first bullet asks for a live
   session's Copilot *turn* to survive a cutover with zero observed
   disruption -- that needs a real model/ACP child in the loop synchronized
