@@ -374,6 +374,30 @@ test that closes the gap.
   every downstream check gates on `returncode == 0` *and* an exact expected
   stdout match -- there is no path left where a crash or a no-op can read as
   a pass.
+- **Corrected a second time after another review round.** That second
+  version still had two real gaps, both caught: (1) a fixed `time.sleep(1.5)`
+  guessed at how long the one-shot startup scan takes rather than observing
+  it -- a slower host could still register the test record before the scan
+  runs, letting it get reaped by the *very* scan the check is trying to get
+  past; fixed by seeding a disposable **sentinel** orphan record *before*
+  daemon startup and polling until it is reaped, an observable signal that
+  the one-shot scan has actually run, before registering the real test
+  record. (2) recovery was "verified" by a disconnected direct
+  `HostIndex.claim()` call standing in for "a new generation," never by the
+  real fresh daemon's own recovery path -- so the check could pass while the
+  actual production reattach scan silently did nothing. Fixed by polling the
+  on-disk index *after the real fresh daemon starts* and requiring either
+  the record to be gone (reaped) or reclaimed under that daemon's own real
+  pid specifically -- not merely "some different value" (a port can in
+  principle be reused). Re-verified via fault injection with `PYTHONPATH`
+  correctly forcing the daemon subprocess to import the edited `zdd` source
+  (an earlier sanity-check run without this silently exercised the
+  unmodified installed venv copy and gave a false PASS, caught before
+  claiming it as verified) -- the corrected check now correctly FAILS.
+  Documented the new check in `tools/clean-room/README.md`'s catalog and the
+  scenario manifest's own description (both previously left listing only
+  the original three checks). Ran the full 4-check probe stable across
+  many runs.
 - **What's honestly NOT delivered.** The Plan's first bullet asks for a live
   session's Copilot *turn* to survive a cutover with zero observed
   disruption -- that needs a real model/ACP child in the loop synchronized
