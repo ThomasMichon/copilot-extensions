@@ -100,6 +100,7 @@ from . import (
     front_door_cli,
     git_ops,
     handoff_trace,
+    launch_registry,
     list_cache,  # noqa: F401 -- compatibility re-export for extracted status-monitor CLI
     locks,
     output,
@@ -5627,6 +5628,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--field", action="append", default=[], help="Extra context as key=value (repeatable)"
     )
 
+    # register-launch -- record this launch's own root pid (internal)
+    launch_registry.add_subparser(sub)
+
     return parser
 
 
@@ -5835,7 +5839,7 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
     "services", "repos", "accounts", "copilot-identity", "related", "state-root",
     "coordination-readiness", "config-root", "knowledge", "git",
     "pr-watch", "pr-merge", "pr-research", "pr",
-    "activity", "activity-log", "stage-update", "reconcile-marketplaces",
+    "activity", "activity-log", "register-launch", "stage-update", "reconcile-marketplaces",
     "execution-leg", "copilot", "resolve", "handoff-trace",
 })
 
@@ -6496,6 +6500,7 @@ def _load_full_command_surface() -> None:
         "anchor-check": cmd_anchor_check,
         "activity": activity.cmd_activity,
         "activity-log": activity.cmd_activity_log,
+        "register-launch": launch_registry.cmd_register_launch,
     }
     _FULL_SURFACE_LOADED = True
 

@@ -23,13 +23,15 @@ from pathlib import Path
 __all__ = [
     "copilot_relaunch_path",
     "count_processes_named",
+    "is_descendant_of",
+    "parent_pid",
     "process_executable_path",
     "processes_with_cwd_under",
     "processes_with_executable_under",
-    "terminate_processes_under",
-    "terminate_processes_under_executable",
     "terminate_pid",
     "terminate_pid_if_identity",
+    "terminate_processes_under",
+    "terminate_processes_under_executable",
 ]
 
 
@@ -83,6 +85,27 @@ def _terminate_posix(pid: int) -> bool:
         return True
     except OSError:
         return False
+
+
+def _parent_pid_posix(pid: int) -> int | None:
+    """Return ``pid``'s parent pid via ``/proc/<pid>/stat`` field 4 (ppid)."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text(errors="ignore")
+    except OSError:
+        return None
+    # comm (field 2) may contain spaces/parens -- split on the LAST ')'.
+    rparen = stat.rfind(")")
+    if rparen == -1:
+        return None
+    rest = stat[rparen + 1:].split()
+    # After comm, `rest` holds fields from state (field 3) onward, so ppid
+    # (field 4) is rest[1]: state=rest[0], ppid=rest[1].
+    if len(rest) < 2:
+        return None
+    try:
+        return int(rest[1])
+    except ValueError:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +246,96 @@ def _win_read_cwd(k32, pid: int) -> tuple[str, str]:
         return cwd_raw.decode("utf-16-le", "ignore").rstrip("\\/"), exe_name
     finally:
         k32.CloseHandle(handle)
+
+
+def _win_parent_pid(pid: int) -> int | None:
+    """Return ``pid``'s parent pid via ``NtQueryInformationProcess``.
+
+    Reads ``PROCESS_BASIC_INFORMATION.InheritedFromUniqueProcessId`` -- the
+    same syscall shape :func:`_win_read_cwd` already makes for cwd, just with
+    the full 6-pointer struct instead of the partial one used there.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    try:
+        k32 = _win_kernel32()
+    except OSError:
+        return None
+    handle = k32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return None
+    try:
+        ntdll = ctypes.WinDLL("ntdll", use_last_error=True)
+
+        class _PBI(ctypes.Structure):
+            _fields_ = [
+                ("ExitStatus", ctypes.c_void_p),
+                ("PebBaseAddress", ctypes.c_void_p),
+                ("AffinityMask", ctypes.c_void_p),
+                ("BasePriority", ctypes.c_void_p),
+                ("UniqueProcessId", ctypes.c_void_p),
+                ("InheritedFromUniqueProcessId", ctypes.c_void_p),
+            ]
+
+        ntdll.NtQueryInformationProcess.argtypes = [
+            wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p,
+            wintypes.ULONG, ctypes.POINTER(wintypes.ULONG),
+        ]
+        ntdll.NtQueryInformationProcess.restype = ctypes.c_long
+
+        pbi = _PBI()
+        status = ntdll.NtQueryInformationProcess(
+            handle, 0, ctypes.byref(pbi), ctypes.sizeof(pbi), None)
+        if status != 0:
+            return None
+        ppid = int(pbi.InheritedFromUniqueProcessId or 0)
+        return ppid or None
+    except OSError:
+        return None
+    finally:
+        k32.CloseHandle(handle)
+
+
+def parent_pid(pid: int) -> int | None:
+    """Return ``pid``'s parent pid, or ``None`` when unknown/unreadable.
+
+    Best-effort and dependency-free on both platforms; never raises.
+    """
+    if pid <= 0:
+        return None
+    try:
+        if platform.system() == "Windows":
+            return _win_parent_pid(pid)
+        return _parent_pid_posix(pid)
+    except OSError:
+        return None
+
+
+def is_descendant_of(pid: int, ancestors: set[int], *, max_depth: int = 64) -> bool:
+    """True when ``pid`` (or an ancestor of it) is in ``ancestors``.
+
+    Walks the parent-pid chain, bounded by ``max_depth`` so a misread or
+    (impossible, but never trust an OS API unconditionally) cyclic chain
+    can't loop forever. A broken/unreadable chain simply stops the walk and
+    returns False -- this is a safety exclusion, so failing to *prove*
+    descent must never be treated as descent.
+    """
+    if not ancestors:
+        return False
+    seen: set[int] = set()
+    current = pid
+    for _ in range(max_depth):
+        if current in ancestors:
+            return True
+        if current <= 0 or current in seen:
+            return False
+        seen.add(current)
+        nxt = parent_pid(current)
+        if not nxt:
+            return False
+        current = nxt
+    return False
 
 
 def process_executable_path(pid: int) -> str | None:
@@ -580,6 +693,7 @@ def terminate_processes_under(
 
 def processes_with_executable_under(
     root: str, *, exclude: str | None = None, exclude_pids: set[int] | None = None,
+    protect_ancestors: set[int] | None = None,
 ) -> list[dict]:
     """Find processes whose resolved **executable** path is at or under
     ``root`` -- unlike :func:`processes_with_cwd_under`, which matches a
@@ -588,6 +702,14 @@ def processes_with_executable_under(
     runtime slot). ``exclude``, when given, is itself a path prefix to skip
     (typically the CURRENT runtime slot nested under the same ``versions/``
     root) so a caller can find only *other*, non-current instances.
+
+    ``protect_ancestors``, when given, is a set of pids: a candidate whose
+    parent-pid chain includes one of them is skipped even though its own
+    executable matches ``root``. This is how a live worktree-launcher root
+    (registered via :mod:`launch_registry`) shields its own short-lived
+    ``agent_worktrees resolve``/``activity-log`` subprocess calls from being
+    caught mid-flight by a version-cutover sweep (#4454 follow-up) -- those
+    calls are legitimate, still-running work, not a wedged orphan.
 
     Returns ``{"pid": int, "name": str, "executable": str}`` dicts.
     Best-effort: any process that can't be opened or read is silently skipped,
@@ -627,12 +749,15 @@ def processes_with_executable_under(
             continue
         if exclude and _is_under(exe, exclude):
             continue
+        if protect_ancestors and is_descendant_of(pid, protect_ancestors):
+            continue
         hits.append({"pid": pid, "name": name, "executable": exe})
     return hits
 
 
 def terminate_processes_under_executable(
     root: str, *, exclude: str | None = None, exclude_pids: set[int] | None = None,
+    protect_ancestors: set[int] | None = None,
 ) -> list[dict]:
     """Terminate every process whose resolved executable is at or under
     ``root`` (excluding ``exclude``, typically the current runtime slot).
@@ -648,10 +773,18 @@ def terminate_processes_under_executable(
     single project over roughly two hours). Called from the cutover reap
     alongside the singleton monitor's own known-pid reap.
 
+    ``protect_ancestors`` is forwarded to :func:`processes_with_executable_under`
+    -- see its docstring. This is the mechanism that keeps a live worktree
+    launcher's own short-lived subprocess calls from being killed mid-flight
+    by this same sweep (#4454 follow-up).
+
     Returns the list of ``{"pid", "name", "executable", "killed": bool}`` that
     were targeted.
     """
-    targets = processes_with_executable_under(root, exclude=exclude, exclude_pids=exclude_pids)
+    targets = processes_with_executable_under(
+        root, exclude=exclude, exclude_pids=exclude_pids,
+        protect_ancestors=protect_ancestors,
+    )
     if not targets:
         return []
 
