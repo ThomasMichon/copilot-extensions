@@ -47,6 +47,17 @@ retire it. The sequence is reversible up to an explicit commit point, with
 rollback and commit-forward (if the old endpoint is unreachable, it commits to
 the healthy new one rather than stranding clients).
 
+### `zdd.diagnostics` -- daemon-health audit + repair
+
+`audit_daemon_health()` and `apply_daemon_health()` let a consumer surface the
+field-proven abnormal cutover states uniformly through its own doctor/health
+command: duplicate resident daemons, stranded old survivors from an aborted
+cutover, never-promoted abandoned passives, and stale superseded generations
+that should already have self-retired. Destructive repairs are gated on the
+same two rules everywhere: first confirm a validated live owner from the
+consumer's lock/routing state, then terminate only through an identity-bound
+OS handle tied to the target process's start time.
+
 ## Consumer contract
 
 Every side-effecting collaborator is **injected**, so a consuming service stays

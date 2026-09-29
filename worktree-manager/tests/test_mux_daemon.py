@@ -1200,7 +1200,7 @@ def test_write_and_read_lock_data_roundtrip(tmp_path):
     assert mux_daemon.write_lock_data(path, {"manager_mux_endpoint": "127.0.0.1:1"}) is True
     data = mux_daemon.read_lock_data(path)
     assert data["manager_mux_endpoint"] == "127.0.0.1:1"
-    assert "pid" in data and "created_at" in data
+    assert "pid" in data and "created_at" in data and "start_time" in data
 
 
 def test_read_lock_data_absent_or_corrupt(tmp_path):

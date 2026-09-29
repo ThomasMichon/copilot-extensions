@@ -197,7 +197,6 @@ _UPDATE_CONTEXT_ENV = "AGENT_WORKTREES_UPDATE_CONTEXT"
 def windowless_daemon_kwargs(**kwargs):
     return _windowless_daemon_kwargs_impl(**kwargs)
 
-
 def _env_get(new_name: str) -> str | None:
     """Read an env var by name (an empty value is treated as unset)."""
     return os.environ.get(new_name) or None
@@ -6013,7 +6012,7 @@ def _load_full_command_surface() -> None:
     global cmd_session_transcript, cmd_set_pr, cmd_state_root_dispatch, cmd_status, cmd_status_context, cmd_status_monitor, cmd_status_monitor_restart, cmd_status_segment
     global cmd_status_updater, cmd_sync, cmd_uninstall, cmd_uninstall_plugins, cmd_update, cmd_validate, cmd_worktree_dispatch
     global cmd_worktree_lineage, cmd_worktree_status_bundle, context_cli, copilot_identity_cli, finalize_cli, finalize_one, follow_ups_cli, front_door_cli, git_cli
-    global handoff_cli, handoff_diagnostics, installation_cli, list_cli, maintenance_cli, picker_profiles_cli, plan_pre_launch, pr_cli
+    global handoff_cli, handoff_diagnostics, installation_cli, list_cli, maintenance_cli, doctor_render, picker_profiles_cli, plan_pre_launch, pr_cli
     global pr_state_cli, reap_cli, reap_orphan_launcher_shells, reclaim_cli, reclaim_one, related_cli, repos_cli, resolve_cli
     global resolve_launch_cli, resolve_machine_cli, resolve_picker_cli, resolve_system_cli, services_cli, session_binding_cli, session_inspection_cli, session_metadata_cli
     global session_tracking_cli, status_bar_cli, status_cli, status_monitor_cli, status_monitor_runtime, status_updater_cli, sweep_finished_session_worktrees
@@ -6033,6 +6032,7 @@ def _load_full_command_surface() -> None:
         installation_cli,
         list_cli,
         maintenance_cli,
+        doctor_render,
         picker_profiles_cli,
         picker_reconcile_cli,
         pr_cli,
@@ -6342,7 +6342,7 @@ def _load_full_command_surface() -> None:
     cmd_backfill_sessions = maintenance_cli.cmd_backfill_sessions
     cmd_doctor = maintenance_cli.cmd_doctor
     _render_doctor_report = maintenance_cli._render_doctor_report
-    _render_dropin_registry_report = maintenance_cli._render_dropin_registry_report
+    _render_dropin_registry_report = doctor_render.render_dropin_registry_report
     cmd_reconcile_binstubs = maintenance_cli.cmd_reconcile_binstubs
     cmd_register_project_entry = maintenance_cli.cmd_register_project_entry
     cmd_anchor_check = maintenance_cli.cmd_anchor_check
