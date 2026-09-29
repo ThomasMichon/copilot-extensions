@@ -71,7 +71,12 @@ class TestProcessIdentity:
 
         monkeypatch.setattr(locks_mod.sys, "platform", "win32")
         monkeypatch.setattr(locks_mod, "pid_alive", lambda pid: True)
-        monkeypatch.setattr(ctypes, "WinDLL", lambda name, use_last_error=True: kernel32)
+        monkeypatch.setattr(
+            ctypes,
+            "WinDLL",
+            lambda name, use_last_error=True: kernel32,
+            raising=False,
+        )
         monkeypatch.setattr(ctypes, "byref", lambda value: value)
 
         assert process_identity(123) == "windows-filetime:4294967298"
