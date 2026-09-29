@@ -473,6 +473,13 @@ statement in the PR description.
    drain).
 3. Link the doc/effort updates that record the contract, or explain why
    existing documentation remains accurate and complete.
+4. Self-check the diff against
+   [`docs/patterns/graceful-daemon-cutover.md`](docs/patterns/graceful-daemon-cutover.md)'s
+   "Common review findings" checklist **before** opening the PR — it enumerates
+   the small set of concurrency-ordering, PID-identity-safety, and
+   cross-platform gaps that recurred across every phase of this repo's own
+   graceful-cutover rollout (6-14 review rounds each). Catching them here is
+   materially cheaper than a review round.
 
 Reviewers treat a missing or hand-wavy statement as unfinished work.
 
@@ -1247,6 +1254,16 @@ Review requires evidence at the real divergence seam, not only a mocked
 Keep this live Windows check focused; the required CI guard remains static and
 fast.
 
+### "POSIX" Is Not "Linux" — Name macOS Explicitly
+
+A process-census or liveness primitive written against `/proc` or Linux
+`pidfd` APIs is **Linux-specific**, not general POSIX support — macOS is
+POSIX but has neither. If a change claims cross-platform daemon/process
+coverage, name **Windows, Linux, and macOS** explicitly and state what each
+one does: implemented, or an explicit and justified exemption (e.g. "no macOS
+runners in this suite yet; falls back to X"). Do not let "POSIX" silently
+stand in for "tested on Linux only."
+
 ### Ephemeral Process Reaping
 
 Launching a background/detached process invisibly (the section above) is only
@@ -1296,6 +1313,20 @@ must additionally answer:
    must never be reaped mid-flight) — see the pattern doc's *Variant*
    section and `agent_mcp.session.BridgeSession.has_pending` /
    `agent_mcp.bridge.Bridge.run`'s idle branch for a worked example.
+
+### PID-Identity-Bound Termination Needs a Direct Test
+
+Any code path that terminates or reaps a process by PID — a stale-daemon
+reaper, a cutover repair action, a self-heal/`doctor` apply mode — must ship a
+dedicated unit test in the **same PR** proving the terminator (a) matches only
+a live, identity-verified target, and (b) refuses to act on an identity
+mismatch (a stale or reused PID, or a mismatched owner). Reuse the existing
+validated-owner + identity-bound-termination discipline
+(`locks.read_lock`/`locks.lock_is_live` for a confirmed live owner,
+`procs.terminate_pid_if_identity` for the actual termination) rather than
+re-deriving a parallel mechanism. An end-to-end rehearsal test that happens to
+exercise the happy path is **not** sufficient evidence of this on its own —
+the safety boundary itself needs a direct test.
 
 They are **not active until wired** per clone (git does not auto-enable a
 committed hooks dir). Run the helper once per checkout:

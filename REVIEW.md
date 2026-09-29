@@ -109,6 +109,28 @@ specifically when reviewing a pull request, not a replacement for them.
   `service-lifecycle-supervision` singleton-handoff path, or a demonstrated
   non-daemon lifecycle governed by another pattern such as
   `ephemeral-process-reaping`.
+- **Daemon-lifecycle concurrency & ordering.** For a PR touching cutover,
+  drain, promotion, or process-repair logic, check it against
+  `docs/patterns/graceful-daemon-cutover.md`'s "Common review findings"
+  checklist: overlapping cutover attempts must be serialized under one
+  lease/guard; a successor's promotion must be *confirmed* before its
+  predecessor retires (never the reverse); the drain boundary must close
+  admission **and** wait out every already-admitted concurrent request, not
+  just the periodic sweep; and any repair/self-heal path must re-validate its
+  target's identity immediately before acting, not only at snapshot time.
+- **PID-identity-bound destructive code needs a direct test.** Flag any
+  change that terminates or reaps a process by PID without a dedicated unit
+  test proving the terminator (a) matches only a live, identity-verified
+  target and (b) refuses on identity mismatch (stale/reused PID, wrong
+  owner). An end-to-end rehearsal alone does not satisfy this.
+- **Cross-platform completeness beyond installer scripts.** The existing
+  "Cross-platform parity" bullet below covers `install.sh`/`install.ps1`
+  pairs; separately, flag a process-census/liveness primitive that
+  implicitly conflates "POSIX" with "Linux" (e.g. `/proc`- or
+  `pidfd`-based code presented as general POSIX support) — a change
+  claiming cross-platform daemon/process support should name Windows,
+  Linux, and macOS explicitly, each either implemented or explicitly and
+  justifiably exempted.
 - **ruff signal, not noise.** Hold changed Python to at least the `F`/`E9`
   groups; do not block on pre-existing style debt in code the PR did not
   touch.

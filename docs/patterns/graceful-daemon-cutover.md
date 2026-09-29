@@ -418,6 +418,70 @@ Consequences of this equivalence:
   `.sh` change always **falls back** to the already-proven SIGTERM-graceful
   `systemctl restart`, so the worst case is today's behavior.
 
+## Common review findings — a pre-flight self-check
+
+The `graceful-cutover-worktrees-and-ssh` effort landed six phases across eight
+PRs (#4447, #4483, #4497, #4518, #4550, #4554, #4563, #4583); the four PRs that
+actually implemented cutover/repair logic (#4447, #4497, #4518, #4563) needed
+6-14 automated review rounds each before merging, almost entirely on a small,
+*recurring* set of bug classes rather than novel ones each round. Read this
+section — and actually check your own diff against it — **before** opening a
+PR that touches cutover, drain, promotion, or process-repair logic; it is
+cheaper than a review round.
+
+1. **Serialize cutover attempts under one lease.** Two overlapping cutover
+   invocations (a rapid-fire re-release, or a manual repair racing an
+   in-progress installer-driven cutover) must never both proceed. Acquire a
+   single exclusive lease/guard for the whole cutover *and* for any repair
+   path that also touches promotion/retirement state — an audit/`doctor`
+   snapshot may read without the lease, but anything that could mutate
+   generation state must hold it.
+2. **Promote before you retire — never the reverse.** The old generation may
+   only retire once the successor's promotion is *confirmed*, not merely
+   attempted. A failure between "route flipped" and "successor confirmed
+   live" must roll back or retry, never leave both generations gone.
+3. **Drain boundary = admission closed AND every already-admitted unit of
+   work finished** — not "between sweep ticks." If the daemon serves any
+   concurrent request surface (a hook/classify/control-plane endpoint)
+   *separate* from its periodic sweep, both must be drained; a sweep-only
+   drain boundary misses in-flight requests.
+4. **A repair/self-heal path must re-validate its target immediately before
+   acting, not just at snapshot time.** Between an audit snapshot and a
+   repair action, the routed active daemon can change, a passive can be
+   promoted, or a candidate can exit and its PID be reused. Re-check the
+   target's identity (owner/lock/routing agreement) at the point of action,
+   not only when the finding was first produced.
+5. **Any process termination by PID needs a direct, dedicated safety test —
+   an end-to-end rehearsal is not sufficient evidence.** Ship a unit test that
+   proves the terminator (a) matches only a live, identity-verified target
+   (`locks.process_start_time` / `procs.terminate_pid_if_identity`-shaped
+   discipline — reuse it, do not re-derive), and (b) refuses on any identity
+   mismatch (stale PID, reused PID, wrong owner). This applies to every
+   destructive repair/reap path, not only the first one you write.
+6. **Loopback control-plane surfaces need owner-scoped auth,** not just
+   "loopback-only." Any local process can otherwise reach the endpoint. Use a
+   per-owner bearer token file (best-effort restrictive permissions), and
+   keep ambient `PYTHONPATH`/environment from leaking into a
+   subprocess-launched activation helper — clear or sanitize it explicitly at
+   the launch seam.
+7. **State your cross-platform coverage explicitly, and don't conflate
+   "POSIX" with "Linux."** A process-census/liveness primitive written
+   against `/proc` or `pidfd` is Linux-specific, not POSIX-general — macOS is
+   POSIX but has neither. If your change claims general cross-platform
+   support, name Windows, Linux, **and** macOS explicitly and say what each
+   one does (implemented, or an explicit, justified exemption) rather than
+   letting "POSIX" silently mean "Linux, untested elsewhere."
+8. **Bookkeeping findings are the cheapest to prevent and the most common to
+   ship anyway** — before opening the PR, re-check: every plugin/library
+   whose vendored/shared code actually changed is named in the changefile
+   (not only the primary plugin); the PR's Documentation impact statement
+   matches the final diff, not an earlier draft; no unrelated
+   generated/vendored directory rode along in the diff (`git status`/`git
+   diff --stat` against your intended file list before pushing); and if the
+   PR touches an effort README, its Journal's completion claims are checked
+   against that same phase's own Validation Plan items, not asserted
+   independently.
+
 ## Rollout sequencing
 
 1. **agent-dispatch** — ~~highest value, currently kill-and-restart~~ **done**:
