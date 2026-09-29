@@ -1,0 +1,9 @@
+{
+  "comment": "Fix test_run_bounded_kills_grandchild_on_timeout flake under the full-suite test-containment wrapper",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

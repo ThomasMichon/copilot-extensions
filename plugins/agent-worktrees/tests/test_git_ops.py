@@ -342,7 +342,7 @@ class TestPushTimeoutTreeKill:
     this since the whole point is real OS-level process/descendant lifetime.
     """
 
-    def test_run_bounded_kills_grandchild_on_timeout(self, tmp_path):
+    def test_run_bounded_kills_grandchild_on_timeout(self, tmp_path, monkeypatch):
         import os
         import subprocess
         import sys
@@ -350,6 +350,26 @@ class TestPushTimeoutTreeKill:
 
         from agent_worktrees import push_timeout
         from agent_worktrees.locks import pid_alive
+
+        # This test's whole point is the REAL, non-contained pgid-based
+        # descendant sweep in push_timeout._kill_tree (see its own
+        # docstring): that sweep is deliberately skipped whenever
+        # contained_test_mode() is true, so that a test harness invoking a
+        # stalled command doesn't killpg its own worker. The repository's
+        # own full-suite test runner (tools/run-plugin-tests.py, via
+        # tools/plugin_test_containment.py) sets
+        # COPILOT_EXTENSIONS_TEST_CONTAINED=1 ambiently for the ENTIRE
+        # pytest process to protect itself from exactly that -- which
+        # leaks into this test's own call to run_bounded() and silently
+        # disables the very sweep being asserted (confirmed live: the
+        # fast/PR-time lane runs plain pytest with no such wrapper, so this
+        # passed there, while every full-suite run -- including every real
+        # validate-and-promote promotion attempt -- inherits the
+        # containment flag and fails this assertion deterministically).
+        # Clearing it here is safe: run_bounded's own real tree-kill is
+        # exactly what this test asserts actually reaps the grandchild, so
+        # no process is left behind for the outer harness to clean up.
+        monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
 
         ready = tmp_path / "ready"
         pidfile = tmp_path / "grandchild.pid"
