@@ -21,6 +21,18 @@ from venue_copilot.refs import upload_for
 _BUSY_EXIT = 75
 _RESERVATION_TTL = 900.0
 _RESERVE_RETRY_WINDOW = 90.0
+_DISPATCH_ENV_KEYS = (
+    "AGENT_DISPATCH_URL",
+    "AGENT_DISPATCH_TOKEN",
+    "AGENT_DISPATCH_SHARED_URL",
+    "AGENT_DISPATCH_SHARED_TOKEN",
+    "AGENT_DISPATCH_SHARED_TOKEN_COMMAND",
+    "AGENT_DISPATCH_ENDPOINT",
+    "AGENT_DISPATCH_SUPERVISE_MACHINE",
+    "AGENT_DISPATCH_FAILOVER_MACHINE",
+    "AGENT_DISPATCH_WSL_WINDOWS_CLIENT",
+    "AGENT_DISPATCH_NO_AUTOSTART",
+)
 
 
 def _with_caller_model(requested: list[str]) -> list[str]:
@@ -146,14 +158,25 @@ def _launch_env(
                 "the container's Copilot CLI would start signed out"
             )
         env["GH_TOKEN"] = github_token
-    if getattr(args, "no_relay", False) or not relay_enabled:
-        return env, None, None
-    from .container_shims import deploy as deploy_shims
+    for key in _DISPATCH_ENV_KEYS:
+        value = os.environ.get(key, "").strip()
+        if value:
+            env[key] = value
     from .container_shims import ensure_agent_worktrees
+    from .container_shims import ensure_agent_worktrees_workspace_registered
+    from .container_shims import deploy as deploy_shims
     from .container_shims import git_credential_environment
     from .relay_provider import token_for
 
     ensure_agent_worktrees(args.name, user=target.user)
+    if getattr(target, "workspace_folder", ""):
+        ensure_agent_worktrees_workspace_registered(
+            args.name,
+            user=target.user,
+            workspace_folder=target.workspace_folder,
+        )
+    if getattr(args, "no_relay", False) or not relay_enabled:
+        return env, None, None
     host_relay_port = require_live_relay_port()
     if not relay_healthy(host_relay_port):
         raise RuntimeError(

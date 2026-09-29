@@ -61,15 +61,24 @@ def test_deploy_includes_git_credential_helper_by_default(monkeypatch):
 def test_ensure_agent_worktrees_is_noop_when_already_ready(monkeypatch):
     monkeypatch.setattr(container_shims, "_agent_worktrees_ready", lambda *a, **k: True)
     monkeypatch.setattr(
+        container_shims, "_agent_worktrees_payload_ready", lambda *a, **k: True
+    )
+    monkeypatch.setattr(container_shims, "_container_home", lambda *a, **k: "/home/vscode")
+    monkeypatch.setattr(
         container_shims,
-        "_container_home",
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not probe home")),
+        "_agent_worktrees_payload_paths",
+        lambda home: ("/home/vscode/.agent-worktrees/payload-src", "/payload-root"),
+    )
+    monkeypatch.setattr(
+        container_shims,
+        "_deploy_agent_worktrees_wrapper",
+        lambda container, payload_root=None: None,
     )
 
     container_shims.ensure_agent_worktrees("repo-1", user="vscode")
 
 
-def test_ensure_agent_worktrees_stages_local_payload_and_external_uv_sources(
+def test_ensure_agent_worktrees_persists_local_payload_and_external_uv_sources(
     monkeypatch, tmp_path
 ):
     repo_root = tmp_path / "repo"
@@ -94,7 +103,7 @@ agent-procutil = { path = "libs/agent-procutil" }
     ready = iter([False, True])
     exec_calls: list[tuple[str, str]] = []
     cp_calls: list[tuple[Path, str]] = []
-    wrappers: list[str] = []
+    wrappers: list[tuple[str, str | None]] = []
 
     monkeypatch.setattr(container_shims, "_agent_worktrees_payload_root", lambda: payload_root)
     monkeypatch.setattr(container_shims, "_agent_worktrees_ready", lambda *a, **k: next(ready))
@@ -119,27 +128,24 @@ agent-procutil = { path = "libs/agent-procutil" }
     monkeypatch.setattr(
         container_shims,
         "_deploy_agent_worktrees_wrapper",
-        lambda container: wrappers.append(container),
+        lambda container, payload_root=None: wrappers.append((container, payload_root)),
     )
 
     container_shims.ensure_agent_worktrees("repo-1", user="vscode")
 
-    assert wrappers == ["repo-1"]
+    assert wrappers == [
+        ("repo-1", "/home/vscode/.agent-worktrees/payload-src/plugins/agent-worktrees")
+    ]
     payload_targets = {source: target_dir for source, target_dir in cp_calls}
-    assert payload_targets[payload_root].startswith(
-        "/home/vscode/.agent-containers/staging/agent-worktrees-"
-    )
-    assert payload_targets[payload_root].endswith("/plugins")
-    assert payload_targets[libs_root].startswith(
-        "/home/vscode/.agent-containers/staging/agent-worktrees-"
-    )
+    assert payload_targets[payload_root] == "/home/vscode/.agent-worktrees/payload-src/plugins"
+    assert payload_targets[libs_root] == "/home/vscode/.agent-worktrees/payload-src"
     install = next(
         command for user, command in exec_calls if "bash scripts/install.sh provision" in command
     )
-    assert "cd '/home/vscode/.agent-containers/staging/agent-worktrees-" in install
+    assert "cd '/home/vscode/.agent-worktrees/payload-src/plugins/agent-worktrees'" in install
     assert "--install-dir '/home/vscode/.agent-worktrees'" in install
     assert any(
-        command.startswith("rm -rf '/home/vscode/.agent-containers/staging/agent-worktrees-")
+        command.startswith("rm -rf '/home/vscode/.agent-worktrees/payload-src'")
         for _, command in exec_calls
     )
 
@@ -177,6 +183,70 @@ def test_ensure_agent_worktrees_surfaces_install_failures(monkeypatch):
         container_shims.ensure_agent_worktrees("repo-1", user="vscode")
 
     assert any(
-        command.startswith("rm -rf '/home/vscode/.agent-containers/staging/agent-worktrees-")
+        command.startswith("rm -rf '/home/vscode/.agent-worktrees/payload-src'")
         for command in exec_calls
     )
+
+
+def test_ensure_agent_worktrees_repairs_old_ready_install_without_reinstall(monkeypatch):
+    ready = iter([True, True])
+    exec_calls: list[str] = []
+    wrappers: list[tuple[str, str | None]] = []
+
+    monkeypatch.setattr(container_shims, "_agent_worktrees_ready", lambda *a, **k: next(ready))
+    monkeypatch.setattr(container_shims, "_agent_worktrees_payload_ready", lambda *a, **k: False)
+    monkeypatch.setattr(container_shims, "_container_home", lambda *a, **k: "/home/vscode")
+    monkeypatch.setattr(container_shims, "_docker_exists", lambda *a, **k: True)
+    monkeypatch.setattr(
+        container_shims,
+        "_agent_worktrees_payload_paths",
+        lambda home: ("/home/vscode/.agent-worktrees/payload-src", "/payload-root"),
+    )
+    monkeypatch.setattr(
+        container_shims,
+        "_sync_agent_worktrees_payload",
+        lambda *a, **k: "/payload-root",
+    )
+    monkeypatch.setattr(
+        container_shims,
+        "_deploy_agent_worktrees_wrapper",
+        lambda container, payload_root=None: wrappers.append((container, payload_root)),
+    )
+    monkeypatch.setattr(
+        container_shims,
+        "_docker_exec",
+        lambda container, command, *, user, env=None, timeout=30.0: (
+            exec_calls.append(command)
+            or types.SimpleNamespace(returncode=0, stdout="", stderr="")
+        ),
+    )
+
+    container_shims.ensure_agent_worktrees("repo-1", user="vscode")
+
+    assert wrappers == [("repo-1", "/payload-root")]
+    assert not any("bash scripts/install.sh provision" in command for command in exec_calls)
+
+
+def test_ensure_agent_worktrees_workspace_registered_runs_idempotent_register(monkeypatch):
+    calls: list[tuple[str, str, str]] = []
+
+    def fake_exec(container, command, *, user, env=None, timeout=30.0):
+        calls.append((container, user, command))
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(container_shims, "_docker_exec", fake_exec)
+
+    container_shims.ensure_agent_worktrees_workspace_registered(
+        "repo-1",
+        user="vscode",
+        workspace_folder="/workspaces/odsp-web",
+    )
+
+    assert calls == [
+        (
+            "repo-1",
+            "vscode",
+            "set -euo pipefail; cd '/workspaces/odsp-web'; "
+            "'/usr/local/bin/agent-worktrees' register 'odsp-web' --repo-dir '/workspaces/odsp-web'",
+        )
+    ]

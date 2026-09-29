@@ -336,6 +336,38 @@ per environment are genuinely undecided, not just unwritten._
         adopted yet (`Could not resolve a project for 'embody'` / `agent-
         worktrees register odsp-web`), so the full no-CLI task-completion
         half of Phase 3 remains open.
+      - Follow-up hand-run (2026-09-29) closed the adoption / reach-back
+        prerequisites but still did **not** produce a successful task run,
+        so this checkbox stays open. Changes from this pass:
+        1. `agent-containers` now persists a real `agent-worktrees` payload
+           snapshot in the trusted container and uses `/usr/local/bin/agent-worktrees`
+           for workspace adoption, so `register odsp-web --repo-dir /workspaces/odsp-web`
+           succeeds repeatably instead of failing on the provisioned runtime's
+           missing payload-root ownership metadata.
+        2. Detached trusted-container launches now forward inherited
+           `AGENT_DISPATCH_*` / shared-coordinator environment into the remote
+           shell, so the no-CLI seed's `dispatch_http.py` contract can actually
+           see the injected coordinator endpoint.
+        3. `no_cli_autopilot_worker_prompt()` now tells Linux venues to
+           substitute `python3` when `python` is absent; the real
+           `peaceful_wright` container only has `/usr/bin/python3`.
+        4. The `peaceful_wright` container itself needed `tmux` installed
+           before `agent-worktrees embody --ensure-mux` could get as far as
+           Copilot startup at all.
+      - Real validation after those fixes used a fresh scratch task
+        (`86ae5821d5544b5d9bc4ff86d303d349`) plus the inline
+        `no_cli_autopilot_worker_prompt()` seed, launched via
+        `agent-containers copilot peaceful_wright --detach` with
+        `AGENT_DISPATCH_URL=http://host.docker.internal:50087`. The detached
+        command now reaches `agent-worktrees embody` with the adopted
+        `/workspaces/odsp-web` checkout, but the next honest blocker is again
+        different: Copilot in that shared trusted container never reaches a
+        ready prompt, so the seed is never submitted. This reproduced both
+        with a 600-second `--seed-ready-timeout` and with
+        `--copilot-arg=--no-experimental`, and the scratch task stayed
+        untouched in `queued`. Cleanup after both failed launches left no live
+        `wt-anchor-odsp-web` tmux session, no active container lease, and the
+        container still running/unleased.
 
 ### Phase 4 — agent-bridge companion-agent heads-up
 - [ ] Confirm (or add, if missing) a minimal heads-up in agent-bridge's own
@@ -553,3 +585,33 @@ _Pending._
     `test_trusted_image_run_namespaces_host_paths_per_fleet_member`,
     `test_ensure_owned_dir_creates_and_chowns`), unrelated to this
     detached-launch/provisioning slice.
+
+### 2026-09-29 — Phase 3 follow-up: adoption closed, but the real no-CLI hand-run is now blocked at Copilot readiness
+- Implemented the next `agent-containers`/`agent-dispatch` follow-up slice
+  for the same trusted-container path: persisted an actual
+  `agent-worktrees` payload snapshot in the container (so repo adoption can
+  mint attributable project binstubs after provisioning), auto-adopted the
+  container workspace repo before detached launch, forwarded inherited
+  `AGENT_DISPATCH_*` / shared-coordinator environment into detached
+  container launches, and taught the no-CLI seed to call out the
+  real-world `python` vs `python3` Linux launcher difference.
+- Hand-run on `peaceful_wright`: confirmed the container is running,
+  unleased, and still has `agent-worktrees` (`1.9.3-dev1`) provisioned;
+  repaired the previous provisioned-runtime registration failure; adopted
+  `/workspaces/odsp-web` as `odsp-web`; then created scratch task
+  `86ae5821d5544b5d9bc4ff86d303d349` and tried a real detached launch with
+  the full inline no-CLI seed and
+  `AGENT_DISPATCH_URL=http://host.docker.internal:50087`.
+- The detached launch now gets past both earlier blockers (missing
+  `agent-worktrees`, then unadopted repo), but a new blocker remains:
+  Copilot inside that shared trusted container never reaches a ready prompt,
+  so `agent-worktrees embody` reports `seed_submitted: false` /
+  `not-ready-timeout` and the scratch task never leaves `queued`. This held
+  even after installing `tmux` in the container (needed just to reach
+  Copilot startup at all), increasing the seed-ready timeout to 600
+  seconds, and retrying with `--copilot-arg=--no-experimental`.
+- Cleanup/final state after the failed hand-run: no surviving
+  `wt-anchor-odsp-web` tmux session, no active `agent-containers` lease,
+  `peaceful_wright` still running/unleased, and the scratch task left queued
+  long enough to observe its untouched state before cleanup/retirement in the
+  follow-up session step.

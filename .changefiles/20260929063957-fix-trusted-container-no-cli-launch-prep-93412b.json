@@ -1,0 +1,9 @@
+{
+  "comment": "Fix trusted-container no-CLI launch prep around workspace adoption and dispatch reach-back.",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "dev"
+    }
+  ]
+}

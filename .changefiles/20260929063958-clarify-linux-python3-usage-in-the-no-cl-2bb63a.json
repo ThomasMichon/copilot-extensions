@@ -1,0 +1,9 @@
+{
+  "comment": "Clarify Linux python3 usage in the no-CLI worker seed.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    }
+  ]
+}
