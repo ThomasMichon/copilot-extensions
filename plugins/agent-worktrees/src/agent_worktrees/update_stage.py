@@ -258,6 +258,37 @@ def _run_copilot_update() -> tuple[bool, str]:
         return False, f"copilot plugin update error: {e}"
 
 
+def _resolve_before_fingerprint(prior: dict, plugin_dir: Path) -> tuple[str, str]:
+    """Reuse the previous stage's recorded AFTER-fingerprint as this run's
+    BEFORE-fingerprint when it is trustworthy, skipping one full-tree hash
+    walk (roughly half the fingerprinting cost) in the common case where
+    nothing changed between stage runs.
+
+    Safe only because of this module's own docstring's "Critical safety
+    constraint": the marketplace payload directory this hashes
+    (``~/.copilot/installed-plugins/copilot-extensions/agent-worktrees``) is
+    exclusively written by ``copilot plugin update`` -- nothing else in this
+    stage-then-join flow mutates it between runs. The prior AFTER-fingerprint
+    is trusted only when it was recorded for the SAME ``plugin_dir`` by a
+    real, non-skipped, completed run; any other prior state (first run ever,
+    a locked/no-plugin-dir skip, a different plugin_dir, or a non-marketplace
+    layout that never computed one) falls back to a fresh full-tree hash so a
+    mismatch never silently hides a real change. Returns
+    ``(fingerprint, "cached" | "computed")`` -- the source tag is carried into
+    the status file purely for diagnosability (tests/`doctor` can see which
+    path a run took), never used to change behavior.
+    """
+    if (
+        not prior.get("skipped")
+        and prior.get("stage_done")
+        and prior.get("plugin_dir") == str(plugin_dir)
+        and isinstance(prior.get("fingerprint"), str)
+        and prior["fingerprint"]
+    ):
+        return prior["fingerprint"], "cached"
+    return fingerprint(plugin_dir), "computed"
+
+
 def stage(
     *,
     status: Path | None = None,
@@ -269,8 +300,10 @@ def stage(
     Steps (all safe w.r.t. the running Picker's venv):
       1. Single-flight: acquire the lock, else record ``skipped: locked``.
       2. Discover the marketplace payload dir (else ``skipped``).
-      3. Fingerprint -> ``copilot plugin update`` -> fingerprint; the diff is
-         ``plugin_changed`` (the shell apply runs the installer iff changed).
+      3. Fingerprint (reusing the prior run's AFTER-hash when trustworthy --
+         see :func:`_resolve_before_fingerprint`) -> ``copilot plugin
+         update`` -> fingerprint; the diff is ``plugin_changed`` (the shell
+         apply runs the installer iff changed).
       4. Pre-compute the cheap ``pre-launch`` staleness plan so the join can
          skip a redundant spawn when nothing is stale.
 
@@ -278,6 +311,7 @@ def stage(
     """
     status = status or status_path()
     lock = lock or lock_path()
+    prior = read_status(status)
     result: dict = {"stage_done": False, "ts": time.time()}
 
     if not acquire_lock(lock):
@@ -300,9 +334,11 @@ def stage(
         plugin_changed = False
         copilot_output = "skipped (non-marketplace layout)"
         if layout == "marketplace":
-            before = fingerprint(plugin_dir)
+            before, before_source = _resolve_before_fingerprint(prior, plugin_dir)
             ran, copilot_output = _run_copilot_update()
             after = fingerprint(plugin_dir) if ran else before
+            result["fingerprint"] = after
+            result["before_fingerprint_source"] = before_source
             plugin_changed = ran and (before != after)
 
         # Version-drift reconcile (#2826): the fingerprint diff above only
