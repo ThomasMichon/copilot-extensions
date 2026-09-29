@@ -412,10 +412,13 @@ substantial in its own right.
       commands keep working for their own narrower cases (version-
       supersession reap) without behavior change for callers that don't hit
       the new automatic path.
-- [ ] Phase 5: a new effort/design doc introducing a resident daemon in any
-      `agent-*` plugin can be shown to reconcile against the invariant (a
-      dry-run test case: draft a hypothetical new-daemon design and confirm
-      the CONTRIBUTING.md checklist item actually surfaces the requirement).
+- [x] Phase 5: a new effort/design doc introducing a resident daemon in any
+      `agent-*` plugin can be shown to reconcile against the invariant (dry
+      run completed against the updated docs: the `docs/patterns/README.md`
+      Runtime-service classification point and `CONTRIBUTING.md`'s
+      **Graceful cutover impact** statement now both surface the requirement;
+      CI automation intentionally remains absent pending a manifest-level
+      daemon declaration).
 - [ ] Phase 6: the diagnostic correctly identifies each of the four named
       abnormality classes in a synthetic reproduction (not just the one this
       session hit), reports report-only findings without side effects, and
@@ -457,6 +460,14 @@ proves a real adopter need not be a plugin-manifested runtime service at all).
 Phase 5 therefore documents the fallback explicitly: until the suite gains a
 manifest-level resident-daemon declaration, the new CONTRIBUTING checklist item
 is the **sole review-time gate** for this invariant.
+
+Validation for this phase stayed proportionate to the actual change: a dry-run
+"new resident daemon" design now hits the requirement in both places the phase
+was meant to harden — first at design time via the Runtime-service
+classification rule in `docs/patterns/README.md`, then again at PR time via
+`CONTRIBUTING.md`'s required **Graceful cutover impact** statement. No
+`check-*.py` guard was added precisely because the feasibility audit above
+showed the repo still lacks a reliable static signal for that same judgment.
 
 ### 2026-09-29 — Phase 4 documented in the pattern doc
 Closed the Phase 4 docs gap in the canonical pattern itself. Updated
