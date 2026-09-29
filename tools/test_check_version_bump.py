@@ -59,6 +59,26 @@ def _plugin_with_editable_ref(repo: Path, name: str, version: str, lib: str) -> 
     _write(repo, f"plugins/{name}/src/{name.replace('-', '_')}/__init__.py", "x = 1\n")
 
 
+def _out_of_plugin_consumer_with_editable_ref(
+    repo: Path, name: str, version: str, lib: str
+) -> None:
+    """Materialize a minimal top-level, out-of-plugin consumer (mirroring
+    ``worktree-manager``: no ``plugin.json`` at all -- its own release
+    version lives directly in ``[project].version``) whose
+    ``pyproject.toml`` references ``lib`` via a `uv`-editable canonical
+    pointer. ``uv_editable_ref.iter_consumer_dirs()`` must discover it
+    without any ``_EXTRA_CONSUMER_DIRS`` fixture wiring here -- it already
+    hardcodes ``worktree-manager`` by that exact name."""
+    assert name == "worktree-manager", "only the real extra-consumer name is discoverable"
+    _write(
+        repo, f"{name}/pyproject.toml",
+        f'[project]\nname = "{name}"\nversion = "{version}"\n\n'
+        f'[tool.uv.sources]\n'
+        f'{lib} = {{ path = "../libs/{lib}", editable = true }}\n',
+    )
+    _write(repo, f"{name}/src/{name.replace('-', '_')}/__init__.py", "x = 1\n")
+
+
 def _set_plugin_version(repo: Path, name: str, version: str) -> None:
     _write(repo, f"plugins/{name}/plugin.json",
            json.dumps({"name": name, "version": version}) + "\n")
@@ -182,6 +202,82 @@ def test_shared_lib_change_charges_uv_editable_pointer_consumer_too(repo: Path):
     result = _run(repo)
     assert result.returncode == 1
     assert "gamma" in result.stderr
+
+
+def test_shared_lib_change_charges_out_of_plugin_editable_ref_consumer(repo: Path):
+    """A top-level, out-of-plugin consumer (mirroring worktree-manager: no
+    `plugin.json`, its own `[project].version`) referencing a shared lib
+    only via a `uv`-editable pointer must still be charged for a shared-lib
+    change (PR #4465 review): `_vendored_consumers()` previously only
+    scanned `plugins/*`, so this class of consumer's version-gated,
+    materialized payload could change with no bump obligation at all."""
+    _out_of_plugin_consumer_with_editable_ref(repo, "worktree-manager", "9.0.0-dev1", "shared-lib")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add worktree-manager (uv-editable shared-lib consumer)")
+    wtm_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", wtm_sha)
+
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "shared = 2\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "shared lib change, no bumps")
+    result = _run(repo)
+    assert result.returncode == 1
+    assert "worktree-manager" in result.stderr
+
+
+def test_shared_lib_change_passes_when_out_of_plugin_consumer_bumps_its_own_version(
+    repo: Path,
+):
+    """The out-of-plugin consumer's OWN `[project].version` (not a
+    `plugin.json` it doesn't have) is what the guard must compare."""
+    _out_of_plugin_consumer_with_editable_ref(repo, "worktree-manager", "9.0.0-dev1", "shared-lib")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add worktree-manager (uv-editable shared-lib consumer)")
+    wtm_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", wtm_sha)
+
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "shared = 2\n")
+    _set_plugin_version(repo, "alpha", "1.0.0-dev2")
+    _set_plugin_version(repo, "beta", "2.0.0-dev2")
+    _write(
+        repo, "worktree-manager/pyproject.toml",
+        '[project]\nname = "worktree-manager"\nversion = "9.0.0-dev2"\n\n'
+        '[tool.uv.sources]\n'
+        'shared-lib = { path = "../libs/shared-lib", editable = true }\n',
+    )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "shared lib change + worktree-manager bump")
+    result = _run(repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_symlinked_pyproject_fails_closed_instead_of_dropping_consumer(repo: Path):
+    """A plugin whose `pyproject.toml` is a SYMLINK must never be silently
+    dropped from the consumer map either (PR #4465 review):
+    `find_uv_editable_refs()` deliberately returns `[]` for a symlinked
+    manifest (its own explicit refusal), so a caller must reject that case
+    itself rather than treating the empty result as "no pointers here"."""
+    _write(repo, "plugins/gamma/plugin.json",
+           json.dumps({"name": "gamma", "version": "3.0.0-dev1"}) + "\n")
+    _write(repo, "plugins/gamma/src/gamma/__init__.py", "x = 1\n")
+    real = repo / "plugins" / "gamma" / "real-pyproject.toml"
+    real.write_text(
+        '[project]\nname = "gamma"\nversion = "3.0.0-dev1"\n\n'
+        '[tool.uv.sources]\n'
+        'shared-lib = { path = "../../libs/shared-lib", editable = true }\n',
+        encoding="utf-8",
+    )
+    (repo / "plugins" / "gamma" / "pyproject.toml").symlink_to(real)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add gamma with a symlinked pyproject.toml")
+    result = _run(repo, "--list")
+    assert result.returncode != 0
+    assert "gamma" in result.stderr
+    assert "symlink" in result.stderr.lower()
 
 
 def test_vendored_copy_change_charges_only_its_plugin(repo: Path):

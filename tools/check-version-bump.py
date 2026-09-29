@@ -52,6 +52,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import uv_editable_ref as uer  # noqa: E402
 
+try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
+    # 3.10 support floor -- mirrors uv_editable_ref's own identical fallback.
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised only on 3.10
+    import tomli as tomllib
+
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
 LIBS_DIR = REPO / "libs"
@@ -104,31 +110,88 @@ def _plugin_json_version_at(ref: str, plugin: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _pyproject_project_version_at(ref: str, rel_pyproject: str) -> str | None:
+    """The ``[project].version`` field of ``rel_pyproject`` (a repo-relative
+    path) at ``ref`` -- for a top-level, out-of-plugin consumer (e.g.
+    ``worktree-manager``) that has no ``plugin.json`` at all and instead
+    carries its own release version directly in its ``pyproject.toml``.
+    ``None`` on a missing file, unparseable TOML, or a manifest with no
+    ``[project].version`` -- same "skip, don't crash" contract as
+    ``_plugin_json_version_at``."""
+    r = _git("show", f"{ref}:{rel_pyproject}")
+    if r.returncode != 0:
+        return None
+    try:
+        data = tomllib.loads(r.stdout)
+    except tomllib.TOMLDecodeError:
+        return None
+    version = data.get("project", {}).get("version")
+    return version if isinstance(version, str) else None
+
+
+def _consumer_version_at(ref: str, consumer: str) -> str | None:
+    """The release version for any consumer `_vendored_consumers()` can
+    name -- a ``plugins/<consumer>`` plugin (``plugin.json``) or a
+    top-level, out-of-plugin consumer tree like ``worktree-manager`` (its
+    own ``pyproject.toml`` ``[project].version``, since it has no
+    ``plugin.json`` at all)."""
+    if (PLUGINS_DIR / consumer).is_dir():
+        return _plugin_json_version_at(ref, consumer)
+    return _pyproject_project_version_at(ref, f"{consumer}/pyproject.toml")
+
+
 def _vendored_consumers() -> dict[str, list[str]]:
-    """Map ``lib name -> [plugins that vendor it]`` -- both an ordinary
-    in-tree ``plugins/*/libs/*`` real copy AND a `uv`-editable canonical-
-    reference pointer in a plugin's own ``pyproject.toml`` (vendor-pointer-
-    generalization effort, Phase 1: no local copy at all in a dev checkout).
-    A plugin using only the pointer form still gets `<lib>`'s payload
-    materialized into it at promotion time (`tools/materialize_main.py`),
-    so it must be charged for a bump the same as a real-copy consumer --
-    skipping this half missed every editable-pointer consumer from the
-    version-bump guard entirely (PR #4465 review)."""
+    """Map ``lib name -> [consumers that vendor it]`` -- both an ordinary
+    in-tree ``<consumer>/libs/*`` real copy AND a `uv`-editable canonical-
+    reference pointer in a consumer's own ``pyproject.toml`` (vendor-
+    pointer-generalization effort, Phase 1: no local copy at all in a dev
+    checkout). A consumer using only the pointer form still gets `<lib>`'s
+    payload materialized into it at promotion time
+    (`tools/materialize_main.py`), so it must be charged for a bump the
+    same as a real-copy consumer -- skipping this half missed every
+    editable-pointer consumer from the version-bump guard entirely (PR
+    #4465 review).
+
+    Covers every ``plugins/*`` plugin AND every top-level, out-of-plugin
+    consumer tree (``uv_editable_ref.iter_consumer_dirs()``'s own extra
+    list, e.g. ``worktree-manager``) -- omitting the latter would let a
+    canonical `libs/<lib>` change alter a version-gated out-of-plugin
+    consumer's materialized payload without ever charging it (PR #4465
+    review)."""
     consumers: dict[str, list[str]] = {}
-    if not PLUGINS_DIR.is_dir():
-        return consumers
-    for plugin in sorted(p for p in PLUGINS_DIR.iterdir() if p.is_dir()):
-        libs = plugin / "libs"
+    for name, consumer_dir in uer.iter_consumer_dirs():
+        libs = consumer_dir / "libs"
         if libs.is_dir():
             for lib in sorted(x for x in libs.iterdir() if x.is_dir()):
-                consumers.setdefault(lib.name, []).append(plugin.name)
+                consumers.setdefault(lib.name, []).append(name)
+        pyproject = consumer_dir / "pyproject.toml"
+        if pyproject.is_symlink():
+            # `find_uv_editable_refs()` itself treats a symlinked manifest
+            # as an explicit refusal (returns `[]`, never raises) -- a
+            # caller that doesn't check separately would silently drop
+            # this consumer's pointers from the map, exactly the
+            # fail-open bug `ManifestUnreadable` handling below exists to
+            # prevent (PR #4465 review).
+            raise SystemExit(
+                f"check-version-bump: {pyproject} is a symlink -- cannot "
+                f"safely determine {name}'s uv-editable consumers; "
+                "replace it with a real file."
+            )
         try:
-            refs = uer.find_uv_editable_refs(plugin)
-        except uer.ManifestUnreadable:
-            continue
+            refs = uer.find_uv_editable_refs(consumer_dir)
+        except uer.ManifestUnreadable as exc:
+            # Fail closed, never silently drop this consumer from the
+            # map -- an unreadable manifest could genuinely reference
+            # `<lib>`, and skipping it would let a shared-lib change
+            # ship without charging a real consumer (PR #4465 review).
+            raise SystemExit(
+                f"check-version-bump: {exc} -- cannot safely determine "
+                f"{name}'s uv-editable consumers; fix its pyproject.toml "
+                "[tool.uv.sources] table."
+            ) from exc
         for _name, _raw_path, lib, _editable in refs:
-            if plugin.name not in consumers.get(lib, ()):
-                consumers.setdefault(lib, []).append(plugin.name)
+            if name not in consumers.get(lib, ()):
+                consumers.setdefault(lib, []).append(name)
     for lib in consumers:
         consumers[lib] = sorted(consumers[lib])
     packaged_peers = [
@@ -209,8 +272,8 @@ def check(base_ref: str, head_ref: str) -> tuple[int, list[str]]:
 
     violations: list[str] = []
     for plugin in sorted(needing):
-        head_ver = _plugin_json_version_at(head, plugin)
-        base_ver = _plugin_json_version_at(mbase, plugin)
+        head_ver = _consumer_version_at(head, plugin)
+        base_ver = _consumer_version_at(mbase, plugin)
         if head_ver is None or base_ver is None:
             # Plugin added or removed across the range -- no bump obligation.
             continue
