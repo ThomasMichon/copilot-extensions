@@ -258,3 +258,56 @@ def test_forward_keeper_rewrites_state_when_relay_pid_changes(tmp_path, monkeypa
 
     assert asyncio.run(detach._run_forward_keeper(args)) == 0
     assert store.read("devbox")["children"] == [{"pid": 222, "identity": "id-222"}]
+
+
+def test_keeper_state_token_fences_overlapping_launches(tmp_path, monkeypatch):
+    store = detach.KeeperStore(tmp_path)
+    monkeypatch.setattr(detach, "_STORE", store)
+
+    first = {
+        "pid": 101,
+        "pid_identity": "keep-101",
+        "target": "devbox",
+        "venue_port": 41234,
+        "mux": "wt-a",
+        "instance_token": "tok-a",
+        "children": [],
+    }
+    second = {
+        "pid": 202,
+        "pid_identity": "keep-202",
+        "target": "devbox",
+        "venue_port": 41234,
+        "mux": "wt-b",
+        "instance_token": "tok-b",
+        "children": [],
+    }
+
+    detach._write_keeper_state("devbox", first)
+    detach._write_keeper_state("devbox", second)
+
+    detach._write_keeper_state(
+        "devbox",
+        {**first, "children": [{"pid": 111, "identity": "id-111"}]},
+    )
+    detach._remove_keeper_state("devbox", "tok-a")
+
+    detach._write_keeper_state(
+        "devbox",
+        {**second, "children": [{"pid": 222, "identity": "id-222"}]},
+    )
+
+    assert store.read("devbox") == {
+        **second,
+        "children": [{"pid": 222, "identity": "id-222"}],
+    }
+
+
+def test_state_lock_path_uses_sanitized_keeper_state_path(tmp_path, monkeypatch):
+    store = detach.KeeperStore(tmp_path)
+    monkeypatch.setattr(detach, "_STORE", store)
+
+    path = detach._state_lock_path("codespace:repo/branch")
+
+    assert path.parent == tmp_path
+    assert path.name == "codespace-repo-branch.lock"
