@@ -1914,7 +1914,10 @@ test("abortHandoffTask abandons the agent-dispatch task with the given reason", 
     { bin: "agent-dispatch", argv: ["show", "task-42"] },
     {
       bin: "agent-dispatch",
-      argv: ["abandon", "task-42", "--permit", "--reason", "no longer needed"],
+      argv: [
+        "abandon", "task-42", "--permit", "--reason", "no longer needed",
+        "--expected-status", "queued",
+      ],
     },
   ]);
 });
@@ -1940,7 +1943,25 @@ test("abortHandoffTask refuses to abandon an already-terminal task", () => {
   };
   const result = abortHandoffTask("C:\\repo", "task-1", null, execute);
   assert.equal(result.ok, false);
-  assert.match(result.error, /already completed/);
+  assert.match(result.error, /not proposed\/queued/);
+});
+
+test("abortHandoffTask refuses to abandon a task a successor already claimed/started", () => {
+  // Real regression this guards: a deferred `agent-dispatch consume
+  // --defer-complete` leaves the task `started`, not terminal -- "cancel
+  // before consumption" must not abandon a handoff a successor may already
+  // be actively working.
+  for (const status of ["claimed", "started", "suspended"]) {
+    const execute = (bin, argv) => {
+      if (argv[0] === "show") {
+        return JSON.stringify({ id: "task-2", labels: ["handoff"], source: "context-handoff", status });
+      }
+      throw new Error(`unexpected CLI call: ${bin} ${argv.join(" ")}`);
+    };
+    const result = abortHandoffTask("C:\\repo", "task-2", null, execute);
+    assert.equal(result.ok, false, `expected refusal for status ${status}`);
+    assert.match(result.error, /not proposed\/queued/);
+  }
 });
 
 test("abortHandoffTask degrades safe on a CLI failure", () => {

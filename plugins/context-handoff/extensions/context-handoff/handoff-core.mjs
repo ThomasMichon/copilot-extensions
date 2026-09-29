@@ -3443,8 +3443,12 @@ export async function triggerHandoff(
 // subcommands of the same name, so both the extension (where applicable) and
 // the CLI-only fallback read the exact same worktree/session lineage
 // agent-worktrees itself tracks, rather than re-deriving it from timestamps
-// or brief content. All three degrade to an explicit `available: false`
-// result (never a guess) when agent-worktrees is not installed.
+// or brief content. `listWorktreeSessions`/`getPreviousSession` degrade to an
+// explicit `available: false` result (never a guess) when agent-worktrees is
+// not installed. `abort` is different: it depends on agent-dispatch for a
+// task-backed handoff, but a file-backed handoff needs neither -- its
+// failures report `{ ok: false, ... }` with a message/error, not
+// `available: false`.
 
 // List every session agent-worktrees has recorded for a worktree, plus the
 // handoff chain linking them -- the same facts `agent-worktrees list-sessions
@@ -3527,11 +3531,17 @@ export function getPreviousSession(cwd, sessionId, worktreeId = null, execute = 
 // so this never abandons blind: it fetches the task first and requires the
 // SAME ownership predicate `handoff_claim_release.py`'s own
 // `_is_handoff_task` already uses server-side (`"handoff" in labels` OR
-// `source == "context-handoff"`), plus a non-terminal status, before calling
-// `abandon`. A task that fails either check is refused, never abandoned.
-const TERMINAL_TASK_STATUSES = new Set([
-  "completed", "confirmed", "abandoned", "dead_letter",
-]);
+// `source == "context-handoff"`). Only `proposed`/`queued` -- genuinely
+// unconsumed -- are eligible for THIS command; `claimed`/`started`/
+// `suspended` mean a successor already consumed it and may be actively
+// working, which "cancel before consumption" must never touch (a deferred
+// `agent-dispatch consume --defer-complete` leaves the task `started`, not
+// terminal). The `show` read and the `abandon` write are two separate calls,
+// so a consumption can still land in between -- `--expected-status` passes
+// the status just observed through to the server's own atomic check, so a
+// racing consumption is rejected there rather than trusted to this
+// process's own stale read.
+const ABORT_ELIGIBLE_TASK_STATUSES = new Set(["proposed", "queued"]);
 
 export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
   let task;
@@ -3556,18 +3566,22 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
         `source is "${task?.source || "unknown"}", not "context-handoff") -- refusing to abandon it.`,
     };
   }
-  if (TERMINAL_TASK_STATUSES.has(task?.status)) {
+  if (!ABORT_ELIGIBLE_TASK_STATUSES.has(task?.status)) {
     return {
       ok: false,
       id: taskId,
       kind: "task",
-      error: `Task ${taskId} is already ${task.status}; nothing to abort.`,
+      error: `Task ${taskId} is ${task?.status || "in an unknown state"}, not proposed/queued -- ` +
+        "either already consumed (a successor may be actively working) or already terminal; refusing to abort.",
     };
   }
   try {
     execute(
       "agent-dispatch", // marketplace-isolation: allow agent-dispatch-management
-      ["abandon", taskId, "--permit", "--reason", reason || "aborted via context-handoff abort"],
+      [
+        "abandon", taskId, "--permit", "--reason", reason || "aborted via context-handoff abort",
+        "--expected-status", task.status,
+      ],
       { cwd, timeout: 15000 },
     );
     return { ok: true, id: taskId, kind: "task" };
