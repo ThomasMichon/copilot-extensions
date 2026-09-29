@@ -1,0 +1,9 @@
+{
+  "comment": "mode: off now disables only automatic/unprompted behavior (context-pressure nudges, the force tier) -- generate/save/trigger/consume_handoff and their slash commands always work, in every mode. trigger_handoff's response text now correctly reflects that the ledger note always runs, explicitly instructs the agent to relay the handoff seed VERBATIM (no paraphrasing), and tells it to stop waiting and use the seed itself if a live-cutover successor doesn't appear within about a minute.",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "minor"
+    }
+  ]
+}

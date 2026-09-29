@@ -240,11 +240,14 @@ Its contract is:
 1. drop the full markdown in the current session's session-state folder,
 2. **always:** durably store it (reusing the existing agent-dispatch task
    path when available, otherwise a worktree-state file),
-3. **always** (any mode other than `off`): note it in the worktree's own
+3. **always, in every mode including `off`:** note it in the worktree's own
    record via `agent-worktrees note-handoff` <!-- marketplace-isolation: allow agent-worktrees-management --> (this creates a
    `pending_handoffs` entry -- lineage/tracking state, so a
    manually-consuming successor can still be promoted to the worktree's
-   head via `link-succession` regardless of mode),
+   head via `link-succession` regardless of mode). `trigger_handoff` is a
+   manual entry point the session/operator explicitly invoked, so `mode:
+   off` never refuses it -- `off` only disables automatic/unprompted
+   behavior (see "Mode gate" below),
 4. **only when `.context-handoff/config.yaml`'s `mode` is `auto`** (the
    default is `manual-only` -- see "Mode gate" below): pass
    `--live-cutover` on that same `note-handoff` call -- agent-worktrees'
@@ -266,18 +269,22 @@ Its contract is:
 
 ## Mode gate
 
-`.context-handoff/config.yaml`'s `mode` defaults to `manual-only`: soft/hard
-context-pressure warnings and nudges fire under this default (any mode other
-than `off`), and so does step 3 above (the worktree-record note itself --
-this is what lets head-tracking march forward even under `manual-only`). The
-force-tier auto-trigger and step 4 above (arming `--live-cutover`: the
-worktree-visible pending-handoff state and the agent-bridge ping) remain
-opt-in, requiring `mode: auto` in that file (repo-level) or
-`~/.context-handoff/config.yaml` (user-level). Under the default,
-`trigger_handoff` still fully composes, stores, seeds, and notes the
-handoff -- it just never auto-forces one or arms automatic pickup, so the
-operator/agent must trigger and consume it manually. Do not assume live
-cutover happens unless you have confirmed `mode: auto` is set.
+`.context-handoff/config.yaml`'s `mode` controls only automatic/unprompted
+behavior; manual entry points (`generate_handoff_prompt`, `save_handoff_
+prompt`, `trigger_handoff`, `consume_handoff`, and their slash-command
+wrappers) work identically in **every** mode, including `off`. Defaults to
+`manual-only`: soft/hard context-pressure warnings and nudges fire under this
+default (any mode other than `off`), and so does step 3 above (the
+worktree-record note itself -- this is what lets head-tracking march forward
+even under `manual-only`, and under `off`). The force-tier auto-trigger and
+step 4 above (arming `--live-cutover`: the worktree-visible pending-handoff
+state and the agent-bridge ping) remain opt-in, requiring `mode: auto` in
+that file (repo-level) or `~/.context-handoff/config.yaml` (user-level).
+`mode: off` disables only the automatic pressure nudges and the force
+tier -- a session or operator who explicitly calls `trigger_handoff` still
+gets it stored/seeded/noted and printed manual instructions, exactly as
+under `manual-only`. Do not assume live cutover happens unless you have
+confirmed `mode: auto` is set.
 
 ## Resume flow
 
@@ -482,6 +489,10 @@ Compose the appropriate shape and pass it to `save_handoff_prompt` as
   diligence; it is only a reason to hand off.
 - The seed is a **locator**, not the handoff. Never inline the full markdown in
   it.
+- **Relay the seed verbatim.** When `trigger_handoff` prints the final
+  handoff seed prompt, give it to the user exactly as printed -- do not
+  paraphrase, summarize, reformat, or invent your own wording for it. The
+  tool's own response says this explicitly; follow it literally.
 - The stored brief may be long. Preserve fidelity there; optimize the seed and
   the pickup exchange instead.
 - Keep the original topic and parent objective visible.
