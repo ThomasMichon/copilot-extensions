@@ -286,6 +286,16 @@ def _is_no_project_invocation(args_list: list[str]) -> bool:
         return True
     if command == "list-sessions" and "--all-projects" in args_list[1:]:
         return True
+    if command == "get" and any(
+        arg == "--session-id" or arg.startswith("--session-id=") for arg in args_list[1:]
+    ):
+        # `get <key> --session-id <sid>` resolves its own project via the
+        # session binding (cmd_get's own _activate_session_binding /
+        # find_worktree_id_by_session fallback) -- a caller sitting in a
+        # neutral/HOME cwd (the bare-resume case a session id exists
+        # precisely to recover from) must reach that resolution instead of
+        # being rejected here before cmd_get() ever runs.
+        return True
     return command == "config-root" and any(
         arg == "--destination" or arg.startswith("--destination=") for arg in args_list[1:]
     )

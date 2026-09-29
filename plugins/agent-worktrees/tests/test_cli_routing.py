@@ -738,6 +738,31 @@ def test_all_project_session_listing_runs_without_project(monkeypatch, capsys):
     assert "Could not resolve a project" not in capsys.readouterr().err
 
 
+def test_session_scoped_get_runs_without_project(monkeypatch, capsys):
+    """Real regression this guards (PR #4570 review round 9): `get <key>
+    --session-id <sid>` resolves its own project via the session binding
+    inside cmd_get() itself -- a bare-resume caller sitting in a neutral/HOME
+    cwd (precisely the situation a session id exists to recover from) must
+    reach that resolution instead of being rejected here first."""
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_git_toplevel", lambda p: None)
+    seen = {}
+
+    def _ran(args):
+        seen["key"] = args.key
+        seen["session_id"] = args.session_id
+        return 0
+
+    monkeypatch.setitem(m.COMMAND_MAP, "get", _ran)
+
+    rc = m.main(["get", "worktree-id", "--session-id", "sess-1"])
+
+    assert rc == 0
+    assert seen["key"] == "worktree-id"
+    assert seen["session_id"] == "sess-1"
+    assert "Could not resolve a project" not in capsys.readouterr().err
+
+
 def test_session_tail_runs_without_project(monkeypatch, capsys):
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     monkeypatch.setattr(m, "_git_toplevel", lambda p: None)

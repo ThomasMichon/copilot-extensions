@@ -1935,6 +1935,7 @@ test("abortHandoffTask abandons the agent-dispatch task with the given reason", 
   assert.equal(result.ledgerNote, undefined);
   assert.deepEqual(calls, [
     { bin: "agent-dispatch", argv: ["show", "task-42"] },
+    { bin: "agent-dispatch", argv: ["payload", "task-42", "--raw"] },
     {
       bin: "agent-dispatch",
       argv: [
@@ -1942,7 +1943,6 @@ test("abortHandoffTask abandons the agent-dispatch task with the given reason", 
         "--expected-status", "queued",
       ],
     },
-    { bin: "agent-dispatch", argv: ["payload", "task-42", "--raw"] },
     { bin: "agent-worktrees", argv: ["get", "worktree-id"] },
     { bin: "agent-worktrees", argv: ["cancel-handoff", "--worktree-id", "wt-1", "--token", "task-42"] },
   ]);
@@ -1964,6 +1964,38 @@ test("abortHandoffTask reports honestly when the ledger cancellation itself can'
   assert.equal(result.ok, true);
   assert.equal(result.ledgerCancelled, false);
   assert.match(result.ledgerNote, /handoffs-check/);
+});
+
+test("abortHandoffTask decodes the payload for its sessionId BEFORE abandoning, since abandon can redact it", () => {
+  // Real regression this guards (PR #4570 review round 9): a real
+  // agent-dispatch may redact/archive a task's payload once it goes
+  // terminal. Reading the payload AFTER abandon (the original ordering)
+  // passed every mocked test yet would silently lose the predecessor
+  // sessionId in production, making both the session-state-mark and
+  // ledger-cancel follow-ups no-ops despite the task itself being retired.
+  let abandoned = false;
+  const marked = [];
+  const execute = (bin, argv) => {
+    if (argv[0] === "show") {
+      return JSON.stringify({ id: "task-42", labels: ["handoff"], source: "context-handoff", status: "queued" });
+    }
+    if (argv[0] === "abandon") {
+      abandoned = true;
+      return "{}";
+    }
+    if (argv[0] === "payload") {
+      return abandoned ? "" : encodeHandoffPayload("body", { sessionId: "predecessor-1" });
+    }
+    if (bin === "agent-worktrees" && argv[0] === "get") return "wt-1";
+    if (bin === "agent-worktrees" && argv[0] === "cancel-handoff") {
+      marked.push(argv);
+      return JSON.stringify({ cancelled: true });
+    }
+    return "{}";
+  };
+  const result = abortHandoffTask("C:\\repo", "task-42", null, execute);
+  assert.equal(result.ledgerCancelled, true);
+  assert.deepEqual(marked, [["cancel-handoff", "--worktree-id", "wt-1", "--token", "task-42"]]);
 });
 
 test("abortHandoffTask refuses to abandon a task that isn't a context-handoff handoff", () => {

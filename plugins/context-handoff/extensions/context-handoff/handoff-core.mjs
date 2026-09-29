@@ -3601,6 +3601,18 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
         "either already consumed (a successor may be actively working) or already terminal; refusing to abort.",
     };
   }
+  // Decode the payload for its embedded sessionId BEFORE abandoning --
+  // abandon may redact/archive the payload once the task goes terminal, so
+  // reading it afterward is unreliable and would silently make the
+  // session-state-mark and ledger-cancel steps below no-ops in practice
+  // (the earlier ordering passed every mocked test yet still had this real
+  // gap -- PR #4570 review round 9). This decode is itself best-effort and
+  // never fails the abort.
+  let predecessorSessionId = null;
+  try {
+    const decoded = decodeHandoffPayload(readTaskPayloadRaw(cwd, taskId, execute));
+    predecessorSessionId = decoded?.metadata?.sessionId || null;
+  } catch { /* best-effort */ }
   try {
     execute(
       "agent-dispatch", // marketplace-isolation: allow agent-dispatch-management
@@ -3613,13 +3625,7 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
     // Best-effort: mark the predecessor's own session-state handoff-request
     // marker aborted too, so a later `readSessionStateHandoff` lookup (or a
     // stale-claimant check) doesn't keep reporting `consumed: false` for a
-    // handoff this command just retired. Decoding the payload for its
-    // embedded sessionId is advisory -- never fails the abort itself.
-    let predecessorSessionId = null;
-    try {
-      const decoded = decodeHandoffPayload(readTaskPayloadRaw(cwd, taskId, execute));
-      predecessorSessionId = decoded?.metadata?.sessionId || null;
-    } catch { /* best-effort */ }
+    // handoff this command just retired.
     if (predecessorSessionId) {
       try {
         markSessionStateHandoffConsumed(predecessorSessionId, {
