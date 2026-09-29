@@ -1,9 +1,0 @@
-{
-  "comment": "Add setting-up-release-pipeline skill routing to the new dev-main-promotion-pipeline pattern doc",
-  "changes": [
-    {
-      "plugin": "customizing-copilot",
-      "type": "patch"
-    }
-  ]
-}

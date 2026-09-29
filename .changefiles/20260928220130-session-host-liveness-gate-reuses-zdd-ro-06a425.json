@@ -1,9 +1,0 @@
-{
-  "comment": "session-host: liveness gate (reuses zdd.routing's active.json) + outgoing-generation exit contract -- /api/v1/shutdown releases session-host claims, startup reattach claims them, a new /api/v1/session-hosts/reattach retries post-cutover (agent-bridge-unified-zdd-cutover Phase 3).",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

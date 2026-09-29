@@ -1,9 +1,0 @@
-{
-  "comment": "Skip mux-daemon cutover when the routed daemon already runs the target version, so frequent same-version reconcile checks (every session launch) no longer trigger a redundant spawn/flip/drain/retire cycle.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

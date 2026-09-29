@@ -1,9 +1,0 @@
-{
-  "comment": "vendor-pointer-generalization: worktree-manager converted from a real, vendored agent-procutil copy to a uv-editable canonical-reference pointer, and is now correctly detected as an agent-procutil consumer by tools/check-version-bump.py's extended _vendored_consumers() -- check-changefile-presence.py (which reuses that same detection) now requires a changefile for it, matching every other converted consumer.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "dev"
-    }
-  ]
-}
