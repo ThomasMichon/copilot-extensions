@@ -116,7 +116,7 @@ def test_terminate_tree_kills_real_process():
         # proc.wait() reaps the child: on POSIX a killed-but-unwaited child lingers
         # as a zombie that os.kill(pid, 0) still reports alive, so assert via
         # wait() (a non-None return code == it exited) rather than _pid_alive.
-        assert proc.wait(timeout=15) is not None
+        assert proc.wait(timeout=45) is not None
     finally:
         if proc.poll() is None:
             proc.kill()

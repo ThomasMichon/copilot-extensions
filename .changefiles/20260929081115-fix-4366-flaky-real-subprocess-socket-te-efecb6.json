@@ -1,0 +1,9 @@
+{
+  "comment": "Fix #4366: flaky real-subprocess/socket tests under host load. _terminate_tree's Windows taskkill timeout raised 15s->45s (spawning even that lightweight command can stall under heavy process-launch contention); ipc._connect now retries a ConnectionRefusedError a few times with backoff before giving up, since a transient refusal against a live, already-advertised endpoint has been observed under heavy Windows host load (not an endpoint-before-listener ordering race -- serve.py's asyncio.start_server() completes, and its sidecar is written, only once the listener is bound and accepting).",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
