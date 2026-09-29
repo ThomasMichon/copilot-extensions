@@ -1,0 +1,9 @@
+{
+  "comment": "context-handoff: skill instructs a pre-completion self-audit for unresolved 'still open' language before declaring a handoff complete, and a resume-side spot-check of the brief against the predecessor's own transcript",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "minor"
+    }
+  ]
+}
