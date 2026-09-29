@@ -641,12 +641,14 @@ edits directly.
 > plugin's own `pyproject.toml`). Some repos also carry a legacy top-level
 > `libs/<lib>/` directory alongside these — it is easy to mistake for "the"
 > source since it sits next to the lib's own `tests/`, but `--list` only
-> enumerates the **real, physical** `plugins/*/libs/*` copies it keeps in
-> sync — it is a real-copy inventory, not the complete consumer map. **A
-> top-level canonical `libs/<lib>/` is not automatically inert just because
-> `--list` doesn't name it as a copy**: for a lib with any `uv`-editable
-> pointer-only consumer (vendor-pointer-generalization effort, e.g.
-> `worktree-manager`'s `agent-procutil`), that canonical tree IS the real
+> enumerates the **real, physical** consumer-local copies it keeps in
+> sync (`plugins/*/libs/*`, plus a registered standalone consumer's own
+> top-level `libs/*`, e.g. `worktree-manager/libs/*`) — it is a real-copy
+> inventory, not the complete consumer map. **A top-level canonical
+> `libs/<lib>/` is not automatically inert just because `--list` doesn't
+> name it as a copy**: for a lib with any `uv`-editable pointer-only
+> consumer (vendor-pointer-generalization effort, e.g. `worktree-manager`'s
+> `plugin-resolve`), that canonical tree IS the real
 > source materialized into those consumers at promotion time
 > (`tools/materialize_main.py`) — editing it changes their real, shipped
 > payload. Find pointer-only consumers with `python
