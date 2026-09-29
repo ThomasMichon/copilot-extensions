@@ -1,0 +1,9 @@
+{
+  "comment": "Trim awareness/handoff-fallback instruction templates to fit the 4KB per-projection render budget",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}

@@ -18,9 +18,8 @@ the real continuation before anything else. You may also be asked to prepare
 one near the end of a session.
 
 Whether a handoff cuts a successor over live or only stages a brief for a
-human is one switch: `mode` (`auto`, `manual-only`, or `off`) in
-`.context-handoff/config.yaml` (or `~/.context-handoff/config.yaml`). Check
-it, or ask, before assuming either.
+human: `mode` (`auto`/`manual-only`/`off`) in `.context-handoff/config.yaml`
+(or `~/...`). Check it, or ask, before assuming either.
 
 ## The commands, if the extension is loaded
 
@@ -30,10 +29,7 @@ it, or ask, before assuming either.
 
 ## The same commands as plain CLI, extension loaded or not
 
-The plugin's bundled CLI needs only `node`. Every **operational** command
-(everything below except `help`) accepts `--json` for machine-readable
-output; `help` always prints the plain-text option reference, ignoring
-`--json` -- never try to JSON-parse its output.
+Bundled CLI, needs only `node`. Every command except `help` accepts `--json`.
 
 | Command | Purpose |
 |---|---|
@@ -43,29 +39,21 @@ output; `help` always prints the plain-text option reference, ignoring
 | `facts` | Basic extension-free handoff facts for this worktree |
 | `check-heads` | Audit pending-handoff head alignment across worktrees |
 | `retry-cutover` | Refocus a live successor or respawn a stuck cutover |
-| `sync-worktree` | Shared lock/rebase-safe worktree sync (same helper the force tier uses) |
-| `list-sessions` | This worktree's sessions + recorded handoff chain (needs `agent-worktrees`) |
-| `get-previous-session` | This (or a named) session's recorded predecessor (needs `agent-worktrees`) |
-| `abort --locator "<kind>:<id>"` | Cancel a pending handoff before anyone consumes it (needs `agent-worktrees`; a task-backed target additionally needs `agent-dispatch`) |
+| `sync-worktree` | Shared lock/rebase-safe sync (same helper the force tier uses) |
+| `list-sessions` | Recorded handoff chain (needs `agent-worktrees`) |
+| `get-previous-session` | Recorded predecessor (needs `agent-worktrees`) |
+| `abort --locator "<kind>:<id>"` | Cancel before consumption (needs `agent-worktrees`; a task target also needs `agent-dispatch`) |
 
 ```bash
 CH_ROOT="${COPILOT_PLUGIN_ROOT:-$HOME/.copilot/installed-plugins/copilot-extensions/context-handoff}"
 CH="$CH_ROOT/extensions/context-handoff/handoff-cli.mjs"
 node "$CH" save --title "<t>" --prompt-file "<f.md>" --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
-node "$CH" trigger --title "<t>" --prompt-file "<f.md>" --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
-node "$CH" consume --locator "<kind>:<id>" --cwd "$PWD"
-node "$CH" list-sessions --json --cwd "$PWD"
-node "$CH" get-previous-session --json --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
-node "$CH" abort --locator "<kind>:<id>" --reason "<why>" --cwd "$PWD"
 ```
-PowerShell: the same default under
-`$HOME\.copilot\installed-plugins\copilot-extensions\context-handoff`, then
-`node $CH <verb> ...`. The fallback guide below lists every verb and rung.
-
-No global `context-handoff` command exists on `PATH` -- this plugin
-deliberately ships **no binstub, install step, or runtime** (see the plugin's
-own README § "How the extension is delivered"); always resolve `$CH`/`$ch` by
-the exact verified path above before invoking it.
+Other verbs share that shape; add `--json` for machine output (table above).
+PowerShell: same default
+(`$HOME\.copilot\installed-plugins\copilot-extensions\context-handoff`), run
+`node $CH <verb> ...`. No global binstub exists -- resolve `$CH` by path
+first. The fallback guide below lists every verb and rung.
 
 ## The handoff prompt ("seed") format
 
