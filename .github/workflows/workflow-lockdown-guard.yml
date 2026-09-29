@@ -8,18 +8,28 @@
 #
 # So this is enforced as a required status check instead: a check with NO
 # bypass except ThomasMichon (see the "workflow/CODEOWNERS lockdown" ruleset)
-# fails outright whenever a PR not authored by ThomasMichon touches a
-# protected path -- even a Maintainer's own PR, even with `pr-merge --now`'s
-# `admin=true` (per pr_merge_cli.py's own docstring, a required check the
-# actor cannot bypass "remains provider-enforced either way").
+# fails whenever a protected path is touched by anyone other than
+# ThomasMichon as either the PR's author OR the actor who pushed the latest
+# commit (both checked -- see "Verify protected-file changes by author and
+# sender" review finding: a same-repo Write collaborator can push a
+# follow-up commit onto ANOTHER person's already-open PR branch, so checking
+# only `pull_request.user.login` is not enough).
 #
-# Read-only: only lists changed file paths via the REST API, no checkout of
-# PR content, no secrets, so this is safe to run unconditionally on
-# `pull_request` (including from forks).
+# IMPORTANT: this uses `pull_request_target`, not `pull_request`. A plain
+# `pull_request` trigger runs the workflow DEFINITION from the PR's own head
+# commit -- so a Write collaborator could edit *this file* within their own
+# PR to neuter the check, and the neutered version is exactly what would
+# run. `pull_request_target` always runs the trusted definition from the
+# repository's default branch, regardless of what the PR head contains, and
+# still exposes `github.event.pull_request` metadata for the untrusted head.
+# This job never checks out or executes PR content -- it only reads the
+# PR's file list via the REST API -- so it carries none of the classic
+# `pull_request_target` secret-exfiltration risk (see this repo's own
+# `identifier-leak-guard.yml` for the citation on that risk class).
 name: Workflow lockdown guard
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [dev]
     types: [opened, reopened, synchronize]
 
@@ -48,6 +58,11 @@ jobs:
             ];
             const protectedExact = new Set([".github/CODEOWNERS"]);
             const allowedLogin = process.env.ALLOWED_LOGIN;
+            // GitHub's "list pull request files" endpoint returns at most
+            // 3000 entries, even across paginated pages -- a PR at or past
+            // that cap could have a protected-path change past the
+            // returned window. Fail closed rather than silently missing it.
+            const HARD_CAP = 3000;
 
             const files = await github.paginate(github.rest.pulls.listFiles, {
               owner: context.repo.owner,
@@ -55,6 +70,16 @@ jobs:
               pull_number: context.payload.pull_request.number,
               per_page: 100,
             });
+
+            if (files.length >= HARD_CAP) {
+              core.setFailed(
+                `This PR's changed-file list hit the GitHub API's ${HARD_CAP}-file ` +
+                  "cap, so a protected-path change could exist outside the " +
+                  "returned window. Failing closed -- split this PR into smaller " +
+                  "changes, or have ThomasMichon review it manually.",
+              );
+              return;
+            }
 
             const touched = files
               .map((f) => f.filename)
@@ -70,15 +95,18 @@ jobs:
             }
 
             const author = context.payload.pull_request.user.login;
-            if (author === allowedLogin) {
+            const sender = context.payload.sender?.login;
+            if (author === allowedLogin && sender === allowedLogin) {
               core.info(
-                `Protected path(s) touched by ${author} (allowed): ${touched.join(", ")}`,
+                `Protected path(s) touched by ${allowedLogin} (author and sender match): ${touched.join(", ")}`,
               );
               return;
             }
 
             core.setFailed(
-              `PRs authored by anyone other than ${allowedLogin} may not modify ` +
-                `workflows, actions, or CODEOWNERS (touched: ${touched.join(", ")}). ` +
-                `Ask ${allowedLogin} to make this change, or split it out of this PR.`,
+              `Protected paths (${touched.join(", ")}) were touched, but this event's ` +
+                `author (${author}) and/or sender (${sender}) is not ${allowedLogin}. ` +
+                "Only PRs authored AND pushed by that account may modify workflows, " +
+                "actions, or CODEOWNERS -- ask them to make this change, or split it " +
+                "out of this PR.",
             );

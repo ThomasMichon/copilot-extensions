@@ -6,15 +6,27 @@
 # granted any access (billed to the repo owner, and giving an unreviewed
 # outsider a free automated pass through the same visible review surface
 # trusted contributors get). This workflow replaces that automatic trigger
-# with an explicit, permission-checked one.
+# with an explicit, permission-checked one -- see CONTRIBUTING.md for the
+# ruleset-side change removing the native `copilot_code_review` rule.
 #
 # A maintainer can still manually request Copilot's review on any PR
 # (including an outsider's) via the normal "Reviewers" sidebar or the REST
 # API at any time -- this workflow only controls the *automatic* path.
+#
+# Uses `pull_request_target`, not `pull_request`: a same-repo Write
+# collaborator's own PR would otherwise run their edited copy of this file
+# (which requests `pull-requests: write` and calls a write API), and a
+# fork PR's forced-read-only `GITHUB_TOKEN` under plain `pull_request` would
+# make `requestReviewers` fail outright for a legitimate collaborator who
+# happens to submit via a fork. `pull_request_target` runs the trusted
+# default-branch definition either way. This job never checks out or
+# executes PR content -- only reads PR/collaborator metadata via the REST
+# API -- so it carries none of the classic `pull_request_target`
+# secret-exfiltration risk.
 name: Copilot review gate
 
 on:
-  pull_request:
+  pull_request_target:
     branches: [dev]
     types: [opened, reopened, ready_for_review, synchronize]
 

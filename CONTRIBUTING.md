@@ -108,14 +108,26 @@ explicit admin escalation).** This is enforced on four layers that agree:
      account) bypass that specific review-count/codeowner requirement via a
      standing, named-`User`-actor `bypass_actors` entry on the ruleset
      (`bypass_mode: pull_request` — still requires a real PR and all required
-     status checks; only the *review* requirement is exempted). This is an
-     author-based exception, which is why it lives in the ruleset rather than
-     CODEOWNERS: CODEOWNERS can only key off file paths, never off who opened
-     the PR. Deliberately, this bypass is a per-`User` ruleset entry, **not**
-     a bump to GitHub's `Maintain`/`Admin` repository role — a Maintainer here
-     keeps their ordinary `Write` permission (no repo-settings, Actions-secret,
-     or collaborator-management access) and gains only the self-merge
+     status checks; only the *review* requirement is exempted). Deliberately,
+     this bypass is a per-`User` ruleset entry, **not** a bump to GitHub's
+     `Maintain`/`Admin` repository role — a Maintainer here keeps their
+     ordinary `Write` permission (no repo-settings, Actions-secret, or
+     collaborator-management access) and gains only the self-merge
      capability.
+     > **This bypass is bound to the *merging* actor, not the PR's author —
+     > read that precisely.** GitHub ruleset bypass has no "only my own PRs"
+     > concept: `bypass_mode: pull_request` means "when this named actor
+     > performs the merge, this rule doesn't apply to them," full stop —
+     > regardless of whose PR it is. In practice this means any Maintainer
+     > *could* merge a Contributor's still-unapproved PR themselves, bypassing
+     > the review-count/codeowner requirement meant for that Contributor. This
+     > is not new to this change — it was already true for ThomasMichon alone
+     > before Maintainers existed — this PR only extends the same structural
+     > trust to three more named accounts. There is no GitHub-side technical
+     > control for "bypass only when merging your own PR"; the mitigation is
+     > the same one that already applied to the sole owner: Maintainers are
+     > trusted not to merge past a Contributor's required review, and every
+     > bypass is visible in the ruleset insights / audit log after the fact.
    - Required CI status checks (`PR gate`, a fixed-name aggregate — see its
      own definition in `.github/workflows/ci.yml` for why a fixed anchor job
      exists rather than naming dynamic matrix jobs directly) apply to
@@ -125,11 +137,23 @@ explicit admin escalation).** This is enforced on four layers that agree:
    the wider Maintainer group (workflow changes can exfiltrate secrets/PATs,
    a materially different risk than an ordinary code change). A Maintainer's
    review-bypass above does *not* cover this: a required status check
-   (`workflow-lockdown-guard`, from `.github/workflows/workflow-lockdown-guard.yml`)
-   in its own ruleset ("dev branch policy: workflow/CODEOWNERS lockdown"),
-   bypassed only by ThomasMichon's own `User` actor entry, hard-fails any
-   merge — Maintainer or not, `pr-merge --now` or not — that touches those
-   paths without ThomasMichon as the author. (This is a required-status-check
+   (`workflow-lockdown-guard`, from `.github/workflows/workflow-lockdown-guard.yml`,
+   run via `pull_request_target` so a PR can't neuter its own trusted
+   definition) in its own ruleset ("dev branch policy: workflow/CODEOWNERS
+   lockdown") fails whenever a protected path is touched by a PR whose
+   author **and** most recent pusher are not both ThomasMichon (checking
+   only the author would miss a same-repo Write collaborator pushing a
+   follow-up commit onto someone else's already-open PR — see
+   `.github/workflows/trusted-ci.yml`'s identical author+sender pattern).
+   This ruleset has **no bypass actors at all** — not even ThomasMichon —
+   because the check's own pass condition already grants exactly the
+   intended exemption; a bypass actor here would let the exemption apply to
+   *whichever PR ThomasMichon merges*, not only PRs he authored, which is
+   the same actor-vs-author gap described above and unnecessary to accept
+   for this specific lockdown. The practical effect: ThomasMichon can merge
+   his own workflow-touching PRs freely; adopting anyone else's such PR
+   requires re-authoring/re-pushing it under his own account first — a
+   deliberate friction, not an oversight. (This is a required-status-check
    workaround, not GitHub's native `file_path_restriction` ruleset rule: that
    rule type returns `Validation Failed` on this personal, non-Enterprise
    account — it's an Enterprise-only feature.)
