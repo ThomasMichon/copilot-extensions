@@ -8,12 +8,19 @@ from . import locks, procs, self_retire, status_monitor_cutover, status_monitor_
 
 
 def _candidates() -> list[diagnostics.DaemonCandidate]:
+    runtime_root = str(status_monitor_runtime._aw_runtime_home())
+    scoped_pids = {
+        item["pid"]
+        for item in procs.processes_with_cwd_under(runtime_root)
+        if isinstance(item, dict) and isinstance(item.get("pid"), int)
+    }
     return [
         diagnostics.DaemonCandidate(
             pid=pid,
             start_time=locks.process_start_time(pid),
         )
         for pid in sorted(status_monitor_cutover._iter_status_monitor_pids())
+        if pid in scoped_pids
     ]
 
 

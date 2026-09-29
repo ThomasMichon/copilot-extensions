@@ -661,7 +661,6 @@ def apply_daemon_health(
             recovery = breadcrumb.recover_stale_cutover(
                 ctx.config_dir,
                 ctx.make_client,
-                health_check=ctx.health_check,
             )
             actions.append({"kind": "stranded_survivor", "result": recovery})
             break
