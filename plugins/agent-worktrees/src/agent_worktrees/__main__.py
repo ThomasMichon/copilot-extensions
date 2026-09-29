@@ -5518,6 +5518,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     session_binding_cli.add_parsers(sub)
     session_inspection_cli.add_parsers(sub)
+    from . import handoff_cancel_cli
+    handoff_cancel_cli.add_parsers(sub)
 
     session_tracking_cli.add_parsers(sub)
     worktree_status_audit.add_parsers(sub)
@@ -5703,6 +5705,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'machine-context': ('context_cli', 'cmd_machine_context'),
     'mark-complete': ('finalize_cli', 'cmd_mark_complete'),
     'note-handoff': ('session_binding_cli', 'cmd_note_handoff'),
+    'cancel-handoff': ('handoff_cancel_cli', 'cmd_cancel_handoff'),
     'pane-create': ('pane_lifecycle', 'cmd_pane_create'),
     'pane-terminate': ('pane_lifecycle', 'cmd_pane_terminate'),
     'picker': ('picker_profiles_cli', 'cmd_picker'),
@@ -5799,6 +5802,7 @@ _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "cleanup_gc_cli",
     "finalize_cli",
     "follow_ups_cli",
+    "handoff_cancel_cli",
     "handoff_cli",
     "handoff_successor_repair_cli",
     "installation_cli",
@@ -5942,7 +5946,7 @@ def _load_full_command_surface() -> None:
     global cmd_effort_focus, cmd_embody, cmd_finalize, cmd_follow_ups, cmd_gc, cmd_get, cmd_git_dispatch, cmd_git_feature_branch, cmd_picker_bootstrap, cmd_picker_paths, cmd_picker_reconcile_local
     global cmd_git_merge_to_feature, cmd_git_sync, cmd_handoff_cutover, cmd_handoff_trace, cmd_handoffs_check, cmd_handoff_cutover_trigger, cmd_head_session, cmd_history_digest, cmd_hygiene
     global cmd_install, cmd_install_status, cmd_installer_readiness, cmd_knowledge_dispatch, cmd_link_succession, cmd_list, cmd_list_sessions, cmd_machine_context, cmd_repair_stale_anchor
-    global cmd_mark_complete, cmd_note_handoff, cmd_picker, cmd_post_exit, cmd_pr_complete, cmd_pr_dispatch, cmd_pr_merge_dispatch, cmd_pr_nudge, cmd_pr_ready
+    global cmd_mark_complete, cmd_note_handoff, cmd_cancel_handoff, cmd_picker, cmd_post_exit, cmd_pr_complete, cmd_pr_dispatch, cmd_pr_merge_dispatch, cmd_pr_nudge, cmd_pr_ready
     global cmd_pr_research_dispatch, cmd_pr_status, cmd_pr_watch_dispatch, cmd_pre_launch, cmd_push_changes, cmd_reap_sessions, cmd_reap_shells
     global cmd_recent_messages, cmd_reclaim, cmd_reconcile_binstubs, cmd_reconcile_marketplaces, cmd_reconcile_plugins, cmd_reconcile_sessions, cmd_register, cmd_register_project_entry
     global cmd_register_session, cmd_related_dispatch, cmd_remove_system, cmd_remux, cmd_repair, cmd_repos_dispatch, cmd_restart, cmd_run
@@ -5956,7 +5960,7 @@ def _load_full_command_surface() -> None:
     global resolve_launch_cli, resolve_machine_cli, resolve_picker_cli, resolve_system_cli, services_cli, session_binding_cli, session_inspection_cli, session_metadata_cli
     global session_tracking_cli, status_bar_cli, status_cli, status_monitor_cli, status_monitor_runtime, status_updater_cli, sweep_finished_session_worktrees
     global sweep_managed_worktrees
-    global sync_one, terminal_conclusion, update_cli, worktree_ops_cli, cmd_resolve_handoff_successor
+    global sync_one, terminal_conclusion, update_cli, worktree_ops_cli, cmd_resolve_handoff_successor, handoff_cancel_cli
     from . import (
         claims_cli,
         cleanup_gc_cli,
@@ -5967,6 +5971,7 @@ def _load_full_command_surface() -> None:
         follow_ups_cli,
         front_door_cli,
         git_cli,
+        handoff_cancel_cli,
         handoff_cli,
         handoff_diagnostics,
         handoff_successor_repair_cli,
@@ -6094,6 +6099,7 @@ def _load_full_command_surface() -> None:
     cmd_bind_session = session_binding_cli.cmd_bind_session
     cmd_bind_nudge = session_binding_cli.cmd_bind_nudge
     cmd_note_handoff = session_binding_cli.cmd_note_handoff
+    cmd_cancel_handoff = handoff_cancel_cli.cmd_cancel_handoff
     cmd_session_lifecycle = session_inspection_cli.cmd_session_lifecycle
     cmd_session_binding = session_inspection_cli.cmd_session_binding
     cmd_session_recovery = session_inspection_cli.cmd_session_recovery
@@ -6430,6 +6436,7 @@ def _load_full_command_surface() -> None:
         "bind-nudge": cmd_bind_nudge,
         "history-digest": cmd_history_digest,
         "note-handoff": cmd_note_handoff,
+        "cancel-handoff": cmd_cancel_handoff,
         "session-role": cmd_session_role,
         "backfill-sessions": cmd_backfill_sessions,
         "doctor": cmd_doctor,

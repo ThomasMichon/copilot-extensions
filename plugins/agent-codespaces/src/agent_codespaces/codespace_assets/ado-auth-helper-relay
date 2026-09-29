@@ -25,8 +25,8 @@ ACTION="${1:-}"
 shift 2>/dev/null || true
 # get-access-token accepts either the historical bare positional
 # scope/resource, or an `az account get-access-token`-style `--scope VALUE`
-# / `--resource VALUE` flag (both forms are in the wild -- odsp-web's
-# odsp-npm-token.sh calls `get-access-token --resource <guid>`, and a bare
+# / `--resource VALUE` flag (both forms are in the wild -- a downstream
+# npm-token helper calls `get-access-token --resource <guid>`, and a bare
 # `--resource`/`--scope` was previously mis-parsed as the scope value
 # itself, silently denied by the host allowlist, and returned empty (#384)).
 SCOPE="${1:-}"
@@ -386,25 +386,44 @@ def _fetch():
     text = resp.decode("utf-8", "replace")
     if mode == "azure":
         for line in text.splitlines():
+            if line == "error=access_denied":
+                # #4367: the relay confirmed a policy denial in-band (rather
+                # than just closing with zero bytes) -- remember it so the
+                # final diagnostic can state this with certainty instead of
+                # the older "likely" heuristic (still used as a fallback
+                # against a relay predating this response line).
+                global _denied
+                _denied = True
             if line.startswith("token="):
                 return line[len("token="):].strip()
         return ""
     return text.strip()
 
 
+_denied = False
 tok = _fetch()
 if tok:
     _write_cache(tok)          # refresh the cache on every live success
     sys.stdout.write(tok + "\n")
     sys.exit(0)
-cached = _read_cache()          # relay unreachable -> serve a fresh-enough cache
+# An explicit policy denial must never fall through to a stale cached token
+# (e.g. one cached before this scope's allowlist entry was revoked) -- the
+# relay just told us, in-band, that this resource is no longer authorized.
+cached = "" if _denied else _read_cache()
 if cached:
     sys.stdout.write(cached + "\n")
     sys.exit(0)
 # Fail loudly (#384): a bare exit 1 with no diagnostic left a confusing
 # downstream 401/credential-prompt error far from the real cause. Reachable
 # vs. unreachable relay narrows the message without ever printing a secret.
-if port and mode == "azure":
+if _denied:
+    print(
+        "ado-auth-helper-relay: get-azure-token denied for scope=%r "
+        "(the credential relay confirmed this resource is not in the "
+        "host's Azure allowlist)" % keymat,
+        file=sys.stderr,
+    )
+elif port and mode == "azure":
     print(
         "ado-auth-helper-relay: get-azure-token denied for scope=%r "
         "(relay reachable; resource likely not in the host's Azure allowlist)"

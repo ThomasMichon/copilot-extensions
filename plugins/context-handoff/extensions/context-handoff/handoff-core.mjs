@@ -1835,15 +1835,14 @@ export function markFileHandoffConsumed(path, record, sid) {
   return consumed;
 }
 
-export function consumeFileHandoffOnce(
-  cwd, sid, handoffId, explicitPath = null,
-  options = {},
-) {
-  const found = readFileHandoff(cwd, sid, handoffId, explicitPath, options);
-  if (!found) {
-    return { ok: false, message: "File-backed handoff was not found." };
-  }
-  const lockPath = `${found.path}.consume.lock`;
+// Shared lock-acquire-with-stale-reclaim for `<handoff>.json.consume.lock`,
+// used by BOTH `consumeFileHandoffOnce` and `abortFileHandoff` so an abort
+// racing a real consume (or vice versa) is refused rather than silently
+// racing an atomic write -- and so a lock abandoned by a crashed holder
+// doesn't permanently block either operation. Returns `{ ok: true, lockFd }`
+// on success (caller owns closing/unlinking the lock when done) or
+// `{ ok: false, busy, claimedBySession, message }` on failure.
+function acquireFileHandoffLockWithReclaim(lockPath, sid, describeTarget) {
   let lockFd = null;
   for (let attempt = 0; attempt < 2 && lockFd === null; attempt++) {
     try {
@@ -1860,7 +1859,7 @@ export function consumeFileHandoffOnce(
         try { unlinkSync(lockPath); } catch { /* nothing to clean */ }
         return {
           ok: false,
-          message: `Could not lock file-backed handoff for consumption: ${error.message}`,
+          message: `Could not lock ${describeTarget()}: ${error.message}`,
         };
       }
       let ownerPid = null;
@@ -1918,8 +1917,7 @@ export function consumeFileHandoffOnce(
           return {
             ok: false,
             busy: true,
-            message:
-              `Handoff ${found.record.id || found.path} recovery is already active.`,
+            message: `${describeTarget()} recovery is already active.`,
           };
         }
         try {
@@ -1952,12 +1950,29 @@ export function consumeFileHandoffOnce(
         busy: true,
         claimedBySession: ownerSessionId,
         message:
-          `Handoff ${found.record.id || found.path} is already being consumed ` +
-          `by session \`${ownerSessionId || "unknown"}\`. ` +
-          "Do not replay it; retry only after the active consumer finishes.",
+          `${describeTarget()} is already locked ` +
+          `by session \`${ownerSessionId || "unknown"}\` (an active consume or ` +
+          "abort is in progress). Retry only once that finishes.",
       };
     }
   }
+  return { ok: true, lockFd };
+}
+
+export function consumeFileHandoffOnce(
+  cwd, sid, handoffId, explicitPath = null,
+  options = {},
+) {
+  const found = readFileHandoff(cwd, sid, handoffId, explicitPath, options);
+  if (!found) {
+    return { ok: false, message: "File-backed handoff was not found." };
+  }
+  const lockPath = `${found.path}.consume.lock`;
+  const acquired = acquireFileHandoffLockWithReclaim(
+    lockPath, sid, () => `handoff ${found.record.id || found.path}`,
+  );
+  if (!acquired.ok) return acquired;
+  const lockFd = acquired.lockFd;
   try {
     const current = readFileHandoff(
       cwd, sid, handoffId, found.path, options,
@@ -1998,9 +2013,9 @@ export function consumeFileHandoffOnce(
 }
 
 // --- agent-dispatch task store --------------------------------------------
-export function agentDispatchJson(argv, cwd) {
+export function agentDispatchJson(argv, cwd, execute = runCli) {
   try {
-    return JSON.parse(runCli("agent-dispatch", argv, { cwd, timeout: 15000 })); // marketplace-isolation: allow agent-dispatch-management
+    return JSON.parse(execute("agent-dispatch", argv, { cwd, timeout: 15000 })); // marketplace-isolation: allow agent-dispatch-management
   } catch {
     return null;
   }
@@ -2029,9 +2044,9 @@ export function findHandoffTask(cwd, worktree) {
   return mine[0] || null;
 }
 
-export function readTaskPayloadRaw(cwd, taskId) {
+export function readTaskPayloadRaw(cwd, taskId, execute = runCli) {
   try {
-    return runCli( // marketplace-isolation: allow agent-dispatch-management
+    return execute( // marketplace-isolation: allow agent-dispatch-management
       "agent-dispatch", ["payload", taskId, "--raw"],
       { cwd, timeout: 15000 },
     );
@@ -2249,7 +2264,7 @@ export function writeSessionStateHandoff(
 
 export function markSessionStateHandoffConsumed(
   predecessorSessionId,
-  { consumedBySession = null, handoffId = null } = {},
+  { consumedBySession = null, handoffId = null, aborted = false, abortReason = null } = {},
 ) {
   if (!predecessorSessionId) return null;
   const found = readSessionStateHandoff(predecessorSessionId);
@@ -2263,6 +2278,7 @@ export function markSessionStateHandoffConsumed(
     consumed: true,
     consumedAt: current.consumedAt || new Date().toISOString(),
     consumedBySession: consumedBySession || current.consumedBySession || null,
+    ...(aborted ? { aborted: true, abortReason: abortReason || current.abortReason || null } : {}),
   };
   writeJsonAtomic(found.path, consumed);
   return consumed;
@@ -2434,10 +2450,25 @@ export function findHandoffFile(cwd, sid) {
   return best;
 }
 
-function loadStoredTaskHandoff(cwd, taskId) {
-  const raw = readTaskPayloadRaw(cwd, taskId);
+function loadStoredTaskHandoff(cwd, taskId, execute = runCli) {
+  const raw = readTaskPayloadRaw(cwd, taskId, execute);
   const decoded = decodeHandoffPayload(raw);
   if (!decoded.text && !decoded.metadata) return null;
+  // Abandoning a task does not make its payload unreadable -- agent-dispatch's
+  // payload endpoint resolves payloads without checking task status. Reject
+  // an abandoned/terminal task here too (mirroring loadStoredFileHandoff's
+  // consumed/aborted check just above), or `trigger --handoff-token
+  // <aborted-task>` could recreate an unconsumed session-state request and
+  // pending ledger entry for a task abort just retired (PR #4570 review
+  // round 14).
+  const task = agentDispatchJson(["show", taskId], cwd, execute);
+  // Fail closed unless `show` positively confirms the task is still
+  // proposed/queued -- a claimed/started/suspended task has already been
+  // picked up (dispatchTaskConsumed treats it that way too), and a failed
+  // `show` itself must never be read as "safe to recover" (PR #4570 review
+  // round 15: rejecting only TERMINAL statuses still let every other
+  // nonterminal-but-already-consumed state through).
+  if (!ABORT_ELIGIBLE_TASK_STATUSES.has(task?.status)) return null;
   return {
     storage: "agent-dispatch",
     id: taskId,
@@ -2447,9 +2478,16 @@ function loadStoredTaskHandoff(cwd, taskId) {
   };
 }
 
-function loadStoredFileHandoff(cwd, sid, handoffId) {
-  const found = readFileHandoff(cwd, sid, handoffId);
+function loadStoredFileHandoff(cwd, sid, handoffId, explicitPath = null, fileOpts = {}) {
+  const found = readFileHandoff(cwd, sid, handoffId, explicitPath, fileOpts);
   if (!found?.record) return null;
+  // A consumed OR aborted record must never be reused to arm a fresh
+  // trigger -- both set `consumed: true` (abort also sets `aborted: true`;
+  // see abortFileHandoff/markSessionStateHandoffConsumed). Without this, an
+  // explicit `trigger --handoff-token <aborted-id>` would rewrite a fresh
+  // unconsumed session request for a token abort was supposed to make
+  // permanently non-reusable (PR #4570 review round 13).
+  if (found.record.consumed) return null;
   return {
     storage: "file",
     id: found.record.id,
@@ -2459,7 +2497,13 @@ function loadStoredFileHandoff(cwd, sid, handoffId) {
   };
 }
 
-export function recoverStoredHandoff(cwd, sid, handoffToken = null) {
+// `explicitFilePath`/`fileOpts` exist purely as a testability seam for the
+// file-backed lookup (readFileHandoff's own `explicitPath`/`{ get, execute }`
+// options) -- production callers never pass them; discovery still runs
+// exactly as before.
+export function recoverStoredHandoff(
+  cwd, sid, handoffToken = null, explicitFilePath = null, fileOpts = {}, execute = runCli,
+) {
   const explicitKinds = handoffToken && handoffToken.startsWith("handoff-")
     ? ["file", "agent-dispatch"]
     : ["agent-dispatch", "file"];
@@ -2467,8 +2511,8 @@ export function recoverStoredHandoff(cwd, sid, handoffToken = null) {
   if (handoffToken) {
     for (const kind of explicitKinds) {
       const loaded = kind === "agent-dispatch"
-        ? loadStoredTaskHandoff(cwd, handoffToken)
-        : loadStoredFileHandoff(cwd, sid, handoffToken);
+        ? loadStoredTaskHandoff(cwd, handoffToken, execute)
+        : loadStoredFileHandoff(cwd, sid, handoffToken, explicitFilePath, fileOpts);
       if (loaded) return loaded;
     }
     return null;
@@ -2478,7 +2522,7 @@ export function recoverStoredHandoff(cwd, sid, handoffToken = null) {
   if (worktree) {
     const task = findHandoffTask(cwd, worktree);
     if (task?.id) {
-      const loaded = loadStoredTaskHandoff(cwd, task.id);
+      const loaded = loadStoredTaskHandoff(cwd, task.id, execute);
       if (loaded) {
         loaded.metadata = loaded.metadata || {
           title: task.title || task.name || "",
@@ -2993,12 +3037,17 @@ function worktreePromptReceived(cwd, stored, execute = runCli) {
   return { received: false, worktreeId };
 }
 
-function dispatchTaskConsumed(cwd, taskId) {
+export function dispatchTaskConsumed(cwd, taskId, execute = runCli) {
   if (!taskId) return { consumed: false, task: null };
-  const task = agentDispatchJson(["show", taskId], cwd);
+  const task = agentDispatchJson(["show", taskId], cwd, execute);
   const status = String(task?.status || "");
+  // `abandoned` is what an ABORT sets via `agent-dispatch abandon` (see
+  // abortHandoffTask) -- it must never be confused with a genuine successor
+  // pickup, or triggerHandoff()'s bounded wait could observe an in-flight
+  // abort mid-race and report "pickup acknowledged", suppressing manual
+  // fallback even though nobody actually consumed the handoff.
   return {
-    consumed: Boolean(task && !["proposed", "queued"].includes(status)),
+    consumed: Boolean(task && !["proposed", "queued", "abandoned"].includes(status)),
     task,
   };
 }
@@ -3043,12 +3092,17 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function pickupSignals(cwd, sid, stored, sessionStatePath, execute = runCli) {
+export function pickupSignals(cwd, sid, stored, sessionStatePath, execute = runCli) {
   const found = readSessionStateHandoff(sid);
-  const sessionConsumed = Boolean(found?.record?.consumed);
+  // Exclude a record an abort marked `aborted: true` -- abortHandoffTask/
+  // abortFileHandoff both set `consumed: true` on the session-state marker
+  // (see markSessionStateHandoffConsumed) purely so a later lookup stops
+  // reporting a stale `consumed: false`, never to mean a successor actually
+  // picked this handoff up.
+  const sessionConsumed = Boolean(found?.record?.consumed) && !found?.record?.aborted;
   const worktree = worktreeSuccessorRecorded(cwd, stored, sid, execute);
   const dispatch = stored.storage === "agent-dispatch"
-    ? dispatchTaskConsumed(cwd, stored.id)
+    ? dispatchTaskConsumed(cwd, stored.id, execute)
     : { consumed: false, task: null };
   const via = [];
   if (sessionConsumed) via.push("session-state-consumed");
@@ -3293,7 +3347,7 @@ export async function triggerHandoff(
     handoffBody = normalizedPrompt;
     justStored = true;
   } else {
-    const loaded = recoverStoredHandoff(cwd, sid, handoffToken);
+    const loaded = recoverStoredHandoff(cwd, sid, handoffToken, null, {}, execute);
     if (!loaded) {
       return {
         ok: false,
@@ -3309,6 +3363,22 @@ export async function triggerHandoff(
       metadata: loaded.metadata || null,
     };
     handoffBody = String(loaded.promptText || "").trim();
+    // Re-verify immediately before arming, not just at the top of recovery:
+    // loadStoredTaskHandoff/loadStoredFileHandoff's status/consumed checks
+    // only protect the instant they run, and a concurrent abort landing
+    // between that read and this write would otherwise still let this
+    // trigger re-arm a token abort just retired (PR #4570 review round
+    // 16). This narrows, but does not fully eliminate, the race -- a true
+    // fix needs a shared atomic gate/lock between abort and recovery,
+    // tracked separately rather than attempted here.
+    const stillValid = recoverStoredHandoff(cwd, sid, handoffToken, null, {}, execute);
+    if (!stillValid || stillValid.id !== loaded.id) {
+      return {
+        ok: false,
+        reason: "not-found",
+        error: "The saved handoff was retired (consumed/aborted) between recovery and arming.",
+      };
+    }
   }
 
   const seed = buildSeedForStored(stored);
@@ -3436,4 +3506,465 @@ export async function triggerHandoff(
         automaticCutoverDisabled: !autoEnabled,
       }),
   };
+}
+
+// --- Diagnostic helpers (CLI-only surface: list-sessions, get-previous-session,
+// abort) -- these back the payload-local `context-handoff` command's own
+// subcommands of the same name, so both the extension (where applicable) and
+// the CLI-only fallback read the exact same worktree/session lineage
+// agent-worktrees itself tracks, rather than re-deriving it from timestamps
+// or brief content. `listWorktreeSessions`/`getPreviousSession` degrade to an
+// explicit `available: false` result (never a guess) when agent-worktrees is
+// not installed. `abort` is different: it depends on agent-dispatch for a
+// task-backed handoff, but a file-backed handoff needs neither -- its
+// failures report `{ ok: false, ... }` with a message/error, not
+// `available: false`.
+
+// List every session agent-worktrees has recorded for a worktree, plus the
+// handoff chain linking them -- the same facts `agent-worktrees list-sessions
+// --worktree <id> --json` returns, wrapped so a caller need not know that
+// exact invocation. `worktreeId` defaults to the one bound to `cwd`; when
+// omitted, `sessionId` (if known) is passed to `agentWorktreesGet`'s own
+// binding-first resolution so a caller sitting in a project anchor or any
+// other cwd that isn't literally the session's worktree can still resolve
+// it, rather than reporting unavailable just because cwd inference missed.
+export function listWorktreeSessions(cwd, worktreeId = null, sessionId = null, execute = runCli) {
+  const resolvedWorktree = worktreeId || agentWorktreesGet("worktree-id", cwd, sessionId, execute);
+  if (!resolvedWorktree) {
+    return {
+      available: false,
+      reason: "no worktree id was resolvable from cwd or the given session id, and none was passed explicitly",
+    };
+  }
+  try {
+    const raw = execute(
+      "agent-worktrees", // marketplace-isolation: allow diagnostic-tooling
+      ["list-sessions", "--worktree", resolvedWorktree, "--all-projects", "--json"],
+      { cwd, timeout: 15000 },
+    );
+    const parsed = JSON.parse(raw);
+    return { available: true, worktree: resolvedWorktree, ...parsed };
+  } catch (error) {
+    return {
+      available: false,
+      worktree: resolvedWorktree,
+      reason: describeCliError(error) || "agent-worktrees list-sessions failed",
+    };
+  }
+}
+
+// Resolve the immediate predecessor of a given session within its worktree's
+// own recorded handoff chain (the `successor === sessionId` entry's
+// `predecessor`) -- the exact fact `formatConsumeResult`/`buildResumePrompt`
+// now surface automatically at consume time, exposed here as a standalone
+// lookup for a session that already knows its own id but wants to confirm or
+// re-derive its predecessor later (e.g. after a restart, or from a sibling
+// tool). Never guesses past agent-worktrees' own recorded chain.
+export function getPreviousSession(cwd, sessionId, worktreeId = null, execute = runCli) {
+  if (!sessionId) {
+    return { available: false, reason: "a session id is required" };
+  }
+  const sessions = listWorktreeSessions(cwd, worktreeId, sessionId, execute);
+  if (!sessions.available) return sessions;
+  const knownSessions = Array.isArray(sessions.sessions) ? sessions.sessions : [];
+  if (!knownSessions.some((entry) => entry?.id === sessionId)) {
+    // A mistyped id or a mismatched explicit --worktree must never be
+    // conflated with a genuinely-first session -- that would be a false
+    // diagnostic (PR #4570 review round 14): report unavailable instead of
+    // silently falling through to the "no recorded handoff" branch below.
+    return {
+      available: false,
+      worktree: sessions.worktree,
+      reason: `session '${sessionId}' is not recorded on worktree '${sessions.worktree}'`,
+    };
+  }
+  const handoffs = Array.isArray(sessions.handoffs) ? sessions.handoffs : [];
+  const link = handoffs.find((entry) => entry?.successor === sessionId);
+  if (!link) {
+    return {
+      available: true,
+      worktree: sessions.worktree,
+      sessionId,
+      predecessorSession: null,
+      reason: "no recorded handoff names this session as a successor "
+        + "(it may be the worktree's first session, or predate lineage tracking)",
+    };
+  }
+  return {
+    available: true,
+    worktree: sessions.worktree,
+    sessionId,
+    predecessorSession: link.predecessor || null,
+    handoff: link,
+  };
+}
+
+// Cancel a pending handoff before it is ever consumed -- distinct from
+// consuming it (which claims and hands off responsibility) and distinct from
+// `abandonSupersededHandoffs` (which is an internal, automatic supersession
+// side effect of storing a NEW handoff). This is an explicit, operator/agent
+// -directed "never mind" for one named handoff. A task-backed handoff is
+// abandoned via the same agent-dispatch primitive `abandonSupersededHandoffs`
+// already uses; a file-backed handoff is marked consumed with an explicit
+// `aborted: true` marker so it is never offered again, without pretending a
+// real successor claimed it (`consumedBySession` stays null).
+//
+// `taskId` is caller-supplied (a typo'd or copied id is a realistic input),
+// so this never abandons blind: it fetches the task first and requires the
+// SAME ownership predicate `handoff_claim_release.py`'s own
+// `_is_handoff_task` already uses server-side (`"handoff" in labels` OR
+// `source == "context-handoff"`). Only `proposed`/`queued` -- genuinely
+// unconsumed -- are eligible for THIS command; `claimed`/`started`/
+// `suspended` mean a successor already consumed it and may be actively
+// working, which "cancel before consumption" must never touch (a deferred
+// `agent-dispatch consume --defer-complete` leaves the task `started`, not
+// terminal). The `show` read and the `abandon` write are two separate calls,
+// so a consumption can still land in between -- `--expected-status` passes
+// the status just observed through to the server's own atomic check, so a
+// racing consumption is rejected there rather than trusted to this
+// process's own stale read.
+const ABORT_ELIGIBLE_TASK_STATUSES = new Set(["proposed", "queued"]);
+
+export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
+  let task;
+  try {
+    task = JSON.parse(execute("agent-dispatch", ["show", taskId], { cwd, timeout: 15000 })); // marketplace-isolation: allow agent-dispatch-management
+  } catch (error) {
+    return {
+      ok: false,
+      id: taskId,
+      kind: "task",
+      error: describeCliError(error) || "agent-dispatch show failed",
+    };
+  }
+  const labels = Array.isArray(task?.labels) ? task.labels : [];
+  const isHandoffTask = labels.includes("handoff") || task?.source === "context-handoff";
+  if (!isHandoffTask) {
+    return {
+      ok: false,
+      id: taskId,
+      kind: "task",
+      error: `Task ${taskId} is not a context-handoff task (no "handoff" label, ` +
+        `source is "${task?.source || "unknown"}", not "context-handoff") -- refusing to abandon it.`,
+    };
+  }
+  if (!ABORT_ELIGIBLE_TASK_STATUSES.has(task?.status)) {
+    return {
+      ok: false,
+      id: taskId,
+      kind: "task",
+      error: `Task ${taskId} is ${task?.status || "in an unknown state"}, not proposed/queued -- ` +
+        "either already consumed (a successor may be actively working) or already terminal; refusing to abort.",
+    };
+  }
+  // Decode the payload for its embedded sessionId BEFORE abandoning --
+  // abandon may redact/archive the payload once the task goes terminal, so
+  // reading it afterward is unreliable and would silently make the
+  // session-state-mark and ledger-cancel steps below no-ops in practice
+  // (the earlier ordering passed every mocked test yet still had this real
+  // gap -- PR #4570 review round 9). This decode is itself best-effort and
+  // never fails the abort.
+  let predecessorSessionId = null;
+  try {
+    const decoded = decodeHandoffPayload(readTaskPayloadRaw(cwd, taskId, execute));
+    predecessorSessionId = decoded?.metadata?.sessionId || null;
+  } catch { /* best-effort */ }
+  // Fence the ledger BEFORE the destructive abandon call, not after: a
+  // successor can already be associated as the ledger handoff's `candidate`
+  // (mid-cutover, per associate_handoff_candidate) while the dispatch task
+  // itself is still `proposed`/`queued` -- abandoning the task in that case
+  // would destroy the baton an in-flight pickup is actively consuming, even
+  // though cancel_handoff itself correctly refuses to touch the ledger
+  // entry (PR #4570 review round 17). This is a read-only PEEK
+  // (`dryRun: true`): the real cancellation is committed only AFTER abandon
+  // itself succeeds below, so a failed abandon (e.g. a race consumer
+  // claimed the task in between) never leaves the ledger showing
+  // "cancelled" over a task that's still alive (PR #4570 review round 18).
+  const peek = cancelHandoffInRecord(cwd, predecessorSessionId, taskId, execute, { dryRun: true });
+  if (!peek.checked) {
+    // Fail CLOSED, not open: a peek failure (worktree id didn't resolve,
+    // the CLI call errored, its output didn't parse) is NOT the same as a
+    // definitive "no candidate" answer -- proceeding on an unchecked fence
+    // could destroy a handoff whose ledger genuinely has an associated
+    // successor candidate (PR #4570 review round 19).
+    return {
+      ok: false,
+      id: taskId,
+      kind: "task",
+      error: `Could not verify whether task ${taskId}'s handoff has an associated successor ` +
+        `candidate (${peek.reason || "the ledger fence could not be checked"}) -- refusing to ` +
+        "abandon it until the ledger can be inspected.",
+    };
+  }
+  if (peek.raw?.candidate) {
+    return {
+      ok: false,
+      id: taskId,
+      kind: "task",
+      error: `Task ${taskId}'s handoff already has an associated successor candidate ` +
+        `(\`${peek.raw.candidate}\`) mid-pickup -- refusing to abandon it.`,
+    };
+  }
+  try {
+    execute(
+      "agent-dispatch", // marketplace-isolation: allow agent-dispatch-management
+      [
+        "abandon", taskId, "--permit", "--reason", reason || "aborted via context-handoff abort",
+        "--expected-status", task.status,
+      ],
+      { cwd, timeout: 15000 },
+    );
+    // Best-effort: mark the predecessor's own session-state handoff-request
+    // marker aborted too, so a later `readSessionStateHandoff` lookup (or a
+    // stale-claimant check) doesn't keep reporting `consumed: false` for a
+    // handoff this command just retired.
+    if (predecessorSessionId) {
+      try {
+        markSessionStateHandoffConsumed(predecessorSessionId, {
+          handoffId: taskId, aborted: true, abortReason: reason || null,
+        });
+      } catch { /* best-effort */ }
+    }
+    // Commit the real ledger cancellation only now, after the task is
+    // confirmed abandoned -- see the peek comment above. A residual race
+    // (a candidate associated in the narrow window between the peek and
+    // this commit) still isn't fully eliminated; that's the same
+    // cross-process gate/lock design tracked by
+    // https://github.com/ThomasMichon/copilot-extensions/issues/4619, and
+    // this commit call will itself decline to cancel (reporting
+    // `cancelled: false`) rather than silently succeeding over it.
+    const ledger = cancelHandoffInRecord(cwd, predecessorSessionId, taskId, execute);
+    return {
+      ok: true,
+      id: taskId,
+      kind: "task",
+      ledgerCancelled: ledger.cancelled,
+      ...(ledger.cancelled ? {} : { ledgerNote: ledgerFailureNote(ledger.reason) }),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      id: taskId,
+      kind: "task",
+      error: describeCliError(error) || "agent-dispatch abandon failed",
+    };
+  }
+}
+
+// Retire the agent-worktrees ledger's own `pending_handoffs` entry for this
+// EXACT handoff token (the `cancel-handoff` primitive -- distinct from
+// agent-worktrees' broad `_cancel_pending_handoffs` sweep, which only fires
+// internally as a side effect of a new session registering). Best-effort:
+// a failure here never fails the abort itself, since the backing handoff
+// record (agent-dispatch task or file) has already been retired by the
+// time this runs -- report the outcome honestly instead.
+//
+// `dryRun: true` peeks at the ledger (candidate/eligibility) WITHOUT
+// mutating it -- callers with a separate, harder-to-undo destructive action
+// (task abandon / file write) must peek first, perform that action, and
+// only commit the real (non-dry-run) cancellation afterward. Committing the
+// ledger cancellation before the caller's own destructive action succeeds
+// would leave the ledger showing "cancelled" (and possibly the predecessor
+// restored to head) even when that action then failed -- e.g. a race
+// consumer claimed the task in between, or the file write hit an I/O error
+// (PR #4570 review round 18).
+//
+// `checked` distinguishes "the ledger was genuinely inspected" (true --
+// including a definitive "no matching pending entry" answer) from "the
+// inspection itself could not be completed" (false -- worktree id didn't
+// resolve, the CLI call failed, or its output didn't parse). A DRY-RUN
+// caller must fail closed on `checked: false`: collapsing every such
+// failure into `raw: null` and treating "not candidate-associated" the same
+// as "couldn't tell" would let a transiently unavailable fence (a timeout,
+// a version skew before this CLI supported --dry-run, a lock/JSON error)
+// silently wave through a handoff whose ledger genuinely has an associated
+// successor candidate (PR #4570 review round 19). The COMMIT call (the
+// non-dry-run cancellation after the destructive action already succeeded)
+// deliberately stays best-effort/fail-open -- there is nothing left to
+// protect by then.
+export function cancelHandoffInRecord(cwd, sessionId, token, execute = runCli, { dryRun = false } = {}) {
+  const worktreeId = agentWorktreesGet("worktree-id", cwd, sessionId, execute);
+  if (!worktreeId) {
+    return {
+      cancelled: false,
+      checked: false,
+      reason: "could not resolve a worktree id for this cwd to target the cancellation",
+      raw: null,
+    };
+  }
+  try {
+    const raw = JSON.parse(
+      execute(
+        "agent-worktrees", // marketplace-isolation: allow agent-worktrees-management
+        [
+          "cancel-handoff", "--worktree-id", worktreeId, "--token", token,
+          ...(dryRun ? ["--dry-run"] : []),
+        ],
+        { cwd, timeout: 5000 },
+      ),
+    );
+    return {
+      cancelled: Boolean(raw?.cancelled),
+      checked: true,
+      reason: raw?.cancelled ? null : (raw?.reason || "token was not a pending ledger entry"),
+      raw,
+    };
+  } catch (error) {
+    return {
+      cancelled: false,
+      checked: false,
+      reason: describeCliError(error) || "agent-worktrees cancel-handoff failed",
+      raw: null,
+    };
+  }
+}
+
+// Surfaced only when cancelHandoffInRecord's own best-effort call didn't
+// report `cancelled: true` -- the backing handoff record is still retired
+// either way; this just tells the caller the agent-worktrees ledger entry
+// (if one was armed under `mode: auto`) may still need manual
+// reconciliation. Must NOT point at `handoffs-check --execute` -- that
+// command only reconciles a stuck cutover AFTER a successor/candidate and a
+// recorded spawn already exist, so it is exactly as ineffective for a
+// pre-consumption abort as the advisory `cancel-handoff` itself replaced
+// (PR #4570 review round 5). Point at retrying `cancel-handoff` directly
+// instead, since that is the one primitive that can actually cancel it.
+function ledgerFailureNote(reason) {
+  return (
+    `Could not confirm agent-worktrees' own pending-handoff ledger entry was ` +
+    `cancelled${reason ? ` (${reason})` : ""}. If one was armed under ` +
+    "`mode: auto`, run `agent-worktrees cancel-handoff --worktree-id <id> " +
+    "--token <handoffId>` to retry the cancellation directly (the command " +
+    "already emits JSON unconditionally -- no --json flag exists to pass)."
+  );
+}
+
+// File-backed abort participates in the SAME `.consume.lock` protocol
+// `consumeFileHandoffOnce` uses (open the lock file exclusively, re-read the
+// record while holding it, then write) -- without this, an abort racing a
+// real consume could each read `consumed: false`, both "succeed", and
+// whichever atomic write lands last would silently win: either resurrecting
+// an aborted handoff or overwriting a real consumer's claim with an aborted
+// marker.
+export function abortFileHandoff(
+  cwd, sid, handoffId, explicitPath, reason,
+  { get = agentWorktreesGet, execute = runCli } = {},
+) {
+  const found = readFileHandoff(cwd, sid, handoffId, explicitPath, { get, execute });
+  if (!found) {
+    return { ok: false, kind: "file", message: "File-backed handoff was not found." };
+  }
+  const lockPath = `${found.path}.consume.lock`;
+  const acquired = acquireFileHandoffLockWithReclaim(
+    lockPath, sid, () => `handoff ${found.record.id || found.path}`,
+  );
+  if (!acquired.ok) return { ...acquired, kind: "file", id: found.record.id };
+  const lockFd = acquired.lockFd;
+  try {
+    const current = readFileHandoff(cwd, sid, handoffId, found.path, { get, execute });
+    if (!current) {
+      return {
+        ok: false,
+        kind: "file",
+        id: found.record.id,
+        message: `Handoff ${found.record.id || found.path} disappeared or became ` +
+          "unreadable while locked for abort; refusing to guess at its prior contents.",
+      };
+    }
+    if (current.record.kind !== "context-handoff" || current.record.storage !== "file") {
+      return {
+        ok: false,
+        kind: "file",
+        id: current.record.id || null,
+        message: `${found.path} does not look like a file-backed context-handoff ` +
+          "record (unexpected kind/storage); refusing to mutate it.",
+      };
+    }
+    if (current.record.consumed) {
+      return {
+        ok: false,
+        kind: "file",
+        id: current.record.id,
+        message: current.record.aborted
+          ? `Handoff ${current.record.id || current.path} was already aborted.`
+          : `Handoff ${current.record.id || current.path} was already consumed by ` +
+            `session \`${current.record.consumedBySession || "unknown"}\`; too late to abort.`,
+      };
+    }
+    // Fence the ledger BEFORE the destructive write, not after: a successor
+    // can already be associated as the ledger handoff's `candidate`
+    // (mid-cutover) while the file record itself is still unconsumed --
+    // marking it aborted in that case would destroy the baton an in-flight
+    // pickup is actively consuming, even though cancel_handoff itself
+    // correctly refuses to touch the ledger entry (PR #4570 review round
+    // 17). This is a read-only PEEK (`dryRun: true`): the real cancellation
+    // is committed only AFTER writeJsonAtomic itself succeeds below, so a
+    // failed write (e.g. permission/disk/rename failure) never leaves the
+    // ledger showing "cancelled" (and the predecessor possibly restored to
+    // head) while the file record remains genuinely unconsumed (PR #4570
+    // review round 18).
+    const peek = cancelHandoffInRecord(cwd, current.record.sessionId, current.record.id, execute, { dryRun: true });
+    if (!peek.checked) {
+      // Fail CLOSED, not open -- see the identical note on the task path
+      // above (PR #4570 review round 19).
+      return {
+        ok: false,
+        kind: "file",
+        id: current.record.id,
+        message: `Could not verify whether handoff ${current.record.id || current.path} has an ` +
+          `associated successor candidate (${peek.reason || "the ledger fence could not be checked"}) ` +
+          "-- refusing to abort it until the ledger can be inspected.",
+      };
+    }
+    if (peek.raw?.candidate) {
+      return {
+        ok: false,
+        kind: "file",
+        id: current.record.id,
+        message: `Handoff ${current.record.id || current.path} already has an associated ` +
+          `successor candidate (\`${peek.raw.candidate}\`) mid-pickup -- refusing to abort it.`,
+      };
+    }
+    const aborted = {
+      ...current.record,
+      consumed: true,
+      consumedAt: new Date().toISOString(),
+      consumedBySession: null,
+      aborted: true,
+      abortedBySession: sid || null,
+      abortReason: reason || null,
+    };
+    writeJsonAtomic(current.path, aborted);
+    // Commit the real ledger cancellation only now, after the write is
+    // confirmed -- see the peek comment above. A residual race (a candidate
+    // associated in the narrow window between the peek and this commit)
+    // still isn't fully eliminated; that's the same cross-process gate/lock
+    // design tracked by
+    // https://github.com/ThomasMichon/copilot-extensions/issues/4619, and
+    // this commit call will itself decline to cancel (reporting
+    // `cancelled: false`) rather than silently succeeding over it.
+    const ledger = cancelHandoffInRecord(cwd, current.record.sessionId, current.record.id, execute);
+    // Best-effort: the file record's own `sessionId` IS the predecessor
+    // session -- mark its session-state handoff-request marker aborted too
+    // (see the identical note on the task path above and cancelHandoffInRecord).
+    if (current.record.sessionId) {
+      try {
+        markSessionStateHandoffConsumed(current.record.sessionId, {
+          handoffId: aborted.id, aborted: true, abortReason: reason || null,
+        });
+      } catch { /* best-effort */ }
+    }
+    return {
+      ok: true,
+      kind: "file",
+      id: aborted.id,
+      path: current.path,
+      record: aborted,
+      ledgerCancelled: ledger.cancelled,
+      ...(ledger.cancelled ? {} : { ledgerNote: ledgerFailureNote(ledger.reason) }),
+    };
+  } finally {
+    try { closeSync(lockFd); } catch { /* best-effort */ }
+    try { unlinkSync(lockPath); } catch { /* already gone */ }
+  }
 }

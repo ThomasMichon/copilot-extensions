@@ -111,6 +111,53 @@ async def test_server_token_gate_allows_valid_denies_invalid():
 
 
 @pytest.mark.asyncio
+async def test_server_states_scope_denial_explicitly_for_known_token(): 
+    """#4367: a *recognized* token whose specific get-azure-token scope is
+    denied gets an explicit, wire-visible response -- not the same silent
+    close as an unknown/invalid token (#4367)."""
+    from credential_relay.server import ScopeDenied
+
+    def _authorizer(tok, action, fields):
+        if tok != "good-token":
+            return False
+        if fields.get("scope") == "https://storage.azure.com/.default":
+            return True
+        raise ScopeDenied
+
+    srv = CredentialRelayServer(
+        port=0,
+        sources=[_AzStub()],
+        token_authorizer=_authorizer,
+        token_required_actions=frozenset({"get-azure-token"}),
+    )
+    await srv.start()
+    srv.port = srv._server.sockets[0].getsockname()[1]
+    try:
+        allowed = await _roundtrip(
+            srv,
+            "get-azure-token\nauth=good-token\n"
+            "scope=https://storage.azure.com/.default\n\n",
+        )
+        assert "token=STUBTOKEN" in allowed
+
+        denied = await _roundtrip(
+            srv,
+            "get-azure-token\nauth=good-token\n"
+            "scope=https://graph.microsoft.com/.default\n\n",
+        )
+        assert denied == "error=access_denied\nreason=resource_not_allowed\n\n"
+
+        unknown = await _roundtrip(
+            srv,
+            "get-azure-token\nauth=WRONG\n"
+            "scope=https://graph.microsoft.com/.default\n\n",
+        )
+        assert unknown == ""  # a plain False stays fully silent
+    finally:
+        await srv.stop()
+
+
+@pytest.mark.asyncio
 async def test_ungated_action_needs_no_token():
     """Open actions (not in token_required_actions) bypass the gate."""
     reg = TokenRegistry()

@@ -82,6 +82,7 @@ def _launch_command(
     plan: dict[str, Any],
     *,
     seed: str | None,
+    seed_ready_timeout: float,
     driver: str | None,
     copilot_args: list[str],
     ensure_mux: bool,
@@ -92,6 +93,7 @@ def _launch_command(
         anchor=bool(plan.get("anchor", True)),
         driver=driver,
         seed=typed_seed,
+        seed_ready_timeout=seed_ready_timeout,
         ensure_mux=ensure_mux,
         detach=True,
         bridge_scope_id=plan["scope_id"],
@@ -220,6 +222,7 @@ def launch_detached(
             _launch_command(
                 plan,
                 seed=seed,
+                seed_ready_timeout=max(register_timeout, 180.0),
                 driver=driver,
                 copilot_args=copilot_args,
                 ensure_mux=ensure_mux,

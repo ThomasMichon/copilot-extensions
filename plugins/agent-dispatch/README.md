@@ -289,6 +289,9 @@ started -> suspended -> started
 - **completed** / **abandoned** / **dead_letter** -- terminal (abandon requires
   permission; **dead_letter** is where a task lands when GC has requeued it past
   the attempts cap -- its owner kept going gone -- an actionable failure state).
+  `completed`/`submitted` briefly traded names (2026-09-25..2026-09-29) --
+  if you see a stray `confirmed` status anywhere, see
+  [`docs/status-rename-migration-2026-09-29.md`](docs/status-rename-migration-2026-09-29.md).
 - A **liveness** GC pass returns a held task to **queued** only when its owner's
   **session** is *confirmed gone* (keyed on the captured `owner_session_id`, not
   mere worktree occupancy) -- never on elapsed time, so a long-running live

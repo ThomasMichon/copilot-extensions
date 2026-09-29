@@ -20,7 +20,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from .server import CredentialRelayServer, RelayPolicy
+from .server import CredentialRelayServer, RelayPolicy, ScopeDenied
 from .sources import CredentialSource
 
 
@@ -195,13 +195,25 @@ class RelayBuilder:
 
                 def _authorize(tok: str, action: str, fields: dict[str, str]) -> bool:
                     # Any provider's request-scoped authorizer accepting wins.
-                    if any(a(tok, action, fields) for a in authorizers):
-                        return True
+                    # A ``ScopeDenied`` from one authorizer (this provider
+                    # recognizes the token but not this request's scope) is
+                    # remembered and re-raised only if no authorizer -- this
+                    # one or another provider's -- ultimately accepts (#4367):
+                    # an unrecognized token must still stay silently denied.
+                    scope_denied = False
+                    for a in authorizers:
+                        try:
+                            if a(tok, action, fields):
+                                return True
+                        except ScopeDenied:
+                            scope_denied = True
                     # Otherwise fall back to the boolean validators; a valid
                     # token is still scope-checked against the static allowlist
                     # for get-azure-token so the validator-only (containers) path
                     # keeps its existing source-level scope guarantee.
                     if not any(v(tok) for v in validators):
+                        if scope_denied:
+                            raise ScopeDenied
                         return False
                     if action != "get-azure-token":
                         return True
@@ -211,7 +223,9 @@ class RelayBuilder:
                         value.removesuffix("/.default").rstrip("/")
                         for value in static_resources
                     }
-                    return "*" in static_resources or normalized in allowed
+                    if "*" in static_resources or normalized in allowed:
+                        return True
+                    raise ScopeDenied
 
                 kwargs["token_authorizer"] = _authorize
             else:

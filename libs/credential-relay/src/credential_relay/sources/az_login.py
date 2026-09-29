@@ -21,6 +21,8 @@ import subprocess
 import sys
 import time
 
+from ..server import ACCESS_DENIED_RESPONSE
+
 log = logging.getLogger("credential-relay.az-login")
 
 _SUBPROCESS_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -187,7 +189,15 @@ class AzLoginSource:
                 target,
                 sorted(self._allowed_resources),
             )
-            return None
+            # Return an explicit, wire-visible denial (#4367) rather than
+            # None: a bare closed connection with zero bytes is
+            # indistinguishable, to a caller, from an unreachable relay or an
+            # internal error -- the exact failure class this response line
+            # exists to rule out. Never echoes the allowlist itself (which
+            # would leak configured-resource details to the requesting
+            # client); the reason a caller needs is "not allowed", not which
+            # other resources are.
+            return ACCESS_DENIED_RESPONSE
 
         # Check cache
         cache_key = (target, tenant)

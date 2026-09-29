@@ -90,12 +90,19 @@ class TestAzLoginResourceAllowlist:
 
     @pytest.mark.asyncio
     async def test_disallowed_resource_denied(self):
+        """#4367: a denial is an explicit, wire-visible response -- not a
+        bare ``None`` a caller can't distinguish from an unreachable relay
+        or an internal error."""
         source = AzLoginSource(allowed_resources=["https://management.azure.com/"])
         result = await source.resolve(
             "get-azure-token",
             {"resource": "https://graph.microsoft.com/"},
         )
-        assert result is None
+        assert result is not None
+        assert "error=access_denied" in result
+        assert "reason=resource_not_allowed" in result
+        # Never echoes the allowlist contents back to the requesting client.
+        assert "management.azure.com" not in result
 
     @pytest.mark.asyncio
     async def test_no_allowed_resources_denies_all(self):
@@ -104,7 +111,8 @@ class TestAzLoginResourceAllowlist:
             "get-azure-token",
             {"resource": "https://management.azure.com/"},
         )
-        assert result is None
+        assert result is not None
+        assert "error=access_denied" in result
 
     @pytest.mark.asyncio
     async def test_normalized_form_allowed(self):
@@ -133,7 +141,8 @@ class TestAzLoginResourceAllowlist:
             "get-azure-token",
             {"resource": "https://storage.azure.com/"},
         )
-        assert result is None
+        assert result is not None
+        assert "error=access_denied" in result
 
     @pytest.mark.asyncio
     async def test_wildcard_allows_any_scope(self):

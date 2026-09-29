@@ -384,6 +384,59 @@ def test_cmd_send_uses_main_resolve_target_compatibility_seam(monkeypatch):
     }
 
 
+def test_cmd_create_prepends_companion_heads_up(monkeypatch):
+    class _Client:
+        def get_session(self, _target):
+            raise BridgeClientError(404, "not found")
+
+    client = _Client()
+    seen = {}
+    monkeypatch.setattr(m, "_get_client", lambda: client)
+    monkeypatch.setattr(
+        "agent_bridge.resume_handoff_cli.find_singleton_repo",
+        lambda target: None,
+    )
+    monkeypatch.setattr(m, "_caller_id_for", lambda _args: "caller-A")
+    monkeypatch.setattr(m, "_resolve_target", lambda *_args, **_kwargs: "sess-new")
+    monkeypatch.setattr(
+        m,
+        "_submit_and_stream",
+        lambda _client, _args, session_id, prompt, *, caller_id: seen.update(
+            {"session_id": session_id, "prompt": prompt, "caller_id": caller_id}
+        ),
+    )
+    args = argparse.Namespace(
+        target="agent-x",
+        prompt="Investigate the failure and report back.",
+        prompt_file=None,
+        caller=None,
+        json=False,
+        no_wait=True,
+        force=False,
+        full_history=False,
+        session_id_file=None,
+        model=None,
+        effort=None,
+        charter=None,
+        target_dir=None,
+        worktree_id=None,
+    )
+
+    m._cmd_create(args)
+
+    assert seen == {
+        "session_id": "sess-new",
+        "prompt": (
+            "Heads-up: you are an agent-bridge companion agent, not an "
+            "agent-dispatch worker. Ordinary end-of-turn prose is fine here: "
+            "the controlling agent reads it. Use dispatch-style lifecycle/tool "
+            "calls only when your actual task explicitly asks for them.\n\n"
+            "Investigate the failure and report back."
+        ),
+        "caller_id": "caller-A",
+    }
+
+
 class _ReadRenderer:
     def render_events(self, _events):
         return ""

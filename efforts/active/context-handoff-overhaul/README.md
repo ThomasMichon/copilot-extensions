@@ -433,11 +433,23 @@ Verbatim from the operator:
   operator's original live symptom.
 - [ ] Fix Worktree Manager's `trigger_handoff` pickup reliability: cases
   where a "successful" report corresponds to no actual live pane.
-- [ ] Harden the successor-side fallback so an agent with zero working
+- [x] Harden the successor-side fallback so an agent with zero working
   context-handoff tools can reliably discover and execute the manual
   consume+resume flow without floundering -- builds on this effort's
   already-merged PR #3016 instructions.md fallback; live agent reports
   suggest it isn't sufficient on its own yet.
+  **Landed as the CLI-parity slice:** three new diagnostic subcommands
+  (`list-sessions`, `get-previous-session`, `abort`) on the existing
+  extension-free `handoff-cli.mjs`, a complete command catalog table added
+  to the checked-in, projected `awareness.instructions.md` (so the
+  "upfront quick catalog" lands in every consuming repo whether or not the
+  extension loaded this session), and matching updates to
+  `handoff-fallback.instructions.md`/`SKILL.md`/`README.md`'s own CLI
+  reference blocks. Deliberately does **not** add a `bin/`
+  binstub/install/runtime step -- this plugin's own README and
+  `cli-parity.test.mjs` already commit to "no PATH binstub," so the
+  catalog stays a documented `node "$CH" <verb>` invocation, not a bare
+  `context-handoff <verb>` command. See the 2026-09-29 Journal entry.
 - [ ] Confirm/close the duplicate-spawn gap (addressed by PR #3011) and the
   predecessor-termination gap against the operator's exact symptom
   description.
@@ -565,6 +577,66 @@ detail; a fuller Proposal will fill in once Phase 0's issue-filing and review
 gate land._
 
 ## Journal
+
+### 2026-09-29 — CLI-parity slice (Phase 7 successor-side fallback item)
+- Closed the long-open Phase 7 bullet "harden the successor-side fallback so
+  an agent with zero working context-handoff tools can reliably discover and
+  execute the manual consume+resume flow" with a concrete CLI-parity slice,
+  triggered by an operator request framed as "the final piece: the CLI-only
+  variant/backup for context-handoff."
+- Design constraint discovered mid-flight and honored rather than overridden:
+  this plugin's own README (§ "How the extension is delivered") and
+  `cli-parity.test.mjs`'s `fallback remains payload-only with no installed
+  runtime` test already commit to zero install step / zero PATH binstub as a
+  deliberate architectural boundary. The operator's literal phrasing
+  ("agents just call `context-handoff ___` subcommands") would have required
+  a `bin/` binstub, which conflicts with that tested invariant -- resolved by
+  keeping the existing verified-path `node "$CH" <verb>` invocation contract
+  and making its **catalog** complete and discoverable instead of adding a
+  global command.
+- Added three subcommands to the existing extension-free `handoff-cli.mjs`
+  (sharing `handoff-core.mjs` with the extension, per the existing contract):
+  `list-sessions` and `get-previous-session` wrap `agent-worktrees
+  list-sessions`'s own recorded handoff chain (degrading to an explicit
+  `available: false` -- never a guess -- when agent-worktrees isn't
+  reachable); `abort` cancels a pending handoff before consumption (task via
+  the same `agent-dispatch abandon` primitive `abandonSupersededHandoffs`
+  already uses; file via an explicit `aborted: true` marker that never
+  fabricates a consuming successor).
+- Extended the checked-in, projected `awareness.instructions.md` (every
+  session's "this mechanism exists" pointer) with a complete command table --
+  the "upfront quick catalog" -- and brought `handoff-fallback.instructions.md`,
+  `SKILL.md`'s CLI fallback block, and the plugin's own `README.md` command
+  blocks into sync with it.
+- 16 new/extended tests across `handoff-core.test.mjs` and
+  `cli-parity.test.mjs` (list-sessions/get-previous-session/abort function
+  contracts, CLI usage-error parity with `consume`, and the existing
+  no-binstub guard continuing to pass unmodified).
+
+### 2026-09-29 (later) — abort now really cancels the agent-worktrees ledger entry
+- PR #4570 review round 5 rejected the abort path's original "ledger
+  advisory" design: `abort` retired the backing handoff record (task/file)
+  but only pointed operators at `agent-worktrees handoffs-check --execute`
+  for the separate `agent-worktrees` ledger's own `pending_handoffs` entry --
+  and that remediation **cannot** reconcile a pre-consumption abort (it only
+  acts once a successor/candidate plus a recorded spawn already exist). The
+  reviewer's explicit call: add a dedicated agent-worktrees cancellation
+  primitive and invoke it from abort, rather than leaving an ineffective
+  pointer.
+- Added a new, precisely-scoped `cancel_handoff(record, token)` to
+  `agent-worktrees` (`tracking_lifecycle.py`), exposed as a new
+  `cancel-handoff` CLI subcommand -- deliberately narrower than the existing
+  `_cancel_pending_handoffs` sweep (which only fires internally as a side
+  effect of a brand-new session registering): this cancels ONE pending
+  handoff by its exact token, never a blanket sweep, so an explicit external
+  abort never silently cancels a genuinely different in-flight handoff.
+- Wired both `abortHandoffTask` and `abortFileHandoff` in context-handoff to
+  call it (best-effort, via the same `execute` injection point tests already
+  use) and report the real outcome (`ledgerCancelled: true/false` plus an
+  honest failure note) instead of the old static advisory text.
+- Cross-plugin PR: this is the first context-handoff change in this effort
+  to land a capability inside `agent-worktrees` itself rather than working
+  around a gap in it.
 
 ### 2026-09-17 — Phase 5 coordination closure
 - Closed this effort's Phase 5 by updating the owning

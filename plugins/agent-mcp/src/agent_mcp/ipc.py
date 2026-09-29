@@ -86,8 +86,25 @@ async def _connect(socket_path: str | Path):
     ep = _read_endpoint(socket_path)
     if ep is None:
         raise OSError(f"no serve endpoint for {socket_path}")
-    reader, writer = await asyncio.open_connection(_TCP_HOST, ep["port"])
-    return reader, writer, ep.get("token")
+    # #4366: a transient ConnectionRefusedError against a live, already-
+    # advertised endpoint has been observed under heavy Windows host load
+    # (the daemon's asyncio.start_server() completes -- and its endpoint
+    # sidecar is written -- only once the listener is bound and accepting,
+    # so this is not an endpoint-before-listener ordering race; the cause is
+    # unconfirmed, consistent with transient host/OS-level contention).
+    # Retry a ConnectionRefusedError a few times with a short backoff before
+    # giving up. Any other OSError (e.g. the daemon has genuinely exited)
+    # still surfaces immediately, unretried.
+    attempts, delay = 5, 0.05
+    for attempt in range(attempts):
+        try:
+            reader, writer = await asyncio.open_connection(_TCP_HOST, ep["port"])
+            return reader, writer, ep.get("token")
+        except ConnectionRefusedError:
+            if attempt == attempts - 1:
+                raise
+            await asyncio.sleep(delay)
+            delay *= 2
 
 
 async def request_via_socket(socket_path: str | Path, request: dict) -> dict | None:

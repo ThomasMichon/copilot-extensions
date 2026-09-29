@@ -45,10 +45,10 @@ CH="$CH_ROOT/extensions/context-handoff/handoff-cli.mjs"
 node "$CH" check-heads --json --cwd "$PWD"
 node "$CH" sync-worktree --json --cwd "$PWD"
 node "$CH" save --title "<t>" --prompt-file "<f.md>" --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
-node "$CH" trigger --title "<t>" --prompt-file "<f.md>" --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
-node "$CH" consume --locator "<kind>:<id>" --cwd "$PWD"
 ```
-PowerShell: same, using `COPILOT_PLUGIN_ROOT` (default
+`trigger`/`consume`/`list-sessions`/`get-previous-session`/`abort` share
+that shape. `node "$CH" help` prints every verb and option. PowerShell:
+same, using `COPILOT_PLUGIN_ROOT` (default
 `$HOME\.copilot\installed-plugins\copilot-extensions\context-handoff`),
 run `node $ch <verb> ...`
 

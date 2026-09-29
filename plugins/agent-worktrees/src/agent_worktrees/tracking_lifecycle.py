@@ -271,6 +271,70 @@ def _cancel_pending_handoffs(record: tracking.WorktreeRecord) -> bool:
     return changed
 
 
+def cancel_handoff(record: tracking.WorktreeRecord, token: str) -> bool:
+    """Cancel ONE pending handoff by its exact token (the handoff/task id a
+    caller already knows), unlike `_cancel_pending_handoffs`'s
+    cancel-everything-pending sweep (a side effect of a NEW session
+    registering). This is the targeted primitive an explicit external
+    cancellation (context-handoff's `abort`) needs: retiring a handoff before
+    consumption must also close ITS OWN ledger entry, not every pending entry
+    on the worktree, or a genuinely different in-flight handoff would be
+    silently cancelled too. A no-op (returns False) when the token isn't
+    found, isn't `pending` (already linked/cancelled), or already has a
+    `candidate` associated -- `associate_handoff_candidate()` leaves state
+    `pending` while a successor is mid-cutover, so `pending` alone does not
+    mean pickup hasn't started; a caller retrying an already-cancelled (or
+    already-claimed) abort should see a clean, idempotent no-op, not an
+    error, and never a false "cancelled" over an in-flight successor."""
+    for handoff in record.handoffs:
+        if handoff.token == token and handoff.state == "pending" and handoff.candidate is None:
+            handoff.state = "cancelled"
+            predecessor = record.session_entry(handoff.predecessor)
+            # open_handoff() moved an active predecessor to "yielded" when
+            # this handoff was opened. In the normal pre-consumption abort
+            # case no successor has taken over, so leaving it "yielded"
+            # would strand the worktree permanently headless even though
+            # the predecessor is still alive/resumable. Restore it to
+            # "active" and record a head transition -- but ONLY when the
+            # worktree is genuinely headless right now (no successor since
+            # claimed head some other way); never clobber a legitimate
+            # newer head.
+            #
+            # `resolved_head_session is None` alone is not enough:
+            # resolved_head_session deliberately hides YIELDED sessions too,
+            # so a genuinely newer head that has since yielded its own
+            # pending handoff would also read as "no head" -- restoring
+            # THIS predecessor would silently overwrite that newer lineage.
+            # Require the raw latest head transition to still name this
+            # exact predecessor (or that no transition exists at all).
+            latest_transition = record.head_transitions[-1] if record.head_transitions else None
+            predecessor_is_latest_head = (
+                latest_transition is None or latest_transition.session_id == handoff.predecessor
+            )
+            if (
+                predecessor is not None
+                and predecessor.state == "yielded"
+                and record.resolved_head_session is None
+                and predecessor_is_latest_head
+            ):
+                predecessor.state = "active"
+                _append_head_transition(
+                    record, handoff.predecessor, reason="handoff-cancelled",
+                    handoff_ordinal=handoff.ordinal,
+                )
+            else:
+                # Advance lifecycle_revision (matching open_handoff and the
+                # other existing cancellation paths) -- save_record()'s
+                # optimistic-concurrency check only preserves newer
+                # session/handoff data when the revision increases, so
+                # skipping this would let an unrelated writer holding a
+                # pre-cancellation snapshot later save with the same
+                # revision and silently restore this handoff to pending.
+                _next_lifecycle_revision(record, handoff.predecessor)
+            return True
+    return False
+
+
 def _handoff_state(record: tracking.WorktreeRecord, token: str) -> str | None:
     handoff = next((handoff for handoff in record.handoffs if handoff.token == token), None)
     return handoff.state if handoff is not None else None

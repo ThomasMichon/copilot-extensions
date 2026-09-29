@@ -454,6 +454,9 @@ node "$CH" consume --locator "task:<task-id>" \
   --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" consume --locator "file:<handoff-id>" \
   --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+node "$CH" list-sessions --json --cwd "$PWD"
+node "$CH" get-previous-session --json --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+node "$CH" abort --locator "task:<task-id>" --reason "<why>" --cwd "$PWD"
 ```
 
 PowerShell:
@@ -478,6 +481,9 @@ node $ch trigger --title '<topic>' --prompt-file '<handoff.md>' --session-id $en
 node $ch trigger --handoff-token '<HANDOFF_TOKEN>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch consume --locator 'task:<task-id>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch consume --locator 'file:<handoff-id>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+node $ch list-sessions --json --cwd $PWD
+node $ch get-previous-session --json --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+node $ch abort --locator 'task:<task-id>' --reason '<why>' --cwd $PWD
 ```
 
 ## Last-resort fallback: write the file yourself

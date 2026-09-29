@@ -423,6 +423,7 @@ def build_copilot_remote_command(
     anchor: bool = False,
     driver: str | None = None,
     seed: str | None = None,
+    seed_ready_timeout: float | None = None,
     ensure_mux: bool = True,
     embody_bin: str = "agent-worktrees",
     detach: bool = False,
@@ -473,6 +474,8 @@ def build_copilot_remote_command(
         argv += ["--driver", driver]
     if seed:
         argv += ["--seed", seed]
+    if seed and seed_ready_timeout and seed_ready_timeout > 0:
+        argv += ["--seed-ready-timeout", str(seed_ready_timeout)]
     if ensure_mux:
         argv.append("--ensure-mux")
     if bridge_scope_id:

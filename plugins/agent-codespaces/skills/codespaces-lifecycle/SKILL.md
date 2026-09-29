@@ -548,16 +548,16 @@ by agent-codespaces.
   hang). Pass explicit, generous budgets for any relay- or `az`-touching
   command, e.g. `--timeout 90 --connect-timeout 220`, rather than assuming the
   default 60 s is enough and treating an early cutoff as a real failure.
-- **A `get-azure-token` relay request for an Azure resource/scope returns
-  nothing, with no error** -- a resource outside the CodeSpace's az-login
-  allowlist is silently denied: the request can come back as a fully empty
-  response (no `token=` line, no diagnostic) instead of a clear rejection.
-  Before assuming the relay or `ado-auth-helper` is broken, check what that
+- **A `get-azure-token` relay request for an Azure resource/scope not in the
+  CodeSpace's allowlist is denied explicitly** -- the response carries
+  `error=access_denied` / `reason=resource_not_allowed` (fixed in
+  `ThomasMichon/copilot-extensions#4367`; before that fix the request came
+  back as a fully empty response with no diagnostic). `ado-auth-helper-relay`
+  surfaces this on stderr as "the credential relay confirmed this resource is
+  not in the host's Azure allowlist". If you hit this, check what that
   CodeSpace is actually allowed to mint: the host's
   `~/.agent-codespaces/relay-tokens.json` has a per-CodeSpace
   `allowed_resources` list (commonly just the ADO resource GUID
   `499b84ac-1321-427f-aa17-267ca6975798` and `https://storage.azure.com/`
   unless the target repo's own `.copilot-extensions/agent-codespaces/config.yaml`
-  grants more) --
-  test against one of those first. The empty-response-on-denial gap itself is
-  tracked as `ThomasMichon/copilot-extensions#4367`.
+  grants more) -- test against one of those first.

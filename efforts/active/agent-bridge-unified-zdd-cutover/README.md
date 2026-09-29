@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 5 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 5 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 5 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to a tracked follow-up)
+- **Status:** In Progress (Phase 1 of 6 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 6 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 6 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 6 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 6 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to Phase 6; Phase 6 (Tier-E live-turn-survival harness) planned, not started)
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
@@ -270,13 +270,35 @@ layer — is the operator's own, captured verbatim in Request.)_
   new `agent-bridge-cutover` companion) that exercises this on a real fresh
   machine.
 
+### Phase 6 — Tier-E live-turn-survival harness (planned, not started)
+
+Closes Phase 5's Plan item 1 for real: prove, with a genuinely live
+Copilot/ACP turn in flight, that `agent-bridge deploy` does not disrupt it
+while the daemon fully changes generation underneath it. Full design,
+topology analysis (a plain `command`-registered Tier-E provider bypasses
+the Session-Host path entirely -- a local target is required), concrete
+sketch, feasibility notes, and acceptance criteria live in the sibling
+design doc:
+[`phase-6-tier-e-live-turn-harness.md`](phase-6-tier-e-live-turn-harness.md).
+
+- [ ] A real live cutover drill shows a real Copilot turn completes with
+  zero observed disruption while the daemon's generation actually changes
+  underneath it (same session id, no dropped/duplicated event, confirmed
+  generation change -- not a trivial/no-op cutover). See the sibling doc.
+- [ ] The drill's verdict is programmatic/evidence-based, or a documented
+  decision explains why an LLM judge is the right mechanism after all.
+- [ ] The scenario (or bespoke script) is documented in the clean-room
+  catalog and harness docs if it establishes a new reusable pattern.
+
 ## Validation Plan
 
 - [ ] `agent-bridge service restart` (or its replacement) and `agent-bridge
   deploy` are provably the same code path (a shared test, or the removal of
   one verb).
 - [ ] A live cutover drill (Phase 5) shows zero session disruption across a
-  real generation change.
+  real generation change. **See Phase 6** -- needs a real live Copilot turn
+  (Tier-E-style harness), not deliverable at Phase 5's Tier-P/stdlib-probe
+  fidelity; planned but not started.
 - [ ] An abrupt-termination drill shows a stale claim is recovered by the
   next generation without manual intervention. **Partially covered** -- the
   claim is stamped with a test-chosen label, not the daemon's own real
@@ -341,6 +363,51 @@ entry below for what was inspected, what was already covered, and the one new
 test that closes the gap.
 
 ## Journal
+
+### 2026-09-29 — Phase 6 planned (not started)
+- Planned (operator request, after Phase 5 merged) rather than started
+  immediately: a Tier-E live-turn-survival harness to close Phase 5's
+  deferred Plan item 1 for real -- a genuinely live Copilot turn surviving
+  a real `agent-bridge deploy` cutover, not just the Tier-P/stdlib-probe
+  mechanism-level proof Phase 5 delivered.
+- Read `tools/clean-room/TIER-E-EXECUTION.md` (partially) and the existing
+  `agent-vault-eval`/`agent-dispatch-hibernate-eval` scenarios to ground the
+  plan. Key finding: every existing Tier-E scenario judges *doc-compliance*
+  (does a driven agent discover and follow a plugin's documented mechanism)
+  via the `clean-room-judge` LLM judge -- this drill has no doc-compliance
+  question at all (it's an infra-reliability assertion independent of what
+  the agent does), so it needs Tier-E's container + real-ACP machinery but
+  almost certainly a **programmatic** verdict, not an LLM judge. This is
+  the central open design question the next session must resolve before
+  committing to a scenario shape -- see the Plan's own Phase 6 section for
+  the full sketch, feasibility notes, and acceptance criteria.
+- No code changed this round; planning-only. Handing off for
+  implementation in a fresh session/worktree per the operator's own
+  request ("plan it out, then tackle it in a handoff").
+- **Corrected after automated review (a plan-saving catch).** The initial
+  design sketch proposed registering the box as a `command`-type Tier-E
+  provider (`bridge_register.py`'s `docker exec ... copilot --acp --stdio`),
+  mirroring the doc-audit scenarios. Review correctly caught that this
+  transport **bypasses the Session-Host mechanism entirely**:
+  `session_start.py` only routes a **`local`**-type target through
+  `_connect_via_session_host` (the survivable-child path Phases 2/3
+  actually built and durably tracks in `HostIndex`); `ssh`/`command`/spawn
+  providers use a separate frontend-owned process path with no
+  host-boundary spawner, never reattached across a cutover. A
+  `command`-registered Tier-E session would have proven nothing about
+  session-host reattachment -- worse, it risked a **false pass** (the
+  session surviving because it drained normally, not because a real
+  generation handoff reattached it). Corrected the design sketch to use a
+  **local** `agent-bridge create <agent-name> --target-dir <local-repo-
+  path>` session instead (the checkout path via `--target-dir`, never the
+  positional `target`, which names an agent -- this is the only path that
+  actually spawns and durably registers a real Session-Host
+  child), which likely means this drill doesn't need Tier-E's
+  provider-registration machinery at all -- it's closer in shape to
+  extending the existing Tier-P `agent-bridge-cutover` probe with a real,
+  credits-consuming session instead of a bare daemon. Re-flagged whether
+  the "Tier E" label even applies as an open question for whoever
+  implements this.
 
 ### 2026-09-29 — Phase 5 landed partially (abrupt-termination drill + clean-room extension; live-turn drill deferred) ([#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586))
 - **What's real here (final implementation).** Extended the pre-existing
@@ -978,3 +1045,4 @@ test that closes the gap.
 - Vision: [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
 - Extends: [`libs/zdd`](../../../libs/zdd/README.md)
 - Sibling effort: [`agent-bridge-truthful-terminal-state`](../agent-bridge-truthful-terminal-state/README.md)
+- Phase 6 design: [`phase-6-tier-e-live-turn-harness.md`](phase-6-tier-e-live-turn-harness.md)

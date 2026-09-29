@@ -11,6 +11,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+_COMPANION_SEED_HEADS_UP = (
+    "Heads-up: you are an agent-bridge companion agent, not an agent-dispatch "
+    "worker. Ordinary end-of-turn prose is fine here: the controlling agent "
+    "reads it. Use dispatch-style lifecycle/tool calls only when your actual "
+    "task explicitly asks for them."
+)
+
 
 def _core():
     from . import __main__ as core
@@ -55,6 +62,13 @@ def _resolve_prompt(args: argparse.Namespace, *, required: bool) -> str | None:
         )
         sys.exit(2)
     return None
+
+
+def _companion_seed_prompt(prompt: str | None) -> str | None:
+    text = (prompt or "").strip()
+    if not text:
+        return prompt
+    return f"{_COMPANION_SEED_HEADS_UP}\n\n{text}"
 
 
 def _cmd_send(args: argparse.Namespace) -> None:
@@ -495,6 +509,7 @@ def _cmd_create_cli(
     needs. The seed then travels over stdin (``--seed-file -``) so a long,
     multi-line prompt never transits a binstub's argv re-parsing.
     """
+    prompt = _companion_seed_prompt(prompt)
     prefix, sep, name = target.partition(":")
     binstub = _CLI_MODE_VENUE_BINSTUBS.get(prefix) if sep else None
     if not binstub or not name:
@@ -624,7 +639,13 @@ def _cmd_create(args: argparse.Namespace) -> None:
             print(f"[OK] Session {session_id} created -- send work with: agent-bridge send {session_id} \"<prompt>\"")
         return
 
-    core._submit_and_stream(client, args, session_id, prompt, caller_id=caller_id)
+    core._submit_and_stream(
+        client,
+        args,
+        session_id,
+        _companion_seed_prompt(prompt),
+        caller_id=caller_id,
+    )
 
 
 def _write_session_id_file(path_value: str, session_id: str) -> None:
