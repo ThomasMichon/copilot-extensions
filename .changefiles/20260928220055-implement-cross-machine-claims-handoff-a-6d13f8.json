@@ -1,0 +1,9 @@
+{
+  "comment": "Implement cross-machine claims handoff accept via SSH exec",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

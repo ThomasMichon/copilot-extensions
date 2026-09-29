@@ -90,7 +90,7 @@ Operator (verbatim, across the correcting exchange):
       location to be confirmed against what's actually there before editing.)_
 
 ### Phase 2 — Implement cross-machine `accept` via SSH exec
-- [ ] Design the two-sided transaction: when `claims handoff accept
+- [x] Design the two-sided transaction: when `claims handoff accept
       <bundle-id>` is invoked and the bundle's source machine differs from
       the local machine, SSH to the source machine's own binstub to read the
       bundle and perform the source-side settle (mark `accepted`, release the
@@ -99,20 +99,20 @@ Operator (verbatim, across the correcting exchange):
       locally, using the *existing* same-machine code path.
       _(agent-recommended shape, to be validated against the existing lease
       module's locking/fencing conventions before implementing.)_
-- [ ] Reuse the existing lease/fencing primitive (`lease_store.py`,
+- [x] Reuse the existing lease/fencing primitive (`lease_store.py`,
       `lease_protocol.py`) for the concurrency-safety half (so two competing
       accept/cancel attempts across the SSH round-trip can't double-transfer
       or lose ownership) -- do not invent a second locking mechanism.
-- [ ] Resolve the SSH target the same way the rest of the suite already does
+- [x] Resolve the SSH target the same way the rest of the suite already does
       (facility SSH aliases / `machines.yaml`), not a hardcoded host.
-- [ ] Fail atomically and cleanly if the SSH round-trip fails partway (no
+- [x] Fail atomically and cleanly if the SSH round-trip fails partway (no
       partial cross-machine transfer; same invariant as the same-machine
       path).
-- [ ] Tests: successful cross-machine accept (faked SSH boundary, mirroring
+- [x] Tests: successful cross-machine accept (faked SSH boundary, mirroring
       how existing tests fake cross-project), a failed SSH-side step leaving
       both sides unchanged, and a fencing conflict on a concurrent accept
       attempt rejected cleanly.
-- [ ] Update the PR body / docs (CLI help, `references/obligations.md`) to
+- [x] Update the PR body / docs (CLI help, `references/obligations.md`) to
       describe the real cross-machine mechanism.
 
 ### Phase 3 — Land and close out
@@ -123,12 +123,12 @@ Operator (verbatim, across the correcting exchange):
 
 ## Validation Plan
 
-- [ ] Same-machine and cross-project acceptance (already covered by #4527)
+- [x] Same-machine and cross-project acceptance (already covered by #4527)
       remain green -- this effort must not regress them.
-- [ ] New cross-machine accept path has direct test coverage (see Phase 2).
-- [ ] `tools/check-version-bump.py`, `tools/check-changefile-presence.py`,
+- [x] New cross-machine accept path has direct test coverage (see Phase 2).
+- [x] `tools/check-version-bump.py`, `tools/check-changefile-presence.py`,
       `tools/check-version-consistency.py` all pass on the implementation PR.
-- [ ] Full `agent-worktrees` plugin suite passes (matching #4527's own
+- [x] Full `agent-worktrees` plugin suite passes (matching #4527's own
       validation bar), modulo the two pre-existing `test_controller_relations.py`
       failures already confirmed unrelated and present on `origin/dev`.
 
@@ -144,3 +144,24 @@ before Phase 2 execution begins, per the `planning-efforts` skill._
   cross-machine gap, over-concluded a new bridge RPC was required, and the
   operator corrected the direction toward the suite's existing SSH-exec
   pattern. Captures the correction and plans the actual fix.
+
+### 2026-09-28 — Phase 2 implementation
+- Implemented true cross-machine `claims handoff accept` in
+  `claim_handoffs.py`: cross-machine acceptance now acquires a shared
+  `claim-handoff` lease fence, SSHes to the source machine's own project
+  binstub for the source-side `accept-source` settle, and finishes the
+  consumer-side ledger/lease transfer locally. Same-machine accept now reuses
+  the same source/consumer-half factoring, and decline/cancel honor the same
+  fence on cross-machine bundles so an in-flight accept cannot race a terminal
+  transition.
+- Added focused coverage for the new remote leg, failure rollback, fence
+  conflict, and the source-side plumbing verb itself in
+  `tests/test_claim_handoffs_accept.py`.
+- Updated the CLI reference and obligations guidance to document the SSH-exec
+  cross-machine path and the shared lease fence.
+- Validation to date: targeted bounded plugin tests passed
+  (`-k "claim_handoffs or handoff or obligations_settled or lease"`), and
+  `tools/check-version-bump.py` / `tools/check-changefile-presence.py` /
+  `tools/check-version-consistency.py` passed. The full bounded
+  `agent-worktrees` plugin suite later cleared on a subsequent retry after
+  transient `test-supervisor` slot saturation.
