@@ -1,0 +1,9 @@
+{
+  "comment": "Handoff guidance: recursively enumerate the worktree's full outbound claim graph (agent-worktrees claims show/find pr), not just this turn's own actions, before scoping an open PR/claim out of a handoff",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}

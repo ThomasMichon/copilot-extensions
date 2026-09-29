@@ -494,3 +494,27 @@ Compose the appropriate shape and pass it to `save_handoff_prompt` as
   carry each forward in the handoff's **Outstanding Background Flows &
   External State** section as either resumable (state how) or an explicit
   open item -- write "none" only when genuinely none exist.
+- **Scope this to the worktree's full outbound claim graph, not just this
+  turn's own actions.** Sessions progress a worktree forward and never look
+  back -- a successor inherits everything the worktree (and everything it
+  spawned, recursively, across every prior session) still has open, not only
+  what the immediately-preceding session itself did. Before writing "none" or
+  scoping an item out as "not this handoff's," verify with the tool, not
+  memory (exact `argv[0]` per the `agent-worktrees:tracing-claimant-graphs`
+  skill's convention):
+  1. `<agent-worktrees catalog argv[0]> claims show --json` lists this
+     worktree's own outbound claims (child worktrees, sessions, PRs).
+  2. **Recurse explicitly**: for every outbound `worktree` claim, run
+     `claims show --json` again from *that* child project/worktree, repeating
+     down every level a prior session spawned -- not just one hop. A
+     repo-wide `claims find pr --repo <owner/repo> --live` sweep is a useful
+     shortcut but no substitute: `--live` only confirms the PR's remote
+     state, never that the claiming worktree/session is alive.
+  3. For each open PR/claim found, apply that skill's own two-hop recipe --
+     `claims <id> --json` for the `owner_ref`, then `claimant-liveness
+     "<owner_ref>" --json` -- before concluding. A claim tracing to a
+     currently-live worktree/session is fine to name and leave (don't adopt
+     another live session's PR); one whose owner reports `alive: false`, or
+     that has no owner at all (e.g. an anchor-repo session with no worktree
+     to hold it), is this worktree's own unresolved obligation -- name it
+     explicitly, never drop it as "someone else's."
