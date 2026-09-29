@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import time
 from typing import Any
 
@@ -27,6 +28,49 @@ def _core() -> Any:
 
 class _SessionHostRecoveryMixin:
     """Session Host authority recovery and reattach helpers."""
+
+    def _claim_host_record(self, rec: Any) -> bool:
+        """Claim ``rec`` for this process's own generation (Phase 3).
+
+        Returns True when this generation now owns the claim (either it
+        already did, or it just recovered a stale one -- no live handshake
+        needed) and False when a live *different* generation still holds it,
+        in which case the caller must not reattach. A missing/no-op host
+        index or generation id (should not happen outside a stripped-down
+        test double) is treated as "claim not required" -- True -- so this
+        never blocks a caller that predates Phase 3's claim wiring.
+        """
+        if self._host_index is None or not getattr(self, "_generation_id", None):
+            return True
+        from .session_host.host_index import ClaimConflict
+        from .session_host.osutil import pid_alive
+
+        try:
+            self._host_index.claim(
+                rec.session_id,
+                generation=self._generation_id,
+                owner_pid=os.getpid(),
+                pid_alive=pid_alive,
+            )
+        except ClaimConflict as exc:
+            log.info(
+                "Not reattaching %s: still claimed by a live generation "
+                "(pid=%s) -- will retry once it releases",
+                rec.session_id, exc.held_by_pid,
+            )
+            return False
+        except KeyError:
+            # ``rec.session_id`` isn't tracked in this process's own
+            # ``HostIndex`` -- in real operation every record reaching this
+            # point came from ``self._host_index.all()`` in the first place,
+            # so this is unreachable there; it only happens with a
+            # lightweight test double that supplies records without
+            # registering them. Treat it as "claim not applicable" (permit
+            # the reattach) rather than blocking, since the safety net this
+            # method exists for -- a durably tracked claim -- simply isn't in
+            # play for an untracked record.
+            return True
+        return True
 
     async def reattach_session_hosts(
         self,
@@ -128,6 +172,16 @@ class _SessionHostRecoveryMixin:
             if plan.disposition in (HostDisposition.REAP_STOPPED,
                                     HostDisposition.FORCE_REAP):
                 self._reap_host_record(rec, plan.reason)
+                continue
+            if not self._claim_host_record(rec):
+                # A live different generation still owns this record -- do not
+                # reattach out from under it (the effort's own "the next
+                # generation earns the handoff, never assumes it" behavior).
+                # Left as inconclusive rather than a hard failure: a later
+                # reattach pass (the post-cutover claim sweep, or this
+                # generation's own next startup) retries once that generation
+                # actually releases it.
+                self._remote_recovery_inconclusive.add(rec.session_id)
                 continue
             session = self._sessions.get(rec.session_id)
             if session is None or not session.acp_session_id:

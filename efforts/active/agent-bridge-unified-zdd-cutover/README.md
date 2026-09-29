@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522))
+- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 5 submitted for review)
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
@@ -226,12 +226,12 @@ layer — is the operator's own, captured verbatim in Request.)_
   recover primitive above) plus a process-level contention regression
   test.
 
-### Phase 3 — The liveness gate and the outgoing generation's exit contract
-- [ ] A new generation, after starting, durably marks itself live (the
+### Phase 3 — The liveness gate and the outgoing generation's exit contract ✅
+- [x] A new generation, after starting, durably marks itself live (the
   operator's "another lock file" idea, or an equivalent durable marker) —
   this is the signal the prior generation waits for before doing anything
   destructive.
-- [ ] Codify the outgoing generation's **exact** obligations before it may
+- [x] Codify the outgoing generation's **exact** obligations before it may
   terminate: confirm the next generation is live; hand off (or durably
   mark stale-recoverable) every session-host claim it held; ensure the
   handoff/claim state itself is durably recorded; notify its own ZDD
@@ -275,10 +275,99 @@ layer — is the operator's own, captured verbatim in Request.)_
 
 ## Proposal
 
-_Pending — Phase 2's claim/release/recover schema and Phase 3's exit-contract
-sequencing will be drafted here once the design is reviewed._
+**Phase 3's liveness gate — a design decision, not new code.** A dedicated
+"another lock file" (the operator's own phrasing in Request) turned out to be
+unnecessary: `zdd.routing`'s existing `active.json` table already *is* the
+durable liveness marker the vision calls for, for two independent reasons
+confirmed by reading `libs/zdd/src/zdd/routing.py` and `cutover.py`: (1)
+`CutoverOrchestrator.run()` only calls `publish_active()` **after** its own
+health gate passes -- so an entry in `active.json` already proves the new
+generation started and answered a live health probe, not merely that its
+process exists; (2) the same orchestrator re-confirms that health
+immediately before retiring the old daemon (the "verify-before-retire" gate),
+so the old generation never destroys itself on the strength of a
+liveness signal that could have gone stale between the flip and the retire.
+Introducing a second, parallel liveness file would only duplicate this
+signal, not strengthen it. Phase 3 therefore reuses `active.json` as-is and
+spends its own effort on the piece that genuinely didn't exist: the
+session-host claim half of the exit contract (below).
+
+**Phase 3's exit-contract sequencing.** Claim/release plugs into the
+*existing* cutover sequence at two points, both agent-bridge-specific (never
+touching `zdd`'s own generic surface, since not every `zdd` consumer has a
+session-host concept):
+1. **Release (outgoing generation, its own initiative)**: the `/api/v1/
+   shutdown` handler -- called by `CutoverOrchestrator` only after flip +
+   drain + the verify-before-retire gate all passed -- releases every claim
+   this generation holds (`HostIndex.release_all(generation_id)`) before
+   `should_exit=True` ever triggers lifespan teardown. This is the "it never
+   waits on a Copilot turn or a client" half: releasing is synchronous,
+   local, and never blocks on anything the new generation does.
+2. **Claim (new generation, never assumes ownership)**: the existing startup
+   reattach scan (`reattach_session_hosts()`) now calls
+   `HostIndex.claim(...)` for each live record before adopting it. A record
+   still claimed by a *live* other generation is skipped (not stolen); one
+   whose owning generation is dead is claimed silently (Phase 2's
+   claim/release/recover contract, no live handshake). Because this
+   generation's own startup reattach pass runs while it is still *passive*
+   (well before the old generation has released anything), it will
+   routinely see every record as contended on that first pass. The cutover
+   CLI (`_cmd_deploy`) therefore retries the scan via a new `/api/v1/
+   session-hosts/reattach` endpoint once the old generation is *confirmed*
+   exited -- mirroring the existing post-commit relay-adoption step's own
+   shape, not a new mechanism.
 
 ## Journal
+
+### 2026-09-28 — Phase 3 landed
+- **Generation identity**: `SessionManager` (via `_SessionCoreMixin.__init__`)
+  computes `self._generation_id = zdd.claims.generation_id(version=
+  __version__, pid=os.getpid())` once per process lifetime -- never
+  persisted, never reused across a restart, matching `zdd.claims`' own
+  contract from Phase 2.
+- **Claim wiring**: `_SessionHostRecoveryMixin._claim_host_record(rec)` (new)
+  wraps `HostIndex.claim()` with the three outcomes Phase 2's primitive
+  already defines -- already-owned (idempotent), a live other generation
+  (skip, don't steal), a dead one (recover silently) -- plus a fourth,
+  Phase-3-specific outcome for an untracked record (permit; keeps every
+  pre-Phase-3 reattach test that fabricates a bare record without
+  registering it in a real `HostIndex` working unchanged). Wired into
+  `reattach_session_hosts()`'s per-record loop right after the version-mux
+  plan is resolved and before the record is ever adopted.
+- **Release wiring (the exit contract)**: `routes/admin.py`'s `/api/v1/
+  shutdown` handler now calls `HostIndex.release_all(generation_id)` before
+  setting `server.should_exit = True`, and returns the released session ids
+  in its response. Best-effort (a release failure never blocks the shutdown
+  it's guarding against outliving).
+- **Post-cutover claim retry**: a new `/api/v1/session-hosts/reattach`
+  endpoint re-runs `reattach_session_hosts()` on demand. `venue_cli.py`'s
+  `_cmd_deploy` calls it on the newly-active daemon (via `BridgeClient
+  ._request` directly, not a new named client method -- `client.py` was
+  already sitting at its grandfathered 1686-line module-size ceiling; the
+  pre-push module-size guard caught this on the first push attempt) once
+  the old generation is *confirmed* exited (the same point that already
+  reconciles the service marker and verifies the retired pid) -- see
+  Proposal above for why this two-step claim dance (an early,
+  mostly-contended pass at startup; a retry once the old generation is
+  provably gone) is necessary rather than a single pass sufficing.
+- New tests: `plugins/agent-bridge/tests/test_session_host_claims_phase3.py`
+  (15 cases: generation-id computation/stability, `_claim_host_record`'s
+  four outcomes, and two `reattach_session_hosts()` integration cases for
+  the live-conflict-skips / dead-claim-recovers paths) and
+  `plugins/agent-bridge/tests/test_admin_routes_phase3.py` (4 route-level
+  cases for `/shutdown`'s release and `/session-hosts/reattach`). Two
+  existing reattach tests initially regressed (`test_startup_reattach_
+  resumes_session_stopped_while_starting`, `test_startup_reattach_leaves_
+  prior_idle_session_idle`) because they fabricate a bare `SimpleNamespace`
+  record without ever registering it in a real `HostIndex` -- fixed by
+  `_claim_host_record` treating an untracked record as "claim not
+  applicable" rather than a block (see above). Full `agent-bridge` suite
+  (2766+ tests, 7 sub-suites): green on two full runs (one prior run hit a
+  transient shared-host `[LIMIT] wall-clock limit exceeded` and a stale
+  test-runner lock from an unrelated dead process on this same machine --
+  both cleared on retry, neither related to this change).
+- This effort's own umbrella issue's Phase 4/5 remain: the caller-facing
+  mask/routing layer and the two validation drills.
 
 ### 2026-09-28 — Phase 2 landed ([#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522))
 - **`zdd.claims`** (new, canonical `libs/zdd`): storage-agnostic
