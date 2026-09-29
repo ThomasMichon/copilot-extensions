@@ -41,6 +41,30 @@
 # more unusual threat than an arbitrary outsider or even a Contributor's own
 # PR -- both of which this check does fully close.
 #
+# KNOWN, ACCEPTED STRUCTURAL LIMITATION: GitHub's `required_status_checks`
+# ruleset rule matches a check purely by its CONTEXT NAME
+# ("workflow-lockdown-guard"), not by which workflow file produced it, and
+# does not distinguish between check runs reported by different workflows
+# under the same GitHub Actions app identity. A Write Maintainer could
+# therefore modify an EXISTING, untrusted-`pull_request`-triggered workflow
+# (e.g. `ci.yml`) within their own PR to add a trivial job also named
+# `workflow-lockdown-guard` that always succeeds; whether that forged
+# success can satisfy the ruleset instead of (or alongside) this guard's own
+# correctly-failing result is a real ambiguity in how GitHub resolves
+# same-named concurrent checks, not something this workflow can control.
+# Closing this fully would need the check reported by a distinct, separately
+# trusted GitHub App/integration pinned in the ruleset by `integration_id`
+# -- not just "any GitHub Actions run in this repo," which forger and
+# defender share equally. That's real additional infrastructure (a GitHub
+# App, or an external CI system) this repo has not built. Until it does,
+# treat this lockdown as a strong deterrent and an accidental-misuse guard
+# (it fully stops an ordinary Contributor's PR, an unsophisticated mistake,
+# or a Maintainer who isn't actively trying to defeat it), NOT a
+# cryptographically hard guarantee against a Write Maintainer deliberately
+# trying to forge it -- the same category of trust already accepted
+# elsewhere in this governance model (see CONTRIBUTING.md's actor-vs-author
+# bypass note).
+#
 # IMPORTANT: this uses `pull_request_target`, not `pull_request`. A plain
 # `pull_request` trigger runs the workflow DEFINITION from the PR's own head
 # commit -- so a Write collaborator could edit *this file* within their own

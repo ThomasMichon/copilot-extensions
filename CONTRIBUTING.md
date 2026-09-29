@@ -171,6 +171,21 @@ explicit admin escalation).** This is enforced on four layers that agree:
    more unusual threat (an already-trusted collaborator actively pushing an
    unwanted commit onto someone else's PR) than an arbitrary outsider or a
    Contributor's own PR, both of which this check fully closes.
+   **Known, accepted structural limitation:** GitHub's
+   `required_status_checks` rule matches purely by context name
+   (`workflow-lockdown-guard`), not by which workflow file produced it. A
+   Write Maintainer could modify an existing, untrusted-`pull_request`
+   workflow (e.g. `ci.yml`) within their own PR to add a trivially
+   succeeding job of the same name — GitHub does not distinguish that forged
+   check from this one by app identity (both run as ordinary GitHub
+   Actions). Closing this fully needs a check reported by a distinct,
+   separately trusted GitHub App pinned in the ruleset by `integration_id`
+   — real additional infrastructure this repo hasn't built. Until it does,
+   treat this lockdown as a strong deterrent against an ordinary
+   Contributor's PR or an unsophisticated mistake, not a cryptographically
+   hard guarantee against a Write Maintainer deliberately trying to defeat
+   it — the same category of trust already accepted in the actor-vs-author
+   bypass note above.
    This ruleset has **no bypass actors at all** — not even ThomasMichon —
    because the check's own pass condition already grants exactly the
    intended exemption; a bypass actor here would let the exemption apply to
