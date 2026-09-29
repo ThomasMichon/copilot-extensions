@@ -257,10 +257,11 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
         else:
             print(f"[>] {recovery.get('reason')}")
         sys.exit(0)
+    prelude_steps: list[str] = []
     if recovery.get("recovered"):
-        print(f"[>] Recovered a prior aborted cutover: {recovery.get('reason')}")
+        prelude_steps.append(f"recovered a prior aborted cutover: {recovery.get('reason')}")
     if passive_reap.get("reaped"):
-        print(f"[>] Reaped an abandoned never-promoted passive (pid={passive_reap.get('pid')})")
+        prelude_steps.append(f"reaped an abandoned never-promoted passive (pid={passive_reap.get('pid')})")
 
     orch = CutoverOrchestrator(
         config_dir(),
@@ -272,6 +273,10 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
         pick_free_port=pick_free_port,
     )
     res = orch.run(health_timeout=args.health_timeout, drain_timeout=args.drain_timeout, force=args.force)
+    # Prepend rather than print eagerly: an eager print corrupts `--json`
+    # output, since it lands on stdout ahead of the single JSON payload
+    # `core._json_out(res.to_dict())` emits below.
+    res.steps = prelude_steps + res.steps
 
     if res.ok:
         active = routing.read_active_endpoint(config_dir(), verify_listener=False)

@@ -92,8 +92,8 @@ def test_service_restart_json_does_not_shadow_global_json():
     # dest. `add_deploy_cutover_flags()` must use
     # `default=argparse.SUPPRESS` so `agent-bridge --json service restart`
     # (the canonical global-flag-before-command form) keeps `args.json is
-    # True`, and `agent-bridge service deploy --json` (flag given at the
-    # subcommand) still works too.
+    # True`, and `agent-bridge deploy --json` (flag given at the subcommand
+    # itself) still works too.
     parser = core.build_parser()
 
     args = parser.parse_args(["--json", "service", "restart"])
@@ -134,3 +134,77 @@ def test_deploy_still_exposes_recover():
     venue_cli.register_venue_commands(sub)
     args = parser.parse_args(["deploy", "--recover"])
     assert args.recover is True
+
+
+def test_deploy_json_output_is_not_corrupted_by_recovery_messages(
+    tmp_path, monkeypatch, capsys
+):
+    # Regression guard: `_cmd_deploy --json` (now also reachable via
+    # `service restart --json`, since Phase 1 routes restart through it)
+    # used to print "[>] Recovered a prior aborted cutover: ..." /
+    # "[>] Reaped an abandoned never-promoted passive ..." to stdout
+    # *unconditionally*, ahead of the single `core._json_out(res.to_dict())`
+    # call -- corrupting the JSON payload whenever a restart/deploy happened
+    # to heal a stale cutover or reap an abandoned passive. Both messages
+    # must now surface as `steps` entries inside the one JSON object
+    # instead of separate prints.
+    from agent_bridge import config as agent_bridge_config
+    from zdd import breadcrumb as zdd_breadcrumb
+    from zdd import cutover as zdd_cutover
+    from zdd import routing as zdd_routing
+
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir()
+    monkeypatch.setattr(agent_bridge_config, "config_dir", lambda: cfg_dir)
+    monkeypatch.setattr(
+        agent_bridge_config,
+        "load_config",
+        lambda: argparse.Namespace(bind="127.0.0.1"),
+    )
+    monkeypatch.setattr(
+        agent_bridge_config, "load_or_create_auth_token", lambda: "tok"
+    )
+    monkeypatch.setattr(zdd_breadcrumb, "read_breadcrumb", lambda _cfg: None)
+    monkeypatch.setattr(
+        zdd_breadcrumb,
+        "recover_stale_cutover",
+        lambda *a, **k: {"recovered": True, "reason": "undrained a stale survivor"},
+    )
+    monkeypatch.setattr(
+        core,
+        "_reap_abandoned_passive",
+        lambda *a, **k: {"reaped": True, "pid": 4242},
+    )
+    monkeypatch.setattr(
+        zdd_routing, "read_active_endpoint", lambda *a, **k: None
+    )
+
+    fake_result = zdd_cutover.CutoverResult(ok=True, new_port=4321, steps=["spawned passive"])
+
+    class FakeOrchestrator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self, **kwargs):
+            return fake_result
+
+    monkeypatch.setattr(zdd_cutover, "CutoverOrchestrator", FakeOrchestrator)
+
+    parser = core.build_parser()
+    args = parser.parse_args(["--json", "deploy"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        venue_cli._cmd_deploy(args)
+    assert excinfo.value.code == 0
+
+    out = capsys.readouterr().out
+    import json
+
+    # Pretty-printed JSON spans multiple lines; the regression this guards
+    # against is a *stray line before/after* the JSON object, not multi-line
+    # JSON itself -- json.loads(out) fails outright if anything else got
+    # printed to stdout ahead of (or after) the payload.
+    payload = json.loads(out)
+    assert payload["ok"] is True
+    assert "recovered a prior aborted cutover" in " ".join(payload["steps"])
+    assert "reaped an abandoned never-promoted passive" in " ".join(payload["steps"])

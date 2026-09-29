@@ -283,11 +283,12 @@ sequencing will be drafted here once the design is reviewed._
   HostIndex recovery works even without a ZDD handoff; left untouched.
   `routes/worktrees.py`'s `"restart"` is an unrelated verb (restarting a
   worktree's mux-launched Copilot session, not the agent-bridge daemon).
-- Added `tests/test_service_restart_zdd.py` (grew to 6 tests across the
-  three review passes below) locking in that `restart` calls `_cmd_deploy`
+- Added `tests/test_service_restart_zdd.py` (grew to 7 tests across the
+  five review passes below) locking in that `restart` calls `_cmd_deploy`
   and never the raw stop/start pair, that its argparse Namespace carries
   every attribute `_cmd_deploy` reads, that `--recover` stays deploy-only,
-  and that the shared `--json` flag never shadows the global one.
+  that the shared `--json` flag never shadows the global one, and that
+  `_cmd_deploy --json` output stays valid JSON even mid-recovery.
 - Full `agent-bridge` suite green (`tools/run-plugin-tests.py agent-bridge`).
 - Filed the umbrella issue,
   [#4477](https://github.com/ThomasMichon/copilot-extensions/issues/4477).
@@ -348,6 +349,22 @@ sequencing will be drafted here once the design is reviewed._
   project name (a "dotfiles#1362" reference — this repo's own public
   `#1362`) from the new test file's docstring per this repo's
   public-artifact policy (`AGENTS.md`).
+- A fifth review pass caught one real bug and a docstring nit, both fixed:
+  `_cmd_deploy`'s recovery/passive-reap status messages
+  (`"[>] Recovered a prior aborted cutover: ..."` /
+  `"[>] Reaped an abandoned never-promoted passive ..."`) printed to
+  stdout *unconditionally*, ahead of the single `core._json_out(res.to_dict())`
+  call `--json` mode relies on -- corrupting the JSON payload whenever a
+  restart/deploy happened to heal a stale cutover or reap an abandoned
+  passive (a pre-existing `deploy --json` bug, newly exercisable through
+  `service restart --json` after Phase 1). Both messages now become
+  `steps` entries prepended to the `CutoverResult` before it's ever printed
+  or serialized, so they show up in both text and `--json` output the same
+  way every other step does. A new test drives `_cmd_deploy` end-to-end
+  with a faked `CutoverOrchestrator` and asserts `capsys`' stdout parses as
+  a single valid JSON object. Also corrected a test docstring that named a
+  nonexistent `agent-bridge service deploy --json` command (`deploy` is a
+  top-level verb, not a `service` action).
 - Phase 0's one open item (the opt-in reconcile-gate design fork) remains
   genuinely undecided — flagged for the operator, not resolved here.
 
