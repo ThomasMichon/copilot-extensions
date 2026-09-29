@@ -55,7 +55,7 @@ import uv_editable_ref as uer  # noqa: E402
 _VERSION_LITERAL = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?$")
 _JSON_VERSION_RE = re.compile(r'("version"\s*:\s*")([^"]+)(")')
 _TOML_VERSION_RE = re.compile(r'^(\s*version\s*=\s*")([^"]+)(")', re.MULTILINE)
-_TOML_TABLE_HEADER_RE = re.compile(r'^\[', re.MULTILINE)
+_TOML_TABLE_HEADER_RE = re.compile(r'^[ \t]*\[', re.MULTILINE)
 
 BUMP_ORDER = ("dev", "patch", "minor", "major")
 
@@ -186,7 +186,7 @@ def _write_project_version(pp: Path, new_version: str) -> bool:
     if not pp.exists():
         return False
     text = pp.read_text(encoding="utf-8")
-    header = re.search(r"^\[project\][ \t]*(?:#.*)?$", text, re.MULTILINE)
+    header = re.search(r"^[ \t]*\[project\][ \t]*(?:#.*)?$", text, re.MULTILINE)
     if header is None:
         return False
     start = header.end()

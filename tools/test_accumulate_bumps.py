@@ -285,6 +285,27 @@ def test_standalone_write_accepts_inline_comment_on_project_header(isolated: Pat
     assert acc.read_pyproject_project_version(d) == "0.1.0-dev96"
 
 
+def test_standalone_write_accepts_indented_project_header(isolated: Path):
+    """`tomllib` accepts leading whitespace before a table header (e.g.
+    `  [project] # metadata`), so `read_pyproject_project_version()`
+    computes a real bump for such a manifest -- but the write-side header
+    regex previously required `[` in column 1, silently returning `False`
+    and leaving the old version in place for this equally valid,
+    indented form (PR #4514 review)."""
+    d = isolated / "worktree-manager"
+    d.mkdir(parents=True)
+    (d / "pyproject.toml").write_text(
+        '  [project] # metadata\n'
+        'name = "worktree-manager"\nversion = "0.1.0-dev95"\n',
+        encoding="utf-8",
+    )
+
+    applied = acc.apply({"worktree-manager": ("0.1.0-dev95", "0.1.0-dev96")})
+
+    assert applied == ["worktree-manager"]
+    assert acc.read_pyproject_project_version(d) == "0.1.0-dev96"
+
+
 def test_apply_rewrites_standalone_consumer_source_fallback(isolated: Path):
     _standalone(isolated, "worktree-manager", "0.1.0-dev95")
     init = isolated / "worktree-manager/src/worktree_manager/__init__.py"
