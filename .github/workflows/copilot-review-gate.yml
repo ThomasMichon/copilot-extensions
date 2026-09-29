@@ -1,0 +1,82 @@
+# Requests a Copilot code review only for PRs authored by an invited
+# collaborator (Maintainer or Contributor) -- never automatically for an
+# uninvited outsider. GitHub's `copilot_code_review` ruleset rule
+# (`review_on_push`) has no "collaborators only" condition, so it would
+# otherwise auto-review every PR, including from people who were never
+# granted any access (billed to the repo owner, and giving an unreviewed
+# outsider a free automated pass through the same visible review surface
+# trusted contributors get). This workflow replaces that automatic trigger
+# with an explicit, permission-checked one.
+#
+# A maintainer can still manually request Copilot's review on any PR
+# (including an outsider's) via the normal "Reviewers" sidebar or the REST
+# API at any time -- this workflow only controls the *automatic* path.
+name: Copilot review gate
+
+on:
+  pull_request:
+    branches: [dev]
+    types: [opened, reopened, ready_for_review, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  request-review:
+    name: request-review-if-collaborator
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Request Copilot review for known collaborators only
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const author = context.payload.pull_request.user.login;
+
+            async function hasRepoAccess(username) {
+              try {
+                const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  username,
+                });
+                const permissions = data.user?.permissions ?? {};
+                return (
+                  permissions.admin === true ||
+                  permissions.maintain === true ||
+                  permissions.push === true ||
+                  permissions.triage === true ||
+                  permissions.pull === true
+                );
+              } catch (error) {
+                if (error.status === 404) {
+                  return false;
+                }
+                throw error;
+              }
+            }
+
+            const trusted = await hasRepoAccess(author);
+            if (!trusted) {
+              core.info(
+                `${author} is not an invited collaborator; skipping automatic Copilot review. ` +
+                  "A maintainer may still request one manually via the Reviewers sidebar.",
+              );
+              return;
+            }
+
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number,
+                reviewers: ["copilot-pull-request-reviewer[bot]"],
+              });
+              core.info(`Requested Copilot review for ${author}'s PR.`);
+            } catch (error) {
+              // Non-fatal: a stale/duplicate request, or Copilot review being
+              // unavailable, shouldn't fail the PR's checks.
+              core.warning(`Could not request Copilot review: ${error.message}`);
+            }

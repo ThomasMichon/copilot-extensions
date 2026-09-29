@@ -66,47 +66,84 @@ base branch.
 
 **Every change lands through a pull request — direct pushes to `dev` are
 blocked, and `main` accepts pushes only from the promotion pipeline (or
-explicit admin escalation).** This is enforced on three layers that agree:
+explicit admin escalation).** This is enforced on four layers that agree:
 
 1. **Tooling** — `.agent-worktrees/config.yaml` sets `pr.required: true`, so
    `agent-worktrees push-changes` refuses direct-to-`dev` and the PR-workflow
    git-hooks block committing to `dev` / pushing a worktree branch directly.
 2. **Branch policy** — a GitHub repository ruleset ("dev branch policy:
-   PR-required + non-blocking Copilot review") carries a `pull_request` rule
-   (+ `non_fast_forward`) that blocks direct pushes to `dev` server-side, for
-   everyone (no bypass). A separate branch-protection rule on `main` restricts
-   pushes to the promotion pipeline's own identity, with repo-admin escalation
-   retained for genuine emergencies (see Release & Versioning below).
-3. **Review** — the same ruleset's `copilot_code_review` rule auto-requests a
-   Copilot review on every PR into `dev`; this trigger itself is unconditional
-   and never bypassed for anyone. Whether that review (or anyone else's) must
-   formally *approve* the PR before merge is governed by a second ruleset
-   ("dev branch policy: review required (maintainer bypass)") plus
-   `.github/CODEOWNERS` (root-scoped to `@ThomasMichon`):
-   - A PR authored by anyone **other than** the maintainer requires the
-     maintainer's own approving review before it can merge — Copilot's review
-     alone is never sufficient for a non-maintainer's PR, however clean it
-     comes back, so a change never lands without the maintainer being aware
-     of it. This holds even though the repo's **"Allow Copilot to approve
-     pull requests"** setting (Settings → Copilot → Code review →
-     Auto-approval) is enabled, letting Copilot submit a genuine `Approve`
-     review that counts toward `required_approving_review_count`: that count
-     and `require_code_owner_review` are independent, both-must-pass gates,
-     and Copilot is deliberately **not** listed in CODEOWNERS, so its
-     approval alone can never satisfy the codeowner-specific half of the
-     requirement for someone else's PR.
-   - The maintainer's own PRs (including this account's agent-authored work)
-     bypass that specific review-count/codeowner requirement via a standing,
-     admin-role-scoped `bypass_actors` entry on the ruleset (`bypass_mode:
-     pull_request` — still requires a real PR and all required status
-     checks; only the *review* requirement is exempted). This is an
+   PR-required") carries a `pull_request` rule (+ `non_fast_forward`) that
+   blocks direct pushes to `dev` server-side, for everyone (no bypass). A
+   separate branch-protection rule on `main` restricts pushes to the
+   promotion pipeline's own identity, with repo-admin escalation retained for
+   genuine emergencies (see Release & Versioning below).
+3. **Review** — `.github/workflows/copilot-review-gate.yml` requests a
+   Copilot review automatically, but **only** when the PR author already has
+   real repository access (any invited collaborator, any permission level —
+   read included). An uninvited outsider's PR gets no automatic review at
+   all; a Maintainer can still request one manually via the "Reviewers"
+   sidebar at any time. (The ruleset-native `copilot_code_review` auto-review
+   rule has no such condition — it would fire for literally anyone — so this
+   repo does not use it; see "Everyone else" below for why that matters.)
+   Whether a review (Copilot's or anyone else's) must formally *approve* the
+   PR before merge is governed by a second ruleset ("dev branch policy:
+   review required (maintainer bypass)") plus `.github/CODEOWNERS`
+   (root-scoped to the full **Maintainer** group — currently `@ThomasMichon
+   @JakeSchieber @anarmawala @namankanakiya`; CODEOWNERS review satisfaction
+   is OR across listed owners, so any *one* Maintainer's approval counts, not
+   all of them):
+   - A PR authored by anyone **other than** a Maintainer requires **some**
+     Maintainer's own approving review before it can merge — Copilot's review
+     alone is never sufficient for a Contributor's PR, however clean it comes
+     back, so a change never lands without a Maintainer being aware of it.
+     This holds even though the repo's **"Allow Copilot to approve pull
+     requests"** setting (Settings → Copilot → Code review → Auto-approval)
+     is enabled, letting Copilot submit a genuine `Approve` review that
+     counts toward `required_approving_review_count`: that count and
+     `require_code_owner_review` are independent, both-must-pass gates, and
+     Copilot is deliberately **not** listed in CODEOWNERS, so its approval
+     alone can never satisfy the codeowner-specific half of the requirement
+     for a Contributor's PR.
+   - Each Maintainer's own PRs (including agent-authored work under their
+     account) bypass that specific review-count/codeowner requirement via a
+     standing, named-`User`-actor `bypass_actors` entry on the ruleset
+     (`bypass_mode: pull_request` — still requires a real PR and all required
+     status checks; only the *review* requirement is exempted). This is an
      author-based exception, which is why it lives in the ruleset rather than
      CODEOWNERS: CODEOWNERS can only key off file paths, never off who opened
-     the PR.
+     the PR. Deliberately, this bypass is a per-`User` ruleset entry, **not**
+     a bump to GitHub's `Maintain`/`Admin` repository role — a Maintainer here
+     keeps their ordinary `Write` permission (no repo-settings, Actions-secret,
+     or collaborator-management access) and gains only the self-merge
+     capability.
    - Required CI status checks (`PR gate`, a fixed-name aggregate — see its
      own definition in `.github/workflows/ci.yml` for why a fixed anchor job
      exists rather than naming dynamic matrix jobs directly) apply to
-     everyone with no bypass, including the maintainer.
+     everyone with no bypass, including every Maintainer.
+4. **Workflow/CODEOWNERS lockdown** — `.github/workflows/`, `.github/actions/`,
+   and `.github/CODEOWNERS` itself are locked to **ThomasMichon alone**, not
+   the wider Maintainer group (workflow changes can exfiltrate secrets/PATs,
+   a materially different risk than an ordinary code change). A Maintainer's
+   review-bypass above does *not* cover this: a required status check
+   (`workflow-lockdown-guard`, from `.github/workflows/workflow-lockdown-guard.yml`)
+   in its own ruleset ("dev branch policy: workflow/CODEOWNERS lockdown"),
+   bypassed only by ThomasMichon's own `User` actor entry, hard-fails any
+   merge — Maintainer or not, `pr-merge --now` or not — that touches those
+   paths without ThomasMichon as the author. (This is a required-status-check
+   workaround, not GitHub's native `file_path_restriction` ruleset rule: that
+   rule type returns `Validation Failed` on this personal, non-Enterprise
+   account — it's an Enterprise-only feature.)
+
+**Everyone else — anyone who hasn't been invited as a collaborator at all —
+gets no automatic CI, no automatic Copilot review, and no agentic-workflow
+support**, only the strictest built-in fork-PR-approval gate (Settings →
+Actions → General → "Fork pull request workflows" → **"Require approval for
+all outside collaborators"**), which already blocks every Actions run
+(including CI) from starting until a Maintainer manually approves it, plus
+`copilot-review-gate.yml`'s own collaborator check (above) for review. A
+Maintainer can still manually approve a run or request a review for an
+outside PR at their discretion — this only removes the automatic path for
+someone the repo owner never invited.
 
 ### The flow every agent (and human) uses
 
@@ -169,11 +206,23 @@ observed). On an owner-authored PR, the passing verdict is a **clean
 that is merely "waited out." Do not spend further review rounds chasing an
 `Approve` that literally cannot land there.
 
-**Everyone — contributor and maintainer alike — waits for a verdict before
+> **This never-`Approve` quirk is specific to the literal GitHub repository
+> *owner* account (ThomasMichon), not the wider Maintainer group.** The other
+> three Maintainers (JakeSchieber, anarmawala, namankanakiya) are ordinary
+> (non-owner) accounts from Copilot's perspective — their own PRs should be
+> treated like a Contributor's for verdict *shape* (wait for a genuine
+> `Approve`, not a clean-`Comment` substitute) even though they don't need
+> anyone else's approving review to merge (the ruleset bypass above). This is
+> an assumption based on GitHub's documented owner-vs-non-owner review
+> behavior, not yet empirically confirmed against this repo's own history for
+> a non-owner Maintainer's PR — revisit this note once one has.
+
+**Everyone — Contributor and Maintainer alike — waits for a verdict before
 merging**, and no one merges past an open Medium/High-severity finding.
-What differs is only the *shape* of the passing verdict: contributor PRs
-need `Approve`; owner-authored PRs need a `Comment` review with nothing
-Medium/High left open. Each wait below uses `pr-watch wait <owner>/<repo>
+What differs is only the *shape* of the passing verdict: Contributor PRs
+need `Approve`; the repo owner's own PRs need a `Comment` review with
+nothing Medium/High left open (see the note above for the other
+Maintainers). Each wait below uses `pr-watch wait <owner>/<repo>
 <PR> --since <cursor> --until approved,commented,changes_requested
 --timeout 300` — scope `--until` to actual review transitions (`--until
 any` also wakes on unrelated transitions like checks or conflicts, which is

@@ -1,0 +1,84 @@
+# Enforces the "only ThomasMichon modifies workflows/actions/CODEOWNERS"
+# policy (governance: maintainer-tier access model). Branch rulesets alone
+# can't express this on a personal (non-Enterprise) account: the
+# `file_path_restriction` rule type that would do it natively returns
+# `Validation Failed` here (Enterprise-only), and CODEOWNERS review
+# requirements are skipped entirely for any actor already bypassing PR
+# review (all Maintainers, by design, for req #2's self-merge).
+#
+# So this is enforced as a required status check instead: a check with NO
+# bypass except ThomasMichon (see the "workflow/CODEOWNERS lockdown" ruleset)
+# fails outright whenever a PR not authored by ThomasMichon touches a
+# protected path -- even a Maintainer's own PR, even with `pr-merge --now`'s
+# `admin=true` (per pr_merge_cli.py's own docstring, a required check the
+# actor cannot bypass "remains provider-enforced either way").
+#
+# Read-only: only lists changed file paths via the REST API, no checkout of
+# PR content, no secrets, so this is safe to run unconditionally on
+# `pull_request` (including from forks).
+name: Workflow lockdown guard
+
+on:
+  pull_request:
+    branches: [dev]
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  ALLOWED_LOGIN: ThomasMichon
+
+jobs:
+  workflow-lockdown-guard:
+    name: workflow-lockdown-guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check protected-path changes are ThomasMichon-authored
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          ALLOWED_LOGIN: ${{ env.ALLOWED_LOGIN }}
+        with:
+          script: |
+            const protectedPrefixes = [
+              ".github/workflows/",
+              ".github/actions/",
+            ];
+            const protectedExact = new Set([".github/CODEOWNERS"]);
+            const allowedLogin = process.env.ALLOWED_LOGIN;
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              per_page: 100,
+            });
+
+            const touched = files
+              .map((f) => f.filename)
+              .filter(
+                (name) =>
+                  protectedExact.has(name) ||
+                  protectedPrefixes.some((prefix) => name.startsWith(prefix)),
+              );
+
+            if (touched.length === 0) {
+              core.info("No protected paths touched; nothing to enforce.");
+              return;
+            }
+
+            const author = context.payload.pull_request.user.login;
+            if (author === allowedLogin) {
+              core.info(
+                `Protected path(s) touched by ${author} (allowed): ${touched.join(", ")}`,
+              );
+              return;
+            }
+
+            core.setFailed(
+              `PRs authored by anyone other than ${allowedLogin} may not modify ` +
+                `workflows, actions, or CODEOWNERS (touched: ${touched.join(", ")}). ` +
+                `Ask ${allowedLogin} to make this change, or split it out of this PR.`,
+            );
