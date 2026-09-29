@@ -621,7 +621,7 @@ edits directly.
 > `pyproject.toml` (`[project].version`), and its `src/*/__init__.py`
 > `__version__` fallback is the "fourth file" equivalent above. A change to
 > **any file under `worktree-manager/`**, or to a **shared lib it consumes
-> either form** — a real, vendored `libs/<lib>/` copy, **or** a `uv`-editable
+> in either form** — a real, vendored `libs/<lib>/` copy, **or** a `uv`-editable
 > canonical-reference pointer in its own `pyproject.toml`
 > `[tool.uv.sources]` (an escaping `{ path = "../libs/<lib>", editable =
 > true }` entry -- no local copy at all; see `tools/uv_editable_ref.py`'s
@@ -641,13 +641,24 @@ edits directly.
 > plugin's own `pyproject.toml`). Some repos also carry a legacy top-level
 > `libs/<lib>/` directory alongside these — it is easy to mistake for "the"
 > source since it sits next to the lib's own `tests/`, but `--list` only
-> enumerates the `plugins/*/libs/*` copies it keeps in sync; a top-level
-> `libs/<lib>/src` that isn't one of the listed copies is **not consumed by any
-> plugin at runtime**, and editing it silently does nothing. Edit every listed
-> copy identically (or edit one and copy it to the rest byte-for-byte), then
-> re-run `check-vendored-libs-sync.py` to confirm — it fails loudly on drift
-> between copies, but it cannot warn you about editing an unlisted, unvendored
-> directory.
+> enumerates the **real, physical** `plugins/*/libs/*` copies it keeps in
+> sync — it is a real-copy inventory, not the complete consumer map. **A
+> top-level canonical `libs/<lib>/` is not automatically inert just because
+> `--list` doesn't name it as a copy**: for a lib with any `uv`-editable
+> pointer-only consumer (vendor-pointer-generalization effort, e.g.
+> `worktree-manager`'s `agent-procutil`), that canonical tree IS the real
+> source materialized into those consumers at promotion time
+> (`tools/materialize_main.py`) — editing it changes their real, shipped
+> payload. Find pointer-only consumers with `python
+> tools/check-version-bump.py --list` (their entry names appear even without
+> a local copy) or by grepping every `pyproject.toml`'s
+> `[tool.uv.sources]` for an escaping `path`. Only a lib with NO pointer-only
+> consumers at all is truly inert outside `--list`'s own copies — edit every
+> listed real copy identically (or edit one and copy it to the rest
+> byte-for-byte), then re-run `check-vendored-libs-sync.py` to confirm — it
+> fails loudly on drift between real copies, but it cannot warn you about a
+> pointer-only consumer's canonical source, which has no "copy" to drift
+> from at all.
 
 **agent-worktrees:**
 
