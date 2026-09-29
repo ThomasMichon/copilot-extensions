@@ -855,6 +855,9 @@ if ($script:LaunchWorktreeId -and $VenvPython -and (Test-Path -LiteralPath $Venv
         & $VenvPython -m agent_worktrees register-launch `
             --worktree-id $script:LaunchWorktreeId --pid $PID `
             --launch-id $script:LaunchId *>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-SetupLog "register-launch exited $LASTEXITCODE -- continuing unprotected" 'WARN'
+        }
     } catch {
         Write-SetupLog "register-launch failed: $($_.Exception.Message)" 'WARN'
     }

@@ -120,5 +120,30 @@ def test_cmd_register_launch_registers_via_config_install_dir(monkeypatch, tmp_p
     assert os.getpid() in launch_registry.active_launch_pids(tmp_path)
 
 
-def test_cmd_register_launch_is_a_no_op_without_worktree_id(tmp_path):
-    assert launch_registry.cmd_register_launch(_Args(worktree_id=None, pid=None)) == 0
+def test_cmd_register_launch_returns_nonzero_without_worktree_id(tmp_path):
+    assert launch_registry.cmd_register_launch(_Args(worktree_id=None, pid=None)) == 1
+
+
+def test_cmd_register_launch_returns_nonzero_when_the_write_fails(monkeypatch, tmp_path):
+    from agent_worktrees import config as _cfg
+
+    monkeypatch.setattr(_cfg, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(launch_registry, "register_launch", lambda *a, **k: False)
+
+    rc = launch_registry.cmd_register_launch(_Args(worktree_id="wt-cli", pid=os.getpid()))
+
+    assert rc == 1
+
+
+def test_add_parsers_registers_the_register_launch_subcommand():
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest="command")
+    launch_registry.add_parsers(sub)
+
+    args = parser.parse_args(["register-launch", "--worktree-id", "wt-x", "--pid", "123"])
+
+    assert args.command == "register-launch"
+    assert args.worktree_id == "wt-x"
+    assert args.pid == 123

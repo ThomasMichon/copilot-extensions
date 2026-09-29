@@ -53,7 +53,7 @@ _ADD_PARSERS_MODULES = [
     "installation_cli", "update_cli", "context_cli", "services_cli",
     "repos_cli", "related_cli", "git_cli", "pr_cli", "session_binding_cli",
     "session_inspection_cli", "session_tracking_cli", "worktree_status_audit",
-    "picker_reconcile_cli",
+    "picker_reconcile_cli", "launch_registry",
 ]
 
 

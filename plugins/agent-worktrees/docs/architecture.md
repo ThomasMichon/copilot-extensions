@@ -1132,8 +1132,8 @@ The reap forwards `launch_registry.active_launch_pids()` to
 descended from a registered, still-live root is skipped.
 
 Protection is **bounded, not indefinite**: `procs.process_age_seconds()`
-(via `GetProcessTimes`/`NtQueryInformationProcess` on Windows,
-`/proc/<pid>/stat` + `/proc/uptime` on posix) gates the exclusion at
+(via `GetProcessTimes`/`GetSystemTimeAsFileTime` on Windows, `/proc/<pid>/stat`
++ `/proc/uptime` on posix) gates the exclusion at
 `_PROTECT_ANCESTOR_GRACE_SECONDS` (120s). A descendant older than that reads
 as genuinely stuck -- the exact #4268 case -- and is reaped regardless of
 its ancestor, so this protection cannot reintroduce the orphan-accumulation

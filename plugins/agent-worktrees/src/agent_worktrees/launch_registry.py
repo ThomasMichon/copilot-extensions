@@ -36,16 +36,19 @@ from pathlib import Path
 
 from . import locks as _locks
 
-__all__ = ["active_launch_pids", "add_subparser", "cmd_register_launch", "register_launch"]
+__all__ = ["active_launch_pids", "add_parsers", "cmd_register_launch", "register_launch"]
 
 
-def add_subparser(sub) -> None:
+def add_parsers(sub) -> None:
     """Register the ``register-launch`` argparse subcommand on ``sub``.
 
-    Kept out of ``__main__.py``'s ``build_parser()`` (which owns every other
-    subparser inline) so this internal, launcher-only verb's argument
-    definitions live alongside the module that implements it, matching this
-    package's shrink-only module-size discipline.
+    Named ``add_parsers`` (not e.g. ``add_subparser``) to match the fixed
+    convention ``lazy_cli_dispatch.dispatch_lazy`` expects of every
+    ``_LAZY_DISPATCH_TABLE``-registered module, so this launcher-only verb's
+    own module owns both its parser and its handler and can be fast-path
+    dispatched without importing the full ~110-command CLI surface (#4481
+    review -- this call fires synchronously on every interactive launch, so
+    its import cost matters).
     """
     sp = sub.add_parser(
         "register-launch",
@@ -129,9 +132,13 @@ def cmd_register_launch(args) -> int:
     Called once by ``launch-session.ps1``/``.sh`` as soon as it knows its
     worktree id, so a version-cutover reap later in this same run (or from a
     concurrent launch's own self-update) can recognize this launcher's
-    subprocess calls as protected rather than orphaned. Best-effort: always
-    exits 0 (a registration failure should never block or fail a launch --
-    it only widens the pre-existing race back to today's behavior).
+    subprocess calls as protected rather than orphaned.
+
+    Returns 1 on a failed write (missing worktree id, or the lock file
+    itself couldn't be written) so the caller's own best-effort wrapper can
+    log a diagnostic -- the launcher itself must still treat this as
+    non-fatal and continue unprotected (#4481 review: silently exiting 0 on
+    every path made that failure mode invisible).
     """
     import os as _os
 
@@ -140,8 +147,11 @@ def cmd_register_launch(args) -> int:
     worktree_id = getattr(args, "worktree_id", None)
     if not worktree_id:
         print("Usage: register-launch --worktree-id ID [--pid PID]", file=sys.stderr)
-        return 0
+        return 1
     pid = getattr(args, "pid", None) or _os.getpid()
     launch_id = getattr(args, "launch_id", None)
-    register_launch(_cfg.install_dir(), worktree_id, pid=pid, launch_id=launch_id)
+    ok = register_launch(_cfg.install_dir(), worktree_id, pid=pid, launch_id=launch_id)
+    if not ok:
+        print(f"register-launch: could not record launch for {worktree_id!r}", file=sys.stderr)
+        return 1
     return 0
