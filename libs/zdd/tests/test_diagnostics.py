@@ -139,6 +139,9 @@ def test_audit_and_apply_recover_stranded_survivor(tmp_path: Path):
         def __init__(self, base_url: str) -> None:
             self.base_url = base_url
 
+        def health(self) -> dict:
+            return {"status": "draining"}
+
         def undrain(self) -> dict:
             undrained.append(self.base_url)
             return {"draining": False}
@@ -266,3 +269,74 @@ def test_apply_never_terminates_validated_owner_from_stale_breadcrumb(tmp_path: 
     assert state["terminated"] == []
     assert result["actions"][0]["blocked"] is True
     assert result["actions"][0]["reason"] == "target is the validated live owner"
+
+
+def test_audit_detects_stranded_draining_survivor_via_health_probe(tmp_path: Path):
+    record = breadcrumb.write_breadcrumb(
+        tmp_path,
+        state="draining",
+        old={"bind": "127.0.0.1", "port": 9281},
+        new_port=9282,
+        new_pid=303,
+    )
+    _set_breadcrumb_age(tmp_path, record, seconds=9999)
+    state = {
+        "lock": {"pid": 101, "start_time": "owner"},
+        "live": {101: "owner"},
+        "terminated": [],
+    }
+
+    class _Client:
+        def __init__(self, base_url: str) -> None:
+            self.base_url = base_url
+
+        def health(self) -> dict:
+            return {"status": "draining"}
+
+    report = diagnostics.audit_daemon_health(
+        _ctx(
+            tmp_path,
+            state=state,
+            make_client=_Client,
+            health_check=lambda host, port: False,
+        )
+    )
+
+    assert report["counts"]["stranded_survivor"] == 1
+
+
+def test_apply_reaps_abandoned_passive_even_when_old_survivor_is_recovered(tmp_path: Path):
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=101, version="1.0.0")
+    record = breadcrumb.write_breadcrumb(
+        tmp_path,
+        state="draining",
+        old={"bind": "127.0.0.1", "port": 9281},
+        new_port=9282,
+        new_pid=303,
+    )
+    _set_breadcrumb_age(tmp_path, record, seconds=9999)
+    undrained: list[str] = []
+    state = {
+        "lock": {"pid": 101, "start_time": "owner"},
+        "live": {101: "owner", 303: "passive"},
+        "terminated": [],
+    }
+
+    class _Client:
+        def __init__(self, base_url: str) -> None:
+            self.base_url = base_url
+
+        def health(self) -> dict:
+            return {"status": "draining"}
+
+        def undrain(self) -> dict:
+            undrained.append(self.base_url)
+            return {"draining": False}
+
+    result = diagnostics.apply_daemon_health(
+        _ctx(tmp_path, state=state, make_client=_Client, health_check=lambda host, port: True)
+    )
+
+    assert undrained == ["http://127.0.0.1:9281"]
+    assert state["terminated"] == [303]
+    assert result["after"]["counts"]["total"] == 0

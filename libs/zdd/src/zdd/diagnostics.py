@@ -343,8 +343,6 @@ def _inspect_stranded_survivor(
     ctx: DiagnosticContext,
     record: dict | None,
 ) -> dict[str, object] | None:
-    if ctx.health_check is None:
-        return None
     if not breadcrumb.is_stale(record):
         return None
     if not isinstance(record, dict):
@@ -352,7 +350,16 @@ def _inspect_stranded_survivor(
     endpoint = _describe_old_endpoint(record)
     if endpoint is None:
         return None
-    reachable = bool(ctx.health_check(*endpoint))
+    base_url = f"http://{routing.format_authority(endpoint[0], endpoint[1])}"
+    reachable = False
+    if ctx.make_client is not None:
+        try:
+            ctx.make_client(base_url).health()
+            reachable = True
+        except Exception:  # noqa: BLE001 - probe is best-effort
+            reachable = False
+    elif ctx.health_check is not None:
+        reachable = bool(ctx.health_check(*endpoint))
     if not reachable:
         return None
     return {
@@ -659,7 +666,53 @@ def apply_daemon_health(
             actions.append({"kind": "stranded_survivor", "result": recovery})
             break
 
+        current = _audit_daemon_health(ctx, now=now, cutover_state="held")
         attempted: set[int] = set()
+        for finding in before.get("findings", []):
+            if finding.get("kind") != "abandoned_passive":
+                continue
+            targets = finding.get("targets")
+            if not isinstance(targets, list):
+                continue
+            owner = current.get("validated_owner")
+            for item in targets:
+                if not isinstance(item, dict) or not isinstance(item.get("pid"), int):
+                    continue
+                if not isinstance(owner, dict):
+                    actions.append(
+                        {
+                            "kind": "abandoned_passive",
+                            "pid": item["pid"],
+                            "blocked": True,
+                            "reason": "no validated live owner",
+                        }
+                    )
+                    attempted.add(item["pid"])
+                    continue
+                if item["pid"] == owner.get("pid"):
+                    actions.append(
+                        {
+                            "kind": "abandoned_passive",
+                            "pid": item["pid"],
+                            "blocked": True,
+                            "reason": "target is the validated live owner",
+                        }
+                    )
+                    attempted.add(item["pid"])
+                    continue
+                termination = ctx.terminate_pid_if_identity(
+                    item["pid"], item.get("start_time")
+                )
+                actions.append(
+                    {
+                        "kind": "abandoned_passive",
+                        "pid": item["pid"],
+                        "owner_pid": owner.get("pid"),
+                        "termination": termination,
+                    }
+                )
+                attempted.add(item["pid"])
+
         max_iterations = max(1, before.get("candidate_count", 0) * 3)
         for _ in range(max_iterations):
             current = _audit_daemon_health(ctx, now=now, cutover_state="held")
