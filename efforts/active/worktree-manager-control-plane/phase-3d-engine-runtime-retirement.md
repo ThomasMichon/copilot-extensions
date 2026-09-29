@@ -6,7 +6,7 @@
 - **Scope of this doc:** the ordered implementation plan for removing the
   Picker's last in-process `agent_worktrees.*` import boundary, building on the
   evidence-gathering inventory already recorded here.
-- **Status:** Done, one residual gap flagged (2026-09-27 re-audit) — #3359's
+- **Status:** Done — #3359's
   vendored-lib prework is done via PR
   [#3368](https://github.com/ThomasMichon/copilot-extensions/pull/3368),
   Group D's `profiles` dependency is closed via Phase 3e / PR
@@ -23,7 +23,8 @@
   Manager-owned housekeeping / monitor-root lifecycle ports. Phase 3c's
   prerequisite for Group C is satisfied by PR
   [#4278](https://github.com/ThomasMichon/copilot-extensions/pull/4278), and
-  only the remaining Group C cleanup/deletion work stays sequenced below.
+  Step 8 closes the 2026-09-27 `housekeeping.py` re-audit gap by moving the
+  remaining Picker-owned lifecycle sweeps off in-process imports too.
 
 ## Why this phase exists
 
@@ -704,40 +705,71 @@ once every remaining caller is already off the import boundary.
      `tests/production_picker/test_picker_tui.py`,
      `tests/production_picker/test_profiles_io.py` -> `367 passed`;
      `tests/production_picker/test_config_readers.py` + the runtime-helper lane
-   - **Residual gap flagged 2026-09-27 (re-audit, not yet fixed):** "repointed
-     the remaining ... housekeeping callers to the top-level helper" is the
-     tell — `production_picker/housekeeping.py` still calls
-     `worktree_manager.agent_worktrees_runtime.engine_module(...)` for
-     `config`/`tracking`/`sessions`/`activity`/`reap_cli`/`gc`/
-     `status_monitor_runtime`, the exact same dynamic
-     `importlib.import_module("agent_worktrees.<name>")` mechanism as the
-     deleted `_engine_runtime.py`, just relocated one module up. The new
-     regression guard only scans for a literal `import agent_worktrees`
-     statement inside `production_picker/*.py`, so it passes while the actual
-     in-process coupling for Step 3's Picker-owned lifecycle sweeps
-     (`reap_orphan_mux_sessions`, `sweep_managed_on_exit`,
-     `sweep_launcher_shells_on_exit`, `sweep_finished_sessions_on_cadence`)
-     remains. This satisfies the guard's letter, not the phase's stated
-     substance ("no in-process `agent_worktrees` import for production
-     Picker behavior" — see the original Step 4 exit criterion above, which
-     used the same "Picker behavior," not "Picker package," framing).
-     Genuinely converting `housekeeping.py` to `--json` verbs is not a free
-     mechanical follow-up: these sweeps run from process-exit hooks and a
-     background cadence timer, not the Picker's own refresh cycle, so a
-     subprocess-per-sweep cost/latency profile needs real evaluation before
-     committing to that conversion — unlike Group A/B/C's already-established
-     low-frequency or already-async call sites. **Left unresolved on
-     purpose** rather than silently accepted: either do the conversion in a
-     future slice, or explicitly amend this doc's (and the governing
-     visions') exit criteria to carve out `housekeeping.py` as a deliberate,
-     reasoned exception instead of an accidental one hidden behind a
-     package-scoped guard.
      -> `63 passed`; `tests/production_picker/test_picker_first_paint.py -k
      "import_does_not_load_config"` -> `2 passed`). Full `worktree-manager`
      suite matched the current unrelated Windows baseline at
      `14 failed, 1552 passed, 7 skipped, 1 warning`; `ruff check --select
      F,E9`, `tools/check-install-contract.py`, and
      `tools/check-version-consistency.py` passed.
+
+8. [x] **Resolve the flagged `housekeeping.py` residual gap.**
+   The 2026-09-27 re-audit was right: Step 7's literal-import scan proved only
+   that `production_picker/*.py` no longer contained a direct
+   `import agent_worktrees` statement, while `housekeeping.py` still reached
+   the same modules indirectly through
+   `worktree_manager.agent_worktrees_runtime.engine_module(...)`. Step 8
+   closes that substance-vs-letter gap per call site rather than by blanket
+   assertion.
+   - **`config.tracking_dir()`** — **converted** to the existing
+     Manager-owned `production_picker.project_config.tracking_dir()` read. This
+     call is just a stable path lookup (`~/.<project>/worktrees`), so keeping a
+     dynamic engine import for it was unjustified.
+   - **`tracking.list_records()` + `tracking.derive_execution_leg()`** —
+     **converted** to a Manager-owned YAML scan of the tracking directory,
+     reading only the `worktree_id` plus `execution_leg.provider` facts needed
+     to identify Manager-owned rows. This runs once in the startup
+     housekeeping thread, not per Picker refresh row, so direct file reads are
+     cheap and avoid a "subprocess just to learn which ids to ask the engine
+     about" loop.
+   - **`sessions._list_mux_sessions()` / `_mux_session_activity()` /
+     `worktree_id_from_mux_session()` / `kill_tmux_session()` plus
+     `activity.log_event()`** — **converted** to the public CLI seam
+     `reap-sessions --json`, additively extended with repeatable
+     `--worktree-id` filters plus `--include-manager-owned` for the Manager's
+     own mux lane. Result: one subprocess per startup sweep, not one per mux
+     session.
+   - **`reap_cli.sweep_managed_worktrees()`** — **converted** to new focused
+     verb `sweep-managed --json`. This runs from exit/startup housekeeping, not
+     the render loop, so the subprocess boundary is the right ownership line.
+   - **`reap_cli.reap_orphan_launcher_shells()`** — **converted** to the
+     already-public `reap-shells --json --yes` verb. Same low-frequency,
+     background-triggered profile as above; no new engine surface needed.
+   - **`gc.SESSION_GC_GRACE_SECS`** — **converted** to a local constant
+     (`48h`) plus the existing env override. This was pure configuration data,
+     not behavior worth importing a module for.
+   - **`reap_cli.sweep_finished_session_worktrees()`** — **converted** to new
+     focused verb `sweep-finished-sessions --json`, preserving the engine-owned
+     cleanup semantics while removing the in-process import.
+   - **`status_monitor_runtime._status_monitor_enabled()` /
+     `_ensure_status_monitor()`** — **converted**, but deliberately not to a
+     `--json` read. This callback runs on every 10s Picker heartbeat while the
+     TUI is open, so a steady-state subprocess every tick would be the wrong
+     cost profile. Instead, `production_picker.monitor_roots` now owns the
+     lockfile check locally and spawns the public `agent-worktrees
+     status-monitor` command only when the resident monitor is actually absent.
+     Steady state therefore stays zero-subprocess-per-heartbeat, while the
+     in-process engine import is gone. **2026-09-29 follow-on:** the
+     Manager-owned port now also treats a live lock as reusable only when it
+     still matches the current engine prefix and the caller's mux capability;
+     otherwise it respawns the public `status-monitor` command with the same
+     clean detached-runtime contract the engine-side helper uses. That closes
+     the related "stale or no-mux resident monitor is reused forever after an
+     upgrade / install-context change" bug discovered while landing Step 8,
+     without reintroducing an in-process engine dependency.
+   - **No vision carve-out was needed.** Step 8 removes the residual
+     `housekeeping.py` in-process access rather than documenting it as an
+     exception, so the Picker vision's process-boundary-only rule stays
+     unconditional.
 
 ## Validation
 

@@ -12,6 +12,8 @@ from __future__ import annotations
 import ctypes
 import json
 import os
+import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -19,7 +21,12 @@ import uuid
 from pathlib import Path
 from typing import Callable
 
+from agent_procutil import windowless_daemon_kwargs
+
+from . import context
 from .. import agent_plugin_runtime
+from .. import engine_client
+from ..mux_daemon_process import scrub_session_credentials
 
 _PICKER_HEARTBEAT_INTERVAL = 10.0
 _PICKER_STALE_AFTER = 30.0
@@ -35,6 +42,72 @@ def _engine_runtime_home() -> Path:
 
 def _roots_dir() -> Path:
     return _engine_runtime_home() / "status-monitor-roots.d"
+
+
+def _status_monitor_lock_path() -> Path:
+    return _engine_runtime_home() / "status-monitor.lock"
+
+
+def _current_engine_prefix() -> str | None:
+    slot = agent_plugin_runtime.resolve_installed_plugin_slot("agent-worktrees")
+    if slot is None:
+        return None
+    return os.path.realpath(str(slot))
+
+
+def status_monitor_enabled() -> bool:
+    return os.environ.get("AGENT_WORKTREES_STATUS_MONITOR", "").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+def _caller_has_mux() -> bool:
+    return bool(shutil.which("psmux") or shutil.which("tmux"))
+
+
+def _monitor_lock_satisfies_current_runtime(data: dict | None) -> bool:
+    if not (_lock_is_live(data) and isinstance(data, dict)):
+        return False
+    if data.get("mux") is False and _caller_has_mux():
+        return False
+    current_prefix = _current_engine_prefix()
+    other_prefix = data.get("prefix")
+    if current_prefix and isinstance(other_prefix, str) and other_prefix:
+        return os.path.realpath(other_prefix) == os.path.realpath(current_prefix)
+    return True
+
+
+def _spawn_status_monitor(base: list[str]) -> bool:
+    env = scrub_session_credentials(engine_client._engine_environment())
+    for key in ("COPILOT_AGENT_SESSION_ID", "WORKTREE_PROJECT", engine_client.ENGINE_ARGV_ENV):
+        env.pop(key, None)
+    kwargs: dict = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "cwd": str(_engine_runtime_home()),
+        "env": env,
+    }
+    kwargs.update(windowless_daemon_kwargs(breakaway=True))
+    try:
+        subprocess.Popen([*base, "status-monitor"], **kwargs)  # noqa: S603
+        return True
+    except Exception:
+        return False
+
+
+def ensure_status_monitor_running() -> bool:
+    if not status_monitor_enabled():
+        return False
+    if _monitor_lock_satisfies_current_runtime(_read_lock(_status_monitor_lock_path())):
+        return True
+    base = engine_client.engine_base_command()
+    if not base:
+        return False
+    return _spawn_status_monitor(base)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -271,3 +344,15 @@ def live_picker_projects(*, now: float | None = None, stale_after: float = _PICK
             continue
         _remove_lock(path)
     return projects
+
+
+def start_picker_monitor_root(project: str | None = None):
+    if not status_monitor_enabled():
+        return None
+    try:
+        root = PickerHeartbeat(project or context.project(), ensure_monitor=ensure_status_monitor_running)
+        if not root.start():
+            return None
+        return root
+    except Exception:
+        return None

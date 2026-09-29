@@ -4797,6 +4797,8 @@ def reap_orphan_mux_sessions(
     *,
     dry_run: bool = False,
     only_id: str | None = None,
+    worktree_ids: set[str] | None = None,
+    include_manager_owned: bool = False,
     idle_grace_secs: float = REAP_IDLE_GRACE_SECS,
     now: float | None = None,
 ) -> dict:
@@ -4814,23 +4816,17 @@ def reap_orphan_mux_sessions(
     (:func:`_sweep_orphans_on_exit`, #2149) -- so idle orphans are reaped on a
     natural cadence with **no persistent timer or daemon**.
 
-    ``only_id`` restricts the sweep to a **single** worktree's session; the exact
-    same spare-attached/system/active/**busy** predicate is applied.
+    ``only_id`` / ``worktree_ids`` restrict the sweep to specific worktree sessions; the exact same
+    spare-attached/system/active/**busy** predicate is applied. ``include_manager_owned`` lifts the normal
+    "hands off Worktree-Manager-owned mux sessions" guard for the Manager's own cleanup lane only.
 
     **Conservative by design** -- a session is never reaped when:
 
     - a terminal client is **attached** (a human is using it),
-    - Worktree Manager already owns the mux session via ``mux-mapping.json``,
-    - its worktree record is ``kind: system`` (daemon-owned), or
-    - its worktree is still **active** (tracked, dir present), or
-    - it has been **active within the grace window** (fresh pane activity => the Copilot inside is busy), or the activity signal is **unknown** (never risk killing a session we can't prove is idle).
+    - Worktree Manager already owns the mux session via ``mux-mapping.json``, or its worktree record is
+      ``kind: system`` (daemon-owned), still **active** (tracked, dir present), or **busy / unknown** within the grace window (never risk killing a session we can't prove is idle).
 
-    Returns a JSON-ready dict::
-
-        {"available": bool,                  # False when no mux is installed
-         "reaped": ["<id>", ...],
-         "skipped": [{"id": "<id>", "reason": "attached|system|active|busy|activity-unknown|manager-owned"}, ...],
-         "errors":  [{"id": "<id>", "reason": "..."}, ...]}
+    Returns a JSON-ready dict:: {"available": bool, "reaped": ["<id>", ...], "skipped": [{"id": "<id>", "reason": "attached|system|active|busy|activity-unknown|manager-owned"}, ...], "errors": [{"id": "<id>", "reason": "..."}, ...]}
     """
     all_sessions = sessions._list_mux_sessions()
     if all_sessions is None:
@@ -4848,6 +4844,9 @@ def reap_orphan_mux_sessions(
     reaped: list[str] = []
     skipped: list[dict] = []
     errors: list[dict] = []
+    filtered_ids = set(worktree_ids or ())
+    if only_id is not None:
+        filtered_ids.add(only_id)
     for name, attached in all_sessions.items():
         if not name.startswith("wt-"):
             continue
@@ -4855,9 +4854,9 @@ def reap_orphan_mux_sessions(
         # so stripping the prefix would miss a dotted id's record and read as
         # "untracked" below -- which reaps a live, tracked session.
         wt_id = sessions.worktree_id_from_mux_session(name, index=by_session)
-        if only_id is not None and wt_id != only_id:
+        if filtered_ids and wt_id not in filtered_ids:
             continue
-        if managed_mux_registry.live_mapping_for_session(name):
+        if not include_manager_owned and managed_mux_registry.live_mapping_for_session(name):
             skipped.append({"id": wt_id, "reason": "manager-owned"})
             continue
         if attached and attached > 0:
@@ -5714,7 +5713,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'pre-launch': ('update_cli', 'cmd_pre_launch'),
     'push-changes': ('finalize_cli', 'cmd_push_changes'),
     'reap-sessions': ('reap_cli', 'cmd_reap_sessions'),
-    'reap-shells': ('reap_cli', 'cmd_reap_shells'),
+    'reap-shells': ('reap_cli', 'cmd_reap_shells'), 'sweep-finished-sessions': ('cleanup_gc_cli', 'cmd_sweep_finished_sessions'), 'sweep-managed': ('cleanup_gc_cli', 'cmd_sweep_managed'),
     'recent-messages': ('session_tracking_cli', 'cmd_recent_messages'),
     'reclaim': ('reclaim_cli', 'cmd_reclaim'),
     'reconcile-binstubs': ('maintenance_cli', 'cmd_reconcile_binstubs'),
@@ -5943,7 +5942,7 @@ def _load_full_command_surface() -> None:
     global cmd_register_session, cmd_related_dispatch, cmd_remove_system, cmd_remux, cmd_repair, cmd_repos_dispatch, cmd_restart, cmd_run
     global cmd_services_dispatch, cmd_session_binding, cmd_session_lifecycle, cmd_session_lineage, cmd_session_lock, cmd_session_recovery, cmd_session_role
     global cmd_session_tail
-    global cmd_session_transcript, cmd_set_pr, cmd_state_root_dispatch, cmd_status, cmd_status_context, cmd_status_monitor, cmd_status_monitor_restart, cmd_status_segment
+    global cmd_session_transcript, cmd_set_pr, cmd_state_root_dispatch, cmd_status, cmd_status_context, cmd_status_monitor, cmd_status_monitor_restart, cmd_status_segment, cmd_sweep_finished_sessions, cmd_sweep_managed
     global cmd_status_updater, cmd_sync, cmd_uninstall, cmd_uninstall_plugins, cmd_update, cmd_validate, cmd_worktree_dispatch
     global cmd_worktree_lineage, cmd_worktree_status_bundle, context_cli, copilot_cli, copilot_identity_cli, finalize_cli, finalize_one, follow_ups_cli, front_door_cli, git_cli
     global handoff_cli, handoff_diagnostics, installation_cli, list_cli, maintenance_cli, doctor_render, picker_profiles_cli, plan_pre_launch, pr_cli
@@ -6268,6 +6267,7 @@ def _load_full_command_surface() -> None:
     _print_gc_managed = cleanup_gc_cli._print_gc_managed
     _print_gc_shells = cleanup_gc_cli._print_gc_shells
     cmd_gc = cleanup_gc_cli.cmd_gc
+    cmd_sweep_finished_sessions = cleanup_gc_cli.cmd_sweep_finished_sessions; cmd_sweep_managed = cleanup_gc_cli.cmd_sweep_managed
     cmd_picker = picker_profiles_cli.cmd_picker
     cmd_validate = picker_profiles_cli.cmd_validate
     cmd_repair = picker_profiles_cli.cmd_repair
@@ -6380,7 +6380,7 @@ def _load_full_command_surface() -> None:
         "cleanup": cmd_cleanup,
         "gc": cmd_gc,
         "reap-sessions": cmd_reap_sessions,
-        "reap-shells": cmd_reap_shells,
+        "reap-shells": cmd_reap_shells, "sweep-finished-sessions": cmd_sweep_finished_sessions, "sweep-managed": cmd_sweep_managed,
         "reclaim": cmd_reclaim,
         "remux": cmd_remux,
         "restart": cmd_restart,

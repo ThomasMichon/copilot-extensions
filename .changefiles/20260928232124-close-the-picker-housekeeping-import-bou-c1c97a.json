@@ -1,0 +1,9 @@
+{
+  "comment": "Close the Picker housekeeping import-boundary gap",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

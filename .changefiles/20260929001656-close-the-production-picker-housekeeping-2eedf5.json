@@ -1,0 +1,9 @@
+{
+  "comment": "Close the production Picker housekeeping import-boundary gap",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -46,6 +46,8 @@ def add_parsers(sub) -> None:
     p = sub.add_parser("reap-sessions", help="Reap leaked tmux/psmux sessions whose worktree is finalized, gone, or untracked AND has been idle past the grace window (never touches attached, active, or busy sessions)")
     p.add_argument("--dry-run", action="store_true", help="Report what would be reaped without killing anything")
     p.add_argument("--id", default=None, help="Target a single worktree id; same spare-attached/active/busy predicate as the full sweep")
+    p.add_argument("--worktree-id", action="append", default=[], help="Limit the sweep to one or more worktree ids; repeatable")
+    p.add_argument("--include-manager-owned", action="store_true", help="Also reap Worktree-Manager-owned mux sessions (for the Manager's own housekeeping lane)")
     p.add_argument("--grace-hours", type=float, default=None, help="Idle window before a finalized/idle session is eligible (default 6h); a busy session is never reaped")
     p.add_argument("--json", action="store_true", help="Emit a single JSON result object")
     p = sub.add_parser("reap-shells", help="Reap orphaned agent-worktrees launcher shells (pwsh/python left by a force-closed terminal). Reports candidates by default; only kills with --yes. Positive-signature + service-safe + idle-gated.")
@@ -828,8 +830,18 @@ def cmd_reap_sessions(args: argparse.Namespace) -> int:
     """
     dry = getattr(args, "dry_run", False)
     only_id = getattr(args, "id", None)
+    worktree_ids = {
+        str(value).strip()
+        for value in getattr(args, "worktree_id", []) or []
+        if str(value).strip()
+    }
     grace_hours = getattr(args, "grace_hours", None)
-    kwargs = {"dry_run": dry, "only_id": only_id}
+    kwargs = {
+        "dry_run": dry,
+        "only_id": only_id,
+        "worktree_ids": worktree_ids or None,
+        "include_manager_owned": getattr(args, "include_manager_owned", False),
+    }
     if grace_hours is not None:
         kwargs["idle_grace_secs"] = float(grace_hours) * 3600
     payload = reap_orphan_mux_sessions(**kwargs)

@@ -168,6 +168,10 @@ version and be coordinated with the Manager.
 | `<project> repair-stale-anchor --json` | Targeted stale-anchor self-heal: `{"version":1,"project":"<resolved-project>","status":"unchanged\|repaired\|still-missing","self_present_before":<bool>,"self_present_after":<bool>}`. | Contract v1 additive addition for Phase 3d Group B. One-shot background-safe repair hook replacing the in-process `_heal_stale_anchor_if_self_missing` dependency. |
 | `<project> restart <id> --json` | Restart a worktree's session. |
 | `<project> reclaim --worktree-id <id> …` | Kill the exact bound orphan process so a session can be re-opened. |
+| `<project> reap-sessions --json [--worktree-id <id> ...] [--include-manager-owned] [--dry-run] [--grace-hours <hours>]` | Reap orphaned mux sessions in one background sweep. | Phase 3d Step 8 uses this for Manager-owned housekeeping: repeatable `--worktree-id` scopes the sweep to the Manager's own candidates, `--include-manager-owned` lifts the ordinary "hands off the Manager's mux lane" guard only for that caller, and the Manager may reuse the verb's existing dry-run / grace-window controls when validating or tuning that sweep. |
+| `<project> reap-shells --json --yes` | Reap orphaned launcher shells in one background sweep. | Existing public verb, now consumed by the Manager's housekeeping thread instead of via an in-process import. |
+| `<project> sweep-managed --json` | Reap leaked managed (`system`/`bridge`) worktrees in one background sweep. | Contract v1 additive addition for Phase 3d Step 8's focused housekeeping cutover. |
+| `<project> sweep-finished-sessions --json` | Run the finished-session auto-clean sweep in one background pass. | Contract v1 additive addition for Phase 3d Step 8; preserves the engine-owned cleanup semantics while removing the Manager's last in-process import of the sweep helper. |
 | `<project> finalize <id> --json` | Finalize a merged/completed worktree. |
 | `<project> sync --worktree-id <id> --json` | Fast-forward a clean, strictly-behind worktree. |
 | `<project> cleanup [--worktree-id <id>] [--clean] [--bare-only --yes] --json` | Remove completed/gone worktrees (single or bulk). |
