@@ -1985,6 +1985,8 @@ test("abortHandoffTask abandons the agent-dispatch task with the given reason", 
   assert.deepEqual(calls, [
     { bin: "agent-dispatch", argv: ["show", "task-42"] },
     { bin: "agent-dispatch", argv: ["payload", "task-42", "--raw"] },
+    { bin: "agent-worktrees", argv: ["get", "worktree-id"] },
+    { bin: "agent-worktrees", argv: ["cancel-handoff", "--worktree-id", "wt-1", "--token", "task-42"] },
     {
       bin: "agent-dispatch",
       argv: [
@@ -1992,8 +1994,6 @@ test("abortHandoffTask abandons the agent-dispatch task with the given reason", 
         "--expected-status", "queued",
       ],
     },
-    { bin: "agent-worktrees", argv: ["get", "worktree-id"] },
-    { bin: "agent-worktrees", argv: ["cancel-handoff", "--worktree-id", "wt-1", "--token", "task-42"] },
   ]);
 });
 
@@ -2057,6 +2057,32 @@ test("abortHandoffTask decodes the payload for its sessionId BEFORE abandoning, 
   const result = abortHandoffTask("C:\\repo", "task-42", null, execute);
   assert.equal(result.ledgerCancelled, true);
   assert.deepEqual(marked, [["cancel-handoff", "--worktree-id", "wt-1", "--token", "task-42"]]);
+});
+
+test("abortHandoffTask refuses to abandon when the ledger already has an associated candidate", () => {
+  // Real regression this guards (PR #4570 review round 17): the candidate
+  // guard in cancel_handoff runs too late to protect this task-backed abort
+  // if fenced only after abandon -- a successor can already be associated
+  // in the ledger while the dispatch task is still queued. Fencing must
+  // happen BEFORE the destructive abandon, and refuse the whole abort, not
+  // just the ledger half of it.
+  let abandonCalled = false;
+  const execute = (bin, argv) => {
+    if (argv[0] === "show") {
+      return JSON.stringify({ id: "task-42", labels: ["handoff"], source: "context-handoff", status: "queued" });
+    }
+    if (argv[0] === "payload") return "";
+    if (argv[0] === "abandon") { abandonCalled = true; return "{}"; }
+    if (bin === "agent-worktrees" && argv[0] === "get") return "wt-1";
+    if (bin === "agent-worktrees" && argv[0] === "cancel-handoff") {
+      return JSON.stringify({ cancelled: false, candidate: "successor-1" });
+    }
+    return "{}";
+  };
+  const result = abortHandoffTask("C:\\repo", "task-42", null, execute);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /successor-1/);
+  assert.equal(abandonCalled, false);
 });
 
 test("abortHandoffTask refuses to abandon a task that isn't a context-handoff handoff", () => {
@@ -2154,6 +2180,44 @@ test("abortFileHandoff marks an unconsumed file handoff aborted, never claiming 
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+test("abortFileHandoff refuses to abort when the ledger already has an associated candidate", () => {
+  // Real regression this guards (PR #4570 review round 17): fencing only
+  // after the destructive write would still let a successor's in-flight
+  // pickup baton be destroyed. Fencing must happen BEFORE writeJsonAtomic.
+  const dir = mkdtempSync(join(tmpdir(), "context-handoff-abort-candidate-"));
+  try {
+    const path = join(dir, "handoff-candidate.json");
+    writeJsonAtomic(path, {
+      kind: "context-handoff",
+      version: 2,
+      id: "handoff-candidate",
+      storage: "file",
+      sessionId: "predecessor-1",
+      cwd: "C:\\repo",
+      promptText: "stored markdown",
+      consumed: false,
+      consumedAt: null,
+    });
+    const execute = (bin, argv) => {
+      if (bin === "agent-worktrees" && argv[0] === "get") return "wt-1";
+      if (bin === "agent-worktrees" && argv[0] === "cancel-handoff") {
+        return JSON.stringify({ cancelled: false, candidate: "successor-1" });
+      }
+      throw new Error(`unexpected CLI call: ${bin} ${argv.join(" ")}`);
+    };
+    const result = abortFileHandoff(
+      "C:\\repo", "aborting-session", "handoff-candidate", path, "changed my mind",
+      { execute },
+    );
+    assert.equal(result.ok, false);
+    assert.match(result.message, /successor-1/);
+    const onDisk = JSON.parse(readFileSync(path, "utf-8"));
+    assert.equal(onDisk.consumed, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("abortFileHandoff reclaims a stale lock left by a crashed consumer instead of failing forever", () => {

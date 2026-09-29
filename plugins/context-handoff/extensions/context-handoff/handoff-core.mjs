@@ -3669,6 +3669,24 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
     const decoded = decodeHandoffPayload(readTaskPayloadRaw(cwd, taskId, execute));
     predecessorSessionId = decoded?.metadata?.sessionId || null;
   } catch { /* best-effort */ }
+  // Fence the ledger BEFORE the destructive abandon call, not after: a
+  // successor can already be associated as the ledger handoff's `candidate`
+  // (mid-cutover, per associate_handoff_candidate) while the dispatch task
+  // itself is still `proposed`/`queued` -- abandoning the task in that case
+  // would destroy the baton an in-flight pickup is actively consuming, even
+  // though cancel_handoff itself correctly refuses to touch the ledger
+  // entry (PR #4570 review round 17). Refuse the WHOLE abort, never just
+  // the ledger half of it, when a candidate is already associated.
+  const ledger = cancelHandoffInRecord(cwd, predecessorSessionId, taskId, execute);
+  if (ledger.raw?.candidate) {
+    return {
+      ok: false,
+      id: taskId,
+      kind: "task",
+      error: `Task ${taskId}'s handoff already has an associated successor candidate ` +
+        `(\`${ledger.raw.candidate}\`) mid-pickup -- refusing to abandon it.`,
+    };
+  }
   try {
     execute(
       "agent-dispatch", // marketplace-isolation: allow agent-dispatch-management
@@ -3689,7 +3707,6 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
         });
       } catch { /* best-effort */ }
     }
-    const ledger = cancelHandoffInRecord(cwd, predecessorSessionId, taskId, execute);
     return {
       ok: true,
       id: taskId,
@@ -3817,6 +3834,23 @@ export function abortFileHandoff(
             `session \`${current.record.consumedBySession || "unknown"}\`; too late to abort.`,
       };
     }
+    // Fence the ledger BEFORE the destructive write, not after: a successor
+    // can already be associated as the ledger handoff's `candidate`
+    // (mid-cutover) while the file record itself is still unconsumed --
+    // marking it aborted in that case would destroy the baton an in-flight
+    // pickup is actively consuming, even though cancel_handoff itself
+    // correctly refuses to touch the ledger entry (PR #4570 review round
+    // 17). Refuse the WHOLE abort, never just the ledger half of it.
+    const ledger = cancelHandoffInRecord(cwd, current.record.sessionId, handoffId, execute);
+    if (ledger.raw?.candidate) {
+      return {
+        ok: false,
+        kind: "file",
+        id: current.record.id,
+        message: `Handoff ${current.record.id || current.path} already has an associated ` +
+          `successor candidate (\`${ledger.raw.candidate}\`) mid-pickup -- refusing to abort it.`,
+      };
+    }
     const aborted = {
       ...current.record,
       consumed: true,
@@ -3837,7 +3871,6 @@ export function abortFileHandoff(
         });
       } catch { /* best-effort */ }
     }
-    const ledger = cancelHandoffInRecord(cwd, current.record.sessionId, aborted.id, execute);
     return {
       ok: true,
       kind: "file",

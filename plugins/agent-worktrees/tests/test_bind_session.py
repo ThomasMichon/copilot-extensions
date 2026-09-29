@@ -564,7 +564,8 @@ class TestCancelHandoff:
         no-op), never report a false success over an in-flight successor."""
         yaml_path = tmp_tracking_dir / "wt-hd.yaml"
         _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
-        monkeypatch.setattr(m, "_json_output", lambda o: None)
+        captured = {}
+        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
         m.tracking.register_session("wt-hd", "sess-pred", source="handoff")
         m.tracking.register_session("wt-hd", "sess-candidate", source="handoff")
 
@@ -581,6 +582,11 @@ class TestCancelHandoff:
         after = m.tracking.load_record(yaml_path)
         assert after.handoffs[0].state == "pending"
         assert after.handoffs[0].candidate == "sess-candidate"
+        # Round 17: the caller must be able to tell "declined because a
+        # candidate is mid-pickup" apart from "declined, nothing to worry
+        # about" -- surfaced regardless of `cancelled`'s own value.
+        assert captured["cancelled"] is False
+        assert captured["candidate"] == "sess-candidate"
 
     def test_advances_lifecycle_revision_so_a_stale_writer_cannot_resurrect_it(
         self, tmp_tracking_dir, monkeypatch_config, monkeypatch

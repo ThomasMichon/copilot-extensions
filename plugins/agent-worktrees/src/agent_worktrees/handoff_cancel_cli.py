@@ -116,6 +116,7 @@ def cmd_cancel_handoff(args: argparse.Namespace) -> int:
         yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
         with tracking._RecordLock(yaml_path):
             record = tracking.load_record(yaml_path)
+            handoff = next((h for h in record.handoffs if h.token == token), None)
             cancelled = tracking_lifecycle.cancel_handoff(record, token)
             if cancelled:
                 tracking.save_record(record, yaml_path)
@@ -123,5 +124,16 @@ def cmd_cancel_handoff(args: argparse.Namespace) -> int:
         _json_output({"cancelled": False, "worktree_id": wt_id, "reason": str(exc)})
         return 1
 
-    _json_output({"cancelled": cancelled, "worktree_id": wt_id, "token": token})
+    _json_output({
+        "cancelled": cancelled,
+        "worktree_id": wt_id,
+        "token": token,
+        # Surfaced regardless of `cancelled` -- a caller that must fence a
+        # SEPARATE destructive action (e.g. context-handoff's task-backed
+        # abort) on "no successor is mid-pickup" needs to distinguish "no
+        # matching pending entry at all" from "a candidate is already
+        # associated, mid-cutover" -- `cancelled: false` alone conflates
+        # both (PR #4570 review round 17).
+        "candidate": handoff.candidate if handoff else None,
+    })
     return 0
