@@ -109,7 +109,7 @@ def test_windows_falls_back_to_new_console_without_wt(monkeypatch):
     assert "conhost" in result["spawner"]
     argv, kwargs = calls[0]
     assert argv == ["psmux", "attach-session", "-t", "wt-abc"]
-    assert kwargs.get("creationflags") == hl.subprocess.CREATE_NEW_CONSOLE
+    assert kwargs.get("creationflags") == hl._CREATE_NEW_CONSOLE
 
 
 def test_windows_headed_launch_refuses_a_banned_psmux_version(monkeypatch):

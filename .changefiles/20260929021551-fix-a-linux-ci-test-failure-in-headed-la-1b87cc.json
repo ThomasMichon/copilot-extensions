@@ -1,0 +1,9 @@
+{
+  "comment": "Fix a Linux-CI test failure in headed_launch's Windows fallback path: subprocess.CREATE_NEW_CONSOLE only exists on Windows Python builds, so exercising the monkeypatched Windows branch on non-Windows CI raised AttributeError. Added a cross-platform-safe _CREATE_NEW_CONSOLE constant (getattr with the real Win32 flag value as fallback) used by both the source and its test.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

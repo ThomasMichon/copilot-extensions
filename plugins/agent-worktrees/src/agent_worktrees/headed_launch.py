@@ -35,6 +35,16 @@ import subprocess
 _PSMUX_MINIMUM_VERSION = (3, 3, 5)
 _PSMUX_BLOCKED_VERSIONS = {(3, 3, 6)}
 
+# `subprocess.CREATE_NEW_CONSOLE` only exists on the `subprocess` module when
+# Python itself is running on Windows -- it is not an OS-detection-gated
+# constant. `_windows_spawn` below only ever runs on a real Windows host, so
+# the attribute is always present there; the `getattr` fallback exists solely
+# so this module -- and its cross-platform test suite -- can be imported and
+# exercised (with the Windows branch monkeypatched in) on non-Windows CI
+# without an `AttributeError`. `0x00000010` is the documented Win32
+# `CREATE_NEW_CONSOLE` creation-flag value.
+_CREATE_NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010)  # headless-guard: allow this is the deliberate --headed exception (module docstring); the whole point is a visible window
+
 
 class HeadedLaunchError(RuntimeError):
     """Raised when a headed attach cannot be started -- callers must
@@ -103,7 +113,7 @@ def _windows_spawn(attach_argv: list[str], *, title: str) -> dict:
     # Windows-11-only feature -- redirects it to); it is the platform's
     # only universal "give me a new window" primitive absent wt.exe.
     proc = subprocess.Popen(
-        attach_argv, creationflags=subprocess.CREATE_NEW_CONSOLE,  # headless-guard: allow this is the deliberate --headed exception (module docstring); the whole point is a visible window
+        attach_argv, creationflags=_CREATE_NEW_CONSOLE,  # headless-guard: allow this is the deliberate --headed exception (module docstring); the whole point is a visible window
     )
     return {"spawner": "conhost (CREATE_NEW_CONSOLE)", "pid": proc.pid}
 
