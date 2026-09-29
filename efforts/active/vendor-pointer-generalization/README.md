@@ -2357,8 +2357,10 @@ _Pending._
   `src-passthrough` (once nothing uses it -- `plugin-activation`'s
   `customizing-copilot` copy stays `src-passthrough` forever, see
   earlier entry). Then Phase 2/3.
-- **Closing note for this leg (PR #4465, review went 11 rounds):**
-  `tools/check-version-bump.py`'s consumer-discovery generalization and
+
+### 2026-09-29 — Closing out the #4465/#4514 split-PR leg
+
+- `tools/check-version-bump.py`'s consumer-discovery generalization and
   `tools/accumulate_bumps.py`/`tools/promote_release.py`'s new
   standalone-consumer bump/promotion support were split into their own
   standalone PR (#4514) partway through review, since they were
@@ -2381,7 +2383,7 @@ _Pending._
   admin-role-scoped bypass path (CONTRIBUTING.md's own normal mechanism
   for the maintainer's own PRs, not an emergency override) after the
   automated `copilot-pull-request-reviewer`'s own review approved both.
-  **Facility-process note, not part of this effort's own scope:** a
+- **Facility-process note, not part of this effort's own scope:** a
   concurrent, uncoordinated peer session was found independently
   reworking the same PR mid-leg (a stray worktree from an earlier,
   un-handed-off attempt) -- it stood down once contacted. Separately,
