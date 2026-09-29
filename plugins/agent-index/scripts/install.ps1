@@ -1244,6 +1244,95 @@ exit /b %ERRORLEVEL%
     Write-Ok "Binstub: $ps1Path (+ .cmd fallback, setup-gated)"
 }
 
+function Install-ServerVenv {
+    <# agent-index-server-venv-split: provision a sibling SERVER venv inside
+       the current runtime slot ($VenvDir\server), installing the full
+       agent-index[store,server] package -- so `spawn_passive` (and, once its
+       own dispatcher retarget lands, `cmd_start`/`cmd_cell_start`) can run the
+       FastAPI/uvicorn/pydantic service from a venv separate from the
+       client/orchestrator's own, keeping a pure client's install footprint
+       light. This is the exact sibling path `config.server_venv_python()`
+       already resolves (a `server` subdirectory of whichever directory
+       contains the current interpreter's own `Scripts`/`bin` folder) --
+       provisioning here just makes that existing, previously-inert resolver
+       find something.
+
+       Host role only: a client never runs the service, so it never needs
+       this second venv. Provisioning failures are WARN, never FAIL --
+       `config.server_venv_python()` already falls back to `$null` (in-process
+       `serve()`, or the shared venv for `spawn_passive`) when no sibling
+       exists, so a failure here must never block the primary client
+       install/update. #>
+    param(
+        [Parameter(Mandatory)][string]$InstallRole,
+        [Parameter(Mandatory)][AllowNull()][string]$PythonCmd
+    )
+    if ($InstallRole -ne 'host') {
+        Write-Skip 'Server venv: skipped (client role never runs the service)'
+        return
+    }
+
+    $serverVenvDir = Join-Path $VenvDir 'server'
+    $serverVenvPython = Join-Path $serverVenvDir 'Scripts\python.exe'
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+
+    if (-not (Test-Path $serverVenvPython)) {
+        $created = $false
+        $signedBase = Get-SignedBasePython
+        if ($signedBase) {
+            & $signedBase -m venv --copies --clear $serverVenvDir 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $serverVenvPython)) { $created = $true }
+        }
+        if (-not $created) {
+            if (Get-Command uv -ErrorAction SilentlyContinue) {
+                $prevLoc = Get-Location
+                Set-Location "$env:SystemDrive\"
+                try { & uv venv $serverVenvDir --allow-existing 2>&1 | Out-Null } finally { Set-Location $prevLoc }
+            } elseif ($PythonCmd) {
+                & $PythonCmd -m venv $serverVenvDir 2>&1 | Out-Null
+            }
+            if (Test-Path $serverVenvPython) { $created = $true }
+        }
+        if (-not $created) {
+            $ErrorActionPreference = $prevEAP
+            Write-Warn "Server venv creation failed -- $serverVenvPython not found (spawn_passive falls back to the shared venv)"
+            return
+        }
+    }
+
+    $ZddDir = Resolve-Zdd
+    if ($ZddDir) {
+        if (Get-Command uv -ErrorAction SilentlyContinue) {
+            & uv pip install --python $serverVenvPython "$ZddDir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet 2>&1 | Out-Null
+        } else {
+            & $serverVenvPython -m pip install "$ZddDir" 2>&1 | Out-Null
+        }
+        if ($LASTEXITCODE -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            Write-Warn "Server venv zdd install failed (exit $LASTEXITCODE) -- spawn_passive falls back to the shared venv"
+            return
+        }
+    }
+    Remove-ConsoleTrampolines -VenvDir $serverVenvDir
+
+    $serverPkgSpec = "$PluginDir[store,server]"
+    if (Get-Command uv -ErrorAction SilentlyContinue) {
+        $srvOut = & uv pip install --python $serverVenvPython $serverPkgSpec 2>&1 | Out-String
+    } else {
+        $srvOut = & $serverVenvPython -m pip install $serverPkgSpec 2>&1 | Out-String
+    }
+    if ($LASTEXITCODE -ne 0) {
+        $ErrorActionPreference = $prevEAP
+        Write-Warn 'Server venv package install failed -- spawn_passive falls back to the shared venv'
+        Write-Host $srvOut
+        return
+    }
+    $ErrorActionPreference = $prevEAP
+    Remove-ConsoleTrampolines -VenvDir $serverVenvDir
+    Write-Ok "Server venv provisioned: $serverVenvDir"
+}
+
 function Install-Runtime {
     if (-not (Test-Path $PkgSrcDir)) { Write-Fail "Package source not found at $PkgSrcDir"; exit 1 }
     $pythonCmd = $null
@@ -1435,6 +1524,8 @@ function Install-Runtime {
     $ErrorActionPreference = $prevEAP
     Remove-ConsoleTrampolines -VenvDir $VenvDir
     Write-Ok 'Package installed: agent-index'
+
+    Install-ServerVenv -InstallRole $installRole -PythonCmd $pythonCmd
 
     Deploy-SetupGatedBinstub
 

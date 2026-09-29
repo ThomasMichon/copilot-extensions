@@ -136,6 +136,12 @@ def add_parsers(sub) -> None:
         default="",
         help="with handoff decline/cancel: required explanation",
     )
+    p.add_argument(
+        "--actor",
+        default="",
+        dest="claim_actor",
+        help=argparse.SUPPRESS,
+    )
     p.add_argument("--all-states", action="store_true", help="with owner: include released claims")
     p.add_argument(
         "--repo",

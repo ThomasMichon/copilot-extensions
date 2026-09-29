@@ -1965,3 +1965,171 @@ efforts' own PRs).
   `gate`-success / `is_dev` / validation-result checks before promoting --
   manual dispatch forces a promotion RUN, never a bypass of what that run
   validates.
+
+### 2026-09-29 — Promotion pipeline starved by unfiltered CI-completion volume; fixed with a separate, cheap outer filter workflow (two flawed attempts first caught by review)
+- Diagnosed live while chasing why an aperture-labs PR's merged
+  `context-handoff` fix (#4489) hadn't reached `main` yet. `validate-and-
+  promote.yml`'s `workflow_run: workflows: ["CI"]` trigger has no branch
+  filter -- deliberately, per this same effort's earlier finding that
+  `workflow_run.head_branch` unreliably reports `main` regardless of the
+  real triggering branch (see the 2026-09-24 entries above). But `ci.yml`
+  itself runs on every `pull_request` too, with no branch scoping -- so
+  this workflow fires on every CI completion repo-wide, not just `dev`
+  pushes.
+- That whole run (validation *and* promotion together) shared one
+  workflow-level `concurrency:` group with GitHub's `queue: single`
+  semantics: at most one running, at most one pending, a newer trigger
+  only ever replaces the *pending* run. Under this repo's actual
+  concurrent-PR volume, new trigger events arrive faster than `gate`'s own
+  ~10-20s ancestry check completes, so the single pending slot kept
+  getting overwritten by the next irrelevant PR-branch CI completion
+  before a genuine `dev`-advancement event ever got a turn.
+- **Confirmed live, not theoretical:** in a ~20 minute window, 10+
+  `validate-and-promote` runs fired, every one deciding `proceed=false` --
+  either `is_dev=false` (the triggering CI run was for a PR branch) or
+  `gate` itself skipped (the triggering CI run had already been cancelled
+  by its own PR-branch concurrency group). `main` still advanced once
+  during that window (`#4499`, promoting `fc6171f89f2d`) -- the
+  "wholesale-replace" design means nothing is silently lost, a later
+  promotion catches up every accumulated `dev` commit -- but the wait
+  under sustained load was unbounded, not the "a promotion opportunity is
+  always in flight" guarantee this pipeline exists to provide.
+- **First attempt (PR #4506, superseded before merge):** moved the
+  `concurrency:` block from the workflow level down to the `promote` job
+  alone, leaving `gate`/`full`/`worktree-manager`/`guards-full-sweep`
+  unrestricted. **Review correctly caught two real regressions:** (1) two
+  different `dev` commits' validations could now finish out of order, and
+  `tools/promote_release.py` has no monotonic stale-candidate guard -- an
+  older, slower-validating commit's `promote` step could run AFTER a
+  newer one's and silently regress `main`; (2) `report-failure`'s watchdog
+  does a non-atomic issue lookup-then-create, and the FORMER whole-run
+  group was the only thing preventing duplicate tracking issues /
+  duplicate fix-agent dispatches on concurrent failures (see
+  `efforts/active/promotion-failure-reactive-fix-agent/README.md:713-728`)
+  -- unrestricting the validation jobs reopened that race too.
+- **Second attempt, caught before it even reached review:** tried making
+  the whole workflow `workflow_dispatch`-only and having a new outer gate
+  call `gh workflow run` to fire it. Checked GitHub's own docs (Events
+  that trigger workflows, `GITHUB_SHA`/`GITHUB_REF` columns) before
+  shipping this and found it would have been a genuine security
+  regression, not just a design nit: `workflow_dispatch` resolves the
+  target workflow's own YAML from WHICHEVER REF IS DISPATCHED, not the
+  default branch -- unlike `workflow_run` (and `repository_dispatch`,
+  confirmed in the same docs pass), which both always resolve from `main`
+  regardless of what triggered them. Making the promotion workflow
+  `workflow_dispatch`-only would have made a `dev`-branch (zero-review-
+  required) copy of this very file fully executable, including the
+  `promote` job's `APERTURE_RELEASE_TOKEN` secret access -- exactly the
+  untrusted-YAML risk `report-failure`'s own comment already flags for a
+  narrower case, reopened for the whole workflow.
+- **Actual fix (PR #4506, revised): a separate, cheap, unthrottled outer
+  workflow, `promote-trigger.yml`.** Still `workflow_run`-triggered (same
+  unreliable-branch-filter problem, but now harmless -- see below), it
+  does the identical `git merge-base --is-ancestor` proof and, only on a
+  confirmed `dev` advancement, fires a `repository_dispatch` event
+  (`event_type: dev-advanced`, `client_payload.sha`) at
+  `validate-and-promote.yml`. Confirmed via GitHub's own REST API docs
+  that creating a `repository_dispatch` event needs only "Contents"
+  (write) permission -- no elevated token required, the default
+  `GITHUB_TOKEN` suffices.
+  - `validate-and-promote.yml`'s trigger becomes `repository_dispatch:
+    types: [dev-advanced]` plus the existing `workflow_dispatch` (manual);
+    the direct `workflow_run: workflows: ["CI"]` trigger is removed
+    entirely. Its `gate` job still independently re-verifies ancestry for
+    BOTH triggers (never trusts the dispatch payload alone -- defense in
+    depth against a bug in the outer gate, and a human `workflow_dispatch`
+    still needs the same proof against whatever ref they ran it on).
+    `report-failure`'s trust-boundary check moves from `github.event_name
+    == 'workflow_run'` to `== 'repository_dispatch'` (the same default-
+    branch-YAML guarantee, just via the new trigger).
+  - The original workflow-level `concurrency:` group is restored
+    completely unchanged -- every job below `gate` is exactly as it was
+    before this whole incident. This fixes the starvation at its actual
+    source (the raw CI-completion firehose never reaches this workflow's
+    concurrency queue at all any more -- only `promote-trigger.yml`'s
+    already-filtered dispatches, or a human, ever enter it) while
+    preserving both regressions the first attempt reopened: promote
+    ordering and `report-failure` dedup are both back to their original,
+    correct behavior.
+- Verified with `actionlint` (clean on all three states of the file, and
+  on the new `promote-trigger.yml`) since this workflow has no dedicated
+  test suite of its own to exercise a live dry run against.
+- **Lesson for future sessions touching this pipeline:** trigger-mechanism
+  changes here are genuinely subtle -- two independent, plausible-looking
+  fixes were wrong in non-obvious ways (one reopening a data race, one a
+  security regression) before landing on the actually-correct design.
+  Check GitHub's own docs for exact per-event-type YAML/ref resolution
+  semantics before trusting an assumption about them, and re-derive every
+  downstream invariant (promote ordering, watchdog dedup) a concurrency
+  change might touch, not just the one symptom being fixed.
+- **A fourth review round (against the rebased head, after picking up a
+  new `workflow-lockdown-guard.yml` this PR's branch predated) caught a
+  real residual gap even the corrected design above left open:**
+  `promote-trigger.yml`'s own filter runs are deliberately unthrottled (no
+  concurrency group -- that's the whole point of the split), so two
+  different `dev` commits' filter runs can complete and dispatch their
+  `repository_dispatch` events out of order. `validate-and-promote.yml`'s
+  restored concurrency group only serializes DISPATCH-ARRIVAL order, never
+  commit order -- if an older commit A's filter run is slow to dispatch
+  while a newer commit B's is fast, B's dispatch can be processed first
+  (correctly promoting `main` to B), and A's dispatch can still arrive and
+  get processed afterward. Since `gate`'s only check was "is this sha an
+  ancestor of `origin/dev`" (true for both A and B), and
+  `tools/promote_release.py` never checked candidate freshness against
+  what was already promoted, A's (now-stale) content would silently
+  regress `main` back to an older snapshot -- a real bug, not the
+  theoretical one the first review round caught inside a single workflow
+  run.
+- **Actual fix: a genuine monotonic guard in `promote_release.py` itself**,
+  rather than relying on trigger/concurrency ordering tricks (which this
+  incident demonstrated are fundamentally too fragile for this invariant).
+  `promote()` now reads `last_promotion.dev_head` from the pipeline state
+  and refuses (via a new `StaleCandidatePromotion`, treated as a benign
+  no-op -- CLI exit 0, not a failure) unless the candidate `dev_head` is
+  either identical to it (falls through to the ordinary "no content change"
+  no-op) or a strict `git merge-base --is-ancestor` descendant of it. 3 new
+  tests: refuses an out-of-order stale candidate, allows genuine forward
+  advancement, and confirms the CLI exit code stays 0 (matching the
+  existing pause-guard precedent) so `report-failure`'s watchdog never
+  files a spurious incident for this expected, benign race outcome.
+- This closes the pipeline's actual correctness gap independent of
+  whatever trigger/concurrency shape sits in front of it -- the guard
+  protects `main` even if a future change reintroduces out-of-order
+  dispatching some other way.
+- **A fifth review round (against the monotonic-guard commit) caught the
+  remaining half of the same problem: a liveness gap the correctness guard
+  alone doesn't close.** `promote-trigger.yml`'s filter runs are still
+  unthrottled, so an older commit's dispatch can still win
+  `validate-and-promote.yml`'s single-pending-slot race and EVICT a newer
+  commit's already-queued dispatch outright (GitHub's `queue: single`
+  semantics: a newer trigger replaces whatever was merely *pending*, never
+  the one already running -- but an out-of-order LATE dispatch can still be
+  the one that ends up pending when the running slot frees, bumping the
+  genuinely-next one). The monotonic guard correctly no-ops on that stale
+  payload once it runs -- but nothing re-queues the newer commit it evicted,
+  so `main` could lag behind `dev` indefinitely if no *further* push ever
+  happens to generate a fresh dispatch.
+- **Fix: stop trusting the dispatch payload's sha for what to promote at
+  all.** `gate` now deliberately ignores `client_payload.sha` for
+  `repository_dispatch` triggers and re-resolves `origin/dev`'s LIVE tip,
+  fresh, at its own run time instead. This sidesteps the whole class of
+  problem rather than patching around it: ANY dispatch that reaches `gate`
+  -- stale or not -- ends up validating and promoting whatever `dev`
+  actually is *right now*, so an evicted/stale dispatch is never a lost
+  opportunity; whichever dispatch happens to trigger `gate` next always
+  converges on the same, freshest target. This is the same
+  "wholesale-replace catches up everything accumulated" philosophy this
+  pipeline already relies on downstream, just applied one hop earlier.
+  Confirmed this doesn't reopen the 2026-09-28 "promote job's own re-fetch
+  could outrun gate's validated sha" bug: that fix's actual invariant --
+  everything downstream (`full`/`worktree-manager`/`guards-full-sweep`/
+  `promote`) trusts `needs.gate.outputs.sha`, never re-resolves
+  `origin/dev` independently at its own later checkout time -- is
+  completely untouched; only *where* `gate` itself samples `dev`'s state
+  from moved (a stale payload -> a fresh, authoritative git call).
+  `client_payload.sha` in `promote-trigger.yml`'s own dispatch is now
+  informational/diagnostic only, never trusted as the promotion target.
+- **Also fixed the same round's third finding:** the previous Journal
+  entry claimed "4 new tests" when the diff (and this entry's own prose)
+  only added 3 -- corrected in place.
+

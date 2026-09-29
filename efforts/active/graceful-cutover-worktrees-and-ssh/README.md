@@ -282,25 +282,31 @@ substantial in its own right.
       flag ahead of real installer support.
 
 ### Phase 3 — `agent-ssh` (ssh-manager): audit first, cutover only if warranted
-- [ ] Run the Phase 0 audit (`forward_keeper.py` + any other spawned
-      children) to conclusion. **Do not assume a persistent daemon exists**
-      — confirmed this round of review that it does not, by design, for the
-      Windows proxy broker at least.
-- [ ] If the audit finds a genuine long-lived/leak-prone process: scope a
+- [x] Run the Phase 0 audit (`forward_keeper.py` + any other spawned
+      children) to conclusion. **Conclusion:** `agent-ssh` still has no
+      persistent daemon/harness/broker service; the Windows proxy broker
+      remains strictly in-process, matching the README contract.
+- [x] If the audit finds a genuine long-lived/leak-prone process: scope a
       right-sized fix (full `zdd` cutover only if it is truly a persistent,
       stateful daemon; otherwise the lighter `ephemeral-process-reaping`
-      pattern is more likely correct).
-- [ ] If the audit finds nothing: close this phase as "no cutover needed,"
+      pattern is more likely correct). **Applied narrowly:** the detached
+      `forward_keeper` now records and reaps its owned reverse-forward child
+      pid on stale-state replacement, closing the one real orphan/stacking
+      seam the audit found without inventing daemon cutover machinery.
+- [x] If the audit finds nothing: close this phase as "no cutover needed,"
       not "done" — record the audit finding in the Journal so a later
       re-check isn't repeated from scratch, and drop `agent-ssh` from
       Phase 4's pattern-doc update (only real adopters belong in that
-      table).
+      table). **Result:** no `agent-ssh` adoption row was added to
+      `docs/patterns/graceful-daemon-cutover.md`; Phase 3 closed as audit +
+      targeted ephemeral-process hygiene only.
 
 ### Phase 4 — Close the loop in the pattern doc itself
-- [ ] Add `agent-worktrees` and `worktree-manager` rows to
+- [x] Add `agent-worktrees` and `worktree-manager` rows to
       `docs/patterns/graceful-daemon-cutover.md`'s **Per-plugin adoption**
-      table and **Rollout sequencing** list once Phases 1-2 land.
-- [ ] Add an `agent-ssh` row **only if** Phase 3's audit finds a real daemon
+      table, update its **Cross-platform parity** guidance, and extend its
+      **Rollout sequencing** list once Phases 1-2 land.
+- [x] Add an `agent-ssh` row **only if** Phase 3's audit finds a real daemon
       and lands actual cutover work; if the audit instead concludes "no
       cutover needed" (Phase 3's own stated possible outcome), do NOT add a
       row implying adoption — note the audit conclusion in this effort's
@@ -421,6 +427,51 @@ substantial in its own right.
 _Pending._
 
 ## Journal
+
+### 2026-09-29 — Phase 4 documented in the pattern doc
+Closed the Phase 4 docs gap in the canonical pattern itself. Updated
+`docs/patterns/graceful-daemon-cutover.md` so its **Per-plugin adoption** table,
+**Cross-platform parity** guidance, and **Rollout sequencing** list now all
+explicitly reflect the already-landed `agent-worktrees` and `worktree-manager`
+cutover adopters rather than stopping at the earlier `agent-bridge` /
+`agent-dispatch` / `agent-index` set.
+
+Per Phase 3's completed audit, **no `agent-ssh` adoption row was added**. The
+pattern doc remains a list of real cutover adopters only; the "no persistent
+daemon, right-sized ephemeral-process reaping instead" conclusion stays recorded
+in this effort's Phase 3 journal entry rather than creating a misleading
+"non-adopter row" in the pattern doc. The detailed adopter inventory remains in
+`docs/patterns/graceful-daemon-cutover.md`; this effort journal records only
+that the canonical doc was updated and why.
+
+### 2026-09-29 — Phase 3 audited in `agent-ssh`; no daemon cutover adopted
+Phase 3 closed with the audit-first conclusion the effort's review had already
+pointed toward: `agent-ssh` still does **not** own a persistent daemon/harness/
+broker service, so full `zdd` graceful-cutover adoption is not warranted here.
+The architectural claim in `plugins/agent-ssh/README.md` and the shared-lib
+claim in `libs/ssh-manager/README.md` both remain accurate after code audit:
+the Windows proxy broker stays in-process with its SSH root, and the rest of
+the plugin surface is one-shot CLI work rather than a resident service.
+
+The audit did find one smaller leak-prone seam worth fixing under the lighter
+`ephemeral-process-reaping` pattern: the detached `agent-ssh copilot`
+`forward_keeper` persisted only **its own** pid in keeper state even though the
+reverse-forward child it supervises is launched as an isolated SSH process
+tree. If the keeper itself died abruptly, a subsequent relaunch could replace
+the stale keeper record without ever knowing the old `ssh -N -R` child still
+existed, letting reverse-forward helpers stack silently over time. The landed
+fix now records the supervised child pid(s) alongside the keeper pid, refreshes
+that state after the forward actually starts, and reaps those children when a
+stale keeper record is replaced or explicitly stopped. Added regression
+coverage in `libs/ssh-manager/tests/test_forward_keeper.py` for the new
+child-pid reap path and in `plugins/agent-ssh/tests/test_copilot_detach.py`
+for the post-start/restart state refresh path.
+
+No `docs/patterns/graceful-daemon-cutover.md` adoption-table row was added for
+`agent-ssh`; that table remains a list of real cutover adopters only. Phase 4
+therefore stays scoped to `agent-worktrees` and `worktree-manager`, while Phase
+3 is now complete as **audit + right-sized ephemeral-process hygiene**, not a
+forced daemon-cutover implementation.
 
 ### 2026-09-29 — Phase 2 implemented in `worktree-manager`
 Implemented the `mux-daemon` cutover slice. `zdd` is now vendored under

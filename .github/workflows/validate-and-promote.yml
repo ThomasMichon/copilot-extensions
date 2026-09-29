@@ -20,6 +20,59 @@ name: Validate and promote dev to main
 # That whole failure class is now structurally impossible for this hop, not
 # merely worked around.
 #
+# Trigger (redesigned 2026-09-29, see `promote-trigger.yml`): this workflow
+# is now entered via `repository_dispatch` (from a separate, cheap,
+# unthrottled outer workflow) or a human `workflow_dispatch` -- never
+# directly by `workflow_run` any more. The direct `workflow_run:
+# workflows: ["CI"]` trigger this workflow used to declare fired on every
+# "CI" completion repo-wide (`ci.yml` runs on every `pull_request`, not
+# just `dev` pushes, and `head_branch` can't be trusted to filter -- see
+# `gate` below), which under this repo's real concurrent-PR volume starved
+# the single-pending-slot concurrency group below: 10+ consecutive runs in
+# a ~20 minute window all declined to promote, confirmed live 2026-09-29
+# while chasing why a merged PR hadn't reached `main`.
+#
+# A first attempt fixed the starvation by moving concurrency down to just
+# the `promote` job, letting `full`/`worktree-manager`/`guards-full-sweep`
+# run unrestricted -- but review correctly caught that this reopened two
+# real invariants the ORIGINAL whole-run serialization existed to provide:
+# (1) two different `dev` commits' validations could now finish out of
+# order, and `tools/promote_release.py` has no monotonic stale-candidate
+# guard -- an older, slower-validating commit's `promote` step could run
+# AFTER a newer one's and silently regress `main`; (2) `report-failure`'s
+# watchdog does a non-atomic issue lookup-then-create, and the former
+# whole-run group was the only thing preventing duplicate tracking issues /
+# duplicate fix-agent dispatches on concurrent failures (see
+# efforts/active/promotion-failure-reactive-fix-agent/README.md:713-728).
+#
+# A second attempt tried moving the whole trigger to `workflow_dispatch`
+# and having the outer gate call `gh workflow run` -- also wrong, and more
+# dangerous: per GitHub's own docs (Events that trigger workflows table),
+# `workflow_dispatch` resolves `GITHUB_SHA`/the workflow YAML itself from
+# WHICHEVER REF IS DISPATCHED, not the default branch -- unlike
+# `workflow_run` (and `repository_dispatch`), which both always resolve
+# from `main` regardless of what triggered them. Making this workflow
+# `workflow_dispatch`-only would have meant a `dev`-branch copy of this
+# very file (a zero-review-required branch) became fully executable,
+# including the `promote` job's `APERTURE_RELEASE_TOKEN` secret access --
+# exactly the untrusted-YAML risk `report-failure`'s own comment already
+# flags for a narrower case, reopened for the whole workflow.
+#
+# The actual fix: `repository_dispatch` shares `workflow_run`'s
+# default-branch-only YAML resolution (confirmed against GitHub's docs,
+# not assumed), so `promote-trigger.yml` -- itself still `workflow_run`-
+# triggered and cheap/unrestricted -- does the ancestry filter and fires a
+# `repository_dispatch` event carrying the validated sha only once it's
+# confirmed. This fixes the starvation at its actual source (the raw
+# CI-completion firehose never reaches this workflow's own concurrency
+# group at all any more) while leaving every job and invariant below
+# completely unchanged: `gate` still independently re-verifies ancestry
+# (defense-in-depth -- never trust the dispatch payload alone, and a human
+# `workflow_dispatch` still needs the same proof against whatever ref they
+# ran it on), and the SAME single workflow-level concurrency group still
+# serializes the entire validate+promote+report run, preserving both the
+# promote-ordering guarantee and `report-failure`'s dedup invariant.
+#
 # Concurrency: a single top-level group (see below) makes the ENTIRE run --
 # validation AND promotion together -- one atomic unit in GitHub's queue.
 # With `cancel-in-progress: false`, this is GitHub's documented
@@ -31,11 +84,12 @@ name: Validate and promote dev to main
 # the previous split design's "cancel and restart from zero" (`ci.yml`) or
 # "full parallelism, no debounce" (the old per-commit validation-gate
 # group) -- see the effort Journal entry that proposed this for the full
-# reasoning.
+# reasoning. Now that only `promote-trigger.yml`'s already-filtered
+# dispatches (or a human) ever enter this queue, the volume contending for
+# it is low enough that this semantics is exactly right again.
 on:
-  workflow_run:
-    workflows: ["CI"]
-    types: [completed]
+  repository_dispatch:
+    types: [dev-advanced]
   workflow_dispatch:
     inputs:
       push:
@@ -55,19 +109,16 @@ permissions:
 jobs:
   gate:
     name: gate (confirm this is a dev commit)
-    # `branches: [dev]` on the workflow_run trigger above looks like the
-    # obvious filter, but it is unreliable in practice: GitHub's
-    # workflow_run event consistently reports `head_branch` as the
-    # repository's *default* branch (main), not the branch that actually
-    # produced the triggering CI run -- confirmed empirically across many
-    # real runs here, including successful push-triggered CI runs on dev
-    # whose own head_branch correctly says "dev". Trusting that field left
-    # this whole pipeline dead: 0 real triggers ever
-    # (dev-branch-release-pipeline effort, promote-trigger finding).
-    # Verify real dev-ancestry with git instead of the event metadata.
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+    # This workflow is now `repository_dispatch`/`workflow_dispatch`-only
+    # (see the header comment for the 2026-09-29 trigger redesign) --
+    # `promote-trigger.yml` is the only automated caller, always
+    # dispatching after its own `git merge-base --is-ancestor` proof
+    # against `origin/dev`. This job re-proves the identical ancestry fact
+    # rather than trusting that caller: a human can also dispatch this
+    # workflow directly against any ref, and giving that path special trust
+    # `promote-trigger.yml`'s own dispatches don't get would reopen the
+    # exact "unreviewed branch promotes straight to main" gap this job's
+    # own history (see below) already closed once.
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -79,32 +130,54 @@ jobs:
           fetch-depth: 0
       - id: check
         run: |
-          # Resolve the candidate sha for EITHER trigger the same way, then
-          # apply the identical ancestor check to both -- `workflow_dispatch`
-          # previously short-circuited straight to `is_dev=true` for
-          # whatever `github.sha` happened to be (the tip of whatever ref
-          # it was run against), never verified against `dev` at all. That
-          # was safe only by accident, because every downstream promotion
-          # call hard-coded `origin/dev` regardless of this job's own `sha`
-          # output -- once promotion started trusting `sha` (see the
+          # Resolve the candidate sha per trigger type, then apply the
+          # IDENTICAL ancestor proof to all of them -- never trust a
+          # dispatch payload alone. For `repository_dispatch`, deliberately
+          # ignore `client_payload.sha` and re-resolve `origin/dev`'s LIVE
+          # tip at THIS job's own run time instead (fixed after a live
+          # review round, 2026-09-29 -- see the effort Journal): pinning to
+          # the payload's specific sha reopened a liveness gap --
+          # `promote-trigger.yml`'s own filter runs are deliberately
+          # unthrottled, so an OLDER commit's dispatch can win
+          # `validate-and-promote.yml`'s single-pending-slot race and
+          # evict a NEWER commit's already-queued dispatch entirely; the
+          # monotonic guard in `tools/promote_release.py` then correctly
+          # no-ops on that stale payload, but nothing re-queues the evicted
+          # newer commit -- `main` could lag behind indefinitely if no
+          # further push ever happens to trigger a fresh dispatch.
+          # Resolving `origin/dev`'s tip fresh, right here, sidesteps the
+          # whole class of problem: ANY dispatch, stale or not, that
+          # reaches this point ends up validating and promoting whatever
+          # `dev` actually is *right now* -- an evicted/stale dispatch is
+          # never lost, because whichever dispatch happens to trigger this
+          # job next always converges on the same, freshest target. This
+          # is the same "wholesale-replace catches up everything
+          # accumulated" philosophy this whole pipeline already relies on,
+          # just applied one hop earlier. `workflow_dispatch`'s own
+          # `github.sha` is unchanged (whatever ref a human dispatched
+          # against) -- previously short-circuited straight to
+          # `is_dev=true` for it, never verified against `dev` at all --
+          # safe only by accident, because every downstream promotion call
+          # hard-coded `origin/dev` regardless of this job's own `sha`
+          # output. Once promotion started trusting `sha` (see the
           # `promote` job's `DEV_SHA`), an operator manually dispatching
           # this workflow from an unreviewed feature/PR branch could
           # promote that branch's own unreviewed content straight to
-          # `main`. Requiring the SAME `git merge-base --is-ancestor`
-          # proof for both events closes that gap without giving manual
-          # dispatch any special trust `workflow_run` doesn't also get.
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            sha="${{ github.sha }}"
-          else
-            sha="${{ github.event.workflow_run.head_sha }}"
-          fi
+          # `main`. Requiring the same `git merge-base --is-ancestor`
+          # proof for every trigger closes that gap regardless of who/what
+          # dispatched this run.
           git fetch origin dev
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            sha="$(git rev-parse origin/dev)"
+          else
+            sha="${{ github.sha }}"
+          fi
           if git merge-base --is-ancestor "$sha" origin/dev; then
             echo "is_dev=true" >> "$GITHUB_OUTPUT"
             echo "sha=$sha" >> "$GITHUB_OUTPUT"
           else
             echo "is_dev=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::$sha is not on origin/dev's history -- skipping (this CI completion was for a different branch/PR, or workflow_dispatch was run against a non-dev ref)."
+            echo "::notice::$sha is not on origin/dev's history -- skipping (workflow_dispatch was run against a non-dev ref, or an unexpected repository_dispatch payload)."
           fi
 
   full:
@@ -218,19 +291,21 @@ jobs:
     # mirrors why `promote` below needs its own `always()` for the same
     # reason.
     #
-    # `workflow_run`-only, deliberately: `workflow_dispatch` loads the
-    # ENTIRE workflow YAML from the dispatched ref (unlike `workflow_run`,
-    # which always resolves the workflow file from the default branch) --
-    # so allowing a dispatch against `dev` would make the whole job
-    # definition itself untrusted, not merely the checked-out script. This
-    # job doesn't need manual triggering (it exists to react automatically
-    # to real validation runs), so the fix is to just never offer that
-    # path, rather than trying to harden a job whose own YAML could be
-    # attacker-controlled.
+    # `repository_dispatch`-only, deliberately: `workflow_dispatch` loads
+    # the ENTIRE workflow YAML from the dispatched ref (unlike
+    # `repository_dispatch`, which -- per GitHub's own docs -- always
+    # resolves the workflow file from the default branch, same as the
+    # `workflow_run` trigger this job originally relied on before the
+    # 2026-09-29 trigger redesign) -- so allowing a dispatch against `dev`
+    # would make the whole job definition itself untrusted, not merely the
+    # checked-out script. This job doesn't need manual triggering (it
+    # exists to react automatically to real validation runs), so the fix is
+    # to just never offer that path, rather than trying to harden a job
+    # whose own YAML could be attacker-controlled.
     needs: [gate, full, worktree-manager, guards-full-sweep]
     if: >-
       always() &&
-      github.event_name == 'workflow_run' &&
+      github.event_name == 'repository_dispatch' &&
       needs.gate.outputs.is_dev == 'true' &&
       (needs.full.result == 'failure' ||
        needs.worktree-manager.result == 'failure' ||
@@ -253,20 +328,21 @@ jobs:
         # dev commit being diagnosed -- the very thing that just failed
         # validation -- and this job holds `issues: write` + `GH_TOKEN`.
         # Executing `tools/ci_failure_watchdog.py` FROM that untrusted
-        # checkout would defeat the whole workflow_run trust boundary
-        # (the same class of mistake `trusted-ci.yml` was hardened
-        # against earlier this session): a compromised dev commit's own
-        # copy of this very script could exfiltrate the token or file
-        # arbitrary issues/comments.
+        # checkout would defeat the whole repository_dispatch/workflow_run
+        # trust boundary (the same class of mistake `trusted-ci.yml` was
+        # hardened against earlier this session): a compromised dev
+        # commit's own copy of this very script could exfiltrate the
+        # token or file arbitrary issues/comments.
         #
         # An EXPLICIT `ref:` naming the default branch is required, not
         # merely omitting `ref:` -- a bare checkout resolves differently
-        # per trigger type: for `workflow_run` it lands on the default
-        # branch, but a bare checkout under `workflow_dispatch` would
-        # resolve to whichever ref was manually dispatched -- moot for
-        # this job specifically now that its own `if:` is `workflow_run`-
-        # only (see above), but naming the default branch explicitly is
-        # correct and harmless defense-in-depth regardless of trigger.
+        # per trigger type: for `repository_dispatch`/`workflow_run` it
+        # lands on the default branch, but a bare checkout under
+        # `workflow_dispatch` would resolve to whichever ref was manually
+        # dispatched -- moot for this job specifically now that its own
+        # `if:` is `repository_dispatch`-only (see above), but naming the
+        # default branch explicitly is correct and harmless defense-in-
+        # depth regardless of trigger.
         with:
           fetch-depth: 1
           ref: ${{ github.event.repository.default_branch }}

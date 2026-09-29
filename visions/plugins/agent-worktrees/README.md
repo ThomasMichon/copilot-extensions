@@ -299,6 +299,19 @@ daemon wire protocol between hosts; cross-machine reach is CLI-to-CLI,
 recursing into the same single-authority-per-host pattern on the far side,
 never a second, wider-scoped authority layered above it.
 
+**A concrete instance of this pattern: claim-bundle acceptance
+(#1090/#4527).** A remote consumer's `claims handoff accept <bundle-id>`
+does not need — and must never grow — a bespoke daemon-to-daemon or
+bridge-RPC transaction surface. It reaches the source machine's own ledger
+the same way any other cross-host `agent-worktrees` operation does: SSH to
+that machine's own binstub, which runs the *exact same local mutation code*
+same-machine acceptance already uses. A prior implementation pass
+concluded no such reach existed because it looked for a purpose-built
+`agent-bridge` verb instead of this already-established CLI-to-CLI
+mechanism — a mistake worth naming here so a future reader doesn't
+re-derive a second cross-machine authority for a problem this section
+already answers.
+
 The daemon's in-memory state is what "current" means; its durable YAML
 persistence is a recovery mechanism (warm-restore after a restart), never a
 second copy another reader/writer could race the daemon over. Every fact this

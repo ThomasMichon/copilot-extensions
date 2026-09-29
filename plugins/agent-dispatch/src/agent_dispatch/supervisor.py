@@ -126,7 +126,22 @@ from .supervisor_conclusion import (  # noqa: F401 -- re-exported for existing c
 log = logging.getLogger("agent-dispatch.supervisor")
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
 
-_TERMINAL = frozenset({Status.COMPLETED, Status.ABANDONED})
+#: "Provably finished, reconcile() may settle a still-active reservation" --
+#: includes CONFIRMED (2026-09-28, rubber-duck review): it is Status.CONFIRMED
+#: that is the TRUE completion terminal now (Status.COMPLETED is only a
+#: worker's unverified claim -- see queue_records.py), but this set had never
+#: been updated when CONFIRMED was introduced, so a task reaching CONFIRMED
+#: before its next reconcile() pass permanently fenced its exclusive_key --
+#: reconcile() never settled the reservation, and no other sweep covers a
+#: RESERVING/SPAWNED/COLD reservation on a CONFIRMED task either. Deliberately
+#: NOT Status.CONCLUDED (which also has DEAD_LETTER): DEAD_LETTER keeps its
+#: own, simpler settlement in recover_dead_lettered_cold_reservations() below
+#: rather than running it through this set's completion-verification-shaped
+#: branch in reconcile() (mirrors how ABANDONED already coexists with the
+#: completion-narrative-heavy branch below -- CONFIRMED slots in the same
+#: way ABANDONED already does, not by relying on reconcile()'s completion
+#: fields being meaningful for a task that never completed a goal).
+_TERMINAL = frozenset({Status.COMPLETED, Status.CONFIRMED, Status.ABANDONED})
 _LEASED = frozenset({Status.CLAIMED, Status.STARTED})
 _CONCLUSION_PER_CYCLE = 10
 _COLD_RESUME_RETRY_SECONDS = 300
@@ -902,6 +917,12 @@ class Supervisor:
 
         return _r(self)
 
+    def recover_dead_lettered_cold_reservations(self) -> int:
+        """See :func:`spawn_cold_recovery.recover_dead_lettered_cold_reservations`."""
+        from .spawn_cold_recovery import recover_dead_lettered_cold_reservations as _r
+
+        return _r(self)
+
     def reconcile_reserving(self) -> int:
         """Recover pre-launch reservations after a supervisor interruption.
 
@@ -1212,6 +1233,12 @@ class Supervisor:
             "anomalies": anomalies,
             "assignment_violations": len(violations),
         }
+
+    def sweep_task_reservation_consistency(self) -> dict[str, int]:
+        """See :func:`task_reservation_consistency.sweep`."""
+        from .task_reservation_consistency import sweep as _sweep
+
+        return _sweep(self)
 
     def _conclude_released_attempt(
         self,
@@ -3470,6 +3497,7 @@ class Supervisor:
             self.hold_live_leases()
         if self.recover:
             self.recover_gone()
+            self.recover_dead_lettered_cold_reservations()
         if self.consistency_sweep:
             # Read-only and additive (see sweep_spawn_consistency's own
             # docstring) -- never gates spawning, only classifies+logs.
@@ -3477,6 +3505,10 @@ class Supervisor:
                 self.sweep_spawn_consistency()
             except Exception:  # pragma: no cover -- never let a cycle die on this
                 log.exception("spawn-consistency sweep failed")
+            try:
+                self.sweep_task_reservation_consistency()
+            except Exception:  # pragma: no cover -- never let a cycle die on this
+                log.exception("task-reservation consistency sweep failed")
         self.redrive_unclaimed_spawns()
         if self.nudge:
             self.nudge_stalled(now=now)

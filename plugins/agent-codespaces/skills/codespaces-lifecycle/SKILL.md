@@ -557,6 +557,7 @@ by agent-codespaces.
   `~/.agent-codespaces/relay-tokens.json` has a per-CodeSpace
   `allowed_resources` list (commonly just the ADO resource GUID
   `499b84ac-1321-427f-aa17-267ca6975798` and `https://storage.azure.com/`
-  unless the target repo's own `agent-codespaces/config.yaml` grants more) --
+  unless the target repo's own `.copilot-extensions/agent-codespaces/config.yaml`
+  grants more) --
   test against one of those first. The empty-response-on-denial gap itself is
   tracked as `ThomasMichon/copilot-extensions#4367`.

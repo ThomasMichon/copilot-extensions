@@ -124,7 +124,7 @@ continue to work unchanged.
 | `push-changes` | Push worktree changes to remote default branch (squash, rebase, push). Aborts if the pre-squash fails (`--allow-unsquashed` to opt into individual commits) |
 | `finalize` | Validate the branch's content is on upstream; prune the worktree/branch only when idle (deferred while a session is live). The creating agent owns child cleanup; `--abandon` is refused without an operator-directed `--handoff-to <recipient-or-flow>`, recorded on each re-homed obligation |
 | `mark-complete` | Manual recovery -- set tracking status flag only (hidden from help) |
-| `claims` | The worktree's **resource-obligation ledger** (accountability for what it allocated; effort `resource-obligation-settlement`). `claims [id]` shows the ledger; `claims owner <kind> <ref> [--json] [--all-states]` searches every registered project on this machine for the worktree(s) holding that outbound claim (held claims only by default); `claims add <kind> <ref> [--owner-ref <m/p/w>]` journals an outbound claim; `claims annotate <ref> --note <text>` attaches/updates a note on an already-existing claim (e.g. one an underlying tool auto-created) without release + re-add; `claims settle <ref> [--released]` marks it at-rest/released; `claims release <ref> [--remove]` retires one; `claims sweep [--apply]` runs the never-wedge reclaim (flip a provably-gone+safe `active` claim → `abandoned`; dry-run default); `claims reconcile-at-rest [<worktree-id> ...] [--apply]` is the dedicated legacy/GC close-out reconciliation command (`worktree-finality-and-obligations` design.md): releases lingering **at-rest-only** claims on existing records that predate/bypassed finalize's own automatic release-under-freeze, never an `active` one; no selector means every tracked record; dry-run by default; `claims orphans` lists the durable orphanage (obligations re-homed by a `finalize --abandon`); `claims cleanup [<ref-or-source-worktree> ...] [--apply]` is the acting consumer that reclaims matching orphaned resources (delete the CodeSpace, finalize the cross-repo worktree) and drops settled entries. No selector means the entire orphanage. Same-machine, best-effort, dry-run by default |
+| `claims` | The worktree's **resource-obligation ledger** (accountability for what it allocated; effort `resource-obligation-settlement`). `claims [id]` shows the ledger; `claims owner <kind> <ref> [--json] [--all-states]` searches every registered project on this machine for the worktree(s) holding that outbound claim (held claims only by default); `claims add <kind> <ref> [--owner-ref <m/p/w>]` journals an outbound claim; `claims annotate <ref> --note <text>` attaches/updates a note on an already-existing claim (e.g. one an underlying tool auto-created) without release + re-add; `claims settle <ref> [--released]` marks it at-rest/released; `claims release <ref> [--remove]` retires one; `claims handoff offer ...` offers exact held claims to another worktree, and `claims handoff accept <bundle-id>` atomically transfers them -- same-machine in-process, cross-machine by SSHing to the source machine's own project binstub for the source-side settle while the accepting machine commits the consumer-side ledger locally, fenced by the shared claim-handoff lease; `claims sweep [--apply]` runs the never-wedge reclaim (flip a provably-gone+safe `active` claim → `abandoned`; dry-run default); `claims reconcile-at-rest [<worktree-id> ...] [--apply]` is the dedicated legacy/GC close-out reconciliation command (`worktree-finality-and-obligations` design.md): releases lingering **at-rest-only** claims on existing records that predate/bypassed finalize's own automatic release-under-freeze, never an `active` one; no selector means every tracked record; dry-run by default; `claims orphans` lists the durable orphanage (obligations re-homed by a `finalize --abandon`); `claims cleanup [<ref-or-source-worktree> ...] [--apply]` is the acting consumer that reclaims matching orphaned resources (delete the CodeSpace, finalize the cross-repo worktree) and drops settled entries. No selector means the entire orphanage. Same-machine, best-effort, dry-run by default |
 | `follow-ups` | The worktree's **itemized follow-up ledger** (worktree-finality-and-obligations effort; replaces the boolean-only `follow_up` flag). `follow-ups [id]` lists items + the effective open count; `follow-ups add <summary> [--ref <kind>:<value>]...` journals a new open item (`--ref` is repeatable; kinds: `resource-claim`\|`dispatch-task`\|`issue`\|`pull-request`\|`file`\|`effort`\|`other`) and reopens a `finalized` owner; `follow-ups resolve <id> [--result-ref <ref>]` marks one done; `follow-ups dismiss <id> --reason <text>` marks one explicitly not requiring action. An open (or `pending-transfer`) item counts as an open obligation the same way `status --follow-up` did, and blocks `cleanup`/`gc` the same way a held claim does. Transfer (`offer`/`accept`/`decline`) is not yet implemented |
 | `cleanup` | List and remove orphaned or finalized worktrees |
 | `gc` | Garbage-collect this project's worktrees on this machine: tracked reap (cleanup verdict) + **managed system/bridge leak sweep** (`--no-managed` to skip) + orphan-directory sweep + **orphaned launcher-shell reap** (`--no-reap-shells` to skip) + `git worktree prune`. `--dry-run` lists without removing; `--json` reports the managed + orphan + shell sweeps. Also runs automatically on the no-daemon cadence (picker launch + session end) |
@@ -466,12 +466,43 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 |------------|-------------|
 | `install` | Full deploy: runtime + project config + binstubs + terminal profiles |
 | `register` | Register a new project (create config + binstub without full reinstall) |
-| `uninstall` | Remove worktree manager |
+| `unregister` | Deregister a project's own adoption lifecycle (projects.yaml + repos.yaml entry + its binstub) -- never the shared runtime or another project's registration; see below |
+| `uninstall` | Remove worktree manager (`--remove-config` ALSO deletes the SHARED `~/.agent-worktrees` registry root -- shared by every adopted project, not just `--project`'s; requires `--yes`) |
 | `update` | Re-deploy runtime from repo source + refresh every active registered plugin payload/runtime, purge inactive installed identities absent from an authoritatively refreshed marketplace catalog, and opportunistically refresh the remaining installed-but-inactive payload inventory; then update sibling modules, fast-forward the managed repo anchor(s), and auto-prune legitimately stale Picker pivot manifests. Active or activation-unknown identities are never purged. An inactive inventory refresh/uninstall failure is advisory; an active plugin refresh failure fails the update. Version-gated: skips a runtime whose deployed version already matches its payload (`--force` re-deploys all active runtimes; `--no-anchor-sync` skips the anchor sync; `--no-prune-pivots` skips the pivot prune -- see `doctor`'s `--prune-pivots` for the same safe subset run on demand) |
 | `install-status` | Show installation and deployment status |
 | `deploy-instructions` | Retire migrated managed instruction files (machine identity now via the `session-machine` sessionStart hook) |
 | `machine-context` | sessionStart producer for the exact-session guidance writer (cwd-gated) |
 | `get` | Query config values (e.g., `agent-worktrees get repo-dir`) |
+
+### Deregistering a project (`unregister`) vs. tearing down the runtime (`uninstall --remove-config`)
+
+`~/.agent-worktrees` mixes two things with very different disposability: the
+deployed **runtime** (`venv/`, `lib/`, `bin/` -- disposable, `install`
+regenerates it with zero data loss) and the **shared registry**
+(`config.yaml`, `repos.yaml`, `projects.yaml`, `accounts.yaml`, `snapshots/`,
+`pivots/` -- the cross-project registry every adopted project shares on this
+machine). `uninstall --remove-config` deletes that whole shared root, so it
+is never scoped to the project named via `--project` -- it is a machine-wide,
+hard-to-undo action. Passing `--remove-config` alone only reports what would
+be deleted (and names any other adopted projects that would lose their
+entries); add `--yes` to actually delete it.
+
+To deregister a single project -- e.g. a stale or broken project stub with
+no repo and no worktrees -- use `unregister` instead:
+
+```
+agent-worktrees --project stale-stub unregister
+```
+
+It removes only that project's `projects.yaml` entry, its `repos.yaml`
+entry (or, with `--keep-repo-entry`, downgrades that entry to a catalogued
+`reference` repo instead of removing it), and its own per-project binstub --
+never the shared runtime, never another project's registration. It refuses
+(unless `--force`) when its own tracking still shows live worktrees, tracked
+sessions, or an open PR, so deregistering never silently orphans in-flight
+work. The project's own per-project state directory (`~/.<project>`) is left
+in place; remove it by hand, or with `uninstall --project <name>
+--remove-config --yes`, once it's no longer needed.
 
 ## Effort Focus
 

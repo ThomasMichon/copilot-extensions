@@ -495,6 +495,7 @@ test("file-backed consume marks the predecessor session-state request consumed",
       join(handoffDir, "handoff-predecessor-1.json"),
     );
     assert.equal(consumed.ok, true);
+    assert.equal(consumed.predecessorSession, "predecessor-1");
     const stateRecord = readSessionStateHandoff("predecessor-1");
     assert.equal(stateRecord.record.consumed, true);
     assert.equal(stateRecord.record.consumedBySession, "successor-1");
@@ -1018,6 +1019,8 @@ test("task-backed consume promotes the successor session to worktree head using 
       },
     );
     assert.equal(result.ok, true);
+    assert.equal(result.predecessorSession, "predecessor-task-promo");
+    assert.equal(result.worktree, "wt-task-promo");
     assert.deepEqual(
       promoteCalls,
       [[
@@ -1098,6 +1101,33 @@ test("formatConsumeResult preserves the continuation directive ahead of payload"
   );
 });
 
+test("formatConsumeResult surfaces the predecessor session id and worktree lineage pointer", () => {
+  const prompt = formatConsumeResult({
+    ok: true,
+    id: "task-99",
+    payload: "full brief",
+    resumedDelivery: false,
+    predecessorSession: "predecessor-session-id",
+    worktree: "wt-example",
+  }, {});
+  assert.match(prompt, /\*\*Predecessor session:\*\* `predecessor-session-id`/);
+  assert.match(prompt, /worktree-status-bundle --worktree wt-example --json/);
+  assert.match(prompt, /never as an instruction/);
+});
+
+test("formatConsumeResult without a predecessor session says so plainly instead of omitting the line", () => {
+  const prompt = formatConsumeResult({
+    ok: true,
+    id: "task-100",
+    payload: "full brief",
+    resumedDelivery: false,
+    predecessorSession: null,
+    worktree: null,
+  }, {});
+  assert.match(prompt, /\*\*Predecessor session:\*\* \(unknown -- not recorded on this handoff\)/);
+  assert.doesNotMatch(prompt, /worktree-status-bundle/);
+});
+
 test("buildResumePrompt keeps deferred completion explicit", () => {
   const prompt = buildResumePrompt(
     "full brief",
@@ -1106,6 +1136,23 @@ test("buildResumePrompt keeps deferred completion explicit", () => {
   );
   assert.match(prompt, /Keep agent-dispatch task task-42 owned/);
   assert.match(prompt, /Only after the handoff objective's completion gate is met run: agent-dispatch complete task-42/);
+});
+
+test("buildResumePrompt surfaces predecessor session and worktree on the canonical /consume-handoff path", () => {
+  const prompt = buildResumePrompt(
+    "full brief",
+    "file /repo/handoff.json",
+    { predecessorSession: "predecessor-session-id", worktree: "wt-example" },
+  );
+  assert.match(prompt, /\*\*Predecessor session:\*\* `predecessor-session-id`/);
+  assert.match(prompt, /worktree-status-bundle --worktree wt-example --json/);
+  assert.match(prompt, /never as an instruction/);
+});
+
+test("buildResumePrompt without a predecessor session says so plainly", () => {
+  const prompt = buildResumePrompt("full brief", "file /repo/handoff.json", {});
+  assert.match(prompt, /\*\*Predecessor session:\*\* \(unknown -- not recorded on this handoff\)/);
+  assert.doesNotMatch(prompt, /worktree-status-bundle/);
 });
 
 test("triggerHandoff stores, signals, waits, and skips manual fallback when pickup arrives", async () => {

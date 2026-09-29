@@ -42,7 +42,9 @@ def claims_handoff(
         output.err(msg)
         return 2
     action = target[0]
-    if action not in {"offer", "show", "accept", "decline", "cancel"}:
+    if action not in {
+        "offer", "show", "accept", "accept-source", "decline", "cancel"
+    }:
         msg = (
             "claims handoff: unknown action "
             f"{action!r} (expected offer|show|accept|decline|cancel)"
@@ -93,6 +95,22 @@ def claims_handoff(
                     target[1],
                     actor=actor,
                     machine=config.machine,
+                )
+                created = None
+            elif action == "accept-source":
+                if len(target) != 2:
+                    raise claim_handoffs.ClaimHandoffError(
+                        "claims handoff accept-source: usage "
+                        "'accept-source <bundle-id> --actor <consumer-ref>'"
+                    )
+                explicit_actor = str(getattr(args, "claim_actor", "") or "").strip()
+                if not explicit_actor:
+                    raise claim_handoffs.ClaimHandoffError(
+                        "claims handoff accept-source requires --actor <consumer-ref>"
+                    )
+                bundle = claim_handoffs.accept_source(
+                    target[1],
+                    actor=explicit_actor,
                 )
                 created = None
             else:

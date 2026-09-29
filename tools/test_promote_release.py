@@ -425,6 +425,93 @@ def test_promote_refuses_to_repromote_a_rolled_back_dev_state(repo: Path):
     assert report["promoted"] is True
 
 
+def test_promote_refuses_a_stale_out_of_order_candidate(repo: Path):
+    """Regression (caught in live review, 2026-09-29): `promote-trigger.yml`'s
+    own dev-ancestry filter is deliberately unthrottled, so two dev commits'
+    filter runs can dispatch out of order -- an older commit's promotion
+    request can arrive and get processed AFTER a newer commit's already
+    landed. Without this guard, the older commit's (stale) content would
+    silently overwrite main's already-newer content -- a real regression,
+    not a no-op."""
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("older\n", encoding="utf-8")
+    older_dev_head = _commit(repo, "demo-plugin: older change")
+    (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("newer\n", encoding="utf-8")
+    newer_dev_head = _commit(repo, "demo-plugin: newer change")
+    _git(["checkout", "-q", "main"], repo)
+
+    # Simulate: the newer commit's own promotion already landed first.
+    (repo / ".github").mkdir(exist_ok=True)
+    (repo / pr.PIPELINE_STATE_PATH).write_text(
+        json.dumps({
+            "paused": False,
+            "last_promotion": {"dev_head": newer_dev_head, "tag": "promote-x"},
+        }),
+        encoding="utf-8",
+    )
+    _commit(repo, "release-pipeline: record the newer promotion")
+
+    # The older commit's own (out-of-order, now-stale) promotion attempt
+    # must be refused, not silently regress main to its content.
+    with pytest.raises(pr.StaleCandidatePromotion, match=older_dev_head[:12]):
+        pr.promote(repo=repo, dev_ref=older_dev_head, main_ref="main", push=False)
+
+
+def test_promote_allows_a_genuine_forward_advancement_after_a_promotion(repo: Path):
+    """The guard must not block ordinary forward progress: promoting a
+    commit that IS a descendant of the last-promoted dev_head is fine."""
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("first\n", encoding="utf-8")
+    first_dev_head = _commit(repo, "demo-plugin: first change")
+    _git(["checkout", "-q", "main"], repo)
+
+    (repo / ".github").mkdir(exist_ok=True)
+    (repo / pr.PIPELINE_STATE_PATH).write_text(
+        json.dumps({
+            "paused": False,
+            "last_promotion": {"dev_head": first_dev_head, "tag": "promote-x"},
+        }),
+        encoding="utf-8",
+    )
+    _commit(repo, "release-pipeline: record the first promotion")
+
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("second\n", encoding="utf-8")
+    _commit(repo, "demo-plugin: second change")
+    _git(["checkout", "-q", "main"], repo)
+
+    report = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+    assert report["promoted"] is True
+
+
+def test_main_cli_exits_zero_on_stale_candidate_not_one(repo: Path, capsys):
+    """The stale-candidate guard is a benign, expected outcome (an
+    out-of-order race), not a pipeline failure -- must exit 0 like the
+    pause guard, or report-failure's watchdog would file a spurious
+    incident for normal behavior."""
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("older\n", encoding="utf-8")
+    older_dev_head = _commit(repo, "demo-plugin: older change")
+    (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("newer\n", encoding="utf-8")
+    newer_dev_head = _commit(repo, "demo-plugin: newer change")
+    _git(["checkout", "-q", "main"], repo)
+
+    (repo / ".github").mkdir(exist_ok=True)
+    (repo / pr.PIPELINE_STATE_PATH).write_text(
+        json.dumps({
+            "paused": False,
+            "last_promotion": {"dev_head": newer_dev_head, "tag": "promote-x"},
+        }),
+        encoding="utf-8",
+    )
+    _commit(repo, "release-pipeline: record the newer promotion")
+
+    code = pr.main(["--repo", str(repo), "--dev-ref", older_dev_head, "--main-ref", "main"])
+    assert code == 0
+    out = capsys.readouterr().out.lower()
+    assert "stale" in out or "descendant" in out
+
+
 def test_promote_no_changefiles_reports_none():
     summary = {"bumps": {}, "changefiles_consumed": []}
     message = pr.format_promotion_message(dev_range=("a" * 40, "b" * 40), summary=summary)
