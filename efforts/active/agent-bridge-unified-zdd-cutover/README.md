@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 5 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 5 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 5 partially landed — TBD, live-turn drill deferred to a tracked follow-up)
+- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 5 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 5 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 5 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to a tracked follow-up)
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
@@ -342,20 +342,23 @@ test that closes the gap.
 
 ## Journal
 
-### 2026-09-29 — Phase 5 landed partially (abrupt-termination drill + clean-room extension; live-turn drill deferred) (TBD)
+### 2026-09-29 — Phase 5 landed partially (abrupt-termination drill + clean-room extension; live-turn drill deferred) ([#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586))
 - **What's real here (final implementation).** Extended the pre-existing
   `tools/clean-room/scenarios/agent-bridge-cutover` Tier-P scenario (found
   already covering the daemon-level routing-flip/drain-gate/breadcrumb-
   recovery mechanism, predating this effort) with a new `abrupt-kill-recovery`
   check in `fixtures/cutover_probe.py`:
-  1. A real daemon starts. A disposable **sentinel** orphan record is seeded
-     and polled (via `HostIndex`'s own strict `_load_or_raise()` read path,
-     never the lenient one the real daemon uses internally -- a read
-     failure is a distinct, explicitly-raised outcome, never silently
-     treated as "the record is gone") until the daemon's own ONE-SHOT
-     startup reattach scan (`app.py`'s `_reattach_session_hosts_bg`, never
-     periodic) reaps it -- an observable signal that scan has actually run,
-     not a timing guess.
+  1. A disposable **sentinel** orphan record is seeded *before* a real
+     daemon starts, then polled (via `HostIndex`'s own strict
+     `_load_or_raise()` read path, never the lenient one the real daemon
+     uses internally -- a read failure is a distinct, explicitly-raised
+     outcome, never silently treated as "the record is gone") until the
+     daemon's own ONE-SHOT startup reattach scan (`app.py`'s
+     `_reattach_session_hosts_bg`, never periodic) reaps it -- an
+     observable signal that scan has actually run, not a timing guess.
+     Seeding *before* startup (not after) matters precisely because the
+     scan is one-shot: seeding too late races it and can miss the one
+     window it runs in.
   2. Only then is the real test record registered (with a *fresh* dummy
      process, never the sentinel's own -- reaping force-kills a record's
      `host_pid`/`child_pid`, so reusing it would mean the "real" record's

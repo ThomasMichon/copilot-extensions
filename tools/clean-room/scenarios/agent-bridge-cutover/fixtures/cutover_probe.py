@@ -33,12 +33,16 @@ Checks (each prints ``PROBE: <name> PASS|FAIL <detail>``):
                        waited on); `undrain` releases it
   breadcrumb-recover   an aborted cutover strands a DRAINED survivor; recovery
                        (`deploy --recover`) undrains it (not stuck closed)
-  abrupt-kill-recovery a generation is SIGKILLed with no graceful shutdown --
-                       never releasing a session-host claim it held (the exit
-                       contract's own release path, #4543, never runs) -- and a
-                       fresh generation started afterward still comes up clean
-                       and does not sit stuck behind the dead generation's stale
-                       claim (agent-bridge-unified-zdd-cutover Phase 5)
+  abrupt-kill-recovery a real, live process holding a session-host claim
+                       (stamped with a test-chosen generation label, not the
+                       daemon's own real identity -- see the check's own
+                       docstring for why) is SIGKILLed with no graceful
+                       shutdown, and a fresh generation started afterward
+                       still comes up clean and does not sit stuck behind
+                       the now-genuinely-dead pid's stale claim -- the
+                       dead-PID recovery primitive, not interruption of a
+                       daemon-owned claim (agent-bridge-unified-zdd-cutover
+                       Phase 5)
 
 Usage:
     python cutover_probe.py --python <agent_bridge-venv-python> [--checks a,b]
