@@ -1318,18 +1318,20 @@ must additionally answer:
 
 Any code path that terminates or reaps a process by PID — a stale-daemon
 reaper, a cutover repair action, a self-heal/`doctor` apply mode — must ship a
-dedicated unit test in the **same PR** proving the terminator (a) matches only
-a live, identity-verified target, and (b) refuses to act on an identity
-mismatch (a stale or reused PID, or a mismatched owner). Reuse the shared
-`zdd.diagnostics` owner-validation and identity-bound termination primitives
-(`process_start_time`/`terminate_pid_if_identity`, plus `audit_daemon_health`/
-`apply_daemon_health` for the higher-level report/repair split) rather than
-re-deriving a parallel mechanism — a plugin-private equivalent (e.g.
-`agent_worktrees.locks`/`agent_worktrees.procs`) is not importable from
-another plugin and should not be cited as *the* thing to reuse. An
-end-to-end rehearsal test that happens to exercise the happy path is **not**
-sufficient evidence of this on its own — the safety boundary itself needs a
-direct test.
+dedicated unit test in the **same PR** covering two separate safety layers:
+(a) **identity-bound termination** — `zdd.diagnostics.process_start_time` /
+`zdd.diagnostics.terminate_pid_if_identity` bind the actual signal to a
+PID/start-time token and refuse on any mismatch (a stale or reused PID) — but
+this pair alone does **not** validate ownership; and (b) **owner
+validation** — confirming the candidate is the legitimate target, not merely
+some other live process, which is the responsibility of the higher-level
+`zdd.diagnostics.audit_daemon_health`/`apply_daemon_health` path. Reuse these
+shared primitives rather than re-deriving a parallel mechanism — a
+plugin-private equivalent (e.g. `agent_worktrees.locks`/`agent_worktrees.procs`)
+is not importable from another plugin and should not be cited as *the* thing
+to reuse. An end-to-end rehearsal test that happens to exercise the happy
+path is **not** sufficient evidence of this on its own — both safety layers
+need a direct test.
 
 They are **not active until wired** per clone (git does not auto-enable a
 committed hooks dir). Run the helper once per checkout:

@@ -452,16 +452,21 @@ cheaper than a review round.
    target's identity (owner/lock/routing agreement) at the point of action,
    not only when the finding was first produced.
 5. **Any process termination by PID needs a direct, dedicated safety test —
-   an end-to-end rehearsal is not sufficient evidence.** Ship a unit test that
-   proves the terminator (a) matches only a live, identity-verified target
-   (the shared `zdd.diagnostics.process_start_time` /
-   `zdd.diagnostics.terminate_pid_if_identity` owner-validation and
-   identity-bound termination primitives — reuse them, do not re-derive a
-   parallel mechanism; a plugin-private module like `agent_worktrees.locks`/
-   `agent_worktrees.procs` is an example of the same discipline, not
-   something another plugin can import), and (b) refuses on any identity
-   mismatch (stale PID, reused PID, wrong owner). This applies to every
-   destructive repair/reap path, not only the first one you write.
+   an end-to-end rehearsal is not sufficient evidence.** Two separate safety
+   layers are involved, and a reaper needs both: (a) **identity-bound
+   termination** — `zdd.diagnostics.process_start_time` obtains a PID's
+   identity token and `zdd.diagnostics.terminate_pid_if_identity` verifies
+   only that the token still matches before signaling, refusing on any
+   mismatch (stale PID, reused PID); and (b) **owner validation** — a
+   separate check that the candidate is actually the legitimate target, not
+   an unrelated live process, performed by the higher-level
+   `zdd.diagnostics.audit_daemon_health`/`apply_daemon_health` path, not by
+   the low-level pair alone. Reuse these shared primitives — a plugin-private
+   module like `agent_worktrees.locks`/`agent_worktrees.procs` is an example
+   of the same discipline, not something another plugin can import. Ship a
+   unit test proving both layers, not just the identity-token match. This
+   applies to every destructive repair/reap path, not only the first one you
+   write.
 6. **Loopback control-plane surfaces need owner-scoped auth,** not just
    "loopback-only." Any local process can otherwise reach the endpoint. Use a
    per-owner bearer token file (best-effort restrictive permissions), and
