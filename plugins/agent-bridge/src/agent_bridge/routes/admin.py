@@ -126,14 +126,14 @@ async def shutdown(request: Request):
 async def reattach_hosts(request: Request):
     """Re-run the Session Host reattach + claim scan on demand.
 
-    The startup reattach pass runs while this (new) generation is still
-    passive, well before the old generation has released its claims via
-    ``/shutdown`` above -- so that pass typically finds every live record
-    still claimed by the (about-to-retire) old generation and skips it. The
-    cutover CLI calls this endpoint on the newly-active daemon once the old
-    generation is *confirmed* exited, so the retried scan's claims are no
-    longer contended (Phase 3's "the next generation earns the handoff, never
-    assumes it"). Returns the number of sessions (re)attached.
+    A passive cutover instance skips the startup reattach task entirely
+    (ATTACHing would disconnect the still-active old generation -- see
+    ``app.py``'s own ``_reattach_session_hosts_bg``), so it never even
+    attempts this scan until now. The cutover CLI calls this endpoint on the
+    newly-active daemon once the old generation is *confirmed* exited, so
+    this is the *first* reattach/claim pass for it, run once claims are no
+    longer contended (Phase 3's "the next generation earns the handoff,
+    never assumes it"). Returns the number of sessions (re)attached.
     """
     mgr: SessionManager = request.app.state.session_manager
     reattached = await mgr.reattach_session_hosts()

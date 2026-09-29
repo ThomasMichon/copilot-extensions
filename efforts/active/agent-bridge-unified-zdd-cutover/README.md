@@ -513,6 +513,22 @@ session-host concept):
      Reverted the earlier widening; trimmed `app.py`'s own net addition to
      exactly zero lines instead (compacted comments/log calls already in
      the touched function -- no unrelated code moved).
+- **A fourth pass** found three small process nits (changefile `type` should
+  default to `patch`, not `minor`, absent explicit maintainer direction;
+  `routes/admin.py`'s reattach-endpoint docstring still described the
+  pre-fix "runs while passive, contended" shape; the PR description needed
+  this repo's specific **Graceful cutover impact** statement, distinct from
+  the generic Documentation impact one already added) -- all fixed -- plus
+  one genuine **known, deliberately scoped-out limitation**: a legacy/partial
+  routing record with no recorded `pid` makes `old_confirmed_gone` stay
+  `False` forever (correctly conservative -- see finding 3 in the second
+  pass above), but nothing then *retries* the post-cutover reattach for that
+  one case; a surviving Session Host under a legacy record can be left
+  unattached until an unrelated recovery path eventually runs. Building a
+  periodic/background retry specifically for this edge case is real work in
+  its own right (this effort's Plan already earmarks Phase 5 for the two
+  validation drills that would surface exactly this kind of gap) -- tracked
+  here rather than rushed in.
 - This effort's own umbrella issue's Phase 4/5 remain: the caller-facing
   mask/routing layer and the two validation drills.
 
