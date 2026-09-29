@@ -1,0 +1,9 @@
+{
+  "comment": "service restart now routes through the same ZDD cutover deploy uses (no more raw stop-then-start).",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "minor"
+    }
+  ]
+}
