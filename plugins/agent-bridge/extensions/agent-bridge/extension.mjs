@@ -292,11 +292,12 @@ async function pollInbox() {
 }
 
 // Poll the bridge for session controls (a mode change: what `/autopilot on`
-// does from this terminal) and apply them through the CLI's own RPC. A control
-// is acked only once it took effect (or can never apply), so the bridge's
-// `POST /mode` can report whether it did; one it can't apply yet is retried on
-// the next poll until the bridge withdraws it. Controls are polled apart from
-// messages, so they're never delivered as a prompt.
+// does from this terminal) and apply them through the CLI's own RPC. The poll
+// claims each control (it is returned once, and its requester can no longer
+// withdraw it), and every claimed control gets an outcome -- applied or
+// rejected -- so the bridge's `POST /mode` reports what really happened.
+// Controls are polled apart from messages, so they're never delivered as a
+// prompt; an older bridge without /controls just answers 404 (null here).
 async function pollControls() {
   if (state.controlling) return;
   if (!state.sessionId || !state.registered) return;
@@ -307,34 +308,33 @@ async function pollControls() {
     );
     const controls = data?.messages;
     if (!Array.isArray(controls) || controls.length === 0) return;
-    const done = [];
+    const applied = [];
+    const rejected = [];
     for (const c of controls) {
       if (!c || typeof c.id !== "number") continue;
       const plan = controlPlan(c);
       if (plan.action === "skip") {
-        extLog(`control ${c.id} skipped: ${plan.reason}`);
-        done.push(c.id);
+        extLog(`control ${c.id} rejected: ${plan.reason}`);
+        rejected.push(c.id);
         continue;
       }
       try {
         const result = await session.rpc.mode.set({ mode: plan.mode });
         if (modeApplied(result)) {
           extLog(`control ${c.id}: mode set to ${plan.mode} (from ${c.sender || "bridge"})`);
-          done.push(c.id);
+          applied.push(c.id);
         } else {
           extLog(`control ${c.id}: mode ${plan.mode} not applied (${result?.status || "no status"})`);
+          rejected.push(c.id);
         }
       } catch (e) {
         extLog(`control ${c.id}: mode ${plan.mode} failed: ${e.message}`);
+        rejected.push(c.id);
       }
     }
-    if (done.length > 0) {
-      await bridgeFetch(
-        "POST",
-        `/api/v1/live-sessions/${encodeURIComponent(state.sessionId)}/controls/ack`,
-        { ids: done },
-      );
-    }
+    const ack = `/api/v1/live-sessions/${encodeURIComponent(state.sessionId)}/controls/ack`;
+    if (applied.length > 0) await bridgeFetch("POST", ack, { ids: applied, applied: true });
+    if (rejected.length > 0) await bridgeFetch("POST", ack, { ids: rejected, applied: false });
   } finally {
     state.controlling = false;
   }

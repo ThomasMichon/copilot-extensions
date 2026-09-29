@@ -28,7 +28,7 @@ The daemon advertises both on ``/health``; ``BridgeClient`` reads them (see
 from __future__ import annotations
 
 # Current HTTP wire-contract version this build speaks.
-HTTP_PROTOCOL_VERSION = 18
+HTTP_PROTOCOL_VERSION = 19
 
 # First version that exposes the harness-owned relay interruption capability.
 RELAY_INTERRUPT_PROTOCOL_VERSION = 2
@@ -102,6 +102,12 @@ BARE_SESSION_TRANSCRIPT_PROTOCOL_VERSION = 17
 # newer agent-dispatch caller detect the capability and refuse cleanly rather
 # than silently losing a requested charter against an older daemon.
 REMOTE_SESSION_COPILOT_ARGS_PROTOCOL_VERSION = 18
+
+# First version that exposes a represented live session's mode change
+# (``POST /live-sessions/{id}/mode``) and its extension-side control poll
+# (``/controls``, ``/controls/ack``). A caller gates ``/mode`` on it rather than
+# posting to an older daemon that would 404.
+LIVE_SESSION_MODE_PROTOCOL_VERSION = 19
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

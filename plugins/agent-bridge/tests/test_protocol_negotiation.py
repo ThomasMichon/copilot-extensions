@@ -78,6 +78,13 @@ def test_remote_session_copilot_args_capability_is_advertised() -> None:
     assert REMOTE_SESSION_COPILOT_ARGS_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
 
 
+def test_live_session_mode_capability_is_advertised() -> None:
+    from agent_bridge.protocol import LIVE_SESSION_MODE_PROTOCOL_VERSION
+
+    assert LIVE_SESSION_MODE_PROTOCOL_VERSION == 19
+    assert LIVE_SESSION_MODE_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
+
+
 def _app(tmp_path):
     cfg = ServiceConfig(
         port=0,
