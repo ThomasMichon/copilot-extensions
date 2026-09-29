@@ -71,21 +71,31 @@ agent-worktrees worktree-status-bundle --worktree <worktree-id> --json  # market
 
 This single call returns, among other facts, everything nested under a top-level
 `facts` key: `facts.disposition.value.title` / `.summary` (the worktree's
-current theme and recap), `facts.disposition.value.history` (a factual,
-timestamped activity log spanning every session that has worked this
-worktree -- not a raw transcript, but what each session reported it was doing
-at the time), and `facts.lineage.value.sessions` / `.handoffs` (the
-predecessor/successor chain, with state and timestamps for each session).
+current theme and recap), `facts.disposition.value.history` (the 20 most
+recent disposition changes -- what each of the last several sessions
+reported it was doing, newest first), and `facts.lineage.value.sessions` /
+`.handoffs` (the predecessor/successor chain, with state and timestamps for
+each session).
 
-**This lineage is retained-but-bounded, not unlimited.** The bundle caps at
-512 sessions and 256 handoffs
-(`facts.lineage.value.bounds.sessions`/`.handoffs`, each with its own
-`limit`/`total`/`returned`/`omitted`/`overflow` fields) -- check those bounds
-before treating an apparently-short or apparently-complete chain as proof
-that no older work exists. An `overflow: true` or nonzero `omitted` means the
-true history extends further back than this one call shows; widen the
-history query (or accept the gap and say so) rather than asserting
-completeness.
+**Neither of these is a complete cross-session record -- read the actual
+retention behavior, not just the bundle's own reported bounds:**
+
+- `facts.lineage.value.bounds.sessions`/`.handoffs` report a
+  `limit`/`total`/`returned`/`omitted`/`overflow` shape, but the underlying
+  handoff ledger is itself pruned to its last 256 entries **at save time**,
+  before this bundle ever computes those bounds
+  (`agent_worktrees/tracking.py`'s `_MAX_HANDOFFS` truncation). A clean
+  `bounds.handoffs` report (`overflow: false`, `omitted: 0`) therefore only
+  proves nothing was lost *within the already-pruned list* -- it is not
+  evidence that a long-lived worktree's earliest handoffs still exist. Treat
+  the 256-entry retention cap itself as a standing completeness gap, not
+  something these fields can rule out.
+- `facts.disposition.value.history` has no such bounds metadata at all --
+  it's a fixed most-recent-20 request
+  (`agent_worktrees/worktree_status_compute.py`'s `disposition_history.read(...,
+  limit=20, ...)`) with no total/omitted count. Treat it strictly as a
+  recent-first-pass glance, never as proof that no earlier activity exists
+  for a worktree with more than ~20 recorded disposition changes.
 
 - **Read `disposition.history` as a cheap first pass.** It's far less context
   than reading raw transcripts and often answers "what has this worktree
