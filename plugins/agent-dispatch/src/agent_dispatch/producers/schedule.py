@@ -56,11 +56,15 @@ from __future__ import annotations
 
 import json
 import math
+import subprocess
+import sys
 import time
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+from agent_procutil import no_window_kwargs
 
 from ..client import DispatchClient
 
@@ -240,34 +244,73 @@ def run_registry_tick(client, now: float | None = None) -> dict:
     return run_tick(client, registry_spec(client), now=now)
 
 
+def _parse_tick_process_output(completed: Any) -> dict[str, Any]:
+    """Turn a completed ``agent-dispatch schedule tick`` subprocess into the
+    same ``{"created": [...], "errors": [...]}`` shape :func:`run_tick`
+    returns in-process.
+
+    A clean run always prints a well-formed JSON object with list-valued
+    ``created``/``errors`` keys. Anything else on a zero exit --
+    empty/malformed/truncated stdout -- is itself a protocol violation, not
+    a vacuous success; treat it as a synthetic error entry rather than
+    silently normalizing it to an empty, error-free tick, which would
+    otherwise lose the failure entirely. A hard failure (the coordinator
+    connection itself refused, a malformed spec, ...) exits non-zero with
+    no JSON on stdout -- its own diagnostic already streamed live to our
+    own inherited stderr (see ``serve``'s own subprocess call), so only a
+    generic, exit-code-keyed message is synthesized here.
+    """
+    try:
+        parsed = json.loads(completed.stdout) if completed.stdout else None
+    except ValueError:
+        parsed = None
+    if (
+        isinstance(parsed, dict)
+        and isinstance(parsed.get("created"), list)
+        and isinstance(parsed.get("errors"), list)
+    ):
+        return {"created": parsed["created"], "errors": parsed["errors"]}
+    return {
+        "created": [],
+        "errors": [
+            {
+                "error": (
+                    "schedule tick produced no valid JSON result "
+                    f"(exit {completed.returncode})"
+                )
+            }
+        ],
+    }
+
+
 def serve(
     spec_path: str | Path,
     *,
-    url: str | None = None,
-    token: str | None = None,
+    cli_argv: list[str] | None = None,
     interval: float = 60.0,
     on_tick=None,
-    resolve_target: Callable[[], tuple[str, str | None]] | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    runner: Callable[..., Any] = subprocess.run,
 ) -> None:
-    """Built-in timer: reload the spec and :func:`run_tick` every ``interval``
-    seconds until interrupted. The spec is re-read each tick so edits take
-    effect without a restart. ``on_tick(result)`` is called with each tick's
+    """Built-in timer: run ``agent-dispatch schedule tick <spec>`` in a fresh
+    subprocess every ``interval`` seconds until interrupted. The spec is
+    re-read (by that fresh process) each tick, so edits take effect without
+    a restart of this loop. ``on_tick(result)`` is called with each tick's
     result (defaults to a compact stderr line).
 
-    Like :func:`agent_dispatch.producers.emitter.serve`, this is a long-lived
-    loop that must never trust a coordinator address resolved only once at
-    startup. ``resolve_target`` (when given) is called at the START OF EVERY
-    TICK to re-derive ``(url, token)`` fresh, so a coordinator that restarts
-    onto a new ephemeral port between ticks is picked up on the very next
-    cycle instead of wedging this loop against a dead port indefinitely (see
-    aperture-labs#7762). Pass a fixed ``url``/``token`` instead for a
-    deliberately pinned, non-rediscovering target.
+    Like :func:`agent_dispatch.producers.emitter.serve`, this loop never
+    builds or holds a :class:`DispatchClient` in-process across the sleep
+    boundary -- the coordinator's address is an internal, invocation-time
+    detail of ``agent-dispatch`` itself, and re-invoking its own CLI per
+    tick gets that discovery for free instead of this loop having to know
+    how to recover from a coordinator restart onto a new ephemeral port.
+    ``cli_argv`` is the ``agent-dispatch`` argv prefix
+    to reuse for every tick (e.g. including ``--shared``/``--url``/
+    ``--token`` when the parent invocation targeted them) -- defaults to
+    ``[sys.executable, "-m", "agent_dispatch"]``.
     """
-    import sys
-
-    if resolve_target is None and url is None:
-        raise ValueError("serve() requires either 'url' or 'resolve_target'")
+    argv = list(cli_argv) if cli_argv is not None else [sys.executable, "-m", "agent_dispatch"]
+    tick_argv = [*argv, "schedule", "tick", str(spec_path)]
 
     def _default_on_tick(result: dict) -> None:
         print(
@@ -279,12 +322,25 @@ def serve(
     on_tick = on_tick or _default_on_tick
     while True:
         try:
-            spec = load_spec(spec_path)
-            tick_url, tick_token = (
-                resolve_target() if resolve_target is not None else (url, token)
+            # No local spec read here -- the forked ``schedule tick``
+            # subprocess loads (and re-validates) the spec itself on every
+            # invocation, so an edit takes effect on the very next tick with
+            # no separate re-read needed in this wrapper.
+            #
+            # Only stdout is piped (captured for JSON parsing) -- stderr is
+            # deliberately left to inherit ours directly (real-time OS-level
+            # streaming, no Python-side buffering), so a malformed-spec
+            # traceback or any other diagnostic the tick process writes
+            # there flows straight through, exactly matching the
+            # previously-inherited passthrough behavior.
+            completed = runner(
+                tick_argv,
+                stdout=subprocess.PIPE,
+                text=True,
+                check=False,
+                **no_window_kwargs(),
             )
-            with DispatchClient(tick_url, token=tick_token) as client:
-                result = run_tick(client, spec)
+            result = _parse_tick_process_output(completed)
             on_tick(result)
         except KeyboardInterrupt:
             return
@@ -322,7 +378,7 @@ def serve_registry(
     takeover ever moves the lease to another host.
 
     ``resolve_target`` re-derives ``(url, token)`` fresh at the start of every
-    tick, same rationale/incident as :func:`serve` above (aperture-labs#7762).
+    tick, same rationale as :func:`serve` above.
     """
     import sys
 

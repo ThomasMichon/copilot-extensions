@@ -273,21 +273,34 @@ def run_tick(
                 "result": result,
                 "duration_seconds": max(0.0, clock() - started_at),
             }
+        task_output_json = spec.get("task_output") == "json"
         completed = runner(
             _render_command(spec["command"]),
             cwd=spec.get("cwd"),
             env=env,
             timeout=spec.get("timeout_seconds"),
             check=False,
-            capture_output=spec.get("task_output") == "json",
-            text=spec.get("task_output") == "json",
+            # For the JSON task-output protocol, capture cleanly through a
+            # pipe -- ``_author_tasks`` needs the exact bytes. Otherwise
+            # route the command's own stdout/stderr DIRECTLY to THIS
+            # process's own stderr at the OS level (real streaming, no
+            # Python-side buffering, nothing lost on a timeout kill) --
+            # never let it inherit our stdout, which is reserved
+            # exclusively for ``_emit()``'s later JSON result: a
+            # subprocess-based caller (a serve loop shelling out to
+            # ``emitter tick``) treats the whole captured stdout stream as
+            # one payload, and a command's own output landing there would
+            # interleave with and corrupt it.
+            stdout=subprocess.PIPE if task_output_json else sys.stderr,
+            stderr=subprocess.PIPE if task_output_json else sys.stderr,
+            text=task_output_json,
             **no_window_kwargs(),
         )
         returncode = int(completed.returncode)
         error = None
         created = (
             _author_tasks(client, spec, str(completed.stdout or ""))
-            if returncode == 0 and spec.get("task_output") == "json"
+            if returncode == 0 and task_output_json
             else []
         )
     except subprocess.TimeoutExpired as exc:
@@ -309,50 +322,94 @@ def run_tick(
     }
 
 
+def _parse_tick_process_output(completed: Any) -> dict[str, Any]:
+    """Turn a completed ``agent-dispatch emitter tick`` subprocess into the
+    same result shape :func:`run_tick` returns in-process.
+
+    ``emitter tick`` always prints a well-formed JSON result (a dict with at
+    least a ``held`` bool) to stdout on a clean run. Anything else on a
+    zero exit -- empty/malformed/truncated stdout -- is itself a protocol
+    violation, not a vacuous success; treat it as an error rather than
+    silently normalizing it to an idle/empty tick, which would otherwise
+    lose the failure entirely and report ``ok: true``. A hard failure (the
+    coordinator connection itself refused, a misconfigured ``--shared``,
+    ...) exits non-zero with no JSON on stdout -- its own diagnostic
+    already streamed live to our own inherited stderr (see ``serve``'s own
+    subprocess call), so only a generic, exit-code-keyed message is
+    synthesized here rather than trying to re-capture and re-embed it.
+    """
+    stdout = getattr(completed, "stdout", None)
+    if stdout:
+        try:
+            parsed = json.loads(stdout)
+        except ValueError:
+            parsed = None
+        if isinstance(parsed, dict) and isinstance(parsed.get("held"), bool):
+            return parsed
+    returncode = getattr(completed, "returncode", None)
+    return {
+        "error": (
+            f"emitter tick produced no valid JSON result (exit {returncode})"
+        )
+    }
+
+
 def serve(
     spec_path: str | Path,
     *,
-    url: str | None = None,
     holder: str,
-    token: str | None = None,
-    resolve_target: Callable[[], tuple[str, str | None]] | None = None,
+    cli_argv: list[str] | None = None,
     on_tick: Callable[[dict[str, Any]], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    runner: Callable[..., Any] = subprocess.run,
 ) -> None:
     """Reload and tick a command emitter on its declared cadence.
 
-    This is a long-lived loop -- often started once at host boot and never
-    restarted -- so it must never trust a coordinator address resolved only
-    once at startup. ``resolve_target`` (when given) is called at the START
-    OF EVERY TICK to re-derive ``(url, token)`` fresh (e.g. via the same
-    rendezvous/``endpoint.json`` discovery a one-shot CLI invocation would
-    use), so a coordinator that restarts onto a new ephemeral port between
-    ticks is picked up on the very next cycle instead of leaving this emitter
-    permanently pointed at a dead port (confirmed incident:
-    aperture-labs#7762 -- a stale-cached URL froze the Intelligence Dampener
-    readiness receipt for ~10 hours with no self-healing). Pass a fixed
-    ``url``/``token`` instead when the caller genuinely wants a pinned,
-    non-rediscovering target (e.g. an explicit ``--url`` override).
+    Each tick runs this emitter's OWN ``agent-dispatch emitter tick`` CLI
+    command in a **fresh subprocess** -- it never builds or holds a
+    :class:`DispatchClient` in-process across the sleep boundary. This is
+    deliberate, not an efficiency accident: the coordinator's address is an
+    internal, invocation-time detail of ``agent-dispatch`` itself
+    (``_resolve_client_target``/``client_url()`` already re-derive it fresh
+    on every CLI invocation, proven correct for every one-shot command) --
+    a long-lived Python loop should never be the thing responsible for
+    remembering it, any more than any other caller of the CLI would be. A
+    prior version of this loop resolved the coordinator's URL/token once at
+    its own process startup (or later, once per tick via an in-process
+    resolver callback) and reused that connection knowledge across an
+    otherwise coordinator-agnostic loop; either way, a coordinator restart
+    onto a new ephemeral OS-assigned port between ticks was one more thing
+    this module had to know how to recover from. Shelling out per tick
+    removes that responsibility entirely: every tick gets the exact
+    discovery a fresh, one-shot ``agent-dispatch emitter tick`` invocation
+    would get, because it *is* one -- there is no coordinator-shaped state
+    inside this loop at all for a restart to strand.
+
+    ``cli_argv`` is the ``agent-dispatch`` argv prefix to reuse for every
+    tick (e.g. ``[sys.executable, "-m", "agent_dispatch", "--shared"]`` when
+    the parent invocation targeted ``--shared``/``--url``/``--token``) --
+    defaults to ``[sys.executable, "-m", "agent_dispatch"]`` (plain local
+    discovery, identical to running the CLI with no override flags).
     """
-    if resolve_target is None and url is None:
-        raise EmitterError("serve() requires either 'url' or 'resolve_target'")
+    argv = list(cli_argv) if cli_argv is not None else [sys.executable, "-m", "agent_dispatch"]
+    tick_argv = [*argv, "emitter", "tick", str(spec_path), "--holder", holder]
 
     def _default_on_tick(result: dict[str, Any]) -> None:
-        if not result.get("held"):
-            print(
-                f"agent-dispatch emitter: lease {result['scope']!r} held by "
-                f"{(result.get('lease') or {}).get('holder')!r} -- idling",
-                file=sys.stderr,
-            )
-        elif result.get("error"):
+        if result.get("error"):
             print(
                 f"agent-dispatch emitter: tick failed: {result['error']}",
                 file=sys.stderr,
             )
+        elif not result.get("held"):
+            print(
+                f"agent-dispatch emitter: lease {result.get('scope')!r} held by "
+                f"{(result.get('lease') or {}).get('holder')!r} -- idling",
+                file=sys.stderr,
+            )
         else:
             print(
-                f"agent-dispatch emitter: tick returncode={result['returncode']} "
-                f"duration={result['duration_seconds']:.3f}s",
+                f"agent-dispatch emitter: tick returncode={result.get('returncode')} "
+                f"duration={result.get('duration_seconds', 0.0):.3f}s",
                 file=sys.stderr,
             )
 
@@ -363,19 +420,42 @@ def serve(
         try:
             spec = load_spec(spec_path)
             interval = float(spec["interval_seconds"])
-            tick_url, tick_token = (
-                resolve_target() if resolve_target is not None else (url, token)
+            # No outer timeout here: the forked ``emitter tick`` process
+            # itself needs time beyond the spec's own command timeout for
+            # its own startup (coordinator discovery, lease acquire) before
+            # its configured command even starts running -- `run_tick`
+            # inside that process already applies `timeout_seconds` to just
+            # the command it launches and returns a clean timed-out result
+            # either way. Racing an identical timeout at this outer layer
+            # would fire before that inner handling gets a chance to,
+            # forcibly killing the wrapper process and potentially leaving
+            # its own grandchild command running/overlapping the next tick.
+            #
+            # Only stdout is piped (captured for JSON parsing) -- stderr is
+            # deliberately left to inherit ours directly (real-time OS-level
+            # streaming, no Python-side buffering at either this layer or
+            # inside the forked process itself, and nothing lost if a
+            # timeout ever kills the process mid-output). The forked
+            # process's own launched command output (when not itself
+            # emitting the JSON task protocol) is routed straight to ITS
+            # stderr the same way -- see run_tick's own stdout/stderr
+            # handling -- so it flows straight through here too.
+            completed = runner(
+                tick_argv,
+                stdout=subprocess.PIPE,
+                text=True,
+                check=False,
+                **no_window_kwargs(),
             )
-            with DispatchClient(tick_url, token=tick_token) as client:
-                result = run_tick(client, spec, holder=holder)
-                report(result)
-                health_path.write_text(
-                    json.dumps(
-                        {"updated_at": time.time(), "ok": not result.get("error"), **result},
-                        default=str,
-                    ),
-                    encoding="utf-8",
-                )
+            result = _parse_tick_process_output(completed)
+            report(result)
+            health_path.write_text(
+                json.dumps(
+                    {"updated_at": time.time(), "ok": not result.get("error"), **result},
+                    default=str,
+                ),
+                encoding="utf-8",
+            )
         except KeyboardInterrupt:
             return
         except Exception as exc:
