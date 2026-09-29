@@ -538,23 +538,54 @@ parallelizable across worktrees.
 
 ## Validation Plan
 
-- [ ] Golden-screenshot diff run before/after every phase in this effort
+- [x] Golden-screenshot diff run before/after every phase in this effort
       (Phase 1's harness), with intentional deltas called out explicitly in
-      the phase's own PR description.
-- [ ] Existing Worktrees-pivot unit/interaction tests continue to pass;
+      the phase's own PR description. **Confirmed**: every phase's journal
+      entry below names its golden diff explicitly (a specific row/column
+      delta, or "byte-identical" / "no golden diff" when the change was
+      out-of-render-path).
+- [x] Existing Worktrees-pivot unit/interaction tests continue to pass;
       each phase adds targeted coverage (sort order, claims rendering,
       column content, mismatch-warning trigger, sub-menu contents).
+      **Confirmed**: every phase's journal entry reports a full-suite pass
+      count (e.g. "770 passed / 1 skipped", "297/297, 45/45, 7/7").
 - [ ] Manual verification against a real multi-worktree mesh state (mix of
       ACTIVE/Recent/unused, at least one long-running worktree, at least one
       worktree with a claimed PR) confirming ordering, CLAIMS column, and
       SESS/TURNS values match ground truth from `agent-worktrees list --json`.
-- [ ] No regression in the accelerator's *warmth, not truth* contract — no
+      **Not done — left honestly unchecked.** Every "verified live" check
+      across this effort's journal was against `--demo`/`--preview` (mock
+      data, not a real mesh); the real `list --classify` path this item
+      requires is still the one blocked by the unbounded-git-walk bug
+      ([copilot-extensions#3418](https://github.com/ThomasMichon/copilot-extensions/issues/3418),
+      filed during Phase 1, still open). Re-run this item once #3418 lands,
+      or accept the demo-verified evidence as sufficient and strike this
+      item explicitly (operator's call — not decided unilaterally here).
+- [x] No regression in the accelerator's *warmth, not truth* contract — no
       new per-render subprocess/git/claims scan introduced by any phase.
+      **Confirmed by the phase-by-phase implementation record** (Phase 4's
+      claims read explicitly routes through the accelerator's cache; every
+      later phase's data additions — USED/Activity, the mismatch warning,
+      Mux Companion — read from the SAME process-boundary `list --json`
+      envelope already being fetched, never an independent scan) rather
+      than a single dedicated end-to-end audit pass.
 
 ## Proposal
 
-_Pending review. This effort's plan has not yet been executed — filed as a
-reviewed-plan PR per the standard effort review gate before Phase 1 begins._
+All 8 named phases are **Done** (2026-09-23 through 2026-09-27), landed
+across the PRs cited in their own Plan entries above. Phase 9 (reconcile
+deferred backlog) has folded in and shipped every concrete operator-feedback
+item raised so far; its one remaining checklist item — "fold in further
+wishlist items raised after this effort's initial review" — is intentionally
+open-ended, gated on the operator raising more items, not unfinished work
+being tracked and stalled.
+
+**Outstanding before this effort could be archived:**
+- The Validation Plan's real-mesh manual-verification item above (blocked on
+  #3418, or an explicit operator decision to accept demo-only verification).
+- Any further Phase 9 wishlist items the operator raises.
+
+This effort remains **Active**, not yet ready to archive.
 
 ## Journal
 
@@ -1248,3 +1279,32 @@ Operator feedback on the rendered pivot, addressed as a bundled follow-up
   own "I'll think of more," so this effort's Status stays Active rather
   than Done, but there is no next scheduled slice -- further work here
   awaits new operator feedback.
+
+### 2026-09-29 — Lineage cleanup + Validation Plan/Proposal reconciled against reality
+- The operator asked to identify the correct head session after several
+  days' worth of resumed sessions had run in the odsp-web-harness control
+  worktree without formal `link-succession` chaining between them
+  (`hook:new`-style resumes, not `context-handoff` cutovers). Traced the
+  full chain via `agent-worktrees list-sessions`/`session-lineage`/
+  `head-session`/`handoffs-check` rather than guessing: five sessions ran
+  since the original 2026-09-23 handoff (`dfa8f775` Phase 2, `33d446f4`
+  the Post-Phase-6-renders slice, `dfbc8f44` Phase 9 item 1's sticky-header/
+  focus-scroll work, a stray 1-turn `2d142c3d`, and the original session
+  itself, now resumed). All had already landed their real work (confirmed
+  against `origin/main` git history and the PRs cited in this Journal) —
+  no dangling uncommitted work, no open PRs, no split-brain hazard
+  (`handoffs-check` returned zero findings; `head-session` already cleanly
+  resolved to the resumed original session).
+- Concluded the four dormant sessions (`conclude-session --state
+  concluded`) for a clean lineage record, rather than leaving them
+  ambiguously open.
+- Reconciled this effort's own **Validation Plan** and **Proposal**
+  sections, which had gone stale (still showing unchecked/"pending review"
+  boilerplate despite Phases 1-9 having landed): checked the two items with
+  direct evidence in every phase's own journal entry (golden diffs;
+  full-suite pass counts), left the "real multi-worktree mesh" manual-
+  verification item honestly UNCHECKED (every "verified live" check across
+  this effort was against `--demo`/`--preview` mock data, never a real
+  mesh — still blocked on #3418), and updated Proposal to state the
+  effort's actual current shape (all named phases Done; Phase 9's one
+  open item is intentionally open-ended, not stalled work).
