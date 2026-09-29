@@ -307,9 +307,10 @@ def test_activate_after_update_runs_recovery_despite_stale_breadcrumb_at_target_
     never be masked by the same-version no-op path: the routed daemon can
     already be healthy and on the target version while a stranded old
     survivor or abandoned passive from that aborted attempt still needs
-    recovery/reaping (aperture-labs #5195 gap; #5344 follow-up). Neither the
-    lock-free pre-check nor the under-lock re-check may return "noop" until
-    recovery has actually run."""
+    recovery/reaping (the abandoned-passive gap `zdd.breadcrumb`'s module
+    docstring describes; #5344 follow-up). Neither the lock-free pre-check
+    nor the under-lock re-check may return "noop" until recovery has
+    actually run."""
     route_dir = mdc.routing_dir(tmp_path)
     route_dir.mkdir(parents=True)
     token = mdc.load_or_create_control_token(tmp_path)

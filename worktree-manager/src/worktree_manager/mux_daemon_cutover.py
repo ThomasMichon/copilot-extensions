@@ -537,8 +537,8 @@ def activate_after_update(
     # while there is no stale breadcrumb: a stale one must always fall
     # through to the locked path below, where recovery/reaping runs before
     # any no-op decision (a crashed prior cutover must never be masked by
-    # "the target version is already active" -- aperture-labs #5195 gap,
-    # #5344 follow-up).
+    # "the target version is already active" -- the same abandoned-passive
+    # gap `zdd.breadcrumb`'s module docstring describes; #5344 follow-up).
     pre_route = routed_endpoint(resolved_root)
     if not _stale_cutover_in_progress(resolved_root) and _already_at_version(
         pre_route, version, root=resolved_root
