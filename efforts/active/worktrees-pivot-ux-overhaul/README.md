@@ -467,6 +467,32 @@ parallelizable across worktrees.
 ### Phase 9 — Reconcile deferred backlog
 - [ ] Fold in further wishlist items raised after this effort's initial
       review (the operator flagged "I'll think of more").
+- [ ] **2026-09-29 operator feedback batch (not yet started):**
+      - **Condense CLAIMS type presentation.** Short-form kind prefixes:
+        `session`→`SESS`, `worktree`→`WT`, `codespace`→`CS`,
+        `container`→`CT`, `task`→`T` (etc. for any remaining kind). PRs and
+        bugs/issues are self-explanatory via their ref alone and need NO
+        kind prefix at all — `odsp-web#2578906`, `copilot-extensions#4507`,
+        `#589` (bare same-repo). Session claims are the least-interesting
+        kind for this column (every worktree effectively has one) and
+        should rank lowest in the pecking order.
+      - **Stretch:** interactive claims navigation — highlight a Worktrees
+        row, press Right to move focus into that row's claims list;
+        continuing Right scrolls through every claim in the cell; Enter (or
+        a click) on a PR/bug claim opens it. Render claim links underlined
+        where possible.
+      - **Rename the SESS/T column to `LENGTH`**, formatted `1s 25t`
+        (session count + turn count, unit-suffixed) rather than the current
+        `1/25` (reads ambiguously like a date).
+      - **LIVE column value taxonomy**: `MUX`, `ACP`, `LOCK`, `-` (replacing
+        today's `●N`/`○`/`ACP`/`PROC`/`LOCK`/`·` glyph set). Stretch: a
+        `(n)` connected-client-count suffix, e.g. `MUX(0)`, `MUX(1)`,
+        `ACP(3)`.
+      - **Render performance**: the operator reports rendering has gotten
+        noticeably slower; investigate for over-painting on updates (redraw
+        more than the changed region) before/alongside the column changes
+        above, since new column formats are an easy place to accidentally
+        regress this further if not measured.
 - [x] CLAIMS/activity mock-data enrichment + a real, distinct "Activity"
       disposition field (`agent-worktrees status --activity`) replacing the
       second line's old STATE-reuse fallback (2026-09-26).
