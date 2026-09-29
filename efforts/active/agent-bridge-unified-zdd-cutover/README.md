@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 5 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 5 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 5 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to a tracked follow-up)
+- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 5 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 5 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 5 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to Phase 6; Phase 6 (Tier-E live-turn-survival harness) planned, not started)
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
@@ -270,13 +270,102 @@ layer — is the operator's own, captured verbatim in Request.)_
   new `agent-bridge-cutover` companion) that exercises this on a real fresh
   machine.
 
+### Phase 6 — Tier-E live-turn-survival harness (planned, not started)
+
+**Goal.** Close Phase 5's Plan item 1 for real: prove, with a genuinely
+live Copilot/ACP turn in flight (not a stdlib-simulated stand-in), that
+`agent-bridge deploy` (the one canonical cutover path) does not disrupt it
+-- no dropped turn, no lost event -- while the daemon fully changes
+generation underneath it.
+
+**Why this doesn't fit the harness's standard Tier-E shape.** Every
+existing Tier-E scenario (`agent-vault-eval`, `agent-dispatch-hibernate-
+eval`, `context-handoff-eval`, ...) judges whether a driven agent
+*discovers and correctly follows* a plugin's documented mechanism -- an
+LLM judge (`clean-room-judge`) scores literal-mode doc-compliance. This
+drill has **no doc-compliance question at all**: it's an infrastructure-
+reliability assertion (did the daemon-level mechanism preserve a live turn
+across a cutover) that holds or fails independent of what the driven agent
+knows or does. The right verdict mechanism is almost certainly a
+**programmatic evidence comparator** (before/after transcript + event-log
++ generation-change proof), not an LLM judge -- but it still needs Tier-E's
+container + real-ACP-registration machinery to get an actual model turn in
+flight, since a stdlib probe (like Phase 5's `abrupt-kill-recovery`) cannot
+fake one.
+
+**Open design question (resolve before committing to a scenario shape).**
+Does the harness's existing `-Mode eval` runner support a scenario that
+skips (or trivially auto-passes) the `clean-room-judge` step in favor of a
+`post_check.sh`-only verdict? If not, evaluate two paths: (a) extend the
+runner with an "objective-only" eval mode other plugins could reuse for
+similar infra-reliability drills, or (b) write this as a bespoke script
+that only reuses `bridge_register.py`'s registration primitive directly,
+outside the standard scenario-manifest/judge pipeline. Read
+`tools/clean-room/ARCHITECTURE.md` and `TIER-E-EXECUTION.md` in full
+before deciding -- this session's read was partial.
+
+**Concrete design sketch.**
+1. **Box.** A base image with `agent-bridge` installed + provisioned (the
+   existing `agent-bridge-cutover` scenario's own `setup.sh` is a starting
+   point).
+2. **A real driven session-host-backed session** -- register the box as a
+   live agent-bridge provider and start a session via `agent-bridge
+   create` against a real repo/worktree inside the box (not the doc-audit
+   flavor's bare ACP registration).
+3. **A genuinely long-running prompt** -- something spanning several
+   model round-trips/tool calls (tens of seconds, not one instant reply),
+   giving a real window to land the cutover mid-turn. Needs tuning: long
+   enough to hit reliably, short enough not to waste credits.
+4. **Fire the cutover exactly mid-turn** -- poll the session's status
+   (via the CLI/API) until it's confirmed running/mid-turn, then invoke
+   `agent-bridge deploy` from OUTSIDE the driven session (a harness-side
+   action racing the turn, not something the driven agent itself does).
+5. **Capture evidence across the boundary** -- the session's event
+   log/transcript spanning before and after the deploy. Assert: the same
+   session id throughout, the turn actually completes (a `turn_complete`/
+   assistant reply reaches the client), no gap corresponding to a
+   dropped or duplicated event, AND (critically) that the cutover
+   *actually happened* (a new active endpoint, the old generation's pid
+   gone) -- a "pass" where the cutover silently no-op'd or landed outside
+   the turn's window is a false pass, not a real proof.
+6. **Programmatic verdict** -- a dedicated evidence comparator (not an LLM
+   judge): confirms the generation genuinely changed, the transcript shows
+   a clean uninterrupted completion, and explicitly fails (rather than
+   silently passing) if the timing race missed the window.
+
+**Feasibility / cost notes.** Consumes real AI credits per run (a genuine
+Copilot turn) -- budget a low `max_credits`, and treat this as a
+manually-triggered/opt-in scenario, not a routine CI pass, per the
+harness's own Tier-E cost-gating conventions (`runs.max_credits`/
+`aggregate` in existing manifests). Requires Docker; not runnable
+off-Docker unlike the Phase 5 stdlib probe. The mid-turn timing race is
+the hardest part -- likely needs a deliberately slow/instrumented test
+workload or a debug synchronization hook ("prompt received, model call in
+flight") to land reliably rather than by luck. Given Phase 5's own
+abrupt-kill-recovery check took nine review rounds to get honest and
+correct, budget comparable iteration here.
+
+**Acceptance criteria (also tracked in the Validation Plan below).**
+- [ ] A real live cutover drill shows a real Copilot turn completes with
+  zero observed disruption while the daemon's generation actually changes
+  underneath it (same session id, no dropped/duplicated event, confirmed
+  generation change -- not a trivial/no-op cutover).
+- [ ] The drill's verdict is programmatic/evidence-based, or a documented
+  decision explains why an LLM judge is the right mechanism after all.
+- [ ] The scenario (or bespoke script) is documented in `tools/clean-room/
+  README.md`'s catalog, and in `ARCHITECTURE.md`/`TIER-E-EXECUTION.md` if
+  it establishes a new "objective-only Tier-E" pattern other plugins could
+  reuse for similar infra-reliability drills.
+
 ## Validation Plan
 
 - [ ] `agent-bridge service restart` (or its replacement) and `agent-bridge
   deploy` are provably the same code path (a shared test, or the removal of
   one verb).
 - [ ] A live cutover drill (Phase 5) shows zero session disruption across a
-  real generation change.
+  real generation change. **See Phase 6** -- needs a real live Copilot turn
+  (Tier-E-style harness), not deliverable at Phase 5's Tier-P/stdlib-probe
+  fidelity; planned but not started.
 - [ ] An abrupt-termination drill shows a stale claim is recovered by the
   next generation without manual intervention. **Partially covered** -- the
   claim is stamped with a test-chosen label, not the daemon's own real
@@ -341,6 +430,27 @@ entry below for what was inspected, what was already covered, and the one new
 test that closes the gap.
 
 ## Journal
+
+### 2026-09-29 — Phase 6 planned (not started)
+- Planned (operator request, after Phase 5 merged) rather than started
+  immediately: a Tier-E live-turn-survival harness to close Phase 5's
+  deferred Plan item 1 for real -- a genuinely live Copilot turn surviving
+  a real `agent-bridge deploy` cutover, not just the Tier-P/stdlib-probe
+  mechanism-level proof Phase 5 delivered.
+- Read `tools/clean-room/TIER-E-EXECUTION.md` (partially) and the existing
+  `agent-vault-eval`/`agent-dispatch-hibernate-eval` scenarios to ground the
+  plan. Key finding: every existing Tier-E scenario judges *doc-compliance*
+  (does a driven agent discover and follow a plugin's documented mechanism)
+  via the `clean-room-judge` LLM judge -- this drill has no doc-compliance
+  question at all (it's an infra-reliability assertion independent of what
+  the agent does), so it needs Tier-E's container + real-ACP machinery but
+  almost certainly a **programmatic** verdict, not an LLM judge. This is
+  the central open design question the next session must resolve before
+  committing to a scenario shape -- see the Plan's own Phase 6 section for
+  the full sketch, feasibility notes, and acceptance criteria.
+- No code changed this round; planning-only. Handing off for
+  implementation in a fresh session/worktree per the operator's own
+  request ("plan it out, then tackle it in a handoff").
 
 ### 2026-09-29 — Phase 5 landed partially (abrupt-termination drill + clean-room extension; live-turn drill deferred) ([#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586))
 - **What's real here (final implementation).** Extended the pre-existing
