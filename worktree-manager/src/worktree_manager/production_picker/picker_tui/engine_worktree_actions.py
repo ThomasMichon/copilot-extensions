@@ -152,6 +152,11 @@ class PickerScreenWorktreeActionsMixin:
             # blank-start, #1026). A worktree that only *looks* sessionless
             # because tracking lost its head session is repaired by Refresh.
             acts = ["Open"]
+        # "Launch in new window" (copilot --headed): whenever the row offers
+        # Open or Resume, also offer a brand-new visible window instead --
+        # local-only (a headed window pops on THIS machine).
+        if rec.get("is_local", True) and ("Open" in acts or "Resume" in acts):
+            acts.append("Launch in new window")
         # Read-only "Messages" peek -- an auxiliary, non-lifecycle verb offered
         # for any worktree that could have a session to peek (not positively
         # sessionless) and is not in the inconsistent WARNING state. Independent
@@ -404,6 +409,13 @@ class PickerScreenWorktreeActionsMixin:
             # resumed without the mux wrapper for troubleshooting), not just
             # Open. no_mux is inert unless the toggle was flipped.
             self._decide(self._resume_decision(rec, no_mux=no_mux, ahp=ahp))
+        elif cur == "Launch in new window":
+            # copilot --headed: open a brand-new visible terminal window
+            # attached to this worktree's session, WITHOUT exiting the
+            # Picker (unlike every other verb here).
+            from .headed_actions import open_worktree_cli_headed
+
+            open_worktree_cli_headed(self, rec)
         elif cur == "Bare resume":
             # Two-step restore: mux + Copilot in HOME, no --resume (#outage).
             self._decide(self._resume_decision(rec, bare_resume=True))
