@@ -343,7 +343,7 @@ class PRProvider(Protocol):
         ``(owner, clone_url)`` on success, or ``None`` on any failure.
 
         The role-aware fork-PR flow's fork-bootstrap primitive (see
-        ``efforts/active/role-aware-fork-pr-flow``): idempotent -- calling it
+        ``efforts/2026/09/26 role-aware-fork-pr-flow``): idempotent -- calling it
         when a fork already exists returns that fork's ``(owner, clone_url)``
         unchanged, never creates a duplicate. ``create-pr`` uses the returned
         ``clone_url`` to point a local git remote at the fork (see

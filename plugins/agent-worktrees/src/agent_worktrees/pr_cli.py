@@ -195,20 +195,14 @@ def _pr_watch_review_blocking(config, prcfg, args) -> bool:
     ``_pr_merge_now``'s live-authority check; fails open on an unknown/failed
     permission read, same as that command.
     """
-    review_blocking = bool(getattr(prcfg, "review_blocking", False))
-    flow = _core()._pr_flow_profile(config.default_repo)
-    from . import pr_contract as pc
-    if review_blocking or flow.profile != pc.PROFILE_PR_SELF_MERGE:
-        return review_blocking
-    from .providers import account_token_for_slug, actor_viewer_permission, get_provider
-    try:
-        provider = get_provider(getattr(prcfg, "provider", "gitea") or "gitea")
-        base = (args.host or getattr(prcfg, "api_base", "") or "").strip()
-        tok = args.token if args.token is not None else account_token_for_slug(args.repo, prcfg)
-        live_permission = actor_viewer_permission(provider, args.repo, api_base=base, token=tok)
-    except Exception:
-        return False
-    return pc.actor_merge_authority(live_permission) is False
+    from . import pr_config
+    actor_flow = pr_config.resolve_actor_pr_flow(
+        config.default_repo,
+        args.repo,
+        api_base=args.host,
+        token=args.token,
+    )
+    return pr_config.actor_review_blocking(actor_flow)
 
 
 def cmd_pr_watch_dispatch(argv: list[str]) -> int:
@@ -277,7 +271,7 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
 
     try:
         config = cfg.load_config(Path(args.config) if args.config else None)
-        prcfg = config.default_repo.pr
+        base_prcfg = config.default_repo.pr
         if args.repo is None:
             args.repo = _infer_active_repo_slug(config)
             if not args.repo:
@@ -286,7 +280,20 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
                     "project; pass an explicit repo slug"
                 )
                 return 2
-        review_blocking = _pr_watch_review_blocking(config, prcfg, args) if verb == "wait" else True
+        prcfg = base_prcfg
+        resolved_token = args.token
+        if verb == "wait":
+            from . import pr_config
+            actor_flow = pr_config.resolve_actor_pr_flow(
+                config.default_repo,
+                args.repo,
+                api_base=args.host,
+                token=resolved_token,
+            )
+            prcfg = actor_flow.pr_config
+            review_blocking = pr_config.actor_review_blocking(actor_flow)
+        else:
+            review_blocking = True
 
         # Parse/validate --until now that its role/policy-aware default is known.
         if verb == "wait":
@@ -304,7 +311,13 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
                     )
                     return 2
 
-        fetch = prw.build_fetch(prcfg, args.repo, args.pr, api_base=args.host, token=args.token)
+        fetch = prw.build_fetch(
+            prcfg,
+            args.repo,
+            args.pr,
+            api_base=args.host,
+            token=resolved_token,
+        )
         if verb == "cursor":
             snap = fetch()
             print(pc.Baseline.from_snapshot(snap).to_cursor())

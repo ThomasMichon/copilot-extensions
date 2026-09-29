@@ -443,31 +443,6 @@ def _title_from_commits(worktree_path: str, upstream: str) -> str | None:
     return subject or None
 
 
-def _resolve_caller_role(prcfg, repo_slug: str) -> str | None:
-    """Resolve the caller's live permission on ``repo_slug`` for role-aware PR
-    flow resolution (efforts/active/role-aware-fork-pr-flow, GitHub-only).
-
-    Reuses the already-landed ``providers.actor_viewer_permission()`` (#2433)
-    rather than a second provider-specific primitive -- no extra request shape
-    to maintain. Returns ``None`` (never raises) when the repo's provider
-    isn't ``"github"``, ``repo_slug`` is empty, or the live read is unknown/
-    failed -- callers must treat that exactly like "no role resolved" (the
-    base, non-role-scoped ``PRConfig`` applies), never as a denial.
-    """
-    if prcfg.provider != "github" or not repo_slug:
-        return None
-    from . import providers
-    try:
-        provider = providers.get_provider(prcfg.provider)
-        token = providers.account_token_for_slug(repo_slug, prcfg)
-        permission = providers.actor_viewer_permission(
-            provider, repo_slug, api_base=prcfg.api_base, token=token,
-        )
-    except Exception:
-        return None
-    return permission or None
-
-
 def _ensure_fork_and_remote(worktree_path: str, repo_slug: str, prcfg) -> dict:
     """Ensure the caller's fork of ``repo_slug`` exists and a local git remote
     (``prcfg.fork.remote``) points at it.
@@ -541,7 +516,7 @@ def create_pr(
     and the agent can fall back to delegating PR creation manually.
 
     ``confirm_fork`` gates the role-aware fork-PR flow (see
-    ``efforts/active/role-aware-fork-pr-flow`` in this repo, GitHub-only
+    ``efforts/2026/09/26 role-aware-fork-pr-flow`` in this repo, GitHub-only
     today): when the repo's ``pr.roles``/``pr.fork`` config resolves the
     caller's live role to a flow that publishes through a personal fork
     rather than a direct push, ``create_pr`` does **not** silently fork or
@@ -827,16 +802,27 @@ def create_pr(
     )
 
     # --- Role-aware PR flow resolution + fork-publish confirmation gate ----
-    # (efforts/active/role-aware-fork-pr-flow, Phase 2b, GitHub-only). Only
+    # (efforts/2026/09/26 role-aware-fork-pr-flow, Phase 2b, GitHub-only). Only
     # touches anything when the repo opts in via `pr.roles` and/or
     # `pr.fork.enabled`; an unconfigured repo's `prcfg`/`publish_remote` are
     # unchanged from here on -- byte-for-byte today's behavior.
     publish_remote = remote
     fork_owner = ""
     if prcfg.roles:
-        prcfg = cfg.resolve_role_pr_config(
-            prcfg, _resolve_caller_role(prcfg, default_pr_repo),
+        from . import pr_config
+
+        actor_flow = pr_config.resolve_actor_pr_flow(
+            repo,
+            default_pr_repo,
+            authority_sensitive=False,
         )
+        prcfg = actor_flow.pr_config
+        base.update({
+            "flow_profile": actor_flow.flow.profile,
+            "configured_flow_profile": actor_flow.configured_flow.profile,
+            "flow_resolution": actor_flow.resolution,
+            "viewer_permission": actor_flow.viewer_permission,
+        })
     if prcfg.fork.enabled:
         if not confirm_fork:
             return {
@@ -1871,6 +1857,8 @@ def _live_pr_state(
     record: tracking.WorktreeRecord | None,
     active: PRRecord | None,
     config: Config,
+    *,
+    prcfg=None,
 ) -> dict | None:
     """Best-effort live verdict/conflict/merge read for the active PR.
 
@@ -1884,7 +1872,7 @@ def _live_pr_state(
     """
     if active is None or active.number is None:
         return None
-    prcfg = config.default_repo.pr
+    prcfg = prcfg or config.default_repo.pr
     provider_name = active.provider or prcfg.provider
     target_repo = active.repo or ((record.repo if record else "") or "")
     try:
@@ -1926,7 +1914,7 @@ def _live_pr_state(
     if st.merge_state not in ("merged", "closed") and not st.wip and not st.held:
         from . import pr_config
 
-        flow = pr_config._pr_flow_profile(config.default_repo)
+        flow = pr_config._profile_for_pr_config(prcfg)
         self_merge_note = self_merge_bypass_note(
             flow, provider, target_repo, active.number,
             api_base=getattr(prcfg, "api_base", "") or "", token=token,
@@ -2236,7 +2224,8 @@ def pr_ready(
 
 
 def pr_status(worktree_id: str, *, all_prs: bool = False,
-              live: bool = True, config: Config | None = None) -> dict:
+              live: bool = True, config: Config | None = None,
+              prcfg=None) -> dict:
     """Return the tracked PR metadata for a worktree (for pr-status).
 
     Returns the **active** PR by default.  With ``all_prs`` the full ``prs``
@@ -2274,7 +2263,7 @@ def pr_status(worktree_id: str, *, all_prs: bool = False,
         if rec:
             result.update(rec)
         if live:
-            live_block = _live_pr_state(record, active, config)
+            live_block = _live_pr_state(record, active, config, prcfg=prcfg)
             if live_block:
                 result.update(live_block)
     if all_prs:

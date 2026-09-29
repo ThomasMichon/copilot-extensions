@@ -740,7 +740,7 @@ class TestCreatePR:
 
 
 # ---------------------------------------------------------------------------
-# create_pr -- role-aware fork-PR flow (efforts/active/role-aware-fork-pr-flow)
+# create_pr -- role-aware fork-PR flow (efforts/2026/09/26 role-aware-fork-pr-flow)
 # ---------------------------------------------------------------------------
 
 class TestCreatePRForkFlow:
@@ -850,9 +850,10 @@ class TestCreatePRForkFlow:
 # These instead exercise the actual integration seam create_pr relies on in
 # practice: a repo that only sets ``pr.roles`` (fork disabled at the base),
 # with the caller's role resolved from a *live* (here, faked) GitHub viewer
-# permission via ``_resolve_caller_role`` -> ``providers.actor_viewer_permission``
-# -> ``cfg.resolve_role_pr_config``. Closes the one seam
-# efforts/active/role-aware-fork-pr-flow's Phase 3 left unit-untested.
+# permission via ``pr_config.resolve_actor_pr_flow`` ->
+# ``providers.actor_viewer_permission`` -> ``cfg.resolve_role_pr_config``.
+# Closes the one seam the archived role-aware-fork-pr-flow effort left
+# unit-untested.
 # ---------------------------------------------------------------------------
 
 class TestCreatePRRoleResolution:

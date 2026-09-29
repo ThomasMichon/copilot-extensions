@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve actor-effective PR flow from live permission and role overrides",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

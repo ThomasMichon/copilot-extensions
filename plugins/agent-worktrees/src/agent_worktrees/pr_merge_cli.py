@@ -77,7 +77,15 @@ def _pr_merge_print_human(summary: dict) -> None:
         print(f"  #{d['pr']:<6} {mark:<14} {d.get('title', '')}", file=sys.stderr)
 
 
-def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
+def _pr_merge_now(
+    args,
+    prcfg,
+    flow,
+    *,
+    apply: bool,
+    token: str | None = None,
+    viewer_permission: str | None = None,
+) -> int:
     """Perform (or preview) a submitter-direct merge -- ``pr-merge --now``.
 
     Only a **pr-self-merge** repo may use this submitter-direct merge verb.
@@ -170,7 +178,15 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
             print(rem.text(), file=sys.stderr)
         return 0
 
-    tok = args.token if args.token is not None else account_token_for_slug(args.repo, prcfg)
+    tok = (
+        token
+        if token is not None
+        else (
+            args.token
+            if args.token is not None
+            else account_token_for_slug(args.repo, prcfg)
+        )
+    )
 
     # General repo comprehension: this repo's *config* selects pr-self-merge
     # (a maintainer's choice), but that never implies the identity running
@@ -180,7 +196,14 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
     # read-only/no-access verdict (False) refuses. A maintainer is never
     # blocked by a permission-read hiccup; a contributor is never told to
     # self-merge a PR they cannot actually merge.
-    live_permission = actor_viewer_permission(provider, args.repo, api_base=base, token=tok,)
+    live_permission = viewer_permission
+    if live_permission is None:
+        live_permission = actor_viewer_permission(
+            provider,
+            args.repo,
+            api_base=base,
+            token=tok,
+        )
     authority = pc.actor_merge_authority(live_permission)
     if authority is False:
         reason = (
@@ -494,13 +517,26 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
                 )
                 return 2
         repo_cfg = config.default_repo
-        prcfg = repo_cfg.pr
         default_branch = repo_cfg.default_branch
-        flow = pr_config._pr_flow_profile(repo_cfg)
+        actor_flow = pr_config.resolve_actor_pr_flow(
+            repo_cfg,
+            args.repo,
+            api_base=args.host,
+            token=args.token,
+        )
+        prcfg = actor_flow.pr_config
+        flow = actor_flow.flow
 
         # --now: perform the direct submitter self-merge (pr-self-merge repos).
         if args.now:
-            return _pr_merge_now(args, prcfg, flow, apply=apply)
+            return _pr_merge_now(
+                args,
+                prcfg,
+                flow,
+                apply=apply,
+                token=args.token,
+                viewer_permission=actor_flow.viewer_permission,
+            )
 
         # A submitter-self-merge repo has no consent label: bare `pr-merge` is a
         # no-op here. Refuse-with-reminder and point at the sanctioned `--now`
@@ -691,5 +727,3 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
     except ValueError as exc:
         output.err(f"pr-merge: {exc}")
         return 2
-
-
