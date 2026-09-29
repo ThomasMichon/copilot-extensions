@@ -431,17 +431,24 @@ session-host concept):
      discover an id absent from a stale enumeration in the first place.
      Fixed: new `HostIndex.refresh()`, called before every reattach scan.
   4. Contract: the new endpoint introduces a client-detectable capability
-     with no matching protocol bump. Fixed: `HTTP_PROTOCOL_VERSION` 18->19,
-     new `SESSION_HOST_REATTACH_PROTOCOL_VERSION`; the post-cutover retry
-     call now gates on `daemon_supports()` and skips (non-fatal) against an
-     older daemon. Updated the agent-bridge HTTP-wire contract registry and
-     fixtures accordingly (new generation-19 evidence, a new
-     `previous-generation-18` snapshot) -- and, while touching it, fixed a
-     genuinely **pre-existing, unrelated** drift found by the full
-     `check-agent-bridge-contracts.py` run: `session-create-response.json`'s
-     own `captured_from.source_sha256` for `models.py` didn't match either
-     the registry's recorded hash or the file's actual current hash (dating
-     to before this effort).
+     with no matching protocol bump. **Attempted, then reverted**: bumping
+     `HTTP_PROTOCOL_VERSION` requires new contract-registry evidence whose
+     own `captured_from.commit` must reference a real, resolvable commit --
+     but every commit on a PR branch here gets rewritten (squashed/rebased)
+     by this repo's own `push-changes` flow before it ever reaches origin,
+     so no commit on an in-flight PR branch can ever durably reference
+     itself. The repo's own precedent (`registry.json`'s existing
+     `a1612599f2...` provenance entries) confirms this: that commit is
+     itself an *already-merged* PR, meaning the established pattern is a
+     **separate follow-up PR** *after* the functional change merges, not
+     doing both atomically. Reverted the version bump and the
+     `daemon_supports()` gate; the post-cutover reattach call is
+     unconditional best-effort instead, mirroring the existing relay-adopt
+     post-cutover step (`/api/v1/relay/adopt`), which itself has never
+     carried a protocol-version gate either. A follow-up PR bumping
+     `HTTP_PROTOCOL_VERSION` and capturing the new evidence, once this PR's
+     merge commit exists to reference, is a reasonable Phase 4/5 or
+     standalone follow-up -- not a blocker for Phase 3 itself.
   5. Test quality: the original two-instance `HostIndex` tests were
      sequential, so they would still pass even with the cross-process lock
      removed entirely. Added a genuinely overlapping (thread + barrier
