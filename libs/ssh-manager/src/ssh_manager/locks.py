@@ -128,6 +128,8 @@ def process_identity(pid: int) -> str | None:
             )
             if not ok:
                 return None
+            if exit_.dwHighDateTime or exit_.dwLowDateTime:
+                return None
             ticks = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
             return f"windows-filetime:{ticks}"
         finally:
