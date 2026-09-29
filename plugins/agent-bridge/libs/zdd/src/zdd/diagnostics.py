@@ -282,6 +282,7 @@ class DiagnosticContext:
     list_candidates: Callable[[], list[DaemonCandidate]]
     is_superseded: Callable[[int, int], bool]
     acquire_cutover_guard: Callable[[float], Any] | None = None
+    reachability_check: Callable[[str, int], bool] | None = None
     terminate_pid_if_identity: Callable[[int, str | None], dict] = terminate_pid_if_identity
     lock_is_live: Callable[[dict | None], bool] = lock_data_is_live
     make_client: Callable[[str], Any] | None = None
@@ -355,15 +356,17 @@ def _inspect_stranded_survivor(
     endpoint = _describe_old_endpoint(record)
     if endpoint is None:
         return None
-    base_url = f"http://{routing.format_authority(endpoint[0], endpoint[1])}"
     reachable = False
-    if ctx.make_client is not None:
+    if ctx.reachability_check is not None:
+        reachable = bool(ctx.reachability_check(*endpoint))
+    base_url = f"http://{routing.format_authority(endpoint[0], endpoint[1])}"
+    if not reachable and ctx.make_client is not None:
         try:
             ctx.make_client(base_url).health()
             reachable = True
         except Exception:  # noqa: BLE001 - probe is best-effort
             reachable = False
-    elif ctx.health_check is not None:
+    elif not reachable and ctx.health_check is not None:
         reachable = bool(ctx.health_check(*endpoint))
     if not reachable:
         return None
@@ -668,6 +671,17 @@ def apply_daemon_health(
                 ctx.make_client,
             )
             actions.append({"kind": "stranded_survivor", "result": recovery})
+            if not recovery.get("recovered"):
+                return {
+                    "service": ctx.service,
+                    "mode": "apply",
+                    "before": before,
+                    "after": before,
+                    "findings": before["findings"],
+                    "remaining_findings": before["findings"],
+                    "counts": before["counts"],
+                    "actions": actions,
+                }
             break
 
         current = _audit_daemon_health(ctx, now=now, cutover_state="held")

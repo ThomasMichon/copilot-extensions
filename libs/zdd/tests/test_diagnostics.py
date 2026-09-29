@@ -17,6 +17,7 @@ def _ctx(
     make_client=None,
     is_superseded=None,
     acquire_cutover_guard=None,
+    reachability_check=None,
 ) -> diagnostics.DiagnosticContext:
     def _candidates() -> list[diagnostics.DaemonCandidate]:
         return [
@@ -43,6 +44,7 @@ def _ctx(
         list_candidates=_candidates,
         is_superseded=is_superseded or (lambda pid, generation: False),
         acquire_cutover_guard=acquire_cutover_guard,
+        reachability_check=reachability_check,
         terminate_pid_if_identity=_terminate,
         make_client=make_client,
         health_check=health_check,
@@ -340,6 +342,43 @@ def test_audit_detects_stranded_draining_survivor_via_health_probe(tmp_path: Pat
     assert report["counts"]["stranded_survivor"] == 1
 
 
+def test_report_prefers_bounded_reachability_probe_over_slow_client(tmp_path: Path):
+    record = breadcrumb.write_breadcrumb(
+        tmp_path,
+        state="draining",
+        old={"bind": "127.0.0.1", "port": 9281},
+        new_port=9282,
+        new_pid=303,
+    )
+    _set_breadcrumb_age(tmp_path, record, seconds=9999)
+    state = {
+        "lock": {"pid": 101, "start_time": "owner"},
+        "live": {101: "owner"},
+        "terminated": [],
+    }
+    used_client = {"value": False}
+
+    class _Client:
+        def __init__(self, base_url: str) -> None:
+            self.base_url = base_url
+
+        def health(self) -> dict:
+            used_client["value"] = True
+            return {"status": "draining"}
+
+    report = diagnostics.audit_daemon_health(
+        _ctx(
+            tmp_path,
+            state=state,
+            make_client=_Client,
+            reachability_check=lambda host, port: True,
+        )
+    )
+
+    assert report["counts"]["stranded_survivor"] == 1
+    assert used_client["value"] is False
+
+
 def test_apply_reaps_abandoned_passive_even_when_old_survivor_is_recovered(tmp_path: Path):
     routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=101, version="1.0.0")
     record = breadcrumb.write_breadcrumb(
@@ -375,3 +414,37 @@ def test_apply_reaps_abandoned_passive_even_when_old_survivor_is_recovered(tmp_p
     assert undrained == ["http://127.0.0.1:9281"]
     assert state["terminated"] == [303]
     assert result["after"]["counts"]["total"] == 0
+
+
+def test_apply_blocks_passive_reap_when_survivor_recovery_fails(tmp_path: Path):
+    record = breadcrumb.write_breadcrumb(
+        tmp_path,
+        state="draining",
+        old={"bind": "127.0.0.1", "port": 9281},
+        new_port=9282,
+        new_pid=303,
+    )
+    _set_breadcrumb_age(tmp_path, record, seconds=9999)
+    state = {
+        "lock": {"pid": 101, "start_time": "owner"},
+        "live": {101: "owner", 303: "passive"},
+        "terminated": [],
+    }
+
+    class _Client:
+        def __init__(self, base_url: str) -> None:
+            self.base_url = base_url
+
+        def health(self) -> dict:
+            return {"status": "draining"}
+
+        def undrain(self) -> dict:
+            raise RuntimeError("still wedged")
+
+    result = diagnostics.apply_daemon_health(
+        _ctx(tmp_path, state=state, make_client=_Client, health_check=lambda host, port: True)
+    )
+
+    assert state["terminated"] == []
+    assert result["actions"][0]["result"]["recovered"] is False
+    assert result["remaining_findings"] == result["before"]["findings"]

@@ -23,6 +23,19 @@ def _candidates(root: Path) -> list[diagnostics.DaemonCandidate]:
 
 def _context(root: Path | None = None) -> diagnostics.DiagnosticContext:
     resolved_root = root if root is not None else default_root()
+
+    def _reachability_check(host: str, port: int) -> bool:
+        try:
+            return bool(
+                mux_daemon_cutover.ControlClient(
+                    f"http://{mux_daemon_cutover.routing.format_authority(host, port)}",
+                    root=resolved_root,
+                    timeout=5.0,
+                ).health()
+            )
+        except Exception:
+            return False
+
     return diagnostics.DiagnosticContext(
         service="worktree-manager mux-daemon",
         config_dir=mux_daemon_cutover.routing_dir(resolved_root),
@@ -35,6 +48,7 @@ def _context(root: Path | None = None) -> diagnostics.DiagnosticContext:
         is_superseded=lambda pid, generation: mux_daemon_cutover.is_superseded(
             resolved_root, pid, generation
         ),
+        reachability_check=_reachability_check,
         make_client=lambda base_url: mux_daemon_cutover._make_client(base_url, root=resolved_root),
         health_check=lambda host, port: mux_daemon_cutover._health_check(
             host, port, root=resolved_root

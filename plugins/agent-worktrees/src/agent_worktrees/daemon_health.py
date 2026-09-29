@@ -24,6 +24,18 @@ def _candidates() -> list[diagnostics.DaemonCandidate]:
     ]
 
 
+def _reachability_check(host: str, port: int) -> bool:
+    try:
+        return bool(
+            status_monitor_cutover.ControlClient(
+                f"http://{status_monitor_cutover.routing.format_authority(host, port)}",
+                timeout=5.0,
+            ).health()
+        )
+    except Exception:
+        return False
+
+
 def _context() -> diagnostics.DiagnosticContext:
     return diagnostics.DiagnosticContext(
         service="agent-worktrees status-monitor",
@@ -38,6 +50,7 @@ def _context() -> diagnostics.DiagnosticContext:
         is_superseded=lambda pid, generation: self_retire.is_superseded(
             status_monitor_cutover.routing_dir(), pid, generation
         ),
+        reachability_check=_reachability_check,
         terminate_pid_if_identity=procs.terminate_pid_if_identity,
         make_client=status_monitor_cutover._make_client,
         health_check=status_monitor_cutover._health_check,
