@@ -49,6 +49,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import uv_editable_ref as uer  # noqa: E402
+
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
 LIBS_DIR = REPO / "libs"
@@ -102,16 +105,32 @@ def _plugin_json_version_at(ref: str, plugin: str) -> str | None:
 
 
 def _vendored_consumers() -> dict[str, list[str]]:
-    """Map ``lib name -> [plugins that vendor it]`` from ``plugins/*/libs/*``."""
+    """Map ``lib name -> [plugins that vendor it]`` -- both an ordinary
+    in-tree ``plugins/*/libs/*`` real copy AND a `uv`-editable canonical-
+    reference pointer in a plugin's own ``pyproject.toml`` (vendor-pointer-
+    generalization effort, Phase 1: no local copy at all in a dev checkout).
+    A plugin using only the pointer form still gets `<lib>`'s payload
+    materialized into it at promotion time (`tools/materialize_main.py`),
+    so it must be charged for a bump the same as a real-copy consumer --
+    skipping this half missed every editable-pointer consumer from the
+    version-bump guard entirely (PR #4465 review)."""
     consumers: dict[str, list[str]] = {}
     if not PLUGINS_DIR.is_dir():
         return consumers
     for plugin in sorted(p for p in PLUGINS_DIR.iterdir() if p.is_dir()):
         libs = plugin / "libs"
-        if not libs.is_dir():
+        if libs.is_dir():
+            for lib in sorted(x for x in libs.iterdir() if x.is_dir()):
+                consumers.setdefault(lib.name, []).append(plugin.name)
+        try:
+            refs = uer.find_uv_editable_refs(plugin)
+        except uer.ManifestUnreadable:
             continue
-        for lib in sorted(x for x in libs.iterdir() if x.is_dir()):
-            consumers.setdefault(lib.name, []).append(plugin.name)
+        for _name, _raw_path, lib, _editable in refs:
+            if plugin.name not in consumers.get(lib, ()):
+                consumers.setdefault(lib, []).append(plugin.name)
+    for lib in consumers:
+        consumers[lib] = sorted(consumers[lib])
     packaged_peers = [
         plugin for plugin in (
             "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",

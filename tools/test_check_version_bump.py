@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parent / "check-version-bump.py"
+UV_EDITABLE_REF = Path(__file__).resolve().parent / "uv_editable_ref.py"
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -42,6 +43,22 @@ def _plugin(repo: Path, name: str, version: str, *, vendors: list[str] | None = 
                "shared = 1\n")
 
 
+def _plugin_with_editable_ref(repo: Path, name: str, version: str, lib: str) -> None:
+    """Materialize a minimal plugin whose ``pyproject.toml`` references
+    ``lib`` via a `uv`-editable canonical pointer (vendor-pointer-
+    generalization effort, Phase 1) -- no local copy under its own
+    ``libs/`` at all."""
+    _write(repo, f"plugins/{name}/plugin.json",
+           json.dumps({"name": name, "version": version}) + "\n")
+    _write(
+        repo, f"plugins/{name}/pyproject.toml",
+        f'[project]\nname = "{name}"\nversion = "{version}"\n\n'
+        f'[tool.uv.sources]\n'
+        f'{lib} = {{ path = "../../libs/{lib}", editable = true }}\n',
+    )
+    _write(repo, f"plugins/{name}/src/{name.replace('-', '_')}/__init__.py", "x = 1\n")
+
+
 def _set_plugin_version(repo: Path, name: str, version: str) -> None:
     _write(repo, f"plugins/{name}/plugin.json",
            json.dumps({"name": name, "version": version}) + "\n")
@@ -61,6 +78,7 @@ def repo(tmp_path: Path) -> Path:
     r = tmp_path / "repo"
     (r / "tools").mkdir(parents=True)
     (r / "tools" / SCRIPT.name).write_bytes(SCRIPT.read_bytes())
+    (r / "tools" / UV_EDITABLE_REF.name).write_bytes(UV_EDITABLE_REF.read_bytes())
 
     _git(r, "init", "-q")
     _git(r, "config", "user.email", "t@example.com")
@@ -137,6 +155,33 @@ def test_shared_lib_change_passes_when_all_consumers_bump(repo: Path):
     _git(repo, "commit", "-qm", "shared lib + both bumps")
     result = _run(repo)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_shared_lib_change_charges_uv_editable_pointer_consumer_too(repo: Path):
+    """A plugin with NO local copy at all -- only a `uv`-editable canonical
+    pointer in its own `pyproject.toml` -- must still be charged for a
+    shared-lib change (PR #4465 review): `materialize_main.py` promotes
+    that same canonical payload into it at release time, so skipping it
+    here would let its promoted payload change under an unbumped version."""
+    _plugin_with_editable_ref(repo, "gamma", "3.0.0-dev1", "shared-lib")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add gamma (uv-editable shared-lib consumer)")
+    # Move the simulated origin/main ref forward past gamma's own addition,
+    # so the actual test diff below sees gamma as a PRE-EXISTING consumer
+    # (a brand-new plugin is exempt from the bump obligation by design --
+    # see test_new_plugin_is_not_charged -- which would otherwise mask the
+    # very detection this test exists to prove).
+    gamma_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", gamma_sha)
+
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "shared = 2\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "shared lib change, no bumps")
+    result = _run(repo)
+    assert result.returncode == 1
+    assert "gamma" in result.stderr
 
 
 def test_vendored_copy_change_charges_only_its_plugin(repo: Path):
