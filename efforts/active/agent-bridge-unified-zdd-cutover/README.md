@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 5 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543))
+- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 5 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 5 merged — TBD)
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
@@ -239,13 +239,13 @@ layer — is the operator's own, captured verbatim in Request.)_
   wire. Nothing else blocks its exit — in particular, it never waits on a
   Copilot turn or a client.
 
-### Phase 4 — The caller-facing mask/routing layer
-- [ ] Confirm (or extend) that upstream callers of agent-bridge resolve
+### Phase 4 — The caller-facing mask/routing layer ✅
+- [x] Confirm (or extend) that upstream callers of agent-bridge resolve
   through the existing `zdd.routing` `active.json` discovery the same way
   session-host clients already tolerate a session-host changeover — a
   cutover in flight should look like a brief, buffered pause to every
   caller, never a hard error.
-- [ ] Validate the buffering/retry behavior at the actual call sites that
+- [x] Validate the buffering/retry behavior at the actual call sites that
   matter in practice (CLI `send`/`read`/`wait`, not only the HTTP layer).
 
 ### Phase 5 — Validation
@@ -318,7 +318,61 @@ session-host concept):
    generation is *confirmed* exited -- mirroring the existing post-commit
    relay-adoption step's own shape, not a new mechanism.
 
+**Phase 4 — validated, not built.** The caller-facing mask this phase's
+checklist calls for already existed before this effort started, predating it
+by years (`#23`/`#46.6`, `#893`, `#900`, `#3179` in the Journal below) --
+Phase 4's real job turned out to be confirming that machinery is intact after
+Phases 1-3's changes and closing the one genuine validation gap: proof at the
+*CLI call site*, not only at the `BridgeClient` request level. See the Journal
+entry below for what was inspected, what was already covered, and the one new
+test that closes the gap.
+
 ## Journal
+
+### 2026-09-29 — Phase 4 landed (TBD)
+- **No new production mechanism was needed.** Reading `client.py`'s
+  `BridgeClient._request()` and the CLI `send`/`read`/`wait` call sites
+  confirmed the caller-facing mask Phase 4's checklist describes was already
+  built and already thoroughly tested, well before this effort:
+  - `_get_client()` (the *sole* client-construction path for every CLI
+    command, including `send`/`read`/`wait`) always calls
+    `BridgeClient.from_config()`, which installs a live `_reresolve` callback
+    against `zdd.routing`'s `active.json` -- there is no CLI code path that
+    constructs an un-reresolving client for ordinary use.
+  - `_request()` already follows a retiring daemon's 503 `"draining"`
+    response (#3179) to the routing table's successor and retries within the
+    connect grace -- for **any** HTTP method, including the non-idempotent
+    POST `send`/`create` issue, since the retiring generation is still
+    answering (just refusing new work), not silently dropping the
+    connection. Covered generically by `TestDrainGrace` in
+    `test_client_connect.py` (already exercises `POST /api/v1/sessions`).
+  - A genuine TCP-level connection reset during a non-idempotent method
+    (POST) is deliberately **not** auto-retried (`BridgeConnectionError`) --
+    this is the correctness-safe boundary for the abrupt-kill case Phase 5's
+    own drill exists to exercise, not a gap: an unacknowledged POST could
+    double-deliver if blindly retried without the caller's own
+    `--idempotency-key` opt-in (`send_live_message`/`submit_prompt` already
+    thread one through when given).
+  - `_stream_feed()` (the engine behind `read`/`wait`) already reconnects
+    across a connection error and resumes from the caller's acked cursor
+    (`#23`/`#46.6`, `#893`, `#900`), tested by `test_reconnect.py`'s eight
+    scenarios including a worktree-handoff follow and a settled-404 report.
+- **The one genuine gap**: every existing test above drives `BridgeClient`
+  or the streaming engine directly -- none drove the actual CLI `_cmd_send`
+  entry point end-to-end through a cutover. Added
+  `test_send_transparent_cutover.py::test_send_cli_survives_drain_503_mid_delivery`,
+  which builds a real `BridgeClient` (mocked `urlopen`, not a fake
+  in-memory client), makes the retiring generation answer the delivery POST
+  with a draining 503, and asserts `agent-bridge send`'s real code path
+  (`_cmd_send` -> `resolve_live_session` -> `send_live_message`) prints a
+  normal delivery confirmation -- never a traceback or hard failure -- after
+  transparently following the routing table to the successor.
+- **Full suite**: `python3 tools/run-plugin-tests.py agent-bridge` stayed
+  green throughout, confirming none of Phases 1-3's changes disturbed this
+  pre-existing machinery.
+- Test-only change; no production code touched. Phase 4's own checklist is
+  now fully validated with concrete evidence, closing it without new
+  runtime mechanism.
 
 ### 2026-09-28 — Phase 3 landed ([#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543))
 - **Generation identity**: `SessionManager` (via `_SessionCoreMixin.__init__`)
