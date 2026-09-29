@@ -631,11 +631,14 @@ def _cmd_service(args: argparse.Namespace) -> None:
     elif action == "stop":
         core._service_stop()
     elif action == "restart":
-        core._service_stop()
-        import time
+        # `restart` is not a distinct behavior: it is the same always-ZDD
+        # cutover `deploy` performs (spawn passive -> health-gate -> flip ->
+        # drain -> retire). A raw stop-then-start would drop every live
+        # session-host with no drain and no handoff -- see
+        # efforts/active/agent-bridge-unified-zdd-cutover Phase 1.
+        from .venue_cli import _cmd_deploy
 
-        time.sleep(3)
-        core._service_start()
+        _cmd_deploy(args)
     elif action == "status":
         core._cmd_status(args)
         pid = core._service_pid()
@@ -656,9 +659,18 @@ def register_service_control_commands(sub: argparse._SubParsersAction) -> None:
     service_sub = service_p.add_subparsers(dest="service_action")
     for _act, _help in (
         ("start", "Start the agent-bridge daemon"),
+        (
+            "restart",
+            "Zero-downtime cutover to a fresh daemon generation (same behavior as `deploy`)",
+        ),
         ("stop", "Stop the agent-bridge daemon"),
-        ("restart", "Restart the agent-bridge daemon"),
         ("status", "Show daemon status, port, and PID"),
     ):
-        service_sub.add_parser(_act, help=_help)
+        action_p = service_sub.add_parser(_act, help=_help)
+        if _act == "restart":
+            # Same flags as `venue deploy` -- `restart` calls _cmd_deploy directly.
+            action_p.add_argument("--health-timeout", type=float, default=60.0, metavar="SECONDS", help="Max seconds to wait for the new daemon to become healthy.")
+            action_p.add_argument("--drain-timeout", type=float, default=300.0, metavar="SECONDS", help="Max seconds to wait for the old daemon's in-flight work to settle.")
+            action_p.add_argument("--force", action="store_true", help="Proceed with cutover even if the old daemon does not fully drain.")
+            action_p.add_argument("--json", action="store_true", help="Emit JSON.")
     service_p.set_defaults(func=_cmd_service)

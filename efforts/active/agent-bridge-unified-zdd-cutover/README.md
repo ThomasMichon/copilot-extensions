@@ -16,7 +16,7 @@ visions:
   §Features/*one-canonical-deploy-path*, and §Behaviors/*the next generation
   earns the handoff, never assumes it* and *the outgoing generation waits for
   confirmation, not for Copilot*
-- **Umbrella issue:** _pending — claim/file before Phase 1 begins_
+- **Umbrella issue:** [#4477](https://github.com/ThomasMichon/copilot-extensions/issues/4477)
 - **Sub-issues:** [#1362](https://github.com/ThomasMichon/copilot-extensions/issues/1362)
   (daemon flapping: stale `active.json` port mapping + failed auto-update
   cutovers + wedge on remote-session-host recovery) ·
@@ -182,13 +182,13 @@ layer — is the operator's own, captured verbatim in Request.)_
   reconstruct that from a raw log file.
 
 ### Phase 1 — Retire the second deploy behavior
-- [ ] `agent-bridge service restart` (and any other reachable stop+start
+- [x] `agent-bridge service restart` (and any other reachable stop+start
   affordance) routes through the same cutover the `deploy` verb already
   performs — either by making `restart` literally call the same code path,
   or by removing `restart` as a distinct verb entirely in favor of one name.
   No behavior change is acceptable that still allows a raw stop-then-start
   of a daemon carrying live session-hosts.
-- [ ] Audit every other caller of the raw stop/start path (installers,
+- [x] Audit every other caller of the raw stop/start path (installers,
   bootstrap-check scripts, any other plugin's activation hook) and route
   them onto the same one path too.
 
@@ -261,6 +261,36 @@ _Pending — Phase 2's claim/release/recover schema and Phase 3's exit-contract
 sequencing will be drafted here once the design is reviewed._
 
 ## Journal
+
+### 2026-09-28 — Phase 1 landed
+- `agent-bridge service restart` now routes through `_cmd_deploy` directly
+  (`service_process_cli.py`'s `_cmd_service`) instead of a raw
+  `_service_stop()` + `_service_start()` — same
+  `zdd.cutover.CutoverOrchestrator` flow as `deploy` (spawn passive ->
+  health-gate -> flip -> drain -> retire), including when no daemon is
+  currently running (`CutoverOrchestrator.run` already tolerates
+  `old_endpoint is None`). The `restart` subcommand gained the same
+  `--health-timeout`/`--drain-timeout`/`--force`/`--json` flags `deploy`
+  exposes so the shared code path has every attribute it reads.
+- Audited every other reachable raw stop/start caller: installers
+  (`scripts/install.sh`/`install.ps1`) and the shared
+  `bootstrap-check.sh`/`.ps1` reconcile hooks already invoke
+  `agent-bridge deploy` (or the installer, which itself deploys), never a
+  raw restart. The only remaining `_service_stop`/`_service_start` pairing
+  outside the CLI is `venue_cli.py`'s
+  `_fault_frontend_restart_hostindex_loss` — a deliberate fault-injection
+  harness that exercises the *old* dangerous path on purpose to prove
+  HostIndex recovery works even without a ZDD handoff; left untouched.
+  `routes/worktrees.py`'s `"restart"` is an unrelated verb (restarting a
+  worktree's mux-launched Copilot session, not the agent-bridge daemon).
+- Added `tests/test_service_restart_zdd.py` (3 tests) locking in that
+  `restart` calls `_cmd_deploy` and never the raw stop/start pair, and that
+  its argparse Namespace carries every attribute `_cmd_deploy` reads.
+- Full `agent-bridge` suite green (`tools/run-plugin-tests.py agent-bridge`).
+- Filed the umbrella issue,
+  [#4477](https://github.com/ThomasMichon/copilot-extensions/issues/4477).
+- Phase 0's one open item (the opt-in reconcile-gate design fork) remains
+  genuinely undecided — flagged for the operator, not resolved here.
 
 ### 2026-09-28 — Kickoff
 - Carved after a live production incident (root-caused in a downstream
