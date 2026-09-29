@@ -1,0 +1,9 @@
+{
+  "comment": "Fix #4552: scrub PYTHONHOME/PYTHONPATH/UV_INTERNAL__PYTHONHOME from every git/validate/validate_hook subprocess spawn so a leaked interpreter-selection env var from this plugin's own runtime cannot redirect a child's Python (e.g. a repo's pre-push hook) onto a version-mismatched stdlib, breaking native extension modules like _sre.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

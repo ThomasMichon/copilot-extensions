@@ -447,3 +447,78 @@ def test_long_title_is_not_truncated_in_squash_message(tmp_path: Path, monkeypat
     assert ok is True
     subject = git_ops.git("log", "-1", "--format=%s", cwd=str(repo), check=False).stdout.strip()
     assert subject == long_title
+
+
+def test_configured_validate_hook_scrubs_python_runtime_env(tmp_path: Path, monkeypatch):
+    """#4552: a configured ``validate_hook`` subprocess must not inherit a
+    leaked Python-runtime-selection var from this plugin's own runtime."""
+    import dataclasses
+    import subprocess
+
+    from agent_worktrees import config as cfg
+    from agent_worktrees import env_scrub, finalize
+
+    _repo, wt_id, config = _make_pushable_repo(tmp_path, 1, monkeypatch)
+    config.repos[wt_id] = dataclasses.replace(
+        config.repos[wt_id],
+        validate_hook={cfg.detect_platform(): ["python", "-c", "pass"]},
+    )
+    monkeypatch.setattr(finalize.git_ops, "push", lambda *a, **k: PushResult(ok=True))
+    monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **k: None)
+    for name in env_scrub._PYTHON_RUNTIME_ENV:
+        monkeypatch.setenv(name, r"C:\fake\stale\value")
+    captured = {}
+    real_run = subprocess.run
+
+    def fake_run(cmd, **kw):
+        if cmd[:1] == ["python"]:
+            captured["env"] = kw.get("env")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        return real_run(cmd, **kw)
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    ok = finalize.push_changes(wt_id, config, title="Test change")
+
+    assert ok is True
+    assert captured, "validate_hook subprocess.run was never called"
+    for name in env_scrub._PYTHON_RUNTIME_ENV:
+        assert name not in captured["env"]
+
+
+def test_legacy_validate_core_ps1_scrubs_python_runtime_env(tmp_path: Path, monkeypatch):
+    """#4552: the legacy ``tools/worktree/validate-core.ps1`` fallback
+    subprocess (no ``validate_hook``/``validate_paths`` configured) must not
+    inherit a leaked Python-runtime-selection var either."""
+    import subprocess
+
+    from agent_worktrees import env_scrub, finalize
+
+    repo, wt_id, config = _make_pushable_repo(tmp_path, 1, monkeypatch)
+    script = repo / "tools" / "worktree" / "validate-core.ps1"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text("# legacy validator\n", encoding="utf-8")
+    _git(repo, "add", "tools")
+    _git(repo, "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "add legacy validator")
+    monkeypatch.setattr(finalize.git_ops, "push", lambda *a, **k: PushResult(ok=True))
+    monkeypatch.setattr(finalize.git_ops, "fetch", lambda *a, **k: None)
+    for name in env_scrub._PYTHON_RUNTIME_ENV:
+        monkeypatch.setenv(name, r"C:\fake\stale\value")
+    captured = {}
+    real_run = subprocess.run
+
+    def fake_run(cmd, **kw):
+        if cmd[:1] == ["pwsh.exe"]:
+            captured["env"] = kw.get("env")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+        return real_run(cmd, **kw)
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    ok = finalize.push_changes(wt_id, config, title="Test change")
+
+    assert ok is True
+    assert captured, "legacy validate-core.ps1 subprocess.run was never called"
+    for name in env_scrub._PYTHON_RUNTIME_ENV:
+        assert name not in captured["env"]
+

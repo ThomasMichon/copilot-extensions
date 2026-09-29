@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import types
+import typing
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,47 @@ class TestGitWrapper:
             assert e.returncode != 0
             assert isinstance(e.cmd, list)
             assert isinstance(e.stderr, str)
+
+
+class TestPythonRuntimeEnvScrub:
+    """#4552: a leaked PYTHONHOME/PYTHONPATH/PYTHONEXECUTABLE/VIRTUAL_ENV/
+    UV_INTERNAL__PYTHONHOME/__PYVENV_LAUNCHER__ from this plugin's own
+    runtime must never reach a spawned ``git`` child (or the
+    ``repository_identity_env()`` probes), since that redirects any other
+    interpreter the child in turn execs (e.g. a repo's pre-push hook) onto
+    this plugin's version-mismatched stdlib/venv."""
+
+    _LEAKED: typing.ClassVar[dict[str, str]] = {
+        "PYTHONHOME": r"C:\fake\stale\home",
+        "PYTHONPATH": r"C:\fake\stale\path",
+        "PYTHONEXECUTABLE": r"C:\fake\stale\python.exe",
+        "VIRTUAL_ENV": r"C:\fake\stale\venv",
+        "UV_INTERNAL__PYTHONHOME": r"C:\fake\uv\internal",
+        "__PYVENV_LAUNCHER__": r"C:\fake\stale\launcher.exe",
+    }
+
+    def test_git_scrubs_python_runtime_vars(self, monkeypatch):
+        import agent_worktrees.git_ops as go
+        for name, value in self._LEAKED.items():
+            monkeypatch.setenv(name, value)
+        captured = {}
+
+        def fake_run(cmd, **kw):
+            captured["env"] = kw.get("env")
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(go.subprocess, "run", fake_run)
+        go.git("--version")
+        for name in self._LEAKED:
+            assert name not in captured["env"]
+
+    def test_repository_identity_env_scrubs_python_runtime_vars(self, monkeypatch):
+        import agent_worktrees.git_ops as go
+        for name, value in self._LEAKED.items():
+            monkeypatch.setenv(name, value)
+        env = go.repository_identity_env()
+        for name in self._LEAKED:
+            assert name not in env
 
 
 class TestNoHooks:
