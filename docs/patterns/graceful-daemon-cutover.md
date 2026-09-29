@@ -454,8 +454,12 @@ cheaper than a review round.
 5. **Any process termination by PID needs a direct, dedicated safety test —
    an end-to-end rehearsal is not sufficient evidence.** Ship a unit test that
    proves the terminator (a) matches only a live, identity-verified target
-   (`locks.process_start_time` / `procs.terminate_pid_if_identity`-shaped
-   discipline — reuse it, do not re-derive), and (b) refuses on any identity
+   (the shared `zdd.diagnostics.process_start_time` /
+   `zdd.diagnostics.terminate_pid_if_identity` owner-validation and
+   identity-bound termination primitives — reuse them, do not re-derive a
+   parallel mechanism; a plugin-private module like `agent_worktrees.locks`/
+   `agent_worktrees.procs` is an example of the same discipline, not
+   something another plugin can import), and (b) refuses on any identity
    mismatch (stale PID, reused PID, wrong owner). This applies to every
    destructive repair/reap path, not only the first one you write.
 6. **Loopback control-plane surfaces need owner-scoped auth,** not just
