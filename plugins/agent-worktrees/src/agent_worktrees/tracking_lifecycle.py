@@ -296,10 +296,23 @@ def cancel_handoff(record: tracking.WorktreeRecord, token: str) -> bool:
             # worktree is genuinely headless right now (no successor since
             # claimed head some other way); never clobber a legitimate
             # newer head.
+            #
+            # `resolved_head_session is None` alone is not enough:
+            # resolved_head_session deliberately hides YIELDED sessions too,
+            # so a genuinely newer head that has since yielded its own
+            # pending handoff would also read as "no head" -- restoring
+            # THIS predecessor would silently overwrite that newer lineage.
+            # Require the raw latest head transition to still name this
+            # exact predecessor (or that no transition exists at all).
+            latest_transition = record.head_transitions[-1] if record.head_transitions else None
+            predecessor_is_latest_head = (
+                latest_transition is None or latest_transition.session_id == handoff.predecessor
+            )
             if (
                 predecessor is not None
                 and predecessor.state == "yielded"
                 and record.resolved_head_session is None
+                and predecessor_is_latest_head
             ):
                 predecessor.state = "active"
                 _append_head_transition(

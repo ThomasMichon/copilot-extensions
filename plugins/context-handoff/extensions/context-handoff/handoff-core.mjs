@@ -2462,7 +2462,13 @@ function loadStoredTaskHandoff(cwd, taskId, execute = runCli) {
   // pending ledger entry for a task abort just retired (PR #4570 review
   // round 14).
   const task = agentDispatchJson(["show", taskId], cwd, execute);
-  if (task?.status && HANDOFF_TERMINAL_STATUSES.has(task.status)) return null;
+  // Fail closed unless `show` positively confirms the task is still
+  // proposed/queued -- a claimed/started/suspended task has already been
+  // picked up (dispatchTaskConsumed treats it that way too), and a failed
+  // `show` itself must never be read as "safe to recover" (PR #4570 review
+  // round 15: rejecting only TERMINAL statuses still let every other
+  // nonterminal-but-already-consumed state through).
+  if (!ABORT_ELIGIBLE_TASK_STATUSES.has(task?.status)) return null;
   return {
     storage: "agent-dispatch",
     id: taskId,

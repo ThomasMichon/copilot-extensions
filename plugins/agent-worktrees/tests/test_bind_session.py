@@ -623,6 +623,42 @@ class TestCancelHandoff:
         assert after.resolved_head_session == "sess-successor"
         assert after.session_entry("sess-pred").state == "yielded"
 
+    def test_does_not_restore_a_stale_predecessor_over_a_newer_yielded_head(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        """Real regression this guards (PR #4570 review round 15):
+        resolved_head_session deliberately hides YIELDED sessions, so "no
+        current head" alone is not proof the worktree is genuinely headless
+        -- a genuinely newer head that has since yielded its OWN pending
+        handoff also reads as "no head" that way. Cancelling an OLDER
+        handoff (sess-a) must not restore sess-a to head and silently
+        overwrite sess-b's newer (still-pending) lineage."""
+        yaml_path = tmp_tracking_dir / "wt-hd.yaml"
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+        monkeypatch.setattr(m, "_json_output", lambda o: None)
+        m.tracking.register_session("wt-hd", "sess-a", source="handoff")
+        m.tracking.register_session("wt-hd", "sess-b", source="handoff")
+
+        with m.tracking._RecordLock(yaml_path):
+            record = m.tracking.load_record(yaml_path)
+            m.tracking.open_handoff(record, "sess-a", "task-a", save=False)
+            # sess-b claims head via its own transition (a real successor
+            # pickup/bind), then ALSO opens its own pending handoff, yielding.
+            record.session_entry("sess-b").state = "active"
+            m.tracking._append_head_transition(record, "sess-b", reason="test-setup")
+            m.tracking.open_handoff(record, "sess-b", "task-b", save=False)
+            m.tracking.save_record(record, yaml_path)
+
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task-a", worktree_dir="/tmp/src/wt-hd", worktree_id=None))
+        assert rc == 0
+        after = m.tracking.load_record(yaml_path)
+        by_token = {h.token: h.state for h in after.handoffs}
+        assert by_token["task-a"] == "cancelled"
+        assert by_token["task-b"] == "pending"
+        assert after.session_entry("sess-a").state == "yielded"
+        assert after.head_transitions[-1].session_id == "sess-b"
+
     def test_explicit_worktree_id_always_activates_its_owning_project(
         self, tmp_tracking_dir, monkeypatch_config, monkeypatch
     ):
