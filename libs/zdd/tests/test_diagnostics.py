@@ -161,6 +161,41 @@ def test_audit_and_apply_recover_stranded_survivor(tmp_path: Path):
     assert result["after"]["counts"]["total"] == 0
 
 
+def test_apply_recovers_stranded_survivor_with_make_client_only(tmp_path: Path):
+    record = breadcrumb.write_breadcrumb(
+        tmp_path,
+        state="draining",
+        old={"bind": "127.0.0.1", "port": 9281},
+        new_port=9282,
+        new_pid=303,
+    )
+    _set_breadcrumb_age(tmp_path, record, seconds=9999)
+    undrained: list[str] = []
+    state = {
+        "lock": {"pid": 101, "start_time": "owner"},
+        "live": {101: "owner"},
+        "terminated": [],
+    }
+
+    class _Client:
+        def __init__(self, base_url: str) -> None:
+            self.base_url = base_url
+
+        def health(self) -> dict:
+            return {"status": "draining"}
+
+        def undrain(self) -> dict:
+            undrained.append(self.base_url)
+            return {"draining": False}
+
+    result = diagnostics.apply_daemon_health(
+        _ctx(tmp_path, state=state, make_client=_Client)
+    )
+
+    assert undrained == ["http://127.0.0.1:9281"]
+    assert result["actions"][0]["result"]["recovered"] is True
+
+
 def test_audit_and_apply_reap_superseded_generation_without_touching_owner(tmp_path: Path):
     routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=202, version="1.0.0")
     routing.publish_active(

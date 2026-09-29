@@ -654,7 +654,7 @@ def apply_daemon_health(
         for finding in before.get("findings", []):
             if finding.get("kind") != "stranded_survivor":
                 continue
-            if ctx.make_client is None or ctx.health_check is None:
+            if ctx.make_client is None:
                 actions.append(
                     {
                         "kind": "stranded_survivor",
