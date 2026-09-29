@@ -107,6 +107,55 @@ def test_restore_canonical_copies_agreeing_copies_up(repo: Path):
     assert "shared-lib: canonical drift" not in check.stdout
 
 
+def test_restore_canonical_creates_missing_top_level_lib_and_copies_full_tree(repo: Path):
+    _seed_two_copies_in_sync(repo, version="0.1.0-dev21")
+    for plugin in ("alpha", "beta"):
+        _write(repo, f"plugins/{plugin}/libs/shared-lib/README.md", "# shared-lib\n")
+        _write(
+            repo,
+            f"plugins/{plugin}/libs/shared-lib/tests/test_shared.py",
+            "def test_ok():\n    assert True\n",
+        )
+
+    result = _run(repo, "--restore-canonical")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "canonical restored" in result.stdout
+
+    canonical = repo / "libs/shared-lib"
+    assert (canonical / "src/shared_lib/__init__.py").read_text() == "shared = 1\n"
+    assert (canonical / "pyproject.toml").read_text(encoding="utf-8").count("0.1.0-dev21") == 1
+    assert (canonical / "README.md").read_text(encoding="utf-8") == "# shared-lib\n"
+    assert (canonical / "tests/test_shared.py").read_text(encoding="utf-8") == (
+        "def test_ok():\n    assert True\n"
+    )
+
+
+def test_restore_canonical_skips_when_full_tree_differs_even_if_src_and_version_match(repo: Path):
+    _seed_two_copies_in_sync(repo)
+    _write(repo, "plugins/alpha/libs/shared-lib/README.md", "# alpha\n")
+    _write(repo, "plugins/beta/libs/shared-lib/README.md", "# beta\n")
+
+    result = _run(repo, "--restore-canonical")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "SKIPPED" in result.stdout
+    assert "complete filtered tree differs" in result.stdout
+    assert not (repo / "libs/shared-lib").exists()
+
+
+def test_restore_canonical_refuses_a_symlinked_copy_ancestor(repo: Path):
+    real = repo.parent / "shared-lib-real"
+    _write(real, "src/shared_lib/__init__.py", "shared = 1\n")
+    _lib_pyproject(real, "pyproject.toml", "0.1.0-dev1")
+    target = repo / "plugins" / "alpha" / "libs"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.symlink_to(real.parent, target_is_directory=True)
+
+    result = _run(repo, "--restore-canonical")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "is a symlink -- refusing" in result.stderr
+    assert not (repo / "libs/shared-lib").exists()
+
+
 def test_restore_canonical_skips_when_copies_disagree(repo: Path):
     _seed_two_copies_in_sync(repo)
     _write(repo, "plugins/beta/libs/shared-lib/src/shared_lib/__init__.py",

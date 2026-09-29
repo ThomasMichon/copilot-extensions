@@ -34,16 +34,32 @@ def test_installers_fall_back_and_preserve_bounded_diagnostics() -> None:
     assert "falling back to the base package" in posix
 
 
-def test_installers_preinstall_zdd_workspace_dependency() -> None:
+@pytest.mark.guard
+def test_installers_preinstall_uv_editable_workspace_dependencies() -> None:
     powershell = (PLUGIN / "scripts" / "init.ps1").read_text(encoding="utf-8")
     posix = (PLUGIN / "scripts" / "init.sh").read_text(encoding="utf-8")
 
     assert "agent-zdd" in powershell
     assert "$ZddDir = Join-Path $PluginDir 'libs\\zdd'" in powershell
     assert "zdd install failed" in powershell
+    assert "agent-venue-copilot" in powershell
+    assert "$VenueCopilotDir = Join-Path $PluginDir 'libs\\venue-copilot'" in powershell
+    assert "venue-copilot install failed" in powershell
+    assert "agent-session-liveness-probe" in powershell
+    assert (
+        "$SessionLivenessProbeDir = Join-Path $PluginDir 'libs\\session-liveness-probe'"
+        in powershell
+    )
+    assert "session-liveness-probe install failed" in powershell
     assert "agent-zdd" in posix
     assert 'ZDD_DIR="$PLUGIN_DIR/libs/zdd"' in posix
     assert "zdd install failed" in posix
+    assert "agent-venue-copilot" in posix
+    assert 'VENUE_COPILOT_DIR="$PLUGIN_DIR/libs/venue-copilot"' in posix
+    assert "venue-copilot install failed" in posix
+    assert "agent-session-liveness-probe" in posix
+    assert 'SESSION_LIVENESS_PROBE_DIR="$PLUGIN_DIR/libs/session-liveness-probe"' in posix
+    assert "session-liveness-probe install failed" in posix
 
 
 def test_windows_management_binstub_resolves_powershell_without_path() -> None:

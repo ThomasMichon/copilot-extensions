@@ -350,29 +350,38 @@ class TestDetachedLaunchAdditions:
         assert "--worktree-id" not in argv
 
     @pytest.mark.parametrize("login_shell", [False, True])
-    def test_staged_home_plugin_dirs_expand_in_the_remote_shell(self, login_shell: bool) -> None:
+    def test_staged_home_plugin_dirs_expand_in_the_remote_shell(
+        self, login_shell: bool, tmp_path: Path,
+    ) -> None:
         import shutil
         import subprocess
 
         bash = shutil.which("bash")
         if bash is None or os.name == "nt":
             pytest.skip("needs a POSIX bash")
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        stub = bindir / "agent-worktrees"
+        stub.write_text(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\"\n",
+            encoding="utf-8",
+        )
+        stub.chmod(0o755)
         cmd = build_copilot_remote_command(
             "anchor-example@cs-1", anchor=True, detach=True,
             seed="keep $HOME literal", driver="d",
             copilot_args=["--plugin-dir=$HOME/.stage/a b", "--no-ask-user"],
+            embody_bin=str(stub),
             login_shell=login_shell,
         )
         # The remote shell expands $HOME only inside --copilot-arg values; the
         # seed text stays verbatim.
-        script = f"embody_argv() {{ printf '%s\\n' \"$@\"; }}; HOME=/h/u; {cmd}"
-        script = script.replace("agent-worktrees", "embody_argv", 1)
-        if login_shell:
-            script = script.replace("bash -lc ", "bash -c ", 1)
-            script = f"export -f embody_argv 2>/dev/null; {script}"
+        script = f"HOME=/h/u; {cmd}"
         out = subprocess.run(
             [bash, "--noprofile", "--norc", "-c", script],
-            capture_output=True, text=True, env={"PATH": "/usr/bin:/bin", "HOME": "/h/u"},
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin", "HOME": "/h/u"},
         ).stdout.splitlines()
         assert "--copilot-arg=--plugin-dir=/h/u/.stage/a b" in out
         assert "keep $HOME literal" in out

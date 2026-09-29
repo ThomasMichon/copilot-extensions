@@ -485,13 +485,13 @@ shape before committing to a design)_
                   original PyYAML-avoidance design. **This same lib also
                   depends on `agent-dropin-registry`/`agent-plugin-resolve`
                   -- apply the ordering caveat above too.**
-      - [ ] Remaining real lib copies never yet converted at all
+      - [x] Remaining real lib copies never yet converted at all
             (`session-liveness-probe`, `venue-copilot`) — convert directly
             to this form, skipping `src-passthrough` entirely.
-            `session-liveness-probe`/`venue-copilot` have no top-level
-            canonical `libs/<lib>/` yet (confirmed via `sync-vendored-libs
-            .py --check`'s advisory drift note) — needs a canonical-
-            promotion step before either is eligible for any conversion.
+            `session-liveness-probe`/`venue-copilot` initially had no top-level
+            canonical `libs/<lib>/`; completed 2026-09-29 by promoting both to
+            canonical first, then converting all 5 real consumers directly to
+            `uv`-editable references (see the 2026-09-29 Journal entry below).
             `zdd` was finished later (2026-09-29) for every real consumer
             **except** deliberately-excluded `agent-worktrees`; see the
             Journal entry below for the rationale.
@@ -2490,3 +2490,94 @@ _Pending._
   liveness-probe` and `venue-copilot` still need canonical promotion
   before any Phase 1 conversion; `src-passthrough` retirement and Phase
   2/3 remain outstanding.
+
+### 2026-09-29 — Phase 1: promoted `session-liveness-probe` + `venue-copilot`, then converted all 5 consumers
+
+- Re-derived the live consumer set from a fresh repo grep before touching
+  anything. Real copies were exactly:
+  - `session-liveness-probe`: `agent-containers`, `agent-codespaces`
+  - `venue-copilot`: `agent-ssh`, `agent-containers`, `agent-codespaces`
+  No extra `worktree-manager`/other plugin consumer surfaced.
+- Re-verified copy agreement *before promotion* two ways:
+  `sync-vendored-libs.py --check` still reported both libs as the only
+  source (no top-level canonical), and direct `diff -qr` / per-file test
+  hashes confirmed each lib's copies matched each other byte-for-byte
+  (including `tests/`).
+- **Found and fixed a real tool gap in the canonical-promotion step**:
+  `sync-vendored-libs.py --restore-canonical`'s docstring claimed it could
+  copy the shipped truth "up into `libs/<lib>`", but the implementation
+  only worked when `libs/<lib>/` already existed *and* only synced `src/`
+  plus the version string. That would have skipped both libs entirely here
+  and would still have produced incomplete canonicals (dropping `README.md`,
+  `tests/`, and any non-version `pyproject.toml` changes). Fixed
+  `--restore-canonical` to create a missing canonical root and copy the
+  whole filtered lib tree, plus a regression test for the missing-canonical
+  case.
+- **Found and fixed a second tool gap exposed immediately by the first real
+  promotion attempt**: `tools/uv_editable_ref.py`'s `lib_tree_matches()`
+  ignored `build/` but not `*.egg-info`, so perfectly-agreeing real copies
+  that only differed by generated packaging metadata falsely looked drifted
+  and blocked conversion. Taught the comparison to ignore `*.egg-info`
+  artifacts too and added a regression test.
+- Promoted both canonicals:
+  `libs/session-liveness-probe/` and `libs/venue-copilot/`.
+- Converted every real consumer directly to the `uv`-editable canonical-
+  reference form:
+  - `agent-containers`: `session-liveness-probe`, `venue-copilot`
+  - `agent-codespaces`: `session-liveness-probe`, `venue-copilot`
+  - `agent-ssh`: `venue-copilot`
+- Install-script audit findings/fixes:
+  - `agent-containers`' `init.sh` / `init.ps1` preinstalled
+    `credential-relay`/`config-migrate`/`zdd` only. Added repo-root
+    fallback + explicit `agent-venue-copilot` /
+    `agent-session-liveness-probe` preinstalls to both variants.
+  - `agent-codespaces`' `install.sh` / `install.ps1` similarly stopped at
+    `zdd`; added both libs to editable and non-editable preinstall paths,
+    again with marketplace/repo-root fallback handling.
+  - `agent-ssh` needed `venue-copilot` in its shared vendored-lib
+    resolver/fallback path; added a dedicated resolver on both shell
+    variants and extended the pip-fallback dependency list to use it.
+- Repo-wide `tests/` grep found **no hardcoded**
+  `libs/session-liveness-probe` or `libs/venue-copilot` path in fixtures,
+  runtime-gate tests, or shared generators. The only test updates needed
+  were installer-contract assertions for the new preinstall/fallback
+  coverage plus canonical-lib `conftest.py` files so the new top-level
+  suites can run directly in CI.
+- Added/updated canonical lib docs for the new state:
+  `libs/session-liveness-probe/README.md`,
+  `libs/session-liveness-probe/src/session_liveness_probe/__init__.py`,
+  `libs/venue-copilot/README.md`,
+  `libs/venue-copilot/src/venue_copilot/__init__.py`
+  now describe the canonical-source + dev-time `uv`-editable /
+  release-time materialization split instead of the old per-plugin-copy-only
+  model.
+- Extended CI's "Canonical shared-library tests" step to run
+  `libs/session-liveness-probe/tests` and `libs/venue-copilot/tests`, since
+  no converted consumer now carries those suites under its own tree.
+- Validation/verification completed:
+  - full repo gate green:
+    `sync-vendored-libs.py --check`,
+    `check-vendored-libs-sync.py`,
+    `check-install-contract.py`,
+    `check-version-consistency.py`,
+    `check-module-size.py`,
+    `check-docs-consistency.py`
+  - converted consumer suites green:
+    `agent-ssh`, `agent-containers`, `agent-codespaces`
+  - fresh non-editable probe installs:
+    `uv pip install --no-cache plugins/agent-containers` resolved
+    `session_liveness_probe.__file__` to canonical
+    `libs/session-liveness-probe/src/session_liveness_probe/__init__.py`;
+    `uv pip install --no-cache plugins/agent-ssh` resolved
+    `venue_copilot.__file__` to canonical
+    `libs/venue-copilot/src/venue_copilot/__init__.py`
+  - `materialize_main.py --dest` round-tripped converted consumers cleanly:
+    `agent-containers` rewrote
+    `agent-session-liveness-probe = { path = "libs/session-liveness-probe" }`
+    and restored a byte-identical vendored tree; `agent-ssh` did the same
+    for `agent-venue-copilot = { path = "libs/venue-copilot" }`, with
+    `editable = true` stripped in both materialized manifests.
+- **Still not done after this leg:** `agent-worktrees`' deliberately-
+  excluded real `zdd` copy; `src-passthrough` retirement (once nothing
+  else depends on it); Phase 2 (installer engine); Phase 3 (pattern doc /
+  Phase 0-style broader audit).

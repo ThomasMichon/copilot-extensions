@@ -135,6 +135,8 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
     (plugin / "libs" / "dropin-registry").mkdir(parents=True)
     (plugin / "libs" / "ssh-manager").mkdir(parents=True)
     (plugin / "libs" / "ssh-manager" / "pyproject.toml").write_text("", encoding="utf-8")
+    (plugin / "libs" / "venue-copilot").mkdir(parents=True)
+    (plugin / "libs" / "venue-copilot" / "pyproject.toml").write_text("", encoding="utf-8")
     (plugin / "libs" / "zdd").mkdir(parents=True)
     (plugin / "libs" / "zdd" / "pyproject.toml").write_text("", encoding="utf-8")
     marker = tmp_path / "pip-fallback-ran"
@@ -155,6 +157,7 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
                 resolve_vendored_lib,
                 "_resolve_ssh_manager() { _resolve_vendored_lib ssh-manager; }",
                 "_resolve_agent_procutil() { _resolve_vendored_lib agent-procutil; }",
+                "_resolve_venue_copilot() { _resolve_vendored_lib venue-copilot; }",
                 "_resolve_zdd() { _resolve_vendored_lib zdd; }",
                 install_package,
                 "HAVE_UV=0",
@@ -181,6 +184,7 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
     assert str(plugin / "libs" / "agent-procutil") in fallback_args
     assert str(plugin / "libs" / "dropin-registry") in fallback_args
     assert str(plugin / "libs" / "ssh-manager") in fallback_args
+    assert str(plugin / "libs" / "venue-copilot") in fallback_args
     assert str(plugin / "libs" / "zdd") in fallback_args
     assert str(plugin) in fallback_args
 
@@ -202,7 +206,8 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
     )
 
     # git-checkout layout: repo_root/plugins/agent-ssh (no local libs/
-    # copy) and repo_root/libs/{ssh-manager,agent-procutil} (canonical).
+    # copy) and repo_root/libs/{ssh-manager,agent-procutil,venue-copilot}
+    # (canonical).
     repo_root = tmp_path / "repo"
     plugin = repo_root / "plugins" / "agent-ssh"
     plugin.mkdir(parents=True)
@@ -213,6 +218,9 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
     canonical_agent_procutil = repo_root / "libs" / "agent-procutil"
     canonical_agent_procutil.mkdir(parents=True)
     (canonical_agent_procutil / "pyproject.toml").write_text("", encoding="utf-8")
+    canonical_venue_copilot = repo_root / "libs" / "venue-copilot"
+    canonical_venue_copilot.mkdir(parents=True)
+    (canonical_venue_copilot / "pyproject.toml").write_text("", encoding="utf-8")
     canonical_zdd = repo_root / "libs" / "zdd"
     canonical_zdd.mkdir(parents=True)
     (canonical_zdd / "pyproject.toml").write_text("", encoding="utf-8")
@@ -235,6 +243,7 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
                 resolve_vendored_lib,
                 "_resolve_ssh_manager() { _resolve_vendored_lib ssh-manager; }",
                 "_resolve_agent_procutil() { _resolve_vendored_lib agent-procutil; }",
+                "_resolve_venue_copilot() { _resolve_vendored_lib venue-copilot; }",
                 "_resolve_zdd() { _resolve_vendored_lib zdd; }",
                 install_package,
                 "HAVE_UV=0",
@@ -260,12 +269,20 @@ def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: 
     fallback_args = marker.read_text(encoding="ascii")
     assert str(canonical_ssh_manager.resolve()) in fallback_args
     assert str(canonical_agent_procutil.resolve()) in fallback_args
+    assert str(canonical_venue_copilot.resolve()) in fallback_args
     assert str(canonical_zdd.resolve()) in fallback_args
 
 
-def test_powershell_installer_resolves_zdd_via_shared_helper() -> None:
+def test_powershell_installer_resolves_uv_editable_libs_via_shared_helper() -> None:
     installer = INSTALLER.read_text(encoding="utf-8")
 
+    assert "[switch]$SkipUv" in installer
+    assert "function Resolve-VenueCopilot" in installer
+    assert "Resolve-VendoredLib -LibName 'venue-copilot'" in installer
+    assert "$venueCopilotDir = Resolve-VenueCopilot" in installer
+    assert "--reinstall-package agent-venue-copilot" in installer
+    assert "venue-copilot uv preinstall failed -- falling back to python -m pip" in installer
+    assert "-SkipUv:$skipUv" in installer
     assert "function Resolve-Zdd" in installer
     assert "Resolve-VendoredLib -LibName 'zdd'" in installer
     assert "$zddDir = Resolve-Zdd" in installer

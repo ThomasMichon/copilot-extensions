@@ -833,8 +833,8 @@ def materialize_file_pointers(dest: Path, *, canonical_root: Path) -> list[str]:
 
 def _ignore(_dir: str, names: list[str]) -> set[str]:
     return {n for n in names if n in {
-        ".git", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist",
-    } or n.endswith((".pyc", ".pyo"))}
+        ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "dist",
+    } or n.endswith((".pyc", ".pyo")) or n.endswith(".egg-info")}
 
 
 def build(dest: Path, *, source_root: Path = REPO) -> list[str]:

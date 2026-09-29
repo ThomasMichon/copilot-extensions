@@ -39,3 +39,19 @@ the only thing each provider's own `copilot` command has to own.
   orchestration. `connect` is the one provider-supplied callback: given the
   remote command string, it opens the actual interactive channel and returns
   its exit code.
+
+## Vendoring
+
+**In dev**, every consumer's `pyproject.toml` references this library through
+a `uv`-editable canonical pointer (`vendor-pointer-generalization` effort,
+Phase 1) --
+`agent-venue-copilot = { path = "../../libs/venue-copilot", editable = true }`
+-- so every consumer resolves to this one source tree; there is no per-plugin
+dev copy to keep in sync.
+
+**At release**, `tools/materialize_main.py` rewrites that same pointer into a
+real, promoted copy at `plugins/<plugin>/libs/venue-copilot/` for each
+consumer -- non-editable, so a published plugin installs a self-contained
+source tree with no cross-plugin `path` reference. `tools/sync-vendored-libs.py
+--check` verifies every materialized copy's `src/` tree and version stay
+byte-identical to this canonical one and to each other.

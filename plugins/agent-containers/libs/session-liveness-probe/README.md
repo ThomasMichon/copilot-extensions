@@ -35,10 +35,16 @@ caller style with no `asyncio.run()` conflicts.
 
 ## Vendoring
 
-This lib is **vendored per plugin** at
-`plugins/<plugin>/libs/session-liveness-probe` (a marketplace-installed
-plugin can only reference libs inside its own dir via
-`[tool.uv.sources] agent-session-liveness-probe = { path = "libs/session-liveness-probe" }`).
-Every copy's `src/` tree must stay **byte-identical** and declare the
-**same version** — enforced by `tools/check-vendored-libs-sync.py`. A
-source change to one copy MUST be propagated to all, with a version bump.
+**In dev**, every consumer's `pyproject.toml` references this library through
+a `uv`-editable canonical pointer (`vendor-pointer-generalization` effort,
+Phase 1) --
+`agent-session-liveness-probe = { path = "../../libs/session-liveness-probe",
+editable = true }` -- so every consumer resolves to this one source tree;
+there is no per-plugin dev copy to keep in sync.
+
+**At release**, `tools/materialize_main.py` rewrites that same pointer into a
+real, promoted copy at `plugins/<plugin>/libs/session-liveness-probe/` for each
+consumer -- non-editable, so a published plugin installs a self-contained
+source tree with no cross-plugin `path` reference. `tools/sync-vendored-libs.py
+--check` verifies every materialized copy's `src/` tree and version stay
+byte-identical to this canonical one and to each other.

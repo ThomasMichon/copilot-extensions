@@ -1,4 +1,4 @@
-"""Shared venue-side CLI-mode ``copilot`` launch orchestration (vendored).
+"""Shared venue-side CLI-mode ``copilot`` launch orchestration.
 
 Provider-agnostic core for ``agent-codespaces copilot <name>`` / ``agent-
 containers copilot <name>`` (agent-bridge-cli-mode-sessions Phase 4): reserve a
@@ -11,9 +11,11 @@ trusted container, or a restricted-fleet ``docker exec`` for containers), and
 always release the reservation afterward.
 
 Only ``connect`` is provider-specific; reserve/build-command/release is
-identical across venues, hence this shared lib (vendored the same way as
-``ssh-manager``/``credential-relay``: byte-identical ``src/`` per
-``tools/check-vendored-libs-sync.py``).
+identical across venues, hence this shared canonical lib. In `dev`, consumers
+reach it through `uv`-editable canonical references
+(`vendor-pointer-generalization` effort, Phase 1); at promotion,
+`tools/materialize_main.py` rewrites those references back into real local
+copies inside each shipped plugin payload.
 """
 from __future__ import annotations
 

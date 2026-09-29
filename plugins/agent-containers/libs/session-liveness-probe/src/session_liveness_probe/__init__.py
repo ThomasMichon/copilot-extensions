@@ -1,6 +1,7 @@
 """Transport-agnostic Copilot CLI session-liveness probe.
 
-Vendored per copilot-extensions.session-rescue-parity Phase 2: the
+Canonical shared source for the `uv`-editable vendoring form
+(`vendor-pointer-generalization` effort, Phase 1). The
 ``inuse.*.lock`` + ``/proc/<pid>`` liveness-probe technique is a property of
 the Copilot CLI's own session-state layout (``~/.copilot/session-state``),
 not of any one transport. This module owns the two pure, transport-agnostic
