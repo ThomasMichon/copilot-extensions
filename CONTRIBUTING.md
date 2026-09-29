@@ -253,6 +253,18 @@ copilot-extensions finalize          # clean up the worktree
 
 ### Waiting for a verdict
 
+> **TL;DR (the shared stopping rule both the author and reviewer converge
+> on):** `Approve` → merge. `Comment` with **zero Medium/High-severity
+> findings open and green checks** → also merge — this is the passing
+> verdict on an owner-authored PR, and (per step 5 below) the accepted
+> stall-breaker on a Contributor PR after one full loop. Any Medium/High
+> finding still open blocks merging regardless of verdict shape. Low-severity
+> findings are advisory once that condition holds — do not keep iterating
+> chasing a clean `Comment` with zero comments left; that is not the bar.
+> The full loop below covers cursor hygiene, re-review requests, and the
+> Contributor-vs-owner verdict-shape difference in detail — read it once,
+> then apply this TL;DR on every subsequent round rather than re-deriving it.
+
 **Copilot code review can only ever render two outcomes: `Approve` or
 `Comment`.** (There is no "Request changes" capability in Copilot code
 review at all — confirmed against GitHub's own current docs, which state
@@ -412,6 +424,34 @@ remains.
 - **Never** `git push origin main` or `push-changes` direct-to-`main`; both the
   tooling and the branch policy reject it. Break-glass (a genuine recovery)
   means temporarily relaxing the ruleset — not routing around it.
+
+### Self-review against REVIEW.md before opening a PR
+
+[`REVIEW.md`](REVIEW.md) is not reviewer-only reading. It is the same rubric
+Copilot's automated review applies to your diff, so read it and self-check
+your own change against its directives **before** opening the PR, not after
+the first review round names what it would have caught. This is the single
+highest-leverage step for reducing review rounds: a coding agent that opens a
+PR "blind" to the rubric the reviewer will apply is guaranteed at least one
+avoidable round on anything the rubric already names (changefile
+completeness, Documentation impact, cross-platform parity, test coverage for
+changed runtime logic, and so on).
+
+Two failure modes to avoid once review findings start arriving, both of
+which turn a bounded review loop into an unbounded one:
+
+- **Whack-a-mole fixes.** When a finding names one instance of a bug class
+  (a missing test, an unserialized race, a platform gap), check the rest of
+  the diff for the *same class*, not just the flagged line — fixing one
+  instance while a sibling function has the identical defect just spends the
+  next review round rediscovering it.
+- **Chasing zero comments instead of the actual bar.** Once the loop in
+  "Waiting for a verdict" above says you've passed (its TL;DR: `Approve`, or
+  `Comment` with zero Medium/High findings and green checks), stop and
+  merge. Continuing to iterate on remaining Low-severity findings past that
+  point is not more thorough — it's optimizing for a bar (zero remaining
+  comments) neither this repo's contribution flow nor the automated
+  reviewer's own directives actually require.
 
 ### Parent trackers stay open across partial slices
 

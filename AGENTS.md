@@ -162,6 +162,26 @@ as-is) → **contribution** (this file + the harness skills, how-to-land).
 > step-by-step, and `diagnosing-copilot-extensions` covers a broken plugin or
 > deploy.
 
+### Coding-Agent / Reviewer Alignment
+
+Both roles work from the **same rubric**, not adversarial, independently-derived
+standards — read [`REVIEW.md`](REVIEW.md) and self-check your own diff against
+it *before* opening a PR, rather than treating the first review round as your
+first exposure to what it checks for. When a finding does arrive, fix the bug
+*class* it names everywhere that class recurs in your diff, not only the one
+flagged instance — a per-instance fix just spends the next round rediscovering
+a sibling.
+
+Both roles also share one **stopping rule**, spelled out in full in
+`CONTRIBUTING.md` § "Waiting for a verdict": `Approve`, or a `Comment` verdict
+with zero Medium/High-severity findings open and green checks, is the passing
+verdict — full stop. Continuing to iterate on remaining Low-severity findings
+past that point is not extra diligence; it is chasing a bar (zero remaining
+comments) that neither this repo's contribution flow nor the reviewer's own
+directives require. If you are driving a PR toward merge and unsure whether
+you've reached that point, re-read that section before assuming a further
+round is needed.
+
 ### Test Portfolio
 
 Required pull-request CI must remain a fast, change-scoped contract gate; do not
