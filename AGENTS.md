@@ -174,12 +174,14 @@ a sibling.
 
 Both roles also share one **stopping rule for Copilot's own verdict** —
 spelled out in full in `CONTRIBUTING.md` § "Waiting for a verdict": `Approve`,
-or a `Comment` verdict with zero Medium/High-severity findings open and green
-checks, satisfies that gate (on a Contributor PR, only after one full review
-loop — a first-round clean `Comment` still needs another attempt). Continuing
-to iterate on remaining Low-severity findings past that point is not extra
-diligence; it is chasing a bar (zero remaining comments) that neither this
-repo's contribution flow nor the reviewer's own directives require.
+or a `Comment` verdict with zero Medium/High-severity findings open, satisfies
+that gate (on a Contributor PR, only after one full review loop — a
+first-round clean `Comment` still needs another attempt). A still-open
+Low-severity finding at that point is either genuinely valuable to fix, or
+already considered and dismissed — spinning a further review round solely to
+make the comment thread read zero is chasing a bar that neither this repo's
+contribution flow nor the reviewer's own directives require. Required status
+checks are a separate merge gate, independent of this verdict condition.
 **Satisfying Copilot's verdict is never merge authorization by itself** — a
 Contributor PR still needs a separate Maintainer-approval review before
 merging (see "Review" in `CONTRIBUTING.md`); only the repo owner's own
