@@ -265,6 +265,10 @@ class QueueClient:
         self.queue = queue
 
     def list(self, **kwargs):
+        status = kwargs.get("status")
+        if isinstance(status, str) and "," in status:
+            kwargs = dict(kwargs)
+            kwargs["status"] = [part.strip() for part in status.split(",") if part.strip()]
         return [asdict(task) for task in self.queue.list(**kwargs)]
 
     def get(self, task_id):
@@ -708,6 +712,32 @@ def test_same_occurrence_is_not_reemitted_after_restart():
 
     assert result["suppressed"] is True
     assert client.created == []
+    assert provider.reserved == []
+    assert provider.list_calls == 0
+
+
+def test_same_occurrence_is_not_reemitted_after_restart_with_queue_client(tmp_path):
+    queue = RepoDefaultingQueue(tmp_path / "tasks.db")
+    repo = "example/project"
+    existing = queue.create(
+        "old",
+        repo=repo,
+        source="repository-backlog",
+        origin_ref="backlog/occurrence/7200",
+        exclusive_key="repository-issue-loop:backlog",
+    )
+    queue.claim_one("worker-1", repo=repo, task_id=existing.id)
+    queue.start(existing.id, "worker-1")
+    queue.complete(existing.id, "worker-1")
+    client = QueueClient(queue)
+    provider = FakeProvider([_issue(1)])
+
+    result = run_tick(
+        client, _config(repo=repo), provider=provider, clock=lambda: 7_500
+    )
+
+    assert result["suppressed"] is True
+    assert result["same_occurrence_tasks"][0]["id"] == existing.id
     assert provider.reserved == []
     assert provider.list_calls == 0
 

@@ -254,7 +254,10 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
     if getattr(args, "board", False):
         from . import board_cli as _board_cli
 
-        status = "proposed,queued,claimed,started,suspended,completed,abandoned,dead_letter"
+        status = (
+            "proposed,queued,claimed,started,suspended,"
+            "submitted,completed,abandoned,dead_letter"
+        )
         with _core()._client(args) as c:
             tasks = c.list(repo=None, status=status, label=args.label, limit=args.limit)
             def _relay_fetch_many(

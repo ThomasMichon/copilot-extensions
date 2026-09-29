@@ -428,7 +428,7 @@ def main(argv: list[str] | None = None) -> int:
     query = {
         "status": (
             "proposed,queued,claimed,started,suspended,"
-            "completed,abandoned,dead_letter"
+            "submitted,completed,abandoned,dead_letter"
         ),
         "limit": str(args.limit),
     }

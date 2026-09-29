@@ -3338,10 +3338,10 @@ class Supervisor:
         return max(overrides) if overrides else self.max_attempts
 
     def advance_via_evaluator(self) -> int:
-        """Feed each newly-terminal task's lifecycle event to the evaluator and
+        """Feed each newly-concluded task's lifecycle event to the evaluator and
         apply its decisions (the service-driven loop-advancement pass).
 
-        Lists recent terminal tasks in the lane (completed / abandoned), and for
+        Lists recent concluded tasks in the lane (submitted / abandoned), and for
         each one not yet seen this process, synthesizes the coordinator-shaped
         lifecycle event ``{"type": "task.submitted"|"task.abandoned", "task":
         {...}}``, runs the evaluator, and applies the returned decisions through
@@ -3351,7 +3351,7 @@ class Supervisor:
 
         Best-effort and non-fatal: a bad evaluator or a failed create is logged
         and skipped, never allowed to abort the supervision cycle. Each task's
-        terminal event fires **at most once per process**; the emitted follow-up's
+        concluded event fires **at most once per process**; the emitted follow-up's
         ``dedup_key`` is the durable cross-restart guard against duplicates.
         """
         if self.evaluator is None:
