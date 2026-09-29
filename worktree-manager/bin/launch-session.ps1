@@ -839,6 +839,30 @@ if ($plan.PSObject.Properties.Name -contains 'launch') {
 # below, without depending on $plan still being reachable at trap time.
 if ($plan.worktree_id) { $script:LaunchWorktreeId = [string]$plan.worktree_id }
 
+# Register this launcher's own root pid as a protected process root (#4454
+# follow-up: a version-cutover reap elsewhere on the machine unconditionally
+# kills every process resolved under a superseded runtime slot -- including a
+# short-lived `agent_worktrees resolve`/`activity-log`/`get` subprocess THIS
+# launcher spawns later in its own run, if the cutover lands at the wrong
+# instant). Registering here lets that reap recognize this whole process
+# tree as live, still-running work rather than an orphan. Synchronous (not
+# the detached Write-ActivityLog pattern): the write must complete before any
+# later subprocess call in this run could become a reap target. Best-effort
+# -- a failure here only widens the pre-existing race back to today's
+# behavior, never blocks or fails the launch.
+if ($script:LaunchWorktreeId -and $VenvPython -and (Test-Path -LiteralPath $VenvPython)) {
+    try {
+        & $VenvPython -m agent_worktrees register-launch `
+            --worktree-id $script:LaunchWorktreeId --pid $PID `
+            --launch-id $script:LaunchId *>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-SetupLog "register-launch exited $LASTEXITCODE -- continuing unprotected" 'WARN'
+        }
+    } catch {
+        Write-SetupLog "register-launch failed: $($_.Exception.Message)" 'WARN'
+    }
+}
+
 # The resolved plan's `project` is authoritative for the worktree this launch
 # actually targets -- it can legitimately differ from this script's own
 # ambient/starting project (e.g. an initial `--project` inherited from how

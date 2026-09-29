@@ -100,6 +100,7 @@ from . import (
     front_door_cli,
     git_ops,
     handoff_trace,
+    launch_registry,
     list_cache,  # noqa: F401 -- compatibility re-export for extracted status-monitor CLI
     locks,
     output,
@@ -5627,6 +5628,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--field", action="append", default=[], help="Extra context as key=value (repeatable)"
     )
 
+    # register-launch -- record this launch's own root pid (internal)
+    launch_registry.add_parsers(sub)
+
     return parser
 
 
@@ -5784,6 +5788,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'reconcile-plugins': ('update_cli', 'cmd_reconcile_plugins'),
     'reconcile-sessions': ('status_monitor_runtime', 'cmd_reconcile_sessions'),
     'register': ('installation_cli', 'cmd_register'),
+    'register-launch': ('launch_registry', 'cmd_register_launch'),
     'register-project-entry': ('maintenance_cli', 'cmd_register_project_entry'),
     'register-session': ('session_binding_cli', 'cmd_register_session'),
     'remove-system': ('worktree_ops_cli', 'cmd_remove_system'),
@@ -5835,7 +5840,7 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
     "services", "repos", "accounts", "copilot-identity", "related", "state-root",
     "coordination-readiness", "config-root", "knowledge", "git",
     "pr-watch", "pr-merge", "pr-research", "pr",
-    "activity", "activity-log", "stage-update", "reconcile-marketplaces",
+    "activity", "activity-log", "register-launch", "stage-update", "reconcile-marketplaces",
     "execution-leg", "copilot", "resolve", "handoff-trace",
 })
 
@@ -5858,6 +5863,7 @@ _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "follow_ups_cli",
     "handoff_cli",
     "installation_cli",
+    "launch_registry",
     "list_cli",
     "maintenance_cli",
     "pane_lifecycle",
@@ -6496,6 +6502,7 @@ def _load_full_command_surface() -> None:
         "anchor-check": cmd_anchor_check,
         "activity": activity.cmd_activity,
         "activity-log": activity.cmd_activity_log,
+        "register-launch": launch_registry.cmd_register_launch,
     }
     _FULL_SURFACE_LOADED = True
 

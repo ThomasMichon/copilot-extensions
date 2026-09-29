@@ -810,6 +810,22 @@ if [[ "$ACTION" == "exec" ]]; then
     WORKTREE_ID=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('worktree_id') or '')")
     NO_MUX=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('no_mux') else '0')")
 
+    # Register this launcher's own root pid as a protected process root
+    # (#4454 follow-up: a version-cutover reap elsewhere on the machine
+    # unconditionally kills every process resolved under a superseded
+    # runtime slot -- including a short-lived `agent_worktrees
+    # resolve`/`activity-log`/`get` subprocess THIS launcher spawns later in
+    # its own run, if the cutover lands at the wrong instant). Synchronous,
+    # not backgrounded: the write must complete before any later subprocess
+    # call in this run could become a reap target. Best-effort -- a failure
+    # here only widens the pre-existing race back to today's behavior.
+    if [[ -n "$WORKTREE_ID" ]]; then
+        "$PYTHON" -m agent_worktrees register-launch \
+            --worktree-id "$WORKTREE_ID" --pid "$$" --launch-id "$LAUNCH_ID" \
+            >/dev/null 2>&1 \
+            || setup_log WARN "register-launch failed (exit $?)"
+    fi
+
     # Env var override takes precedence
     _NO_MUX="${WORKTREE_NO_MUX:-}"
     if [[ "$_NO_MUX" == "1" ]]; then
