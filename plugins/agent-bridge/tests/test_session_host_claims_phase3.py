@@ -218,3 +218,79 @@ def test_shutdown_releases_every_claim_this_generation_holds(tmp_path) -> None:
     assert set(released) == {"s1", "s2"}
     assert mgr._host_index.get("s1").owner_generation == ""
     assert mgr._host_index.get("s2").owner_generation == ""
+
+
+# -- claim_hosts=False: a passive instance never claims at startup (PR #4543
+# review) -------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_claim_hosts_false_reattaches_without_claiming(tmp_path, monkeypatch) -> None:
+    """A passive cutover instance's own startup scan must not stamp
+    generation ownership onto a record the still-live old generation may
+    still be driving -- even though (pre-claim) this is indistinguishable
+    from a legitimately unclaimed record. It still reattaches (unchanged,
+    pre-Phase-3 behavior); it just never calls claim()."""
+    mgr = _session_manager(tmp_path)
+    session = Session("session-1", "agent", SpawnTarget(type="local", cwd=str(tmp_path)))
+    session.status = SessionStatus.STOPPED
+    session.acp_session_id = "acp-1"
+    mgr._sessions[session.session_id] = session
+    _register(mgr, session.session_id)
+    rec = SimpleNamespace(
+        session_id=session.session_id, protocol_version=1, host_version="test",
+        host_pid=123, child_pid=456, created_at=time.time(),
+        resume_on_reattach=False, boundary="local",
+    )
+    attach = AsyncMock(return_value=True)
+    monkeypatch.setattr(mgr, "_recover_remote_host_records", AsyncMock(return_value=0))
+    monkeypatch.setattr(mgr, "_prune_dead_hosts", lambda: None)
+    monkeypatch.setattr(mgr, "_live_host_records", lambda: [rec])
+    monkeypatch.setattr(mgr, "_rec_child_alive", lambda _rec: True)
+    monkeypatch.setattr(mgr, "_reattach_one", attach)
+
+    reattached = await mgr.reattach_session_hosts(
+        remote_recovery_timeout=1.0, claim_hosts=False,
+    )
+    assert reattached == 1
+    attach.assert_awaited_once()
+    # No claim was ever attempted -- ownership fields are untouched.
+    assert mgr._host_index.get(session.session_id).owner_generation == ""
+
+
+@pytest.mark.asyncio
+async def test_claim_hosts_false_does_not_steal_a_live_other_generations_claim(
+    tmp_path, monkeypatch,
+) -> None:
+    """Even when a record IS already claimed by a live other generation, a
+    passive instance's claim_hosts=False scan reattaches anyway (matching
+    pre-Phase-3 behavior exactly) -- it simply never touches claim state
+    either way while passive."""
+    mgr = _session_manager(tmp_path)
+    session = Session("session-1", "agent", SpawnTarget(type="local", cwd=str(tmp_path)))
+    session.status = SessionStatus.STOPPED
+    session.acp_session_id = "acp-1"
+    mgr._sessions[session.session_id] = session
+    _register(mgr, session.session_id)
+    mgr._host_index.claim(
+        session.session_id, generation="live-old-generation", owner_pid=os.getpid(),
+        pid_alive=lambda p: True,
+    )
+    rec = SimpleNamespace(
+        session_id=session.session_id, protocol_version=1, host_version="test",
+        host_pid=123, child_pid=456, created_at=time.time(),
+        resume_on_reattach=False, boundary="local",
+    )
+    attach = AsyncMock(return_value=True)
+    monkeypatch.setattr(mgr, "_recover_remote_host_records", AsyncMock(return_value=0))
+    monkeypatch.setattr(mgr, "_prune_dead_hosts", lambda: None)
+    monkeypatch.setattr(mgr, "_live_host_records", lambda: [rec])
+    monkeypatch.setattr(mgr, "_rec_child_alive", lambda _rec: True)
+    monkeypatch.setattr(mgr, "_reattach_one", attach)
+
+    reattached = await mgr.reattach_session_hosts(
+        remote_recovery_timeout=1.0, claim_hosts=False,
+    )
+    assert reattached == 1
+    # The live other generation's own claim is untouched.
+    assert mgr._host_index.get(session.session_id).owner_generation == "live-old-generation"

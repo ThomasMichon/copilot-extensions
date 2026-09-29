@@ -102,6 +102,9 @@ def test_http_protocol_constant_fixture_matches_production() -> None:
         "remote_session_copilot_args": (
             bridge_protocol.REMOTE_SESSION_COPILOT_ARGS_PROTOCOL_VERSION
         ),
+        "session_host_reattach": (
+            bridge_protocol.SESSION_HOST_REATTACH_PROTOCOL_VERSION
+        ),
     }
 
 

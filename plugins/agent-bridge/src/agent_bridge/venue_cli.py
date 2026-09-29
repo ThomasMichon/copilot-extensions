@@ -320,11 +320,22 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
             # adopted rather than left stranded until some later opportunity.
             # Best-effort, mirroring the existing relay-adopt post-cutover step.
             try:
+                from .protocol import SESSION_HOST_REATTACH_PROTOCOL_VERSION
+
                 active_url = f"http://{routing.format_authority(host, active.port)}"
-                reattach = make_client(active_url)._request(
-                    "POST", "/api/v1/session-hosts/reattach"
-                ) or {}
-                res.steps.append(f"post-cutover reattach: {reattach.get('reattached', 0)} session(s)")
+                active_client = make_client(active_url)
+                if active_client.daemon_supports(SESSION_HOST_REATTACH_PROTOCOL_VERSION):
+                    reattach = active_client._request(
+                        "POST", "/api/v1/session-hosts/reattach"
+                    ) or {}
+                    res.steps.append(
+                        f"post-cutover reattach: {reattach.get('reattached', 0)} session(s)"
+                    )
+                else:
+                    res.steps.append(
+                        "post-cutover reattach skipped: new daemon does not advertise "
+                        f"protocol >= {SESSION_HOST_REATTACH_PROTOCOL_VERSION}"
+                    )
             except Exception as exc:  # noqa: BLE001 -- best-effort, never fails the cutover
                 res.steps.append(f"post-cutover reattach failed (non-fatal): {exc}")
 

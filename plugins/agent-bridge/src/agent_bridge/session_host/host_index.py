@@ -198,6 +198,23 @@ class HostIndex:
             lease.release()
 
     # -- mutation ----------------------------------------------------------
+    def refresh(self) -> None:
+        """Reload the in-memory cache from the latest on-disk state.
+
+        Query methods (``get``/``all``/``live_records``/...) read this
+        process's own in-memory snapshot, which can predate a concurrent
+        writer's registration -- the other daemon generation during a
+        cutover, most importantly. A per-record reload inside :meth:`claim`
+        cannot help a scan that needs to *discover* a session id it doesn't
+        already know about (PR #4543 review). Call this before any scan
+        (like the startup/post-cutover reattach pass) that must see records
+        registered after this ``HostIndex`` was constructed. No lock is
+        needed for a plain reload: writes are atomic replace, so a reader
+        never observes a torn file, only possibly a slightly earlier or
+        later complete version.
+        """
+        self._load()
+
     def register(self, record: HostRecord) -> None:
         with self._locked_reload():
             self._records[record.session_id] = record

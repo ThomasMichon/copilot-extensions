@@ -95,12 +95,20 @@ async def shutdown(request: Request):
     runs, sessions stop, routing claim is retracted) -- a clean exit, so a
     systemd unit with Restart=on-failure does NOT resurrect it.
 
-    Before exiting, releases every session-host claim this generation holds
-    (effort agent-bridge-unified-zdd-cutover, Phase 3's exit contract): the
-    outgoing generation's own initiative, not something the next generation
-    has to wait on or discover by probing a dead pid. Best-effort -- a release
-    failure must never block the shutdown it's guarding against outliving.
+    Releases every session-host claim this generation holds (effort
+    agent-bridge-unified-zdd-cutover, Phase 3's exit contract) -- but only
+    once shutdown can actually be initiated. Releasing first and *then*
+    discovering there is no server handle to shut down would leave a still-
+    live daemon with no claims -- exactly the split ownership this whole
+    mechanism exists to prevent (PR #4543 review). Best-effort within that
+    ordering -- a release failure must never block the shutdown it's
+    guarding against outliving.
     """
+    server = getattr(request.app.state, "uvicorn_server", None)
+    if server is None:
+        return {"shutting_down": False, "reason": "no server handle",
+                "released_claims": []}
+
     mgr: SessionManager = request.app.state.session_manager
     released: list[str] = []
     try:
@@ -110,10 +118,6 @@ async def shutdown(request: Request):
             released = host_index.release_all(generation)
     except Exception:  # noqa: BLE001 -- release is best-effort, never blocks shutdown
         pass
-    server = getattr(request.app.state, "uvicorn_server", None)
-    if server is None:
-        return {"shutting_down": False, "reason": "no server handle",
-                "released_claims": released}
     server.should_exit = True
     return {"shutting_down": True, "released_claims": released}
 

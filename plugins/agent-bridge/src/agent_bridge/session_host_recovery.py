@@ -76,6 +76,7 @@ class _SessionHostRecoveryMixin:
         self,
         *,
         remote_recovery_timeout: float = 60.0,
+        claim_hosts: bool = True,
     ) -> int:
         """Reconnect to every surviving Session Host on startup (goal 3).
 
@@ -85,6 +86,23 @@ class _SessionHostRecoveryMixin:
         reattached loopback endpoint and **adopts** the existing ACP session --
         no child respawn, no lost session. Dead hosts are pruned. Returns the
         count reattached. No-op when no host index exists.
+
+        ``claim_hosts=False`` (PR #4543 review) skips the generation-claim
+        step entirely -- used for a **passive** cutover instance's own
+        startup scan. A record with no recorded owner is, correctly,
+        "recoverable" by design (Phase 2's claim/release/recover contract),
+        but on this repo's first rollout of Phase 3 -- and for any record a
+        generation registered without ever claiming its own writes -- that
+        would let a still-passive, not-yet-promoted daemon claim (and
+        reattach to) a Session Host the truly active old generation is still
+        live and driving, before the verified-retirement gate ever runs. A
+        passive instance therefore still warms up its ACP connections (the
+        pre-Phase-3, goal-3 behavior, unchanged) but does not touch claim
+        state; the post-cutover retry (``/api/v1/session-hosts/reattach``,
+        called only once the old generation is *confirmed* exited) is the
+        sole place claiming happens for a promoted generation. A normal
+        (non-passive) cold start still claims at startup as before -- there
+        is no other live generation to race in that case.
 
         **Version-mux (Phase 4).** A host advertising a wire-envelope protocol
         this frontend no longer speaks (a rare breaking host-layer change) is
@@ -96,6 +114,13 @@ class _SessionHostRecoveryMixin:
         """
         if self._host_index is None:
             return 0
+        # Reload from the latest on-disk state before scanning (PR #4543
+        # review): this process's own in-memory snapshot can predate a
+        # concurrent writer's registration -- most importantly the other
+        # daemon generation during a cutover -- and a per-record `claim()`
+        # reload cannot discover a session id absent from the stale scan
+        # below in the first place.
+        self._host_index.refresh()
         from .session_host.version_mux import HostDisposition, plan_host
 
         loop = asyncio.get_running_loop()
@@ -173,7 +198,7 @@ class _SessionHostRecoveryMixin:
                                     HostDisposition.FORCE_REAP):
                 self._reap_host_record(rec, plan.reason)
                 continue
-            if not self._claim_host_record(rec):
+            if claim_hosts and not self._claim_host_record(rec):
                 # A live different generation still owns this record -- do not
                 # reattach out from under it (the effort's own "the next
                 # generation earns the handoff, never assumes it" behavior).

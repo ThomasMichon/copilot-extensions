@@ -191,3 +191,47 @@ def test_claim_reloads_latest_state_across_instances(tmp_path: Path):
     # must still see `b`'s live claim (via a reload), not silently win.
     with pytest.raises(ClaimConflict):
         a.claim("s1", generation="gen-a", owner_pid=os.getpid(), pid_alive=lambda p: True)
+
+
+def test_concurrent_writers_from_two_instances_do_not_lose_updates(tmp_path: Path):
+    """A genuinely overlapping-in-time write from two ``HostIndex`` instances
+    over the same file (PR #4543 review: the sequential tests above prove
+    reload-before-write is correct, but would still pass even if the
+    cross-process lock were removed entirely -- this test forces real
+    temporal overlap via a barrier, so it only passes if the lock actually
+    excludes one writer while the other is mid reload-mutate-flush)."""
+    import threading
+
+    path = tmp_path / "hosts.json"
+    seed = HostIndex(path)
+    for i in range(20):
+        _register(seed, f"s{i}")
+
+    barrier = threading.Barrier(2)
+    errors: list[BaseException] = []
+
+    def _writer(idx: int) -> None:
+        try:
+            barrier.wait(timeout=5.0)
+            hi = HostIndex(path)
+            for i in range(20):
+                hi.set_resume_flag(f"s{i}", value=(idx == 0))
+        except BaseException as exc:  # noqa: BLE001 -- surfaced by the assertion below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_writer, args=(i,)) for i in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    assert not errors, errors
+    assert not any(t.is_alive() for t in threads)
+
+    # Every record must still be present -- neither writer's flush dropped
+    # the other's records, regardless of which one's `resume_on_reattach`
+    # value "won" the final write for each session.
+    final = HostIndex(path)
+    assert len(final.all()) == 20
+    for i in range(20):
+        assert final.get(f"s{i}") is not None

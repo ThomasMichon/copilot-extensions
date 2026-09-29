@@ -423,9 +423,19 @@ async def lifespan(app: FastAPI):
     # flapping report). Run it as a background task so the daemon serves
     # immediately; surviving sessions reattach concurrently, moments after
     # startup. The task is cancelled on shutdown.
+    #
+    # ``claim_hosts=publish_on_ready`` (PR #4543 review): a passive cutover
+    # instance (``publish_on_ready=False``) must not claim generation
+    # ownership of a Session Host the still-live old generation may still be
+    # driving -- it still warms up its ACP connections here (unchanged), but
+    # claiming waits for the post-cutover retry once the old generation is
+    # confirmed exited. A normal (non-passive) start has no other live
+    # generation to race and claims immediately.
     async def _reattach_session_hosts_bg() -> None:
         try:
-            n = await mgr.reattach_session_hosts()
+            n = await mgr.reattach_session_hosts(
+                claim_hosts=bool(getattr(app.state, "publish_on_ready", False)),
+            )
             if n:
                 logging.getLogger("agent-bridge").info(
                     "Reattached %d session(s) to surviving Session Hosts", n
