@@ -90,15 +90,29 @@ def test_rank_claims_unknown_kind_falls_back_to_default_rank():
         ResourceClaim(kind="task", ref="task-1"),
     ]
     ranked = claims_rank.rank_claims(claims, limit=None)
-    # "task" is the lowest NAMED tier; an unrecognized kind ranks even lower
-    # (the default fallback), so it comes after "task" here.
+    # An unrecognized kind ranks below every NAMED tier (including "session",
+    # the lowest named tier as of 2026-09-29) -- the default fallback.
     assert ranked == [("task", "task-1"), ("mystery-kind", "x#1")]
 
 
+def test_rank_claims_session_is_the_lowest_named_tier():
+    """Operator feedback, 2026-09-29: a session claim is the LEAST
+    differentiating kind for the CLAIMS column (every worktree effectively
+    has one), so it ranks below every other named tier, including "task"."""
+    claims = [
+        ResourceClaim(kind="session", ref="sess-1"),
+        ResourceClaim(kind="task", ref="task-1"),
+    ]
+    ranked = claims_rank.rank_claims(claims, limit=None)
+    assert ranked == [("task", "task-1"), ("session", "sess-1")]
+
+
 def test_format_claim_extracts_trailing_number():
-    assert claims_rank.format_claim("pr", "acme-org/sample-repo#2481") == "PR #2481"
-    assert claims_rank.format_claim("bug", "acme-org/sample-repo#2410") == "bug #2410"
-    assert claims_rank.format_claim("issue", "acme-org/sample-repo#2410") == "bug #2410"
+    """No kind prefix at all for PR/bug/issue -- the ref alone is
+    self-explanatory (operator feedback, 2026-09-29)."""
+    assert claims_rank.format_claim("pr", "acme-org/sample-repo#2481") == "#2481"
+    assert claims_rank.format_claim("bug", "acme-org/sample-repo#2410") == "#2410"
+    assert claims_rank.format_claim("issue", "acme-org/sample-repo#2410") == "#2410"
 
 
 def test_rank_claims_accepts_a_custom_pecking_order():
@@ -132,12 +146,12 @@ def test_summarize_claims_accepts_a_custom_pecking_order():
     ]
     custom = {"task": 0, "pr": 1}
     assert claims_rank.summarize_claims(claims, pecking_order=custom) == (
-        "task task-1 \u00b7 PR #1"
+        "T task-1 \u00b7 #1"
     )
 
 
 def test_format_claim_falls_back_to_bare_ref_with_no_hash():
-    assert claims_rank.format_claim("codespace", "cs-a1c4-relay") == "codespace cs-a1c4-relay"
+    assert claims_rank.format_claim("codespace", "cs-a1c4-relay") == "CS cs-a1c4-relay"
     # #3307 follow-up: "worktree" now gets its own "WT" label prefix (used
     # when the ref doesn't parse as the machine/project/id convention --
     # see test_format_claim_worktree_* below for the parsed-ref cases).
@@ -150,7 +164,7 @@ def test_summarize_claims_joins_prominent_entries():
         ResourceClaim(kind="pr", ref="acme-org/sample-repo#2481"),
         ResourceClaim(kind="bug", ref="acme-org/sample-repo#2410"),
     ]
-    assert claims_rank.summarize_claims(claims) == "PR #2481 \u00b7 bug #2410"
+    assert claims_rank.summarize_claims(claims) == "#2481 \u00b7 #2410"
 
 
 def test_summarize_claims_empty_ledger_is_empty_string():
@@ -165,11 +179,11 @@ def test_summarize_claims_all_non_live_is_empty_string():
 # --- #3307 worktrees-pivot-ux-overhaul follow-up: cross-repo abbreviations,
 # URL resolution, and the structured claim_entries_for_worktree() list -----
 
-def test_format_claim_worktree_same_repo_is_bare_last4():
+def test_format_claim_worktree_same_repo_has_wt_prefix():
     ref = "host-win/copilot-extensions/aperture-labs-testchamber-4b8a"
     assert claims_rank.format_claim(
         "worktree", ref, own_repo="copilot-extensions",
-    ) == "4b8a"
+    ) == "WT 4b8a"
 
 
 def test_format_claim_worktree_cross_repo_names_the_repo():
@@ -178,22 +192,24 @@ def test_format_claim_worktree_cross_repo_names_the_repo():
     ref = "host-win/dotfiles/2026-09-26-retry-logic"
     assert claims_rank.format_claim(
         "worktree", ref, own_repo="copilot-extensions",
-    ) == "dotfiles:ogic"
+    ) == "WT dotfiles:ogic"
 
 
 def test_format_claim_worktree_unknown_own_repo_never_asserts_cross_repo():
     """own_repo not passed (an older caller) -- never guesses cross-repo,
     even though the ref carries a project segment."""
     ref = "host-win/dotfiles/2026-09-26-retry-logic"
-    assert claims_rank.format_claim("worktree", ref) == "ogic"
+    assert claims_rank.format_claim("worktree", ref) == "WT ogic"
 
 
-def test_format_claim_pr_same_repo_is_plain_pr_number():
+def test_format_claim_pr_same_repo_is_bare_number():
+    """No 'PR' prefix at all -- the ref alone is self-explanatory
+    (operator feedback, 2026-09-29)."""
     assert claims_rank.format_claim(
         "pr", "copilot-extensions#2481", own_repo="copilot-extensions",
-    ) == "PR #2481"
+    ) == "#2481"
     # repo unknown on our side -- never asserts cross-repo either.
-    assert claims_rank.format_claim("pr", "copilot-extensions#2481") == "PR #2481"
+    assert claims_rank.format_claim("pr", "copilot-extensions#2481") == "#2481"
 
 
 def test_format_claim_pr_cross_repo_names_the_short_repo_not_the_owner():
@@ -210,7 +226,7 @@ def test_format_claim_pr_parses_a_full_github_url_ref():
     assert claims_rank.format_claim(
         "bug", "https://github.com/acme-org/sample-repo/issues/17",
         own_repo="sample-repo",
-    ) == "bug #17"
+    ) == "#17"
 
 
 def test_claim_url_resolves_github_pr_and_issue_refs():
@@ -241,7 +257,7 @@ def test_claim_entries_for_worktree_pairs_label_with_url():
     assert entries == [
         {"label": "sample-repo#2481",
          "url": "https://github.com/acme-org/sample-repo/pull/2481"},
-        {"label": "4b8a", "url": None},
+        {"label": "WT 4b8a", "url": None},
     ]
 
 
@@ -254,4 +270,31 @@ def test_claim_entries_for_worktree_backfills_active_pr_like_summary_does():
         {"label": "sample-repo#91",
          "url": "https://github.com/acme-org/sample-repo/pull/91"},
     ]
+
+
+# --- operator feedback, 2026-09-29: condensed short-form kind prefixes ----
+
+def test_format_claim_short_form_kind_prefixes():
+    """Every non-PR-like kind gets a terse, fixed short-form prefix so a
+    claims-list cell stays scannable across many different kinds sharing
+    one narrow column."""
+    assert claims_rank.format_claim("session", "sess-1") == "SESS sess-1"
+    assert claims_rank.format_claim("codespace", "cs-a1c4-relay") == "CS cs-a1c4-relay"
+    assert claims_rank.format_claim("container", "ct-b2d5-fleet") == "CT ct-b2d5-fleet"
+    assert claims_rank.format_claim("task", "task-9f21") == "T task-9f21"
+    assert claims_rank.format_claim("bridge", "bridge-1") == "BR bridge-1"
+    assert claims_rank.format_claim("ssh", "dev6") == "SSH dev6"
+
+
+def test_format_claim_pr_like_override_still_prefixes():
+    """A plugin-contributed label override (e.g. an ADO-sourced 'bug' that
+    isn't a native GitHub issue) still applies its prefix -- only the
+    UNLABELED default is bare (operator feedback, 2026-09-29)."""
+    assert claims_rank.format_claim(
+        "bug", "r1#2", label_overrides={"bug": "ADO bug"},
+    ) == "ADO bug #2"
+    assert claims_rank.format_claim(
+        "bug", "acme-org/sample-repo#2", own_repo="copilot-extensions",
+        label_overrides={"bug": "ADO bug"},
+    ) == "ADO bug sample-repo#2"
 

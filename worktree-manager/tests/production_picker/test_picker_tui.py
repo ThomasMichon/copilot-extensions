@@ -3375,10 +3375,12 @@ def test_sessionless_flag_only_when_count_known_zero():
 
 
 def test_sess_turns_combines_session_count_and_turn_count():
-    """#3307 Phase 6: the combined SESS/TURNS column renders
-    "<session_count>/<turn_count>", falling back to "-" for the session half
-    when ``session_count`` is absent (a fixture or a too-old remote) rather
-    than fabricating a count -- the turn half always renders."""
+    """#3307 Phase 6, renamed LENGTH (operator feedback 2026-09-29): the
+    combined column renders "<session_count>s <turn_count>t", falling back
+    to "-" for the session half when ``session_count`` is absent (a
+    fixture or a too-old remote) rather than fabricating a count -- the
+    turn half always renders. Unit-suffixed so it never reads ambiguously
+    like a date (the prior "N/M" form's exact complaint)."""
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
 
     def n(**extra):
@@ -3387,10 +3389,10 @@ def test_sess_turns_combines_session_count_and_turn_count():
         base.update(extra)
         return derive.norm(base, "m", "Win")
 
-    assert n(session_count=3, turn_count=47)["sess_turns"] == "3/47"
-    assert n(session_count=0, turn_count=0)["sess_turns"] == "0/0"
-    assert n(turn_count=5)["sess_turns"] == "-/5"          # count unknown
-    assert n()["sess_turns"] == "-/0"                      # neither known
+    assert n(session_count=3, turn_count=47)["sess_turns"] == "3s 47t"
+    assert n(session_count=0, turn_count=0)["sess_turns"] == "0s 0t"
+    assert n(turn_count=5)["sess_turns"] == "-s 5t"          # count unknown
+    assert n()["sess_turns"] == "-s 0t"                      # neither known
 
 
 def test_pair_marker_names_this_rows_own_role():

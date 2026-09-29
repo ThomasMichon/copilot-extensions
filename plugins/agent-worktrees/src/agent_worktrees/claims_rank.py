@@ -28,11 +28,12 @@ itself never reads a plugin drop-in (stays pure/I/O-free; see below).
 **Kind-vocabulary gap (grounded against the real code, 2026-09-21):**
 ``claims_cli._claims_add``'s ``valid_kinds`` today is only
 ``{worktree, codespace, container, ssh, workdir, pr, task}`` -- "bug"/
-"issue", "effort", and "bridge" are **not yet claimable kinds**. This module
-ranks whatever kind is actually present in a ledger; a kind this repo cannot
-yet produce a claim for simply never appears here (no fabrication). Adding a
-"bug"/"issue" claim kind is a prerequisite of the vision's own workspace-PR
-auto-claim work, not something this module does.
+"issue", "effort", "bridge", and "session" (added 2026-09-29) are **not yet
+claimable kinds**. This module ranks whatever kind is actually present in a
+ledger; a kind this repo cannot yet produce a claim for simply never
+appears here (no fabrication). Adding a "bug"/"issue" claim kind is a
+prerequisite of the vision's own workspace-PR auto-claim work, not
+something this module does.
 
 **Deliberately pure, no I/O.** This module never scans a filesystem, reads
 a plugin's installed files, or imports anything beyond the standard library
@@ -64,8 +65,14 @@ DEFAULT_PECKING_ORDER: dict[str, int] = {
     "container": 4,    # CodeSpace and container share a tier (venue parity)
     "worktree": 5,     # a claimed CHILD worktree
     "ssh": 6,          # a claimed machine SSH session
-    "task": 7,         # a dispatch task -- lowest: no independently
-                       # referenceable id outside this fabric
+    "task": 7,         # a dispatch task -- no independently referenceable
+                       # id outside this fabric
+    "session": 8,      # lowest -- not yet a claimable kind (see the
+                       # module docstring's kind-vocabulary-gap note), but
+                       # ranked here for when it becomes one: a worktree's
+                       # own session is the LEAST differentiating claim,
+                       # since every worktree effectively has one
+                       # (operator feedback, 2026-09-29).
 }
 
 # The same "still held" vocabulary `tracking_claims.ResourceClaim.is_live`
@@ -151,11 +158,25 @@ def rank_claims(
     return ordered if limit is None else ordered[:limit]
 
 
+#: Short-form kind prefix for every non-PR-like claimable kind (operator
+#: feedback, 2026-09-29): a claims-list cell must stay scannable across many
+#: different kinds sharing one narrow column, so each kind gets a terse,
+#: fixed-width label rather than its full name. ``pr``/``bug``/``issue`` are
+#: deliberately ABSENT here -- their own ref (``"#N"``/``"repo#N"``) is
+#: self-explanatory on its own (see :func:`format_claim`'s special case),
+#: and prefixing it with a redundant "PR"/"bug" word wastes the column's
+#: scarce width. ``session`` is included even though it is not yet a
+#: claimable kind (see the module docstring), so the label is ready the
+#: moment a producer starts emitting one.
 DEFAULT_LABEL_PREFIX: dict[str, str] = {
-    "pr": "PR",
-    "bug": "bug",
-    "issue": "bug",
     "worktree": "WT",
+    "session": "SESS",
+    "codespace": "CS",
+    "container": "CT",
+    "task": "T",
+    "bridge": "BR",
+    "ssh": "SSH",
+    "effort": "EFF",
 }
 
 #: Kinds whose ``ref`` is a GitHub PR/issue reference -- either the
@@ -259,21 +280,28 @@ def format_claim(
     :func:`_is_cross_repo` -- a repo that can't be determined on either side
     never asserts cross-repo (never a guess).
 
-    * ``pr``/``bug``/``issue`` -- ``"PR #2481"`` same-repo (or repo
+    * ``pr``/``bug``/``issue`` -- **no DEFAULT kind prefix** (operator
+      feedback, 2026-09-29): the ref alone is self-explanatory for the
+      ordinary GitHub-sourced case. ``"#2481"`` same-repo (or repo
       unknown); ``"sample-repo#2481"`` cross-repo (short repo name, no
       owner -- the number alone is the point, the repo name is the only
       NEW information cross-repo actually adds). Parses a full GitHub URL
-      ref the same as the ``"owner/repo#N"`` shape (:func:`_parse_pr_like_ref`).
-    * ``worktree`` -- ``"<last4>"`` same-repo, ``"<repo>:<last4>"``
-      cross-repo (operator's own example: ``"copilot-extensions:4b8a"``),
-      reading the sibling's project from the ``tracking_claims
-      .format_claim_ref`` ref convention (see :func:`_parse_worktree_ref`).
-      Falls through to the generic ``#N``/bare-ref rule below when the ref
-      doesn't parse that way (an older or hand-added ref with no embedded
-      project).
-    * every other kind (bridge/codespace/container/ssh/task) -- unchanged:
-      prefers a trailing ``#<number>`` already in ``ref``, else the bare
-      ``ref``, prefixed by ``label_overrides``/:data:`DEFAULT_LABEL_PREFIX`.
+      ref the same as the ``"owner/repo#N"`` shape
+      (:func:`_parse_pr_like_ref`). A plugin-contributed
+      ``label_overrides[kind]`` (e.g. an ADO-sourced "bug" wanting to read
+      distinctly from a native GitHub issue) still applies and IS
+      prefixed -- only the unlabeled default is bare.
+    * ``worktree`` -- ``"WT <last4>"`` same-repo, ``"WT <repo>:<last4>"``
+      cross-repo (operator's own example: ``"copilot-extensions:4b8a"``,
+      now prefixed), reading the sibling's project from the
+      ``tracking_claims.format_claim_ref`` ref convention (see
+      :func:`_parse_worktree_ref`). Falls through to the generic
+      ``#N``/bare-ref rule below when the ref doesn't parse that way (an
+      older or hand-added ref with no embedded project).
+    * every other kind (session/bridge/codespace/container/ssh/task) --
+      unchanged: prefers a trailing ``#<number>`` already in ``ref``, else
+      the bare ``ref``, prefixed by
+      ``label_overrides``/:data:`DEFAULT_LABEL_PREFIX`.
     """
     prefix = (
         label_overrides[kind]
@@ -285,14 +313,19 @@ def format_claim(
         if worktree_id:
             last4 = worktree_id[-4:]
             if project and _is_cross_repo(own_repo, project):
-                return f"{project}:{last4}"
-            return last4
+                return f"{prefix} {project}:{last4}"
+            return f"{prefix} {last4}"
     if kind in _PR_LIKE_KINDS:
         owner_repo, number = _parse_pr_like_ref(ref)
         if number:
+            # Only a plugin-contributed override is prefixed -- pr/bug/issue
+            # carry no DEFAULT prefix (removed from DEFAULT_LABEL_PREFIX),
+            # so an unlabeled kind falls through to bare here.
+            override = label_overrides.get(kind) if label_overrides else None
             if owner_repo and _is_cross_repo(own_repo, owner_repo):
-                return f"{_repo_short_name(owner_repo)}#{number}"
-            return f"{prefix} #{number}"
+                short_ref = f"{_repo_short_name(owner_repo)}#{number}"
+                return f"{override} {short_ref}" if override else short_ref
+            return f"{override} #{number}" if override else f"#{number}"
     if "#" in ref:
         _, _, number = ref.rpartition("#")
         number = number.strip()

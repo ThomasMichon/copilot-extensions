@@ -6,7 +6,7 @@
 
    + New worktree…     creates on anomalous-potato Win  (this host)
 
-  ID     STATE      AGE    USED   LIVE   SESS/T    CLAIMS
+  ID     STATE      AGE    USED   LIVE       LENGTH    CLAIMS
   ── Active ──────────────────────────────────────────────────────────────────────────────────────────────────────────
     (none)
   ── Recent ──────────────────────────────────────────────────────────────────────────────────────────────────────────

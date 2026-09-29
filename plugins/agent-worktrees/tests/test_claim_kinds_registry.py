@@ -130,4 +130,4 @@ def test_end_to_end_a_plugin_contributed_kind_ranks_and_labels_correctly(tmp_pat
     # "pr" (0), proving the override actually took effect rather than
     # coincidentally winning a tie on ledger order.
     assert order["bug"] == -1
-    assert summary == "ADO bug #2 \u00b7 PR #1"
+    assert summary == "ADO bug #2 \u00b7 #1"
