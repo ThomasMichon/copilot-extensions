@@ -446,6 +446,8 @@ daemon" is automatically also "we owe a cutover story".
 introduces or materially changes a resident daemon must carry a **Graceful
 cutover impact** statement naming the daemon, its activation seam, its
 drain/cutover contract, or the explicit justification for a claimed exemption.
+`REVIEW.md` now mirrors that expectation for Copilot review so the non-CI gate
+is visible to the automatic reviewer too.
 
 The automated-guard investigation concluded that a new `check-*.py` review gate
 is **not reliably feasible today**, so none was added. The repo has no single

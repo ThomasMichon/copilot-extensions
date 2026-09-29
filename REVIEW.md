@@ -99,6 +99,14 @@ specifically when reviewing a pull request, not a replacement for them.
   Documentation-impact statement actually matches the final diff
   (`CONTRIBUTING.md`, "Documentation impact") -- flag a missing or
   inaccurate one.
+- **Graceful cutover impact.** When a PR introduces or materially changes a
+  long-lived resident daemon, confirm the PR description's required
+  **Graceful cutover impact** statement exists and matches the diff
+  (`CONTRIBUTING.md`, "Graceful cutover impact"). Flag a missing statement, a
+  daemon change with no named activation seam/safe cutover point, or an
+  exemption claim that does not fit either
+  `graceful-daemon-cutover` or the documented lighter
+  `service-lifecycle-supervision` singleton-handoff path.
 - **ruff signal, not noise.** Hold changed Python to at least the `F`/`E9`
   groups; do not block on pre-existing style debt in code the PR did not
   touch.

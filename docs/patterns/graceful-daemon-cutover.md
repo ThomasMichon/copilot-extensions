@@ -315,17 +315,21 @@ agent-bridge needs.
 
 ## Invariants (binding)
 
-0. **Any long-lived resident daemon in the suite MUST adopt this pattern.** The
-   common case is an `agent-*` plugin in the
-   [`Runtime service`](README.md#plugin-shapes) shape, but the obligation is
-   behavioral, not nominal: if any suite component (including a sibling runtime
-   such as `worktree-manager`) adds a resident daemon under some other label,
-   that daemon still owes graceful cutover semantics. "It isn't classified as a
-   runtime service" is not an exemption. The only valid alternative is to show
-   that the process is **not** a long-lived resident daemon at all and belongs
-   under a different lifecycle pattern instead (for example
-   [`ephemeral-process-reaping`](ephemeral-process-reaping.md) for a detached
-   helper).
+0. **Any long-lived resident daemon in the suite that serves callers through a
+   discoverable local endpoint, routed control plane, or other non-resumable
+   in-flight work MUST adopt this pattern.** The common case is an `agent-*`
+   plugin in the [`Runtime service`](README.md#plugin-shapes) shape, but the
+   obligation is behavioral, not nominal: if any suite component (including a
+   sibling runtime such as `worktree-manager`) adds that class of resident
+   daemon under some other label, it still owes graceful cutover semantics.
+   "It isn't classified as a runtime service" is not an exemption. The only
+   valid alternatives are to show that the process is **not** that class of
+   daemon at all and belongs under a different lifecycle pattern instead (for
+   example [`ephemeral-process-reaping`](ephemeral-process-reaping.md) for a
+   detached helper), or that it explicitly fits the lighter
+   [`service-lifecycle-supervision`](service-lifecycle-supervision.md)
+   wind-down-and-successor path for a singleton daemon with no shared endpoint
+   and no in-flight request to drain.
 1. **Cutover is installer-driven and automatic — there is NO externally-driven
    `deploy` command.** The installer's `update`/activation (and first-use
    `provision`) performs the cutover in-process whenever it detects a live
