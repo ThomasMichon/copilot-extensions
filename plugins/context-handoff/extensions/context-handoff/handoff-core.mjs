@@ -3675,16 +3675,19 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
   // itself is still `proposed`/`queued` -- abandoning the task in that case
   // would destroy the baton an in-flight pickup is actively consuming, even
   // though cancel_handoff itself correctly refuses to touch the ledger
-  // entry (PR #4570 review round 17). Refuse the WHOLE abort, never just
-  // the ledger half of it, when a candidate is already associated.
-  const ledger = cancelHandoffInRecord(cwd, predecessorSessionId, taskId, execute);
-  if (ledger.raw?.candidate) {
+  // entry (PR #4570 review round 17). This is a read-only PEEK
+  // (`dryRun: true`): the real cancellation is committed only AFTER abandon
+  // itself succeeds below, so a failed abandon (e.g. a race consumer
+  // claimed the task in between) never leaves the ledger showing
+  // "cancelled" over a task that's still alive (PR #4570 review round 18).
+  const peek = cancelHandoffInRecord(cwd, predecessorSessionId, taskId, execute, { dryRun: true });
+  if (peek.raw?.candidate) {
     return {
       ok: false,
       id: taskId,
       kind: "task",
       error: `Task ${taskId}'s handoff already has an associated successor candidate ` +
-        `(\`${ledger.raw.candidate}\`) mid-pickup -- refusing to abandon it.`,
+        `(\`${peek.raw.candidate}\`) mid-pickup -- refusing to abandon it.`,
     };
   }
   try {
@@ -3707,6 +3710,15 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
         });
       } catch { /* best-effort */ }
     }
+    // Commit the real ledger cancellation only now, after the task is
+    // confirmed abandoned -- see the peek comment above. A residual race
+    // (a candidate associated in the narrow window between the peek and
+    // this commit) still isn't fully eliminated; that's the same
+    // cross-process gate/lock design tracked by
+    // https://github.com/ThomasMichon/copilot-extensions/issues/4619, and
+    // this commit call will itself decline to cancel (reporting
+    // `cancelled: false`) rather than silently succeeding over it.
+    const ledger = cancelHandoffInRecord(cwd, predecessorSessionId, taskId, execute);
     return {
       ok: true,
       id: taskId,
@@ -3731,7 +3743,17 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
 // a failure here never fails the abort itself, since the backing handoff
 // record (agent-dispatch task or file) has already been retired by the
 // time this runs -- report the outcome honestly instead.
-export function cancelHandoffInRecord(cwd, sessionId, token, execute = runCli) {
+//
+// `dryRun: true` peeks at the ledger (candidate/eligibility) WITHOUT
+// mutating it -- callers with a separate, harder-to-undo destructive action
+// (task abandon / file write) must peek first, perform that action, and
+// only commit the real (non-dry-run) cancellation afterward. Committing the
+// ledger cancellation before the caller's own destructive action succeeds
+// would leave the ledger showing "cancelled" (and possibly the predecessor
+// restored to head) even when that action then failed -- e.g. a race
+// consumer claimed the task in between, or the file write hit an I/O error
+// (PR #4570 review round 18).
+export function cancelHandoffInRecord(cwd, sessionId, token, execute = runCli, { dryRun = false } = {}) {
   const worktreeId = agentWorktreesGet("worktree-id", cwd, sessionId, execute);
   if (!worktreeId) {
     return {
@@ -3744,7 +3766,10 @@ export function cancelHandoffInRecord(cwd, sessionId, token, execute = runCli) {
     const raw = JSON.parse(
       execute(
         "agent-worktrees", // marketplace-isolation: allow agent-worktrees-management
-        ["cancel-handoff", "--worktree-id", worktreeId, "--token", token],
+        [
+          "cancel-handoff", "--worktree-id", worktreeId, "--token", token,
+          ...(dryRun ? ["--dry-run"] : []),
+        ],
         { cwd, timeout: 5000 },
       ),
     );
@@ -3840,15 +3865,20 @@ export function abortFileHandoff(
     // marking it aborted in that case would destroy the baton an in-flight
     // pickup is actively consuming, even though cancel_handoff itself
     // correctly refuses to touch the ledger entry (PR #4570 review round
-    // 17). Refuse the WHOLE abort, never just the ledger half of it.
-    const ledger = cancelHandoffInRecord(cwd, current.record.sessionId, handoffId, execute);
-    if (ledger.raw?.candidate) {
+    // 17). This is a read-only PEEK (`dryRun: true`): the real cancellation
+    // is committed only AFTER writeJsonAtomic itself succeeds below, so a
+    // failed write (e.g. permission/disk/rename failure) never leaves the
+    // ledger showing "cancelled" (and the predecessor possibly restored to
+    // head) while the file record remains genuinely unconsumed (PR #4570
+    // review round 18).
+    const peek = cancelHandoffInRecord(cwd, current.record.sessionId, handoffId, execute, { dryRun: true });
+    if (peek.raw?.candidate) {
       return {
         ok: false,
         kind: "file",
         id: current.record.id,
         message: `Handoff ${current.record.id || current.path} already has an associated ` +
-          `successor candidate (\`${ledger.raw.candidate}\`) mid-pickup -- refusing to abort it.`,
+          `successor candidate (\`${peek.raw.candidate}\`) mid-pickup -- refusing to abort it.`,
       };
     }
     const aborted = {
@@ -3861,6 +3891,15 @@ export function abortFileHandoff(
       abortReason: reason || null,
     };
     writeJsonAtomic(current.path, aborted);
+    // Commit the real ledger cancellation only now, after the write is
+    // confirmed -- see the peek comment above. A residual race (a candidate
+    // associated in the narrow window between the peek and this commit)
+    // still isn't fully eliminated; that's the same cross-process gate/lock
+    // design tracked by
+    // https://github.com/ThomasMichon/copilot-extensions/issues/4619, and
+    // this commit call will itself decline to cancel (reporting
+    // `cancelled: false`) rather than silently succeeding over it.
+    const ledger = cancelHandoffInRecord(cwd, current.record.sessionId, handoffId, execute);
     // Best-effort: the file record's own `sessionId` IS the predecessor
     // session -- mark its session-state handoff-request marker aborted too
     // (see the identical note on the task path above and cancelHandoffInRecord).

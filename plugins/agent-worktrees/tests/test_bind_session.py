@@ -552,6 +552,47 @@ class TestCancelHandoff:
         record = m.tracking.load_record(tmp_tracking_dir / "wt-hd.yaml")
         assert record.handoffs[0].state == "cancelled"
 
+    def test_dry_run_reports_eligibility_without_mutating_the_ledger(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        """Real regression this guards (PR #4570 review round 18): a caller
+        with a separate destructive action to fence (context-handoff's task
+        abandon / file write) must be able to peek at candidate/eligibility
+        BEFORE committing that action, then commit the real cancellation
+        only afterward. Committing first (the round-17 shape) left the
+        ledger showing "cancelled" even when the caller's own action then
+        failed. --dry-run must never call cancel_handoff or save_record."""
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
+        captured = {}
+        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+        monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "sess-pred")
+
+        rc = m.cmd_note_handoff(argparse.Namespace(
+            task="task456", title="Fix the widget",
+            worktree_dir="/tmp/src/wt-hd", worktree_id=None, session_id=None))
+        assert rc == 0
+
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task456", worktree_dir="/tmp/src/wt-hd", worktree_id=None, dry_run=True))
+        assert rc == 0
+        assert captured["cancelled"] is False
+        assert captured["dry_run"] is True
+        assert captured["eligible"] is True
+        assert captured["candidate"] is None
+        # The ledger must be untouched -- still pending, not cancelled.
+        record = m.tracking.load_record(tmp_tracking_dir / "wt-hd.yaml")
+        assert record.handoffs[0].state == "pending"
+
+        # The real (non-dry-run) call still works afterward.
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task456", worktree_dir="/tmp/src/wt-hd", worktree_id=None))
+        assert rc == 0
+        assert captured["cancelled"] is True
+        record = m.tracking.load_record(tmp_tracking_dir / "wt-hd.yaml")
+        assert record.handoffs[0].state == "cancelled"
+
     def test_never_cancels_a_handoff_with_an_associated_candidate(
         self, tmp_tracking_dir, monkeypatch_config, monkeypatch
     ):

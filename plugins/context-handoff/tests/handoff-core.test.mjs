@@ -1985,8 +1985,9 @@ test("abortHandoffTask abandons the agent-dispatch task with the given reason", 
   assert.deepEqual(calls, [
     { bin: "agent-dispatch", argv: ["show", "task-42"] },
     { bin: "agent-dispatch", argv: ["payload", "task-42", "--raw"] },
+    // Peek: read-only, --dry-run, BEFORE the destructive abandon.
     { bin: "agent-worktrees", argv: ["get", "worktree-id"] },
-    { bin: "agent-worktrees", argv: ["cancel-handoff", "--worktree-id", "wt-1", "--token", "task-42"] },
+    { bin: "agent-worktrees", argv: ["cancel-handoff", "--worktree-id", "wt-1", "--token", "task-42", "--dry-run"] },
     {
       bin: "agent-dispatch",
       argv: [
@@ -1994,6 +1995,9 @@ test("abortHandoffTask abandons the agent-dispatch task with the given reason", 
         "--expected-status", "queued",
       ],
     },
+    // Commit: the real cancellation, only after abandon succeeded.
+    { bin: "agent-worktrees", argv: ["get", "worktree-id"] },
+    { bin: "agent-worktrees", argv: ["cancel-handoff", "--worktree-id", "wt-1", "--token", "task-42"] },
   ]);
 });
 
@@ -2056,7 +2060,11 @@ test("abortHandoffTask decodes the payload for its sessionId BEFORE abandoning, 
   };
   const result = abortHandoffTask("C:\\repo", "task-42", null, execute);
   assert.equal(result.ledgerCancelled, true);
-  assert.deepEqual(marked, [["cancel-handoff", "--worktree-id", "wt-1", "--token", "task-42"]]);
+  assert.deepEqual(marked, [
+    // Peek (dry-run) BEFORE abandon, then the real commit AFTER it succeeds.
+    ["cancel-handoff", "--worktree-id", "wt-1", "--token", "task-42", "--dry-run"],
+    ["cancel-handoff", "--worktree-id", "wt-1", "--token", "task-42"],
+  ]);
 });
 
 test("abortHandoffTask refuses to abandon when the ledger already has an associated candidate", () => {
@@ -2083,6 +2091,37 @@ test("abortHandoffTask refuses to abandon when the ledger already has an associa
   assert.equal(result.ok, false);
   assert.match(result.error, /successor-1/);
   assert.equal(abandonCalled, false);
+});
+
+test("abortHandoffTask never commits the ledger cancellation when abandon itself fails", () => {
+  // Real regression this guards (PR #4570 review round 18): the peek is
+  // read-only, so a clean peek does not by itself prove the abandon that
+  // follows will succeed -- a race consumer can still claim the task in
+  // between (rejected here by --expected-status). The ledger must be left
+  // untouched (no non-dry-run cancel-handoff call at all) rather than
+  // committed before abandon, which would otherwise show "cancelled" (and
+  // possibly restore the predecessor to head) over a task that's still
+  // alive under a real successor.
+  const commitCalls = [];
+  const execute = (bin, argv) => {
+    if (argv[0] === "show") {
+      return JSON.stringify({ id: "task-42", labels: ["handoff"], source: "context-handoff", status: "queued" });
+    }
+    if (argv[0] === "payload") return "";
+    if (argv[0] === "abandon") {
+      throw new Error("agent-dispatch: expected-status mismatch (task is now claimed)");
+    }
+    if (bin === "agent-worktrees" && argv[0] === "get") return "wt-1";
+    if (bin === "agent-worktrees" && argv[0] === "cancel-handoff") {
+      if (!argv.includes("--dry-run")) commitCalls.push(argv);
+      return JSON.stringify({ cancelled: false, candidate: null });
+    }
+    return "{}";
+  };
+  const result = abortHandoffTask("C:\\repo", "task-42", null, execute);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /expected-status mismatch/);
+  assert.deepEqual(commitCalls, []);
 });
 
 test("abortHandoffTask refuses to abandon a task that isn't a context-handoff handoff", () => {

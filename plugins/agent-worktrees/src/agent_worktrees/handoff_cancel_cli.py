@@ -70,13 +70,32 @@ def add_parsers(sub) -> None:
     sp.add_argument(
         "--worktree-id", default=None, help="Worktree ID (alternative to --worktree-dir)"
     )
+    sp.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report what cancellation WOULD do (candidate/eligible) without "
+        "mutating the ledger -- lets a caller peek before a separate "
+        "destructive action (e.g. abandoning a task) it wants to fence, then "
+        "commit the real cancellation only after that action succeeds",
+    )
 
 
 def cmd_cancel_handoff(args: argparse.Namespace) -> int:
     """Cancel one pending handoff ledger entry by its exact token. Idempotent:
     a token that's already cancelled/linked, or was never opened, reports
     `cancelled: false` rather than raising -- a caller retrying an abort
-    should see a clean result, not an error."""
+    should see a clean result, not an error.
+
+    `--dry-run` never mutates the ledger (no `cancel_handoff` call, no
+    `save_record`): it exists so a caller with a SEPARATE, harder-to-undo
+    destructive action (context-handoff's task abandon / file write) can
+    peek at `candidate` first, perform its own action, and only commit this
+    ledger's cancellation afterward -- committing the ledger cancellation
+    BEFORE the caller's own destructive action succeeds would leave the
+    ledger showing "cancelled" (and possibly the predecessor restored to
+    head) even if that action then failed, e.g. a race consumer claimed the
+    task in between, or a file write hit an I/O error (PR #4570 review
+    round 18)."""
     wt_id = getattr(args, "worktree_id", None)
     wdir = getattr(args, "worktree_dir", None) or os.getcwd()
     if wt_id:
@@ -117,9 +136,21 @@ def cmd_cancel_handoff(args: argparse.Namespace) -> int:
         with tracking._RecordLock(yaml_path):
             record = tracking.load_record(yaml_path)
             handoff = next((h for h in record.handoffs if h.token == token), None)
-            cancelled = tracking_lifecycle.cancel_handoff(record, token)
-            if cancelled:
-                tracking.save_record(record, yaml_path)
+            if getattr(args, "dry_run", False):
+                # Read-only: never call cancel_handoff or save_record. Mirror
+                # its exact eligibility predicate so the peek and the later
+                # real commit agree on what "cancellable" means.
+                cancelled = False
+                eligible = (
+                    handoff is not None
+                    and handoff.state == "pending"
+                    and handoff.candidate is None
+                )
+            else:
+                cancelled = tracking_lifecycle.cancel_handoff(record, token)
+                eligible = None
+                if cancelled:
+                    tracking.save_record(record, yaml_path)
     except Exception as exc:
         _json_output({"cancelled": False, "worktree_id": wt_id, "reason": str(exc)})
         return 1
@@ -128,6 +159,10 @@ def cmd_cancel_handoff(args: argparse.Namespace) -> int:
         "cancelled": cancelled,
         "worktree_id": wt_id,
         "token": token,
+        "dry_run": bool(getattr(args, "dry_run", False)),
+        # Only meaningful for --dry-run: whether a real (non-dry-run) call
+        # would have cancelled this token, without this call having done so.
+        **({"eligible": eligible} if eligible is not None else {}),
         # Surfaced regardless of `cancelled` -- a caller that must fence a
         # SEPARATE destructive action (e.g. context-handoff's task-backed
         # abort) on "no successor is mid-pickup" needs to distinguish "no
