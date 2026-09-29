@@ -290,23 +290,117 @@ def test_activate_after_update_is_noop_when_already_at_target_version(tmp_path, 
     assert result["route"]["pid"] == live.pid
     assert routing.read_active_endpoint(route_dir, verify_listener=False).pid == live.pid
 
-    # The cutover lock must not have been touched -- a concurrent real
-    # cutover (a different version) should never have had to wait behind it.
-    assert not mdc._cutover_lock_path(tmp_path).exists() or _try_uncontended(
-        mdc._cutover_lock_path(tmp_path)
-    )
+    # The cutover lock must never even be touched for the lock-free fast
+    # path: tmp_path starts without this file, so its continued absence is
+    # the actual regression signal (a stale/released lock file left behind
+    # by _acquire_cutover_lock would otherwise make a "try to acquire it"
+    # check pass even though the lock WAS taken and released).
+    assert not mdc._cutover_lock_path(tmp_path).exists()
 
     live.force_terminate()
 
 
-def _try_uncontended(path) -> bool:
-    from worktree_manager.mux_mapping_registry import _try_lock_file_once, _unlock_file
+def test_activate_after_update_same_version_second_caller_converges_without_spawn(
+    tmp_path, monkeypatch
+):
+    """A second caller targeting the *same* version as an in-flight cutover
+    must not race its own spawn: its lock-free pre-check can still observe
+    the pre-flip (old) version and fall through to the cutover lock, but
+    once it acquires that lock the first caller has already published the
+    target version -- so it must converge to a no-op there instead of
+    spawning a second passive daemon for a version that is already active
+    (#5344)."""
+    route_dir = mdc.routing_dir(tmp_path)
+    lock_path = mux_daemon.lock_path(tmp_path)
+    route_dir.mkdir(parents=True)
+    token = mdc.load_or_create_control_token(tmp_path)
 
-    handle = open(path, "a+b")
-    try:
-        acquired = _try_lock_file_once(handle)
-        if acquired:
-            _unlock_file(handle)
-        return acquired
-    finally:
-        handle.close()
+    old = _FakeMuxDaemon(101, token=token)
+    old.start(mdc.pick_free_port())
+    new = _FakeMuxDaemon(202, token=token)
+
+    routing.publish_active(route_dir, bind="127.0.0.1", port=old.port, pid=old.pid, version="old")
+    lock_path.write_text(
+        json.dumps(
+            {
+                "pid": old.pid,
+                "manager_mux_endpoint": f"127.0.0.1:{old.port}",
+                "manager_mux_token": token,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    spawn_calls: list[int] = []
+    spawned_and_started = threading.Event()
+    release_first = threading.Event()
+
+    def _spawn(slot, *, root: Path, port: int):
+        del slot, root
+        if spawn_calls:
+            raise AssertionError(
+                "spawn_passive must only be called once for a single target version"
+            )
+        spawn_calls.append(port)
+        new.start(port)
+        # Hold the first caller here -- spawned and healthy, but not yet
+        # flipped -- so the second caller's own lock-free pre-check still
+        # observes the pre-cutover (old) version and falls through to the
+        # contended lock, exactly the race this test exercises.
+        spawned_and_started.set()
+        assert release_first.wait(timeout=10), "test never released the first caller"
+        return _Handle(new)
+
+    monkeypatch.setattr(mdc, "spawn_passive", _spawn)
+
+    first_result: dict[str, object] = {}
+
+    def _run_first() -> None:
+        first_result.update(
+            mdc.activate_after_update(root=tmp_path, slot=tmp_path / "slot-a", version="2.0.0")
+        )
+
+    first_thread = threading.Thread(target=_run_first, daemon=True)
+    first_thread.start()
+
+    assert spawned_and_started.wait(timeout=10), "first caller never spawned"
+    assert routing.read_active_endpoint(route_dir, verify_listener=False).version == "old", (
+        "test setup invalid: the route must still show the pre-cutover version "
+        "at the point the second caller's pre-lock check runs"
+    )
+
+    second_result: dict[str, object] = {}
+
+    def _run_second() -> None:
+        second_result.update(
+            mdc.activate_after_update(root=tmp_path, slot=tmp_path / "slot-b", version="2.0.0")
+        )
+
+    second_thread = threading.Thread(target=_run_second, daemon=True)
+    second_thread.start()
+
+    # Give the second caller a real chance to pass its own pre-lock check
+    # (still "old") and start blocking on the contended cutover lock before
+    # the first caller is allowed to proceed to the flip.
+    time.sleep(0.3)
+    release_first.set()
+
+    first_thread.join(timeout=10)
+    second_thread.join(timeout=10)
+    assert not first_thread.is_alive(), "first cutover never completed"
+    assert not second_thread.is_alive(), "second caller never converged"
+
+    assert first_result["action"] == "cutover"
+    assert first_result["result"]["ok"] is True
+    assert second_result["action"] == "noop"
+    assert second_result["reason"] == "already-active-version"
+    assert len(spawn_calls) == 1, "second caller must not spawn a redundant passive"
+
+    _wait_for(
+        lambda: (not old.alive) and new.alive,
+        timeout=10,
+        message="old daemon never retired after the (only) real cutover",
+    )
+
+    old.force_terminate()
+    new.force_terminate()
