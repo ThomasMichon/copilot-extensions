@@ -1,0 +1,9 @@
+{
+  "comment": "Supervisor now sweeps and releases a COLD spawn reservation whose task ended up queued/unowned instead of resumed -- a permanent-orphan gap (confirmed live: a PR review stalled 5+ hours, surviving a full supervisor restart) that no existing reconcile path (release_resumed_cold_tasks, recover_gone, reconcile) ever covered.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

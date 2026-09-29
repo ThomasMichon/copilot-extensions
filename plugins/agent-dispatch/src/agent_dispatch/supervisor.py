@@ -896,6 +896,12 @@ class Supervisor:
                 )
         return handled
 
+    def recover_stranded_cold_reservations(self) -> int:
+        """See :func:`spawn_cold_recovery.recover_stranded_cold_reservations`."""
+        from .spawn_cold_recovery import recover_stranded_cold_reservations as _r
+
+        return _r(self)
+
     def reconcile_reserving(self) -> int:
         """Recover pre-launch reservations after a supervisor interruption.
 
@@ -3457,6 +3463,7 @@ class Supervisor:
         self.nudge_idle_headless_tasks(now=now)
         self.cool_dormant_bodies()
         self.release_resumed_cold_tasks(now=now)
+        self.recover_stranded_cold_reservations()
         if self.evaluator is not None:
             self.advance_via_evaluator()
         if self.heartbeat or self.publish_activity:
