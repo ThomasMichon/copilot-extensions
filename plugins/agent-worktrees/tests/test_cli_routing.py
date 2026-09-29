@@ -687,6 +687,13 @@ def test_reap_sessions_is_project_scoped_not_no_project():
     assert "reap-sessions" not in m._NO_PROJECT_COMMANDS
 
 
+def test_cancel_handoff_is_no_project_command():
+    """cancel-handoff must run from a neutral cwd, like its note-handoff
+    counterpart -- an external caller (context-handoff's abort) may invoke it
+    before any project is adopted/activated in this process."""
+    assert "cancel-handoff" in m._NO_PROJECT_COMMANDS
+
+
 def test_removed_terminal_profile_commands_not_registered():
     parser = m.build_parser()
 

@@ -37,6 +37,12 @@ def _activate_project_for_path(*args, **kwargs):
     return _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)(*args, **kwargs)
 
 
+def _activate_project_for_worktree_id(*args, **kwargs):
+    return _core_helper(
+        "_activate_project_for_worktree_id", status_updater_cli._activate_project_for_worktree_id
+    )(*args, **kwargs)
+
+
 def _resolve_worktree_id(*args, **kwargs):
     return _core()._resolve_worktree_id(*args, **kwargs)
 
@@ -73,6 +79,8 @@ def cmd_cancel_handoff(args: argparse.Namespace) -> int:
     wt_id = getattr(args, "worktree_id", None)
     wdir = getattr(args, "worktree_dir", None) or os.getcwd()
     if wt_id:
+        if not cfg.active_project():
+            _activate_project_for_worktree_id(wt_id)
         wt_id = _resolve_worktree_id(wt_id)
     else:
         _activate_project_for_path(wdir)

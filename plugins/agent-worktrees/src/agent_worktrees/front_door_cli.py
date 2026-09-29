@@ -259,6 +259,7 @@ _NO_PROJECT_COMMANDS = {
     "bind-nudge",
     "history-digest",
     "note-handoff",
+    "cancel-handoff",
     "session-role",
     "head-session",
     "worktree-lineage",

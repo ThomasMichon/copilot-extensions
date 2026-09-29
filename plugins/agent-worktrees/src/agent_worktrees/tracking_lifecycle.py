@@ -286,6 +286,14 @@ def cancel_handoff(record: tracking.WorktreeRecord, token: str) -> bool:
     for handoff in record.handoffs:
         if handoff.token == token and handoff.state == "pending":
             handoff.state = "cancelled"
+            # Advance lifecycle_revision (matching open_handoff and the
+            # other existing cancellation paths) -- save_record()'s
+            # optimistic-concurrency check only preserves newer session/
+            # handoff data when the revision increases, so skipping this
+            # would let an unrelated writer holding a pre-cancellation
+            # snapshot later save with the same revision and silently
+            # restore this handoff to pending.
+            _next_lifecycle_revision(record, handoff.predecessor)
             return True
     return False
 

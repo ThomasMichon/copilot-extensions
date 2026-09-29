@@ -552,6 +552,63 @@ class TestCancelHandoff:
         record = m.tracking.load_record(tmp_tracking_dir / "wt-hd.yaml")
         assert record.handoffs[0].state == "cancelled"
 
+    def test_advances_lifecycle_revision_so_a_stale_writer_cannot_resurrect_it(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        """Real regression this guards (PR #4570 review round 6): cancelling
+        must bump lifecycle_revision like open_handoff and every other
+        mutation path do -- save_record()'s optimistic-concurrency check only
+        preserves newer session/handoff data when the revision increases, so
+        skipping this would let an unrelated writer holding a
+        pre-cancellation snapshot later save with the same (or lower)
+        revision and silently restore the handoff to pending."""
+        yaml_path = tmp_tracking_dir / "wt-hd.yaml"
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
+        monkeypatch.setattr(m, "_json_output", lambda o: None)
+        monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "sess-pred")
+
+        m.cmd_note_handoff(argparse.Namespace(
+            task="task-rev", title=None,
+            worktree_dir="/tmp/src/wt-hd", worktree_id=None, session_id=None))
+        before = m.tracking.load_record(yaml_path).lifecycle_revision
+
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task-rev", worktree_dir="/tmp/src/wt-hd", worktree_id=None))
+        assert rc == 0
+        after = m.tracking.load_record(yaml_path)
+        assert after.lifecycle_revision > before
+        assert after.handoffs[0].state == "cancelled"
+
+    def test_explicit_worktree_id_activates_its_owning_project_first(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        """An explicit --worktree-id (no cwd resolution at all) must still
+        activate that worktree's OWNING project before touching
+        cfg.tracking_dir() -- otherwise a neutral/unadopted cwd would read
+        the wrong (or no) project's tracking directory entirely."""
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+        monkeypatch.setattr(status_updater_cli, "_activate_project_for_path", lambda c: None)
+        monkeypatch.setattr(m.tracking, "find_worktree_id_by_cwd", lambda c: "wt-hd")
+        monkeypatch.setattr(m.cfg, "active_project", lambda: None)
+        activated = []
+        monkeypatch.setattr(
+            m, "_activate_project_for_worktree_id",
+            lambda wt_id: activated.append(wt_id) or True,
+        )
+        captured = {}
+        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+
+        m.cmd_note_handoff(argparse.Namespace(
+            task="task-explicit", title=None,
+            worktree_dir="/tmp/src/wt-hd", worktree_id=None, session_id="sess-x"))
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task-explicit", worktree_dir=None, worktree_id="wt-hd"))
+        assert rc == 0
+        assert activated == ["wt-hd"]
+        assert captured["cancelled"] is True
+
     def test_does_not_cancel_an_unrelated_pending_handoff(
         self, tmp_tracking_dir, monkeypatch_config, monkeypatch
     ):
