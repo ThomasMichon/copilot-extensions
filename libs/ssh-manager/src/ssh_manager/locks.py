@@ -134,10 +134,11 @@ def process_identity(pid: int) -> str | None:
             kernel32.CloseHandle(handle)
     try:
         raw = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        boot_id = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
         tail = raw.rsplit(")", 1)[1].split()
         if tail and tail[0] == "Z":
             return None
-        return f"proc-start:{tail[19]}"
+        return f"proc-start:{boot_id}:{tail[19]}"
     except (IndexError, OSError, UnicodeError):
         pass
     try:
