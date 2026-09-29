@@ -1896,6 +1896,23 @@ test("getPreviousSession reports no predecessor honestly instead of guessing", (
   assert.match(result.reason, /no recorded handoff names this session/);
 });
 
+test("getPreviousSession reports unavailable for a session not recorded on the worktree", () => {
+  // Real regression this guards (PR #4570 review round 14): a mistyped id
+  // or a mismatched explicit --worktree must never be conflated with a
+  // genuinely-first session -- that would falsely say "it may be the
+  // worktree's first session" for a session that isn't even on it.
+  const execute = (bin, argv) => {
+    if (argv[0] === "get") return "wt-example";
+    if (argv[0] === "list-sessions") {
+      return JSON.stringify({ sessions: [{ id: "s0" }], handoffs: [] });
+    }
+    throw new Error(`unexpected CLI call: ${bin} ${argv.join(" ")}`);
+  };
+  const result = getPreviousSession("C:\\repo", "sess-does-not-exist", null, execute);
+  assert.equal(result.available, false);
+  assert.match(result.reason, /not recorded/);
+});
+
 test("getPreviousSession requires a session id", () => {
   const result = getPreviousSession("C:\\repo", null, null, () => "");
   assert.equal(result.available, false);
@@ -2239,6 +2256,29 @@ test("an aborted file handoff can never be recovered/retriggered again", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("an abandoned task-backed handoff can never be recovered/retriggered again", () => {
+  // Real regression this guards (PR #4570 review round 14): abandoning a
+  // task does not make its payload unreadable -- agent-dispatch's payload
+  // endpoint resolves payloads without checking task status -- so
+  // loadStoredTaskHandoff must check the task's own status itself, or
+  // `trigger --handoff-token <aborted-task>` could recreate an unconsumed
+  // session-state request and pending ledger entry for a task abort just
+  // retired.
+  const execute = (bin, argv) => {
+    if (argv[0] === "payload") {
+      return encodeHandoffPayload("body", { sessionId: "predecessor-1" });
+    }
+    if (argv[0] === "show") {
+      return JSON.stringify({ id: "task-reuse", status: "abandoned" });
+    }
+    throw new Error(`unexpected CLI call: ${bin} ${argv.join(" ")}`);
+  };
+  const recovered = recoverStoredHandoff(
+    "C:\\repo", "predecessor-1", "task-reuse", null, {}, execute,
+  );
+  assert.equal(recovered, null);
 });
 
 test("dispatchTaskConsumed does not treat an abandoned (aborted) task as picked up", () => {

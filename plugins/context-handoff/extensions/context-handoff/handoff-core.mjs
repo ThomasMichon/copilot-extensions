@@ -2450,10 +2450,19 @@ export function findHandoffFile(cwd, sid) {
   return best;
 }
 
-function loadStoredTaskHandoff(cwd, taskId) {
-  const raw = readTaskPayloadRaw(cwd, taskId);
+function loadStoredTaskHandoff(cwd, taskId, execute = runCli) {
+  const raw = readTaskPayloadRaw(cwd, taskId, execute);
   const decoded = decodeHandoffPayload(raw);
   if (!decoded.text && !decoded.metadata) return null;
+  // Abandoning a task does not make its payload unreadable -- agent-dispatch's
+  // payload endpoint resolves payloads without checking task status. Reject
+  // an abandoned/terminal task here too (mirroring loadStoredFileHandoff's
+  // consumed/aborted check just above), or `trigger --handoff-token
+  // <aborted-task>` could recreate an unconsumed session-state request and
+  // pending ledger entry for a task abort just retired (PR #4570 review
+  // round 14).
+  const task = agentDispatchJson(["show", taskId], cwd, execute);
+  if (task?.status && HANDOFF_TERMINAL_STATUSES.has(task.status)) return null;
   return {
     storage: "agent-dispatch",
     id: taskId,
@@ -2487,7 +2496,7 @@ function loadStoredFileHandoff(cwd, sid, handoffId, explicitPath = null, fileOpt
 // options) -- production callers never pass them; discovery still runs
 // exactly as before.
 export function recoverStoredHandoff(
-  cwd, sid, handoffToken = null, explicitFilePath = null, fileOpts = {},
+  cwd, sid, handoffToken = null, explicitFilePath = null, fileOpts = {}, execute = runCli,
 ) {
   const explicitKinds = handoffToken && handoffToken.startsWith("handoff-")
     ? ["file", "agent-dispatch"]
@@ -2496,7 +2505,7 @@ export function recoverStoredHandoff(
   if (handoffToken) {
     for (const kind of explicitKinds) {
       const loaded = kind === "agent-dispatch"
-        ? loadStoredTaskHandoff(cwd, handoffToken)
+        ? loadStoredTaskHandoff(cwd, handoffToken, execute)
         : loadStoredFileHandoff(cwd, sid, handoffToken, explicitFilePath, fileOpts);
       if (loaded) return loaded;
     }
@@ -2507,7 +2516,7 @@ export function recoverStoredHandoff(
   if (worktree) {
     const task = findHandoffTask(cwd, worktree);
     if (task?.id) {
-      const loaded = loadStoredTaskHandoff(cwd, task.id);
+      const loaded = loadStoredTaskHandoff(cwd, task.id, execute);
       if (loaded) {
         loaded.metadata = loaded.metadata || {
           title: task.title || task.name || "",
@@ -3332,7 +3341,7 @@ export async function triggerHandoff(
     handoffBody = normalizedPrompt;
     justStored = true;
   } else {
-    const loaded = recoverStoredHandoff(cwd, sid, handoffToken);
+    const loaded = recoverStoredHandoff(cwd, sid, handoffToken, null, {}, execute);
     if (!loaded) {
       return {
         ok: false,
@@ -3535,6 +3544,18 @@ export function getPreviousSession(cwd, sessionId, worktreeId = null, execute = 
   }
   const sessions = listWorktreeSessions(cwd, worktreeId, sessionId, execute);
   if (!sessions.available) return sessions;
+  const knownSessions = Array.isArray(sessions.sessions) ? sessions.sessions : [];
+  if (!knownSessions.some((entry) => entry?.id === sessionId)) {
+    // A mistyped id or a mismatched explicit --worktree must never be
+    // conflated with a genuinely-first session -- that would be a false
+    // diagnostic (PR #4570 review round 14): report unavailable instead of
+    // silently falling through to the "no recorded handoff" branch below.
+    return {
+      available: false,
+      worktree: sessions.worktree,
+      reason: `session '${sessionId}' is not recorded on worktree '${sessions.worktree}'`,
+    };
+  }
   const handoffs = Array.isArray(sessions.handoffs) ? sessions.handoffs : [];
   const link = handoffs.find((entry) => entry?.successor === sessionId);
   if (!link) {
