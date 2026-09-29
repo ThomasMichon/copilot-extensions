@@ -280,11 +280,14 @@ def cancel_handoff(record: tracking.WorktreeRecord, token: str) -> bool:
     consumption must also close ITS OWN ledger entry, not every pending entry
     on the worktree, or a genuinely different in-flight handoff would be
     silently cancelled too. A no-op (returns False) when the token isn't
-    found or isn't `pending` (already linked/cancelled) -- never raises for
-    that case, since a caller retrying an already-cancelled abort should see
-    a clean, idempotent result."""
+    found, isn't `pending` (already linked/cancelled), or already has a
+    `candidate` associated -- `associate_handoff_candidate()` leaves state
+    `pending` while a successor is mid-cutover, so `pending` alone does not
+    mean pickup hasn't started; a caller retrying an already-cancelled (or
+    already-claimed) abort should see a clean, idempotent no-op, not an
+    error, and never a false "cancelled" over an in-flight successor."""
     for handoff in record.handoffs:
-        if handoff.token == token and handoff.state == "pending":
+        if handoff.token == token and handoff.state == "pending" and handoff.candidate is None:
             handoff.state = "cancelled"
             predecessor = record.session_entry(handoff.predecessor)
             # open_handoff() moved an active predecessor to "yielded" when

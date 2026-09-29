@@ -1632,6 +1632,37 @@ test("triggerHandoff reports when an explicit stored baton cannot be recovered",
   assert.equal(result.reason, "not-found");
 });
 
+test("triggerHandoff refuses to re-arm a handoff aborted between recovery and arming", async () => {
+  // Real regression this guards (PR #4570 review round 16): the status/
+  // consumed check only protects the instant recovery runs -- without a
+  // fresh re-check immediately before arming, a concurrent abort landing in
+  // that gap would still let this trigger re-arm the token abort just
+  // retired. This narrows (does not fully eliminate) the race.
+  let showCalls = 0;
+  const execute = (bin, argv) => {
+    if (argv[0] === "payload") {
+      return encodeHandoffPayload("body", { sessionId: "predecessor-1" });
+    }
+    if (argv[0] === "show") {
+      showCalls += 1;
+      const status = showCalls === 1 ? "queued" : "abandoned";
+      return JSON.stringify({ id: "task-race", status });
+    }
+    throw new Error(`unexpected CLI call: ${bin} ${argv.join(" ")}`);
+  };
+  const result = await triggerHandoff({
+    sid: "predecessor-1",
+    cwd: "C:\\repo",
+    handoffToken: "task-race",
+    execute,
+    sleepFn: async () => {},
+    writeSessionState: () => { throw new Error("must not arm a retired handoff"); },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, "not-found");
+  assert.equal(showCalls, 2);
+});
+
 // -- Phase 3 item 3: the deterministic "did my launch actually land" signal --
 
 test("logHandoffPromptReceived shells the exact activity-log invocation", () => {

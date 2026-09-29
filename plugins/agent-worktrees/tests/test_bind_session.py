@@ -552,6 +552,36 @@ class TestCancelHandoff:
         record = m.tracking.load_record(tmp_tracking_dir / "wt-hd.yaml")
         assert record.handoffs[0].state == "cancelled"
 
+    def test_never_cancels_a_handoff_with_an_associated_candidate(
+        self, tmp_tracking_dir, monkeypatch_config, monkeypatch
+    ):
+        """Real regression this guards (PR #4570 review round 16):
+        associate_handoff_candidate() leaves the handoff `pending` while
+        setting `candidate` -- a successor can register during cutover
+        before it formally consumes the task/file. `pending` alone must
+        never be read as "safe to cancel"; a candidate-associated handoff is
+        already mid-pickup and cancel-handoff must decline (idempotent
+        no-op), never report a false success over an in-flight successor."""
+        yaml_path = tmp_tracking_dir / "wt-hd.yaml"
+        _save_record(tmp_tracking_dir, "wt-hd", "/tmp/src/wt-hd")
+        monkeypatch.setattr(m, "_json_output", lambda o: None)
+        m.tracking.register_session("wt-hd", "sess-pred", source="handoff")
+        m.tracking.register_session("wt-hd", "sess-candidate", source="handoff")
+
+        with m.tracking._RecordLock(yaml_path):
+            record = m.tracking.load_record(yaml_path)
+            m.tracking.open_handoff(record, "sess-pred", "task-mid-cutover", save=False)
+            m.tracking.associate_handoff_candidate(
+                record, "task-mid-cutover", "sess-candidate", save=False)
+            m.tracking.save_record(record, yaml_path)
+
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task-mid-cutover", worktree_dir="/tmp/src/wt-hd", worktree_id=None))
+        assert rc == 0
+        after = m.tracking.load_record(yaml_path)
+        assert after.handoffs[0].state == "pending"
+        assert after.handoffs[0].candidate == "sess-candidate"
+
     def test_advances_lifecycle_revision_so_a_stale_writer_cannot_resurrect_it(
         self, tmp_tracking_dir, monkeypatch_config, monkeypatch
     ):

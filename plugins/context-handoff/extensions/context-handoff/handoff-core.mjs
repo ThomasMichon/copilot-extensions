@@ -3363,6 +3363,22 @@ export async function triggerHandoff(
       metadata: loaded.metadata || null,
     };
     handoffBody = String(loaded.promptText || "").trim();
+    // Re-verify immediately before arming, not just at the top of recovery:
+    // loadStoredTaskHandoff/loadStoredFileHandoff's status/consumed checks
+    // only protect the instant they run, and a concurrent abort landing
+    // between that read and this write would otherwise still let this
+    // trigger re-arm a token abort just retired (PR #4570 review round
+    // 16). This narrows, but does not fully eliminate, the race -- a true
+    // fix needs a shared atomic gate/lock between abort and recovery,
+    // tracked separately rather than attempted here.
+    const stillValid = recoverStoredHandoff(cwd, sid, handoffToken, null, {}, execute);
+    if (!stillValid || stillValid.id !== loaded.id) {
+      return {
+        ok: false,
+        reason: "not-found",
+        error: "The saved handoff was retired (consumed/aborted) between recovery and arming.",
+      };
+    }
   }
 
   const seed = buildSeedForStored(stored);
