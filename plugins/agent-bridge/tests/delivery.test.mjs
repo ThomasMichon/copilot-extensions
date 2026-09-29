@@ -10,6 +10,8 @@ import {
   escAttr,
   renderDeliveredPrompt,
   STATUS_CHECK_INLINE_GUIDANCE,
+  controlPlan,
+  modeApplied,
 } from "../extensions/agent-bridge/delivery.mjs";
 
 test("buildDeliveredSendOptions always tags an explicit non-user source", () => {
@@ -126,4 +128,21 @@ test("an interrupt re-sends exactly the older messages the CLI has not recorded"
   inFlight.observe(recorded(a)); // the CLI already took message 1
   assert.deepEqual(inFlight.takeBefore(4).map((m) => m.id), [2, 3]);
   assert.deepEqual(inFlight.takeBefore(4), []); // taken once
+});
+
+test("controlPlan applies only a mode change to a mode the CLI knows", () => {
+  assert.deepEqual(controlPlan({ id: 1, kind: "control:set-mode", body: "autopilot" }),
+    { action: "set-mode", mode: "autopilot" });
+  assert.deepEqual(controlPlan({ id: 2, kind: "control:set-mode", body: " interactive " }),
+    { action: "set-mode", mode: "interactive" });
+  assert.equal(controlPlan({ id: 3, kind: "control:set-mode", body: "yolo" }).action, "skip");
+  assert.equal(controlPlan({ id: 4, kind: "control:reboot", body: "now" }).action, "skip");
+  assert.equal(controlPlan({ id: 5, kind: "prompt", body: "autopilot" }).action, "skip");
+});
+
+test("modeApplied is false only when the CLI says the mode wasn't applied", () => {
+  assert.equal(modeApplied({ status: "applied", modelChanged: false }), true);
+  assert.equal(modeApplied({ status: "applied", modelChanged: false, modeApplied: true }), true);
+  assert.equal(modeApplied({ status: "rejected", modelChanged: false, modeApplied: false }), false);
+  assert.equal(modeApplied(undefined), false);
 });

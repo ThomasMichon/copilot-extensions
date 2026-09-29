@@ -10,6 +10,7 @@ is reaped by staleness rather than relying on a clean deregister.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from dataclasses import dataclass
@@ -33,8 +34,11 @@ from ..models import (
     LiveSessionListResponse,
     LiveSessionVenue,
     RegisterLiveSessionRequest,
+    SET_MODE_CONTROL,
     SendMessageRequest,
     SendMessageResult,
+    SetModeRequest,
+    SetModeResult,
 )
 from ..events import EventLog
 from ..live_representation import (
@@ -603,6 +607,11 @@ async def post_live_message(
     head is captured **before** enqueue so the reply window starts at the moment
     of sending.
     """
+    if body.kind.startswith("control:"):
+        raise HTTPException(
+            status_code=400,
+            detail="control kinds are reserved; use the session's control routes (e.g. /mode)",
+        )
     db = _db(request)
     now = time.time()
 
@@ -689,6 +698,93 @@ async def post_live_message(
         reply=reply["reply"],
         stop_reason=reply["stop_reason"],
     )
+
+
+#: How often ``POST /mode`` checks whether the extension applied the change.
+MODE_POLL_SECONDS = 0.25
+
+
+@router.post("/{session_id}/mode", response_model=SetModeResult)
+async def set_live_mode(
+    session_id: str, body: SetModeRequest, request: Request
+) -> SetModeResult:
+    """Switch a live session's agent mode, as ``/autopilot on`` or ``/plan``
+    would from its own terminal (ACP's ``session/set_mode``).
+
+    The change is queued as a session control that the session's extension
+    polls from ``/controls`` (never from ``/messages``, so an extension that
+    predates controls can't deliver it as a prompt) and applies through the
+    CLI's own ``session.rpc.mode.set``, acking only once it took effect. The
+    route waits for that ack; if none comes within ``wait_timeout`` the control
+    is withdrawn, so it never applies later, and ``applied`` is False.
+    """
+    db = _db(request)
+    control_id, reason = db.enqueue_live_message_if_fresh(
+        session_id,
+        sender=body.sender,
+        body=body.mode,
+        now=time.time(),
+        kind=SET_MODE_CONTROL,
+        delivery="queue",
+        expected_session_id=body.expected_session_id,
+    )
+    if reason == "not_found":
+        raise HTTPException(status_code=404, detail="live session not found")
+    if reason is not None or control_id is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"live session {session_id} can't take a mode change now ({reason})",
+        )
+    deadline = time.monotonic() + body.wait_timeout
+    while time.monotonic() < deadline:
+        if db.live_message_delivered(session_id, control_id):
+            return SetModeResult(session_id=session_id, mode=body.mode, applied=True)
+        await asyncio.sleep(MODE_POLL_SECONDS)
+    # Withdraw it (an idempotent ack) unless the extension acked just now.
+    if db.ack_live_messages(session_id, [control_id], time.time()) == 0:
+        return SetModeResult(session_id=session_id, mode=body.mode, applied=True)
+    return SetModeResult(
+        session_id=session_id,
+        mode=body.mode,
+        applied=False,
+        detail=(
+            "the session didn't apply it in time: its agent-bridge extension may "
+            "predate mode changes, or the session isn't responding"
+        ),
+    )
+
+
+@router.get("/{session_id}/controls", response_model=LiveMessageListResponse)
+async def list_live_controls(
+    session_id: str, request: Request
+) -> LiveMessageListResponse:
+    """Pending session controls (a mode change), oldest-first: the extension's
+    control poll. It applies each, then acks it through ``/controls/ack``."""
+    db = _db(request)
+    if db.get_live_session(session_id) is None:
+        raise HTTPException(status_code=404, detail="live session not found")
+    rows = db.list_pending_live_messages(session_id, controls=True)
+    return LiveMessageListResponse(
+        messages=[
+            LiveMessage(
+                id=r["id"], sender=r["sender"], body=r["body"],
+                kind=r.get("kind") or SET_MODE_CONTROL, created_at=r["created_at"],
+            )
+            for r in rows
+        ]
+    )
+
+
+@router.post("/{session_id}/controls/ack", response_model=AckMessagesResult)
+async def ack_live_controls(
+    session_id: str, body: AckMessagesRequest, request: Request
+) -> AckMessagesResult:
+    """Mark applied controls acked. Unlike a message ack, it doesn't mark the
+    session busy: a mode change starts no turn."""
+    db = _db(request)
+    if db.get_live_session(session_id) is None:
+        raise HTTPException(status_code=404, detail="live session not found")
+    return AckMessagesResult(acked=db.ack_live_messages(session_id, body.ids, now=time.time()))
 
 
 @router.get("/{session_id}/messages", response_model=LiveMessageListResponse)

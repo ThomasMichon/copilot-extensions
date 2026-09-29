@@ -820,14 +820,32 @@ class _LiveSessionsMixin:
             return None, f"expected_mismatch:{current_sid}"
         return None, "stale"
 
-    def list_pending_live_messages(self, session_id: str) -> list[dict[str, Any]]:
-        """Undelivered messages for a session, oldest-first (delivery order)."""
+    def list_pending_live_messages(
+        self, session_id: str, *, controls: bool = False
+    ) -> list[dict[str, Any]]:
+        """Undelivered messages for a session, oldest-first (delivery order).
+
+        ``controls`` selects the session-control rows (``kind`` starting with
+        ``control:``, e.g. a mode change) instead of the messages. The two are
+        polled separately, so an extension that predates controls never
+        receives one and delivers it as a prompt.
+        """
+        match = "LIKE" if controls else "NOT LIKE"
         rows = self.execute_read(
             "SELECT * FROM live_messages "
-            "WHERE session_id=? AND delivered_at IS NULL ORDER BY id ASC",
+            f"WHERE session_id=? AND delivered_at IS NULL AND kind {match} 'control:%' "
+            "ORDER BY id ASC",
             (session_id,),
         )
         return [dict(r) for r in rows]
+
+    def live_message_delivered(self, session_id: str, message_id: int) -> bool:
+        """Whether a queued message (or control) has been acked."""
+        rows = self.execute_read(
+            "SELECT delivered_at FROM live_messages WHERE session_id=? AND id=?",
+            (session_id, message_id),
+        )
+        return bool(rows) and rows[0]["delivered_at"] is not None
 
     def ack_live_messages(
         self, session_id: str, ids: list[int], now: float

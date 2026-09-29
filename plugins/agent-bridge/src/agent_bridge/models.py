@@ -646,6 +646,38 @@ class SendMessageRequest(BaseModel):
     idempotency_key: str | None = None
 
 
+#: A Copilot CLI session's agent mode, as ``/autopilot`` and ``/plan`` set it.
+LiveSessionMode = Literal["interactive", "plan", "autopilot"]
+#: The ``live_messages.kind`` of a mode change (a session control, polled apart
+#: from messages so it is never delivered as a prompt).
+SET_MODE_CONTROL = "control:set-mode"
+
+
+class SetModeRequest(BaseModel):
+    """Switch a live session's agent mode (what ``/autopilot on`` does)."""
+
+    mode: LiveSessionMode
+    sender: str = "operator"
+    #: How long to wait for the session's extension to apply it (seconds).
+    wait_timeout: float = Field(default=30.0, ge=1.0, le=120.0)
+    expected_session_id: str | None = None
+
+
+class SetModeResult(BaseModel):
+    """Whether the session's extension applied the mode change.
+
+    ``applied`` is False when it didn't within ``wait_timeout`` (the session's
+    agent-bridge extension may predate mode changes, or the session is
+    unresponsive); the request is then withdrawn, so it never applies later.
+    """
+
+    ok: bool = True
+    session_id: str
+    mode: LiveSessionMode
+    applied: bool
+    detail: str | None = None
+
+
 class SendMessageResult(BaseModel):
     """Result of enqueuing a message for delivery into a live session.
 

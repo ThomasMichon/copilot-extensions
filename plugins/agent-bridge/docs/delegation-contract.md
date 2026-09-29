@@ -53,6 +53,7 @@ delegated-agent facade.
 | Hand off context | `handoff` | `POST .../handoff` | A successor session is created and linked |
 | Rebuild a damaged relay log | No CLI verb; the watchdog may trigger it internally | Authenticated `POST .../resync` | Event log is rebuilt from downstream replay and delivery cursors reset |
 | Message a represented interactive session | `send <live-handle>` | `POST /api/v1/live-sessions/{id}/messages` | Durable inbox message ID; optional waited reply |
+| Switch a represented session's mode (`/autopilot`, `/plan`) | No CLI verb yet | `POST /api/v1/live-sessions/{id}/mode` with `{"mode": "autopilot"}` (or `interactive`, `plan`) | The session's extension applies it through the CLI's own `session.rpc.mode.set`; `applied` says whether it took effect in time (else the control is withdrawn) |
 
 Source anchors:
 

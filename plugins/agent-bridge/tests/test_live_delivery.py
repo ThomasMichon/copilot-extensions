@@ -526,3 +526,51 @@ def test_post_fresh_registration_still_delivers(client: TestClient) -> None:
     )
     assert r.status_code == 200
     assert r.json()["message_id"] > 0
+
+
+# -- Session controls (mode changes) ---------------------------------------
+
+
+def test_a_mode_change_is_a_control_never_a_message(client: TestClient, monkeypatch) -> None:
+    _register(client)
+    monkeypatch.setattr(live_sessions, "MODE_POLL_SECONDS", 0.01)
+    r = client.post("/api/v1/live-sessions/cli-1/mode", json={"mode": "autopilot", "wait_timeout": 1})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    # Nothing applied it (no extension here), so it's withdrawn, never applied later.
+    assert (out["applied"], out["mode"]) == (False, "autopilot") and "predate" in out["detail"]
+    assert client.get("/api/v1/live-sessions/cli-1/controls").json()["messages"] == []
+    assert client.get("/api/v1/live-sessions/cli-1/messages").json()["messages"] == []
+
+
+def test_controls_are_polled_apart_from_messages(tmp_db: Database, client: TestClient) -> None:
+    _register(client)
+    client.post("/api/v1/live-sessions/cli-1/messages", json={"sender": "a", "body": "hi"})
+    cid, reason = tmp_db.enqueue_live_message_if_fresh(
+        "cli-1", sender="op", body="autopilot", now=time.time(), kind="control:set-mode")
+    assert reason is None
+    msgs = client.get("/api/v1/live-sessions/cli-1/messages").json()["messages"]
+    ctrls = client.get("/api/v1/live-sessions/cli-1/controls").json()["messages"]
+    assert [m["body"] for m in msgs] == ["hi"]  # an older extension never sees a control
+    assert [(c["id"], c["kind"], c["body"]) for c in ctrls] == [(cid, "control:set-mode", "autopilot")]
+    assert not tmp_db.live_message_delivered("cli-1", cid)
+    acked = client.post("/api/v1/live-sessions/cli-1/controls/ack", json={"ids": [cid]}).json()
+    assert acked["acked"] == 1 and tmp_db.live_message_delivered("cli-1", cid)
+    # A control ack doesn't mark the session busy (a mode change starts no turn).
+    assert (tmp_db.get_live_session("cli-1") or {}).get("turn_state") != "running"
+
+
+def test_an_applied_mode_change_reports_applied(client: TestClient, tmp_db: Database, monkeypatch) -> None:
+    _register(client)
+    monkeypatch.setattr(tmp_db, "live_message_delivered", lambda sid, mid: True)
+    r = client.post("/api/v1/live-sessions/cli-1/mode", json={"mode": "interactive"})
+    assert r.json()["applied"] is True
+
+
+def test_mode_changes_are_validated_and_controls_reserved(client: TestClient) -> None:
+    _register(client)
+    assert client.post("/api/v1/live-sessions/cli-1/mode", json={"mode": "yolo"}).status_code == 422
+    assert client.post("/api/v1/live-sessions/ghost/mode", json={"mode": "plan"}).status_code == 404
+    r = client.post("/api/v1/live-sessions/cli-1/messages",
+                    json={"sender": "a", "body": "autopilot", "kind": "control:set-mode"})
+    assert r.status_code == 400
