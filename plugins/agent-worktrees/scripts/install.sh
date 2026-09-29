@@ -646,9 +646,73 @@ _versioned_activate() {
         fi
         return 1
     fi
+    # Determine the just-superseded slot by calling the CANONICAL resolver
+    # (resolve-runtime.sh) directly, rather than reimplementing its tiered
+    # marker/last-known-good/newest-slot validity logic here (review finding,
+    # round 5): reading `current`/last-known-good as raw strings only checks
+    # for EMPTINESS, not whether the resolver actually considers that slot
+    # valid/complete -- a nonempty but incomplete marker or last-known-good
+    # value makes the resolver reject it and fall through to a further tier,
+    # while this heuristic would have stopped at the first nonempty value and
+    # protected the WRONG (or no) slot. Calling the resolver directly is
+    # authoritative by construction: it IS the exact code path a real
+    # resolve()/launch would use, so whatever slot it returns here is exactly
+    # what a plan resolved moments earlier would have pinned.
+    #
+    # MUST run BEFORE _versioned_mark_complete (review finding, round 6):
+    # marking $SRC_VERSION complete makes IT a valid tier-3 candidate too: if
+    # both the marker and last-known-good are invalid at this exact moment,
+    # a resolve AFTER mark-complete could have the newest-slot scan pick the
+    # brand-new $SRC_VERSION itself (its own version number sorts newest)
+    # instead of the actually-previously-pinned older slot, leaving that real
+    # prev undetected and unprotected.
+    local prev=""
+    local _saved_rt_root="${AGENT_RT_ROOT-}"
+    local _resolver_src="$SCRIPT_DIR/resolve-runtime.sh"
+    if [[ -f "$_resolver_src" ]]; then
+        AGENT_RT_ROOT="$INSTALL_DIR"
+        # install.sh runs under `set -euo pipefail`; resolve-runtime.sh has
+        # bare (non-&&/||-guarded) commands that can return non-zero on a
+        # normal miss (e.g. an invalid marker), which would abort THIS script
+        # under -e once sourced in-process. Suspend -e for the source call
+        # only, best-effort; never let a resolver hiccup fail the install.
+        set +e
+        # shellcheck source=resolve-runtime.sh
+        . "$_resolver_src"
+        set -e
+        if [[ -n "${AW_PY-}" ]]; then
+            # AW_PY = .../versions/<ver>/{bin/python,Scripts/python.exe}; the
+            # version is two directory levels up from the interpreter.
+            prev="$(basename "$(dirname "$(dirname "$AW_PY")")")"
+        fi
+        if [[ -n "$_saved_rt_root" ]]; then
+            AGENT_RT_ROOT="$_saved_rt_root"
+        else
+            unset AGENT_RT_ROOT
+        fi
+    fi
     _versioned_mark_complete
-    local prev
-    prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
+    # Touch the just-superseded slot's mtime IMMEDIATELY after resolving it,
+    # BEFORE activate() runs (review finding on #4451): installs run
+    # concurrently by design, so a delay here (activate + status-monitor-
+    # restart + last-known-good write all used to run first) leaves a window
+    # where a CONCURRENT installer can activate the NEXT generation and run
+    # its own gc -- which protects only ITS OWN $prev (the version we are
+    # about to activate, not the one before it) -- reaping this $prev before
+    # this invocation's own touch/gc ever runs. Touching as early as possible
+    # minimizes that exposure window. `gc`'s --min-age-days floor measures a
+    # slot's age from its directory mtime (~= install time, versioned_runtime
+    # .py's _slot_age_days), NOT from when it stopped being current. Without
+    # this touch, a slot installed more than --min-age-days ago (the common
+    # case -- most versions live for days between releases) gets ZERO
+    # protection from the floor the moment it's superseded. Resetting $prev's
+    # mtime here makes the floor measure what it needs to: time-since-
+    # superseded, so a plan resolved against it moments before this
+    # activation survives the immediately-following gc. Best-effort; a touch
+    # failure never blocks activation.
+    if [[ -n "$prev" ]]; then
+        touch "$INSTALL_DIR/versions/$prev" 2>/dev/null || true
+    fi
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --no-link; then
         err "Failed to activate runtime version (marker -> versions/$SRC_VERSION)"
         return 1
@@ -670,11 +734,17 @@ _versioned_activate() {
         mv -f "$INSTALL_DIR/last-known-good.tmp.$$" "$INSTALL_DIR/last-known-good" 2>/dev/null \
             || rm -f "$INSTALL_DIR/last-known-good.tmp.$$" 2>/dev/null
     fi
-    if [[ -n "$prev" ]]; then
-        "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  → gc: /' || true
-    else
-        "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  → gc: /' || true
-    fi
+    local -a gc_keep_args=()
+    [[ -n "$prev" ]] && gc_keep_args+=(--keep "$prev")
+    # --min-age-days is a recency floor protecting a STORED (not-running)
+    # path-pinned reference -- launch-session.ps1/.sh's `resolve` bakes the
+    # runtime interpreter's path into a plan BEFORE this activation runs;
+    # if that plan hasn't launched its pane yet, its baked path names a
+    # slot that is neither `current` nor `--keep`-protected nor attributable
+    # to a live process (the resolving process already exited). 0.05 days
+    # (~72min) matches agent-mcp's init.sh precedent for the same class of
+    # not-yet-live reference. See #4432 for the concrete failure this closes.
+    "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids "${gc_keep_args[@]}" --min-age-days 0.05 2>&1 | sed 's/^/  → gc: /' || true
     return 0
 }
 # === end install-contract:v3 versioned-venv ===

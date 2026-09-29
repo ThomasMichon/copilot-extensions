@@ -136,7 +136,7 @@ def test_install_sh_guards_value_greps():
     (``default_branch`` is no longer grep-extracted -- the projects.yaml write
     moved to the Python `register-project-entry` subcommand -- so only the
     ``anchor:`` REPO_DIR detection remains.)"""
-    text = _INSTALL_SH.read_text()
+    text = _INSTALL_SH.read_text(encoding="utf-8")
     for key in ("anchor:",):
         line = next(
             ln for ln in text.splitlines()
