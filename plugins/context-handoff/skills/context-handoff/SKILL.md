@@ -126,15 +126,20 @@ Before composing the **Continuing Objective** / **Successor Work Roster** /
    for open-ended language: "still open," "future pass," "not yet," "didn't
    verify," "follow-up," "left as-is," "deferred," "out of scope for this,"
    or similar.
-2. For each hit, fold it into the brief's own carrier for open work -- the
-   **Successor Work Roster** for the standalone shape, or the **Next Slice**
-   for the effort-backed shape (which has no Successor Work Roster; route
-   the hit there, or into the active effort itself when it doesn't belong to
-   this handoff leg specifically) -- or state explicitly in the brief that it
-   was deliberately scoped out and why. Never let it silently disappear
-   because the primary ask happened to be done, and never drop it for lack
-   of a Successor Work Roster in the shape you're using.
-3. Only write "None outstanding" once this scan has actually happened, not
+2. **Classify each hit against what happened afterward, not just the hit
+   itself.** An earlier "didn't verify" or "still open" may have been
+   resolved by a later turn in the same session -- check the turns that
+   follow the hit before deciding it's still open. Carry forward only the
+   hits that remain genuinely unresolved at the point the brief is composed.
+3. For each hit that remains open, fold it into the brief's own carrier for
+   open work -- the **Successor Work Roster** for the standalone shape, or
+   the **Next Slice** for the effort-backed shape (which has no Successor
+   Work Roster; route the hit there, or into the active effort itself when
+   it doesn't belong to this handoff leg specifically) -- or state explicitly
+   in the brief that it was deliberately scoped out and why. Never let it
+   silently disappear because the primary ask happened to be done, and never
+   drop it for lack of a Successor Work Roster in the shape you're using.
+4. Only write "None outstanding" once this scan has actually happened, not
    because nothing came immediately to mind.
 
 This is a self-check, not a formal tool -- do it by re-reading, not by
@@ -354,25 +359,33 @@ yourself deserves a lighter version of the same check before you report
    full transcript with no way to search or page it, delegate the read to a
    sub-agent (the same context-firewall pattern the `session-rampup` agent
    uses) rather than loading it directly.
-2. **Identifying the right predecessor session is best-effort, not
+2. **A bounded read around a match can miss a later resolution.** Before
+   classifying a hit as a dropped item, do a targeted follow-up query for
+   turns/status references *after* the match (not the full transcript) --
+   the predecessor may have resolved it later in the same session and the
+   brief simply reflects that later state correctly. Only items that remain
+   unresolved through the end of the predecessor's own history count as
+   dropped.
+3. **Identifying the right predecessor session is best-effort, not
    guaranteed.** Nothing today reliably threads a predecessor's session ID
    through the handoff payload into your hands, so resolve it from whatever
    lineage signals the available tooling exposes (worktree/session history,
    timestamps, the brief's own content) rather than assuming an authoritative
    pointer exists. If you can't identify a specific predecessor session with
-   reasonable confidence, that itself is a retrieval failure -- see point 4.
-3. If the identified predecessor session's own first turn shows it was itself
+   reasonable confidence, that itself is a retrieval failure -- see point 5.
+4. If the identified predecessor session's own first turn shows it was itself
    resuming from an earlier handoff, treat that as a chain: a terse or
    all-green brief is more likely to be compressed rather than complete, so
    extend the same spot-check one hop further back before accepting "nothing
    outstanding" at face value.
-4. If you find a dropped item, surface it to the user rather than quietly
-   picking it up or quietly dropping it again -- it may be intentional, or it
-   may be exactly the kind of gap this check exists to catch.
-5. **Disclose whenever the check didn't actually happen** -- not only when no
+5. If you find a dropped item -- one that was still unresolved when the
+   predecessor's own history ends -- surface it to the user rather than
+   quietly picking it up or quietly dropping it again; it may be intentional,
+   or it may be exactly the kind of gap this check exists to catch.
+6. **Disclose whenever the check didn't actually happen** -- not only when no
    history surface exists at all, but whenever the specific predecessor
    transcript is missing, remote, expired, unreadable, or unidentifiable (per
-   point 2). "The brief looks complete but I could not cross-check it against
+   point 3). "The brief looks complete but I could not cross-check it against
    the predecessor's own transcript (<reason>)" is honest; a bare "nothing
    outstanding" is not, when the check was never actually completed.
 
