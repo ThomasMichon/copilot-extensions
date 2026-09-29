@@ -338,6 +338,21 @@ def test_apply_reports_unsupported_identity_bound_repair(tmp_path: Path):
     assert result["actions"][0]["reason"] == "identity-bound repair unsupported on this platform"
 
 
+def test_apply_requires_provable_owner_start_time_token(tmp_path: Path):
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=101, version="1.0.0")
+    state = {
+        "lock": {"pid": 101, "start_time": None},
+        "live": {101: "owner", 202: "duplicate"},
+        "terminated": [],
+    }
+
+    result = diagnostics.apply_daemon_health(_ctx(tmp_path, state=state))
+
+    assert state["terminated"] == []
+    assert result["actions"][0]["blocked"] is True
+    assert result["actions"][0]["reason"] == "no validated live owner"
+
+
 def test_audit_detects_stranded_draining_survivor_via_health_probe(tmp_path: Path):
     record = breadcrumb.write_breadcrumb(
         tmp_path,

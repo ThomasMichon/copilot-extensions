@@ -319,12 +319,17 @@ def _validated_owner(
     candidate = candidates.get(pid)
     if candidate is None:
         return None, "validated owner absent from fresh daemon census"
+    recorded_start = lock_data.get("start_time")
+    if not recorded_start or not candidate.start_time:
+        return None, "validated owner lacks a provable start-time token"
+    if str(recorded_start) != str(candidate.start_time):
+        return None, "lock owner token disagrees with fresh process census"
     return {
         "pid": candidate.pid,
         "start_time": candidate.start_time,
         "lock": {
             "pid": lock_data.get("pid"),
-            "start_time": lock_data.get("start_time"),
+            "start_time": recorded_start,
         },
     }, None
 
