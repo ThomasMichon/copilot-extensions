@@ -422,6 +422,38 @@ _Pending._
 
 ## Journal
 
+### 2026-09-28 — Phase 1 merged (`agent-worktrees` / PR #4447)
+Phase 1 is now merged to `dev` via PR #4447 (`agent-worktrees: add graceful
+status-monitor cutover`). The landed slice vendors `zdd` under
+`plugins/agent-worktrees/libs/zdd/`, wires the resident `status-monitor`
+into the installer-driven active/passive cutover contract, and keeps the
+old generation alive until the successor is both routed and promoted.
+
+The final security-sensitive design detail is the new **owner-scoped
+loopback control token** for the monitor control plane: the drain/promote/
+shutdown surface now requires an unguessable bearer token loaded from a
+machine-local `status-monitor-control.token` file under the monitor's own
+runtime root, written best-effort `0600`, and used only on loopback by the
+installer/cutover client. This closes the local-process drain/shutdown hole
+the review found without inventing a second auth model distinct from the
+suite's other token-protected local control surfaces.
+
+The final drain-boundary shape is: **close admission first, keep the sweep
+marked active through reconciliation/pane-reap mutations, wait for every
+already-accepted hook/classify/tracking-write handler plus in-flight write
+compute to drain, then retire**. Passive generations self-promote once they
+observe themselves become the routed active pid, so an installer dying after
+the route flip cannot strand a successor with no published surfaces.
+
+Review history: the early rounds found real correctness gaps (drain races,
+promotion timing, abandoned-passive recovery, PYTHONPATH isolation, Windows
+spawn mode, and loopback auth), all of which were fixed before merge. Later
+rounds began re-surfacing findings against older heads or already-landed
+content (notably the documentation-impact statement and the shared-lib
+preinstall ordering), so the final merge decision followed this repo's own
+commented-verdict policy: once the current head had green checks, a plain
+`COMMENTED` Copilot verdict remained advisory rather than merge-blocking.
+
 ### 2026-09-28 — Phase 1 implemented in `agent-worktrees`
 Implemented the `status-monitor` cutover slice. `zdd` is now vendored under
 `plugins/agent-worktrees/libs/zdd/`, the plugin declares
