@@ -350,7 +350,7 @@ class TestPushTimeoutTreeKill:
         import time
 
         from agent_worktrees import push_timeout
-        from agent_worktrees.locks import pid_alive
+        from agent_worktrees.locks import pid_alive, process_start_time
 
         # This test's whole point is the REAL, non-contained pgid-based
         # descendant sweep in push_timeout._kill_tree (see its own
@@ -403,6 +403,7 @@ class TestPushTimeoutTreeKill:
         cmd = [sys.executable, str(outer_script)]
 
         grandchild_pid: int | None = None
+        grandchild_start_time: str | None = None
         try:
             with pytest.raises(subprocess.TimeoutExpired):
                 push_timeout.run_bounded(
@@ -416,6 +417,10 @@ class TestPushTimeoutTreeKill:
                 "grandchild never started -- test setup issue, not a real assertion"
             )
             grandchild_pid = int(ready.read_text().strip())
+            # Captured immediately after reading the PID, before any risk
+            # of it exiting and being reused -- the finally block below
+            # revalidates against this token before ever signaling the PID.
+            grandchild_start_time = process_start_time(grandchild_pid)
 
             deadline = time.monotonic() + 10
             alive = pid_alive(grandchild_pid)
@@ -427,8 +432,19 @@ class TestPushTimeoutTreeKill:
             # Independent safety net (see comment above): force-kill the
             # grandchild directly by PID if it's still alive, regardless of
             # the outcome above -- this test must never itself leak a live
-            # process back to the (now-uncontained) suite.
-            if grandchild_pid is not None and pid_alive(grandchild_pid):
+            # process back to the (now-uncontained) suite. Revalidate the
+            # start-time identity token first (agent_worktrees.locks'
+            # PID-reuse-proof mechanism, already used elsewhere in this
+            # module for exactly this class of race): a PID can be reaped
+            # and reused by an unrelated process during the poll window
+            # above, and signaling a bare PID without this check could kill
+            # that unrelated process instead of our own grandchild.
+            if (
+                grandchild_pid is not None
+                and grandchild_start_time is not None
+                and pid_alive(grandchild_pid)
+                and process_start_time(grandchild_pid) == grandchild_start_time
+            ):
                 if platform.system() == "Windows":
                     subprocess.run(
                         ["taskkill", "/F", "/PID", str(grandchild_pid)],
