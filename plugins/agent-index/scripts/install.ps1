@@ -1493,6 +1493,25 @@ function Install-Runtime {
         Write-Fail 'Cannot locate zdd library. Reinstall the agent-index plugin from the marketplace (copilot plugin install agent-index@copilot-extensions), then rerun this installer.'
         exit 1
     }
+
+    # agent-procutil is a `uv`-editable canonical reference in a dev
+    # checkout (vendor-pointer-generalization effort: no local copy at
+    # all) and not on PyPI -- pre-install it the same way as zdd above, so
+    # the non-uv (bare-pip) fallback below can still resolve it.
+    $ProcutilDir = Resolve-VendoredLib -LibName 'agent-procutil'
+    if ($ProcutilDir) {
+        if (Get-Command uv -ErrorAction SilentlyContinue) {
+            $procutilOut = & uv pip install --python $VenvPython "$ProcutilDir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet 2>&1
+        } else {
+            $procutilOut = & $VenvPython -m pip install "$ProcutilDir" 2>&1
+        }
+        if ($LASTEXITCODE -ne 0) {
+            $ErrorActionPreference = $prevEAP
+            Write-Fail "agent-procutil install failed (exit $LASTEXITCODE)"
+            if ($procutilOut) { Write-Host ($procutilOut | Out-String) }
+            exit 1
+        }
+    }
     Remove-ConsoleTrampolines -VenvDir $VenvDir
     # A host runs the local indexing/vector-store stack and the FastAPI/uvicorn
     # server, so it needs the [store,server] extras (numpy, pyarrow, lancedb,
@@ -1737,6 +1756,20 @@ function Install-Engine {
                 ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
         } else {
             & $EngineVenvPython -m pip install "$ZddDir" 2>&1 |
+                ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
+        }
+    }
+
+    # agent-procutil is likewise a `uv`-editable canonical reference in a
+    # dev checkout (no local copy, not on PyPI) -- pre-install it the same
+    # way as zdd above.
+    $ProcutilDir = Resolve-VendoredLib -LibName 'agent-procutil'
+    if ($ProcutilDir) {
+        if (Get-Command uv -ErrorAction SilentlyContinue) {
+            & uv pip install --python $EngineVenvPython "$ProcutilDir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet 2>&1 |
+                ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
+        } else {
+            & $EngineVenvPython -m pip install "$ProcutilDir" 2>&1 |
                 ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
         }
     }

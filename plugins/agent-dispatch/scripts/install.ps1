@@ -1012,6 +1012,7 @@ function Install-Runtime {
         @{ Dir = 'dropin-registry'; Pkg = 'agent-dropin-registry'; Display = 'dropin-registry' },
         @{ Dir = 'plugin-resolve'; Pkg = 'agent-plugin-resolve'; Display = 'plugin-resolve' },
         @{ Dir = 'single-instance-lease'; Pkg = 'agent-single-instance-lease'; Display = 'single-instance-lease' },
+        @{ Dir = 'agent-procutil'; Pkg = 'agent-procutil'; Display = 'agent-procutil' },
         @{ Dir = 'plugin-activation'; Pkg = 'agent-plugin-activation'; Display = 'plugin-activation' }
     )) {
         $libDir = Resolve-VendoredLib -LibName $lib.Dir

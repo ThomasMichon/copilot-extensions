@@ -475,6 +475,13 @@ def _copied_agent_machines_payload(tmp_path: Path) -> Path:
     return payload
 
 
+def _agent_procutil_src(payload: Path) -> Path:
+    local = payload / "libs" / "agent-procutil" / "src"
+    if local.is_dir():
+        return local
+    return REPO / "libs" / "agent-procutil" / "src"
+
+
 def _directory_marketplace_agent_machines_payload(tmp_path: Path) -> Path:
     marketplace = tmp_path / "marketplace"
     payload = marketplace / "plugins" / "agent-machines"
@@ -768,7 +775,7 @@ def _agent_worktrees_test_environment(
                     str(payload / "src"),
                     str(payload / "libs" / "config-migrate" / "src"),
                     str(payload / "libs" / "plugin-resolve" / "src"),
-                    str(payload / "libs" / "agent-procutil" / "src"),
+                    str(_agent_procutil_src(payload)),
                     str(payload / "libs" / "dropin-registry" / "src"),
                     str(payload / "libs" / "plugin-activation" / "src"),
                 ]
@@ -1419,7 +1426,7 @@ def test_agent_machines_required_context_preserves_absent_policy_legacy_use(
                 [
                     str(payload / "src"),
                     str(payload / "libs" / "plugin-resolve" / "src"),
-                    str(payload / "libs" / "agent-procutil" / "src"),
+                    str(_agent_procutil_src(payload)),
                 ]
             ),
             "TEST_PYTHON": sys.executable,
@@ -1516,7 +1523,7 @@ def test_agent_machines_active_context_selects_only_its_cell_root(
                 [
                     str(payload / "src"),
                     str(payload / "libs" / "plugin-resolve" / "src"),
-                    str(payload / "libs" / "agent-procutil" / "src"),
+                    str(_agent_procutil_src(payload)),
                 ]
             ),
             "TEST_PYTHON": sys.executable,
@@ -1574,7 +1581,7 @@ def test_agent_machines_blocked_context_states_never_run_legacy(
                 [
                     str(payload / "src"),
                     str(payload / "libs" / "plugin-resolve" / "src"),
-                    str(payload / "libs" / "agent-procutil" / "src"),
+                    str(_agent_procutil_src(payload)),
                 ]
             ),
             "TEST_PYTHON": sys.executable,
@@ -1684,7 +1691,7 @@ def test_agent_machines_removed_policy_keeps_active_cell_authoritative(
                 [
                     str(payload / "src"),
                     str(payload / "libs" / "plugin-resolve" / "src"),
-                    str(payload / "libs" / "agent-procutil" / "src"),
+                    str(_agent_procutil_src(payload)),
                 ]
             ),
             "TEST_PYTHON": sys.executable,

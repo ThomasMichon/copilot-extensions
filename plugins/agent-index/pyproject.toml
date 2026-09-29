@@ -40,7 +40,11 @@ dependencies = [
 # zero-downtime cutover primitives -- the routing table + cutover orchestrator
 # (module ``zdd``), extracted from agent-bridge so other services reuse them.
 agent-zdd = { path = "libs/zdd" }
-agent-procutil = { path = "libs/agent-procutil" }
+# `path` escapes this plugin's own root and resolves live to
+# `libs/agent-procutil`, so this `dev`-branch checkout has nothing to keep
+# manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
+agent-procutil = { path = "../../libs/agent-procutil", editable = true }
 agent-dropin-registry = { path = "libs/dropin-registry" }
 
 [project.optional-dependencies]

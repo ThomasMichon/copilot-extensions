@@ -1,0 +1,9 @@
+{
+  "comment": "vendor-pointer-generalization: sync agent-procutil's canonical docstring comment into agent-worktrees' own real vendored copy (this plugin keeps a real local copy per PR #4447, not the uv-editable form used elsewhere)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

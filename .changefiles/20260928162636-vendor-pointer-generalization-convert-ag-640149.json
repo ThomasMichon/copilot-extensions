@@ -1,0 +1,29 @@
+{
+  "comment": "vendor-pointer-generalization: convert agent-procutil to a uv-editable canonical reference (dropped the real local copy); agent-machines' installer non-uv preinstall loop and fallback-preinstall tests updated to cover it, agent-index's runtime-gate tests updated to resolve the canonical path. agent-worktrees excluded: PR #4447 deliberately reverted it back to real local vendored copies for its status-monitor cutover feature's self-contained build surface, so its agent-procutil stays a real copy too.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

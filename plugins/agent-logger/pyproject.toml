@@ -27,9 +27,11 @@ dependencies = [
 # effort, Phase 1): `path` escapes this plugin's own root and resolves live
 # to `libs/config-migrate`, so every consumer shares one canonical copy.
 agent-config-migrate = { path = "../../libs/config-migrate", editable = true }
-# Windows-headless process-spawn helpers (module ``agent_procutil``). Vendored
-# per plugin; byte-identical src across copies.
-agent-procutil = { path = "libs/agent-procutil" }
+# `path` escapes this plugin's own root and resolves live to
+# `libs/agent-procutil`, so this `dev`-branch checkout has nothing to keep
+# manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
+agent-procutil = { path = "../../libs/agent-procutil", editable = true }
 # Canonical git-remote identity normalization (module ``plugin_activation``);
 # vendored per plugin; byte-identical src across copies.
 agent-plugin-activation = { path = "../../libs/plugin-activation", editable = true }

@@ -14,6 +14,19 @@ import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
 SOURCE_ROOT = PLUGIN / "src"
+
+
+def _procutil_src() -> Path:
+    """Resolve `agent_procutil`'s `src/` for the fake-runtime `PYTHONPATH`
+    below. `agent-procutil` is a `uv`-editable canonical reference in a dev
+    checkout (vendor-pointer-generalization effort) -- no local copy under
+    this plugin's own `libs/` at all -- so this falls back to the repo-root
+    canonical `libs/agent-procutil/src`, mirroring the same local-copy/
+    canonical-fallback pattern the install scripts use."""
+    local = PLUGIN / "libs" / "agent-procutil" / "src"
+    if local.is_dir():
+        return local
+    return PLUGIN.parents[1] / "libs" / "agent-procutil" / "src"
 DEFAULT_FAKE_RUNTIME = (
     "import json, os, sys\n"
     "command = sys.argv[1] if len(sys.argv) > 1 else 'status'\n"
@@ -164,7 +177,7 @@ def _fixture(tmp_path: Path, shell: str) -> tuple[Path, dict[str, str]]:
     env["PYTHONPATH"] = os.pathsep.join(
         (
             str(SOURCE_ROOT),
-            str(PLUGIN / "libs" / "agent-procutil" / "src"),
+            str(_procutil_src()),
             str(PLUGIN / "libs" / "zdd" / "src"),
         )
     )
@@ -212,7 +225,7 @@ printf '{"pluginRoot":"%s","versionsRoot":"%s/versions","snapshotsRoot":"%s/snap
         env["PYTHONPATH"] = ":".join(
             (
                 SOURCE_ROOT.as_posix(),
-                (PLUGIN / "libs" / "agent-procutil" / "src").as_posix(),
+                _procutil_src().as_posix(),
                 (PLUGIN / "libs" / "zdd" / "src").as_posix(),
             )
         )
@@ -388,7 +401,7 @@ def _real_setup_runtime(
     }
     dependency_paths.update(
         {
-            str((PLUGIN / "libs" / "agent-procutil" / "src").resolve()),
+            str(_procutil_src().resolve()),
             str((PLUGIN / "libs" / "zdd" / "src").resolve()),
         }
     )

@@ -45,9 +45,19 @@ allocate a visible console.
 
 ## Vendoring
 
-This lib is **vendored per plugin** at `plugins/<plugin>/libs/agent-procutil`
-(a marketplace-installed plugin can only reference libs inside its own dir via
-`[tool.uv.sources] agent-procutil = { path = "libs/agent-procutil" }`). Every
-copy's `src/` tree must stay **byte-identical** and declare the **same version**
-— enforced by `tools/check-vendored-libs-sync.py`. A source change to one copy
-MUST be propagated to all, with a version bump.
+**In dev**, most consumers' `pyproject.toml` reference this library through
+a `uv`-editable canonical pointer (`vendor-pointer-generalization` effort,
+Phase 1) --
+`agent-procutil = { path = "../../libs/agent-procutil", editable = true }` --
+so those consumers resolve to this one source tree with nothing to keep in
+sync. At least one consumer (`agent-worktrees`) ships a real local copy in
+dev too, per its own self-contained build-surface requirement for its
+status-monitor cutover feature.
+
+**At release**, `tools/materialize_main.py` rewrites every remaining
+`uv`-editable pointer into a real, promoted copy at
+`plugins/<plugin>/libs/agent-procutil/` for that consumer -- non-editable, so
+a published plugin installs a self-contained source tree with no
+cross-plugin `path` reference. `tools/sync-vendored-libs.py
+--check` verifies every materialized copy's `src/` tree and version stay
+byte-identical to this canonical one and to each other.

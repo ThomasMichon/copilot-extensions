@@ -61,9 +61,11 @@ dependencies = [
 # (dotfiles#929); kept byte-identical to every other copy by
 # tools/check-vendored-libs-sync.py.
 agent-plugin-resolve = { path = "../libs/plugin-resolve", editable = true }
-# Shared Windows-headless / detached process-spawn kwargs (module
-# ``agent_procutil``). Vendored per plugin; byte-identical src across copies.
-agent-procutil = { path = "libs/agent-procutil" }
+# `path` escapes this plugin's own root and resolves live to
+# `libs/agent-procutil`, so this `dev`-branch checkout has nothing to keep
+# manually in sync -- only a real `main`-branch release
+# (tools/materialize_main.py) ever gets a real local copy.
+agent-procutil = { path = "../libs/agent-procutil", editable = true }
 # Resilient scan authority, entry decisions, and bounded warning tracking for
 # filesystem registries (module ``dropin_registry``).
 agent-dropin-registry = { path = "../libs/dropin-registry", editable = true }

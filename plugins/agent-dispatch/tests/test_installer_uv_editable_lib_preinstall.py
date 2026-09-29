@@ -1,7 +1,7 @@
 """Guard for install.ps1's non-uv (bare-pip) preinstall loop covering the
 uv-editable canonical-reference libs (vendor-pointer-generalization effort):
-dropin-registry, plugin-resolve, single-instance-lease, plugin-activation.
-Exercises the loop via real pwsh execution (stubbing the actual install
+dropin-registry, plugin-resolve, single-instance-lease, agent-procutil,
+plugin-activation. Exercises the loop via real pwsh execution (stubbing the actual install
 call and Resolve-VendoredLib's own canonical fallback) to confirm both
 resolution and the required dropin-registry/plugin-resolve-before-
 plugin-activation install order -- a regression here would still pass
@@ -74,7 +74,7 @@ def test_preinstall_loop_resolves_each_lib_and_installs_in_order(tmp_path: Path)
         pytest.skip("PowerShell is unavailable")
 
     plugin_dir = tmp_path / "plugins" / "agent-dispatch"
-    for lib in ("dropin-registry", "plugin-resolve", "single-instance-lease", "plugin-activation"):
+    for lib in ("dropin-registry", "plugin-resolve", "single-instance-lease", "agent-procutil", "plugin-activation"):
         lib_dir = plugin_dir / "libs" / lib
         lib_dir.mkdir(parents=True)
         (lib_dir / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
@@ -87,7 +87,7 @@ def test_preinstall_loop_resolves_each_lib_and_installs_in_order(tmp_path: Path)
         for seg in proc.stdout.split("|")
         if seg.startswith("INSTALL:")
     ]
-    assert len(installs) == 4
+    assert len(installs) == 5
     order = [Path(p).name for p in installs]
     assert order.index("plugin-activation") > order.index("dropin-registry")
     assert order.index("plugin-activation") > order.index("plugin-resolve")
@@ -97,6 +97,7 @@ def test_preinstall_loop_resolves_each_lib_and_installs_in_order(tmp_path: Path)
         "dropin-registry installed",
         "plugin-resolve installed",
         "single-instance-lease installed",
+        "agent-procutil installed",
         "plugin-activation installed",
     ]
 
@@ -113,7 +114,7 @@ def test_preinstall_loop_falls_back_to_repo_root_canonical_via_resolve_vendored_
     # No plugins/agent-dispatch/libs/<lib> for any of them -- dev checkout,
     # uv-editable canonical reference with no per-plugin copy.
     canonical = tmp_path / "libs"
-    for lib in ("dropin-registry", "plugin-resolve", "single-instance-lease", "plugin-activation"):
+    for lib in ("dropin-registry", "plugin-resolve", "single-instance-lease", "agent-procutil", "plugin-activation"):
         lib_dir = canonical / lib
         lib_dir.mkdir(parents=True)
         (lib_dir / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
@@ -125,6 +126,6 @@ def test_preinstall_loop_falls_back_to_repo_root_canonical_via_resolve_vendored_
         for seg in proc.stdout.split("|")
         if seg.startswith("INSTALL:")
     ]
-    assert len(installs) == 4
+    assert len(installs) == 5
     for resolved in installs:
         assert os.path.realpath(resolved).startswith(os.path.realpath(str(canonical)))

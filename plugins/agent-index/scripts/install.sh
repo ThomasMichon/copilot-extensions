@@ -1212,6 +1212,22 @@ _ensure_runtime() {
         exit 1
     fi
 
+    # agent-procutil is a `uv`-editable canonical reference in a dev
+    # checkout (vendor-pointer-generalization effort: no local copy at
+    # all) and not on PyPI -- pre-install it the same way as zdd above, so
+    # the non-uv (bare-pip) fallback below can still resolve it.
+    local procutil_dir
+    if procutil_dir="$(_resolve_vendored_lib agent-procutil)"; then
+        if [[ "$have_uv" -eq 1 ]]; then
+            uv pip install --python "$VENV_PYTHON" "$procutil_dir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet
+        else
+            "$VENV_PYTHON" -m pip install "$procutil_dir" >/dev/null
+        fi || {
+            _fail "agent-procutil install failed"
+            exit 1
+        }
+    fi
+
     _pip_install() {
         # A host runs the local indexing/vector-store stack and the FastAPI/
         # uvicorn server, so it needs the [store,server] extras (numpy,
@@ -1418,6 +1434,18 @@ _install_engine() {
             uv pip install --python "$ENGINE_VENV_PYTHON" "$zdd_dir" --reinstall-package agent-zdd --refresh-package agent-zdd --quiet >/dev/null 2>&1 || true
         else
             "$ENGINE_VENV_PYTHON" -m pip install "$zdd_dir" >/dev/null 2>&1 || true
+        fi
+    fi
+
+    # agent-procutil is likewise a `uv`-editable canonical reference in a
+    # dev checkout (no local copy, not on PyPI) -- pre-install it the same
+    # way as zdd above.
+    local procutil_dir
+    if procutil_dir="$(_resolve_vendored_lib agent-procutil)"; then
+        if [[ "$have_uv" -eq 1 ]]; then
+            uv pip install --python "$ENGINE_VENV_PYTHON" "$procutil_dir" --reinstall-package agent-procutil --refresh-package agent-procutil --quiet >/dev/null 2>&1 || true
+        else
+            "$ENGINE_VENV_PYTHON" -m pip install "$procutil_dir" >/dev/null 2>&1 || true
         fi
     fi
 
