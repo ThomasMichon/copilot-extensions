@@ -308,6 +308,36 @@ def test_apply_never_terminates_validated_owner_from_stale_breadcrumb(tmp_path: 
     assert result["actions"][0]["reason"] == "target is the validated live owner"
 
 
+def test_apply_reports_unsupported_identity_bound_repair(tmp_path: Path):
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=101, version="1.0.0")
+    state = {
+        "lock": {"pid": 101, "start_time": "owner"},
+        "live": {101: "owner", 202: "duplicate"},
+        "terminated": [],
+    }
+    ctx = _ctx(tmp_path, state=state)
+    ctx = diagnostics.DiagnosticContext(
+        service=ctx.service,
+        config_dir=ctx.config_dir,
+        read_lock=ctx.read_lock,
+        list_candidates=ctx.list_candidates,
+        is_superseded=ctx.is_superseded,
+        repair_supported=False,
+        acquire_cutover_guard=ctx.acquire_cutover_guard,
+        reachability_check=ctx.reachability_check,
+        terminate_pid_if_identity=ctx.terminate_pid_if_identity,
+        lock_is_live=ctx.lock_is_live,
+        make_client=ctx.make_client,
+        health_check=ctx.health_check,
+        abandoned_passive_grace_seconds=ctx.abandoned_passive_grace_seconds,
+    )
+
+    result = diagnostics.apply_daemon_health(ctx)
+
+    assert state["terminated"] == []
+    assert result["actions"][0]["reason"] == "identity-bound repair unsupported on this platform"
+
+
 def test_audit_detects_stranded_draining_survivor_via_health_probe(tmp_path: Path):
     record = breadcrumb.write_breadcrumb(
         tmp_path,

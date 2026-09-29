@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from zdd import diagnostics
@@ -45,6 +46,7 @@ def _context(root: Path | None = None) -> diagnostics.DiagnosticContext:
             resolved_root,
             timeout_s=timeout,
         ),
+        repair_supported=(sys.platform != "darwin"),
         is_superseded=lambda pid, generation: mux_daemon_cutover.is_superseded(
             resolved_root, pid, generation
         ),

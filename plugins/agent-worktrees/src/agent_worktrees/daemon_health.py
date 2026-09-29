@@ -82,6 +82,7 @@ def _context() -> diagnostics.DiagnosticContext:
             status_monitor_cutover.routing_dir(),
             timeout_s=timeout,
         ),
+        repair_supported=(sys.platform != "darwin"),
         is_superseded=lambda pid, generation: self_retire.is_superseded(
             status_monitor_cutover.routing_dir(), pid, generation
         ),

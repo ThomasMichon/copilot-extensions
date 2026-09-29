@@ -282,6 +282,7 @@ class DiagnosticContext:
     list_candidates: Callable[[], list[DaemonCandidate]]
     is_superseded: Callable[[int, int], bool]
     acquire_cutover_guard: Callable[[float], Any] | None = None
+    repair_supported: bool = True
     reachability_check: Callable[[str, int], bool] | None = None
     terminate_pid_if_identity: Callable[[int, str | None], dict] = terminate_pid_if_identity
     lock_is_live: Callable[[dict | None], bool] = lock_data_is_live
@@ -419,13 +420,21 @@ def _inspect_abandoned_passive(
     candidate = candidates.get(new_pid)
     if candidate is None:
         return None, None
-    repairable = candidate.start_time is not None
+    repairable = ctx.repair_supported and candidate.start_time is not None
     return (
         {
             "kind": "abandoned_passive",
             "summary": "stale cutover breadcrumb names a never-promoted passive daemon",
             "repairable": repairable,
-            "blocked_reason": None if repairable else "candidate start_time unavailable",
+            "blocked_reason": (
+                None
+                if repairable
+                else (
+                    "identity-bound repair unsupported on this platform"
+                    if not ctx.repair_supported
+                    else "candidate start_time unavailable"
+                )
+            ),
             "targets": [candidate.to_dict()],
             "age_seconds": age_s,
         },
@@ -463,13 +472,21 @@ def _inspect_superseded_generations(
         targets.append(item)
     if not targets:
         return None, set()
-    repairable = all(item.get("start_time") for item in targets)
+    repairable = ctx.repair_supported and all(item.get("start_time") for item in targets)
     return (
         {
             "kind": "superseded_generation",
             "summary": "a routed, superseded generation is still running past self-retire",
             "repairable": repairable,
-            "blocked_reason": None if repairable else "candidate start_time unavailable",
+            "blocked_reason": (
+                None
+                if repairable
+                else (
+                    "identity-bound repair unsupported on this platform"
+                    if not ctx.repair_supported
+                    else "candidate start_time unavailable"
+                )
+            ),
             "targets": targets,
         },
         matched,
@@ -477,6 +494,7 @@ def _inspect_superseded_generations(
 
 
 def _inspect_duplicates(
+    ctx: DiagnosticContext,
     candidates: dict[int, DaemonCandidate],
     owner: dict[str, object] | None,
     excluded_pids: set[int],
@@ -493,7 +511,11 @@ def _inspect_duplicates(
         targets = [candidate.to_dict() for _, candidate in sorted(candidates.items())]
     if not targets:
         return None
-    repairable = owner_pid is not None and all(item.get("start_time") for item in targets)
+    repairable = (
+        ctx.repair_supported
+        and owner_pid is not None
+        and all(item.get("start_time") for item in targets)
+    )
     return {
         "kind": "duplicate_resident",
         "summary": "more than one live daemon matches the resident active slot",
@@ -502,9 +524,13 @@ def _inspect_duplicates(
             None
             if repairable
             else (
+                "identity-bound repair unsupported on this platform"
+                if not ctx.repair_supported
+                else (
                 "no validated live owner"
                 if owner_pid is None
                 else "candidate start_time unavailable"
+                )
             )
         ),
         "owner": owner,
@@ -577,7 +603,7 @@ def _audit_daemon_health(
             excluded = set(superseded_pids)
             if abandoned_pid is not None:
                 excluded.add(abandoned_pid)
-            duplicate = _inspect_duplicates(candidates, owner, excluded)
+            duplicate = _inspect_duplicates(ctx, candidates, owner, excluded)
             if duplicate is not None:
                 findings.append(duplicate)
     finally:
@@ -646,6 +672,24 @@ def apply_daemon_health(
                     "kind": "cutover_guard",
                     "blocked": True,
                     "reason": guard_error or "cutover in progress",
+                }
+            ],
+        }
+    if not ctx.repair_supported:
+        report = _audit_daemon_health(ctx, now=now, cutover_state="held" if guard is not None else "auto")
+        return {
+            "service": ctx.service,
+            "mode": "apply",
+            "before": report,
+            "after": report,
+            "findings": report["findings"],
+            "remaining_findings": report["findings"],
+            "counts": report["counts"],
+            "actions": [
+                {
+                    "kind": "repair_support",
+                    "blocked": True,
+                    "reason": "identity-bound repair unsupported on this platform",
                 }
             ],
         }
