@@ -84,7 +84,7 @@ boundary (`agent-worktrees --json`), owning no worktree logic of its own.
 update story (graceful cutover on `worktree-manager update`, generation
 self-retire, so a stale daemon can never stack up after a rapid-fire
 release) is tracked by a separate, dedicated effort —
-[`graceful-cutover-worktrees-and-ssh`](../graceful-cutover-worktrees-and-ssh/README.md)
+[`graceful-cutover-worktrees-and-ssh`](../../2026/09/29 graceful-cutover-worktrees-and-ssh/README.md)
 (covers `agent-worktrees` and `worktree-manager` adopting the same
 pre-existing `zdd`/`graceful-daemon-cutover` pattern already proven by
 `agent-bridge`/`agent-dispatch`/`agent-index`, plus `agent-ssh` as an

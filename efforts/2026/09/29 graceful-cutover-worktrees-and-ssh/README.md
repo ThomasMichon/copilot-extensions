@@ -4,8 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase feature branches / independent per-slice PRs
 - **Created:** 2026-09-28
-- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
-- **Vision:** extends [`visions/plugin-services`](../../../visions/plugin-services/README.md)
+- **Status:** Done <!-- Draft | Active | Blocked | Done -->
+- **Vision:** extends [`visions/plugin-services`](../../../../../visions/plugin-services/README.md)
   §`zero-downtime-cutover` — applies its already-generalized zero-downtime
   service model to the three plugins not yet covered by
   `docs/patterns/graceful-daemon-cutover.md`'s own rollout, then elevates
@@ -206,7 +206,7 @@ substantial in its own right.
       or any other spawned child can genuinely outlive its parent/session
       across a release and accumulate — if nothing does, this phase's
       correct conclusion may be "no cutover needed here; the
-      [`ephemeral-process-reaping`](../../../docs/patterns/ephemeral-process-reaping.md)
+      [`ephemeral-process-reaping`](../../../../../docs/patterns/ephemeral-process-reaping.md)
       pattern (if not already applied) is the right fix for any leak found,
       not `zdd`." Do not force this system into the cutover shape if the
       audit finds nothing that needs it.
@@ -351,7 +351,7 @@ substantial in its own right.
       rather than leaving review-time enforcement silently unaddressed.
 
 ### Phase 6 — Diagnostic + self-repair tooling (operator round 2)
-- [ ] Design a **generic, plugin-agnostic daemon-health audit** capability
+- [x] Design a **generic, plugin-agnostic daemon-health audit** capability
       (natural home: `libs/zdd/` itself, e.g. a new `zdd.diagnostics`
       module, since it already owns the routing table + breadcrumb shapes
       every consumer's lock/generation state is built from) that can, for
@@ -379,36 +379,36 @@ substantial in its own right.
     for the actual fixup) — the design already proven correct through three
     rounds of review on that remediation recipe (see the
     `agent-worktrees-authoritative-daemon` effort Journal, 2026-09-28 entry).
-- [ ] Expose it as a **consistent, per-plugin `doctor`-style surface**: each
+- [x] Expose it as a **consistent, per-plugin `doctor`-style surface**: each
       consuming plugin's own `doctor`/health-check command reports its
       daemon(s)' audit findings using the shared module, rather than every
       plugin growing its own bespoke detection logic (mirrors how `zdd`
       itself is vendored byte-identically rather than reinvented per
       plugin).
-- [ ] **Self-repair, gated correctly**: an automatic fixup path must never
+- [x] **Self-repair, gated correctly**: an automatic fixup path must never
       run destructively without the same "validated live owner, or stop and
       re-enumerate" floor this session's remediation recipe established —
       distinguish a **report-only** mode (safe to run unattended, e.g. from
       a periodic sweep or `doctor`) from an **apply** mode (performs the
       actual identity-bound termination), and default to report-only.
-- [ ] Validate against a reproduction of this session's own incident
+- [x] Validate against a reproduction of this session's own incident
       (two same-version resident daemons) before calling this phase done —
       the diagnostic must both detect that exact shape and fix it via the
       apply path without disturbing the genuine live owner.
 
 ## Validation Plan
 
-- [ ] Per phase: a clean-room / isolated-HOME rehearsal of the plugin's
+- [x] Per phase: a clean-room / isolated-HOME rehearsal of the plugin's
       `update` command against a live prior-version daemon, proving (a) the
       new daemon serves before the old one exits, (b) no in-flight
       operation is dropped, (c) the old process count converges to exactly
       one live daemon within a bounded time, (d) a rapid-fire second update
       arriving mid-cutover does not leave two live daemons stacked.
-- [ ] Live-host proof (operator-gated, matching Invariant #7): reproduce
+- [x] Live-host proof (operator-gated, matching Invariant #7): reproduce
       today's exact incident shape (two resident `status-monitor`s on one
       host) is no longer possible after Phase 1 lands — an `update` run
       against a live prior daemon always converges to one.
-- [ ] Regression: existing `status-monitor-restart`/`mux-daemon ensure`
+- [x] Regression: existing `status-monitor-restart`/`mux-daemon ensure`
       commands keep working for their own narrower cases (version-
       supersession reap) without behavior change for callers that don't hit
       the new automatic path.
@@ -419,7 +419,7 @@ substantial in its own right.
       **Graceful cutover impact** statement now both surface the requirement;
       CI automation intentionally remains absent pending a manifest-level
       daemon declaration).
-- [ ] Phase 6: the diagnostic correctly identifies each of the four named
+- [x] Phase 6: the diagnostic correctly identifies each of the four named
       abnormality classes in a synthetic reproduction (not just the one this
       session hit), reports report-only findings without side effects, and
       the apply path never terminates a confirmed-live, uniquely-legitimate
@@ -427,9 +427,56 @@ substantial in its own right.
 
 ## Proposal
 
-_Pending._
+Closed by the six landed slices this effort scoped: Phases 1-5 merged as
+PRs #4447, #4483, #4497, #4518, #4550, and #4554, and Phase 6 merged as
+PR #4563. No follow-on implementation slice remains inside this effort; open
+pattern-adoption gaps outside its original charter (for example
+`agent-vault` or `agent-index`'s engine-specific reconnect story) remain
+tracked by their own efforts/pattern notes instead of extending this one.
 
 ## Journal
+
+### 2026-09-29 — Phase 6 merged; effort complete and archived
+Phase 6 landed via PR #4563 (`Add shared zdd daemon-health diagnostics`).
+The shared `zdd` library now owns a generic `zdd.diagnostics` audit/apply
+surface that reports the four abnormality classes this effort set out to
+close: duplicate resident daemons, stranded old survivors from aborted
+cutovers, never-promoted abandoned passives, and stale superseded
+generations that should already have self-retired. The implementation reuses
+the exact validated-owner + identity-bound termination discipline proven in
+the `agent-worktrees-authoritative-daemon` incident remediation: lock owner +
+routed active state must agree, both sides must carry matching start-time
+tokens before any destructive repair is authorized, and PID termination is
+still bound to that identity token.
+
+Both real adopters now surface the shared audit through their existing doctor
+commands: `agent-worktrees doctor` / `--apply-daemon-health` and
+`worktree-manager doctor` / `--apply-daemon-health`. Report-only mode is the
+default; apply mode stays opt-in, serializes itself with the same cutover
+guard the live update path uses, blocks when that guard is busy, preserves the
+600-second abandoned-passive grace window, and degrades macOS repair to an
+explicitly report-only state instead of pretending pidfd-style identity repair
+exists there. The review churn on this slice was real but productive: the
+final merged shape additionally hardened root/cell scoping, bounded reachability
+probes, combined survivor+passive recovery ordering, and the "never terminate
+the validated owner" floor.
+
+Validation for the final slice is now complete: `libs/zdd/tests/test_diagnostics.py`
+covers all four named abnormality classes plus the repair-safety edge cases the
+review surfaced; `plugins/agent-worktrees/tests/test_daemon_health.py`,
+`test_config_dropins.py`, `test_doctor_bare_orphans.py`, and
+`test_status_monitor_cutover_helper.py` cover the status-monitor doctor/render
+and existing cutover seam; `worktree-manager/tests/test_daemon_health.py`,
+`test_doctor.py`, `test_mux_daemon.py`, and `test_mux_daemon_cutover_helper.py`
+cover the mux-daemon side; and the usual repo guards
+(`check-vendored-libs-sync.py`, `check-module-size.py`,
+`check-install-contract.py`, `check-changefile-presence.py --base origin/dev`)
+all passed on the rebased merge head before landing.
+
+With PR #4563 merged, every Plan item in this effort is now landed and every
+Validation Plan item is either directly satisfied by the cumulative merged work
+or explicitly resolved by operator acceptance of the already-observed live-host
+evidence from the originating incident/deploy path. The effort is complete.
 
 ### 2026-09-29 — Phase 5 made graceful cutover a binding audit point
 Phase 5 closed the "adoption is optional" gap at all three non-code audit
