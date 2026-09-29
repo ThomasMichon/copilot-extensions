@@ -152,18 +152,23 @@ def _vendored_consumers() -> dict[str, list[str]]:
     editable-pointer consumer from the version-bump guard entirely (PR
     #4465 review).
 
-    Covers every ``plugins/*`` plugin AND every top-level, out-of-plugin
-    consumer tree (``uv_editable_ref.iter_consumer_dirs()``'s own extra
-    list, e.g. ``worktree-manager``) -- omitting the latter would let a
-    canonical `libs/<lib>` change alter a version-gated out-of-plugin
-    consumer's materialized payload without ever charging it (PR #4465
-    review)."""
+    The real-copy half scans EVERY ``plugins/*`` directory directly
+    (never ``uv_editable_ref.iter_consumer_dirs()``, which requires a
+    root ``pyproject.toml`` and so silently drops a payload-only plugin
+    like `customizing-copilot` that ships real vendored copies with no
+    ``pyproject.toml`` of its own at all -- PR #4465 review). The
+    editable-ref half legitimately needs `iter_consumer_dirs()` (plugins
+    with a ``pyproject.toml`` + every top-level, out-of-plugin consumer
+    tree, e.g. ``worktree-manager``) since a pointer can only ever live
+    inside a real ``pyproject.toml``."""
     consumers: dict[str, list[str]] = {}
+    if PLUGINS_DIR.is_dir():
+        for plugin in sorted(p for p in PLUGINS_DIR.iterdir() if p.is_dir()):
+            libs = plugin / "libs"
+            if libs.is_dir():
+                for lib in sorted(x for x in libs.iterdir() if x.is_dir()):
+                    consumers.setdefault(lib.name, []).append(plugin.name)
     for name, consumer_dir in uer.iter_consumer_dirs():
-        libs = consumer_dir / "libs"
-        if libs.is_dir():
-            for lib in sorted(x for x in libs.iterdir() if x.is_dir()):
-                consumers.setdefault(lib.name, []).append(name)
         pyproject = consumer_dir / "pyproject.toml"
         if pyproject.is_symlink():
             # `find_uv_editable_refs()` itself treats a symlinked manifest

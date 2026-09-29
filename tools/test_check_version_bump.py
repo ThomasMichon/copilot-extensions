@@ -227,6 +227,32 @@ def test_shared_lib_change_charges_out_of_plugin_editable_ref_consumer(repo: Pat
     assert "worktree-manager" in result.stderr
 
 
+def test_shared_lib_change_charges_payload_only_plugin_with_real_copy(repo: Path):
+    """A plugin with NO root `pyproject.toml` at all (mirroring
+    `customizing-copilot`: payload-only, no `[tool.uv.sources]` possible)
+    but a REAL vendored copy under its own `libs/` must still be charged
+    for a shared-lib change (PR #4465 review): restricting the real-copy
+    scan to `uv_editable_ref.iter_consumer_dirs()` (which requires a root
+    `pyproject.toml`) would silently drop this class of consumer, exactly
+    the regression `customizing-copilot` itself would have hit."""
+    _write(repo, "plugins/gamma/plugin.json",
+           json.dumps({"name": "gamma", "version": "3.0.0-dev1"}) + "\n")
+    _write(repo, "plugins/gamma/libs/shared-lib/src/shared_lib/__init__.py", "shared = 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add payload-only gamma with a real vendored copy")
+    gamma_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", gamma_sha)
+
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "shared = 2\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "shared lib change, no bumps")
+    result = _run(repo)
+    assert result.returncode == 1
+    assert "gamma" in result.stderr
+
+
 def test_shared_lib_change_passes_when_out_of_plugin_consumer_bumps_its_own_version(
     repo: Path,
 ):
