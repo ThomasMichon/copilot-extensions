@@ -5802,6 +5802,7 @@ _CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "cleanup_gc_cli",
     "finalize_cli",
     "follow_ups_cli",
+    "handoff_cancel_cli",
     "handoff_cli",
     "handoff_successor_repair_cli",
     "installation_cli",
