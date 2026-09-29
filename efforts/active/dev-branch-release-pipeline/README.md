@@ -2062,4 +2062,38 @@ efforts' own PRs).
   semantics before trusting an assumption about them, and re-derive every
   downstream invariant (promote ordering, watchdog dedup) a concurrency
   change might touch, not just the one symptom being fixed.
+- **A fourth review round (against the rebased head, after picking up a
+  new `workflow-lockdown-guard.yml` this PR's branch predated) caught a
+  real residual gap even the corrected design above left open:**
+  `promote-trigger.yml`'s own filter runs are deliberately unthrottled (no
+  concurrency group -- that's the whole point of the split), so two
+  different `dev` commits' filter runs can complete and dispatch their
+  `repository_dispatch` events out of order. `validate-and-promote.yml`'s
+  restored concurrency group only serializes DISPATCH-ARRIVAL order, never
+  commit order -- if an older commit A's filter run is slow to dispatch
+  while a newer commit B's is fast, B's dispatch can be processed first
+  (correctly promoting `main` to B), and A's dispatch can still arrive and
+  get processed afterward. Since `gate`'s only check was "is this sha an
+  ancestor of `origin/dev`" (true for both A and B), and
+  `tools/promote_release.py` never checked candidate freshness against
+  what was already promoted, A's (now-stale) content would silently
+  regress `main` back to an older snapshot -- a real bug, not the
+  theoretical one the first review round caught inside a single workflow
+  run.
+- **Actual fix: a genuine monotonic guard in `promote_release.py` itself**,
+  rather than relying on trigger/concurrency ordering tricks (which this
+  incident demonstrated are fundamentally too fragile for this invariant).
+  `promote()` now reads `last_promotion.dev_head` from the pipeline state
+  and refuses (via a new `StaleCandidatePromotion`, treated as a benign
+  no-op -- CLI exit 0, not a failure) unless the candidate `dev_head` is
+  either identical to it (falls through to the ordinary "no content change"
+  no-op) or a strict `git merge-base --is-ancestor` descendant of it. 4 new
+  tests: refuses an out-of-order stale candidate, allows genuine forward
+  advancement, and confirms the CLI exit code stays 0 (matching the
+  existing pause-guard precedent) so `report-failure`'s watchdog never
+  files a spurious incident for this expected, benign race outcome.
+- This closes the pipeline's actual correctness gap independent of
+  whatever trigger/concurrency shape sits in front of it -- the guard
+  protects `main` even if a future change reintroduces out-of-order
+  dispatching some other way.
 
