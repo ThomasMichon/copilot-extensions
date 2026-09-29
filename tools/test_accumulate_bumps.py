@@ -240,6 +240,29 @@ def test_standalone_write_only_touches_project_table_version(isolated: Path):
     assert acc.read_pyproject_project_version(d) == "0.1.0-dev96"
 
 
+def test_standalone_write_supports_single_quoted_toml_version(isolated: Path):
+    """TOML allows either `"..."` or `'...'` string quoting -- both equally
+    valid and both already accepted by `read_pyproject_project_version()`'s
+    genuine `tomllib` parsing. A write-side regex that only matched double
+    quotes would compute a real bump for a single-quoted manifest and then
+    silently fail to apply it (`_write_project_version()` returning
+    `False`), letting a changefile-consuming promotion ship the OLD
+    version with no error at all (PR #4514 review)."""
+    d = isolated / "worktree-manager"
+    d.mkdir(parents=True)
+    (d / "pyproject.toml").write_text(
+        "[project]\nname = 'worktree-manager'\nversion = '0.1.0-dev95'\n",
+        encoding="utf-8",
+    )
+
+    applied = acc.apply({"worktree-manager": ("0.1.0-dev95", "0.1.0-dev96")})
+
+    assert applied == ["worktree-manager"]
+    text = (d / "pyproject.toml").read_text(encoding="utf-8")
+    assert "version = '0.1.0-dev96'" in text  # quote style preserved
+    assert acc.read_pyproject_project_version(d) == "0.1.0-dev96"
+
+
 def test_apply_rewrites_standalone_consumer_source_fallback(isolated: Path):
     _standalone(isolated, "worktree-manager", "0.1.0-dev95")
     init = isolated / "worktree-manager/src/worktree_manager/__init__.py"

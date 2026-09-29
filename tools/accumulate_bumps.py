@@ -167,13 +167,22 @@ def read_pyproject_project_version(root: Path) -> str | None:
     return version if isinstance(version, str) else None
 
 
+_TOML_QUOTED_VERSION_RE = re.compile(r"^(\s*version\s*=\s*)([\"'])([^\"']+)\2", re.MULTILINE)
+
+
 def _write_project_version(pp: Path, new_version: str) -> bool:
     """Rewrite ONLY the ``[project].version`` field of ``pp`` -- scoped to
     that table's own span (mirroring `cell-runtime.py`'s
     `_rewrite_uv_source_to_local()`), never the first `version = ` line
     anywhere in the file, so an earlier unrelated table's own `version` key
     is never silently overwritten instead of the package's real one (PR
-    #4514 review)."""
+    #4514 review). Matches EITHER TOML quote style (`"..."` or `'...'`,
+    both valid) and preserves whichever the manifest already used --
+    `read_pyproject_project_version()` (genuine `tomllib` parsing) accepts
+    both, so a write-side regex that only matched double quotes could
+    compute a real bump for a single-quoted manifest and then silently
+    fail to apply it, letting the changefile-consuming promotion path ship
+    the OLD version with no error at all (PR #4514 review)."""
     if not pp.exists():
         return False
     text = pp.read_text(encoding="utf-8")
@@ -183,7 +192,9 @@ def _write_project_version(pp: Path, new_version: str) -> bool:
     start = header.end()
     next_header = _TOML_TABLE_HEADER_RE.search(text, start + 1)
     end = next_header.start() if next_header else len(text)
-    new_body, n = _TOML_VERSION_RE.subn(rf"\g<1>{new_version}\g<3>", text[start:end], count=1)
+    new_body, n = _TOML_QUOTED_VERSION_RE.subn(
+        lambda m: f"{m.group(1)}{m.group(2)}{new_version}{m.group(2)}", text[start:end], count=1,
+    )
     if n == 0:
         return False
     pp.write_text(text[:start] + new_body + text[end:], encoding="utf-8")
