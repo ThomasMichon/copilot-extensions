@@ -19,7 +19,8 @@ one near the end of a session.
 
 Whether a handoff cuts a successor over live or only stages a brief for a
 human: `mode` (`auto`/`manual-only`/`off`) in `.context-handoff/config.yaml`
-(or `~/...`). Check it, or ask, before assuming either.
+(or `~/.context-handoff/config.yaml`). Check it, or ask, before assuming
+either.
 
 ## The commands, if the extension is loaded
 
