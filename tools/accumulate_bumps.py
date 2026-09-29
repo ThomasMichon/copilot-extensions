@@ -186,7 +186,7 @@ def _write_project_version(pp: Path, new_version: str) -> bool:
     if not pp.exists():
         return False
     text = pp.read_text(encoding="utf-8")
-    header = re.search(r"^\[project\]\s*$", text, re.MULTILINE)
+    header = re.search(r"^\[project\][ \t]*(?:#.*)?$", text, re.MULTILINE)
     if header is None:
         return False
     start = header.end()
