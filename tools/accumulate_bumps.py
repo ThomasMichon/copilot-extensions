@@ -44,6 +44,7 @@ MARKETPLACE = REPO / ".github" / "plugin" / "marketplace.json"
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from changefile import read_changefiles
+import uv_editable_ref as uer  # noqa: E402
 
 _VERSION_LITERAL = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?$")
 _JSON_VERSION_RE = re.compile(r'("version"\s*:\s*")([^"]+)(")')
@@ -155,6 +156,16 @@ def read_consumer_version(consumer: str) -> str | None:
     if is_standalone_consumer(consumer):
         return read_pyproject_project_version(_consumer_root(consumer))
     return read_plugin_json_version(consumer)
+
+
+def iter_standalone_consumer_names() -> list[str]:
+    """Every standalone, out-of-plugin consumer name this module's
+    `compute()`/`apply()`/`compute_from_diff()` can bump (e.g.
+    `worktree-manager`) -- the single place a caller that needs to
+    enumerate them (e.g. `promote_release.py`'s seed-from-main step)
+    should look, rather than re-hardcoding
+    `uv_editable_ref._EXTRA_CONSUMER_DIRS` a third time."""
+    return [name for name in uer._EXTRA_CONSUMER_DIRS if (REPO / name / "pyproject.toml").is_file()]
 
 
 def _write_version(path: Path, pattern: re.Pattern[str], new_version: str, *, count: int = 1) -> bool:

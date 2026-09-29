@@ -308,6 +308,34 @@ def test_shared_lib_change_charges_out_of_plugin_real_copy_consumer(repo: Path):
     assert "worktree-manager" in result.stderr
 
 
+def test_violation_message_for_standalone_consumer_omits_impossible_fix(repo: Path):
+    """A standalone, out-of-plugin consumer (no `plugin.json`, no
+    marketplace entry) must get bump guidance it can actually follow --
+    the diagnostic previously always prescribed "plugin.json + pyproject.toml
+    + marketplace.json" universally, which is impossible for a consumer with
+    neither of the first two surfaces (PR #4514 review)."""
+    _write(repo, "worktree-manager/pyproject.toml",
+           '[project]\nname = "worktree-manager"\nversion = "9.0.0-dev1"\n')
+    _write(repo, "worktree-manager/libs/shared-lib/src/shared_lib/__init__.py", "shared = 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add worktree-manager with a real vendored copy")
+    wtm_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", wtm_sha)
+
+    _write(repo, "libs/shared-lib/src/shared_lib/__init__.py", "shared = 2\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "shared lib change, no bumps")
+    result = _run(repo)
+    assert result.returncode == 1
+    wtm_lines = [ln for ln in result.stderr.splitlines() if "worktree-manager:" in ln]
+    assert len(wtm_lines) == 1, result.stderr
+    assert "plugin.json" not in wtm_lines[0]
+    assert "marketplace.json" not in wtm_lines[0]
+    assert "pyproject.toml" in wtm_lines[0]
+
+
 def test_symlinked_pyproject_fails_closed_instead_of_dropping_consumer(repo: Path):
     """A plugin whose `pyproject.toml` is a SYMLINK must never be silently
     dropped from the consumer map either (PR #4465 review):

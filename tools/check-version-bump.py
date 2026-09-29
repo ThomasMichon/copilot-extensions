@@ -295,11 +295,14 @@ def check(base_ref: str, head_ref: str) -> tuple[int, list[str]]:
             continue
         if head_ver == base_ver:
             reasons = ", ".join(sorted(needing[plugin]))
-            violations.append(
-                f"{plugin}: content changed ({reasons}) but version is still "
-                f"{head_ver} -- bump it (plugin.json + pyproject.toml + "
-                "marketplace.json, per CONTRIBUTING.md)."
-            )
+            if (PLUGINS_DIR / plugin).is_dir():
+                fix = "bump it (plugin.json + pyproject.toml + marketplace.json, per CONTRIBUTING.md)"
+            else:
+                # A standalone, out-of-plugin consumer (e.g. worktree-manager)
+                # has neither a plugin.json nor a marketplace entry -- naming
+                # them here would prescribe an impossible fix (PR #4514 review).
+                fix = "bump its own pyproject.toml [project].version (+ source __version__ fallback)"
+            violations.append(f"{plugin}: content changed ({reasons}) but version is still {head_ver} -- {fix}.")
     return (1 if violations else 0), violations
 
 

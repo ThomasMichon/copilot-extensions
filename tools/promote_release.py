@@ -154,26 +154,45 @@ def _seed_versions_from_main(scratch: Path, main_head: str, *, acc, repo: Path) 
     agent-bridge 0.4.1-dev1 -> 0.4.0-dev551) -- that fix was necessary but
     not sufficient on its own; this seed step is the other required half."""
     plugins_dir = scratch / "plugins"
-    if not plugins_dir.is_dir():
-        return
     seed_result: dict[str, tuple[str, str]] = {}
-    for plugin_dir in sorted(plugins_dir.iterdir()):
-        if not plugin_dir.is_dir():
-            continue
-        plugin = plugin_dir.name
-        main_pj_raw = _git(
-            ["show", f"{main_head}:plugins/{plugin}/plugin.json"], cwd=repo, check=False,
+    if plugins_dir.is_dir():
+        for plugin_dir in sorted(plugins_dir.iterdir()):
+            if not plugin_dir.is_dir():
+                continue
+            plugin = plugin_dir.name
+            main_pj_raw = _git(
+                ["show", f"{main_head}:plugins/{plugin}/plugin.json"], cwd=repo, check=False,
+            )
+            if not main_pj_raw:
+                continue  # never shipped on main yet -- dev's own literal stands as-is
+            try:
+                main_version = json.loads(main_pj_raw)["version"]
+            except (json.JSONDecodeError, KeyError):
+                continue
+            dev_version = acc.read_plugin_json_version(plugin)
+            if dev_version is None or dev_version == main_version:
+                continue
+            seed_result[plugin] = (dev_version, main_version)
+    # A standalone, out-of-plugin consumer (e.g. `worktree-manager`) ships
+    # its own `pyproject.toml` [project].version instead of a plugin.json --
+    # it needs the exact same main-is-truth seeding, or a promotion round
+    # with no new changefile for it would regress it back to dev's stale
+    # literal (or repeat an already-shipped bump) the same way an
+    # un-seeded plugin would (PR #4514 review).
+    for consumer in acc.iter_standalone_consumer_names():
+        main_pp_raw = _git(
+            ["show", f"{main_head}:{consumer}/pyproject.toml"], cwd=repo, check=False,
         )
-        if not main_pj_raw:
+        if not main_pp_raw:
             continue  # never shipped on main yet -- dev's own literal stands as-is
-        try:
-            main_version = json.loads(main_pj_raw)["version"]
-        except (json.JSONDecodeError, KeyError):
+        m = acc._TOML_VERSION_RE.search(main_pp_raw)
+        if not m:
             continue
-        dev_version = acc.read_plugin_json_version(plugin)
+        main_version = m.group(2)
+        dev_version = acc.read_consumer_version(consumer)
         if dev_version is None or dev_version == main_version:
             continue
-        seed_result[plugin] = (dev_version, main_version)
+        seed_result[consumer] = (dev_version, main_version)
     if seed_result:
         acc.apply(seed_result)
 

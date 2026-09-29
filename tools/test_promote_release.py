@@ -42,6 +42,16 @@ def _write_plugin(repo: Path, plugin: str, version: str) -> None:
     )
 
 
+def _write_standalone(repo: Path, name: str, version: str) -> None:
+    """A top-level, out-of-plugin consumer tree (mirroring `worktree-manager`:
+    no `plugin.json` at all, its own `pyproject.toml` [project].version)."""
+    d = repo / name
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "pyproject.toml").write_text(
+        f'[project]\nname = "{name}"\nversion = "{version}"\n', encoding="utf-8"
+    )
+
+
 def _write_marketplace(repo: Path, plugins: dict[str, str]) -> None:
     mkt_dir = repo / ".github" / "plugin"
     mkt_dir.mkdir(parents=True, exist_ok=True)
@@ -368,6 +378,54 @@ def test_promote_preserves_shipped_version_when_no_new_changefile_at_all(repo: P
     )
     entry = next(p for p in marketplace_json["plugins"] if p["name"] == "demo-plugin")
     assert entry["version"] == "0.1.1-dev1"
+
+
+def test_promote_preserves_shipped_version_of_a_standalone_consumer(repo: Path):
+    """The same regression as
+    `test_promote_preserves_shipped_version_when_no_new_changefile_at_all`,
+    but for a standalone, out-of-plugin consumer (mirroring
+    `worktree-manager`: no `plugin.json`, its own `pyproject.toml`
+    [project].version) -- `_seed_versions_from_main` previously only ever
+    iterated `plugins/*`, so a promotion round with no new changefile for
+    such a consumer would regress its `pyproject.toml` back to dev's stale
+    literal, or repeat an already-shipped bump (PR #4514 review)."""
+    _git(["checkout", "-q", "dev"], repo)
+    _write_standalone(repo, "worktree-manager", "0.1.0-dev1")
+    _commit(repo, "add worktree-manager")
+    _git(["checkout", "-q", "main"], repo)
+    first_add = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+    assert first_add["promoted"] is True
+    _git(["update-ref", "refs/heads/main", first_add["commit"]], repo)
+    _git(["reset", "--hard", "main"], repo)
+
+    _git(["checkout", "-q", "dev"], repo)
+    _write_changefile(repo, "20260101-wtm-abc123.json", "worktree-manager", "patch")
+    (repo / "worktree-manager" / "src" / "worktree_manager").mkdir(parents=True)
+    (repo / "worktree-manager" / "src" / "worktree_manager" / "__init__.py").write_text(
+        "x = 1\n", encoding="utf-8",
+    )
+    _commit(repo, "worktree-manager: change + changefile")
+    _git(["checkout", "-q", "main"], repo)
+
+    first = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+    assert first["bumps"] == {"worktree-manager": ("0.1.0-dev1", "0.1.1-dev1")}
+    _git(["update-ref", "refs/heads/main", first["commit"]], repo)
+    _git(["reset", "--hard", "main"], repo)
+
+    # Unrelated new content on dev; this round drives NO new bump at all.
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "worktree-manager" / "README.md").write_text("y\n", encoding="utf-8")
+    _commit(repo, "worktree-manager: unrelated change only")
+    _git(["checkout", "-q", "main"], repo)
+
+    second = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+    assert second["promoted"] is True
+    assert second["bumps"] == {}
+
+    # The generated commit's own tree must still carry the SHIPPED
+    # "0.1.1-dev1" -- never dev's frozen "0.1.0-dev1".
+    pyproject = _git(["show", f"{second['commit']}:worktree-manager/pyproject.toml"], repo)
+    assert 'version = "0.1.1-dev1"' in pyproject
 
 
 def test_promote_refuses_when_paused(repo: Path):
