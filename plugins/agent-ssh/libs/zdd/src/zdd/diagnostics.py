@@ -300,6 +300,7 @@ def _candidate_map(candidates: list[DaemonCandidate]) -> dict[int, DaemonCandida
 def _validated_owner(
     ctx: DiagnosticContext,
     candidates: dict[int, DaemonCandidate],
+    table: dict | None,
 ) -> tuple[dict[str, object] | None, str | None]:
     lock_data = ctx.read_lock()
     if not ctx.lock_is_live(lock_data):
@@ -309,6 +310,10 @@ def _validated_owner(
     pid = lock_data.get("pid")
     if not isinstance(pid, int):
         return None, "lock missing owner pid"
+    active_raw = table.get("active") if isinstance(table, dict) else None
+    active_pid = active_raw.get("pid") if isinstance(active_raw, dict) else None
+    if isinstance(active_pid, int) and active_pid != pid:
+        return None, "lock owner disagrees with routed active pid"
     candidate = candidates.get(pid)
     if candidate is None:
         return None, "validated owner absent from fresh daemon census"
@@ -529,8 +534,8 @@ def _audit_daemon_health(
     cutover_state: str = "auto",
 ) -> dict[str, object]:
     candidates = _candidate_map(ctx.list_candidates())
-    owner, owner_reason = _validated_owner(ctx, candidates)
     table = routing.read_table(ctx.config_dir)
+    owner, owner_reason = _validated_owner(ctx, candidates, table)
     record = breadcrumb.read_breadcrumb(ctx.config_dir)
     active_raw = table.get("active") if isinstance(table, dict) else None
     active_pid = active_raw.get("pid") if isinstance(active_raw, dict) else None
