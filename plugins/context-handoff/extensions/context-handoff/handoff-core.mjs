@@ -2561,7 +2561,13 @@ export function consumeDispatchHandoffTask(
     decoded.metadata?.sessionId || checkpoint.predecessorSession || null,
     { consumedBySession: sid, handoffId: taskId },
   );
-  safePromoteHead(promoteHead, cwd, decoded.metadata?.worktree || null, sid);
+  safePromoteHead(
+    promoteHead,
+    cwd,
+    decoded.metadata?.worktree || null,
+    decoded.metadata?.sessionId || checkpoint.predecessorSession || null,
+    sid,
+  );
   return {
     ok: true,
     id: taskId,
@@ -2590,7 +2596,7 @@ export function consumeFileHandoff(
     record.sessionId || null,
     { consumedBySession: sid, handoffId: record.id },
   );
-  safePromoteHead(promoteHead, cwd, record.worktree || null, sid);
+  safePromoteHead(promoteHead, cwd, record.worktree || null, record.sessionId || null, sid);
   return {
     ok: true,
     id: record.id,
@@ -2751,36 +2757,59 @@ function worktreeHeadState(cwd, worktreeId, execute = runCli) {
 // already confirmed, so a failure here never blocks or corrupts the
 // consume result -- it only leaves the pre-existing (already-broken) resume
 // behavior in place, exactly as before this backstop existed.
-export function promoteSuccessorHead(cwd, worktreeId, sid, execute = runCli) {
-  if (!worktreeId || !sid) return { promoted: false, reason: "missing-ids" };
+//
+// `predecessorSessionId` MUST be the handoff's own recorded authoring
+// session (`record.sessionId` for a file handoff; the task metadata's
+// `sessionId` for a dispatch handoff) -- never merely "whatever the
+// worktree's current head happens to be." The live head can have drifted
+// for reasons unrelated to this handoff (a different, unrelated succession
+// already happened, a live-cutover already fixed it, a race with another
+// consumer) between when the handoff was created and when it's consumed
+// here; treating that drifted value as "the predecessor" would incorrectly
+// conclude an unrelated session's lineage as `handed-off` to this one. So
+// this only proceeds when the *live* head still matches the *expected*
+// predecessor -- anything else is left untouched rather than guessed at.
+export function promoteSuccessorHead(
+  cwd, worktreeId, predecessorSessionId, sid, execute = runCli,
+) {
+  if (!worktreeId || !predecessorSessionId || !sid) {
+    return { promoted: false, reason: "missing-ids" };
+  }
   const head = worktreeHeadState(cwd, worktreeId, execute);
   if (!head?.tracked) return { promoted: false, reason: "untracked" };
-  const predecessor = head.head_session || null;
-  if (predecessor === sid) return { promoted: false, reason: "already-head" };
-  if (!predecessor) {
-    // No prior head at all: an ordinary sessionStart already claims this
-    // (register_session initializes an empty head), so there is nothing to
-    // supersede here.
-    return { promoted: false, reason: "no-predecessor" };
+  const currentHead = head.head_session || null;
+  if (currentHead === sid) return { promoted: false, reason: "already-head" };
+  if (currentHead !== predecessorSessionId) {
+    // The live head is neither us nor the session that authored this
+    // handoff -- something else already changed it (or it was never set).
+    // Never guess at a substitute predecessor; leave it for a manual
+    // repair pass (repairing-worktrees skill, class G) instead.
+    return {
+      promoted: false,
+      reason: "head-diverged",
+      currentHead,
+      expectedPredecessor: predecessorSessionId,
+    };
   }
   try {
     execute("agent-worktrees", [
       "link-succession",
       "--worktree", worktreeId,
-      "--predecessor", predecessor,
+      "--predecessor", predecessorSessionId,
       "--successor", sid,
       "--predecessor-state", "handed-off",
       "--json",
     ], { cwd, timeout: 10000 });
-    return { promoted: true, predecessor, successor: sid };
+    return { promoted: true, predecessor: predecessorSessionId, successor: sid };
   } catch (error) {
     return { promoted: false, reason: "link-failed", error: describeCliError(error) };
   }
 }
 
-function safePromoteHead(promoteHead, cwd, worktreeId, sid) {
+
+function safePromoteHead(promoteHead, cwd, worktreeId, predecessorSessionId, sid) {
   try {
-    return promoteHead(cwd, worktreeId, sid);
+    return promoteHead(cwd, worktreeId, predecessorSessionId, sid);
   } catch (error) {
     return { promoted: false, reason: "promote-head-threw", error: describeCliError(error) };
   }

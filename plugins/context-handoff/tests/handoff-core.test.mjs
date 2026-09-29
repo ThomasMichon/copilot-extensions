@@ -763,7 +763,7 @@ test("formatConsumeResult without a known claimant does not fabricate a bug offe
   assert.doesNotMatch(text, /offer to file a bug/i);
 });
 
-test("promoteSuccessorHead links succession over a stale predecessor head", () => {
+test("promoteSuccessorHead links succession over the expected predecessor head", () => {
   const calls = [];
   const execute = (bin, argv, opts) => {
     calls.push({ bin, argv, opts });
@@ -776,7 +776,9 @@ test("promoteSuccessorHead links succession over a stale predecessor head", () =
     if (argv[0] === "link-succession") return JSON.stringify({ ok: true });
     throw new Error(`unexpected CLI call: ${bin} ${argv.join(" ")}`);
   };
-  const result = promoteSuccessorHead("C:\\repo", "wt-1", "successor-x", execute);
+  const result = promoteSuccessorHead(
+    "C:\\repo", "wt-1", "predecessor-x", "successor-x", execute,
+  );
   assert.deepEqual(result, {
     promoted: true,
     predecessor: "predecessor-x",
@@ -800,21 +802,64 @@ test("promoteSuccessorHead is a no-op when this session is already the recorded 
     calls.push(argv[0]);
     return JSON.stringify({ tracked: true, head_session: "successor-x" });
   };
-  const result = promoteSuccessorHead("C:\\repo", "wt-1", "successor-x", execute);
+  const result = promoteSuccessorHead(
+    "C:\\repo", "wt-1", "predecessor-x", "successor-x", execute,
+  );
   assert.deepEqual(result, { promoted: false, reason: "already-head" });
   assert.deepEqual(calls, ["head-session"]);
 });
 
-test("promoteSuccessorHead is a no-op when the worktree has no recorded head yet", () => {
+test("promoteSuccessorHead never guesses a substitute predecessor when the live head has diverged", () => {
+  // The handoff's own recorded author is "predecessor-x", but something
+  // else already made "someone-else" the live head (e.g. an unrelated
+  // succession, or a race with another consumer). Superseding that would
+  // wrongly conclude an unrelated session's lineage -- must be a no-op.
+  const execute = (bin, argv) => {
+    if (argv[0] === "head-session") {
+      return JSON.stringify({ tracked: true, head_session: "someone-else" });
+    }
+    throw new Error(`unexpected CLI call: ${argv.join(" ")}`);
+  };
+  const result = promoteSuccessorHead(
+    "C:\\repo", "wt-1", "predecessor-x", "successor-x", execute,
+  );
+  assert.deepEqual(result, {
+    promoted: false,
+    reason: "head-diverged",
+    currentHead: "someone-else",
+    expectedPredecessor: "predecessor-x",
+  });
+});
+
+test("promoteSuccessorHead is a no-op when the worktree has no recorded head at all", () => {
   const execute = () => JSON.stringify({ tracked: true, head_session: null });
-  const result = promoteSuccessorHead("C:\\repo", "wt-1", "successor-x", execute);
-  assert.deepEqual(result, { promoted: false, reason: "no-predecessor" });
+  const result = promoteSuccessorHead(
+    "C:\\repo", "wt-1", "predecessor-x", "successor-x", execute,
+  );
+  assert.deepEqual(result, {
+    promoted: false,
+    reason: "head-diverged",
+    currentHead: null,
+    expectedPredecessor: "predecessor-x",
+  });
 });
 
 test("promoteSuccessorHead is a no-op when the worktree is untracked", () => {
   const execute = () => JSON.stringify({ tracked: false });
-  const result = promoteSuccessorHead("C:\\repo", "wt-1", "successor-x", execute);
+  const result = promoteSuccessorHead(
+    "C:\\repo", "wt-1", "predecessor-x", "successor-x", execute,
+  );
   assert.deepEqual(result, { promoted: false, reason: "untracked" });
+});
+
+test("promoteSuccessorHead is a no-op without a known predecessor to supersede", () => {
+  const execute = () => {
+    throw new Error("must not call the CLI without a predecessor id");
+  };
+  const result = promoteSuccessorHead(
+    "C:\\repo", "wt-1", null, "successor-x", execute,
+  );
+  assert.deepEqual(result, { promoted: false, reason: "missing-ids" });
 });
 
 test("promoteSuccessorHead degrades to link-failed instead of throwing on a CLI error", () => {
@@ -824,7 +869,9 @@ test("promoteSuccessorHead degrades to link-failed instead of throwing on a CLI 
     }
     throw new Error("agent-worktrees unreachable");
   };
-  const result = promoteSuccessorHead("C:\\repo", "wt-1", "successor-x", execute);
+  const result = promoteSuccessorHead(
+    "C:\\repo", "wt-1", "predecessor-x", "successor-x", execute,
+  );
   assert.equal(result.promoted, false);
   assert.equal(result.reason, "link-failed");
   assert.match(result.error, /agent-worktrees unreachable/);
@@ -860,7 +907,10 @@ test("file-backed consume promotes the successor session to worktree head (best-
       { promoteHead: (...args) => { promoteCalls.push(args); } },
     );
     assert.equal(consumed.ok, true);
-    assert.deepEqual(promoteCalls, [["C:\\repo", "wt-promo-1", "successor-promo"]]);
+    assert.deepEqual(
+      promoteCalls,
+      [["C:\\repo", "wt-promo-1", "predecessor-promo", "successor-promo"]],
+    );
   });
 });
 
@@ -926,7 +976,10 @@ test("task-backed consume promotes the successor session to worktree head using 
     assert.equal(result.ok, true);
     assert.deepEqual(
       promoteCalls,
-      [["C:\\repo", "wt-task-promo", "successor-task-promo"]],
+      [[
+        "C:\\repo", "wt-task-promo", "predecessor-task-promo",
+        "successor-task-promo",
+      ]],
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
