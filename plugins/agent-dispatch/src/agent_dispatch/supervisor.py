@@ -1234,6 +1234,12 @@ class Supervisor:
             "assignment_violations": len(violations),
         }
 
+    def sweep_task_reservation_consistency(self) -> dict[str, int]:
+        """See :func:`task_reservation_consistency.sweep`."""
+        from .task_reservation_consistency import sweep as _sweep
+
+        return _sweep(self)
+
     def _conclude_released_attempt(
         self,
         reservation: dict,
@@ -3499,6 +3505,10 @@ class Supervisor:
                 self.sweep_spawn_consistency()
             except Exception:  # pragma: no cover -- never let a cycle die on this
                 log.exception("spawn-consistency sweep failed")
+            try:
+                self.sweep_task_reservation_consistency()
+            except Exception:  # pragma: no cover -- never let a cycle die on this
+                log.exception("task-reservation consistency sweep failed")
         self.redrive_unclaimed_spawns()
         if self.nudge:
             self.nudge_stalled(now=now)
