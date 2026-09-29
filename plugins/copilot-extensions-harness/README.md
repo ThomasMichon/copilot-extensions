@@ -11,7 +11,7 @@ in any control repo and your agent knows how to **diagnose** the deployed
 runtimes, **contribute** changes to the plugins, and **validate** them on a
 fresh box, without you hand-writing a per-repo guide or installing a runtime.
 
-The plugin declares three checked-in static projections. Adopting
+The plugin declares four checked-in static projections. Adopting
 repositories synchronize them with the
 `customizing-copilot:reviewing-customizations` manager; each remains available
 without a competing `sessionStart` output.
@@ -26,10 +26,16 @@ without a competing `sessionStart` output.
   `argv[0]` from the session command catalog, never a bare PATH lookup), and
   cross-link a local symptom's tracking issue with its upstream
   `ThomasMichon/copilot-extensions` issue/PR in both directions.
+- **`commented-review-verdict`** — a PR review verdict that comes back as a
+  plain comment (not an approval/change-request) is Copilot's normal
+  non-blocking review shape absent a repo-specific override; read it as
+  advisory and land the change rather than chasing a further verdict that
+  may never arrive.
 - **`validate-and-promote-triage`** — a red `validate-and-promote` release
   gate blocks every pending contributor's work, not just whoever broke it;
-  isolate the one failing per-plugin fan-out job, classify a
-  CI-environment-specific test bug apart from a genuine regression, and fix
+  identify which job actually failed first, and for a per-plugin fan-out
+  failure classify a CI-environment-specific test bug apart from a genuine
+  regression, then fix
   forward. Full runbook in the
   [diagnosing-validate-and-promote-failures](skills/diagnosing-validate-and-promote-failures/SKILL.md)
   skill.

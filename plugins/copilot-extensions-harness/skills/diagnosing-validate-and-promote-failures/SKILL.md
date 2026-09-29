@@ -4,11 +4,12 @@ description: >
   Diagnose a red `validate-and-promote` GitHub Actions run
   (`.github/workflows/validate-and-promote.yml`) -- the automated dev-to-main
   release-pipeline gate for copilot-extensions. Walks the exact `gh run`/`gh
-  run view --log` sequence to isolate the one failing per-plugin fan-out job,
-  read the pytest failure literally, and tell a CI-environment-specific test
-  bug (e.g. a Windows-only `subprocess` constant referenced on a Linux
-  runner) apart from a genuine regression -- both owed a real fix-forward PR,
-  never a "pre-existing, not my concern" shrug. Use when
+  run view --log` sequence to identify the actual failed job (a per-plugin
+  fan-out job or a non-matrix guard/lint job), read the pytest failure
+  literally for a fan-out job, and tell a CI-environment-specific test bug
+  (e.g. a Windows-only `subprocess` constant referenced on a Linux runner)
+  apart from a genuine regression -- both owed a real fix-forward PR, never a
+  "pre-existing, not my concern" shrug. Use when
   `validate-and-promote`/`dev-advanced` is failing, promotion is stuck, or a
   contributor asks "why won't dev promote to main".
   Trigger phrases include:
@@ -26,12 +27,20 @@ description: >
 `validate-and-promote` (triggered by `workflow_run`/`repository_dispatch` as
 `dev-advanced`, per the dev-branch-release-pipeline effort,
 `ThomasMichon/copilot-extensions#3336`) is the sole automated gate between
-`dev` and `main`. It fans out one full-suite job per runtime plugin
-(`full - agent-worktrees`, `full - agent-bridge`, ...); promotion proceeds
-only when **every** fan-out job is green. A red run blocks **all** pending
-contributors' already-merged work, not just whoever's change happened to
-break it — treat it with the same urgency as a production incident, not a
-personal test failure.
+`dev` and `main`. Its full-suite stage fans out one job per runtime plugin
+(`full - agent-worktrees`, `full - agent-bridge`, ...), but the workflow also
+runs non-matrix jobs (`guards + lint` and similar) that gate promotion just
+as hard; promotion proceeds only when **every** required job is green. A red
+run blocks **all** pending contributors' already-merged work, not just
+whoever's change happened to break it — treat it with the same urgency as a
+production incident, not a personal test failure.
+
+Route every `gh` call in this runbook through the repository-scoped account
+wrapper -- resolve the current session's actual catalog invocation name
+(`<agent-worktrees catalog argv[0]>`) rather than assuming a bare
+`agent-worktrees` on PATH resolves to the right runtime/account mapping; see
+`contributing-to-copilot-extensions`'s own account-routing rule. The
+commands below use `<agent-worktrees catalog argv[0]>` as that placeholder.
 
 ## Procedure
 
@@ -39,39 +48,36 @@ personal test failure.
    (one bad run vs. a persistent block):
 
    ```bash
-   agent-worktrees repos gh ThomasMichon/copilot-extensions -- run list -R ThomasMichon/copilot-extensions --workflow=validate-and-promote.yml --limit 20  # marketplace-isolation: allow diagnostic-example
+   <agent-worktrees catalog argv[0]> repos gh ThomasMichon/copilot-extensions -- run list -R ThomasMichon/copilot-extensions --workflow=validate-and-promote.yml --limit 20  # marketplace-isolation: allow diagnostic-example
    ```
 
-   Route every `gh` call through the repo's account-routing wrapper (never a
-   bare `gh`) -- see `contributing-to-copilot-extensions` and the repo's own
-   account-routing warning from its `related resolve` output.
-   <!-- marketplace-isolation: allow diagnostic-example -->
-
-2. **Open the failing run** and read its job list — the workflow's own
-   per-plugin fan-out means exactly one (or a small subset) of the `full -
-   <plugin>` jobs is red while the rest are green:
+2. **Open the failing run** and read its full job list — do not assume the
+   failure is a per-plugin fan-out job; a non-matrix job (`guards + lint` and
+   similar) can fail on its own and needs different diagnosis than the
+   fan-out guidance in steps 3-4 below:
 
    ```bash
-   agent-worktrees repos gh ThomasMichon/copilot-extensions -- run view <run-id> -R ThomasMichon/copilot-extensions  # marketplace-isolation: allow diagnostic-example
+   <agent-worktrees catalog argv[0]> repos gh ThomasMichon/copilot-extensions -- run view <run-id> -R ThomasMichon/copilot-extensions  # marketplace-isolation: allow diagnostic-example
    ```
 
-   Note the failing job's numeric ID from the output (for example a `full -`
-   job entry naming the plugin and an ID in parentheses).
-   <!-- marketplace-isolation: allow diagnostic-example -->
+   Note the failing job's exact name and numeric ID from the output.
 
-3. **Pull that job's full log** and grep for the pytest summary — the log is
-   large (tens of KB), so save it to a file and grep rather than reading it
-   inline:
+3. **Pull that job's full log** and grep for the failure summary — the log
+   is large (tens of KB), so save it to a file and grep rather than reading
+   it inline:
 
    ```bash
-   agent-worktrees repos gh ThomasMichon/copilot-extensions -- run view <run-id> -R ThomasMichon/copilot-extensions --job <job-id> --log > /tmp/run-<run-id>-job-<job-id>.log  # marketplace-isolation: allow diagnostic-example
-   grep -n "FAILED\|short test summary\|AttributeError\|Traceback" /tmp/run-<run-id>-job-<job-id>.log
+   <agent-worktrees catalog argv[0]> repos gh ThomasMichon/copilot-extensions -- run view <run-id> -R ThomasMichon/copilot-extensions --job <job-id> --log > /tmp/run-<run-id>-job-<job-id>.log  # marketplace-isolation: allow diagnostic-example
+   grep -n "FAILED\|short test summary\|AttributeError\|Traceback\|Error" /tmp/run-<run-id>-job-<job-id>.log
    ```
 
-   Read the literal `FAILED <test-node-id> - <ExceptionType>: <message>`
-   line and the traceback above it before forming a hypothesis.
+   For a `full - <plugin>` fan-out job, read the literal `FAILED
+   <test-node-id> - <ExceptionType>: <message>` line and the traceback above
+   it before forming a hypothesis. For a `guards + lint` (or other
+   non-matrix) job, read that specific guard/check's own failure output the
+   same way -- literally, before hypothesizing.
 
-4. **Classify the failure — test bug vs. real regression:**
+4. **Classify a fan-out (pytest) failure — test bug vs. real regression:**
    - **CI-environment-specific test bug** — the test's own assumption
      doesn't hold on the runner (classic case: referencing a platform-only
      `subprocess`/`os` constant, like `CREATE_NEW_CONSOLE`, that only exists
@@ -88,25 +94,27 @@ personal test failure.
 5. **Check whether it's already fixed** — another contributor or a
    concurrent agent may have landed the fix already (this pipeline blocks
    *everyone*, so it draws fast, parallel attention). Before opening a
-   worktree:
+   worktree, inspect `origin/dev`'s tip explicitly -- a local checkout's bare
+   `HEAD` may sit on a different branch or a stale fetch, which would miss an
+   already-landed fix and risk a duplicate PR:
 
    ```bash
    cd <writable checkout>   # from a `related resolve copilot-extensions` lookup
-   git log --oneline -3 -- <path/to/the/failing/test-or-source>
-   agent-worktrees repos gh ThomasMichon/copilot-extensions -- pr list -R ThomasMichon/copilot-extensions --search "<test name>"  # marketplace-isolation: allow diagnostic-example
+   git fetch origin dev
+   git log --oneline -3 origin/dev -- <path/to/the/failing/test-or-source>
+   <agent-worktrees catalog argv[0]> repos gh ThomasMichon/copilot-extensions -- pr list -R ThomasMichon/copilot-extensions --search "<test name>"  # marketplace-isolation: allow diagnostic-example
    ```
 
-   If `dev`'s tip already contains a fix, don't duplicate it — finalize any
-   worktree you opened as unused and just watch for the
-   next `dev-advanced` run to go green.
+   If `origin/dev`'s tip already contains a fix, don't duplicate it —
+   finalize any worktree you opened as unused and just watch for the next
+   `dev-advanced` run to go green.
 
-6. **Land the real fix** through the normal flow — `copilot-extensions
-   create` a worktree off `dev`, fix the test or the source, add a
-   changefile, run the plugin's own suite, and land it via
-   `contributing-to-copilot-extensions`'s PR flow. Never patch `main`
-   directly, and never treat a retry/force-deploy of the pipeline itself as a
-   substitute for a real fix (see the `error-response` discipline: an error
-   names a symptom, not a license to force past it).
+6. **Land the real fix** through the normal flow — create a worktree off
+   `dev`, fix the test or the source, add a changefile, run the plugin's own
+   suite, and land it via `contributing-to-copilot-extensions`'s PR flow.
+   Never patch `main` directly, and never treat a retry/force-deploy of the
+   pipeline itself as a substitute for a real fix (see the `error-response`
+   discipline: an error names a symptom, not a license to force past it).
 
 ## Worked example
 
@@ -127,7 +135,8 @@ exist there.
 ## Reference
 
 `contributing-to-copilot-extensions` (the full PR flow, the fix-forward
-obligation, the mandatory changefile/version bump);
+obligation, the mandatory changefile/version bump, and the
+`<agent-worktrees catalog argv[0]>` account-routing convention);
 `diagnosing-copilot-extensions` (the sibling skill for deployed-plugin/runtime
 symptoms, as opposed to this repo's own CI); the
 dev-branch-release-pipeline effort

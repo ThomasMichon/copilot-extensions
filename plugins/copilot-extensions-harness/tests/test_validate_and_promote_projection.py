@@ -7,6 +7,10 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.guard
+
 _PLUGIN = Path(__file__).resolve().parents[1]
 _DECLARATION = _PLUGIN / "instruction-projections.json"
 _TEMPLATE = _PLUGIN / "instructions" / "validate-and-promote-triage.instructions.md"
