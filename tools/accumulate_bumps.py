@@ -438,12 +438,24 @@ def _next_after_base(current: str, base_version: str | None) -> str | None:
 
 def _changed_libs(changed: list[str]) -> set[str]:
     libs = set()
+    standalone_names = set(iter_standalone_consumer_names())
     for path in changed:
         parts = path.split("/")
         if len(parts) >= 5 and parts[0] == "plugins" and parts[2] == "libs" and parts[4] == "src":
             libs.add(parts[3])
         elif len(parts) >= 3 and parts[0] == "libs" and parts[2] == "src":
             libs.add(parts[1])
+        elif (
+            len(parts) >= 4 and parts[0] in standalone_names
+            and parts[1] == "libs" and parts[3] == "src"
+        ):
+            # A recognized standalone consumer's OWN top-level libs/<lib>/
+            # real copy (mirroring worktree-manager/libs/zdd) -- without
+            # this, a lib change confined entirely to that copy (no
+            # plugin/canonical copy also touched) was invisible here, so
+            # lib_bumps_from_diff() never even got a lib name to look the
+            # copy up under (PR #4514 review).
+            libs.add(parts[2])
     return libs
 
 

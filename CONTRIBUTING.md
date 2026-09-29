@@ -620,14 +620,18 @@ edits directly.
 > no `plugin.json` at all — its release version lives directly in its own
 > `pyproject.toml` (`[project].version`), and its `src/*/__init__.py`
 > `__version__` fallback is the "fourth file" equivalent above. A change to
-> **any file under `worktree-manager/`**, or to a **shared, vendored
-> `libs/<lib>/`** it still carries a real copy of, requires a changefile
-> naming `worktree-manager` the same way a plugin's own content change
-> does (`python tools/changefile.py add --plugin worktree-manager --type
-> patch --comment "..."` — the `--plugin` flag name is historical; it
-> accepts any recognized consumer identifier). It has no
-> `marketplace.json` entry and no instruction-projection ownership, so
-> those two surfaces never apply to it.
+> **any file under `worktree-manager/`**, or to a **shared lib it consumes
+> either form** — a real, vendored `libs/<lib>/` copy, **or** a `uv`-editable
+> canonical-reference pointer in its own `pyproject.toml`
+> `[tool.uv.sources]` (an escaping `{ path = "../libs/<lib>", editable =
+> true }` entry -- no local copy at all; see `tools/uv_editable_ref.py`'s
+> own module docstring for the full mechanism, part of the
+> vendor-pointer-generalization effort) — requires a changefile naming `worktree-manager` the same
+> way a plugin's own content change does (`python tools/changefile.py add
+> --plugin worktree-manager --type patch --comment "..."` — the `--plugin`
+> flag name is historical; it accepts any recognized consumer identifier).
+> It has no `marketplace.json` entry and no instruction-projection
+> ownership, so those two surfaces never apply to it.
 >
 > **Before editing a shared lib, find every REAL copy first: `python
 > tools/check-vendored-libs-sync.py --list`.** A shared lib such as

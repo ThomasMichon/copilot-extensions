@@ -382,6 +382,33 @@ def test_from_diff_bumps_a_standalone_consumers_own_vendored_lib_copy(diff_repo)
     assert libs.get(wtm_copy) == ("0.1.0-dev2", "0.1.0-dev3")
 
 
+def test_from_diff_bumps_a_standalone_only_lib_edit_with_no_plugin_copy_touched(diff_repo):
+    """Same as the sibling test above, but the shared-lib change is
+    confined ENTIRELY to `worktree-manager`'s own copy -- no plugin copy
+    or top-level canonical copy is also touched. `_changed_libs()`
+    previously only recognized `plugins/*/libs/<lib>/src` and top-level
+    `libs/<lib>/src` paths, so this diff alone produced an empty
+    `_changed_libs()` result and `lib_bumps_from_diff()` never even got a
+    lib name to look the standalone copy up under (PR #4514 review)."""
+    root, git = diff_repo
+    git("checkout", "-q", "main")
+    _standalone(root, "worktree-manager", "0.5.0-dev1")
+    (root / "worktree-manager/libs/shared-lib/src/shared_lib").mkdir(parents=True)
+    (root / "worktree-manager/libs/shared-lib/pyproject.toml").write_text(
+        '[project]\nname = "shared-lib"\nversion = "0.1.0-dev2"\n', encoding="utf-8",
+    )
+    (root / "worktree-manager/libs/shared-lib/src/shared_lib/__init__.py").write_text("x = 1\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "add worktree-manager with a real shared-lib copy")
+    git("checkout", "-q", "-B", "feature", "main")
+
+    (root / "worktree-manager/libs/shared-lib/src/shared_lib/__init__.py").write_text("x = 2\n")
+
+    _plugins, libs = acc.compute_from_diff("main")
+    wtm_copy = root / "worktree-manager/libs/shared-lib/pyproject.toml"
+    assert libs.get(wtm_copy) == ("0.1.0-dev2", "0.1.0-dev3")
+
+
 def test_from_diff_charges_all_copies_even_if_only_one_was_edited(diff_repo):
     root, _git = diff_repo
     (root / "plugins/agent-a/libs/shared-lib/src/shared_lib/__init__.py").write_text("x = 2\n")
