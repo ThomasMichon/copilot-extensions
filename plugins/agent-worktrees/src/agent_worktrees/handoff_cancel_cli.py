@@ -11,6 +11,7 @@ import argparse
 import os
 
 from . import tracking
+from . import tracking_lifecycle
 from . import config as cfg
 from . import status_updater_cli
 
@@ -101,7 +102,7 @@ def cmd_cancel_handoff(args: argparse.Namespace) -> int:
         yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
         with tracking._RecordLock(yaml_path):
             record = tracking.load_record(yaml_path)
-            cancelled = tracking.cancel_handoff(record, token)
+            cancelled = tracking_lifecycle.cancel_handoff(record, token)
             if cancelled:
                 tracking.save_record(record, yaml_path)
     except Exception as exc:
