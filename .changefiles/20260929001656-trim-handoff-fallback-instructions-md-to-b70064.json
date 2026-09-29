@@ -1,0 +1,9 @@
+{
+  "comment": "Trim handoff-fallback.instructions.md to fit the projection byte budget (unrelated PRs had grown it past MAX_PROJECTION_BYTES).",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}
