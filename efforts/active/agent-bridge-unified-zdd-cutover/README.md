@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 5 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 5 merged — TBD)
+- **Status:** In Progress (Phase 1 of 5 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 5 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 5 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 5 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581))
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
@@ -329,7 +329,7 @@ test that closes the gap.
 
 ## Journal
 
-### 2026-09-29 — Phase 4 landed (TBD)
+### 2026-09-29 — Phase 4 landed ([#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581))
 - **No new production mechanism was needed.** Reading `client.py`'s
   `BridgeClient._request()` and the CLI `send`/`read`/`wait` call sites
   confirmed the caller-facing mask Phase 4's checklist describes was already
@@ -339,20 +339,36 @@ test that closes the gap.
     `BridgeClient.from_config()`, which installs a live `_reresolve` callback
     against `zdd.routing`'s `active.json` -- there is no CLI code path that
     constructs an un-reresolving client for ordinary use.
-  - `_request()` already follows a retiring daemon's 503 `"draining"`
-    response (#3179) to the routing table's successor and retries within the
-    connect grace -- for **any** HTTP method, including the non-idempotent
-    POST `send`/`create` issue, since the retiring generation is still
-    answering (just refusing new work), not silently dropping the
-    connection. Covered generically by `TestDrainGrace` in
-    `test_client_connect.py` (already exercises `POST /api/v1/sessions`).
-  - A genuine TCP-level connection reset during a non-idempotent method
-    (POST) is deliberately **not** auto-retried (`BridgeConnectionError`) --
-    this is the correctness-safe boundary for the abrupt-kill case Phase 5's
-    own drill exists to exercise, not a gap: an unacknowledged POST could
-    double-deliver if blindly retried without the caller's own
-    `--idempotency-key` opt-in (`send_live_message`/`submit_prompt` already
-    thread one through when given).
+  - The **drain-refusal 503** (#3179) is real but narrower than this
+    journal entry first assumed: only `POST /api/v1/sessions` (brand-new
+    session creation, `routes/sessions.py`) checks `is_draining` and refuses
+    with it. `post_live_message` (`routes/live_sessions.py`, the route
+    `send` actually hits once a target already has a live session -- the
+    common case) has **no draining gate at all**: delivering into an
+    already-registered live session is cheap local-DB work, not new agent
+    work, so the retiring generation keeps serving it normally throughout
+    its own drain window. (Caught by automated PR review on the first
+    version of this PR's test, which had wrongly generalized the
+    session-creation drain-503 to the live-message delivery path -- see
+    below.)
+  - The real risk window for `send` mid-cutover is therefore not a graceful
+    503 at all -- it's the retiring generation's HTTP listener actually
+    closing post-shutdown. That produces a *plain connection refusal*
+    (`ECONNREFUSED`, wrapped as `urllib.error.URLError`, not
+    `ConnectionResetError`), which `_request()` follows to the routing
+    table's successor and retries for **any** HTTP method, including this
+    non-idempotent POST -- safe because a clean refusal proves the dead
+    process never received the request, unlike an in-flight reset.
+    Covered generically for GET by `TestReresolveOnRejection` in
+    `test_client_connect.py`.
+  - A genuine **connection reset** (the process accepted the connection,
+    then died mid-request) during a non-idempotent method is deliberately
+    **not** auto-retried (`BridgeConnectionError`) -- the correctness-safe
+    boundary for the abrupt-kill case Phase 5's own drill exists to
+    exercise, not a gap: an unacknowledged POST could double-deliver if
+    blindly retried without the caller's own `--idempotency-key` opt-in
+    (`send_live_message`/`submit_prompt` already thread one through when
+    given).
   - `_stream_feed()` (the engine behind `read`/`wait`) already reconnects
     across a connection error and resumes from the caller's acked cursor
     (`#23`/`#46.6`, `#893`, `#900`), tested by `test_reconnect.py`'s eight
@@ -360,10 +376,11 @@ test that closes the gap.
 - **The one genuine gap**: every existing test above drives `BridgeClient`
   or the streaming engine directly -- none drove the actual CLI `_cmd_send`
   entry point end-to-end through a cutover. Added
-  `test_send_transparent_cutover.py::test_send_cli_survives_drain_503_mid_delivery`,
+  `test_send_transparent_cutover.py::test_send_cli_survives_connection_refused_mid_delivery`,
   which builds a real `BridgeClient` (mocked `urlopen`, not a fake
-  in-memory client), makes the retiring generation answer the delivery POST
-  with a draining 503, and asserts `agent-bridge send`'s real code path
+  in-memory client), makes the retiring generation's port answer with a
+  clean connection refusal (matching the route's real behavior, not an
+  invented 503), and asserts `agent-bridge send`'s real code path
   (`_cmd_send` -> `resolve_live_session` -> `send_live_message`) prints a
   normal delivery confirmation -- never a traceback or hard failure -- after
   transparently following the routing table to the successor.

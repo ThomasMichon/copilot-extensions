@@ -1,22 +1,33 @@
 """Phase 4 (agent-bridge-unified-zdd-cutover): ``send`` survives a mid-command
 graceful cutover transparently, exercised at the real CLI call site.
 
-``BridgeClient._request()`` already follows a retiring daemon's "draining" 503
-(#3179) to the successor named by the routing table and retries within the
-connect grace -- proven at the client-request level by
-``TestDrainGrace`` in ``test_client_connect.py``. This test closes the one gap
-Phase 4's own checklist calls out explicitly: validating that the *same*
-transparency reaches all the way through ``agent-bridge send``'s real code
-path (``_cmd_send`` -> ``resolve_live_session`` -> ``send_live_message``),
-not just the underlying ``BridgeClient`` unit in isolation -- a live cutover
-mid-``send`` must surface as a delivered message, never a traceback or a
-hard CLI failure.
+Correction (post-review): an earlier version of this test simulated the
+retiring generation refusing ``send``'s delivery with a 503 "draining"
+response. That response is real (#3179) but is only ever emitted by the
+*session-creation* route (``POST /api/v1/sessions``, when the daemon is
+mid-drain and refuses brand-new work) -- ``post_live_message`` (the route
+``send`` actually hits when the target already has a live session, the
+common case this test exercises) has no draining gate at all, since
+delivering into an *already-registered* live session is cheap local-DB work,
+not new agent work. That prior test therefore validated a scenario the real
+endpoint can never produce.
+
+The real risk window for ``send`` mid-cutover is different: once the
+retiring generation's HTTP listener actually closes (post-shutdown, after
+the drain grace has elapsed), the *next* delivery attempt against the
+remembered port sees a plain connection refusal (a clean ``ECONNREFUSED``,
+never a "connection reset" -- nothing was ever sent to the dead process, so
+retrying is unambiguously safe even for this non-idempotent POST).
+``BridgeClient._request()`` already follows exactly this case to the
+routing table's successor and retries (proven generically at the
+``BridgeClient`` unit level by ``TestReresolveOnRejection`` in
+``test_client_connect.py``); this test closes the same gap as before, this
+time against the real endpoint and the real CLI ``send`` code path.
 """
 
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import urllib.error
 
@@ -39,18 +50,11 @@ class _FakeResp:
         return json.dumps(self._payload).encode()
 
 
-def _draining() -> urllib.error.HTTPError:
-    detail = "agent-bridge is draining for a redeploy; retry shortly."
-    return urllib.error.HTTPError(
-        "http://127.0.0.1/api/v1/live-sessions/sess1/messages",
-        503,
-        "Service Unavailable",
-        {},
-        io.BytesIO(json.dumps({"detail": detail}).encode()),
-    )
-
-
-def test_send_cli_survives_drain_503_mid_delivery(monkeypatch, capsys):
+def test_send_cli_survives_connection_refused_mid_delivery(monkeypatch, capsys):
+    """A clean ECONNREFUSED against the retired generation's port (post-#3179
+    shutdown, not mid-drain) is followed to the successor and retried, even
+    for `send`'s non-idempotent delivery POST -- and the CLI prints a normal
+    delivery confirmation, never a traceback or hard failure."""
     old_base = "http://127.0.0.1:57585"
     new_base = "http://127.0.0.1:47000"
     client = BridgeClient(
@@ -66,9 +70,9 @@ def test_send_cli_survives_drain_503_mid_delivery(monkeypatch, capsys):
         if req.full_url.endswith("/api/v1/live-sessions/resolve?handle=agent-x"):
             return _FakeResp({"session_id": "sess1", "status": "idle"})
         if req.full_url.startswith(old_base):
-            # The retiring generation still answers -- it just refuses new
-            # delivery while it waits for its successor to take over.
-            raise _draining()
+            # The old generation has fully shut down -- its port is closed,
+            # not merely refusing new work while alive.
+            raise urllib.error.URLError(ConnectionRefusedError("refused"))
         return _FakeResp({"message_id": "m1", "replied": False})
 
     monkeypatch.setattr(
@@ -96,9 +100,9 @@ def test_send_cli_survives_drain_503_mid_delivery(monkeypatch, capsys):
 
     out = capsys.readouterr().out
     assert "Delivered to live session sess1" in out
-    # The retiring generation was tried first, then the routing table's
-    # successor -- exactly the sequence `send` must follow to look like a
-    # brief buffered pause, never a hard error, across a graceful cutover.
+    # The retired generation's dead port was tried first, then the routing
+    # table's successor -- exactly the sequence `send` must follow to look
+    # like a brief buffered pause, never a hard error, across a cutover.
     assert seen == [
         f"{old_base}/api/v1/live-sessions/resolve?handle=agent-x",
         f"{old_base}/api/v1/live-sessions/sess1/messages",
