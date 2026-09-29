@@ -615,6 +615,20 @@ edits directly.
 > `CONTRIBUTING.md`, `README.md`) need no changefile. Build artifacts under a
 > plugin are ignored.
 >
+> **`worktree-manager` follows the same rule, even though it is not a
+> marketplace plugin.** It is a top-level, out-of-plugin consumer tree with
+> no `plugin.json` at all — its release version lives directly in its own
+> `pyproject.toml` (`[project].version`), and its `src/*/__init__.py`
+> `__version__` fallback is the "fourth file" equivalent above. A change to
+> **any file under `worktree-manager/`**, or to a **shared, vendored
+> `libs/<lib>/`** it still carries a real copy of, requires a changefile
+> naming `worktree-manager` the same way a plugin's own content change
+> does (`python tools/changefile.py add --plugin worktree-manager --type
+> patch --comment "..."` — the `--plugin` flag name is historical; it
+> accepts any recognized consumer identifier). It has no
+> `marketplace.json` entry and no instruction-projection ownership, so
+> those two surfaces never apply to it.
+>
 > **Before editing a shared lib, find every REAL copy first: `python
 > tools/check-vendored-libs-sync.py --list`.** A shared lib such as
 > `ssh-manager` is vendored **per consuming plugin**, at

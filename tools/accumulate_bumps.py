@@ -38,6 +38,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
+    # 3.10 support floor -- see uv_editable_ref.py's own identical fallback.
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised only on 3.10
+    import tomli as tomllib
+
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
 MARKETPLACE = REPO / ".github" / "plugin" / "marketplace.json"
@@ -49,6 +55,7 @@ import uv_editable_ref as uer  # noqa: E402
 _VERSION_LITERAL = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?$")
 _JSON_VERSION_RE = re.compile(r'("version"\s*:\s*")([^"]+)(")')
 _TOML_VERSION_RE = re.compile(r'^(\s*version\s*=\s*")([^"]+)(")', re.MULTILINE)
+_TOML_TABLE_HEADER_RE = re.compile(r'^\[', re.MULTILINE)
 
 BUMP_ORDER = ("dev", "patch", "minor", "major")
 
@@ -120,11 +127,19 @@ def read_plugin_json_version(plugin: str) -> str | None:
 
 
 def is_standalone_consumer(consumer: str) -> bool:
-    """True when ``consumer`` is a top-level, out-of-plugin consumer tree
-    (e.g. ``worktree-manager``) with no ``plugin.json`` at all -- its
-    release version lives directly in its own ``pyproject.toml``
-    ``[project].version`` instead."""
-    return not (PLUGINS_DIR / consumer / "plugin.json").exists()
+    """True when ``consumer`` is a RECOGNIZED, top-level, out-of-plugin
+    consumer tree (currently just ``worktree-manager``, per
+    ``uv_editable_ref._EXTRA_CONSUMER_DIRS``) -- its release version lives
+    directly in its own ``pyproject.toml`` ``[project].version`` instead of
+    a ``plugin.json``. Deliberately checks membership in that fixed
+    registry rather than merely "no plugin.json under
+    `plugins/<consumer>`" -- the latter would also match a malformed/typo'd
+    changefile name like ``libs/zdd`` or ``plugins/agent-bridge`` (whose
+    ``PLUGINS_DIR / consumer`` lookup is not a directory at all), silently
+    resolving it through `_consumer_root()` to an unintended real
+    `pyproject.toml` elsewhere in the tree and bumping THAT file instead of
+    correctly skipping the unrecognized name (PR #4514 review)."""
+    return consumer in uer._EXTRA_CONSUMER_DIRS and (REPO / consumer / "pyproject.toml").is_file()
 
 
 def _consumer_root(consumer: str) -> Path:
@@ -136,11 +151,43 @@ def _consumer_root(consumer: str) -> Path:
 
 
 def read_pyproject_project_version(root: Path) -> str | None:
+    """The ``[project].version`` field of ``root/pyproject.toml`` --
+    genuine TOML parsing, not a "first `version = ` line anywhere in the
+    file" regex, so an earlier unrelated table's own ``version`` key (e.g.
+    ``[tool.example] version = "9.9.9"``) is never mistaken for the
+    package's own release version (PR #4514 review)."""
     pp = root / "pyproject.toml"
     if not pp.exists():
         return None
-    m = _TOML_VERSION_RE.search(pp.read_text(encoding="utf-8"))
-    return m.group(2) if m else None
+    try:
+        data = tomllib.loads(pp.read_text(encoding="utf-8"))
+    except tomllib.TOMLDecodeError:
+        return None
+    version = data.get("project", {}).get("version")
+    return version if isinstance(version, str) else None
+
+
+def _write_project_version(pp: Path, new_version: str) -> bool:
+    """Rewrite ONLY the ``[project].version`` field of ``pp`` -- scoped to
+    that table's own span (mirroring `cell-runtime.py`'s
+    `_rewrite_uv_source_to_local()`), never the first `version = ` line
+    anywhere in the file, so an earlier unrelated table's own `version` key
+    is never silently overwritten instead of the package's real one (PR
+    #4514 review)."""
+    if not pp.exists():
+        return False
+    text = pp.read_text(encoding="utf-8")
+    header = re.search(r"^\[project\]\s*$", text, re.MULTILINE)
+    if header is None:
+        return False
+    start = header.end()
+    next_header = _TOML_TABLE_HEADER_RE.search(text, start + 1)
+    end = next_header.start() if next_header else len(text)
+    new_body, n = _TOML_VERSION_RE.subn(rf"\g<1>{new_version}\g<3>", text[start:end], count=1)
+    if n == 0:
+        return False
+    pp.write_text(text[:start] + new_body + text[end:], encoding="utf-8")
+    return True
 
 
 def read_consumer_version(consumer: str) -> str | None:
@@ -301,7 +348,7 @@ def apply(result: dict[str, tuple[str, str]]) -> list[str]:
             # instruction-projection owner -- only its own `pyproject.toml`
             # [project].version and source `__version__` fallbacks apply.
             root = _consumer_root(consumer)
-            ok_pp = _write_version(root / "pyproject.toml", _TOML_VERSION_RE, new_version)
+            ok_pp = _write_project_version(root / "pyproject.toml", new_version)
             _write_source_fallbacks(root, old, new_version)
             if ok_pp:
                 applied.append(consumer)
@@ -363,6 +410,23 @@ def _version_at(ref: str, rel_path: str, pattern: re.Pattern[str]) -> str | None
     return m.group(2) if m else None
 
 
+def _project_version_at(ref: str, rel_pyproject: str) -> str | None:
+    """The ``[project].version`` field of ``rel_pyproject`` at ``ref`` --
+    genuine TOML parsing (mirroring `read_pyproject_project_version`), not
+    `_version_at`'s generic "first `version = ` line" regex, which could
+    read an earlier unrelated table's own `version` key instead of a
+    standalone consumer's real release version (PR #4514 review)."""
+    text = _git("show", f"{ref}:{rel_pyproject}")
+    if not text:
+        return None
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return None
+    version = data.get("project", {}).get("version")
+    return version if isinstance(version, str) else None
+
+
 def _next_after_base(current: str, base_version: str | None) -> str | None:
     """The version to bump to, or ``None`` when ``current`` is already ahead of the base."""
     if base_version is None:
@@ -418,7 +482,7 @@ def compute_from_diff(base: str) -> tuple[dict[str, tuple[str, str]], dict[Path,
         current = read_consumer_version(consumer)
         if is_standalone_consumer(consumer):
             rel_pyproject = f"{consumer}/pyproject.toml"
-            base_version = _version_at(base, rel_pyproject, _TOML_VERSION_RE)
+            base_version = _project_version_at(base, rel_pyproject)
         else:
             base_version = _version_at(base, f"plugins/{consumer}/plugin.json", _JSON_VERSION_RE)
         new = _next_after_base(current, base_version) if current else None

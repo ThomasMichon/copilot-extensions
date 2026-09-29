@@ -180,15 +180,9 @@ def _seed_versions_from_main(scratch: Path, main_head: str, *, acc, repo: Path) 
     # literal (or repeat an already-shipped bump) the same way an
     # un-seeded plugin would (PR #4514 review).
     for consumer in acc.iter_standalone_consumer_names():
-        main_pp_raw = _git(
-            ["show", f"{main_head}:{consumer}/pyproject.toml"], cwd=repo, check=False,
-        )
-        if not main_pp_raw:
+        main_version = acc._project_version_at(main_head, f"{consumer}/pyproject.toml")
+        if main_version is None:
             continue  # never shipped on main yet -- dev's own literal stands as-is
-        m = acc._TOML_VERSION_RE.search(main_pp_raw)
-        if not m:
-            continue
-        main_version = m.group(2)
         dev_version = acc.read_consumer_version(consumer)
         if dev_version is None or dev_version == main_version:
             continue

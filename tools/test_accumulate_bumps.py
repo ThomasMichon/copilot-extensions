@@ -185,6 +185,24 @@ def test_is_standalone_consumer_detects_out_of_plugin_tree(isolated: Path):
     assert acc.is_standalone_consumer("worktree-manager") is True
 
 
+def test_is_standalone_consumer_rejects_unrecognized_names(isolated: Path):
+    """`is_standalone_consumer()` must restrict to the recognized
+    out-of-plugin registry, never "any name without a plugin.json" --
+    otherwise a malformed/typo'd changefile name like `libs/zdd` or
+    `plugins/agent-bridge` would resolve through `_consumer_root()` to
+    some unintended real `pyproject.toml` elsewhere in the tree and get
+    bumped as if it were a genuine standalone consumer (PR #4514 review).
+    A directory that merely happens to exist and lack a plugin.json (but
+    isn't the recognized `worktree-manager` name) must be rejected too."""
+    (isolated / "libs" / "zdd").mkdir(parents=True)
+    (isolated / "libs" / "zdd" / "pyproject.toml").write_text(
+        '[project]\nname = "zdd"\nversion = "1.0.0"\n', encoding="utf-8",
+    )
+    assert acc.is_standalone_consumer("libs/zdd") is False
+    assert acc.is_standalone_consumer("plugins/agent-bridge") is False
+    assert acc.is_standalone_consumer("some-random-unrecognized-name") is False
+
+
 def test_compute_and_apply_bumps_a_standalone_consumer(isolated: Path):
     _standalone(isolated, "worktree-manager", "0.1.0-dev95")
     changefile.write_changefile([{"plugin": "worktree-manager", "type": "dev"}], "convert a lib")
@@ -196,6 +214,30 @@ def test_compute_and_apply_bumps_a_standalone_consumer(isolated: Path):
     assert applied == ["worktree-manager"]
     pp = (isolated / "worktree-manager/pyproject.toml").read_text()
     assert 'version = "0.1.0-dev96"' in pp
+
+
+def test_standalone_write_only_touches_project_table_version(isolated: Path):
+    """A standalone consumer's `pyproject.toml` may legitimately carry an
+    earlier, unrelated table with its OWN `version` key (e.g. a build
+    backend's own pinned version) before `[project]` -- the write must be
+    scoped to `[project]`'s own span, never the first `version = ` line
+    anywhere in the file, or that earlier table's value gets silently
+    corrupted while the real package version is left untouched (PR #4514
+    review)."""
+    d = isolated / "worktree-manager"
+    d.mkdir(parents=True)
+    (d / "pyproject.toml").write_text(
+        '[tool.example]\nversion = "9.9.9"\n\n'
+        '[project]\nname = "worktree-manager"\nversion = "0.1.0-dev95"\n',
+        encoding="utf-8",
+    )
+
+    acc.apply({"worktree-manager": ("0.1.0-dev95", "0.1.0-dev96")})
+
+    text = (d / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'version = "9.9.9"' in text  # untouched, unrelated table
+    assert 'version = "0.1.0-dev96"' in text
+    assert acc.read_pyproject_project_version(d) == "0.1.0-dev96"
 
 
 def test_apply_rewrites_standalone_consumer_source_fallback(isolated: Path):
