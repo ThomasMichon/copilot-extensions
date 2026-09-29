@@ -632,7 +632,9 @@ agent-bridge service restart
 `service restart` always performs the same zero-downtime cutover
 (spawn passive -> health-gate -> flip -> drain -> retire) that
 `agent-bridge deploy` uses -- **never** `systemctl --user restart
-agent-bridge.service` directly, on any platform. The systemd/scheduled-task
-unit's own restart is a raw stop-then-start with no cutover, no drain, and
-no session-host handoff; it will drop every live session-host with no
-warning.
+agent-bridge.service` directly, on any platform. The unit's own restart is a
+raw stop-then-start with no health gate and no coordinated cutover: existing
+sessions may still reattach after (the shutdown path detaches for
+background recovery, and `KillMode=process` on Linux lets a Session Host
+outlive the frontend), but callers see an uncoordinated gap instead of the
+`service restart`/`deploy` cutover's health-gated, zero-downtime handoff.

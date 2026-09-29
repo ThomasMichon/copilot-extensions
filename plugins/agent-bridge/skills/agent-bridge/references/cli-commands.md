@@ -297,11 +297,15 @@ be discarded (or the cancel signature *persists* across sends). See the
 
 ### Service Control
 
-Use the `service` subcommands to control the long-running daemon. These
-delegate to the platform service manager (Windows scheduled task / Linux
-systemd user unit) that the installer registered, so they control the **same**
-instance that auto-starts at logon -- and they fall back to a detached spawn if
-no service manager is registered.
+Use the `service` subcommands to control the long-running daemon. `start`
+and `stop` delegate to the platform service manager (Windows scheduled task
+/ Linux systemd user unit) that the installer registered, so they control
+the **same** instance that auto-starts at logon -- and fall back to a
+detached spawn if no service manager is registered. `restart` is different:
+it never touches the platform service manager at all -- it invokes the same
+app-level ZDD cutover `deploy` uses, spawning a new daemon generation and
+handing off to it, leaving the platform-managed process replaced by that
+successor.
 
 ```bash
 agent-bridge service start      # start the daemon (no-op if already running) -- marketplace-isolation: allow service-management
@@ -313,8 +317,11 @@ agent-bridge service status     # running state + bound port + PID -- marketplac
 > **Never bypass `service restart` with the platform service manager
 > directly** (`systemctl --user restart agent-bridge.service`, `schtasks /Run`
 > on the scheduled task, etc.) -- that path is a raw stop-then-start with no
-> cutover, no drain, and no session-host handoff, and will drop every live
-> session-host with no warning.
+> health gate and no coordinated cutover: existing sessions may still
+> reattach after (the shutdown path detaches for background recovery, and
+> `KillMode=process` on Linux lets a Session Host outlive the frontend), but
+> callers see an uncoordinated gap instead of `service restart`/`deploy`'s
+> health-gated, zero-downtime handoff.
 
 > **Note:** the payload-local `stop <session-id>` operation stops a *session*,
 > not the service. For the daemon, use the literal management command

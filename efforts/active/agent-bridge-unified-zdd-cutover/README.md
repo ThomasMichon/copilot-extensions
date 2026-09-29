@@ -289,7 +289,7 @@ sequencing will be drafted here once the design is reviewed._
 - Full `agent-bridge` suite green (`tools/run-plugin-tests.py agent-bridge`).
 - Filed the umbrella issue,
   [#4477](https://github.com/ThomasMichon/copilot-extensions/issues/4477).
-- PR #4478's automated review caught three real gaps, all fixed:
+- PR #4478's automated review caught four real gaps, all fixed:
   - the regression test patched the unused module-level
     `_service_stop`/`_service_start` names instead of what `_cmd_service`
     actually calls (`core._service_stop`/`core._service_start` via
@@ -305,7 +305,20 @@ sequencing will be drafted here once the design is reviewed._
     `systemctl --user restart agent-bridge.service` (the unit's own
     `ExecStart` is `agent-bridge start`) was an interchangeable restart —
     it bypasses the CLI (and its ZDD cutover) entirely. Both now say never
-    to call the platform service manager's restart directly.
+    to call the platform service manager's restart directly, and the
+    wording was later softened per a second review pass (below) once the
+    unit's `KillMode=process` + the shutdown path's detach-for-reattach
+    behavior were confirmed to make a manager restart *uncoordinated*, not
+    a guaranteed session-host loss.
+- A second review pass on that doc fix caught remaining rough edges, all
+  fixed: an absolute "will drop every live session-host" claim overstated
+  the actual risk (systemd's `KillMode=process` plus the shutdown path's
+  detach-for-background-recovery mean sessions can often reattach; the
+  manager path is uncoordinated/potentially disruptive, not a guaranteed
+  loss); the CLI reference's Service Control intro paragraph said *all*
+  `service` subcommands delegate to the platform manager, which now
+  contradicts `restart`'s deploy-cutover behavior; and this Journal
+  undercounted the fixes above as three instead of four.
 - Phase 0's one open item (the opt-in reconcile-gate design fork) remains
   genuinely undecided — flagged for the operator, not resolved here.
 
