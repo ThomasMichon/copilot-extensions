@@ -28,7 +28,7 @@ protected_branches: [main, dev]
 # PR workflow (agent-worktrees hook facility + create-pr flow) — REQUIRED.
 #
 # copilot-extensions lands changes through pull requests, not direct pushes to
-# `dev` (the contribution branch -- see below). This is enforced on three
+# `dev` (the contribution branch -- see below). This is enforced on four
 # layers that agree:
 #
 #   1. This config (`required: true`) — `push-changes` REFUSES direct-to-`dev`
@@ -53,6 +53,12 @@ protected_branches: [main, dev]
 #      status check, so it never gates the merge. (The ruleset-native
 #      `copilot_code_review` rule that used to do this unconditionally for
 #      anyone has been removed -- it had no "collaborators only" condition.)
+#   4. Workflow/CODEOWNERS lockdown: `.github/workflows/workflow-lockdown-guard.yml`
+#      (a required status check, no bypass actors, its own ruleset) hard-fails
+#      any PR touching `.github/workflows/`, `.github/actions/`, or
+#      `.github/CODEOWNERS` unless the PR's registered author is ThomasMichon
+#      -- see CONTRIBUTING.md's "Contribution flow" for the accepted
+#      residual risks and structural limitations this layer does NOT close.
 #
 # `dev` is the contribution branch; `main` ships releases. Plugins are
 # published/deployed from `main`, so `dev` is periodically promoted to `main`
