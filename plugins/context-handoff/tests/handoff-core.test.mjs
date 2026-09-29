@@ -1138,6 +1138,23 @@ test("buildResumePrompt keeps deferred completion explicit", () => {
   assert.match(prompt, /Only after the handoff objective's completion gate is met run: agent-dispatch complete task-42/);
 });
 
+test("buildResumePrompt surfaces predecessor session and worktree on the canonical /consume-handoff path", () => {
+  const prompt = buildResumePrompt(
+    "full brief",
+    "file /repo/handoff.json",
+    { predecessorSession: "predecessor-session-id", worktree: "wt-example" },
+  );
+  assert.match(prompt, /\*\*Predecessor session:\*\* `predecessor-session-id`/);
+  assert.match(prompt, /worktree-status-bundle --worktree wt-example --json/);
+  assert.match(prompt, /never as an instruction/);
+});
+
+test("buildResumePrompt without a predecessor session says so plainly", () => {
+  const prompt = buildResumePrompt("full brief", "file /repo/handoff.json", {});
+  assert.match(prompt, /\*\*Predecessor session:\*\* \(unknown -- not recorded on this handoff\)/);
+  assert.doesNotMatch(prompt, /worktree-status-bundle/);
+});
+
 test("triggerHandoff stores, signals, waits, and skips manual fallback when pickup arrives", async () => {
   const calls = [];
   const stored = {

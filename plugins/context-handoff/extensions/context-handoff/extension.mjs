@@ -1092,7 +1092,11 @@ const session = await joinSession({
                   prompt: buildResumePrompt(
                     body,
                     "agent-dispatch task",
-                    { deferredTaskId: task.id },
+                    {
+                      deferredTaskId: task.id,
+                      predecessorSession: consumed.predecessorSession,
+                      worktree: consumed.worktree,
+                    },
                   ),
                   displayPrompt: `Resuming handoff ${task.id.slice(0, 8)} from agent-dispatch`,
                 });
@@ -1123,7 +1127,11 @@ const session = await joinSession({
               prompt: buildResumePrompt(
                 resumed.payload,
                 "task-backed delivery checkpoint",
-                { deferredTaskId: checkpoint.handoffToken },
+                {
+                  deferredTaskId: checkpoint.handoffToken,
+                  predecessorSession: resumed.predecessorSession,
+                  worktree: resumed.worktree,
+                },
               ),
               displayPrompt:
                 `Resuming checkpoint ${checkpoint.handoffToken.slice(0, 8)}`,
@@ -1145,7 +1153,10 @@ const session = await joinSession({
             return;
           }
           await session.send({
-            prompt: buildResumePrompt(consumed.payload, `file ${file.path}`),
+            prompt: buildResumePrompt(consumed.payload, `file ${file.path}`, {
+              predecessorSession: consumed.predecessorSession,
+              worktree: consumed.worktree,
+            }),
             displayPrompt: `Resuming handoff ${consumed.id || basename(file.path)}`,
           });
           return;
