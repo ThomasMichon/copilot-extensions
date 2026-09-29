@@ -40,7 +40,7 @@ class TestPrWatchReviewBlocking:
         config = SimpleNamespace(default_repo=repo)
         called = MagicMock()
         monkeypatch.setattr("agent_worktrees.providers.get_provider", called)
-        assert m._pr_watch_review_blocking(config, repo.pr, _args()) is True
+        assert m._pr_watch_review_blocking(config, _args()) is True
         called.assert_not_called()
 
     def test_non_self_merge_repo_stays_non_blocking_no_network(self, monkeypatch):
@@ -50,7 +50,7 @@ class TestPrWatchReviewBlocking:
         config = SimpleNamespace(default_repo=repo)
         called = MagicMock()
         monkeypatch.setattr("agent_worktrees.providers.get_provider", called)
-        assert m._pr_watch_review_blocking(config, repo.pr, _args()) is False
+        assert m._pr_watch_review_blocking(config, _args()) is False
         called.assert_not_called()
 
     def test_self_merge_maintainer_stays_non_blocking(self, monkeypatch):
@@ -62,7 +62,7 @@ class TestPrWatchReviewBlocking:
             "agent_worktrees.providers.actor_viewer_permission",
             lambda *a, **k: "write",
         )
-        assert m._pr_watch_review_blocking(config, repo.pr, _args()) is False
+        assert m._pr_watch_review_blocking(config, _args()) is False
 
     def test_self_merge_contributor_falls_back_to_blocking(self, monkeypatch):
         """Live authority False (a confident read-only/no-access read): a
@@ -74,7 +74,24 @@ class TestPrWatchReviewBlocking:
             "agent_worktrees.providers.actor_viewer_permission",
             lambda *a, **k: "read",
         )
-        assert m._pr_watch_review_blocking(config, repo.pr, _args()) is True
+        assert m._pr_watch_review_blocking(config, _args()) is True
+
+    def test_explicit_write_role_without_self_merge_is_blocking(self, monkeypatch):
+        """An actor may have write authority while repo policy still assigns
+        that role a contributor flow. The explicit role override wins, and the
+        watcher waits for a human maintainer's binding verdict."""
+        repo = _repo_config(
+            review_blocking=False,
+            merge_actor="submitter-direct",
+            provider="github",
+            roles={"write": cfg.PRRoleOverride(merge_actor="")},
+        )
+        config = SimpleNamespace(default_repo=repo)
+        monkeypatch.setattr(
+            "agent_worktrees.providers.actor_viewer_permission",
+            lambda *a, **k: "write",
+        )
+        assert m._pr_watch_review_blocking(config, _args()) is True
 
     def test_self_merge_unknown_authority_fails_open_to_non_blocking(self, monkeypatch):
         """An unknown/failed live read (None) must never deny a legitimate
@@ -85,7 +102,7 @@ class TestPrWatchReviewBlocking:
             "agent_worktrees.providers.actor_viewer_permission",
             lambda *a, **k: "",
         )
-        assert m._pr_watch_review_blocking(config, repo.pr, _args()) is False
+        assert m._pr_watch_review_blocking(config, _args()) is False
 
     def test_self_merge_provider_read_failure_fails_open(self, monkeypatch):
         repo = _repo_config(review_blocking=False, self_approve=True, provider="github")
@@ -95,7 +112,7 @@ class TestPrWatchReviewBlocking:
             raise RuntimeError("network down")
 
         monkeypatch.setattr("agent_worktrees.providers.get_provider", _boom)
-        assert m._pr_watch_review_blocking(config, repo.pr, _args()) is False
+        assert m._pr_watch_review_blocking(config, _args()) is False
 
 
 class TestPrWatchUntilDefaultIntegration:

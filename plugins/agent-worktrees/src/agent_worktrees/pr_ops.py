@@ -516,7 +516,7 @@ def create_pr(
     and the agent can fall back to delegating PR creation manually.
 
     ``confirm_fork`` gates the role-aware fork-PR flow (see
-    ``efforts/2026/09/26 role-aware-fork-pr-flow`` in this repo, GitHub-only
+    ``efforts/active/role-aware-fork-pr-flow`` in this repo, GitHub-only
     today): when the repo's ``pr.roles``/``pr.fork`` config resolves the
     caller's live role to a flow that publishes through a personal fork
     rather than a direct push, ``create_pr`` does **not** silently fork or
@@ -802,7 +802,7 @@ def create_pr(
     )
 
     # --- Role-aware PR flow resolution + fork-publish confirmation gate ----
-    # (efforts/2026/09/26 role-aware-fork-pr-flow, Phase 2b, GitHub-only). Only
+    # (efforts/active/role-aware-fork-pr-flow, Phase 2b, GitHub-only). Only
     # touches anything when the repo opts in via `pr.roles` and/or
     # `pr.fork.enabled`; an unconfigured repo's `prcfg`/`publish_remote` are
     # unchanged from here on -- byte-for-byte today's behavior.

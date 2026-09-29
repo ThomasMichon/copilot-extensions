@@ -106,14 +106,17 @@ GITHUB_ROLE_LEVELS: tuple[str, ...] = (
 @dataclass(frozen=True)
 class ForkConfig:
     """How ``create-pr`` should publish a PR head when a role can't push to
-    the repo directly (see ``efforts/2026/09/26 role-aware-fork-pr-flow`` in
+    the repo directly (see ``efforts/active/role-aware-fork-pr-flow`` in
     copilot-extensions).
 
     ``enabled`` on the base ``pr.fork`` block is a repo-wide default; a role
     override (``pr.roles.<role>.fork``) may turn it on/off for just that role
     without repeating the other fields. When active, ``create-pr`` publishes
     the PR head to the caller's fork instead of ``repo.remote`` and opens the
-    PR with a ``<fork-owner>:<branch>`` head. GitHub-only today; other
+    PR with a ``<fork-owner>:<branch>`` head. GitHub-only today; the
+    fork-push/PR-open integration in ``create_pr`` itself is a later phase of
+    the same effort, not yet implemented -- this config shape is accepted and
+    parsed now so repos can declare intent ahead of that landing. Other
     providers ignore this block.
     """
 
@@ -125,7 +128,7 @@ class ForkConfig:
 @dataclass(frozen=True)
 class PRRoleOverride:
     """Per-role overrides layered onto the repo's base ``PRConfig`` (see
-    ``efforts/2026/09/26 role-aware-fork-pr-flow`` in copilot-extensions).
+    ``efforts/active/role-aware-fork-pr-flow`` in copilot-extensions).
 
     Keyed in ``PRConfig.roles`` by one of ``GITHUB_ROLE_LEVELS``. Every field
     is optional (``None`` = inherit the base ``PRConfig`` value unchanged) so a
@@ -354,7 +357,7 @@ class PRConfig:
     branch_update_strategy: str = "rebase"
     merge_strategy: str = "squash"
     prefer_auto_merge: bool = True
-    # ── Role-aware PR flow (see ``efforts/2026/09/26 role-aware-fork-pr-flow`` in
+    # ── Role-aware PR flow (see ``efforts/active/role-aware-fork-pr-flow`` in
     # copilot-extensions). ``roles`` maps a GitHub permission level
     # (``GITHUB_ROLE_LEVELS``) to a ``PRRoleOverride`` layered onto this
     # PRConfig for a caller resolved at that level. Empty (the default) means

@@ -179,6 +179,9 @@ def resolve_actor_pr_flow(
 
 def actor_review_blocking(actor_flow: ActorPRFlow) -> bool:
     """Return the effective ``pr-watch`` verdict posture for this actor."""
-    if actor_flow.resolution == "actor-authority":
+    if (
+        actor_flow.configured_flow.profile == pc.PROFILE_PR_SELF_MERGE
+        and actor_flow.flow.profile != pc.PROFILE_PR_SELF_MERGE
+    ):
         return True
     return bool(getattr(actor_flow.pr_config, "review_blocking", False))

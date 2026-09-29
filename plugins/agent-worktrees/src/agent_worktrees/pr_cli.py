@@ -184,24 +184,24 @@ def _classify_pr_operands(operands: list[str]) -> tuple[str | None, int | None]:
     return repo, pr
 
 
-def _pr_watch_review_blocking(config, prcfg, args) -> bool:
+def _pr_watch_review_blocking(config, args, *, actor_flow=None) -> bool:
     """Effective review-blocking posture for a ``pr-watch wait``.
 
     A ``pr-self-merge`` repo whose review is marked non-blocking (e.g. GitHub
     Copilot code review, which cannot render APPROVED/CHANGES_REQUESTED on an
     owner-authored PR) only skips waiting for a real verdict for an actor who
-    actually holds merge authority -- a contributor without it still needs a
-    human maintainer's APPROVED/CHANGES_REQUESTED. Mirrors
-    ``_pr_merge_now``'s live-authority check; fails open on an unknown/failed
-    permission read, same as that command.
+    keeps the effective self-merge flow. A live-authority demotion or an
+    explicit role override that removes self-merge restores the contributor's
+    human-review wait. Unknown permission fails open to the configured flow.
     """
     from . import pr_config
-    actor_flow = pr_config.resolve_actor_pr_flow(
-        config.default_repo,
-        args.repo,
-        api_base=args.host,
-        token=args.token,
-    )
+    if actor_flow is None:
+        actor_flow = pr_config.resolve_actor_pr_flow(
+            config.default_repo,
+            args.repo,
+            api_base=args.host,
+            token=args.token,
+        )
     return pr_config.actor_review_blocking(actor_flow)
 
 
@@ -291,7 +291,11 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
                 token=resolved_token,
             )
             prcfg = actor_flow.pr_config
-            review_blocking = pr_config.actor_review_blocking(actor_flow)
+            review_blocking = _pr_watch_review_blocking(
+                config,
+                args,
+                actor_flow=actor_flow,
+            )
         else:
             review_blocking = True
 
