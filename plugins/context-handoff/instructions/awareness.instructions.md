@@ -30,8 +30,10 @@ it, or ask, before assuming either.
 
 ## The same commands as plain CLI, extension loaded or not
 
-The plugin's bundled CLI needs only `node`. Every command accepts `--json`
-for machine-readable output; `help` prints the full option reference.
+The plugin's bundled CLI needs only `node`. Every **operational** command
+(everything below except `help`) accepts `--json` for machine-readable
+output; `help` always prints the plain-text option reference, ignoring
+`--json` -- never try to JSON-parse its output.
 
 | Command | Purpose |
 |---|---|

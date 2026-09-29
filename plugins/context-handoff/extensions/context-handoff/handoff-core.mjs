@@ -3692,13 +3692,19 @@ export function cancelHandoffInRecord(cwd, sessionId, token, execute = runCli) {
 // Surfaced only when cancelHandoffInRecord's own best-effort call didn't
 // report `cancelled: true` -- the backing handoff record is still retired
 // either way; this just tells the caller the agent-worktrees ledger entry
-// (if one was armed under `mode: auto`) may still need manual reconciliation.
+// (if one was armed under `mode: auto`) may still need manual
+// reconciliation. Must NOT point at `handoffs-check --execute` -- that
+// command only reconciles a stuck cutover AFTER a successor/candidate and a
+// recorded spawn already exist, so it is exactly as ineffective for a
+// pre-consumption abort as the advisory `cancel-handoff` itself replaced
+// (PR #4570 review round 5). Point at retrying `cancel-handoff` directly
+// instead, since that is the one primitive that can actually cancel it.
 function ledgerFailureNote(reason) {
   return (
     `Could not confirm agent-worktrees' own pending-handoff ledger entry was ` +
     `cancelled${reason ? ` (${reason})` : ""}. If one was armed under ` +
-    "`mode: auto`, run `agent-worktrees handoffs-check --worktree-id <id> " +
-    "--execute --json` to reconcile it manually."
+    "`mode: auto`, run `agent-worktrees cancel-handoff --worktree-id <id> " +
+    "--token <handoffId> --json` to retry the cancellation directly."
   );
 }
 

@@ -1963,7 +1963,12 @@ test("abortHandoffTask reports honestly when the ledger cancellation itself can'
   const result = abortHandoffTask("C:\\repo", "task-42", null, execute);
   assert.equal(result.ok, true);
   assert.equal(result.ledgerCancelled, false);
-  assert.match(result.ledgerNote, /handoffs-check/);
+  // Must recommend retrying cancel-handoff directly, never handoffs-check
+  // --execute -- that command cannot reconcile a pre-consumption abort (PR
+  // #4570 review round 5 and round 11: it only acts once a successor/
+  // candidate and a recorded spawn already exist).
+  assert.match(result.ledgerNote, /cancel-handoff/);
+  assert.doesNotMatch(result.ledgerNote, /handoffs-check/);
 });
 
 test("abortHandoffTask decodes the payload for its sessionId BEFORE abandoning, since abandon can redact it", () => {
