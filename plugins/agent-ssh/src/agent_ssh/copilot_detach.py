@@ -319,18 +319,8 @@ def _mux_exists(ssh_config: Any, mux: str) -> bool:
 
 async def _run_forward_keeper(args: argparse.Namespace) -> int:
     ssh_config = _ssh_config(args.target)
-    forwards = [
-        SupervisedRelayForward(
-            ssh_config,
-            int(args.venue_port),
-            host_port_resolver=lambda: resolve_daemon_port() or 0,
-            monitor_interval=15.0,
-        )
-    ]
-    return await run_supervised_loop(
-        forwards,
-        session_alive=lambda: _mux_exists(ssh_config, args.mux),
-        write_state=lambda: _STORE.write(
+    def write_state() -> None:
+        _STORE.write(
             _state_key(args.target),
             _keeper_state(
                 args.target,
@@ -338,7 +328,21 @@ async def _run_forward_keeper(args: argparse.Namespace) -> int:
                 args.mux,
                 forwards,
             ),
-        ),
+        )
+
+    forwards = [
+        SupervisedRelayForward(
+            ssh_config,
+            int(args.venue_port),
+            host_port_resolver=lambda: resolve_daemon_port() or 0,
+            monitor_interval=15.0,
+            on_pid_change=write_state,
+        )
+    ]
+    return await run_supervised_loop(
+        forwards,
+        session_alive=lambda: _mux_exists(ssh_config, args.mux),
+        write_state=write_state,
         remove_state=lambda: _STORE.remove(_state_key(args.target)),
         probe_interval=float(args.probe_interval),
         startup_grace=float(args.startup_grace),

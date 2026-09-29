@@ -78,6 +78,7 @@ class SupervisedRelayForward:
         ready_timeout: float = 40.0,
         serving_probe: Callable[[], Awaitable[bool]] | None = None,
         host_port_resolver: Callable[[], int] | None = None,
+        on_pid_change: Callable[[], None] | None = None,
     ) -> None:
         self._config = config
         self._relay_port = int(relay_port)
@@ -88,6 +89,7 @@ class SupervisedRelayForward:
         self._backoff_max = float(backoff_max)
         self._ready_timeout = float(ready_timeout)
         self._serving_probe = serving_probe
+        self._on_pid_change = on_pid_change
         self._proc: asyncio.subprocess.Process | None = None
         self._monitor_task: asyncio.Task[None] | None = None
 
@@ -104,6 +106,15 @@ class SupervisedRelayForward:
             return None
         pid = getattr(proc, "pid", None)
         return pid if isinstance(pid, int) and pid > 0 else None
+
+    def _notify_pid_change(self) -> None:
+        callback = self._on_pid_change
+        if callback is None:
+            return
+        try:
+            callback()
+        except Exception as exc:  # noqa: BLE001 - best-effort state refresh
+            log.warning("Credential relay pid-change callback failed: %s", exc)
 
     def _resolve_host_port(self) -> int:
         """Resolve the host-side ``-R`` target port.
@@ -173,6 +184,7 @@ class SupervisedRelayForward:
                 raise
             if settled.ready:
                 self._established_host_port = host_port
+                self._notify_pid_change()
                 log.info(
                     "Credential relay reverse-forward up on %s "
                     "(-R %d:127.0.0.1:%d)",
@@ -344,6 +356,8 @@ class SupervisedRelayForward:
     async def _cancel_process(self) -> None:
         proc = self._proc
         self._proc = None
+        if proc is not None:
+            self._notify_pid_change()
         if proc is not None:
             await self._kill(proc)
 

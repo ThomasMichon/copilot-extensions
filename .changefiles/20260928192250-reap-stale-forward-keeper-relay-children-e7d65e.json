@@ -2,6 +2,18 @@
   "comment": "Reap stale forward-keeper relay children",
   "changes": [
     {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
       "plugin": "agent-ssh",
       "type": "patch"
     }

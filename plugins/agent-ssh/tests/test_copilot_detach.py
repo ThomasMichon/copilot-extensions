@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import types
 
@@ -203,3 +204,51 @@ def test_detached_session_mirrors_the_callers_model(monkeypatch):
     monkeypatch.setattr(detach, "model_copilot_args", lambda existing: seen.append(list(existing)) or ["--model=example-model"])
     assert detach._with_caller_model(["--no-ask-user"]) == ["--no-ask-user", "--model=example-model"]
     assert seen == [["--no-ask-user"]]
+
+
+def test_forward_keeper_rewrites_state_when_relay_pid_changes(tmp_path, monkeypatch):
+    store = detach.KeeperStore(tmp_path)
+    monkeypatch.setattr(detach, "_STORE", store)
+    monkeypatch.setattr(detach, "_ssh_config", lambda target: object())
+
+    class Forward:
+        def __init__(self, *_args, on_pid_change=None, **_kwargs):
+            self._pid = None
+            self._on_pid_change = on_pid_change
+
+        @property
+        def process_pid(self):
+            return self._pid
+
+        async def start(self):
+            self._pid = 111
+            assert self._on_pid_change is not None
+            self._on_pid_change()
+
+        def restart(self):
+            self._pid = 222
+            assert self._on_pid_change is not None
+            self._on_pid_change()
+
+        async def stop(self):
+            return None
+
+    async def fake_loop(forwards, **kwargs):
+        kwargs["write_state"]()
+        await forwards[0].start()
+        forwards[0].restart()
+        return 0
+
+    monkeypatch.setattr(detach, "SupervisedRelayForward", Forward)
+    monkeypatch.setattr(detach, "run_supervised_loop", fake_loop)
+
+    args = argparse.Namespace(
+        target="devbox",
+        venue_port=41234,
+        mux="wt-anchor-repo",
+        probe_interval=15.0,
+        startup_grace=300.0,
+    )
+
+    assert asyncio.run(detach._run_forward_keeper(args)) == 0
+    assert store.read("devbox")["child_pids"] == [222]
