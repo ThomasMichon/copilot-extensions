@@ -80,6 +80,8 @@ Events are intentionally high-level:
                             (orphaned) obligation
   claim_handoff_offered     ``claims handoff offer`` created or re-affirmed a
                             same-machine claim-bundle offer
+  claim_handoff_accepted    ``claims handoff accept`` transferred a bundle's
+                            ownership to the consumer worktree
   claim_handoff_declined    ``claims handoff decline`` marked a bundle declined
   claim_handoff_cancelled   ``claims handoff cancel`` marked a bundle cancelled
   follow_up_added           ``follow-ups add`` journaled a new open follow-up
