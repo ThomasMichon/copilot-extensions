@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase (this effort's own PR, then the implementation PR)
 - **Created:** 2026-09-29
-- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
+- **Status:** Done <!-- Draft | Active | Blocked | Done -->
 - **Vision:** closes the remaining gap in #1090's claim-bundle handoff design (atomic ownership transfer across machines)
 - **Umbrella issue:** #1090
 - **Sub-issues:** #4529 <!-- filed on a premise this effort corrects; see Plan -->
@@ -77,11 +77,11 @@ Operator (verbatim, across the correcting exchange):
 ## Plan
 
 ### Phase 1 — Correct the record
-- [ ] Recharacterize/close #4529 as filed on a wrong premise, pointing at this
+- [x] Recharacterize/close #4529 as filed on a wrong premise, pointing at this
       effort and #1090 for the corrected direction.
-- [ ] Update #1090 with the corrected cross-machine design (SSH-exec, not a
+- [x] Update #1090 with the corrected cross-machine design (SSH-exec, not a
       new bridge RPC) so its acceptance-criterion language matches reality.
-- [ ] Update the relevant vision/architecture doc(s) — check
+- [x] Update the relevant vision/architecture doc(s) — check
       `visions/plugins/agent-worktrees` and `visions/plugins/agent-bridge` for
       where cross-machine worktree operations are described, and add/correct
       the "reach another machine's own binstub over SSH, don't build a new
@@ -116,10 +116,12 @@ Operator (verbatim, across the correcting exchange):
       describe the real cross-machine mechanism.
 
 ### Phase 3 — Land and close out
-- [ ] Open the implementation PR, drive it through CI + review to merge.
-- [ ] Comment on #1090 that requirement 7 is now actually satisfied; close it
+- [x] Open the implementation PR, drive it through CI + review to merge.
+      (#4544, merged.)
+- [x] Comment on #1090 that requirement 7 is now actually satisfied; close it
       if every other requirement is also satisfied (re-check against #4527).
-- [ ] Archive this effort.
+      (#1090 closed -- all 7 requirements satisfied across #4527 + #4544.)
+- [x] Archive this effort.
 
 ## Validation Plan
 
@@ -165,3 +167,8 @@ before Phase 2 execution begins, per the `planning-efforts` skill._
   `tools/check-version-consistency.py` passed. The full bounded
   `agent-worktrees` plugin suite later cleared on a subsequent retry after
   transient `test-supervisor` slot saturation.
+
+### 2026-09-29 — Closed out
+- #4544 merged: true cross-machine `accept` via SSH-exec, landed.
+- #1090 closed: all 7 requirements now satisfied across #4527 + #4544.
+- Effort archived.

@@ -58,7 +58,6 @@ that pattern to this repository.
 | [Pull-Request Capability](active/pull-request-capability/README.md) | Draft | #2691, #2699, #2700 |
 | [Module Componentization Discipline](active/module-componentization-discipline/README.md) | Active | #2805 |
 | [Componentization Campaign Auto-Worker](active/componentization-campaign-auto-worker/README.md) | Draft | #3372 |
-| [Cross-Machine Claim-Handoff Acceptance](active/cross-machine-claim-handoff-acceptance/README.md) | Draft | #1090 |
 | [Authoritative Write-Through Daemon](active/agent-worktrees-authoritative-daemon/README.md) | Active | #3761 |
 | [agent-dispatch Worker Operating Procedures](active/agent-dispatch-worker-operating-procedures/README.md) | Draft | #3897 |
 | [Mux Companion Manual Cutover Diagnostics](active/mux-companion-manual-cutover-diagnostics/README.md) | Active | #4369 |
