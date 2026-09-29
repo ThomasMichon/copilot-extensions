@@ -1,0 +1,9 @@
+{
+  "comment": "Trim validate-and-promote-triage projection to fit the aggregate instruction-projection budget",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}
