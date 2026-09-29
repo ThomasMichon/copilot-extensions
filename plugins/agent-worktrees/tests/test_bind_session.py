@@ -651,6 +651,26 @@ class TestCancelHandoff:
         assert activated == ["wt-hd"]
         assert captured["cancelled"] is True
 
+    def test_explicit_unknown_worktree_id_fails_closed_instead_of_tracebacking(
+        self, monkeypatch_config, monkeypatch
+    ):
+        """Real regression this guards (PR #4570 review round 12): when no
+        project is active and activation cannot find the owner (an unknown
+        or mistyped explicit ID), fail closed with a clean JSON result --
+        never fall through to _resolve_worktree_id/cfg.tracking_dir(), which
+        require an active project and would raise instead. Mirrors the
+        paired explicit-ID fail-closed pattern in session_binding_cli.py."""
+        monkeypatch.setattr(m.cfg, "active_project", lambda: None)
+        monkeypatch.setattr(m, "_activate_project_for_worktree_id", lambda wt_id: False)
+        captured = {}
+        monkeypatch.setattr(m, "_json_output", lambda o: captured.update(o))
+
+        rc = m.cmd_cancel_handoff(argparse.Namespace(
+            token="task-x", worktree_dir=None, worktree_id="wt-unknown"))
+        assert rc == 1
+        assert captured["cancelled"] is False
+        assert "wt-unknown" in captured["reason"]
+
     def test_does_not_cancel_an_unrelated_pending_handoff(
         self, tmp_tracking_dir, monkeypatch_config, monkeypatch
     ):

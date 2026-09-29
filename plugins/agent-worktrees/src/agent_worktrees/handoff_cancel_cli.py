@@ -80,9 +80,17 @@ def cmd_cancel_handoff(args: argparse.Namespace) -> int:
     wt_id = getattr(args, "worktree_id", None)
     wdir = getattr(args, "worktree_dir", None) or os.getcwd()
     if wt_id:
-        if not cfg.active_project():
-            _activate_project_for_worktree_id(wt_id)
-        wt_id = _resolve_worktree_id(wt_id)
+        if not cfg.active_project() and not _activate_project_for_worktree_id(wt_id):
+            _json_output({
+                "cancelled": False,
+                "reason": f"could not find the adopted project that owns worktree '{wt_id}'",
+            })
+            return 1
+        try:
+            wt_id = _resolve_worktree_id(wt_id)
+        except Exception as exc:
+            _json_output({"cancelled": False, "reason": f"could not resolve worktree '{wt_id}': {exc}"})
+            return 1
     else:
         _activate_project_for_path(wdir)
         try:

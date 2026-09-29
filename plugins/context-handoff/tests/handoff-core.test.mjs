@@ -1969,6 +1969,13 @@ test("abortHandoffTask reports honestly when the ledger cancellation itself can'
   // candidate and a recorded spawn already exist).
   assert.match(result.ledgerNote, /cancel-handoff/);
   assert.doesNotMatch(result.ledgerNote, /handoffs-check/);
+  // Real regression this guards (PR #4570 review round 12): cancel-handoff's
+  // own argparser registers only --token/--worktree-dir/--worktree-id, so a
+  // suggested --json flag would make argparse exit before the retry could
+  // even run. Check the actual backtick-quoted invocation, not the whole
+  // message (which may mention "--json" only in passing prose).
+  const suggestedCommand = result.ledgerNote.match(/`([^`]+)`/)[1];
+  assert.doesNotMatch(suggestedCommand, /--json/);
 });
 
 test("abortHandoffTask decodes the payload for its sessionId BEFORE abandoning, since abandon can redact it", () => {

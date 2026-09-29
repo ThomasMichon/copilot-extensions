@@ -3704,7 +3704,8 @@ function ledgerFailureNote(reason) {
     `Could not confirm agent-worktrees' own pending-handoff ledger entry was ` +
     `cancelled${reason ? ` (${reason})` : ""}. If one was armed under ` +
     "`mode: auto`, run `agent-worktrees cancel-handoff --worktree-id <id> " +
-    "--token <handoffId> --json` to retry the cancellation directly."
+    "--token <handoffId>` to retry the cancellation directly (the command " +
+    "already emits JSON unconditionally -- no --json flag exists to pass)."
   );
 }
 
