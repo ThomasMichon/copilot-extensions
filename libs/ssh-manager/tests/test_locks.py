@@ -8,13 +8,16 @@ import subprocess
 import sys
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
+import ssh_manager.locks as locks_mod
 
 from ssh_manager.locks import (
     LockHolder,
     TargetBusyError,
     TargetLock,
+    process_identity,
     pid_alive,
 )
 
@@ -39,6 +42,42 @@ class TestPidAlive:
     def test_almost_certainly_dead_pid(self):
         # A very high pid is almost never live on a fresh machine.
         assert pid_alive(2**31 - 1) is False
+
+
+class TestProcessIdentity:
+    def test_procfs_start_time_identity(self, monkeypatch):
+        tokens = ["S"] + ["0"] * 18 + ["12345"]
+        monkeypatch.setattr(locks_mod.sys, "platform", "linux")
+        monkeypatch.setattr(
+            locks_mod.Path,
+            "read_text",
+            lambda self, encoding="ascii": f"123 (python) {' '.join(tokens)}",
+        )
+        assert process_identity(123) == "proc-start:12345"
+
+    def test_procfs_zombie_has_no_identity(self, monkeypatch):
+        tokens = ["Z"] + ["0"] * 18 + ["12345"]
+        monkeypatch.setattr(locks_mod.sys, "platform", "linux")
+        monkeypatch.setattr(
+            locks_mod.Path,
+            "read_text",
+            lambda self, encoding="ascii": f"123 (python) {' '.join(tokens)}",
+        )
+        assert process_identity(123) is None
+
+    def test_ps_fallback_identity(self, monkeypatch):
+        monkeypatch.setattr(locks_mod.sys, "platform", "linux")
+
+        def fail_proc(*_args, **_kwargs):
+            raise OSError("missing procfs")
+
+        monkeypatch.setattr(locks_mod.Path, "read_text", fail_proc)
+        monkeypatch.setattr(
+            locks_mod.subprocess,
+            "run",
+            lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="Mon Sep 29 04:00:00 2026\n"),
+        )
+        assert process_identity(123) == "ps-start:Mon Sep 29 04:00:00 2026"
 
 
 class TestAcquireRelease:
