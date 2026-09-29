@@ -45,8 +45,32 @@ def _terminate_pid(pid: int) -> None:
         except (OSError, subprocess.SubprocessError):
             pass
         return
+    import signal
+
+    pgid: int | None
     try:
-        os.kill(pid, 15)
+        pgid = os.getpgid(pid)
+    except OSError:
+        pgid = None
+    try:
+        if pgid is not None:
+            os.killpg(pgid, signal.SIGTERM)
+        else:
+            os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        if not pid_alive(pid):
+            return
+        time.sleep(0.1)
+    if not pid_alive(pid):
+        return
+    try:
+        if pgid is not None:
+            os.killpg(pgid, signal.SIGKILL)
+        else:
+            os.kill(pid, signal.SIGKILL)
     except OSError:
         return
 
