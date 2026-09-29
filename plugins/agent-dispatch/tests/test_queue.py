@@ -1559,6 +1559,60 @@ def test_migration_adds_nullable_result_column_to_existing_db(tmp_path):
     assert {"result", "completed_by"} <= columns
 
 
+def test_migration_renames_legacy_completed_and_confirmed_statuses(tmp_path):
+    db = tmp_path / "legacy-statuses.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE tasks ("
+            "id TEXT PRIMARY KEY, status TEXT, result TEXT, result_ref TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO tasks VALUES (?, ?, NULL, NULL)",
+            [("t-submitted", "completed"), ("t-completed", "confirmed")],
+        )
+        conn.execute(
+            "CREATE TABLE task_events ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,"
+            "ts REAL NOT NULL, from_status TEXT, to_status TEXT,"
+            "worker TEXT, note TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO task_events (task_id, ts, from_status, to_status, worker, note)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                ("t-submitted", 1, "started", "completed", "worker-1", "complete"),
+                ("t-completed", 2, "completed", "confirmed", "evaluator", "confirm"),
+            ],
+        )
+
+    q = RealTaskQueue(db)
+
+    assert q.get("t-submitted").status == Status.SUBMITTED
+    assert q.get("t-completed").status == Status.COMPLETED
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute(
+            "SELECT task_id, from_status, to_status FROM task_events ORDER BY id"
+        ).fetchall()
+        applied = conn.execute(
+            "SELECT COUNT(*) FROM queue_migrations"
+            " WHERE name = '2026-09-29-status-rename-submitted-completed'"
+        ).fetchone()[0]
+    assert rows == [
+        ("t-submitted", "started", "submitted"),
+        ("t-completed", "submitted", "completed"),
+    ]
+    assert applied == 1
+
+    fresh = q.create("fresh work", repo="github.com/example/repo")
+    q.claim_one("worker-1")
+    q.start(fresh.id, "worker-1")
+    q.complete(fresh.id, "worker-1")
+    q.confirm(fresh.id)
+
+    reopened = RealTaskQueue(db)
+    assert reopened.get(fresh.id).status == Status.COMPLETED
+
+
 def test_migration_backfills_stable_completing_owner(tmp_path):
     db = tmp_path / "legacy-completed.db"
     with sqlite3.connect(db) as conn:

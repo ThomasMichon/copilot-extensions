@@ -1,0 +1,9 @@
+{
+  "comment": "Restore `completed` as agent-dispatch's corroborated terminal state, introduce `submitted` for the provisional completion claim, add a durable queue migration for legacy `completed`/`confirmed` rows, and update the board/docs/tests to keep external and internal status vocabularies aligned.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

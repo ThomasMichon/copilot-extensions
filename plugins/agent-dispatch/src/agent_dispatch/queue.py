@@ -275,6 +275,48 @@ class TaskQueue(
                 "  note TEXT"
                 ")"
             )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS queue_migrations ("
+                "  name TEXT PRIMARY KEY,"
+                "  applied_at REAL NOT NULL"
+                ")"
+            )
+            status_rename = "2026-09-29-status-rename-submitted-completed"
+            renamed = conn.execute(
+                "SELECT 1 FROM queue_migrations WHERE name = ?",
+                (status_rename,),
+            ).fetchone()
+            if renamed is None:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    conn.execute(
+                        "UPDATE tasks SET status = CASE"
+                        " WHEN status = 'completed' THEN 'submitted'"
+                        " WHEN status = 'confirmed' THEN 'completed'"
+                        " ELSE status END"
+                        " WHERE status IN ('completed', 'confirmed')"
+                    )
+                    conn.execute(
+                        "UPDATE task_events SET"
+                        " from_status = CASE"
+                        "   WHEN from_status = 'completed' THEN 'submitted'"
+                        "   WHEN from_status = 'confirmed' THEN 'completed'"
+                        "   ELSE from_status END,"
+                        " to_status = CASE"
+                        "   WHEN to_status = 'completed' THEN 'submitted'"
+                        "   WHEN to_status = 'confirmed' THEN 'completed'"
+                        "   ELSE to_status END"
+                        " WHERE from_status IN ('completed', 'confirmed')"
+                        "    OR to_status IN ('completed', 'confirmed')"
+                    )
+                    conn.execute(
+                        "INSERT INTO queue_migrations(name, applied_at) VALUES (?, ?)",
+                        (status_rename, self._now(None)),
+                    )
+                    conn.execute("COMMIT")
+                except Exception:
+                    conn.execute("ROLLBACK")
+                    raise
             # Rows completed before ``completed_by`` existed retain their
             # original completing identity when the durable audit trail proves
             # exactly one owner.  A completion retry is a completed->completed

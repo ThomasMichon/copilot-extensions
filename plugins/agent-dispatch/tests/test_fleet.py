@@ -470,7 +470,7 @@ def _remote_unavailable(*_args, **_kwargs):
         (0, '{"status": "running"}', "", "live"),
         (0, '{"status": "idle"}', "", "live"),          # idle == alive between turns
         (0, '{"status": "stopped"}', "", "gone"),
-        (0, '{"status": "submitted"}', "", "gone"),
+        (0, '{"status": "completed"}', "", "gone"),
         (0, '{"status": "running", "liveness": "dead"}', "", "gone"),  # liveness wins
         (1, "", "[FAIL] Session x not found", "gone"),   # absent -> gone
         (1, "", "ssh: connect: Connection refused", "unknown"),  # transport -> unknown

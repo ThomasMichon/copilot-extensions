@@ -41,7 +41,7 @@ DEFAULT_DRIVER = "agent-dispatch"
 
 #: Tracking statuses meaning a worktree is done and cannot be reused.
 _TERMINAL_WORKTREE_STATUSES = frozenset(
-    {"finalizing", "finalized", "complete", "submitted", "orphaned", "terminal"})
+    {"finalizing", "finalized", "complete", "completed", "orphaned", "terminal"})
 
 
 class EmbodyUnavailable(RuntimeError):
@@ -861,7 +861,7 @@ def parse_fleet_body_session(result: subprocess.CompletedProcess) -> str | None:
 _FLEET_BODY_TERMINAL = frozenset(
     {
         "stopped",
-        "submitted",
+        "completed",
         "failed",
         "ended",
         "error",
