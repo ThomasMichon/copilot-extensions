@@ -428,7 +428,7 @@ async function cmdSyncWorktree(args) {
 
 function cmdListSessions(args) {
   const cwd = args.cwd || process.cwd();
-  const result = listWorktreeSessions(cwd, args.worktree || null);
+  const result = listWorktreeSessions(cwd, args.worktree || null, resolveSid(args));
   if (!result.available) process.exitCode = 1;
   if (args.json) return emit(result, args);
   if (!result.available) {

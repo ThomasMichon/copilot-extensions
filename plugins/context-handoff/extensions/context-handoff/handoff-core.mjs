@@ -3449,13 +3449,17 @@ export async function triggerHandoff(
 // List every session agent-worktrees has recorded for a worktree, plus the
 // handoff chain linking them -- the same facts `agent-worktrees list-sessions
 // --worktree <id> --json` returns, wrapped so a caller need not know that
-// exact invocation. `worktreeId` defaults to the one bound to `cwd`.
-export function listWorktreeSessions(cwd, worktreeId = null, execute = runCli) {
-  const resolvedWorktree = worktreeId || agentWorktreesGet("worktree-id", cwd, null, execute);
+// exact invocation. `worktreeId` defaults to the one bound to `cwd`; when
+// omitted, `sessionId` (if known) is passed to `agentWorktreesGet`'s own
+// binding-first resolution so a caller sitting in a project anchor or any
+// other cwd that isn't literally the session's worktree can still resolve
+// it, rather than reporting unavailable just because cwd inference missed.
+export function listWorktreeSessions(cwd, worktreeId = null, sessionId = null, execute = runCli) {
+  const resolvedWorktree = worktreeId || agentWorktreesGet("worktree-id", cwd, sessionId, execute);
   if (!resolvedWorktree) {
     return {
       available: false,
-      reason: "no worktree id was resolvable from cwd, and none was passed explicitly",
+      reason: "no worktree id was resolvable from cwd or the given session id, and none was passed explicitly",
     };
   }
   try {
@@ -3486,7 +3490,7 @@ export function getPreviousSession(cwd, sessionId, worktreeId = null, execute = 
   if (!sessionId) {
     return { available: false, reason: "a session id is required" };
   }
-  const sessions = listWorktreeSessions(cwd, worktreeId, execute);
+  const sessions = listWorktreeSessions(cwd, worktreeId, sessionId, execute);
   if (!sessions.available) return sessions;
   const handoffs = Array.isArray(sessions.handoffs) ? sessions.handoffs : [];
   const link = handoffs.find((entry) => entry?.successor === sessionId);
@@ -3614,6 +3618,14 @@ export function abortFileHandoff(
           "(active lock held) -- too late to abort; do not force-clear the lock.",
       };
     }
+    // The lock file itself may have been created before the write failed
+    // (e.g. a full filesystem) -- clean it up rather than leaving an orphan
+    // that would permanently block every future consume/abort of this
+    // handoff, mirroring consumeFileHandoffOnce's own cleanup on this path.
+    if (lockFd !== undefined) {
+      try { closeSync(lockFd); } catch { /* already closed */ }
+    }
+    try { unlinkSync(lockPath); } catch { /* never created, or already gone */ }
     return {
       ok: false,
       kind: "file",
@@ -3621,7 +3633,25 @@ export function abortFileHandoff(
     };
   }
   try {
-    const current = readFileHandoff(cwd, sid, handoffId, found.path, { get, execute }) || found;
+    const current = readFileHandoff(cwd, sid, handoffId, found.path, { get, execute });
+    if (!current) {
+      return {
+        ok: false,
+        kind: "file",
+        id: found.record.id,
+        message: `Handoff ${found.record.id || found.path} disappeared or became ` +
+          "unreadable while locked for abort; refusing to guess at its prior contents.",
+      };
+    }
+    if (current.record.kind !== "context-handoff" || current.record.storage !== "file") {
+      return {
+        ok: false,
+        kind: "file",
+        id: current.record.id || null,
+        message: `${found.path} does not look like a file-backed context-handoff ` +
+          "record (unexpected kind/storage); refusing to mutate it.",
+      };
+    }
     if (current.record.consumed) {
       return {
         ok: false,

@@ -1815,16 +1815,36 @@ test("listWorktreeSessions returns sessions/handoffs when agent-worktrees resolv
     }
     throw new Error(`unexpected CLI call: ${bin} ${argv.join(" ")}`);
   };
-  const result = listWorktreeSessions("C:\\repo", null, execute);
+  const result = listWorktreeSessions("C:\\repo", null, null, execute);
   assert.equal(result.available, true);
   assert.equal(result.worktree, "wt-example");
   assert.equal(result.sessions.length, 1);
   assert.equal(result.handoffs[0].successor, "s1");
 });
 
+test("listWorktreeSessions resolves the worktree via a known session id even when cwd has no binding", () => {
+  // Real regression this guards: a project anchor (or any cwd that isn't
+  // literally the session's worktree) has no cwd-inferable worktree id, but
+  // agentWorktreesGet supports binding-first resolution by session id.
+  const execute = (bin, argv, opts) => {
+    if (bin === "agent-worktrees" && argv[0] === "get") {
+      assert.equal(argv.includes("--session-id"), true);
+      assert.equal(argv[argv.indexOf("--session-id") + 1], "s1");
+      return "wt-example";
+    }
+    if (bin === "agent-worktrees" && argv[0] === "list-sessions") {
+      return JSON.stringify({ sessions: [{ id: "s1" }], handoffs: [] });
+    }
+    throw new Error(`unexpected CLI call: ${bin} ${argv.join(" ")} ${JSON.stringify(opts)}`);
+  };
+  const result = listWorktreeSessions("C:\\anchor", null, "s1", execute);
+  assert.equal(result.available, true);
+  assert.equal(result.worktree, "wt-example");
+});
+
 test("listWorktreeSessions reports unavailable without guessing when no worktree id resolves", () => {
   const execute = () => "";
-  const result = listWorktreeSessions("C:\\repo", null, execute);
+  const result = listWorktreeSessions("C:\\repo", null, null, execute);
   assert.equal(result.available, false);
   assert.match(result.reason, /no worktree id was resolvable/);
 });
@@ -1834,7 +1854,7 @@ test("listWorktreeSessions reports unavailable when agent-worktrees itself fails
     if (argv[0] === "get") return "wt-example";
     throw new Error("agent-worktrees not installed");
   };
-  const result = listWorktreeSessions("C:\\repo", null, execute);
+  const result = listWorktreeSessions("C:\\repo", null, null, execute);
   assert.equal(result.available, false);
   assert.equal(result.worktree, "wt-example");
 });
