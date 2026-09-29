@@ -238,7 +238,7 @@ class QueueLifecycleMixin:
             completed = self._fetch(conn, task_id)
             assert completed is not None
             conn.execute("COMMIT")
-        return CompletionOutcome(completed, "task.completed")
+        return CompletionOutcome(completed, "task.submitted")
 
     @staticmethod
     def _completion_event_workers(conn: sqlite3.Connection, task_id: str) -> list[str]:

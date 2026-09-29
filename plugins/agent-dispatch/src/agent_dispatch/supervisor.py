@@ -3343,7 +3343,7 @@ class Supervisor:
 
         Lists recent terminal tasks in the lane (completed / abandoned), and for
         each one not yet seen this process, synthesizes the coordinator-shaped
-        lifecycle event ``{"type": "task.completed"|"task.abandoned", "task":
+        lifecycle event ``{"type": "task.submitted"|"task.abandoned", "task":
         {...}}``, runs the evaluator, and applies the returned decisions through
         :func:`~agent_dispatch.producers.evaluator.apply_decisions` (an ``Emit``
         creates a follow-up task in this lane). Returns the number of follow-up
@@ -3381,7 +3381,7 @@ class Supervisor:
                 continue
             self._evaluated.add(tid)  # fire once per process, success or not
             status = task.get("status")
-            event_type = "task.abandoned" if status == Status.ABANDONED else "task.completed"
+            event_type = "task.abandoned" if status == Status.ABANDONED else "task.submitted"
             event = {"type": event_type, "task": task}
             try:
                 decisions = self.evaluator.evaluate(event)

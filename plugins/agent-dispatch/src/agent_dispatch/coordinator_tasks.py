@@ -315,7 +315,7 @@ def register_task_routes(
             msg = str(exc)
             status = 404 if msg.startswith("no such task") else 409
             raise HTTPException(status_code=status, detail=msg) from exc
-        if event_type in ("task.completed", "task.abandoned"):
+        if event_type in ("task.submitted", "task.abandoned"):
             # A shared terminal-transition hook: every caller that reaches a
             # genuine (not idempotent-retry) completion or an abandon funnels
             # through this same _guard, whether over HTTP (the CLI's own
@@ -756,7 +756,7 @@ def register_task_routes(
                 expected_status=body.expected_status,
                 expected_generation=body.expected_generation,
             ),
-            "task.confirmed",
+            "task.completed",
         )
 
     @app.post("/tasks/{task_id}/reopen")

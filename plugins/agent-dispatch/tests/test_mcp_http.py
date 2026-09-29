@@ -530,7 +530,7 @@ def test_mcp_retry_fill_emits_result_recorded_not_duplicate_completion(
 
     assert json.loads(response.content[0].text)["result"] == {"ok": True}
     types = [event["type"] for event in published]
-    assert types.count("task.completed") == 1
+    assert types.count("task.submitted") == 1
     assert types.count("task.result_recorded") == 1
 
 

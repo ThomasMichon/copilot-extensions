@@ -7626,7 +7626,7 @@ def _spec_evaluator(rules):
 
 
 _REVIEWER_DONE_RULE = {
-    "on": "task.completed",
+    "on": "task.submitted",
     "when": {"labels_any": ["recipe:reviewer"]},
     "emit": {
         "title_template": "unstick follow-up for {title}",

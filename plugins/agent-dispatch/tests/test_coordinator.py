@@ -1385,12 +1385,12 @@ def test_sse_stream_distinguishes_retry_recorded_result(server_url):
     types = [e["type"] for e in received]
     assert "task.created" in types
     assert "task.claimed" in types
-    assert "task.completed" in types
+    assert "task.submitted" in types
     assert "task.result_recorded" in types
-    assert types.count("task.completed") == 1
+    assert types.count("task.submitted") == 1
     created = next(e for e in received if e["type"] == "task.created")
     assert created["task"]["id"] == tid
-    completed = next(e for e in received if e["type"] == "task.completed")
+    completed = next(e for e in received if e["type"] == "task.submitted")
     assert completed["task"]["has_result"] is False
     assert "result" not in completed["task"]
     recorded = next(
