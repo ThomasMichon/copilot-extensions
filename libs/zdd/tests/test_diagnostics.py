@@ -379,6 +379,43 @@ def test_report_prefers_bounded_reachability_probe_over_slow_client(tmp_path: Pa
     assert used_client["value"] is False
 
 
+def test_report_does_not_fallback_to_slow_client_when_reachability_fails(tmp_path: Path):
+    record = breadcrumb.write_breadcrumb(
+        tmp_path,
+        state="draining",
+        old={"bind": "127.0.0.1", "port": 9281},
+        new_port=9282,
+        new_pid=303,
+    )
+    _set_breadcrumb_age(tmp_path, record, seconds=9999)
+    state = {
+        "lock": {"pid": 101, "start_time": "owner"},
+        "live": {101: "owner"},
+        "terminated": [],
+    }
+    used_client = {"value": False}
+
+    class _Client:
+        def __init__(self, base_url: str) -> None:
+            self.base_url = base_url
+
+        def health(self) -> dict:
+            used_client["value"] = True
+            return {"status": "draining"}
+
+    report = diagnostics.audit_daemon_health(
+        _ctx(
+            tmp_path,
+            state=state,
+            make_client=_Client,
+            reachability_check=lambda host, port: False,
+        )
+    )
+
+    assert report["counts"]["total"] == 0
+    assert used_client["value"] is False
+
+
 def test_apply_reaps_abandoned_passive_even_when_old_survivor_is_recovered(tmp_path: Path):
     routing.publish_active(tmp_path, bind="127.0.0.1", port=9281, pid=101, version="1.0.0")
     record = breadcrumb.write_breadcrumb(

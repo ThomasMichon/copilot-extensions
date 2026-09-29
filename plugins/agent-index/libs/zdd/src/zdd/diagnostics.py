@@ -359,14 +359,14 @@ def _inspect_stranded_survivor(
     reachable = False
     if ctx.reachability_check is not None:
         reachable = bool(ctx.reachability_check(*endpoint))
-    base_url = f"http://{routing.format_authority(endpoint[0], endpoint[1])}"
-    if not reachable and ctx.make_client is not None:
+    elif ctx.make_client is not None:
+        base_url = f"http://{routing.format_authority(endpoint[0], endpoint[1])}"
         try:
             ctx.make_client(base_url).health()
             reachable = True
         except Exception:  # noqa: BLE001 - probe is best-effort
             reachable = False
-    elif not reachable and ctx.health_check is not None:
+    elif ctx.health_check is not None:
         reachable = bool(ctx.health_check(*endpoint))
     if not reachable:
         return None

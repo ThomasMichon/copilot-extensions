@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+
 from zdd import diagnostics
 
 from . import locks, procs, self_retire, status_monitor_cutover, status_monitor_runtime
@@ -9,11 +13,18 @@ from . import locks, procs, self_retire, status_monitor_cutover, status_monitor_
 
 def _candidates() -> list[diagnostics.DaemonCandidate]:
     runtime_root = str(status_monitor_runtime._aw_runtime_home())
-    scoped_pids = {
-        item["pid"]
-        for item in procs.processes_with_cwd_under(runtime_root)
-        if isinstance(item, dict) and isinstance(item.get("pid"), int)
-    }
+    if sys.platform == "darwin":
+        scoped_pids = {
+            pid
+            for pid in status_monitor_cutover._iter_status_monitor_pids()
+            if _darwin_pid_under_root(pid, runtime_root)
+        }
+    else:
+        scoped_pids = {
+            item["pid"]
+            for item in procs.processes_with_cwd_under(runtime_root)
+            if isinstance(item, dict) and isinstance(item.get("pid"), int)
+        }
     return [
         diagnostics.DaemonCandidate(
             pid=pid,
@@ -22,6 +33,30 @@ def _candidates() -> list[diagnostics.DaemonCandidate]:
         for pid in sorted(status_monitor_cutover._iter_status_monitor_pids())
         if pid in scoped_pids
     ]
+
+
+def _darwin_pid_under_root(pid: int, runtime_root: str) -> bool:
+    try:
+        result = subprocess.run(
+            ["lsof", "-a", "-d", "cwd", "-p", str(pid), "-Fn"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if result.returncode != 0:
+        return False
+    prefix = os.path.normcase(os.path.normpath(os.path.abspath(runtime_root)))
+    for line in (result.stdout or "").splitlines():
+        if not line.startswith("n"):
+            continue
+        cwd = line[1:].strip()
+        norm = os.path.normcase(os.path.normpath(os.path.abspath(cwd)))
+        if norm == prefix or norm.startswith(prefix + os.sep):
+            return True
+    return False
 
 
 def _reachability_check(host: str, port: int) -> bool:
