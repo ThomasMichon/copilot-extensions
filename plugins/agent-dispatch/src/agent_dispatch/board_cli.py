@@ -23,8 +23,17 @@ from .worktree_status_relay import board_fields_for_task, claimed_identity
 #: glance than Queued (a task not yet running), so it sits right after
 #: Blocked/Proposed. `__main__.py`'s `_BOARD_GROUPS` is a byte-identical
 #: duplicate (used by the delegated `inbox` CLI path) and must stay in sync.
+#: Phase 7 follow-up (2026-09-29): a durable, operator-set pause hold
+#: (``hold_reason``) is its OWN group -- distinct from system-``Suspended``
+#: (a liveness-detected/force-stop outcome the system can recover from on its
+#: own schedule) and from ``Blocked`` (the task itself is asking the operator
+#: something). Sits right after Blocked: both need the operator's attention,
+#: but a paused task is waiting on the operator to *unpause*, not to answer a
+#: question. Keep this in sync with `task_query_cli.py`'s byte-identical
+#: `_BOARD_GROUPS` tuple.
 GROUPS = (
     "Blocked",
+    "Paused",
     "Proposed",
     "Started",
     "Queued",
@@ -102,6 +111,8 @@ def _group(task: dict) -> str:
         return "Confirmed"
     if status in {"abandoned", "dead_letter"}:
         return "Abandoned"
+    if task.get("hold_reason"):
+        return "Paused"
     if task.get("awaiting_steer"):
         return "Blocked"
     if status == "proposed":
@@ -175,6 +186,54 @@ def _cli_openable(task: dict) -> bool:
     if status == "queued":
         return not task.get("awaiting_steer") and not task.get("pool")
     return False
+
+
+def _charter_for_task(task: dict) -> dict:
+    """Compose the read-only ``charter`` card: a short description plus
+    structured metadata, and the raw prompt verbatim -- so the operator can
+    see "what this task is" the same way they can already read a steering
+    card's raw prose (Phase 7's own charter note). Never mutates the task.
+    """
+    repo_name = task.get("repo_name") or _repo_name(task.get("repo"))
+    labels = task.get("labels") or []
+    if isinstance(labels, str):
+        labels = [labels]
+    meta = "\n".join(
+        [
+            f"- Repo: `{repo_name or 'unknown'}`",
+            f"- Source: `{task.get('source') or 'unknown'}`",
+            f"- Registrar/origin: `{task.get('origin_ref') or 'none'}`",
+            f"- Target machine: `{task.get('target_machine') or 'any'}`",
+            "- Labels: `"
+            + (", ".join(str(label) for label in labels) if labels else "none")
+            + "`",
+        ]
+    )
+    goal = task.get("goal")
+    goal_text = goal.strip() if isinstance(goal, str) and goal.strip() else None
+    done_criteria = task.get("done_criteria")
+    done_text = (
+        done_criteria.strip()
+        if isinstance(done_criteria, str) and done_criteria.strip()
+        else None
+    )
+    prompt = task.get("prompt")
+    prompt_text = prompt.strip() if isinstance(prompt, str) else ""
+    body = "\n\n".join(
+        [
+            meta,
+            "## Goal\n"
+            + (goal_text or "_no durable goal recorded — see the raw prompt below_"),
+            "## Done criteria\n" + (done_text or "_not specified_"),
+            "## Raw prompt\n```\n" + prompt_text + "\n```",
+        ]
+    )
+    return {
+        "title": task.get("title") or task.get("id"),
+        "status": task.get("status"),
+        "link": None,
+        "body": body,
+    }
 
 
 def _sort_timestamp(task: dict) -> float:
@@ -285,12 +344,11 @@ def _build(
         # --interactive`, so this row-level gate can finally mirror the
         # transaction's own status contract instead of staying hard-false.
         row["cli_openable"] = _cli_openable(task)
-        # `has_charter` similarly stays `False`: nothing today populates a
-        # real `charter.*` object (title/status/link/body), so leaving the
-        # action ungated would render an empty card. Gating it behind this
-        # field (mirroring `worktree-status`'s own `has_worktree` gate)
-        # keeps it schema-visible without showing a broken empty card.
-        row["has_charter"] = False
+        # `has_charter`/`charter`: every task carries at least a title +
+        # prompt, so the charter card is always populated (2026-09-29,
+        # closes the Phase 7 gap this comment used to document as open).
+        row["has_charter"] = bool(task.get("title"))
+        row["charter"] = _charter_for_task(task)
         row.setdefault("repo_name", _repo_name(task.get("repo")))
         repo = str(row.get("repo") or "")
         if repo and claimed_worktree:

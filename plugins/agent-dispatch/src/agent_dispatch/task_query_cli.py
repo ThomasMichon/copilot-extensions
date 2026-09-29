@@ -37,6 +37,7 @@ def _core_helper(name: str, local):
 #: distinct from this module's delegated `inbox` CLI path).
 _BOARD_GROUPS = (
     "Blocked",
+    "Paused",
     "Proposed",
     "Started",
     "Queued",
@@ -53,10 +54,13 @@ def _board_group(task: dict) -> str:
 
     A **terminal** status (completed / confirmed / abandoned / dead_letter)
     wins first -- a task can carry a stale ``awaiting_steer`` flag after being
-    abandoned while blocked, and a finished task is never "Blocked". Otherwise
-    ``awaiting_steer`` (a live task needing the operator's steer) wins over
-    the raw lifecycle state, then proposed/queued/suspended, else any other
-    owned in-flight state reads as *Started*."""
+    abandoned while blocked, and a finished task is never "Blocked". A durable
+    operator-set pause hold (``hold_reason``) is next -- its own group,
+    distinct from system-``Suspended`` and from ``Blocked`` (see
+    `board_cli.py`'s byte-identical `_group`). Otherwise ``awaiting_steer`` (a
+    live task needing the operator's steer) wins over the raw lifecycle
+    state, then proposed/queued/suspended, else any other owned in-flight
+    state reads as *Started*."""
     st = task.get("status")
     if st == "completed":
         return "Completed"
@@ -64,6 +68,8 @@ def _board_group(task: dict) -> str:
         return "Confirmed"
     if st in ("abandoned", "dead_letter"):
         return "Abandoned"
+    if task.get("hold_reason"):
+        return "Paused"
     if task.get("awaiting_steer"):
         return "Blocked"
     if st == "proposed":

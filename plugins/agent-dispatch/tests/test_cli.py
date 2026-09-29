@@ -3830,6 +3830,20 @@ class TestInboxBoard:
         assert self._grp(status="completed", awaiting_steer=True) == "Completed"
         assert self._grp(status="confirmed", awaiting_steer=True) == "Confirmed"
 
+    def test_hold_reason_is_paused_and_wins_over_blocked(self):
+        # Phase 7 follow-up (2026-09-29): a durable operator-set hold is its
+        # own group, distinct from system-Suspended and from Blocked, and
+        # takes priority over awaiting_steer -- but never over a terminal
+        # status (a hold can't be set on a concluded task in the first place).
+        assert self._grp(status="started", hold_reason="paused") == "Paused"
+        assert self._grp(status="queued", hold_reason="paused") == "Paused"
+        assert (
+            self._grp(status="suspended", awaiting_steer=True, hold_reason="p")
+            == "Paused"
+        )
+        assert self._grp(status="abandoned", hold_reason="p") == "Abandoned"
+        assert self._grp(status="completed", hold_reason="p") == "Completed"
+
     def test_activity_is_independent_from_lifecycle_phase(self):
         from agent_dispatch import __main__ as m
 

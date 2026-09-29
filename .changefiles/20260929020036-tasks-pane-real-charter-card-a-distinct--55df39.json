@@ -1,0 +1,9 @@
+{
+  "comment": "Tasks pane: real charter card + a distinct Paused phase/badge for the user-pause hold (Phase 7 closure)",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

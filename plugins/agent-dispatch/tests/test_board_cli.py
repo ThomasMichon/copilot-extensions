@@ -129,6 +129,83 @@ def test_build_cli_openable_matches_interactive_embody_statuses(monkeypatch):
     assert by_id["completed"]["cli_openable"] is False
 
 
+def test_build_group_paused_for_held_task(monkeypatch):
+    """Phase 7 follow-up (2026-09-29): a durable operator-set hold reads as
+    its own ``Paused`` group -- never conflated with system-``Suspended`` or
+    with ``Blocked``/awaiting-steer -- but a terminal status still wins."""
+    monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)
+    rows = board_cli._build(
+        [
+            {"id": "paused-started", "status": "started",
+             "hold_reason": "operator pause", "updated_at": 10},
+            {"id": "paused-blocked", "status": "suspended",
+             "awaiting_steer": True, "hold_reason": "operator pause",
+             "updated_at": 9},
+            {"id": "paused-abandoned", "status": "abandoned",
+             "hold_reason": "operator pause", "updated_at": 8},
+        ],
+        machine="m1",
+        recent_mins=120,
+    )
+    by_id = {row["id"]: row for row in rows}
+    assert by_id["paused-started"]["group"] == "Paused"
+    assert by_id["paused-started"]["held"] is True
+    assert by_id["paused-blocked"]["group"] == "Paused"
+    assert by_id["paused-abandoned"]["group"] == "Abandoned"
+
+
+def test_build_charter_is_always_populated(monkeypatch):
+    """Phase 7's charter card gap: every row now carries a real
+    ``charter.*`` payload (title/status/link/body) instead of a hard-`False`
+    `has_charter` -- structured metadata plus the raw prompt verbatim."""
+    monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)
+    rows = board_cli._build(
+        [
+            {
+                "id": "t-1",
+                "title": "Fix the thing",
+                "status": "queued",
+                "repo": "github.com/example/repo",
+                "source": "registrar:nightly",
+                "origin_ref": "recipe:cleanup",
+                "target_machine": "m1",
+                "labels": ["urgent", "bugfix"],
+                "goal": "Make the thing work again.",
+                "done_criteria": "Tests pass.",
+                "prompt": "Please fix the thing.",
+                "updated_at": 5,
+            },
+            {
+                "id": "t-2",
+                "title": "Bare task",
+                "status": "proposed",
+                "prompt": "Just do it.",
+                "updated_at": 4,
+            },
+        ],
+        machine="m1",
+        recent_mins=120,
+    )
+    by_id = {row["id"]: row for row in rows}
+    full = by_id["t-1"]["charter"]
+    assert by_id["t-1"]["has_charter"] is True
+    assert full["title"] == "Fix the thing"
+    assert full["status"] == "queued"
+    assert "`repo`" in full["body"]
+    assert "registrar:nightly" in full["body"]
+    assert "recipe:cleanup" in full["body"]
+    assert "urgent, bugfix" in full["body"]
+    assert "Make the thing work again." in full["body"]
+    assert "Tests pass." in full["body"]
+    assert "Please fix the thing." in full["body"]
+
+    bare = by_id["t-2"]["charter"]
+    assert by_id["t-2"]["has_charter"] is True
+    assert "no durable goal recorded" in bare["body"]
+    assert "_not specified_" in bare["body"]
+    assert "Just do it." in bare["body"]
+
+
 def test_build_artifacts_summary_reads_claims_from_relay(monkeypatch):
     monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)
     rows = board_cli._build(

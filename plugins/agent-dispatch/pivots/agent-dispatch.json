@@ -47,7 +47,7 @@
       "link_from": "charter.link",
       "body_from": "charter.body",
       "when": {"has_charter": "true"},
-      "description": "Read this task's charter: a short description plus structured metadata (registrar, source, linked artifacts). Read-only — never mutates the task. Not yet populated by the real board (see `board_cli._build`'s `has_charter` note) — gated off rather than shown blank until it is."
+      "description": "Read this task's charter: a short description (goal/done-criteria when recorded), structured metadata (repo, source, registrar/origin, target machine, labels), and the raw prompt verbatim. Read-only — never mutates the task."
     },
     {
       "key": "worktree-status",
@@ -111,9 +111,9 @@
       "key": "abandon",
       "label": "Force-abandon the task",
       "run": ["agent-dispatch", "abandon", "{task_id}", "--permit", "--reason", "abandoned from picker", "--expected-status", "{status}"],
-      "when": {"group": ["Blocked", "Proposed", "Queued", "Started", "Suspended"]},
+      "when": {"group": ["Blocked", "Proposed", "Queued", "Started", "Suspended", "Paused"]},
       "confirm": true,
-      "description": "Terminally abandon this task — the user's way to say \"No\"."
+      "description": "Terminally abandon this task — the user's way to say \"No\". Works even on a Paused task: force-abandon always overrides a hold."
     }
   ]
 }

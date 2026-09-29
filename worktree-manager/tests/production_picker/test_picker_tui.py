@@ -9662,6 +9662,25 @@ def test_palette_style_reuses_worktree_state_palette():
     assert _palette_style("state", "???") == ""
 
 
+def test_palette_style_task_phase_distinguishes_paused_from_suspended():
+    """Phase 7 follow-up (2026-09-29): a durable operator-set pause hold
+    ("Paused") must render with its own colour, never the same as a
+    system-Suspended task's teal or a Blocked task's amber."""
+    from worktree_manager.production_picker.picker_tui.engine import (
+        C_STATE,
+        _palette_style,
+    )
+    assert _palette_style("task_phase", "PAUSED") == C_STATE["ORPHAN"]
+    assert _palette_style("task_phase", "paused") == C_STATE["ORPHAN"]
+    assert _palette_style("task_phase", "SUSPENDED") == C_STATE["CONVO"]
+    assert _palette_style("task_phase", "PAUSED") != _palette_style(
+        "task_phase", "SUSPENDED"
+    )
+    assert _palette_style("task_phase", "PAUSED") != _palette_style(
+        "task_phase", "BLOCKED"
+    )
+
+
 def test_codespaces_state_column_is_colour_coded(tmp_path, monkeypatch):
     """The CodeSpaces STATE column renders each status in the reused Worktrees
     palette (a RUNNING cell carries the ACTIVE colour in the ANSI capture)."""

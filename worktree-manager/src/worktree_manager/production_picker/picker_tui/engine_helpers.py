@@ -238,7 +238,12 @@ _TASK_PHASE_PALETTE = {
     "QUEUED": C_STATE["UNUSED"],     # approved, awaiting a worker -> same grey
     "STARTED": C_STATE["ACTIVE"],    # an agent is actively working it -> blue
     "BLOCKED": C_STATE["WIP"],       # awaiting operator steer -> WIP amber
-    "SUSPENDED": C_STATE["CONVO"],   # user/system paused, mid-conversation -> teal
+    "PAUSED": C_STATE["ORPHAN"],     # durable operator-set hold -> magenta;
+                                     # deliberately distinct from SUSPENDED's
+                                     # teal (a system/liveness outcome, not
+                                     # an explicit operator pause) -- #7-2
+    "SUSPENDED": C_STATE["CONVO"],   # system-suspended (liveness-detected or
+                                     # force-stopped), mid-conversation -> teal
     "COMPLETED": C_STATE["FINAL"],   # done and settled -> FINAL green
     "ABANDONED": C_STATE["GONE"],    # terminal, no longer relevant -> dark grey
 }
