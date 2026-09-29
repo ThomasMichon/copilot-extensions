@@ -1,0 +1,25 @@
+{
+  "comment": "Fix #4367: get-azure-token allowlist denial is now wire-visible across every real gate path -- az-login's static allowlist, agent-codespaces' in-process request-scoped authorizer, AND agent-bridge's file-backed CLI-profile FileTokenAuthorizer (the actual path a running bridge installs for a discovered CodeSpace) -- via a new ScopeDenied signal, instead of a bare closed connection indistinguishable from an unreachable relay or internal error. ado-auth-helper-relay states the denial with certainty when confirmed in-band, and never falls back to a stale cached token on an explicit denial. agent-containers/agent-mcp are dev-bumped only as libs/credential-relay consumers -- no behavior change of their own.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-credential-relay",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "dev"
+    }
+  ]
+}

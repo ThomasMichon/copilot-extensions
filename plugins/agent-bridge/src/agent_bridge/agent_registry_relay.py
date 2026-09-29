@@ -46,7 +46,16 @@ class FileTokenValidator:
 
 
 class FileTokenAuthorizer:
-    """A file-backed, request-scoped relay-token authorizer."""
+    """A file-backed, request-scoped relay-token authorizer.
+
+    Mirrors ``agent_codespaces.relay_token.authorize_azure`` for the
+    degrade-safe CLI seam (``agent-codespaces relay-profile``): both read the
+    same on-host token store, so both must raise
+    :class:`credential_relay.server.ScopeDenied` -- not merely return
+    ``False`` -- for a *recognized* token whose specific scope is denied
+    (#4367), so this path also gets a wire-visible denial via the server's
+    token gate instead of a silent closed connection.
+    """
 
     __slots__ = ("_path", "_static")
 
@@ -68,6 +77,8 @@ class FileTokenAuthorizer:
             return False
         if not isinstance(data, dict):
             return False
+        from credential_relay.server import ScopeDenied
+
         requested = fields.get("scope") or fields.get("resource") or ""
         normalized = requested.removesuffix("/.default").rstrip("/")
         for entry in data.values():
@@ -88,7 +99,9 @@ class FileTokenAuthorizer:
                 }
             else:
                 allowed = self._static
-            return "*" in allowed or normalized in allowed
+            if "*" in allowed or normalized in allowed:
+                return True
+            raise ScopeDenied
         return False
 
 
