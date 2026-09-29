@@ -242,6 +242,26 @@ that issue before assuming this is a one-off bug in the local install; it
 generalizes past `embody` to any informal resume. Class **F**'s foreign-cwd
 registration bug has the same "no engine guard yet" shape — see `#1553` above.
 
+**Update: the `/consume-handoff` variant of this gap is now fixed at the
+source, not just repaired after the fact.** `context-handoff`'s
+`consumeFileHandoff`/`consumeDispatchHandoffTask` (the functions behind both
+the CLI `consume` verb and the `consume_handoff` MCP tool) previously did
+nothing to move the worktree's head after a successful consumption — they
+only updated `context-handoff`'s own session-state/task bookkeeping. Since a
+manually-pasted handoff seed never opens an entry in agent-worktrees' own
+`handoffs[]` ledger (that only happens on the `mode: auto` live-cutover path),
+the successor session's `sessionStart` had no token to link against either,
+so the head stuck on the predecessor **permanently** — not just until the
+next repair pass. Both consume functions now call `link-succession` as a
+best-effort backstop immediately after a confirmed consumption, promoting the
+consuming session over whatever the worktree's registered head currently is
+(a no-op if it's already correct, and never fails the consume result if the
+CLI call itself fails). This closes the reproducible case reported as
+"pasting the handoff seed and running `/consume-handoff` still resumes into
+the old session every time." The broader `sessionStart`-level architecture
+proposal in #3716 (a universal, engine-level backstop for *every* start path,
+not just the sanctioned consume path) remains open.
+
 ### Verify which class you're in — cheap structured signals first
 
 Work **cheap → expensive**; most cases resolve without ever touching the

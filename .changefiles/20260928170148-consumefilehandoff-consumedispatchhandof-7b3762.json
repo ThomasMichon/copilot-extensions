@@ -1,0 +1,9 @@
+{
+  "comment": "consumeFileHandoff/consumeDispatchHandoffTask now promote the consuming session to the worktree's tracked head via link-succession after a confirmed consumption, fixing resume always reopening the stale predecessor session when a handoff was consumed manually (no agent-worktrees ledger token, e.g. a pasted seed + /consume-handoff).",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "minor"
+    }
+  ]
+}

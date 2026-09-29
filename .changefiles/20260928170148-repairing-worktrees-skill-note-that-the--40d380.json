@@ -1,0 +1,9 @@
+{
+  "comment": "repairing-worktrees skill: note that the manual /consume-handoff head-mismatch gap is now fixed at the source in context-handoff (link-succession backstop), distinct from the still-open #3716 sessionStart-level architecture proposal.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}
