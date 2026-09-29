@@ -391,6 +391,27 @@ async def test_an_owner_that_finds_another_owners_beacon_stands_down(store, monk
     assert json.loads(owner.LIVE_FILE.read_text("utf-8"))["pid"] == 424242  # not erased
 
 
+async def test_a_cycle_that_blocks_the_loop_keeps_the_beacon_fresh(store):
+    """A cycle can block the event loop for minutes (SSH probes, synchronous
+    gh calls). The beacon must not age meanwhile, or the next tenant spawns a
+    second Owner."""
+    fake = _FakeOwner(stop_after=1000)
+    seen = {}
+
+    async def reconcile():
+        fake.reconciles += 1
+        if fake.reconciles == 1:
+            before = json.loads(owner.LIVE_FILE.read_text("utf-8"))["heartbeat_at"]
+            time.sleep(2.5)  # blocks the loop, as a synchronous gh call would
+            seen["advanced"] = json.loads(owner.LIVE_FILE.read_text("utf-8"))["heartbeat_at"] - before
+            fake.stop_event.set()
+
+    fake.reconcile = reconcile
+    await asyncio.wait_for(owner.run_owner_daemon(fake, interval=0, stop_event=fake.stop_event), timeout=10)
+    assert seen["advanced"] >= 1.0  # refreshed by the keeper thread while the loop was blocked
+    assert not owner.LIVE_FILE.exists()
+
+
 def test_clear_liveness_leaves_another_owners_beacon(store):
     owner.LIVE_FILE.write_text(json.dumps({"pid": 424242, "heartbeat_at": time.time()}), "utf-8")
     owner._clear_liveness()
