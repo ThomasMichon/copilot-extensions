@@ -39,37 +39,33 @@ personal test failure.
    (one bad run vs. a persistent block):
 
    ```bash
-   agent-worktrees repos gh ThomasMichon/copilot-extensions -- \
-     run list -R ThomasMichon/copilot-extensions \
-     --workflow=validate-and-promote.yml --limit 20
+   agent-worktrees repos gh ThomasMichon/copilot-extensions -- run list -R ThomasMichon/copilot-extensions --workflow=validate-and-promote.yml --limit 20  # marketplace-isolation: allow diagnostic-example
    ```
 
-   (Route every `gh` call through `agent-worktrees repos gh <owner/repo> --
-   <gh args>` — never a bare `gh`; see `contributing-to-copilot-extensions`
-   and the repo's own account-routing warning from `related resolve`.)
+   Route every `gh` call through the repo's account-routing wrapper (never a
+   bare `gh`) -- see `contributing-to-copilot-extensions` and the repo's own
+   account-routing warning from its `related resolve` output.
+   <!-- marketplace-isolation: allow diagnostic-example -->
 
 2. **Open the failing run** and read its job list — the workflow's own
    per-plugin fan-out means exactly one (or a small subset) of the `full -
    <plugin>` jobs is red while the rest are green:
 
    ```bash
-   agent-worktrees repos gh ThomasMichon/copilot-extensions -- \
-     run view <run-id> -R ThomasMichon/copilot-extensions
+   agent-worktrees repos gh ThomasMichon/copilot-extensions -- run view <run-id> -R ThomasMichon/copilot-extensions  # marketplace-isolation: allow diagnostic-example
    ```
 
-   Note the failing job's numeric ID from the output (e.g. `full -
-   agent-worktrees in 2m37s (ID 109338891734)`).
+   Note the failing job's numeric ID from the output (for example a `full -`
+   job entry naming the plugin and an ID in parentheses).
+   <!-- marketplace-isolation: allow diagnostic-example -->
 
 3. **Pull that job's full log** and grep for the pytest summary — the log is
    large (tens of KB), so save it to a file and grep rather than reading it
    inline:
 
    ```bash
-   agent-worktrees repos gh ThomasMichon/copilot-extensions -- \
-     run view <run-id> -R ThomasMichon/copilot-extensions \
-     --job <job-id> --log > /tmp/run-<run-id>-job-<job-id>.log
-   grep -n "FAILED\|short test summary\|AttributeError\|Traceback" \
-     /tmp/run-<run-id>-job-<job-id>.log
+   agent-worktrees repos gh ThomasMichon/copilot-extensions -- run view <run-id> -R ThomasMichon/copilot-extensions --job <job-id> --log > /tmp/run-<run-id>-job-<job-id>.log  # marketplace-isolation: allow diagnostic-example
+   grep -n "FAILED\|short test summary\|AttributeError\|Traceback" /tmp/run-<run-id>-job-<job-id>.log
    ```
 
    Read the literal `FAILED <test-node-id> - <ExceptionType>: <message>`
@@ -95,14 +91,13 @@ personal test failure.
    worktree:
 
    ```bash
-   cd <writable checkout>   # from `related resolve copilot-extensions`
+   cd <writable checkout>   # from a `related resolve copilot-extensions` lookup
    git log --oneline -3 -- <path/to/the/failing/test-or-source>
-   agent-worktrees repos gh ThomasMichon/copilot-extensions -- \
-     pr list -R ThomasMichon/copilot-extensions --search "<test name>"
+   agent-worktrees repos gh ThomasMichon/copilot-extensions -- pr list -R ThomasMichon/copilot-extensions --search "<test name>"  # marketplace-isolation: allow diagnostic-example
    ```
 
-   If `dev`'s tip already contains a fix, don't duplicate it — clean up any
-   worktree you opened (`copilot-extensions finalize`) and just watch for the
+   If `dev`'s tip already contains a fix, don't duplicate it — finalize any
+   worktree you opened as unused and just watch for the
    next `dev-advanced` run to go green.
 
 6. **Land the real fix** through the normal flow — `copilot-extensions
