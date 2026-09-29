@@ -55,10 +55,18 @@ def _text(value: Any) -> str | None:
     return None
 
 
-_ENVELOPE = re.compile(r"<agent-message\b([^>]*)>\s*(.*?)\s*</agent-message>", re.S)
+# The body is literal (only attribute values are escaped), so it can itself
+# contain "</agent-message>": read through the *final* closing tag.
+_ENVELOPE = re.compile(r"<agent-message\b([^>]*)>\s*(.*)\s*</agent-message>", re.S)
 _ENVELOPE_ATTR = re.compile(r'([a-z][a-z-]*)="([^"]*)"')
 #: Longest relayed message text carried on a represented ``user_message``.
 _RELAY_BODY_MAX = 8000
+
+
+def _unescape_attr(value: str) -> str:
+    """Undo the extension's ``escAttr`` (``&``, ``"``, ``<``, ``>``)."""
+    return (value.replace("&lt;", "<").replace("&gt;", ">")
+            .replace("&quot;", '"').replace("&amp;", "&"))
 
 
 def _relayed(d: dict[str, Any]) -> dict[str, Any]:
@@ -77,13 +85,13 @@ def _relayed(d: dict[str, Any]) -> dict[str, Any]:
     m = _ENVELOPE.search(str(d.get("transformedContent") or ""))
     if not m:
         return {}
-    body = m.group(2)
+    body = m.group(2).strip()
     out: dict[str, Any] = {"relay_body": body if len(body) <= _RELAY_BODY_MAX else body[:_RELAY_BODY_MAX] + "\u2026"}
-    attrs = dict(_ENVELOPE_ATTR.findall(m.group(1)))
+    attrs = {k: _unescape_attr(v) for k, v in _ENVELOPE_ATTR.findall(m.group(1))}
     if attrs.get("from"):
         out["relay_from"] = attrs["from"]
-    if attrs.get("kind"):
-        out["relay_kind"] = attrs["kind"]
+    # The extension omits ``kind`` for an ordinary prompt.
+    out["relay_kind"] = attrs.get("kind") or "prompt"
     return out
 
 
