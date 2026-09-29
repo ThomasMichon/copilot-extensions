@@ -761,7 +761,25 @@ def _backfill_canonical_vendored_libs(payload_root: Path, snapshot: Path) -> Non
     for lib in ("agent-procutil",):
         if (snapshot / "libs" / lib).exists():
             continue
-        canonical = payload_root.parents[1] / "libs" / lib
+        canonical_libs = payload_root.parents[1] / "libs"
+        canonical = canonical_libs / lib
+        if (
+            canonical_libs.is_symlink()
+            or _is_reparse(canonical_libs)
+            or canonical.is_symlink()
+            or _is_reparse(canonical)
+        ):
+            # `Path.is_dir()` below follows a symlink/reparse point --
+            # `_copy_payload()` only rejects a link found *inside* its own
+            # source tree, so a symlinked `libs/` or `libs/agent-procutil`
+            # component itself would slip through undetected and
+            # `copytree()` would then dereference it, copying external
+            # files into the published snapshot and breaking the
+            # snapshot's no-link invariant (PR #4465 review).
+            raise CellError(
+                f"canonical vendored-lib path contains a link or reparse "
+                f"point: {canonical}"
+            )
         if canonical.is_dir():
             _copy_payload(canonical, snapshot / "libs" / lib)
             _rewrite_uv_source_to_local(snapshot / "pyproject.toml", lib)

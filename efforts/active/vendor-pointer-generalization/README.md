@@ -2262,9 +2262,15 @@ _Pending._
     moot once `agent-worktrees` was excluded above (its `install.sh`
     counterpart structurally requires `uv` with no fallback branch at
     all, confirmed via a fresh `uv`-only probe install).
-  - `agent-vault`/`agent-mcp` have the SAME systemic gap for their OTHER
-    already-converted libs, already tracked under #3905/#4410 (not fixed
-    here, confirmed pre-existing by inspection, not assumed).
+  - `agent-vault`/`agent-mcp` had the SAME systemic gap for their OTHER
+    already-converted libs (tracked under #3905/#4410, confirmed
+    pre-existing by inspection, not assumed) -- fixed later in this same
+    leg: a preinstall loop was added to all 4 scripts (`agent-vault`
+    `install.sh`/`install.ps1`, `agent-mcp` `init.sh`/`init.ps1`)
+    covering every escaping `[tool.uv.sources]` dependency, not just
+    `agent-procutil`, with 16 new guard-test cases. Verified:
+    `agent-vault` (251 passed, 6 skipped) and `agent-mcp` (359 passed,
+    1 skipped) full suites both green afterward.
   - `libs/payload-invocation/tests/test_generate.py` ALSO hardcoded
     `payload/libs/agent-procutil/src` at 5 call sites, for both the
     `agent-machines` AND `agent-worktrees` fixtures it copies from the
@@ -2306,9 +2312,10 @@ _Pending._
   doesn't ship `tools/`), since the snapshotted `pyproject.toml`'s own
   `../../libs/agent-procutil` source entry escapes the snapshot root and
   never resolves from there either. Widened `cell-runtime.py`'s
-  module-size-baseline entry twice for these two fixes (5145 -> 5161 ->
-  5193) -- the file was already at its grandfathered ceiling before this
-  leg touched it at all.
+  module-size-baseline entry three times across this leg (5145 -> 5161
+  -> 5193 -> 5211, the last for round 9's symlink-reject fix) -- the
+  file was already at its grandfathered ceiling before this leg touched
+  it at all.
 - Also updated `libs/agent-procutil/README.md` § Vendoring and its
   module docstring -- both still described the pre-this-leg "every
   plugin carries a local copy" state, caught by reviewer inspection
@@ -2320,7 +2327,11 @@ _Pending._
   `editable = true` correctly stripped. Full suites green: `agent-vault`
   (249 passed), `agent-dispatch` (806 passed), `agent-mcp` (359 passed),
   `agent-logger`, `agent-machines`, `agent-index` (633 passed, 2 skipped)
-  all green; `worktree-manager` has no test suite of its own.
+  all green; `worktree-manager`'s own full suite (1455 passed, 4
+  skipped) and its version-specific tests (19 passed) also green after
+  bumping its `pyproject.toml`/`__init__.py` version surfaces (its
+  `agent-procutil` dependency annotation had also gone stale, describing
+  the pre-conversion "vendored per plugin" state -- fixed alongside).
 - **Investigated and did NOT reproduce** an external, unverified report
   (relayed via this session's inherited handoff) that PR #4420 broke
   `check-vendored-libs-sync.py` repo-wide for `agent-dispatch`: a fresh
