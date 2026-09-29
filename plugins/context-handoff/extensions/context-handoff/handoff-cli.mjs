@@ -429,10 +429,10 @@ async function cmdSyncWorktree(args) {
 function cmdListSessions(args) {
   const cwd = args.cwd || process.cwd();
   const result = listWorktreeSessions(cwd, args.worktree || null);
+  if (!result.available) process.exitCode = 1;
   if (args.json) return emit(result, args);
   if (!result.available) {
     process.stderr.write(`handoff-cli list-sessions: unavailable -- ${result.reason}\n`);
-    process.exitCode = 1;
     return;
   }
   const sessions = Array.isArray(result.sessions) ? result.sessions : [];
@@ -459,10 +459,10 @@ function cmdGetPreviousSession(args) {
     process.exit(2);
   }
   const result = getPreviousSession(cwd, sid, args.worktree || null);
+  if (!result.available) process.exitCode = 1;
   if (args.json) return emit(result, args);
   if (!result.available) {
     process.stderr.write(`handoff-cli get-previous-session: unavailable -- ${result.reason}\n`);
-    process.exitCode = 1;
     return;
   }
   if (!result.predecessorSession) {
@@ -488,9 +488,10 @@ async function cmdAbort(args) {
     ? abortHandoffTask(cwd, taskId, reason)
     : abortFileHandoff(cwd, sid, handoffId, path, reason);
   if (!result.ok) {
+    process.exitCode = 1;
     if (args.json) return emit(result, args);
     process.stderr.write(`handoff-cli abort: ${result.message || result.error || "failed"}\n`);
-    process.exit(1);
+    return;
   }
   if (args.json) return emit(result, args);
   process.stdout.write(

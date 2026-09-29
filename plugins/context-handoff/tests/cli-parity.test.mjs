@@ -235,6 +235,7 @@ test("list-sessions degrades honestly (never fabricates a chain) without agent-w
     );
     const parsed = JSON.parse(result.stdout);
     assert.equal(parsed.available, false);
+    assert.equal(result.status, 1);
   }));
 });
 

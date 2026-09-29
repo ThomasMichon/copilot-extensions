@@ -1883,14 +1883,44 @@ test("abortHandoffTask abandons the agent-dispatch task with the given reason", 
   const calls = [];
   const execute = (bin, argv) => {
     calls.push({ bin, argv });
+    if (argv[0] === "show") {
+      return JSON.stringify({ id: "task-42", labels: ["handoff"], source: "context-handoff", status: "queued" });
+    }
     return "{}";
   };
   const result = abortHandoffTask("C:\\repo", "task-42", "no longer needed", execute);
   assert.deepEqual(result, { ok: true, id: "task-42", kind: "task" });
-  assert.deepEqual(calls, [{
-    bin: "agent-dispatch",
-    argv: ["abandon", "task-42", "--permit", "--reason", "no longer needed"],
-  }]);
+  assert.deepEqual(calls, [
+    { bin: "agent-dispatch", argv: ["show", "task-42"] },
+    {
+      bin: "agent-dispatch",
+      argv: ["abandon", "task-42", "--permit", "--reason", "no longer needed"],
+    },
+  ]);
+});
+
+test("abortHandoffTask refuses to abandon a task that isn't a context-handoff handoff", () => {
+  const execute = (bin, argv) => {
+    if (argv[0] === "show") {
+      return JSON.stringify({ id: "task-99", labels: ["unrelated"], source: "some-other-producer", status: "queued" });
+    }
+    throw new Error(`unexpected CLI call: ${bin} ${argv.join(" ")}`);
+  };
+  const result = abortHandoffTask("C:\\repo", "task-99", "typo'd id", execute);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /is not a context-handoff task/);
+});
+
+test("abortHandoffTask refuses to abandon an already-terminal task", () => {
+  const execute = (bin, argv) => {
+    if (argv[0] === "show") {
+      return JSON.stringify({ id: "task-1", labels: ["handoff"], source: "context-handoff", status: "completed" });
+    }
+    throw new Error(`unexpected CLI call: ${bin} ${argv.join(" ")}`);
+  };
+  const result = abortHandoffTask("C:\\repo", "task-1", null, execute);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /already completed/);
 });
 
 test("abortHandoffTask degrades safe on a CLI failure", () => {
@@ -1964,4 +1994,37 @@ test("abortFileHandoff reports not-found honestly for a nonexistent handoff", ()
   );
   assert.equal(result.ok, false);
   assert.match(result.message, /was not found/);
+});
+
+test("abortFileHandoff refuses to abort while a real consume holds the lock (never races it)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "context-handoff-abort-race-"));
+  try {
+    const path = join(dir, "handoff-in-flight.json");
+    writeJsonAtomic(path, {
+      kind: "context-handoff",
+      version: 2,
+      id: "handoff-in-flight",
+      storage: "file",
+      sessionId: "predecessor-1",
+      cwd: "C:\\repo",
+      promptText: "stored markdown",
+      consumed: false,
+      consumedAt: null,
+    });
+    // Simulate a real consumeFileHandoffOnce actively holding the lock.
+    writeFileSync(`${path}.consume.lock`, JSON.stringify({
+      pid: process.pid, sessionId: "real-consumer", createdAt: new Date().toISOString(),
+    }), "utf-8");
+    const result = abortFileHandoff(
+      "C:\\repo", "aborting-session", "handoff-in-flight", path, "too slow",
+    );
+    assert.equal(result.ok, false);
+    assert.match(result.message, /currently being consumed/);
+    // The abort attempt must not have deleted the real consumer's lock.
+    assert.ok(existsSync(`${path}.consume.lock`));
+    const onDisk = JSON.parse(readFileSync(path, "utf-8"));
+    assert.equal(onDisk.consumed, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -3518,7 +3518,48 @@ export function getPreviousSession(cwd, sessionId, worktreeId = null, execute = 
 // already uses; a file-backed handoff is marked consumed with an explicit
 // `aborted: true` marker so it is never offered again, without pretending a
 // real successor claimed it (`consumedBySession` stays null).
+//
+// `taskId` is caller-supplied (a typo'd or copied id is a realistic input),
+// so this never abandons blind: it fetches the task first and requires the
+// SAME ownership predicate `handoff_claim_release.py`'s own
+// `_is_handoff_task` already uses server-side (`"handoff" in labels` OR
+// `source == "context-handoff"`), plus a non-terminal status, before calling
+// `abandon`. A task that fails either check is refused, never abandoned.
+const TERMINAL_TASK_STATUSES = new Set([
+  "completed", "confirmed", "abandoned", "dead_letter",
+]);
+
 export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
+  let task;
+  try {
+    task = JSON.parse(execute("agent-dispatch", ["show", taskId], { cwd, timeout: 15000 })); // marketplace-isolation: allow agent-dispatch-management
+  } catch (error) {
+    return {
+      ok: false,
+      id: taskId,
+      kind: "task",
+      error: describeCliError(error) || "agent-dispatch show failed",
+    };
+  }
+  const labels = Array.isArray(task?.labels) ? task.labels : [];
+  const isHandoffTask = labels.includes("handoff") || task?.source === "context-handoff";
+  if (!isHandoffTask) {
+    return {
+      ok: false,
+      id: taskId,
+      kind: "task",
+      error: `Task ${taskId} is not a context-handoff task (no "handoff" label, ` +
+        `source is "${task?.source || "unknown"}", not "context-handoff") -- refusing to abandon it.`,
+    };
+  }
+  if (TERMINAL_TASK_STATUSES.has(task?.status)) {
+    return {
+      ok: false,
+      id: taskId,
+      kind: "task",
+      error: `Task ${taskId} is already ${task.status}; nothing to abort.`,
+    };
+  }
   try {
     execute(
       "agent-dispatch", // marketplace-isolation: allow agent-dispatch-management
@@ -3536,6 +3577,18 @@ export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
   }
 }
 
+// File-backed abort participates in the SAME `.consume.lock` protocol
+// `consumeFileHandoffOnce` uses (open the lock file exclusively, re-read the
+// record while holding it, then write) -- without this, an abort racing a
+// real consume could each read `consumed: false`, both "succeed", and
+// whichever atomic write lands last would silently win: either resurrecting
+// an aborted handoff or overwriting a real consumer's claim with an aborted
+// marker. Reclaim logic is deliberately NOT duplicated here: abort is an
+// explicit, human/agent-directed action, not a background retry path, so a
+// held lock (someone else is actively consuming right now) is reported as a
+// straightforward failure rather than attempting the same stale-lock
+// recovery dance `consumeFileHandoffOnce` performs for its own crash-safety
+// needs.
 export function abortFileHandoff(
   cwd, sid, handoffId, explicitPath, reason,
   { get = agentWorktreesGet, execute = runCli } = {},
@@ -3544,26 +3597,55 @@ export function abortFileHandoff(
   if (!found) {
     return { ok: false, kind: "file", message: "File-backed handoff was not found." };
   }
-  if (found.record.consumed) {
+  const lockPath = `${found.path}.consume.lock`;
+  let lockFd;
+  try {
+    lockFd = openSync(lockPath, "wx");
+    writeFileSync(lockFd, JSON.stringify({
+      pid: process.pid, sessionId: sid || null, createdAt: new Date().toISOString(),
+    }), "utf-8");
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      return {
+        ok: false,
+        kind: "file",
+        id: found.record.id,
+        message: `Handoff ${found.record.id || found.path} is currently being consumed ` +
+          "(active lock held) -- too late to abort; do not force-clear the lock.",
+      };
+    }
     return {
       ok: false,
       kind: "file",
-      id: found.record.id,
-      message: found.record.aborted
-        ? `Handoff ${found.record.id || found.path} was already aborted.`
-        : `Handoff ${found.record.id || found.path} was already consumed by ` +
-          `session \`${found.record.consumedBySession || "unknown"}\`; too late to abort.`,
+      message: `Could not lock file-backed handoff for abort: ${error.message}`,
     };
   }
-  const aborted = {
-    ...found.record,
-    consumed: true,
-    consumedAt: new Date().toISOString(),
-    consumedBySession: null,
-    aborted: true,
-    abortedBySession: sid || null,
-    abortReason: reason || null,
-  };
-  writeJsonAtomic(found.path, aborted);
-  return { ok: true, kind: "file", id: aborted.id, path: found.path, record: aborted };
+  try {
+    const current = readFileHandoff(cwd, sid, handoffId, found.path, { get, execute }) || found;
+    if (current.record.consumed) {
+      return {
+        ok: false,
+        kind: "file",
+        id: current.record.id,
+        message: current.record.aborted
+          ? `Handoff ${current.record.id || current.path} was already aborted.`
+          : `Handoff ${current.record.id || current.path} was already consumed by ` +
+            `session \`${current.record.consumedBySession || "unknown"}\`; too late to abort.`,
+      };
+    }
+    const aborted = {
+      ...current.record,
+      consumed: true,
+      consumedAt: new Date().toISOString(),
+      consumedBySession: null,
+      aborted: true,
+      abortedBySession: sid || null,
+      abortReason: reason || null,
+    };
+    writeJsonAtomic(current.path, aborted);
+    return { ok: true, kind: "file", id: aborted.id, path: current.path, record: aborted };
+  } finally {
+    try { closeSync(lockFd); } catch { /* best-effort */ }
+    try { unlinkSync(lockPath); } catch { /* already gone */ }
+  }
 }
