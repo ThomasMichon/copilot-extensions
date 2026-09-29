@@ -3437,3 +3437,133 @@ export async function triggerHandoff(
       }),
   };
 }
+
+// --- Diagnostic helpers (CLI-only surface: list-sessions, get-previous-session,
+// abort) -- these back the payload-local `context-handoff` command's own
+// subcommands of the same name, so both the extension (where applicable) and
+// the CLI-only fallback read the exact same worktree/session lineage
+// agent-worktrees itself tracks, rather than re-deriving it from timestamps
+// or brief content. All three degrade to an explicit `available: false`
+// result (never a guess) when agent-worktrees is not installed.
+
+// List every session agent-worktrees has recorded for a worktree, plus the
+// handoff chain linking them -- the same facts `agent-worktrees list-sessions
+// --worktree <id> --json` returns, wrapped so a caller need not know that
+// exact invocation. `worktreeId` defaults to the one bound to `cwd`.
+export function listWorktreeSessions(cwd, worktreeId = null, execute = runCli) {
+  const resolvedWorktree = worktreeId || agentWorktreesGet("worktree-id", cwd, null, execute);
+  if (!resolvedWorktree) {
+    return {
+      available: false,
+      reason: "no worktree id was resolvable from cwd, and none was passed explicitly",
+    };
+  }
+  try {
+    const raw = execute(
+      "agent-worktrees", // marketplace-isolation: allow diagnostic-tooling
+      ["list-sessions", "--worktree", resolvedWorktree, "--json"],
+      { cwd, timeout: 15000 },
+    );
+    const parsed = JSON.parse(raw);
+    return { available: true, worktree: resolvedWorktree, ...parsed };
+  } catch (error) {
+    return {
+      available: false,
+      worktree: resolvedWorktree,
+      reason: describeCliError(error) || "agent-worktrees list-sessions failed",
+    };
+  }
+}
+
+// Resolve the immediate predecessor of a given session within its worktree's
+// own recorded handoff chain (the `successor === sessionId` entry's
+// `predecessor`) -- the exact fact `formatConsumeResult`/`buildResumePrompt`
+// now surface automatically at consume time, exposed here as a standalone
+// lookup for a session that already knows its own id but wants to confirm or
+// re-derive its predecessor later (e.g. after a restart, or from a sibling
+// tool). Never guesses past agent-worktrees' own recorded chain.
+export function getPreviousSession(cwd, sessionId, worktreeId = null, execute = runCli) {
+  if (!sessionId) {
+    return { available: false, reason: "a session id is required" };
+  }
+  const sessions = listWorktreeSessions(cwd, worktreeId, execute);
+  if (!sessions.available) return sessions;
+  const handoffs = Array.isArray(sessions.handoffs) ? sessions.handoffs : [];
+  const link = handoffs.find((entry) => entry?.successor === sessionId);
+  if (!link) {
+    return {
+      available: true,
+      worktree: sessions.worktree,
+      sessionId,
+      predecessorSession: null,
+      reason: "no recorded handoff names this session as a successor "
+        + "(it may be the worktree's first session, or predate lineage tracking)",
+    };
+  }
+  return {
+    available: true,
+    worktree: sessions.worktree,
+    sessionId,
+    predecessorSession: link.predecessor || null,
+    handoff: link,
+  };
+}
+
+// Cancel a pending handoff before it is ever consumed -- distinct from
+// consuming it (which claims and hands off responsibility) and distinct from
+// `abandonSupersededHandoffs` (which is an internal, automatic supersession
+// side effect of storing a NEW handoff). This is an explicit, operator/agent
+// -directed "never mind" for one named handoff. A task-backed handoff is
+// abandoned via the same agent-dispatch primitive `abandonSupersededHandoffs`
+// already uses; a file-backed handoff is marked consumed with an explicit
+// `aborted: true` marker so it is never offered again, without pretending a
+// real successor claimed it (`consumedBySession` stays null).
+export function abortHandoffTask(cwd, taskId, reason, execute = runCli) {
+  try {
+    execute(
+      "agent-dispatch", // marketplace-isolation: allow agent-dispatch-management
+      ["abandon", taskId, "--permit", "--reason", reason || "aborted via context-handoff abort"],
+      { cwd, timeout: 15000 },
+    );
+    return { ok: true, id: taskId, kind: "task" };
+  } catch (error) {
+    return {
+      ok: false,
+      id: taskId,
+      kind: "task",
+      error: describeCliError(error) || "agent-dispatch abandon failed",
+    };
+  }
+}
+
+export function abortFileHandoff(
+  cwd, sid, handoffId, explicitPath, reason,
+  { get = agentWorktreesGet, execute = runCli } = {},
+) {
+  const found = readFileHandoff(cwd, sid, handoffId, explicitPath, { get, execute });
+  if (!found) {
+    return { ok: false, kind: "file", message: "File-backed handoff was not found." };
+  }
+  if (found.record.consumed) {
+    return {
+      ok: false,
+      kind: "file",
+      id: found.record.id,
+      message: found.record.aborted
+        ? `Handoff ${found.record.id || found.path} was already aborted.`
+        : `Handoff ${found.record.id || found.path} was already consumed by ` +
+          `session \`${found.record.consumedBySession || "unknown"}\`; too late to abort.`,
+    };
+  }
+  const aborted = {
+    ...found.record,
+    consumed: true,
+    consumedAt: new Date().toISOString(),
+    consumedBySession: null,
+    aborted: true,
+    abortedBySession: sid || null,
+    abortReason: reason || null,
+  };
+  writeJsonAtomic(found.path, aborted);
+  return { ok: true, kind: "file", id: aborted.id, path: found.path, record: aborted };
+}

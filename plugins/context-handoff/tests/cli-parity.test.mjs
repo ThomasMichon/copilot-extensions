@@ -49,7 +49,10 @@ test("payload-local CLI exposes the extension fallback flow", () => {
     encoding: "utf8",
   });
   assert.equal(result.status, 0, result.stderr);
-  for (const command of ["facts", "save", "trigger", "consume", "check-heads", "retry-cutover", "sync-worktree"]) {
+  for (const command of [
+    "facts", "save", "trigger", "consume", "check-heads", "retry-cutover",
+    "sync-worktree", "list-sessions", "get-previous-session", "abort",
+  ]) {
     assert.match(result.stdout, new RegExp(`\\b${command}\\b`));
   }
   assert.match(result.stdout, /--locator/);
@@ -57,6 +60,8 @@ test("payload-local CLI exposes the extension fallback flow", () => {
   assert.match(result.stdout, /"file:<id>"/);
   assert.match(result.stdout, /--task-id/);
   assert.match(result.stdout, /--handoff-token/);
+  assert.match(result.stdout, /--worktree/);
+  assert.match(result.stdout, /--reason/);
   assert.doesNotMatch(result.stdout, /\bcontinue\b/);
   assert.match(result.stdout, /\bretry-cutover\b/);
 });
@@ -180,10 +185,57 @@ test("extension and CLI delegate storage, signaling, and consumption to the same
     "consumeDispatchHandoffTask",
     "formatConsumeResult",
     "attemptWorktreeSync",
+    "listWorktreeSessions",
+    "getPreviousSession",
+    "abortHandoffTask",
+    "abortFileHandoff",
   ]) {
     assert.match(source, new RegExp(`\\b${shared}\\b`));
   }
   assert.doesNotMatch(source, /runHandoffCutover/);
+});
+
+test("abort requires exactly one recovery target, same as consume", () => {
+  withRepository((root) => withIsolatedHome((homeEnv) => {
+    const common = { cwd: root, encoding: "utf8", env: { ...process.env, ...homeEnv } };
+    const missing = spawnSync(process.execPath, [cli, "abort"], common);
+    assert.equal(missing.status, 2);
+    assert.match(missing.stderr, /exactly one of --locator/);
+
+    const ambiguous = spawnSync(
+      process.execPath,
+      [cli, "abort", "--task-id", "task-1", "--handoff-id", "handoff-1"],
+      common,
+    );
+    assert.equal(ambiguous.status, 2);
+    assert.match(ambiguous.stderr, /exactly one of --locator/);
+  }));
+});
+
+test("get-previous-session requires a session id", () => {
+  withRepository((root) => withIsolatedHome((homeEnv) => {
+    const env = { ...process.env, ...homeEnv };
+    delete env.COPILOT_AGENT_SESSION_ID;
+    const result = spawnSync(
+      process.execPath,
+      [cli, "get-previous-session"],
+      { cwd: root, encoding: "utf8", env },
+    );
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /--session-id or COPILOT_AGENT_SESSION_ID is required/);
+  }));
+});
+
+test("list-sessions degrades honestly (never fabricates a chain) without agent-worktrees", () => {
+  withRepository((root) => withIsolatedHome((homeEnv) => {
+    const result = spawnSync(
+      process.execPath,
+      [cli, "list-sessions", "--json"],
+      { cwd: root, encoding: "utf8", env: { ...process.env, ...homeEnv } },
+    );
+    const parsed = JSON.parse(result.stdout);
+    assert.equal(parsed.available, false);
+  }));
 });
 
 test("sync-worktree shares the same lock/rebase-safe helper the force-tier path uses", async () => {

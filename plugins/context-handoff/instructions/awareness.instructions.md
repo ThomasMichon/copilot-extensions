@@ -30,7 +30,21 @@ it, or ask, before assuming either.
 
 ## The same commands as plain CLI, extension loaded or not
 
-The plugin's bundled CLI needs only `node`:
+The plugin's bundled CLI needs only `node`. Every command accepts `--json`
+for machine-readable output; `help` prints the full option reference.
+
+| Command | Purpose |
+|---|---|
+| `save` | Store a handoff without requesting pickup yet |
+| `trigger` | Store + signal pickup (arms live-cutover only under `mode: auto`) |
+| `consume --locator "<kind>:<id>"` | Claim and load a stored handoff exactly once |
+| `facts` | Basic extension-free handoff facts for this worktree |
+| `check-heads` | Audit pending-handoff head alignment across worktrees |
+| `retry-cutover` | Refocus a live successor or respawn a stuck cutover |
+| `sync-worktree` | Shared lock/rebase-safe worktree sync (same helper the force tier uses) |
+| `list-sessions` | This worktree's sessions + recorded handoff chain (needs `agent-worktrees`) |
+| `get-previous-session` | This (or a named) session's recorded predecessor (needs `agent-worktrees`) |
+| `abort --locator "<kind>:<id>"` | Cancel a pending handoff before anyone consumes it |
 
 ```bash
 CH_ROOT="${COPILOT_PLUGIN_ROOT:-$HOME/.copilot/installed-plugins/copilot-extensions/context-handoff}"
@@ -38,10 +52,18 @@ CH="$CH_ROOT/extensions/context-handoff/handoff-cli.mjs"
 node "$CH" save --title "<t>" --prompt-file "<f.md>" --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" trigger --title "<t>" --prompt-file "<f.md>" --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" consume --locator "<kind>:<id>" --cwd "$PWD"
+node "$CH" list-sessions --json --cwd "$PWD"
+node "$CH" get-previous-session --json --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+node "$CH" abort --locator "<kind>:<id>" --reason "<why>" --cwd "$PWD"
 ```
 PowerShell: the same default under
 `$HOME\.copilot\installed-plugins\copilot-extensions\context-handoff`, then
 `node $CH <verb> ...`. The fallback guide below lists every verb and rung.
+
+No global `context-handoff` command exists on `PATH` -- this plugin
+deliberately ships **no binstub, install step, or runtime** (see the plugin's
+own README § "How the extension is delivered"); always resolve `$CH`/`$ch` by
+the exact verified path above before invoking it.
 
 ## The handoff prompt ("seed") format
 

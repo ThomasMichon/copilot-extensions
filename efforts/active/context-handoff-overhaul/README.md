@@ -433,11 +433,23 @@ Verbatim from the operator:
   operator's original live symptom.
 - [ ] Fix Worktree Manager's `trigger_handoff` pickup reliability: cases
   where a "successful" report corresponds to no actual live pane.
-- [ ] Harden the successor-side fallback so an agent with zero working
+- [x] Harden the successor-side fallback so an agent with zero working
   context-handoff tools can reliably discover and execute the manual
   consume+resume flow without floundering -- builds on this effort's
   already-merged PR #3016 instructions.md fallback; live agent reports
   suggest it isn't sufficient on its own yet.
+  **Landed as the CLI-parity slice:** three new diagnostic subcommands
+  (`list-sessions`, `get-previous-session`, `abort`) on the existing
+  extension-free `handoff-cli.mjs`, a complete command catalog table added
+  to the checked-in, projected `awareness.instructions.md` (so the
+  "upfront quick catalog" lands in every consuming repo whether or not the
+  extension loaded this session), and matching updates to
+  `handoff-fallback.instructions.md`/`SKILL.md`/`README.md`'s own CLI
+  reference blocks. Deliberately does **not** add a `bin/`
+  binstub/install/runtime step -- this plugin's own README and
+  `cli-parity.test.mjs` already commit to "no PATH binstub," so the
+  catalog stays a documented `node "$CH" <verb>` invocation, not a bare
+  `context-handoff <verb>` command. See the 2026-09-29 Journal entry.
 - [ ] Confirm/close the duplicate-spawn gap (addressed by PR #3011) and the
   predecessor-termination gap against the operator's exact symptom
   description.
@@ -565,6 +577,41 @@ detail; a fuller Proposal will fill in once Phase 0's issue-filing and review
 gate land._
 
 ## Journal
+
+### 2026-09-29 — CLI-parity slice (Phase 7 successor-side fallback item)
+- Closed the long-open Phase 7 bullet "harden the successor-side fallback so
+  an agent with zero working context-handoff tools can reliably discover and
+  execute the manual consume+resume flow" with a concrete CLI-parity slice,
+  triggered by an operator request framed as "the final piece: the CLI-only
+  variant/backup for context-handoff."
+- Design constraint discovered mid-flight and honored rather than overridden:
+  this plugin's own README (§ "How the extension is delivered") and
+  `cli-parity.test.mjs`'s `fallback remains payload-only with no installed
+  runtime` test already commit to zero install step / zero PATH binstub as a
+  deliberate architectural boundary. The operator's literal phrasing
+  ("agents just call `context-handoff ___` subcommands") would have required
+  a `bin/` binstub, which conflicts with that tested invariant -- resolved by
+  keeping the existing verified-path `node "$CH" <verb>` invocation contract
+  and making its **catalog** complete and discoverable instead of adding a
+  global command.
+- Added three subcommands to the existing extension-free `handoff-cli.mjs`
+  (sharing `handoff-core.mjs` with the extension, per the existing contract):
+  `list-sessions` and `get-previous-session` wrap `agent-worktrees
+  list-sessions`'s own recorded handoff chain (degrading to an explicit
+  `available: false` -- never a guess -- when agent-worktrees isn't
+  reachable); `abort` cancels a pending handoff before consumption (task via
+  the same `agent-dispatch abandon` primitive `abandonSupersededHandoffs`
+  already uses; file via an explicit `aborted: true` marker that never
+  fabricates a consuming successor).
+- Extended the checked-in, projected `awareness.instructions.md` (every
+  session's "this mechanism exists" pointer) with a complete command table --
+  the "upfront quick catalog" -- and brought `handoff-fallback.instructions.md`,
+  `SKILL.md`'s CLI fallback block, and the plugin's own `README.md` command
+  blocks into sync with it.
+- 16 new/extended tests across `handoff-core.test.mjs` and
+  `cli-parity.test.mjs` (list-sessions/get-previous-session/abort function
+  contracts, CLI usage-error parity with `consume`, and the existing
+  no-binstub guard continuing to pass unmodified).
 
 ### 2026-09-17 — Phase 5 coordination closure
 - Closed this effort's Phase 5 by updating the owning

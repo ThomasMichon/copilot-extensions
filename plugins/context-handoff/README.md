@@ -16,7 +16,7 @@ This plugin ships four cooperating payload pieces:
 | **continuity guidance hook** | Declarative `sessionStart` hook | Writes the full owner-marked continuity contract to the exact session folder and emits only `{}` |
 | **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard/**force** thresholds (55% / 70% / 79% by default) with optional repository overrides, delivered on the next idle -- soft/hard warnings fire under the default `manual-only` mode too (any mode other than `off`); only the force tier's auto-draft/store/trigger + mutating-tool-call denial, and `trigger_handoff`'s live-cutover signaling, are opt-in (`mode: auto` in `.context-handoff/config.yaml`; the default, `manual-only`, always still stores/seeds a handoff on request, see § Thresholds); provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, and `trigger_handoff` tools plus **`/handoff-continue`**, **`/consume-handoff`**, and the compatibility **`/resume-handoff`** alias |
 | **context-handoff skill** | Skill | Owns the `/handoff` workflow: compose the continuation prompt from the extension's structured facts and the agent's live context, decide when to store it, and decide whether to ask or trigger |
-| **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save, trigger, task/file consume, `check-heads` auditing, a safe `retry-cutover` remediation for a superseded session, and a lock/rebase-safe `sync-worktree` (shared with the force-tier path). Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension |
+| **payload-local fallback CLI** | Node script (`handoff-cli.mjs`) | Extension-free facts, save, trigger, task/file consume, `check-heads` auditing, a safe `retry-cutover` remediation for a superseded session, a lock/rebase-safe `sync-worktree` (shared with the force-tier path), `list-sessions`/`get-previous-session` lineage lookups, and `abort` to cancel a pending handoff before it's consumed. Invoked by exact verified plugin-root-relative path; it has no PATH binstub or install/runtime step and shares `handoff-core.mjs` with the extension |
 
 ## The boundary
 
@@ -619,6 +619,9 @@ node "$CH" consume --locator "task:<task-id>" \
   --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 node "$CH" consume --locator "file:<handoff-id>" \
   --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+node "$CH" list-sessions --json --cwd "$PWD"
+node "$CH" get-previous-session --json --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
+node "$CH" abort --locator "task:<task-id>" --reason "<why>" --cwd "$PWD"
 ```
 
 PowerShell uses the same verified, plugin-folder-relative invocation:
@@ -644,6 +647,9 @@ node $ch trigger --title '<topic>' --prompt-file '<handoff.md>' --session-id $en
 node $ch trigger --handoff-token '<HANDOFF_TOKEN>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch consume --locator 'task:<task-id>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
 node $ch consume --locator 'file:<handoff-id>' --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+node $ch list-sessions --json --cwd $PWD
+node $ch get-previous-session --json --session-id $env:COPILOT_AGENT_SESSION_ID --cwd $PWD
+node $ch abort --locator 'task:<task-id>' --reason '<why>' --cwd $PWD
 ```
 
 ## Last-resort fallback: write the file yourself

@@ -45,6 +45,10 @@ import {
   markSessionStateHandoffConsumed,
   noteHandoffInRecord,
   promoteSuccessorHead,
+  listWorktreeSessions,
+  getPreviousSession,
+  abortHandoffTask,
+  abortFileHandoff,
 } from "../extensions/context-handoff/handoff-core.mjs";
 import { extractRecoveryLocatorFromPrompt } from "../extensions/context-handoff/cutover-seed.mjs";
 
@@ -1795,4 +1799,169 @@ test("sanitizedGitEnv disables the terminal credential prompt so an unattended s
 test("sanitizedGitEnv is case-insensitive to a lowercase-spelled repository-identity variable", () => {
   const env = sanitizedGitEnv({ git_dir: "/somewhere/else/.git" });
   assert.equal(env.git_dir, undefined);
+});
+
+test("listWorktreeSessions returns sessions/handoffs when agent-worktrees resolves the worktree", () => {
+  const execute = (bin, argv) => {
+    if (bin === "agent-worktrees" && argv[0] === "get") {
+      return "wt-example";
+    }
+    if (bin === "agent-worktrees" && argv[0] === "list-sessions") {
+      assert.deepEqual(argv, ["list-sessions", "--worktree", "wt-example", "--json"]);
+      return JSON.stringify({
+        sessions: [{ id: "s1", is_head: true, state: "active", name: "Fix parser", created_at: "t1" }],
+        handoffs: [{ predecessor: "s0", successor: "s1", token: "manual-1", linked_at: "t2" }],
+      });
+    }
+    throw new Error(`unexpected CLI call: ${bin} ${argv.join(" ")}`);
+  };
+  const result = listWorktreeSessions("C:\\repo", null, execute);
+  assert.equal(result.available, true);
+  assert.equal(result.worktree, "wt-example");
+  assert.equal(result.sessions.length, 1);
+  assert.equal(result.handoffs[0].successor, "s1");
+});
+
+test("listWorktreeSessions reports unavailable without guessing when no worktree id resolves", () => {
+  const execute = () => "";
+  const result = listWorktreeSessions("C:\\repo", null, execute);
+  assert.equal(result.available, false);
+  assert.match(result.reason, /no worktree id was resolvable/);
+});
+
+test("listWorktreeSessions reports unavailable when agent-worktrees itself fails", () => {
+  const execute = (bin, argv) => {
+    if (argv[0] === "get") return "wt-example";
+    throw new Error("agent-worktrees not installed");
+  };
+  const result = listWorktreeSessions("C:\\repo", null, execute);
+  assert.equal(result.available, false);
+  assert.equal(result.worktree, "wt-example");
+});
+
+test("getPreviousSession resolves the predecessor from the recorded handoff chain", () => {
+  const execute = (bin, argv) => {
+    if (argv[0] === "get") return "wt-example";
+    if (argv[0] === "list-sessions") {
+      return JSON.stringify({
+        sessions: [
+          { id: "s0", is_head: false, state: "handed-off" },
+          { id: "s1", is_head: true, state: "active" },
+        ],
+        handoffs: [{ predecessor: "s0", successor: "s1", token: "manual-1", linked_at: "t2" }],
+      });
+    }
+    throw new Error(`unexpected CLI call: ${bin} ${argv.join(" ")}`);
+  };
+  const result = getPreviousSession("C:\\repo", "s1", null, execute);
+  assert.equal(result.available, true);
+  assert.equal(result.predecessorSession, "s0");
+  assert.equal(result.handoff.token, "manual-1");
+});
+
+test("getPreviousSession reports no predecessor honestly instead of guessing", () => {
+  const execute = (bin, argv) => {
+    if (argv[0] === "get") return "wt-example";
+    if (argv[0] === "list-sessions") {
+      return JSON.stringify({ sessions: [{ id: "s0" }], handoffs: [] });
+    }
+    throw new Error(`unexpected CLI call: ${bin} ${argv.join(" ")}`);
+  };
+  const result = getPreviousSession("C:\\repo", "s0", null, execute);
+  assert.equal(result.available, true);
+  assert.equal(result.predecessorSession, null);
+  assert.match(result.reason, /no recorded handoff names this session/);
+});
+
+test("getPreviousSession requires a session id", () => {
+  const result = getPreviousSession("C:\\repo", null, null, () => "");
+  assert.equal(result.available, false);
+  assert.match(result.reason, /session id is required/);
+});
+
+test("abortHandoffTask abandons the agent-dispatch task with the given reason", () => {
+  const calls = [];
+  const execute = (bin, argv) => {
+    calls.push({ bin, argv });
+    return "{}";
+  };
+  const result = abortHandoffTask("C:\\repo", "task-42", "no longer needed", execute);
+  assert.deepEqual(result, { ok: true, id: "task-42", kind: "task" });
+  assert.deepEqual(calls, [{
+    bin: "agent-dispatch",
+    argv: ["abandon", "task-42", "--permit", "--reason", "no longer needed"],
+  }]);
+});
+
+test("abortHandoffTask degrades safe on a CLI failure", () => {
+  const execute = () => { throw new Error("agent-dispatch not installed"); };
+  const result = abortHandoffTask("C:\\repo", "task-42", null, execute);
+  assert.equal(result.ok, false);
+  assert.equal(result.kind, "task");
+});
+
+test("abortFileHandoff marks an unconsumed file handoff aborted, never claiming a fake consumer", () => {
+  const dir = mkdtempSync(join(tmpdir(), "context-handoff-abort-"));
+  try {
+    const path = join(dir, "handoff-to-abort.json");
+    writeJsonAtomic(path, {
+      kind: "context-handoff",
+      version: 2,
+      id: "handoff-to-abort",
+      storage: "file",
+      sessionId: "predecessor-1",
+      cwd: "C:\\repo",
+      title: "Continue",
+      promptText: "stored markdown",
+      consumed: false,
+      consumedAt: null,
+    });
+    const result = abortFileHandoff(
+      "C:\\repo", "aborting-session", "handoff-to-abort", path, "changed my mind",
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.record.consumed, true);
+    assert.equal(result.record.consumedBySession, null);
+    assert.equal(result.record.aborted, true);
+    assert.equal(result.record.abortedBySession, "aborting-session");
+    assert.equal(result.record.abortReason, "changed my mind");
+    const onDisk = JSON.parse(readFileSync(path, "utf-8"));
+    assert.equal(onDisk.aborted, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("abortFileHandoff refuses to re-abort an already-consumed handoff", () => {
+  const dir = mkdtempSync(join(tmpdir(), "context-handoff-abort-consumed-"));
+  try {
+    const path = join(dir, "handoff-already-consumed.json");
+    writeJsonAtomic(path, {
+      kind: "context-handoff",
+      version: 2,
+      id: "handoff-already-consumed",
+      storage: "file",
+      sessionId: "predecessor-1",
+      cwd: "C:\\repo",
+      promptText: "stored markdown",
+      consumed: true,
+      consumedAt: "2026-01-01T00:00:00Z",
+      consumedBySession: "successor-1",
+    });
+    const result = abortFileHandoff(
+      "C:\\repo", "aborting-session", "handoff-already-consumed", path, "too late",
+    );
+    assert.equal(result.ok, false);
+    assert.match(result.message, /already consumed by session `successor-1`/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("abortFileHandoff reports not-found honestly for a nonexistent handoff", () => {
+  const result = abortFileHandoff(
+    "C:\\repo", "aborting-session", "handoff-does-not-exist", null, null,
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.message, /was not found/);
 });

@@ -1,0 +1,9 @@
+{
+  "comment": "context-handoff: add list-sessions/get-previous-session/abort CLI subcommands (extension-free), and complete the projected command catalog across awareness.instructions.md/handoff-fallback.instructions.md/SKILL.md/README.md",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "minor"
+    }
+  ]
+}
