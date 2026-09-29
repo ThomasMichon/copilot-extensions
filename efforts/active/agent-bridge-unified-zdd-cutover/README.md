@@ -16,7 +16,7 @@ visions:
   §Features/*one-canonical-deploy-path*, and §Behaviors/*the next generation
   earns the handoff, never assumes it* and *the outgoing generation waits for
   confirmation, not for Copilot*
-- **Umbrella issue:** _pending — claim/file before Phase 1 begins_
+- **Umbrella issue:** [#4477](https://github.com/ThomasMichon/copilot-extensions/issues/4477)
 - **Sub-issues:** [#1362](https://github.com/ThomasMichon/copilot-extensions/issues/1362)
   (daemon flapping: stale `active.json` port mapping + failed auto-update
   cutovers + wedge on remote-session-host recovery) ·
@@ -182,13 +182,13 @@ layer — is the operator's own, captured verbatim in Request.)_
   reconstruct that from a raw log file.
 
 ### Phase 1 — Retire the second deploy behavior
-- [ ] `agent-bridge service restart` (and any other reachable stop+start
+- [x] `agent-bridge service restart` (and any other reachable stop+start
   affordance) routes through the same cutover the `deploy` verb already
   performs — either by making `restart` literally call the same code path,
   or by removing `restart` as a distinct verb entirely in favor of one name.
   No behavior change is acceptable that still allows a raw stop-then-start
   of a daemon carrying live session-hosts.
-- [ ] Audit every other caller of the raw stop/start path (installers,
+- [x] Audit every other caller of the raw stop/start path (installers,
   bootstrap-check scripts, any other plugin's activation hook) and route
   them onto the same one path too.
 
@@ -207,6 +207,22 @@ layer — is the operator's own, captured verbatim in Request.)_
   same way), not bolted onto agent-bridge alone — the same shape helps any
   of `zdd`'s other 7 consumers that host long-lived children across an
   update.
+- [ ] **Cutover-wide serialization** (surfaced by PR #4478's review, not a
+  Phase 1 regression: `agent-bridge deploy` was already directly invocable
+  and racy before this effort — Phase 1 only widens exposure by making
+  `service restart`, an operator-facing routine command, funnel into the
+  same path): the shared deploy/cutover path
+  (`venue_cli._cmd_deploy`/`CutoverOrchestrator.run`) has no process-wide
+  lock. Installer-driven deploys serialize via the installers' own
+  `.install.lock`; a direct `agent-bridge deploy`/`service restart`
+  invocation does not, so two concurrent invocations (two operators, or a
+  restart racing an installer deploy) can both read the same predecessor
+  breadcrumb/routing state and race — one can demote the other's new
+  generation while both report success, or roll back against state the
+  other invocation owns. Needs a dedicated cross-platform cutover lock
+  (likely a `libs/zdd` primitive, same reasoning as the claim/release/
+  recover primitive above) plus a process-level contention regression
+  test.
 
 ### Phase 3 — The liveness gate and the outgoing generation's exit contract
 - [ ] A new generation, after starting, durably marks itself live (the
@@ -261,6 +277,128 @@ _Pending — Phase 2's claim/release/recover schema and Phase 3's exit-contract
 sequencing will be drafted here once the design is reviewed._
 
 ## Journal
+
+### 2026-09-28 — Phase 1 landed
+- `agent-bridge service restart` now routes through `_cmd_deploy` directly
+  (`service_process_cli.py`'s `_cmd_service`) instead of a raw
+  `_service_stop()` + `_service_start()` — same
+  `zdd.cutover.CutoverOrchestrator` flow as `deploy` (spawn passive ->
+  health-gate -> flip -> drain -> retire), including when no daemon is
+  currently running (`CutoverOrchestrator.run` already tolerates
+  `old_endpoint is None`). The `restart` subcommand gained the same
+  `--health-timeout`/`--drain-timeout`/`--force`/`--json` flags `deploy`
+  exposes so the shared code path has every attribute it reads.
+- Audited every other reachable raw stop/start caller: installers
+  (`scripts/install.sh`/`install.ps1`) and the shared
+  `bootstrap-check.sh`/`.ps1` reconcile hooks already invoke
+  `agent-bridge deploy` (or the installer, which itself deploys), never a
+  raw restart. The only remaining `_service_stop`/`_service_start` pairing
+  outside the CLI is `venue_cli.py`'s
+  `_fault_frontend_restart_hostindex_loss` — a deliberate fault-injection
+  harness that exercises the *old* dangerous path on purpose to prove
+  HostIndex recovery works even without a ZDD handoff; left untouched.
+  `routes/worktrees.py`'s `"restart"` is an unrelated verb (restarting a
+  worktree's mux-launched Copilot session, not the agent-bridge daemon).
+- Added `tests/test_service_restart_zdd.py` (grew to 7 tests across the
+  five review passes below) locking in that `restart` calls `_cmd_deploy`
+  and never the raw stop/start pair, that its argparse Namespace carries
+  every attribute `_cmd_deploy` reads, that `--recover` stays deploy-only,
+  that the shared `--json` flag never shadows the global one, and that
+  `_cmd_deploy --json` output stays valid JSON even mid-recovery.
+- Full `agent-bridge` suite green (`tools/run-plugin-tests.py agent-bridge`).
+- Filed the umbrella issue,
+  [#4477](https://github.com/ThomasMichon/copilot-extensions/issues/4477).
+- PR #4478's automated review caught four real gaps, all fixed:
+  - the regression test patched the unused module-level
+    `_service_stop`/`_service_start` names instead of what `_cmd_service`
+    actually calls (`core._service_stop`/`core._service_start` via
+    `core = _core()`) — fixed so a regression back to the raw path would
+    fail the test;
+  - `service_process_cli.py` imported the private `_cmd_deploy` symbol
+    directly instead of the `venue_cli` module — switched to
+    `venue_cli._cmd_deploy(args)`;
+  - `deploy` and `service restart`'s flags were duplicated — extracted
+    `venue_cli.add_deploy_cutover_flags()` so both share one registration;
+  - `docs/machine-config.md` and
+    `skills/agent-bridge/references/cli-commands.md` still told operators
+    `systemctl --user restart agent-bridge.service` (the unit's own
+    `ExecStart` is `agent-bridge start`) was an interchangeable restart —
+    it bypasses the CLI (and its ZDD cutover) entirely. Both now say never
+    to call the platform service manager's restart directly, and the
+    wording was later softened per a second review pass (below) once the
+    unit's `KillMode=process` + the shutdown path's detach-for-reattach
+    behavior were confirmed to make a manager restart *uncoordinated*, not
+    a guaranteed session-host loss.
+- A second review pass on that doc fix caught remaining rough edges, all
+  fixed: an absolute "will drop every live session-host" claim overstated
+  the actual risk (systemd's `KillMode=process` plus the shutdown path's
+  detach-for-background-recovery mean sessions can often reattach; the
+  manager path is uncoordinated/potentially disruptive, not a guaranteed
+  loss); the CLI reference's Service Control intro paragraph said *all*
+  `service` subcommands delegate to the platform manager, which now
+  contradicts `restart`'s deploy-cutover behavior; and this Journal
+  undercounted the fixes above as three instead of four.
+- A third review pass caught one real bug and two smaller gaps, all fixed:
+  the shared `add_deploy_cutover_flags()` helper also exposed `--recover`
+  on `service restart`, but `--recover` is a deploy-only maintenance mode
+  that exits without starting a new cutover -- `service restart --recover`
+  would have returned success while never actually restarting the daemon;
+  the helper now takes `include_recover=False` for `restart` (deploy still
+  gets it, locked in by a new test). `tests/test_service_restart_zdd.py`
+  gained `pytestmark = pytest.mark.guard` so this restart regression is
+  covered by the fast contract lane (`--guards`), per `TESTING.md`. The CLI
+  reference's Windows warning named `schtasks /Run` as the disruptive
+  restart path, but the scheduled task is registered `-MultipleInstances
+  IgnoreNew`, so a bare `/Run` while active is simply ignored -- reworded to
+  name the actual equivalent (`schtasks /End` then `/Run`).
+- A fourth review pass caught one real bug and one public-safety nit, both
+  fixed: `add_deploy_cutover_flags()`'s `--json` used `default=False`,
+  which — being a subparser flag sharing the top-level `--json`'s `json`
+  dest — silently overwrote the canonical `agent-bridge --json service
+  restart`/`--json deploy` invocation back to `False` (the exact
+  argparse-Namespace-collision class already documented and guarded in
+  `tests/test_session_selection.py`'s
+  `test_global_json_flag_survives_into_resume_namespace`). Switched to
+  `default=argparse.SUPPRESS`, matching the existing `parity_p` pattern in
+  the same file; a new test parses through the real `build_parser()` to
+  cover both invocation orders. Also removed an accidental downstream-private
+  project name (a "dotfiles#1362" reference — this repo's own public
+  `#1362`) from the new test file's docstring per this repo's
+  public-artifact policy (`AGENTS.md`).
+- A fifth review pass caught one real bug and a docstring nit, both fixed:
+  `_cmd_deploy`'s recovery/passive-reap status messages
+  (`"[>] Recovered a prior aborted cutover: ..."` /
+  `"[>] Reaped an abandoned never-promoted passive ..."`) printed to
+  stdout *unconditionally*, ahead of the single `core._json_out(res.to_dict())`
+  call `--json` mode relies on -- corrupting the JSON payload whenever a
+  restart/deploy happened to heal a stale cutover or reap an abandoned
+  passive (a pre-existing `deploy --json` bug, newly exercisable through
+  `service restart --json` after Phase 1). Both messages now become
+  `steps` entries prepended to the `CutoverResult` before it's ever printed
+  or serialized, so they show up in both text and `--json` output the same
+  way every other step does. A new test drives `_cmd_deploy` end-to-end
+  with a faked `CutoverOrchestrator` and asserts `capsys`' stdout parses as
+  a single valid JSON object. Also corrected a test docstring that named a
+  nonexistent `agent-bridge service deploy --json` command (`deploy` is a
+  top-level verb, not a `service` action).
+- A sixth review pass raised a real HIGH-severity architectural gap —
+  the shared deploy/cutover path has no process-wide cutover lock, so two
+  concurrent invocations (two operators, or a restart racing an installer
+  deploy) can race the same breadcrumb/routing state — but assessed and
+  scoped rather than folded into Phase 1: `agent-bridge deploy` was already
+  directly invocable and exposed to this exact race before this effort;
+  Phase 1 only widens exposure by routing `service restart` (a routine,
+  actively-recommended operator command) onto the same path. Building a
+  correct **cross-platform** lock (the installers' own `.install.lock` only
+  covers installer-driven deploys, and Windows/POSIX file-locking semantics
+  differ enough to need real design) plus a process-level contention
+  regression test is squarely Phase 2/3's remit — the effort's own Plan
+  already reserves that phase for the generation-scoped claim/release/
+  recover primitive this concern is the same shape as. Captured as an
+  explicit Phase 2 checklist item (see above) instead of rushed into this
+  PR under review pressure.
+- Phase 0's one open item (the opt-in reconcile-gate design fork) remains
+  genuinely undecided — flagged for the operator, not resolved here.
 
 ### 2026-09-28 — Kickoff
 - Carved after a live production incident (root-caused in a downstream

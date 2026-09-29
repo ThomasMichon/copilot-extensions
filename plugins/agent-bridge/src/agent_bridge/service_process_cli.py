@@ -631,11 +631,14 @@ def _cmd_service(args: argparse.Namespace) -> None:
     elif action == "stop":
         core._service_stop()
     elif action == "restart":
-        core._service_stop()
-        import time
+        # `restart` is not a distinct behavior: it is the same always-ZDD
+        # cutover `deploy` performs (spawn passive -> health-gate -> flip ->
+        # drain -> retire). A raw stop-then-start bypasses the health gate
+        # and coordinated handoff -- see
+        # efforts/active/agent-bridge-unified-zdd-cutover Phase 1.
+        from . import venue_cli
 
-        time.sleep(3)
-        core._service_start()
+        venue_cli._cmd_deploy(args)
     elif action == "status":
         core._cmd_status(args)
         pid = core._service_pid()
@@ -656,9 +659,21 @@ def register_service_control_commands(sub: argparse._SubParsersAction) -> None:
     service_sub = service_p.add_subparsers(dest="service_action")
     for _act, _help in (
         ("start", "Start the agent-bridge daemon"),
+        (
+            "restart",
+            "Zero-downtime cutover to a fresh daemon generation (same behavior as `deploy`)",
+        ),
         ("stop", "Stop the agent-bridge daemon"),
-        ("restart", "Restart the agent-bridge daemon"),
         ("status", "Show daemon status, port, and PID"),
     ):
-        service_sub.add_parser(_act, help=_help)
+        action_p = service_sub.add_parser(_act, help=_help)
+        if _act == "restart":
+            # Same flags as `venue deploy` -- `restart` calls _cmd_deploy
+            # directly, via the shared registration helper so the two never
+            # drift apart. `--recover` is excluded: it's a deploy-only
+            # maintenance mode that exits without restarting anything, which
+            # would make `service restart --recover` silently no-op.
+            from . import venue_cli
+
+            venue_cli.add_deploy_cutover_flags(action_p, include_recover=False)
     service_p.set_defaults(func=_cmd_service)
