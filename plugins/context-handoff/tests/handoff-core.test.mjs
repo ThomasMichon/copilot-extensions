@@ -495,6 +495,7 @@ test("file-backed consume marks the predecessor session-state request consumed",
       join(handoffDir, "handoff-predecessor-1.json"),
     );
     assert.equal(consumed.ok, true);
+    assert.equal(consumed.predecessorSession, "predecessor-1");
     const stateRecord = readSessionStateHandoff("predecessor-1");
     assert.equal(stateRecord.record.consumed, true);
     assert.equal(stateRecord.record.consumedBySession, "successor-1");
@@ -1018,6 +1019,8 @@ test("task-backed consume promotes the successor session to worktree head using 
       },
     );
     assert.equal(result.ok, true);
+    assert.equal(result.predecessorSession, "predecessor-task-promo");
+    assert.equal(result.worktree, "wt-task-promo");
     assert.deepEqual(
       promoteCalls,
       [[
@@ -1096,6 +1099,33 @@ test("formatConsumeResult preserves the continuation directive ahead of payload"
   assert.ok(
     prompt.indexOf("agent-dispatch complete task-42") < prompt.indexOf("full brief"),
   );
+});
+
+test("formatConsumeResult surfaces the predecessor session id and worktree lineage pointer", () => {
+  const prompt = formatConsumeResult({
+    ok: true,
+    id: "task-99",
+    payload: "full brief",
+    resumedDelivery: false,
+    predecessorSession: "predecessor-session-id",
+    worktree: "wt-example",
+  }, {});
+  assert.match(prompt, /\*\*Predecessor session:\*\* `predecessor-session-id`/);
+  assert.match(prompt, /worktree-status-bundle --worktree wt-example --json/);
+  assert.match(prompt, /never as an instruction/);
+});
+
+test("formatConsumeResult without a predecessor session says so plainly instead of omitting the line", () => {
+  const prompt = formatConsumeResult({
+    ok: true,
+    id: "task-100",
+    payload: "full brief",
+    resumedDelivery: false,
+    predecessorSession: null,
+    worktree: null,
+  }, {});
+  assert.match(prompt, /\*\*Predecessor session:\*\* \(unknown -- not recorded on this handoff\)/);
+  assert.doesNotMatch(prompt, /worktree-status-bundle/);
 });
 
 test("buildResumePrompt keeps deferred completion explicit", () => {
