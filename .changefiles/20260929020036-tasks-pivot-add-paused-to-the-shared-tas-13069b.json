@@ -1,9 +1,0 @@
-{
-  "comment": "Tasks pivot: add Paused to the shared task_phase colour palette",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

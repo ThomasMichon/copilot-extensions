@@ -1,9 +1,0 @@
-{
-  "comment": "Retarget cmd_start/cmd_cell_start's foreground dispatch to the sibling SERVER venv when one is provisioned, with signal-forwarding (SIGTERM relay; SIGINT/Ctrl+Break rely on the OS's own inherited console/process-group fan-out) and live stdio passthrough.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "minor"
-    }
-  ]
-}

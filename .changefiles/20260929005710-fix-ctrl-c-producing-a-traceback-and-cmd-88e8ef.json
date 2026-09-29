@@ -1,9 +1,0 @@
-{
-  "comment": "Fix Ctrl+C producing a traceback (and cmd.exe's Terminate batch job prompt) instead of a clean exit outside the CPython 3.13 shutdown-crash workaround",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}
