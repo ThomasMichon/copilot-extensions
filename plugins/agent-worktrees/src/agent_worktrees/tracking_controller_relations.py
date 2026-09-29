@@ -7,7 +7,7 @@ with no behavior change, from ``tracking.py``.
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from .tracking import (
     _MAX_CONTROLLER_RELATIONS,
@@ -297,7 +297,19 @@ def _derive_initial_controller_relations(
             # `delegate_cli._caller_lookup_tokens` already applies when
             # reading this field, instead of letting the raw path reach
             # `_normalize_controller_ref` and trip its path-safety check.
-            bare_id = Path(parsed_caller.worktree_id).name
+            # Always parse with `PureWindowsPath`, never the platform-
+            # dependent `Path`/`PosixPath`: a legacy Windows-style path
+            # (backslash-separated) is a cross-machine value that can be
+            # read back on a Linux host, where plain `Path` treats
+            # backslash as an ordinary character and leaves the whole raw
+            # path unsplit -- confirmed live: this silently defeated the
+            # reduction below on any non-Windows reader, leaving the raw,
+            # non-path-safe string to reach `_normalize_controller_ref` and
+            # raise, which the caller then swallowed into an empty
+            # (0-relation) controller list. `PureWindowsPath` also accepts
+            # forward slashes, so it stays a safe superset for the
+            # already-POSIX-style raw paths this same branch has to cover.
+            bare_id = PureWindowsPath(parsed_caller.worktree_id).name
             if bare_id:
                 parsed_caller = ClaimRef(
                     worktree_id=bare_id,

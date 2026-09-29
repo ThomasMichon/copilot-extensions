@@ -1,0 +1,9 @@
+{
+  "comment": "Fix controller-relation raw-path folding to use PureWindowsPath (host-OS-independent), and repair a stale pr-merge test left patching a bypassed function after #4480's actor-flow refactor -- both were deterministically failing on Linux and blocking dev->main promotion for every plugin.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
