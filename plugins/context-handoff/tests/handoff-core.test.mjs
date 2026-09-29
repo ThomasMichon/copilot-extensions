@@ -1370,18 +1370,26 @@ test("triggerHandoff under the default (manual-only) mode never wires up automat
     waitMs: 120000,
   });
   assert.equal(result.ok, true);
-  // Neither live-cutover trigger point was ever invoked -- not the activity
-  // event agent-worktrees' resident monitor primarily watches for, not the
-  // agent-bridge ping, and -- critically -- not `noteHandoff` either: it
-  // shells to `agent-worktrees note-handoff`, which calls `open_handoff()`
-  // and creates a `pending_handoffs` entry the monitor can independently
-  // discover and claim via its OWN session-state-file fallback path, with
-  // no activity event required at all (the High-severity gap a Copilot
-  // review caught on PR #3041 -- gating only the activity event/bridge
-  // ping left this second path wide open). Only a single pickup-status
-  // check, no polling loop, no sleep.
-  assert.deepEqual(calls.map(([name]) => name), ["signals"]);
-  assert.equal(result.worktreeSignal.noted, false);
+  // `noteHandoff` (agent-worktrees `note-handoff`) now always fires -- this
+  // is head-tracking/lineage state ("manual" mode must not withhold it, per
+  // the mode redesign), not a live-cutover trigger. What manual mode still
+  // withholds is the actual cutover machinery: neither the activity event
+  // agent-worktrees' resident monitor primarily watches for, nor the
+  // agent-bridge ping, ever fire. And the note-handoff call itself carries
+  // `liveCutover: false` (see the 5th positional arg below), which is what
+  // now keeps the monitor's own spawn-eligibility gate closed for this
+  // entry -- not the entry's mere absence (the pre-this-change gap a
+  // Copilot review caught on PR #3041, before that field existed).
+  assert.deepEqual(calls.map(([name]) => name), ["note-handoff", "signals"]);
+  assert.deepEqual(calls[0], [
+    "note-handoff",
+    "C:\\repo",
+    "predecessor-1",
+    "handoff-predecessor-1",
+    "Parser follow-up",
+    false,
+  ]);
+  assert.equal(result.worktreeSignal.noted, true);
   assert.equal(result.worktreeSignal.activity.logged, false);
   assert.equal(result.bridge.attempted, false);
   assert.match(
@@ -1433,15 +1441,22 @@ test("triggerHandoff force=true arms live-cutover signaling even under manual-on
   assert.equal(result.worktreeSignal.noted, true);
   assert.equal(result.worktreeSignal.activity.logged, true);
   assert.equal(result.bridge.attempted, true);
-  assert.ok(calls.some(([name]) => name === "note-handoff"));
+  const noteCall = calls.find(([name]) => name === "note-handoff");
+  assert.ok(noteCall, "expected a note-handoff call");
+  assert.equal(noteCall.at(-1), true, "expected liveCutover armed (last arg true)");
   assert.ok(calls.some(([name]) => name === "activity"));
   assert.ok(calls.some(([name]) => name === "bridge"));
 });
 
-test("triggerHandoff omitting force preserves manual-only's exact prior behavior", async () => {
+test("triggerHandoff omitting force still notes the handoff (lineage tracking), but never arms live-cutover", async () => {
   // Regression guard for the PR #3041 fix this effort builds on top of --
-  // force defaults to false, so an ordinary call (mode omitted or
-  // manual-only, no force) must behave identically to before force existed.
+  // force defaults to false, so activity/bridge (the actual spawn+retire
+  // signals) must behave identically to before force existed. `noteHandoff`
+  // itself is now intentionally NOT part of that guarantee: it always
+  // fires regardless of mode (mode governs live-cutover arming, not whether
+  // handoff state gets recorded at all -- see the mode redesign this test
+  // was updated for), but always with `liveCutover: false` here, which is
+  // what keeps the monitor's own gate closed.
   const calls = [];
   const result = await triggerHandoff({
     promptText: "stored markdown",
@@ -1467,10 +1482,12 @@ test("triggerHandoff omitting force preserves manual-only's exact prior behavior
   });
   assert.equal(result.ok, true);
   assert.equal(result.automaticCutoverDisabled, true);
-  assert.equal(result.worktreeSignal.noted, false);
+  assert.equal(result.worktreeSignal.noted, true);
   assert.equal(result.worktreeSignal.activity.logged, false);
   assert.equal(result.bridge.attempted, false);
-  assert.deepEqual(calls, []);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], "note-handoff");
+  assert.equal(calls[0].at(-1), false, "expected liveCutover NOT armed (last arg false)");
 });
 
 test("storeHandoff never notes the worktree record itself (save_handoff_prompt must never arm pickup)", () => {

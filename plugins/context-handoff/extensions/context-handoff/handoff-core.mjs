@@ -2667,12 +2667,20 @@ export function buildResumePrompt(
 }
 
 // Mirror the stored handoff into the worktree's own record (best-effort).
-export function noteHandoffInRecord(cwd, sid, ref, title) {
+// `liveCutover` arms agent-worktrees' resident status-monitor to consider
+// this entry for an automatic spawn-and-retire cutover (see
+// SessionHandoff.live_cutover's own docstring on the Python side) --
+// recording the handoff at all (so a manually-consuming successor can later
+// be promoted to head via a matching --handoff-token, and so tooling can
+// see a handoff is in flight) must NOT by itself risk an unwanted auto
+// spawn, so this defaults to false and callers arm it explicitly.
+export function noteHandoffInRecord(cwd, sid, ref, title, liveCutover = false) {
   try {
     const argv = ["note-handoff"];
     if (ref) argv.push("--task", ref);
     if (title) argv.push("--title", title);
     if (sid) argv.push("--session-id", sid);
+    if (liveCutover) argv.push("--live-cutover");
     runCli("agent-worktrees", argv, { cwd, timeout: 5000 }); // marketplace-isolation: allow agent-worktrees-management
   } catch { /* history is advisory */ }
 }
@@ -3037,12 +3045,15 @@ export function storeHandoff({ promptText, sid, cwd, title, preferTask = true })
   // non-committal" step that must never arm pickup) and `trigger_handoff`
   // (the "arm pickup" step). Recording a handoff there creates a
   // `pending_handoffs` entry agent-worktrees' resident monitor can
-  // discover and claim on its own -- a live-cutover trigger, not merely
-  // advisory history (Copilot review finding on PR #3041: this used to
-  // run unconditionally here, so even `save_handoff_prompt` -- and a
-  // manual-only-mode `trigger_handoff` -- could still get auto-launched by
-  // the monitor through this exact path). Only `triggerHandoff()` records
-  // it now, and only when `mode: auto` is configured.
+  // discover and claim on its own (Copilot review finding on PR #3041:
+  // this used to run unconditionally here, so even `save_handoff_prompt`
+  // could get auto-launched by the monitor through this exact path). Only
+  // `triggerHandoff()` records it now, always with an explicit
+  // `live_cutover` flag: the entry itself is recorded for BOTH manual and
+  // auto mode (mode governs live-cutover arming, not whether handoff state
+  // gets tracked at all), but the monitor's own spawn-eligibility gate
+  // requires `live_cutover: true`, which is only ever passed when `mode:
+  // auto` (or an explicit `force`) is in effect.
   if (preferTask && agentDispatchAvailable()) {
     const task = dispatchHandoff(promptText, sid, cwd, title);
     if (task) {
@@ -3275,27 +3286,36 @@ export async function triggerHandoff(
   // mode, the default, never arms pickup at all, so there is nothing to
   // gate and no reason to add the sync's latency to this call).
   if (autoEnabled) await beforeArmPickup();
-  // `noteHandoff` (agent-worktrees `note-handoff`) calls `open_handoff()`,
-  // which creates a `pending_handoffs` entry agent-worktrees' resident
-  // monitor scans independently of the `handoff_requested` activity event
-  // below (a session-state-file fallback path lets it discover and claim a
-  // pending handoff with NO activity event at all) -- so this call is a
-  // live-cutover trigger point too, not merely advisory, and must be gated
-  // the same way (Copilot review finding on PR #3041: a "manual-only"
-  // handoff could otherwise still get auto-launched by the monitor through
-  // this exact path, defeating the entire opt-in gate). Now runs
-  // regardless of `justStored` -- `storeHandoff()` itself never notes it
-  // (see its own docstring), so this is the ONE place that ever does,
-  // whether the handoff was just stored fresh or recovered from a prior
-  // save.
-  if (autoEnabled) {
-    noteHandoff(cwd, sid, stored.id, stored.metadata?.title || title);
-  }
+  // `noteHandoff` (agent-worktrees `note-handoff`) always records this
+  // handoff in the worktree's own ledger now, regardless of mode -- this is
+  // the head-tracking/lineage state (a manually-consuming successor later
+  // promotes itself over the stale head via `link-succession`, independent
+  // of this ledger; see `promoteSuccessorHead`) that "manual" mode is
+  // explicitly NOT supposed to withhold (only "off" disables handoff-state
+  // management entirely, and this function is never reached under "off" --
+  // every caller gates on `requireManualHandoffsEnabled` first).
+  //
+  // What "manual" mode DOES still withhold is the *live-cutover arming*:
+  // `open_handoff()`'s `pending_handoffs` entry is independently scanned by
+  // agent-worktrees' resident status-monitor (a session-state-file fallback
+  // path lets it discover and claim a pending handoff with NO activity
+  // event at all -- Copilot review finding on PR #3041), so the entry's
+  // mere existence used to be conflated with "spawn a successor pane and
+  // retire the predecessor for it." That conflation is now resolved on the
+  // agent-worktrees side: `open_handoff`/`note-handoff` takes an explicit
+  // `live_cutover` flag (default false, safe), and the monitor's own
+  // spawn-eligibility gate (`_monitor_pending_handoff_request`) requires it
+  // to be true. So this call is unconditional, but `liveCutover` -- passed
+  // as `autoEnabled` -- is what actually decides whether the monitor may
+  // ever act on it.
+  noteHandoff(
+    cwd, sid, stored.id, stored.metadata?.title || title, autoEnabled,
+  );
   // Only "auto" mode emits the `handoff_requested` activity event
   // agent-worktrees' resident status-monitor watches for, or pings
   // agent-bridge -- both are how an automatic successor pane gets spawned.
   // Any other mode (the default, "manual-only") skips both: the handoff is
-  // still fully stored/seeded, but nothing wires up automatic pickup.
+  // still fully stored/seeded/noted, but nothing wires up automatic pickup.
   const activity = autoEnabled
     ? logActivity(
       cwd,
@@ -3341,7 +3361,12 @@ export async function triggerHandoff(
     // "signaled" when neither live-cutover trigger point ever ran).
     automaticCutoverDisabled: !autoEnabled,
     worktreeSignal: {
-      noted: autoEnabled,
+      // `noted` now means exactly what it says: the handoff was recorded in
+      // the worktree's own ledger. That always happens (see the call
+      // above); it is `liveCutoverArmed` -- not `noted` -- that reflects
+      // whether the monitor may actually act on it.
+      noted: true,
+      liveCutoverArmed: autoEnabled,
       activity,
     },
     bridge,

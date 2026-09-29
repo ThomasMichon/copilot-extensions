@@ -100,6 +100,7 @@ def open_handoff(
     *,
     opened_at: str | None = None,
     save: bool = True,
+    live_cutover: bool = False,
 ) -> tracking.SessionHandoff:
     tracking = _tracking()
     if not token:
@@ -131,6 +132,7 @@ def open_handoff(
         predecessor=predecessor_id,
         state="pending",
         opened_at=opened_at or tracking._now_iso(),
+        live_cutover=live_cutover,
     )
     record.handoffs.append(handoff)
     if predecessor.state == "active":

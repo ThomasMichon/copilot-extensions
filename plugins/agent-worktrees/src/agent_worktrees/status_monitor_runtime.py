@@ -944,7 +944,7 @@ def _monitor_pending_handoff_request(
     for handoff in reversed(record.pending_handoffs):
         token = str(getattr(handoff, "token", "") or "").strip()
         confirmed = getattr(handoff, "candidate", None) or getattr(handoff, "successor", None)
-        if not token or confirmed or token in already_attempted:
+        if not token or confirmed or token in already_attempted or not handoff.live_cutover:
             continue
         request_event = requested.get(token, {})
         predecessor_session = str(

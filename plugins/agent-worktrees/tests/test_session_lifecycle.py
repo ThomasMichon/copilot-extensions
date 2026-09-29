@@ -414,6 +414,31 @@ class TestExactHandoffLedger:
             "linked", "pending"
         ]
 
+    def test_live_cutover_defaults_false_and_round_trips_through_save_and_load(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        """A handoff opened without ``live_cutover=True`` (the safe default --
+        recorded for lineage/tracking only) must never silently become
+        spawn-eligible, including across a save/reload cycle. One opened
+        WITH it must round-trip that fact durably (see
+        ``status_monitor_runtime._monitor_pending_handoff_request``, which
+        gates the resident monitor's automatic spawn+retire on exactly this
+        field)."""
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.open_handoff(rec, "old", "token-manual")
+        assert rec.handoffs[0].live_cutover is False
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.handoffs[0].live_cutover is False
+
+        tracking.register_session("wt-1", "new2")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.open_handoff(rec, "new2", "token-armed", live_cutover=True)
+        assert rec.handoffs[1].live_cutover is True
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.handoffs[1].live_cutover is True
+
     def test_linked_token_is_idempotent_for_same_successor(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):

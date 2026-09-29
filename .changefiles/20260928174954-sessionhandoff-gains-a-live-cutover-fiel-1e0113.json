@@ -1,0 +1,9 @@
+{
+  "comment": "SessionHandoff gains a live_cutover field (default false, safe); the resident status-monitor's automatic spawn-and-retire cutover now requires it explicitly, rather than treating a pending_handoffs entry's mere existence as the spawn gate. note-handoff gains --live-cutover to set it.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}

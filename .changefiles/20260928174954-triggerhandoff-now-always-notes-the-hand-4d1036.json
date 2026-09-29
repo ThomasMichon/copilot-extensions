@@ -1,0 +1,9 @@
+{
+  "comment": "triggerHandoff now always notes the handoff in the worktree's own record (any mode other than off), so head-tracking/lineage marches forward under the default manual-only mode; only --live-cutover (armed exclusively under mode:auto or an explicit force) still gates the resident monitor's automatic spawn-and-retire cutover. 'manual' vs 'auto' now governs cutover-arming only, matching the intended design -- previously it also silently withheld the ledger entry itself.",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "minor"
+    }
+  ]
+}
