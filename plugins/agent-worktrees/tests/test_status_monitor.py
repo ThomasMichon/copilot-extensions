@@ -1300,6 +1300,7 @@ def _wire_monitor_handoff_session(tmp_path, monkeypatch):
                     predecessor="session-1",
                     candidate=None,
                     successor=None,
+                    live_cutover=True,
                 )
             ],
             pending_handoffs=[
@@ -1308,6 +1309,7 @@ def _wire_monitor_handoff_session(tmp_path, monkeypatch):
                     predecessor="session-1",
                     candidate=None,
                     successor=None,
+                    live_cutover=True,
                 )
             ],
         ),
@@ -1364,6 +1366,7 @@ def test_monitor_pending_handoff_request_returns_actionable_request(tmp_path, mo
                 predecessor="session-1",
                 candidate=None,
                 successor=None,
+                live_cutover=True,
             )
         ],
     )
@@ -1379,6 +1382,75 @@ def test_monitor_pending_handoff_request_returns_actionable_request(tmp_path, mo
         "storage": "file",
         "claim_path": str(tmp_path / "status-monitor-handoffs.d" / "a" / "handoff-1.json"),
     }
+
+
+def test_monitor_pending_handoff_request_ignores_entry_without_live_cutover_armed(
+    tmp_path, monkeypatch,
+):
+    """A handoff recorded purely for lineage tracking (e.g. context-handoff's
+    manual-mode consume backstop, or any other caller that records a handoff
+    without intending an automatic spawn) must never be treated as an
+    auto-spawn candidate merely because the entry exists. This is the
+    replacement for PR #3041's original "existence is the gate" fix -- see
+    SessionHandoff.live_cutover's own docstring."""
+    monkeypatch.delenv("AGENT_WORKTREES_STATUS_MONITOR", raising=False)
+    monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
+
+    def read_events(**kwargs):
+        event = kwargs.get("event")
+        if event == "handoff_requested":
+            return [
+                {
+                    "handoff_id": "handoff-1",
+                    "session_id": "session-1",
+                    "session_state": r"C:\state\handoff-request.json",
+                    "storage": "file",
+                }
+            ]
+        return []
+
+    monkeypatch.setattr(m.activity, "read_events", read_events)
+
+    def _fail_if_claimed(*a, **k):
+        raise AssertionError(
+            "must never attempt a claim for a handoff not armed for live-cutover"
+        )
+
+    monkeypatch.setattr(m, "_monitor_claim_handoff_cutover", _fail_if_claimed)
+    monkeypatch.setattr(
+        m,
+        "_monitor_read_session_state_handoff",
+        lambda path: {
+            "handoffId": "handoff-1",
+            "seed": "HANDOFF_SEED",
+            "worktree": "a",
+            "storage": "file",
+            "consumed": False,
+        },
+    )
+    record = types.SimpleNamespace(
+        worktree_id="a",
+        handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1",
+                predecessor="session-1",
+                candidate=None,
+                successor=None,
+                live_cutover=False,
+            )
+        ],
+        pending_handoffs=[
+            types.SimpleNamespace(
+                token="handoff-1",
+                predecessor="session-1",
+                candidate=None,
+                successor=None,
+                live_cutover=False,
+            )
+        ],
+    )
+
+    assert m._monitor_pending_handoff_request(record) is None
 
 
 def test_monitor_pending_handoff_request_skips_already_claimed(tmp_path, monkeypatch):
@@ -1425,6 +1497,7 @@ def test_monitor_pending_handoff_request_skips_already_claimed(tmp_path, monkeyp
                 predecessor="session-1",
                 candidate=None,
                 successor=None,
+                live_cutover=True,
             )
         ],
     )

@@ -240,39 +240,44 @@ Its contract is:
 1. drop the full markdown in the current session's session-state folder,
 2. **always:** durably store it (reusing the existing agent-dispatch task
    path when available, otherwise a worktree-state file),
-3. **only when `.context-handoff/config.yaml`'s `mode` is `auto`** (the
-   default is `manual-only` -- see "Mode gate" below): note it in the
-   worktree's own record via `agent-worktrees note-handoff` <!-- marketplace-isolation: allow agent-worktrees-management --> (this creates a
-   `pending_handoffs` entry agent-worktrees' resident monitor can discover
-   and claim independently -- a live-cutover trigger point, not merely
-   advisory, so it is gated the same as the two below), refresh
-   worktree-visible PENDING-HANDOFF state when `agent-worktrees` is
+3. **always** (any mode other than `off`): note it in the worktree's own
+   record via `agent-worktrees note-handoff` <!-- marketplace-isolation: allow agent-worktrees-management --> (this creates a
+   `pending_handoffs` entry -- lineage/tracking state, so a
+   manually-consuming successor can still be promoted to the worktree's
+   head via `link-succession` regardless of mode),
+4. **only when `.context-handoff/config.yaml`'s `mode` is `auto`** (the
+   default is `manual-only` -- see "Mode gate" below): pass
+   `--live-cutover` on that same `note-handoff` call -- agent-worktrees'
+   resident monitor requires this exact flag on the entry (never merely
+   its existence) before it will discover and claim it on its own --
+   refresh worktree-visible PENDING-HANDOFF state when `agent-worktrees` is
    available, and best-effort ping `agent-bridge` if present,
-4. wait up to 30 seconds for the cutover itself to start -- not for the
+5. wait up to 30 seconds for the cutover itself to start -- not for the
    successor to fully finish cold-starting and consume the handoff (a real
    Copilot cold-start routinely takes 40-90+ seconds, and isn't worth
    blocking on) -- **skipped entirely under `manual-only`**, since nothing
    will spawn automatically,
-5. check for any pickup signal, including the earlier, cheaper "spawn
+6. check for any pickup signal, including the earlier, cheaper "spawn
    acknowledged" marker,
-6. print manual instructions only if nothing at all happened; print a
+7. print manual instructions only if nothing at all happened; print a
    distinct "already under way" note when a spawn is merely in flight, or a
    distinct "automatic cutover is disabled" note under `manual-only`,
-7. always end with the short handoff prompt/seed.
+8. always end with the short handoff prompt/seed.
 
 ## Mode gate
 
 `.context-handoff/config.yaml`'s `mode` defaults to `manual-only`: soft/hard
 context-pressure warnings and nudges fire under this default (any mode other
-than `off`). The force-tier auto-trigger and step 3 above (the three
-live-cutover triggers -- the worktree-record note, worktree-visible
-pending-handoff state, and the agent-bridge ping) remain opt-in, requiring
-`mode: auto` in that file (repo-level) or `~/.context-handoff/config.yaml`
-(user-level). Under the default, `trigger_handoff` still fully composes,
-stores, and seeds the handoff -- it just never auto-forces one or wires up
-automatic pickup, so the operator/agent must trigger and consume it
-manually. Do not assume live cutover happens unless you have confirmed
-`mode: auto` is set.
+than `off`), and so does step 3 above (the worktree-record note itself --
+this is what lets head-tracking march forward even under `manual-only`). The
+force-tier auto-trigger and step 4 above (arming `--live-cutover`: the
+worktree-visible pending-handoff state and the agent-bridge ping) remain
+opt-in, requiring `mode: auto` in that file (repo-level) or
+`~/.context-handoff/config.yaml` (user-level). Under the default,
+`trigger_handoff` still fully composes, stores, seeds, and notes the
+handoff -- it just never auto-forces one or arms automatic pickup, so the
+operator/agent must trigger and consume it manually. Do not assume live
+cutover happens unless you have confirmed `mode: auto` is set.
 
 ## Resume flow
 
@@ -494,3 +499,27 @@ Compose the appropriate shape and pass it to `save_handoff_prompt` as
   carry each forward in the handoff's **Outstanding Background Flows &
   External State** section as either resumable (state how) or an explicit
   open item -- write "none" only when genuinely none exist.
+- **Scope this to the worktree's full outbound claim graph, not just this
+  turn's own actions.** Sessions progress a worktree forward and never look
+  back -- a successor inherits everything the worktree (and everything it
+  spawned, recursively, across every prior session) still has open, not only
+  what the immediately-preceding session itself did. Before writing "none" or
+  scoping an item out as "not this handoff's," verify with the tool, not
+  memory (exact `argv[0]` per the `agent-worktrees:tracing-claimant-graphs`
+  skill's convention):
+  1. `<agent-worktrees catalog argv[0]> claims show --json` lists this
+     worktree's own outbound claims (child worktrees, sessions, PRs).
+  2. **Recurse explicitly**: for every outbound `worktree` claim, run
+     `claims show --json` again from *that* child project/worktree, repeating
+     down every level a prior session spawned -- not just one hop. A
+     repo-wide `claims find pr --repo <owner/repo> --live` sweep is a useful
+     shortcut but no substitute: `--live` only confirms the PR's remote
+     state, never that the claiming worktree/session is alive.
+  3. For each open PR/claim found, apply that skill's own two-hop recipe --
+     `claims <id> --json` for the `owner_ref`, then `claimant-liveness
+     "<owner_ref>" --json` -- before concluding. A claim tracing to a
+     currently-live worktree/session is fine to name and leave (don't adopt
+     another live session's PR); one whose owner reports `alive: false`, or
+     that has no owner at all (e.g. an anchor-repo session with no worktree
+     to hold it), is this worktree's own unresolved obligation -- name it
+     explicitly, never drop it as "someone else's."

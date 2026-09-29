@@ -160,36 +160,41 @@ It always:
 1. drops the composed handoff markdown in the current session's session-state
    folder,
 2. durably stores it (`agent-dispatch` task-backed storage when available,
-   otherwise a worktree-state file).
+   otherwise a worktree-state file),
+3. notes it in the worktree's own record via `agent-worktrees note-handoff`
+   (this creates a `pending_handoffs` entry -- lineage/tracking state, so a
+   manually-consuming successor can later be promoted to head via
+   `link-succession` regardless of mode). This step runs under **both**
+   `manual-only` and `auto` -- only `mode: off` skips it entirely (see
+   `note-handoff --live-cutover` below for the piece that's actually
+   mode-gated).
 
 **Only when `.context-handoff/config.yaml`'s `mode` is `auto`** (the default
-is `manual-only`) does it additionally:
+is `manual-only`) does it additionally arm **live-cutover**:
 
-3. note it in the worktree's own record via `agent-worktrees note-handoff`
-   (this creates a `pending_handoffs` entry agent-worktrees' resident
-   monitor can discover and claim on its own -- a live-cutover trigger
-   point, not merely advisory, so it is gated identically to the two
-   below), refresh worktree-visible PENDING-HANDOFF state -- the signal
-   agent-worktrees' resident status-monitor watches for -- when
-   `agent-worktrees` is available,
-4. best-effort ping `agent-bridge` if present,
-5. wait up to 30 seconds for the CUTOVER to start -- not for the successor to
+4. pass `--live-cutover` to the same `note-handoff` call from step 3 --
+   agent-worktrees' resident status-monitor requires this exact flag on the
+   entry (not merely the entry's existence) before it will ever discover and
+   claim it on its own; refresh worktree-visible PENDING-HANDOFF state -- the
+   signal the monitor watches for -- when `agent-worktrees` is available,
+5. best-effort ping `agent-bridge` if present,
+6. wait up to 30 seconds for the CUTOVER to start -- not for the successor to
    fully finish cold-starting and consume the handoff, which legitimately
    takes longer (40-90+ seconds) and isn't worth blocking on.
 
 Regardless of mode, it always:
 
-6. check once whether the session-state marker was consumed, the worktree
+7. check once whether the session-state marker was consumed, the worktree
    recorded a successor, the dispatch task moved out of `proposed` /
    `queued`, or (the earlier, cheaper signal) the resident status-monitor
    has already logged a `handoff_cutover_spawn` for this token -- under
-   `manual-only` this is a single check with no polling wait (steps 3-5 are
+   `manual-only` this is a single check with no polling wait (steps 4-6 are
    the only ones actually skipped),
-7. print manual continuation instructions -- distinctly worded when
+8. print manual continuation instructions -- distinctly worded when
    automatic cutover is simply disabled by `mode` versus when it was
    attempted and nothing happened, or a distinct "already under way" note if
    a spawn is merely in flight,
-8. always end by printing the final short handoff prompt/seed.
+9. always end by printing the final short handoff prompt/seed.
 
 That final seed is the "if your download doesn't start, click here" fallback:
 it gives a human or control system enough to continue even if none of the
@@ -747,8 +752,12 @@ warnings above fire under `manual-only` too -- only the force tier's own
 automatic handoff and any live pickup signaling wait for `mode: auto`.
 `save_handoff_prompt`,
 `trigger_handoff`, and `consume_handoff` all keep working under
-`manual-only` -- `trigger_handoff` still stores/seeds the handoff and prints
-the manual pickup instructions, it just never wires up automatic pickup.
+`manual-only` -- `trigger_handoff` still stores/seeds/notes the handoff and
+prints the manual pickup instructions, it just never arms the resident
+monitor's live-cutover (the `note-handoff` ledger entry itself is still
+recorded under `manual-only`; only its `--live-cutover` flag is `mode: auto`
+gated -- this is what lets a manually-consumed successor still be promoted
+to the worktree's head regardless of mode).
 `mode: off` disables both automatic behavior and the extension/CLI handoff
 entry points for that repo entirely (only the last-resort manual file write
 remains reachable, since it depends on nothing this plugin owns).

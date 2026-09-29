@@ -369,7 +369,18 @@ integers allocated under the record lock determine ordering:
 - **`handoffs[]` / `handoff_counter`** — an incrementing ledger of handoff
   intents. Each entry has a stable external token, one predecessor, and an
   eventual exact successor. A new session can claim only the token it was given;
-  it never adopts "the newest pending handoff."
+  it never adopts "the newest pending handoff." Each entry also carries
+  **`live_cutover`** (default `False`): whether the opener intends the resident
+  status-monitor to auto-spawn a successor pane and retire the predecessor for
+  it. Recording a handoff at all (so lineage is trackable, and a
+  manually-consuming successor can later be promoted to head via
+  `link-succession`) must never by itself risk an unwanted automatic spawn — the
+  monitor's own spawn-eligibility gate
+  (`status_monitor_runtime._monitor_pending_handoff_request`) requires this
+  field to be `True`, not merely the entry's existence (context-handoff's
+  `mode: manual-only` vs `auto` maps directly to this flag, not to whether the
+  entry gets recorded at all — see the `context-handoff` plugin's own `triggerHandoff`
+  for the caller side).
 - **`head_transitions[]` / `lifecycle_revision`** — the authoritative,
   replayable changes to the current session. `head_session` and `head_revision`
   are materialized caches repaired from the highest valid transition revision.
