@@ -7,18 +7,18 @@ from ssh_manager import forward_keeper as fk
 
 def test_keeper_store_state_and_stop(tmp_path, monkeypatch):
     store = fk.KeeperStore(tmp_path)
-    alive = {123: True}
+    alive = {123: True, 456: True}
     killed = []
     monkeypatch.setattr(fk, "pid_alive", lambda pid: alive.get(pid, False))
     monkeypatch.setattr(fk, "_terminate_pid", lambda pid: killed.append(pid))
 
-    store.write("target:one", {"pid": 123, "mux": "wt-x"})
+    store.write("target:one", {"pid": 123, "mux": "wt-x", "child_pids": [456]})
 
     assert store.state_path("target:one").name == "target-one.json"
-    assert store.read("target:one") == {"pid": 123, "mux": "wt-x"}
+    assert store.read("target:one") == {"pid": 123, "mux": "wt-x", "child_pids": [456]}
     assert store.alive("target:one") is True
     assert store.stop("target:one") is True
-    assert killed == [123]
+    assert killed == [123, 456]
     assert store.read("target:one") is None
 
 
@@ -57,6 +57,19 @@ def test_spawn_keeper_detaches_and_returns_state():
     assert seen["kwargs"]["creationflags"] == 99
 
 
+def test_keeper_store_reaps_child_pids_when_keeper_pid_is_gone(tmp_path, monkeypatch):
+    store = fk.KeeperStore(tmp_path)
+    alive = {456: True}
+    killed = []
+    monkeypatch.setattr(fk, "pid_alive", lambda pid: alive.get(pid, False))
+    monkeypatch.setattr(fk, "_terminate_pid", lambda pid: killed.append(pid))
+
+    store.write("target:one", {"pid": 123, "child_pids": [456]})
+
+    assert store.stop("target:one") is True
+    assert killed == [456]
+
+
 def test_run_supervised_loop_waits_for_startup_then_exits_when_session_gone(monkeypatch):
     events = []
     alive = iter([False, True, True, False])
@@ -82,7 +95,7 @@ def test_run_supervised_loop_waits_for_startup_then_exits_when_session_gone(monk
     ))
 
     assert rc == 0
-    assert events[0:2] == ["write", "start"]
+    assert events[0:3] == ["write", "start", "write"]
     assert "stop" in events and events[-1] == "remove"
     assert ("sleep", 5.0) in events
     assert ("sleep", 10.0) in events
@@ -123,4 +136,4 @@ def test_run_supervised_loop_exits_after_startup_grace(monkeypatch):
     ))
 
     assert rc == 0
-    assert events == ["write", "start", "stop", "remove"]
+    assert events == ["write", "start", "write", "stop", "remove"]

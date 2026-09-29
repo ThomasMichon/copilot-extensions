@@ -96,6 +96,15 @@ class SupervisedRelayForward:
         """Whether the supervised ``ssh -N -R`` process is currently running."""
         return self._proc is not None and self._proc.returncode is None
 
+    @property
+    def process_pid(self) -> int | None:
+        """The current ``ssh -N -R`` child pid, when one is live."""
+        proc = self._proc
+        if proc is None or proc.returncode is not None:
+            return None
+        pid = getattr(proc, "pid", None)
+        return pid if isinstance(pid, int) and pid > 0 else None
+
     def _resolve_host_port(self) -> int:
         """Resolve the host-side ``-R`` target port.
 

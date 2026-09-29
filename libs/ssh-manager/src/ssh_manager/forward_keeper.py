@@ -84,15 +84,13 @@ class KeeperStore:
         state = self.read(key)
         if not state:
             return False
-        try:
-            pid = int(state.get("pid") or 0)
-        except (TypeError, ValueError):
-            pid = 0
-        alive = pid_alive(pid) if pid > 0 else False
-        if alive:
-            _terminate_pid(pid)
+        live = False
+        for pid in _state_pids(state):
+            if pid_alive(pid):
+                live = True
+                _terminate_pid(pid)
         self.remove(key)
-        return alive
+        return live
 
 
 def spawn_keeper(
@@ -129,6 +127,7 @@ async def run_supervised_loop(
     try:
         for forward in forwards:
             await forward.start()
+        write_state()
         startup_deadline = asyncio.get_running_loop().time() + max(0.0, startup_grace)
         while True:
             if await asyncio.to_thread(session_alive):
@@ -144,3 +143,18 @@ async def run_supervised_loop(
         for forward in reversed(forwards):
             await forward.stop()
         remove_state()
+
+
+def _state_pids(state: dict[str, Any]) -> list[int]:
+    pids: list[int] = []
+    child_values = state.get("child_pids")
+    if not isinstance(child_values, list):
+        child_values = []
+    for value in [state.get("pid"), *child_values]:
+        try:
+            pid = int(value or 0)
+        except (TypeError, ValueError):
+            continue
+        if pid > 0 and pid not in pids:
+            pids.append(pid)
+    return pids

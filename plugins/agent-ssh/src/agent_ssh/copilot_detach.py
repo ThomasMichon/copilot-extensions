@@ -170,6 +170,23 @@ def stop_keeper(target: str) -> bool:
     return _STORE.stop(_state_key(target))
 
 
+def _keeper_state(
+    target: str, venue_port: int, mux: str, forwards: list[SupervisedRelayForward] | None = None,
+) -> dict[str, Any]:
+    child_pids = [
+        pid
+        for pid in (forward.process_pid for forward in (forwards or []))
+        if isinstance(pid, int) and pid > 0
+    ]
+    return {
+        "pid": os.getpid(),
+        "target": target,
+        "venue_port": int(venue_port),
+        "mux": mux,
+        "child_pids": child_pids,
+    }
+
+
 def ensure_keeper(target: str, *, venue_port: int, mux: str) -> dict[str, Any]:
     state = read_keeper_state(target)
     if (
@@ -315,12 +332,12 @@ async def _run_forward_keeper(args: argparse.Namespace) -> int:
         session_alive=lambda: _mux_exists(ssh_config, args.mux),
         write_state=lambda: _STORE.write(
             _state_key(args.target),
-            {
-                "pid": os.getpid(),
-                "target": args.target,
-                "venue_port": int(args.venue_port),
-                "mux": args.mux,
-            },
+            _keeper_state(
+                args.target,
+                int(args.venue_port),
+                args.mux,
+                forwards,
+            ),
         ),
         remove_state=lambda: _STORE.remove(_state_key(args.target)),
         probe_interval=float(args.probe_interval),

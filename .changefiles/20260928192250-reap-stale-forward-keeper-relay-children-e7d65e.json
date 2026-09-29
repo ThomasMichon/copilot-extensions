@@ -1,0 +1,9 @@
+{
+  "comment": "Reap stale forward-keeper relay children",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}
