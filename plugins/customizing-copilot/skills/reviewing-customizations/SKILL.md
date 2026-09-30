@@ -227,6 +227,33 @@ repo and out of this repo's own scope -- see Phase 5); refreshing installed
 plugin payloads is similarly the caller's job, via an optional `refresh`
 callback run once before the pass (never retried mid-pass).
 
+### Worktree-scoped local cache -- the consent-free, permissionless read path
+
+`sync`/`scan`/`run_sync_pass()` above mutate the checked-in projection and
+its lock -- privileged, PR-gated, consent-gated by design (see Phase 5).
+`instruction_projections.render_local_cache(repo_root, discover_sources)` is
+a deliberately **un**privileged sibling: it renders each enabled source's
+*current* projection into a gitignored `<sourceId>.local.instructions.md`
+file next to its checked-in destination
+(`local_sibling_destination()` computes the path) -- no consent check, no
+mutation of any checked-in file, lock, or git history. It *does* hold its
+own dedicated lock (`_local_cache_lock`, separate from `sync`'s own) so
+concurrent callers for the same repository can't interleave their
+render/write/cleanup passes -- distinct from the checked-in sync's lock in
+purpose and lifetime. A caller must handle contention: a locked-out call
+returns a blocking `projection-local-cache-lock` finding and refreshes
+nothing at all, rather than assuming every call updates the cache: retry
+later, or treat it as a benign no-op if this call was only ever a
+best-effort refresh. `discover_sources` is a callable, resolved only after
+the lock is acquired -- never a precomputed list -- so no call can act on a
+source set a more recent call has already superseded. See
+`docs/patterns/worktree-scoped-dynamic-guidance.md`: any session, regardless
+of push rights or scheduled-worker opt-in, can always see a fresh render of
+what's currently installed without a privileged sync. Call it
+unconditionally -- worktree create/resume, `sessionStart`, or any read path --
+since a failure on one source never blocks another and nothing it does
+mutates a checked-in file or git history.
+
 The CLI (`main()`/`__main__`) is the actual consent-gated scheduled-worker
 surface: it calls `projection_reflect_consent.load_consent()` first and
 refuses to run at all -- no mutation, no trust decision made -- without this

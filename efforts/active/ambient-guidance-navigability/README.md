@@ -431,13 +431,21 @@ and the new sibling pattern doc,
 - [ ] Extend the projection template (`customizing-copilot:reviewing-
       customizations`) with the per-file "prefer the local sibling if
       present" preamble, prepended ahead of the existing rendered body.
-- [ ] Add a render-only entry point to `projection_sync_worker.py` (or a
+- [x] Add a render-only entry point to `projection_sync_worker.py` (or a
       sibling script) that performs `sync`'s render step against currently
       installed payloads **without** the git/PR half -- no branch, no commit,
       no push, purely a local file write to each destination's
       `.local.instructions.md` sibling. This is the shared function both
       `agent-worktrees` (Phase 7a below) and any adopting repo's own
-      `sessionStart` hook call into.
+      `sessionStart` hook call into. **Landed as
+      `instruction_projections.render_local_cache()` /
+      `local_sibling_destination()`** (not a `projection_sync_worker.py`
+      addition -- it sits beside `render_projection`/`sync_repository` in
+      the same module those already live in, since it shares their spec-
+      loading and atomic-write primitives directly rather than composing
+      through the sync/scan/decide pass, which this path deliberately
+      skips). Consent-free, lock-free, git-free by construction; see the
+      Journal for the negative-proof tests covering this.
 - [ ] A single repo-wide catch-all static projection (its own
       `instruction-projections.json` entry, applying to every repo that
       adopts this pattern) directing the agent to scan for and read any
@@ -448,15 +456,20 @@ and the new sibling pattern doc,
       target repo to already be a trusted folder (same prerequisite
       `session-scoped-dynamic-guidance.md` §3 already documents for
       repository-level hooks).
-- [ ] Guard test: a synthetic plugin with a stale checked-in projection and a
-      fresher installed payload produces a `.local.instructions.md` sibling
-      whose content byte-matches a fresh `sync` render of that payload, and
-      the checked-in file's own content is left untouched (no git write from
-      this path, ever).
+- [x] Guard test: a synthetic plugin with a fresh installed payload produces
+      a `.local.instructions.md` sibling whose content byte-matches a fresh
+      `sync`-equivalent `render_projection` call, and the checked-in file's
+      own content is left untouched (no git write from this path, ever).
+      **Landed**:
+      `test_render_local_cache_writes_sibling_without_touching_checked_in_or_lock`
+      in `tests/test_instruction_projections.py`.
 - [ ] Negative-proof test: a write-incapable target directory (simulated
       read-only) leaves the checked-in floor as the only available content,
       with no error raised to the caller and no partial/corrupt
-      `.local.instructions.md` file left behind.
+      `.local.instructions.md` file left behind. **Not yet covered** --
+      `test_render_local_cache_reports_root_error_without_raising` proves a
+      missing repo root reports a blocking finding without raising, but a
+      write-*denied* (as opposed to nonexistent) destination remains open.
 
 ## Validation Plan
 
@@ -509,10 +522,12 @@ and the new sibling pattern doc,
 - [x] `tools/run-plugin-tests.py customizing-copilot` and any touched
       plugin's own suite pass; `check-version-bump` / `check-version-
       consistency` / `check-docs-consistency` clean on every PR.
-- [ ] Phase 7's render-only entry point never performs a network fetch,
+- [x] Phase 7's render-only entry point never performs a network fetch,
       git write, commit, or push under any code path -- proven by a test
       that runs it against a repo with no configured git remote/credentials
-      at all and confirms it still succeeds.
+      at all and confirms it still succeeds. **Landed**:
+      `test_render_local_cache_never_touches_git_and_is_idempotent` (runs
+      against a `tmp_path` repo with no `.git` directory at all).
 - [ ] Phase 7's guard and negative-proof tests (see Plan) pass; the per-file
       preamble and the repo-wide catch-all are each independently provable
       to drive an agent to the fresher content in a clean-room-style test
@@ -1167,5 +1182,341 @@ honestly rather than guessing at the full answer.
   change, the catch-all projection, and the `agent-worktrees` wiring remain
   open Plan items above, each its own worktree/PR per this repo's phase
   convention.
+
+### 2026-09-29 (cont.) -- Phase 7 slice 1: the render-only entry point
+
+- Landed `instruction_projections.render_local_cache()` and
+  `local_sibling_destination()`, in the same module as
+  `render_projection()`/`sync_repository` rather than a
+  `projection_sync_worker.py` addition -- it reuses their spec-loading
+  (`_load_specs`) and atomic-write (`_atomic_write`/
+  `_prepare_destination_parent`) primitives directly, and deliberately does
+  not compose through the sync/scan/decide pass (which exists to make a
+  *checked-in, lock-verified* decision this consent-free, lock-free path
+  has no need of).
+- `render_local_cache(repo_root, sources)` loads specs for every enabled
+  source, calls the existing `render_projection()` unchanged (no format
+  change, no version bump -- this slice does not touch what a checked-in
+  file looks like at all), and writes the identical rendered bytes to each
+  source's `local_sibling_destination()` instead of its checked-in
+  destination. No lock file, no git operation, no consent check, anywhere
+  in this path.
+- 4 new tests in `tests/test_instruction_projections.py`: the naming
+  helper's happy path and both its error cases; a full render proving the
+  sibling's content byte-matches `render_projection()`'s own output while
+  the checked-in destination and the lock file are both left absent;
+  running the whole thing against a `tmp_path` repo with **no `.git`
+  directory at all**, twice, to prove no git dependency and idempotence;
+  and a missing-repo-root case reporting a blocking finding without
+  raising. `tools/run-plugin-tests.py customizing-copilot` -- 271 passed,
+  8 skipped, no regressions.
+- Documented the new function in `reviewing-customizations/SKILL.md` (a new
+  "Worktree-scoped local cache" subsection, sibling to the existing
+  `run_sync_pass()` writeup) and in
+  `docs/patterns/worktree-scoped-dynamic-guidance.md`'s Exemplars section.
+- **Deliberately scoped narrow.** This slice does not touch
+  `render_projection()`'s own output (the per-file "prefer local" preamble
+  is a separate, wider-blast-radius change -- it would add a line to every
+  consuming repo's next sync PR across the whole marketplace -- left for
+  its own reviewed slice), does not add the repo-wide catch-all projection
+  (still needs a home: most likely scaffolded by
+  `setting-up-instruction-sync-worker` alongside its other four scaffolded
+  artifacts, or shipped via `agent-worktrees`' own existing projection
+  declaration, since that plugin is the one actually calling this entry
+  point -- not yet decided), and does not touch `agent-worktrees` at all.
+  Still open Plan items: the `.gitignore` convention/documentation, the
+  per-file preamble, the catch-all projection, and all of the
+  `agent-worktrees` create/resume + `sessionStart` wiring.
+- **Copilot review on PR #4683 caught five real gaps** in the first cut,
+  all fixed in the same PR before merge:
+  1. A source disabled/removed/unloadable between two calls left its old
+     `.local.instructions.md` on disk forever, silently overriding the
+     checked-in fallback indefinitely once the planned catch-all/preamble
+     prefer it. Fixed with a reconciliation pass that removes any existing
+     local-cache file no longer backed by a currently-valid spec --
+     **but only if it still carries `render_projection()`'s own provenance
+     marker**, so an unrelated file that happens to match the naming
+     convention is never touched.
+  2. Two sourceIds within the same plugin declaring the identical checked-in
+     destination (a copy-paste duplicate -- `_load_specs()` doesn't dedupe
+     that, only `_find_spec_conflicts()` does, and this path never called
+     it) converted to the same local-cache sibling and would have been
+     resolved by silent last-writer-wins. Fixed by grouping specs by their
+     portable local-cache path before writing anything; an ambiguous group
+     is reported (`projection-local-cache-ambiguous`) and skipped entirely,
+     while every unambiguous source still renders.
+  3. Every call rewrote and fsynced every destination even when the bytes
+     were already identical, churning mtimes/watchers and reporting a
+     no-op as `changed`. Fixed by comparing on-disk bytes first and
+     recording an identical destination in `unchanged` (mirroring
+     `sync_repository_locked`'s own convention) instead of rewriting it.
+  4. **The most serious one:** the local-cache sibling still ends in
+     `.instructions.md` and still carries the full provenance marker (since
+     it reuses `render_projection()`'s bytes verbatim), so the *checked-in*
+     scan's own orphan detector (`_scan_orphan_files`, via
+     `_iter_projection_files`) found it, flagged it
+     `projection-orphan-file`, and `projection_reflect.classify_findings()`
+     routes any check name outside its narrow `PLAIN_DRIFT_CHECKS`
+     allowlist to conflict-dispatch by default -- meaning the mere
+     *presence* of a local cache would have forced every future ordinary
+     sync pass into false conflict-dispatch for any repo that adopted this
+     mechanism. Fixed by excluding `*.local.instructions.md` from
+     `_iter_projection_files` outright (its only caller), with a regression
+     test proving a healthy synced repo plus a rendered local cache scans
+     clean.
+  5. The render-only path skipped both budget checks `sync_repository`
+     enforces (`MAX_PROJECTION_BYTES` per file, the aggregate ceiling),
+     so an installed template the checked-in sync would itself refuse
+     could still become preferred local guidance. Fixed by checking both
+     before writing -- an over-budget source is reported
+     (`projection-local-cache-budget`) and skipped, never silently
+     promoted, while unrelated valid renders still proceed.
+
+  6 new tests added for these (10 total for this function); full suite
+  still 277 passed, 8 skipped. Widened `instruction_projections.py`'s
+  module-size baseline a second time (1871 -> 2007) to cover the fixes --
+  splitting the module was reconsidered and rejected again for the same
+  reason as the first widening (shared private helpers, no existing
+  cross-module-private-import precedent in this skill's script set).
+
+  **Round 2 (same PR, re-review after pushing round 1's fixes) found six
+  more real gaps**, all fixed before merge:
+  1. The write path replaced an *existing* file at the local-cache path
+     without checking whether it was this renderer's own prior output --
+     an unmarked file a user happened to leave at that exact path would
+     have been silently overwritten, contradicting the stale-cleanup path's
+     own promise never to touch an unmarked file. Fixed with a shared
+     `_owns_local_cache_file()` helper both the write path and the cleanup
+     path now call: true only when a marker parses *and* its own recorded
+     checked-in `destination` converts (via `local_sibling_destination()`)
+     to exactly the path in question. An existing-but-foreign file is now
+     reported (`projection-local-cache-foreign`) and left alone, other
+     sources still render.
+  2. That same marker-destination check closes a subtler cleanup gap too:
+     a marker-bearing file *copied* to the wrong `*.local.instructions.md`
+     path (identical bytes, valid marker, wrong location) would previously
+     have been deleted as "stale" even though this renderer never put it
+     there. Now the marker's own destination must match the file's actual
+     path, not just parse successfully.
+  3. Duplicate `source_key`s declaring *different* destinations weren't
+     caught at all (only same-destination collisions were) --
+     `_load_specs()` already reports `projection-duplicate-source` for this
+     shape but doesn't drop the specs. Fixed with an explicit pre-pass that
+     rejects every spec sharing a repeated source key before the
+     destination-collision grouping even runs.
+  4. A malformed aggregate-budget config (`_load_aggregate_budget` itself
+     reporting a blocking `projection-config` finding) still let this path
+     proceed and publish caches under the silent fallback default --
+     `sync_repository` refuses to write anything in that state. Fixed: a
+     budget-config failure now stops the whole call before any write.
+  5. The write loop's exception handler caught only `OSError`, but
+     `_prepare_destination_parent()` raises `ValueError` for a
+     symlink/reparse-point destination -- one unsafe destination would have
+     crashed the entire call instead of reporting a finding and letting
+     unrelated sources still render. Fixed by catching both.
+  6. A symlinked/junctioned `.github` itself (not just `.github/instructions`,
+     which was already checked) could let the walk -- and the stale-cleanup
+     unlink -- reach files outside the repository. Fixed by rejecting
+     `.github` indirection too, before ever descending into it.
+
+  4 more tests added (14 total for this function, including a
+  copied-marker-at-the-wrong-path regression for #2 and a
+  foreign-file-on-write regression for #1). Full suite: 281 passed, 8
+  skipped. Widened the module-size baseline a third time (2007 -> 2092).
+  **Flagging for a future cleanup pass, not blocking this PR:** three
+  widenings in one PR (1806 -> 2092, +286 lines / ~16%) is exactly the kind
+  of organic growth `harness-guidance`'s `bounded-source-modules` behavior
+  warns about even when each individual widening was reviewed and
+  justified in the moment; this module is a reasonable candidate for an
+  actual split once the code stabilizes, rather than continuing to widen
+  its ceiling indefinitely.
+
+  **Round 3 (same PR, re-review after round 2's fixes) found five more real
+  gaps**, all fixed before merge:
+  1. The malformed-budget-config early return also skipped stale-cache
+     reconciliation, reintroducing the exact "stale sibling silently
+     preferred forever" defect round 1 had already fixed, for this one
+     edge case. Fixed: a budget-config failure now empties the *accepted*
+     (write) set only -- reconciliation still runs, so a source that's
+     genuinely gone still gets its cache removed even under a broken
+     config.
+  2. The existing-file read for the idempotence/foreign-file check used
+     `_current_regular_bytes()` (an unbounded `path.read_bytes()`) -- a
+     large foreign or damaged file at a local-cache path could be loaded in
+     full every refresh despite fresh renders being capped at
+     `MAX_PROJECTION_BYTES`. Fixed with a new bounded reader
+     (`_read_existing_local_cache()`) that raises rather than fully
+     reading an oversized/unsafe file, reported and skipped like any other
+     write failure.
+  3. No test actually exercised a real write failure (only the
+     never-reaches-the-write-loop missing-root case was covered). Added a
+     monkeypatched `_atomic_write` failure on one of two sources, proving
+     the other source still renders and no partial file is left behind.
+  4. `_owns_local_cache_file()` (path-based ownership) was also being used,
+     unchanged, to gate the *write* path's overwrite decision -- but it
+     never compared the marker's own `plugin`/`sourceId` against the
+     *current* spec trying to publish there, so a sourceId rename sharing
+     the same destination would have silently inherited the previous
+     source's marker identity. Split the concern: renamed the path-only
+     check to `_parse_owned_local_cache_marker()` (still what stale
+     cleanup uses, deliberately unchanged there), and the write path now
+     separately compares `plugin`+`sourceId` against the current spec --
+     a mismatch is a legitimate handoff (the destination-collision
+     grouping already guarantees at most one *current* spec claims any
+     given destination), so it still supersedes the old content rather
+     than refusing forever, but now reports it
+     (`projection-local-cache-handoff`) instead of doing it silently.
+  5. (Folded into #2's fix rather than a separate change.)
+
+  5 more tests added (18 total for this function, plus one covering the
+  reconciliation-survives-a-broken-budget-config case together with #1).
+  Full suite: 285 passed, 8 skipped. Widened the module-size baseline a
+  fourth time (2092 -> 2132) -- the split-candidate flag from round 2
+  stands, unchanged.
+
+  **Round 4 (same PR, re-review after round 3's fixes) found three more
+  real gaps**, all fixed before merge:
+  1. `valid_destinations` was computed *before* the write attempt, from
+     every accepted spec -- so a destination whose refresh failed
+     mid-write was still marked "valid" and the reconciliation pass left
+     its stale prior content in place, looking current. Fixed: build
+     `valid_destinations` incrementally, adding a destination only on
+     confirmed success (unchanged, or an actual successful write) -- a
+     failed refresh is no longer marked valid, so the existing
+     reconciliation pass (unchanged otherwise) now removes the owned,
+     now-stale prior sibling instead of leaving it to masquerade as
+     current, and still reports if that removal itself fails.
+  2. `_load_specs()` never rejected a checked-in *declared* destination
+     literally named `foo.local.instructions.md` (only the general
+     `.instructions.md` suffix was checked), but the checked-in orphan
+     scan's `*.local.instructions.md` exclusion (round 1's fix) would have
+     hidden such a file from orphan detection even though it's a real,
+     locked, checked-in projection. Fixed at the source: declaration
+     validation now rejects the reserved suffix outright, so the orphan
+     scan's exclusion is exhaustively safe by construction rather than
+     merely "safe in practice."
+  3. The module's own top docstring claimed it "never removes repository
+     files," no longer accurate now that stale-cache reconciliation exists.
+     Clarified: checked-in projections and the lock are never removed;
+     only an owned, gitignored, worktree-local cache sibling can be
+     reconciled away.
+
+  2 more tests added (20 total for this function). Full suite: 287
+  passed, 8 skipped. Widened the module-size baseline a fifth time (2132
+  -> 2161).
+
+  **Round 5 (same PR, re-review after round 4's fixes) found one more real
+  gap, and it was the one that mattered most for correctness under real
+  concurrency:** nothing serialized two overlapping calls to
+  `render_local_cache()` itself. The planned callers (worktree
+  create/resume, `sessionStart`) can genuinely race each other for the same
+  repository -- an older call could finish its render/write after a newer
+  call already published fresher content, silently clobbering it and both
+  reporting success; the stale-cleanup pass could likewise unlink a
+  sibling another call had just refreshed. Fixed by splitting the function
+  the same way `sync_repository`/`sync_repository_locked` already split
+  (thin public wrapper resolves the root and acquires a lock; a private
+  `_render_local_cache_locked()` does the actual work) -- but with a
+  **dedicated lock** (`_local_cache_lock()`), deliberately separate from
+  the checked-in sync's own, so this permissionless path never contends
+  with or blocks behind the privileged checked-in worker. A concurrent
+  attempt fails closed with a `projection-local-cache-lock` finding and
+  touches nothing, mirroring the exact test shape
+  `test_run_sync_pass_reports_conflict_when_lock_already_held` already
+  established for the checked-in sync's own lock.
+
+  1 more test added (21 total for this function). Full suite: 288 passed,
+  8 skipped. Widened the module-size baseline a sixth time (2161 -> 2219).
+
+  **Round 6 (same PR, re-review after round 5's fixes) found four more real
+  gaps**, all fixed before merge:
+  1. **The deepest one:** the round-5 lock serialized file *operations*,
+     but not which call's *source set* was authoritative -- an older call
+     holding a precomputed/snapshotted source list (e.g. captured before
+     some plugin was enabled) could still acquire the lock *after* a newer
+     call already published that plugin's cache and released it, then
+     delete the newer cache as "stale" using its own outdated view, both
+     calls reporting success. Moving `list(sources)` inside the lock would
+     not have fixed this -- the staleness is in what the *caller* computed
+     before ever calling in. Fixed by changing the second parameter from a
+     precomputed `sources: Iterable[object]` to a
+     `discover_sources: Callable[[], Iterable[object]]` resolver, invoked
+     only *after* the lock is acquired -- no call can now act on a source
+     set a more recent call has already superseded. All 21 existing test
+     call sites updated (`[source]` -> `lambda: [source]`); 2 new tests
+     prove the resolver is never invoked at all when the lock is
+     contended, and is invoked exactly once when it isn't.
+  2. The checked-in orphan scan's `*.local.instructions.md` exclusion
+     (round 1) assumes the `.gitignore` rule this whole mechanism depends
+     on is actually in place -- but that rule is still its own, separate,
+     not-yet-built Plan item. A repo that hasn't adopted it yet (or a file
+     committed before it was) could end up with a *tracked*
+     `.local.instructions.md` file permanently invisible to orphan
+     detection. Fixed by verifying, not assuming: `render_local_cache()`
+     now checks (best-effort, via `git ls-files --error-unmatch`, fail-open
+     when git is unavailable so the no-`.git`-dependency guarantee holds)
+     that a destination is not git-tracked before writing *or* deleting it
+     -- a tracked destination is reported (`projection-local-cache-tracked`)
+     and left completely alone either way.
+  3. `SKILL.md` claimed "no lock file" and "no lock needed," contradicting
+     round 5's own `_local_cache_lock()`. Corrected to describe the
+     dedicated lock, its contention behavior, and that callers must handle
+     a locked-out result rather than assume every call refreshes the cache.
+  4. The docstring's "each earned through review" sentence pointed at the
+     Journal for chronology that doesn't belong in lasting API
+     documentation (`REVIEW.md`'s timeless-documentation rule). Removed;
+     the docstring now states only current guarantees.
+
+  4 more tests added (25 total for this function). Full suite: 292 passed,
+  8 skipped. Widened the module-size baseline a seventh time (2219 ->
+  2301).
+
+  **Round 7 (same PR, re-review after round 6's fixes) found five more
+  real gaps, refining round 6's own git-tracked check**, all fixed before
+  merge:
+  1. The tracked-status probe used `-C root` alone, which an inherited
+     `GIT_DIR`/`GIT_INDEX_FILE` can override, and a plain `ls-files` treats
+     a filename containing pathspec magic characters (`[`, `]`, `*`, ...)
+     as a glob rather than a literal name -- either could report a truly
+     tracked file as untracked. Fixed with a git-isolated environment
+     (`_git_isolated_env()`, mirroring `scan_plugin_sources.py`'s own) and
+     `--literal-pathspecs`.
+  2. **Fail-open was backwards for this specific check.** Treating "can't
+     tell" the same as "confirmed untracked" (round 6's own shape) lets
+     this renderer overwrite or delete a tracked file the moment the probe
+     itself merely fails (a timeout, a corrupted index) inside a real git
+     working tree. Redesigned as tri-state: `_resolve_git_tracked_paths()`
+     now distinguishes "not a git working tree at all" (proceed -- the
+     documented plain-directory case) from "a git working tree whose query
+     failed" (refuse, exactly like confirmed-tracked) from "confirmed
+     tracked"/"confirmed untracked".
+  3. `discover_sources()` can itself raise (e.g.
+     `discover_enabled_sources` -> `validate_committed_settings` on
+     malformed repository settings) -- that exception was escaping this
+     best-effort entry point uncaught. Fixed: caught under the lock,
+     reported as a blocking `projection-local-cache-discovery` finding,
+     existing cache files left untouched for that call.
+  4. One `git` subprocess pair per candidate path (a write check plus a
+     separate cleanup check) meant a large plugin stack paid repeated
+     process-startup cost, and a slow probe could accumulate multiple 5s
+     timeouts in one call. Fixed by resolving tracked status **once per
+     call**, batched over every candidate path (both the accepted writes
+     and the existing local-cache files found for cleanup) in a single
+     `git ls-files` invocation.
+  5. The docstring's "never touching... git in any way" claim was already
+     inaccurate the moment round 6 added read-only tracking queries, and
+     the `*.local.instructions.md` suffix is not actually gitignored until
+     an adopting repo has adopted that still-separate, not-yet-built
+     convention. Corrected to describe the real boundary: no checked-in or
+     git-*mutating* action, read-only tracking queries when available.
+
+  3 more tests added (28 total for this function): an inconclusive-check
+  refusal (a monkeypatched timeout on the second of two git calls), a
+  discovery-exception report, and reuse of the existing tracked/foreign
+  regressions to prove the batched design didn't regress them. Full suite:
+  294 passed, 8 skipped. Widened the module-size baseline an eighth time
+  (2301 -> 2418). **Seven review rounds, 29 total findings, all fixed in
+  this one PR** -- the split-candidate flag from round 2 stands, more
+  strongly than ever.
 
 

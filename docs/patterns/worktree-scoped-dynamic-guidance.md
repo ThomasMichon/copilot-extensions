@@ -157,12 +157,15 @@ attempt a privileged sync merely to see current guidance.
 
 ## Exemplars
 
-None yet -- this pattern is introduced by
+`customizing-copilot:reviewing-customizations`'s
+`instruction_projections.render_local_cache()` and
+`local_sibling_destination()` are the reference implementation of this
+pattern's render side, landed as part of
 `efforts/active/ambient-guidance-navigability` Phase 7
 ([ThomasMichon/copilot-extensions#4674](https://github.com/ThomasMichon/copilot-extensions/issues/4674)).
-The reference implementation will be `agent-worktrees`' own
-`projection-reflect` consumption, alongside the render-step addition to
-`customizing-copilot:reviewing-customizations`.
+The per-file "prefer local" preamble, the repo-wide catch-all projection,
+and the `agent-worktrees` create/resume + `sessionStart` wiring remain open
+Plan items in that same phase.
 
 ## See Also
 
