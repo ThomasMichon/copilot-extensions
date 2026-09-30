@@ -216,9 +216,15 @@ class TranscriptMirror:
             return {"ok": True, "changed": 0, "detail": "another pass is mirroring this CodeSpace"}
         handed_off = False
         try:
-            stdout = await self._read(codespace)
+            try:
+                stdout = await self._read(codespace)
+            except Exception as exc:  # the box unreachable: a push still owed goes ahead
+                log.debug("transcript mirror: read on %s failed: %s", codespace, exc)
+                stdout = None
             if stdout is None:
-                return {"ok": False, "detail": "read failed"}
+                if not (self._root / f"{codespace}.dirty").exists():
+                    return {"ok": False, "detail": "read failed"}
+                stdout = ""  # nothing new to append; push what's already here
 
             def append_and_push() -> dict[str, Any]:
                 try:

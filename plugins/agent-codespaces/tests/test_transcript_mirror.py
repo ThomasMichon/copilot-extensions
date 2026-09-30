@@ -197,7 +197,7 @@ async def test_a_failed_read_or_a_bad_name_pushes_nothing(tmp_path, direct_exec)
 
 
 async def test_a_failed_push_is_retried_until_it_lands_even_after_a_restart(tmp_path, direct_exec):
-    results = [(False, "hub unreachable"), (False, "still down"), (True, "pushed")]
+    results = [(False, "hub unreachable"), (False, "still down"), (False, "down"), (True, "pushed")]
     pushes = []
 
     def push(source, label):
@@ -213,11 +213,20 @@ async def test_a_failed_push_is_retried_until_it_lands_even_after_a_restart(tmp_
     assert (await mirror("cs-1"))["ok"] is False
     manager.stdout = tm._DONE + "\n"  # nothing new on the box: the push is still owed
     assert (await mirror("cs-1"))["ok"] is False
+    manager.exit_code = 255  # the box can't be read either: the owed push still goes ahead
+    assert (await mirror("cs-1"))["ok"] is False
+    manager.exit_code = 0
     restarted = tm.TranscriptMirror(open_manager=opener, push=push, root=tmp_path)
     assert (await restarted("cs-1"))["ok"] is True
-    assert len(pushes) == 3 and not (tmp_path / "cs-1.dirty").exists()
+    assert len(pushes) == 4 and not (tmp_path / "cs-1.dirty").exists()
     assert (await restarted("cs-1")) == {"ok": True, "changed": 0}  # settled: no more pushes
-    assert len(pushes) == 3
+    assert len(pushes) == 4
+
+    async def unreachable(codespace):
+        raise OSError("tunnel down")
+
+    settled = tm.TranscriptMirror(open_manager=unreachable, push=push, root=tmp_path)
+    assert (await settled("cs-1"))["ok"] is False and len(pushes) == 4  # nothing owed: no push
 
 
 async def test_a_pass_skips_a_codespace_another_owner_is_mirroring(tmp_path, direct_exec):
