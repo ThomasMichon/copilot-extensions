@@ -162,3 +162,46 @@ def test_stage_pending_generation_id_never_raises(tmp_path):
     afile.write_text("x", encoding="utf-8")
     stage_pending_generation_id(1, "whatever", afile / "sub")  # must not raise
     assert not (afile / "sub" / PENDING_GENERATION_IDS_FILE).exists()
+
+
+def test_concurrent_staging_and_consuming_never_loses_an_update(
+    tmp_path, monkeypatch
+):
+    """The exact race the review flagged: concurrent unlocked read-modify-
+    write on the pending-ids file could silently erase another writer's
+    entry. Drive real threads through stage/consume concurrently and
+    assert every staged entry is accounted for (either consumed exactly
+    once, or still present) -- never silently lost.
+    """
+    import threading
+
+    from agent_bridge.session_host import osutil
+
+    monkeypatch.setattr(osutil, "pid_alive", lambda pid: True)
+
+    n = 20
+    consumed: list[str | None] = [None] * n
+    barrier = threading.Barrier(n)
+
+    def stage_then_consume(i: int) -> None:
+        barrier.wait()  # maximize actual overlap
+        stage_pending_generation_id(1000 + i, f"gen-{i}", tmp_path)
+        consumed[i] = consume_pending_generation_id(1000 + i, tmp_path)
+
+    threads = [
+        threading.Thread(target=stage_then_consume, args=(i,)) for i in range(n)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    # Every one of this thread's own stage->consume round trips must see
+    # its OWN entry -- never None (lost to a concurrent writer) and never
+    # someone else's value (cross-talk).
+    assert consumed == [f"gen-{i}" for i in range(n)]
+    # Nothing left dangling in the pending file afterward.
+    remaining = json.loads(
+        (tmp_path / PENDING_GENERATION_IDS_FILE).read_text(encoding="utf-8")
+    )
+    assert remaining == {}

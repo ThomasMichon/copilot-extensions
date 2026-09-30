@@ -101,11 +101,17 @@ def test_lifespan_stages_generation_id_for_a_passive_successor(
 def test_lifespan_does_not_stage_generation_id_for_elevated_sub_daemon(
     tmp_path, monkeypatch
 ):
-    # The elevated sub-daemon ALSO sets enable_credential_relay=False, but
-    # app.state.passive stays unset/False (it is never promoted) -- it
-    # shares the primary's runtime dir and must never touch the marker OR
-    # the pending-staging file, or it would silently steal either from
-    # whichever daemon actually owns it.
+    # The elevated sub-daemon shares the primary's runtime dir and is never
+    # promoted -- it must never touch the marker OR the pending-staging
+    # file, regardless of app.state.passive or enable_credential_relay
+    # (the role signal is is_subdaemon(), not those -- see app.py's own
+    # comment). is_subdaemon() also requires real Windows elevation, which
+    # this Linux-CI test can't trigger for real, so monkeypatch the role
+    # signal directly rather than trying to fake OS-level elevation.
+    from agent_bridge import elevated
+
+    monkeypatch.setattr(elevated, "is_subdaemon", lambda: True)
+
     runtime_dir = tmp_path / "runtime"
     runtime_dir.mkdir()
     monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(runtime_dir))
@@ -116,7 +122,8 @@ def test_lifespan_does_not_stage_generation_id_for_elevated_sub_daemon(
     )
     app = create_app(config=cfg, token="test-token")
     # app.state.passive deliberately left unset (mirrors a real elevated
-    # sub-daemon boot, which never sets it).
+    # sub-daemon boot, which never sets it) -- but is_subdaemon() alone
+    # must already be enough to skip, regardless.
 
     with TestClient(app) as c:
         # No marker at all: the earlier boot-time write_running_version()
@@ -124,5 +131,41 @@ def test_lifespan_does_not_stage_generation_id_for_elevated_sub_daemon(
         # sub-daemon writes nothing here, by design (dotfiles #533 caveat).
         assert not (runtime_dir / RUNNING_VERSION_FILE).exists()
         assert not (runtime_dir / PENDING_GENERATION_IDS_FILE).exists()
+
+        c.get("/ui")
+
+
+def test_lifespan_records_generation_id_for_a_relay_disabled_normal_primary(
+    tmp_path, monkeypatch
+):
+    # enable_credential_relay=False alone must NOT be treated as "skip" --
+    # it's user-configurable persisted config (an operator may disable the
+    # relay on an otherwise perfectly normal, promoted-by-default primary
+    # for unrelated reasons). Only is_subdaemon() (never touch) and
+    # app.state.passive (stage) opt out of recording directly.
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(runtime_dir))
+
+    cfg = ServiceConfig(
+        port=0, bind="127.0.0.1", db_path=str(tmp_path / "test.db"),
+        enable_credential_relay=False,
+    )
+    app = create_app(config=cfg, token="test-token")
+    # Neither is_subdaemon() (real elevation can't be faked on Linux CI, so
+    # it's already False here) nor app.state.passive (left unset) applies --
+    # this must fall through to the direct-record branch.
+
+    with TestClient(app) as c:
+        mgr = app.state.session_manager
+        real_generation_id = mgr._generation_id
+        assert real_generation_id
+
+        # The earlier boot-time write_running_version() call is ALSO gated
+        # on enable_credential_relay, so there's no pre-existing marker to
+        # merge onto here -- set_running_generation_id must start fresh.
+        marker_path = runtime_dir / RUNNING_VERSION_FILE
+        data = json.loads(marker_path.read_text(encoding="utf-8"))
+        assert data["generation_id"] == real_generation_id
 
         c.get("/ui")

@@ -189,6 +189,76 @@ def _prune_dead_pids(pending: dict[str, str]) -> dict[str, str]:
     return alive
 
 
+def _with_pending_lock(directory: Path, fn) -> None:
+    """Run ``fn()`` (a read-modify-write against the pending-ids file) while
+    holding a dedicated, cross-process, cross-platform advisory lock scoped
+    ONLY to this file -- never :mod:`zdd.cutover_lock`'s own lock, which a
+    ``CutoverOrchestrator.run()`` call holds for its ENTIRE duration
+    (spawn -> health-gate -> flip -> drain -> retire); a passive successor's
+    own boot-time staging call happens INSIDE that same window, so reusing
+    that lock here would deadlock the very staging call this needs to let
+    through. This closes the unlocked-read-modify-write race between a
+    passive staging its id and a promotion consuming/pruning entries
+    concurrently, independently of the cutover lock's own scope.
+
+    Same primitive as :mod:`zdd.cutover_lock` (POSIX ``fcntl.flock``,
+    Windows ``msvcrt.locking``, both non-blocking under the hood), wrapped
+    in a short poll-retry loop for an effectively-blocking acquire. Best-
+    effort: on any lock-acquisition failure (contention past the short wait
+    budget, or an OSError), skips the write entirely rather than risk a
+    lost update -- generation_id recording is observability, never
+    load-bearing for the cutover itself.
+    """
+    import sys
+    import time
+
+    lock_file = directory / "pending-generation-ids.lock"
+    directory.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(lock_file), os.O_RDWR | os.O_CREAT, 0o644)
+    fh = os.fdopen(fd, "r+", encoding="ascii")
+    try:
+        deadline = time.monotonic() + 2.0
+        acquired = False
+        while time.monotonic() < deadline:
+            try:
+                if sys.platform == "win32":
+                    import msvcrt
+
+                    fh.seek(1 << 30)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                    fh.seek(0)
+                else:
+                    import fcntl
+
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+                break
+            except OSError:
+                time.sleep(0.05)
+        if not acquired:
+            return
+        try:
+            fn()
+        finally:
+            try:
+                if sys.platform == "win32":
+                    import msvcrt
+
+                    fh.seek(1 << 30)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+    finally:
+        try:
+            fh.close()
+        except OSError:
+            pass
+
+
 def stage_pending_generation_id(
     pid: int, generation_id: str, directory: Path | None = None
 ) -> None:
@@ -200,12 +270,17 @@ def stage_pending_generation_id(
     grows unbounded across many cutover attempts. Never raises.
     """
     d = directory or install_dir()
-    path = d / PENDING_GENERATION_IDS_FILE
-    try:
-        pending = _prune_dead_pids(_load_pending(path))
+
+    def _do() -> None:
+        pending = _prune_dead_pids(_load_pending(d / PENDING_GENERATION_IDS_FILE))
         pending[str(pid)] = generation_id
         d.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(pending), encoding="utf-8")
+        (d / PENDING_GENERATION_IDS_FILE).write_text(
+            json.dumps(pending), encoding="utf-8"
+        )
+
+    try:
+        _with_pending_lock(d, _do)
     except OSError:
         pass
 
@@ -220,12 +295,18 @@ def consume_pending_generation_id(
     Never raises.
     """
     d = directory or install_dir()
-    path = d / PENDING_GENERATION_IDS_FILE
+    result: dict[str, str | None] = {"gen_id": None}
+
+    def _do() -> None:
+        pending = _load_pending(d / PENDING_GENERATION_IDS_FILE)
+        result["gen_id"] = pending.pop(str(pid), None)
+        if result["gen_id"] is not None:
+            (d / PENDING_GENERATION_IDS_FILE).write_text(
+                json.dumps(pending), encoding="utf-8"
+            )
+
     try:
-        pending = _load_pending(path)
-        gen_id = pending.pop(str(pid), None)
-        if gen_id is not None:
-            path.write_text(json.dumps(pending), encoding="utf-8")
-        return gen_id
+        _with_pending_lock(d, _do)
     except OSError:
-        return None
+        pass
+    return result["gen_id"]
