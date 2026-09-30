@@ -2,7 +2,9 @@
 
 Linked from [`README.md`](README.md)'s Plan/Proposal. Read this when working
 Phase 1/2 of that effort; it is the detailed evidence the Proposal
-summarizes.
+summarizes. This is timeless, current-state documentation — the review
+history that produced and corrected these findings lives in the README's
+Journal, not here.
 
 Each finding cites exact files/lines from four bounded, independent
 evidence passes (agent-bridge core + Picker UI; agent-codespaces;
@@ -17,18 +19,30 @@ framing.
 |---|---|---|
 | `agent-containers` | Yes | Shares the Session Host dispatch primitive (`ContainerTransport` → `build_container_spawner()` → the same `CodeSpaceSpawner` class); `session-host-prepare`/`-state`/`-cleanup` verbs present (`plugins/agent-containers/src/agent_containers/__main__.py:202-224, 363-368`). |
 | `agent-codespaces` | Yes | Native `copilot --detach --forward`, Connection Owner, model-launch parity (`plugins/agent-codespaces/src/agent_codespaces/copilot_detach.py`). |
-| Cross-machine (SSH mesh) | Yes | `plugins/agent-ssh/src/agent_ssh/copilot_detach.py:58-72` (`plan_for()`) implements the same detached/reserved CLI-mode launch shape as `agent-codespaces`/`agent-containers`. (Correction: an earlier pass of this review cited `session_host/spawner.py`'s `CodeSpaceSpawner`/`SshSpawner` framing — that's a *different*, generic headless/ACP agent-dispatch path, where `session_start.py:680-685` documents SSH-mesh/elevated targets as a known, separately-tracked gap (#566), unrelated to the CLI-mode session mechanism this effort reviews.) |
-| **Elevated bridging (Windows S4U/scheduled-task/WMI broker)** | **No** | `plugins/agent-bridge/src/agent_bridge/session_targeting_cli.py:732` explicitly scopes `--cli` to `codespace:<name>` and `container:<name>` targets only and rejects a bare/elevated target. `elevated.py` implements an isolated ACP-relay daemon lifecycle (`relay_spawn_command`, `relay_agent_for` at `:233-296`) with no Session Host launch, CLI reservation claim, or muxed CLI process anywhere in that path. |
+| Cross-machine (SSH mesh) | Yes | `plugins/agent-ssh/src/agent_ssh/copilot_detach.py:58-72` (`plan_for()`) implements the same detached/reserved CLI-mode launch shape as `agent-codespaces`/`agent-containers`. |
 
-**Finding:** elevated bridging is the one transport genuinely left out of
-the CLI-mode session work — not a partial or inconsistent implementation,
-but no wiring at all. This directly answers the operator's "ensure...
-elevated bridging aren't left out" concern: it was.
+**Elevated bridging is not a fourth CLI-mode venue, by design — not a gap.**
+`visions/remote-interactive-sessions/README.md:1-9, 125-146` defines the
+supported venue set for symmetric CLI-mode launch as `agent-codespaces`,
+`agent-containers`, and an `agent-ssh`-reachable machine — three remote
+venues reached over one SSH-based transport. Elevated bridging
+(`plugins/agent-bridge/src/agent_bridge/elevated.py`) is architecturally
+different: a local headless ACP relay (Windows S4U/scheduled-task/WMI
+broker), not a remote venue a CLI-mode session launches into. A *local*
+CLI session already goes directly through `agent-worktrees`
+(`session_targeting_cli.py:500-504`), bypassing this mechanism entirely.
+`session_targeting_cli.py:732` scoping `--cli` to `codespace:<name>`/
+`container:<name>` targets therefore reflects the vision's own venue set,
+not an oversight. Extending CLI-mode sessions to reach an elevated target
+would be a genuine new capability — a privileged mux/launch/reattach
+contract that doesn't exist today for *any* elevated interactive session,
+CLI-mode or otherwise — not a wiring gap in the existing mechanism. Framed
+as an open question for the Proposal, not a defect.
 
 ## 2. Dynamic port reservation
 
-- **Worth fixing — the CLI extension's client-fallback logic is stale
-  relative to the canonical Python client's own already-retired WSL port.**
+- **Worth fixing — the CLI extension's WSL port-fallback is stale relative
+  to the canonical Python client's own already-retired special case.**
   `plugins/agent-bridge/extensions/agent-bridge/extension.mjs:resolveBaseUrl`
   (lines 111-130) correctly reads the daemon's discovered port from
   `active.json` first, then a static `config.yaml` port, and only as a
@@ -36,15 +50,11 @@ elevated bridging aren't left out" concern: it was.
   is legitimate and intentional — the canonical Python client keeps exactly
   this last-resort constant (`plugins/agent-bridge/src/agent_bridge/models.py:
   22-33`, `default_port()`), documented as surviving "only as the client's
-  last-resort fallback when no routing table exists yet." The actual
+  last-resort fallback when no routing table exists yet." The concrete
   inconsistency: `models.py:29` explicitly says "the former WSL '+1' (9281)
   is retired with the fixed bind," but the JS extension's fallback
   (`extension.mjs:123-130`) still special-cases WSL to dial 9281. The two
-  clients now disagree about a retired platform special-case. (Correction:
-  an earlier pass of this review over-broadly characterized this as
-  "hardcoded fallback ports conflicting with the dynamic-port contract" —
-  the 9280 fallback itself is not a departure from that contract; only the
-  stale 9281 WSL branch is.)
+  clients now disagree about a retired platform special-case.
 
 - **Significant — `agent-codespaces --forward` uses a caller-supplied fixed
   host port, not a daemon-reserved one.**
@@ -82,15 +92,15 @@ elevated bridging aren't left out" concern: it was.
   blocking a subsequent launch attempt for that same worktree despite no
   real session existing.
 
-- **Worth fixing — a container's local-forward keeper is tracked by
-  container name, not by session/CWD identity.**
-  `plugins/agent-containers/src/agent_containers/forward_keeper.py:
-  ensure_running()` keys existing keeper state only by container `name`
-  and replaces it whenever the mux/venue port differs. Because the scope
-  construction issue below (§4) already makes container-hosted CLI-mode
-  identity container-scoped rather than CWD-scoped, this compounds: one
-  detached session on a container can silently replace another live
-  session's forwarding process on the same container.
+- **Worth fixing — `agent-codespaces --detach`'s reservation TTL ignores
+  the caller's `--ttl-seconds` value.**
+  `plugins/agent-codespaces/src/agent_codespaces/copilot_venue.py:138-148`
+  dispatches `--detach` straight to `cmd_detach`, whose plan hard-codes
+  `_RESERVATION_TTL` (`copilot_detach.py:49-64`) rather than threading
+  through the parsed `--ttl-seconds`; only the *attached* (non-detached)
+  path actually forwards `args.ttl_seconds` (`copilot_venue.py:228-237`).
+  An operator who passes `--ttl-seconds` on a detached launch gets the
+  hard-coded default silently instead.
 
 - **Clean elsewhere.** The CLI extension's own recurring work (heartbeat,
   flush, inbox poll) is timer-based, `unref()`'d, and cleared on shutdown
@@ -102,76 +112,59 @@ elevated bridging aren't left out" concern: it was.
   (`copilot_detach.py:585-680`). The Session Host abstraction retains and
   closes its forward/relay handles symmetrically (`spawner.py:91-145`), and
   the elevated daemon has its own matched start/stop lifecycle
-  (`elevated.py:180-230, 296-306`) — sound for what it covers, though it
-  covers only the elevated ACP daemon, not a CLI-mode child (see §1).
+  (`elevated.py:180-230, 296-306`).
 
 ## 4. CWD-keyed discovery / single-current-session-per-worktree
 
-- **Worth fixing — a container's local-forward keeper is tracked by
-  container name alone, not by the full venue-qualified session scope.**
+The `<worktree identity>@<venue>` scope qualifier
+(`plugins/agent-containers/src/agent_containers/copilot_detach.py:43-74`,
+`plan_for()`) is the standing, documented design
+(`visions/remote-interactive-sessions/README.md:116-123`): one host can see
+many venues of the same worktree at once, so the venue qualifier keeps
+sibling venues distinct while the worktree stays the uniqueness unit within
+a venue. That part is correct and not a finding.
+
+- **Worth fixing — the container forward keeper's own tracking key doesn't
+  include that same scope.**
   `plugins/agent-containers/src/agent_containers/forward_keeper.py:
   ensure_running()` keys existing keeper state only by container `name`
-  and replaces it whenever the mux/venue port differs. Two different
-  CLI-mode sessions hosted on the *same* container (e.g. two different
-  worktrees, or the same worktree reused after a prior session ended) can
-  therefore have one session's forwarding process silently replace
-  another's, because the keeper's identity doesn't include the
-  worktree/session scope the way the CLI-mode reservation itself does.
-  (Correction: an earlier pass of this review additionally flagged
-  `copilot_detach.py:plan_for()`'s `scope_id = f"{identity}@{args.name}"`
-  as breaking CWD-uniqueness across containers — that's wrong. The
-  `<worktree identity>@<venue>` qualifier is the standing, documented
-  design (`visions/remote-interactive-sessions/README.md:116-123`):
-  "One host coordination layer can see *many* venues of the same
-  repository at once... so a venue launch qualifies the identity it
-  reserves and registers under with the venue." Dropping that qualifier
-  would be the actual regression. The real, narrower bug is only in the
-  forward keeper's own tracking key, not the session scope.)
+  and replaces it whenever the mux/venue port differs — dropping the
+  worktree/session part of the scope the CLI-mode reservation itself
+  already carries. Two different CLI-mode sessions hosted on the *same*
+  container can therefore have one session's forwarding process silently
+  replace another's, purely because the keeper's own storage key is
+  narrower than the session scope it's supposed to track.
 
 ## 5. Decoupling (session-driving vs. providing local resources/tools)
 
-No violation found here on a corrected reading. An earlier pass of this
-review flagged `agent-containers`' detached launch
+No violation found here. `agent-containers`' detached launch
 (`copilot_detach.py:_launch_env()`, which calls `ensure_agent_worktrees()`,
 workspace registration, and — when relay is enabled —
-`deploy_shims(ado=True)` plus git-credential-relay environment) as coupling
-session dispatch to unrelated remote-resource provisioning. That doesn't
-hold up: the standing vision makes exactly this kind of venue preparation
-part of the single `copilot` verb's own contract —
-"`agent-codespaces copilot <name>` / `agent-containers copilot <name>`
-perform the *identical* action for a remote venue by preparing it (the
-venue-specific 'setup' step: reverse forwards, **credentials**, the
+`deploy_shims(ado=True)` plus git-credential-relay environment) is required
+venue preparation, not unrelated resource provisioning: the standing vision
+makes exactly this kind of setup part of the single `copilot` verb's own
+contract — "`agent-codespaces copilot <name>` / `agent-containers copilot
+<name>` perform the *identical* action for a remote venue by preparing it
+(the venue-specific 'setup' step: reverse forwards, **credentials**, the
 reservation)" (`visions/remote-interactive-sessions/README.md:139-146`).
 The credential-relay/GH-token/ADO-shim mechanism this launch path uses is
-also the already-proven, standing pattern the repo's own
-`visions/host-resource-providers` explicitly builds on rather than
-supersedes — that vision generalizes *beyond* credentials to other
-resource kinds; it doesn't recharacterize the existing credential relay as
-out-of-scope. `agent-worktrees` presence on the venue is likewise a hard
-prerequisite for the same verb ("agent-worktrees is also required to
-execute that verb"), not an unrelated capability being bundled in.
-Retracted; no adjustment proposed.
+also the already-proven, standing pattern `visions/host-resource-providers`
+explicitly builds *on* (generalizing credentials to other resource kinds)
+rather than recharacterizing as out-of-scope. `agent-worktrees` presence on
+the venue is likewise a hard prerequisite for the same verb, not an
+unrelated capability bundled in.
 
 ## 6. Minimal opinionated UX / idiomatic parameter naming
 
-The CLI surface is largely idiomatic and consistent
+The CLI surface is idiomatic and consistent
 (`--worktree-id`, `--detach`, `--stop`, `--keep-claim`, `--json`,
 `--seed-file`, `--ref-file`, `--register-timeout`, `--dry-run`, kebab-case
-throughout) — no broad drift found. Two localized nits:
-
-- **Nit — asymmetric forward-flag grammar in `agent-codespaces`.**
-  `copilot_venue.py:127-145` / `copilot_detach.py:155-195` introduce
-  `--reverse-forward VENUE_PORT:HOST_PORT` and `--forward
-  PORT[:VENUE_PORT]` — two different port-pair orderings for what reads
-  like the same kind of flag. Documented and tested, so not a functional
-  defect, but more opinionated/error-prone than the otherwise thin surface
-  around it.
-
-- **Nit — mismatched lifecycle-parameter naming in `agent-containers`.**
-  `copilot_venue.py:32-111` exposes `--ttl-seconds`, while the detached
-  plan's own fields are named `reservation_ttl` and `register_timeout` —
-  the CLI flag and its underlying concept aren't named to visibly
-  correspond.
+throughout), including the forwarding flags: `--reverse-forward
+VENUE_PORT:HOST_PORT` and `--forward PORT[:VENUE_PORT]`
+(`copilot_venue.py:127-145`) both order the *listening*-side port first —
+venue-side for the reverse forward, host-side for the local forward —
+which is the more consistent convention, not an inconsistency. No naming
+drift found in this pass.
 
 ## 7. Adjacent, out-of-scope: an already-tracked pre-existing gap
 

@@ -16,8 +16,7 @@
   by the fact that a run of the contributing PRs landed with **no
   automated review at all** (see Context) and so never had an independent
   sanity check.
-- **Umbrella issue:** _TBD — open once the Plan below is confirmed with the
-  contributor whose PRs this reviews._
+- **Umbrella issue:** [#4702](https://github.com/ThomasMichon/copilot-extensions/issues/4702)
 
 ## Guiding Intent
 
@@ -165,21 +164,13 @@ config overlays, an older skill-review plan — and are out of scope here.)
 
 ## Proposal
 
-Full evidence: [`findings.md`](findings.md). This round of the effort was
-itself reviewed (PR #4696) and three items below were corrected or
-retracted as a result — noted inline. Summary, ordered by invariant, each
-item naming what it preserves and whether it's a pure addition or a
-behavior change needing compatibility handling:
+Full evidence: [`findings.md`](findings.md); review history that shaped
+this proposal is in the Journal below, not repeated here. Five concrete
+items plus one open design question, each naming what it preserves and
+whether it's a pure addition/bugfix or a behavior change needing
+compatibility handling:
 
-1. **Wire elevated bridging into CLI-mode sessions**, matching the parity
-   the container/CodeSpace/SSH-mesh transports already have
-   (`session_targeting_cli.py`'s `--cli` scope currently rejects a bare
-   elevated target outright). Preserves the existing elevated-ACP-daemon
-   lifecycle as-is (it's sound on its own terms) — this only extends CLI
-   reservation/launch to reach it, the way the other three transports
-   already work. *Pure addition.*
-
-2. **Align the CLI extension's WSL port-fallback with the Python client's
+1. **Align the CLI extension's WSL port-fallback with the Python client's
    already-retired special case** (`extension.mjs:resolveBaseUrl` still
    dials 9281 for a WSL guest; `models.py` retired that distinction and
    keeps only 9280 as the shared last-resort fallback). *Behavior change*
@@ -187,7 +178,7 @@ behavior change needing compatibility handling:
    none, per the Python client's own retirement, but flag as a compat
    check before landing).
 
-3. **Give `agent-codespaces --forward` a daemon-reserved host port as the
+2. **Give `agent-codespaces --forward` a daemon-reserved host port as the
    default**, with the current caller-supplied fixed port available as an
    explicit opt-in for the (real) case an operator wants a stable local
    port. Preserves the whole `--detach --forward`/Connection Owner design
@@ -196,45 +187,69 @@ behavior change needing compatibility handling:
    always-fixed-port default would need the explicit opt-in flag; needs a
    migration note.
 
-4. **Key `agent-containers`' forward keeper to the full venue-qualified
+3. **Key `agent-containers`' forward keeper to the full venue-qualified
    session scope (`<worktree identity>@<venue>`), not container name
    alone.** Preserves the standing `<worktree identity>@<venue>` design
-   entirely (an earlier draft of this proposal incorrectly targeted that
-   qualifier itself for removal — corrected in review; see `findings.md`
-   §4) — this only fixes the keeper's own tracking key so two sessions on
-   the same container can no longer clobber each other's forwarding
-   process. *Pure addition/bugfix, no behavior change for callers.*
+   entirely — this only fixes the keeper's own tracking key so two
+   sessions on the same container can no longer clobber each other's
+   forwarding process. *Pure addition/bugfix, no behavior change for
+   callers.*
 
-5. **Fix the stale reservation left by a failed CLI-mode launch**
+4. **Fix the stale reservation left by a failed CLI-mode launch**
    (`inventory_cli.py:_launch_cli_mode_session`) so a launch failure
    releases its reservation instead of holding it until TTL expiry.
    *Pure bugfix.*
 
-6. **Reconcile the two forwarding-flag grammars** in `agent-codespaces`
-   (`--reverse-forward VENUE_PORT:HOST_PORT` vs. `--forward
-   PORT[:VENUE_PORT]`) to one consistent port-pair ordering, and **rename
-   `agent-containers`' `--ttl-seconds` to visibly match its underlying
-   `reservation_ttl`/`register_timeout` concepts**. *Behavior change*: a
-   flag-grammar/name change is a public-CLI compatibility break by
-   definition — needs a deprecation window (accept both grammars/names for
-   a release) rather than a hard cutover.
+5. **Thread `agent-codespaces --detach`'s `--ttl-seconds` through to
+   `cmd_detach`**, which currently hard-codes its own reservation TTL and
+   silently ignores the caller's value on the detached path (only the
+   attached path honors it today). *Pure bugfix — the flag already exists
+   and is documented; this makes it work on both paths.*
 
-**Retracted, not proposed** (see `findings.md` for the corrected reasoning):
-a broader "hardcoded port fallback" framing (only the WSL branch above is
-actually stale); a claim that `agent-containers`' venue-qualified scope
-itself breaks CWD-uniqueness (it doesn't — that qualifier is the standing
-design); a claim that `agent-containers`' detached launch improperly
-couples session dispatch to remote-resource provisioning (it doesn't — the
-standing vision makes that venue preparation part of the single `copilot`
-verb's own contract). The in-container precondition-check gap
-(`findings.md` §7) is real but pre-existing and out of this effort's
-zero-review-PR scope — not included here.
+**Open design question, not a proposed fix:** should CLI-mode sessions
+extend to elevated-bridging targets at all? Today they deliberately don't
+— the vision scopes symmetric CLI-mode launch to `agent-codespaces`,
+`agent-containers`, and `agent-ssh`-reachable machines, and elevated
+bridging is an architecturally different local headless relay with no
+privileged mux/reattach contract for *any* interactive session yet (see
+`findings.md` §1). If wanted, it's new scope requiring its own design, not
+a wiring fix — raised here because it's exactly the kind of question the
+reviewed contributor is positioned to weigh in on, not decided
+unilaterally by this proposal.
 
-Every item above is either a pure addition/bugfix or an explicitly-flagged
-compatibility-affecting change with its own migration note — none proposes
-silently removing functionality the reviewed PRs added.
+**Out of scope, noted for continuity, not proposed here:** the
+in-container precondition-check gap (`findings.md` §7) is real but
+pre-existing and outside this effort's zero-review-PR scope.
+
+Every numbered item above is either a pure addition/bugfix or an
+explicitly-flagged compatibility-affecting change with its own migration
+note — none proposes silently removing functionality the reviewed PRs
+added.
 
 ## Journal
+
+### 2026-09-30 — Second correction round, after the effort's own review (PR #4696)
+- A second Copilot review pass (against the first correction round) caught
+  more: (1) the "elevated bridging left out" framing was itself wrong —
+  the standing vision scopes CLI-mode's venue set to `agent-codespaces`/
+  `agent-containers`/`agent-ssh` only; elevated bridging is an
+  architecturally distinct local relay with no privileged interactive mux
+  contract at all, so this is an open design question, not a gap, and is
+  no longer a numbered Proposal item; (2) the forwarding-flag-grammar nit
+  was wrong — `--reverse-forward`/`--forward` already share a consistent
+  listening-side-first convention; retracted; (3) the `--ttl-seconds`
+  naming nit was actually masking a real bug — the flag is silently
+  ignored on the detached path (`copilot_venue.py` hard-codes
+  `_RESERVATION_TTL` in `cmd_detach` instead of forwarding
+  `args.ttl_seconds`) — replaced the naming proposal with this concrete
+  fix; (4) the Proposal/findings docs were rewritten to state current
+  conclusions directly rather than narrating the prior review rounds
+  inline (that history now lives only here in the Journal); (5) opened the
+  umbrella issue (#4702) the local effort convention requires before
+  treating a stretch as Active. Widened `copilot-review-gate.yml`'s own
+  confirmation-poll window in the same PR (unrelated fix, bundled because
+  this PR's own checks needed it) — flagged in the PR description per the
+  same review round.
 
 ### 2026-09-30 — Corrected after the effort's own review (PR #4696)
 - Copilot's review of this effort's own PR caught real errors in the first
