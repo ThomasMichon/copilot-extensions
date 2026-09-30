@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import __main__ as m
-from agent_worktrees import locks, procs, reclaim
+from agent_worktrees import locks, procs, process_table_cache, reclaim
 
 
 # ── homing_of / descendants_of (pure) ──────────────────────────────────────
@@ -184,6 +184,14 @@ class TestResolveBoundCopilots:
         monkeypatch.setattr(reclaim, "_resolve_worktree_id_for_cwd",
                             lambda cwd: wt_map.get(cwd))
         monkeypatch.setattr(reclaim, "build_process_table", lambda: table)
+        # resolve_bound_copilots()'s default table now goes through a short-TTL
+        # read cache (copilot-extensions#4716: see process_table_cache.py),
+        # not build_process_table() directly -- a test that re-patches the
+        # table mid-test (this class calls _patch more than once in some
+        # tests) must drop any cached snapshot from a prior _patch, or a fast
+        # back-to-back call sees the stale one instead of the just-patched
+        # table.
+        process_table_cache.clear()
         # Neutralize the POSIX tty-upgrade by default (no tmux panes) so these
         # tests stay deterministic on Linux runners; a specific test overrides it.
         from agent_worktrees import remux
@@ -322,6 +330,47 @@ class TestResolveBoundCopilots:
             lambda e: (calls.__setitem__("cwd", calls["cwd"] + 1), real(e))[1])
         assert reclaim.resolve_bound_copilots() == []
         assert calls["cwd"] == 0
+
+
+# ── resolve_bound_copilots's use of the shared read cache (#4716) ──────────
+# Pure cache-mechanism tests (coalescing, TTL expiry, clear) live in
+# test_process_table_cache.py, mirroring record_cache/test_record_cache.py.
+class TestResolveBoundCopilotsReadCache:
+    def setup_method(self):
+        process_table_cache.clear()
+
+    def teardown_method(self):
+        process_table_cache.clear()
+
+    def test_resolve_bound_copilots_default_uses_the_read_cache(self, monkeypatch):
+        calls = {"n": 0}
+
+        def _build():
+            calls["n"] += 1
+            return {}
+
+        monkeypatch.setattr(reclaim, "build_process_table", _build)
+        monkeypatch.setattr(reclaim.sessions, "_session_state_dir",
+                            lambda: Path("/nonexistent-for-this-test"))
+        reclaim.resolve_bound_copilots()
+        reclaim.resolve_bound_copilots()
+        assert calls["n"] == 1
+
+    def test_explicit_table_bypasses_the_cache(self, monkeypatch):
+        """An explicit ``table=`` (the kill-adjacent-caller contract) must
+        never consult the cache -- passing one should not even touch
+        ``build_process_table``."""
+        calls = {"n": 0}
+
+        def _build():
+            calls["n"] += 1
+            return {}
+
+        monkeypatch.setattr(reclaim, "build_process_table", _build)
+        monkeypatch.setattr(reclaim.sessions, "_session_state_dir",
+                            lambda: Path("/nonexistent-for-this-test"))
+        reclaim.resolve_bound_copilots(table={})
+        assert calls["n"] == 0
 
 
 # ── reap_bound_copilots (termination boundary mocked) ──────────────────────
