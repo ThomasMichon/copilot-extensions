@@ -15,17 +15,18 @@ framing.
 
 ## 1. CLI-mode transport parity ("all should support CLI mode")
 
-| Transport | Supports CLI-mode sessions today? | Evidence |
-|---|---|---|
-| `agent-containers` | Yes | Shares the Session Host dispatch primitive (`ContainerTransport` → `build_container_spawner()` → the same `CodeSpaceSpawner` class); `session-host-prepare`/`-state`/`-cleanup` verbs present (`plugins/agent-containers/src/agent_containers/__main__.py:202-224, 363-368`). |
-| `agent-codespaces` | Yes | Native `copilot --detach --forward`, Connection Owner, model-launch parity (`plugins/agent-codespaces/src/agent_codespaces/copilot_detach.py`). |
-| Cross-machine (SSH mesh) | Yes | `plugins/agent-ssh/src/agent_ssh/copilot_detach.py:58-72` (`plan_for()`) implements the same detached/reserved CLI-mode launch shape as `agent-codespaces`/`agent-containers`. |
+| Transport | Implements CLI-mode sessions? | Reachable via `agent-bridge create --cli`? | Evidence |
+|---|---|---|---|
+| `agent-containers` | Yes | Yes | Shares the Session Host dispatch primitive (`ContainerTransport` → `build_container_spawner()` → the same `CodeSpaceSpawner` class); `session-host-prepare`/`-state`/`-cleanup` verbs present (`plugins/agent-containers/src/agent_containers/__main__.py:202-224, 363-368`). Listed in `_CLI_MODE_VENUE_BINSTUBS` (below). |
+| `agent-codespaces` | Yes | Yes | Native `copilot --detach --forward`, Connection Owner, model-launch parity (`plugins/agent-codespaces/src/agent_codespaces/copilot_detach.py`). Listed in `_CLI_MODE_VENUE_BINSTUBS` (below). |
+| Cross-machine (SSH mesh) | Yes | **No — significant, genuine functional gap** | `plugins/agent-ssh/src/agent_ssh/copilot_detach.py:58-72` (`plan_for()`) implements the same detached/reserved CLI-mode launch shape as `agent-codespaces`/`agent-containers` — the underlying mechanism exists. But `agent-bridge`'s own central dispatch surface, `plugins/agent-bridge/src/agent_bridge/session_targeting_cli.py:481` (`_CLI_MODE_VENUE_BINSTUBS = {"codespace": "agent-codespaces", "container": "agent-containers"}`), has no `"ssh"` entry, and the `--cli` flag's own help text (`:732`) only documents `codespace:<name>`/`container:<name>` targets. An operator using the central `agent-bridge create --cli` command has no way to reach an `agent-ssh`-reachable machine, even though `agent-ssh copilot --detach` works directly. This is the one place central routing hasn't kept pace with a venue that otherwise has full CLI-mode support. |
 
-**Elevated bridging is not a fourth CLI-mode venue, by design — not a gap.**
-`visions/remote-interactive-sessions/README.md:1-9, 125-146` defines the
-supported venue set for symmetric CLI-mode launch as `agent-codespaces`,
-`agent-containers`, and an `agent-ssh`-reachable machine — three remote
-venues reached over one SSH-based transport. Elevated bridging
+**Elevated bridging is not a fourth CLI-mode venue, by design — this is a
+scope question, not a parity gap.** `visions/remote-interactive-sessions/
+README.md:1-9, 125-146` defines the supported venue set for symmetric
+CLI-mode launch as `agent-codespaces`, `agent-containers`, and an
+`agent-ssh`-reachable machine — three remote venues reached over one
+SSH-based transport. Elevated bridging
 (`plugins/agent-bridge/src/agent_bridge/elevated.py`) is architecturally
 different: a local headless ACP relay (Windows S4U/scheduled-task/WMI
 broker), not a remote venue a CLI-mode session launches into. A *local*

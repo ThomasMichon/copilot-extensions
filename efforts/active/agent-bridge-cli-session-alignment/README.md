@@ -23,13 +23,19 @@
 Keep the observable agent-bridge CLI-session surface — spanning
 `agent-bridge`, `agent-codespaces`, `agent-containers`, and `agent-ssh` —
 internally consistent as multiple people extend it concurrently: idiomatic,
-non-drifting parameter naming; equal CLI-mode support across every bridging
-transport (container, ordinary machine-to-machine, cross-machine, and
-elevated); and preservation of the standing invariants the mechanism was
+non-drifting parameter naming; equal CLI-mode support across the vision's
+three remote venues (`agent-codespaces`, `agent-containers`, and an
+`agent-ssh`-reachable machine) reached uniformly through the central
+routing surface, not just supported by an individual venue plugin in
+isolation; and preservation of the standing invariants the mechanism was
 built on (dynamic port reservation, process hygiene, decoupling from
-unrelated concerns, and a deliberately unopinionated/unthemed UX). This is a
-product-coherence pass, not a critique of any one contributor — the trigger
-is procedural (a review gap), and the output is a proposal, not a mandate.
+unrelated concerns, and a deliberately unopinionated/unthemed UX). Whether
+CLI-mode should ever extend to elevated bridging (an architecturally
+distinct local relay, outside the vision's current venue set) is an open
+question this effort raises but does not answer — not an acceptance
+criterion of this pass. This is a product-coherence pass, not a critique of
+any one contributor — the trigger is procedural (a review gap), and the
+output is a proposal, not a mandate.
 
 ## Participants
 
@@ -165,12 +171,21 @@ config overlays, an older skill-review plan — and are out of scope here.)
 ## Proposal
 
 Full evidence: [`findings.md`](findings.md); review history that shaped
-this proposal is in the Journal below, not repeated here. Five concrete
+this proposal is in the Journal below, not repeated here. Six concrete
 items plus one open design question, each naming what it preserves and
 whether it's a pure addition/bugfix or a behavior change needing
 compatibility handling:
 
-1. **Align the CLI extension's WSL port-fallback with the Python client's
+1. **Add an `"ssh"` entry to `agent-bridge`'s `_CLI_MODE_VENUE_BINSTUBS`
+   and document it in `--cli`'s help text**, so `agent-bridge create --cli`
+   can route to an `agent-ssh`-reachable machine the same way it already
+   routes to `codespace:<name>`/`container:<name>` — `agent-ssh` itself
+   already implements the full CLI-mode launch shape
+   (`agent-ssh/copilot_detach.py`), only the central dispatcher doesn't
+   know about it yet. *Pure addition* — no existing routing changes,
+   this only adds a missing case.
+
+2. **Align the CLI extension's WSL port-fallback with the Python client's
    already-retired special case** (`extension.mjs:resolveBaseUrl` still
    dials 9281 for a WSL guest; `models.py` retired that distinction and
    keeps only 9280 as the shared last-resort fallback). *Behavior change*
@@ -178,7 +193,7 @@ compatibility handling:
    none, per the Python client's own retirement, but flag as a compat
    check before landing).
 
-2. **Give `agent-codespaces --forward` a daemon-reserved host port as the
+3. **Give `agent-codespaces --forward` a daemon-reserved host port as the
    default**, with the current caller-supplied fixed port available as an
    explicit opt-in for the (real) case an operator wants a stable local
    port. Preserves the whole `--detach --forward`/Connection Owner design
@@ -187,7 +202,7 @@ compatibility handling:
    always-fixed-port default would need the explicit opt-in flag; needs a
    migration note.
 
-3. **Key `agent-containers`' forward keeper to the full venue-qualified
+4. **Key `agent-containers`' forward keeper to the full venue-qualified
    session scope (`<worktree identity>@<venue>`), not container name
    alone.** Preserves the standing `<worktree identity>@<venue>` design
    entirely — this only fixes the keeper's own tracking key so two
@@ -195,12 +210,12 @@ compatibility handling:
    forwarding process. *Pure addition/bugfix, no behavior change for
    callers.*
 
-4. **Fix the stale reservation left by a failed CLI-mode launch**
+5. **Fix the stale reservation left by a failed CLI-mode launch**
    (`inventory_cli.py:_launch_cli_mode_session`) so a launch failure
    releases its reservation instead of holding it until TTL expiry.
    *Pure bugfix.*
 
-5. **Thread `agent-codespaces --detach`'s `--ttl-seconds` through to
+6. **Thread `agent-codespaces --detach`'s `--ttl-seconds` through to
    `cmd_detach`**, which currently hard-codes its own reservation TTL and
    silently ignores the caller's value on the detached path (only the
    attached path honors it today). *Pure bugfix — the flag already exists
@@ -227,6 +242,23 @@ note — none proposes silently removing functionality the reviewed PRs
 added.
 
 ## Journal
+
+### 2026-09-30 — Third correction round, after the effort's own review (PR #4696)
+- A third Copilot review pass caught the most substantive gap of all three
+  rounds: `agent-bridge`'s own central dispatch surface
+  (`_CLI_MODE_VENUE_BINSTUBS` in `session_targeting_cli.py`) has no
+  `"ssh"` entry and `--cli`'s help text only documents
+  `codespace:<name>`/`container:<name>` — so `agent-ssh`, despite fully
+  implementing CLI-mode sessions on its own
+  (`agent-ssh/copilot_detach.py`), can't be reached through the central
+  `agent-bridge create --cli` command at all. This is exactly the kind of
+  parity gap the operator's original "ensure... cross-machine... aren't
+  left out" concern was asking about, and it's real — added as Proposal
+  item #1. Also fixed the Guiding Intent, which still stated "equal
+  CLI-mode support... including elevated" as a goal even after the
+  Proposal itself had already reframed elevation as an open question in
+  the prior round — an internal contradiction the review correctly
+  flagged.
 
 ### 2026-09-30 — Second correction round, after the effort's own review (PR #4696)
 - A second Copilot review pass (against the first correction round) caught
