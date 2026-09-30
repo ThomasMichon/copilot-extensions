@@ -271,7 +271,8 @@ class TranscriptMirror:
         persisted ``<codespace>.prune`` request) by a later owed-push pass."""
         if not _CODESPACE.match(codespace or "") or not self._root.is_dir():
             return False
-        if not (self._root / codespace).exists():
+        # A first pass holds ``<codespace>.lock`` before its ``<codespace>/`` exists.
+        if not (self._root / codespace).exists() and not (self._root / f"{codespace}.lock").exists():
             return False
         (self._root / f"{codespace}.prune").touch()
         return self.prune_if_clean(codespace)

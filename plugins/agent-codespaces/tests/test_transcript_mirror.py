@@ -363,6 +363,20 @@ async def test_a_prune_requested_while_a_push_is_owed_happens_once_it_lands(tmp_
     assert (await mirror.push_owed("cs-2")) == {"ok": True, "changed": 0}
     assert not (tmp_path / "cs-2").exists() and mirror.owed_codespaces() == []
 
+    # Deleted during a first pass: it holds the lock, its directory isn't made yet.
+    first = SingleInstance(tmp_path, service="transcript-mirror", lock_name="cs-3.lock")
+    first.acquire()
+    try:
+        assert not mirror.request_prune("cs-3")
+        (tmp_path / "cs-3" / "session-state" / SID).mkdir(parents=True)  # the pass then writes
+    finally:
+        first.release()
+    assert mirror.owed_codespaces() == ["cs-3"]
+    await mirror.push_owed("cs-3")
+    assert not (tmp_path / "cs-3").exists() and mirror.owed_codespaces() == []
+    assert not mirror.request_prune("cs-4")  # never mirrored: nothing to remember
+    assert not (tmp_path / "cs-4.prune").exists()
+
 
 async def test_a_push_debt_with_no_mirror_left_is_dropped_not_retried_forever(tmp_path):
     pushes = []
