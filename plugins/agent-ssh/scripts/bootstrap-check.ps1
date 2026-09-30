@@ -16,13 +16,16 @@
     Deployed to ~/.agent-ssh/bin/ by scripts/install.ps1. Only reconciles
     staleness -- first install is the one-time setting-up-ssh-* / setup step. PS5.1+.
 
-    OPT-IN GATE (fanned out from the agent-bridge reference implementation,
-    see tools/check-bootstrap-sync.py FAMILIES): the background reconcile
-    spawn below requires an explicit, checked-in opt-in --
-    ``<project>/.copilot-extensions/config.yaml`` carrying a top-level
-    ``background_reconcile_agent-ssh: true`` line (plain regex match, no yaml
-    parser -- this hook has no python/venv yet). No opt-in -> no background
-    spawn; deliberate behavior change from silent auto-heal.
+    NO OPT-IN GATE (agent-bridge-unified-zdd-cutover Phase 0): background
+    reconcile used to require a checked-in, per-project opt-in flag in
+    ``<project>/.copilot-extensions/config.yaml``, because a raw reconcile
+    could race a live session. Now that every reconcile-capable plugin's
+    update path is always-ZDD (safe to run unattended), that justification
+    is gone; the gate was removed rather than kept as a redundant consent
+    checkbox. Frequency/trigger stays deliberately bounded -- still only
+    once per session start, only on a real version drift. What DOES still
+    bound concurrency is the single-flight + stale-reap guard below (a
+    lock file, not the removed opt-in).
 #>
 $ErrorActionPreference = 'SilentlyContinue'
 $script:SessionStartJsonEmitted = $false
@@ -91,26 +94,31 @@ try {
     }
     if ($provisioned -and $deployed -eq $current) { Exit-SessionStart }
 
-    # OPT-IN GATE: drift exists, so we'd normally reconcile -- but only when
-    # this project has explicitly opted THIS plugin in. COPILOT_PROJECT_DIR is
-    # the session's project checkout, injected by the CLI at session start;
-    # fall back to cwd if unset.
-    $ProjectDir = $env:COPILOT_PROJECT_DIR
-    if (-not $ProjectDir) { $ProjectDir = (Get-Location).Path }
-    $optInFile = Join-Path $ProjectDir '.copilot-extensions\config.yaml'
-    $optInKey = 'background_reconcile_agent-ssh'
-    $optedIn = $false
-    if (Test-Path -LiteralPath $optInFile -PathType Leaf) {
-        $optInPattern = '^\s*' + [regex]::Escape($optInKey) + ':\s*true\s*$'
-        $optedIn = [bool](Select-String -LiteralPath $optInFile -Pattern $optInPattern -Quiet -ErrorAction SilentlyContinue)
-    }
-    if (-not $optedIn) {
-        [Console]::Error.WriteLine("[agent-ssh] runtime $deployed -> $current; background reconcile SKIPPED (no opt-in -- add '$optInKey`: true' to $optInFile to enable)")
-        Exit-SessionStart
-    }
-
     $init = Join-Path $pluginDir 'scripts\init.ps1'
     if (-not (Test-Path $init)) { Exit-SessionStart }
+
+    # --- Good boot-citizen guard: single-flight + stale-reap ---
+    # This hook fires on EVERY new session now that the opt-in gate is gone
+    # (agent-bridge-unified-zdd-cutover Phase 0 review finding): without
+    # this, a slow or wedged reconcile gets re-spawned every session,
+    # stacking orphaned background installers. If a prior reconcile PID
+    # recorded in reconcile.lock is still alive:
+    #   YOUNG  -> a reconcile is already in flight; do nothing (never stack).
+    #   STALE  -> it is wedged; reap it, then relaunch (self-heal, so a
+    #             one-off wedge can't poison every future session).
+    $staleSeconds = 600
+    $lockFile = Join-Path $InstallDir 'reconcile.lock'
+    try {
+        if (Test-Path $lockFile) {
+            $lockPid = 0
+            [void][int]::TryParse((Get-Content $lockFile -Raw -ErrorAction SilentlyContinue), [ref]$lockPid)
+            if ($lockPid -gt 0 -and (Get-Process -Id $lockPid -ErrorAction SilentlyContinue)) {
+                $ageSec = ((Get-Date) - (Get-Item $lockFile).LastWriteTime).TotalSeconds
+                if ($ageSec -lt $staleSeconds) { Exit-SessionStart }         # in flight -- don't stack
+                Stop-Process -Id $lockPid -Force -ErrorAction SilentlyContinue  # wedged -- reap
+            }
+        }
+    } catch { }
 
     [Console]::Error.WriteLine("[agent-ssh] runtime $deployed -> $current; reconciling in background...")
     $pw = Get-Command pwsh -ErrorAction SilentlyContinue
@@ -119,9 +127,11 @@ try {
     # it as a window -- -WindowStyle Hidden ALONE is ignored by DefTerm (see
     # agent-bridge). Base64-encode the reconcile command to avoid arg quoting.
     $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes("& `"$init`""))
-    Start-Process -FilePath 'conhost.exe' `
-        -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc) `
-        -WindowStyle Hidden | Out-Null
+    $proc = Start-Process -FilePath 'conhost.exe' -PassThru -WindowStyle Hidden `
+        -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc)
+    try {
+        if ($proc) { Set-Content -LiteralPath $lockFile -Value ([string]$proc.Id) -NoNewline -ErrorAction SilentlyContinue }
+    } catch { }
 } catch { }
 
 Exit-SessionStart
