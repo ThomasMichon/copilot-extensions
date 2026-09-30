@@ -169,11 +169,13 @@ organization-neutral contribution boundary):
 > a reviewer, source/query/tagging for a backlog worker — referencing a
 > shared recipe, never a repo-local copy of the loop/prompt/evaluator logic.
 
-**Follow-up correction (2026-09-30, same day):**
+**Follow-up correction (2026-09-30, same day, generalized per this repo's
+identifier-neutrality rule — private consumer names replaced with
+descriptive venue categories):**
 
 > The review "staleness" needs to be a parameter for the reviewer loop. 30
-> days for odsp-web ADO, 7 days for odsp-web-harness or copilot-extensions,
-> etc.
+> days for a slower-moving Azure DevOps-backed consumer, 7 days for a
+> faster-moving GitHub-backed consumer (e.g. this repo), etc.
 
 This replaces the fixed "7-day-since-last-commit" reading of item (b) above:
 staleness is a **per-declaration parameter** (e.g. `stale_after_days`), not a
@@ -363,10 +365,11 @@ _Pending review._
 ### 2026-09-30 (same day) — Correction: staleness is a per-declaration parameter
 - Operator follow-up: the reviewer recipe's stale-exit threshold must be a
   **configurable parameter**, not the fixed 7 days item (b) originally
-  named — concretely, 30 days for an Azure DevOps-backed loop (odsp-web)
-  vs. 7 days for a faster-moving GitHub loop (odsp-web-harness or this
-  repo). Captured verbatim as a Request follow-up rather than silently
-  editing the original quote.
+  named — concretely, 30 days for a slower-moving Azure DevOps-backed
+  consumer vs. 7 days for a faster-moving GitHub-backed consumer (e.g. this
+  repo). Captured verbatim as a Request follow-up (generalized to drop
+  private consumer names per this repo's identifier-neutrality rule,
+  `AGENTS.md`) rather than silently editing the original quote.
 - Revised Phase 4 (`stale_after_days`-shaped param, no baked-in default —
   an unset value leaves staleness unchecked rather than guessing a cadence)
   and its test item (two fixture declarations with different thresholds
