@@ -196,8 +196,44 @@ class TranscriptMirror:
         return changed
 
     async def __call__(self, codespace: str) -> dict[str, Any]:
+        """One pass: read what's new on the box, append it here, push the mirror.
+
+        The whole pass holds an OS lock on ``<root>/<codespace>.lock``, so two
+        Owners (a replacement starting while an old one shuts down) never mirror
+        the same CodeSpace at once; a pass that finds it held skips. Once the
+        append-and-push runs in its worker thread, that thread owns the lock and
+        releases it when it finishes: cancelling this coroutine (Owner shutdown)
+        can't stop that thread, so the lock has to outlive the cancellation.
+        """
         if not _CODESPACE.match(codespace or ""):
             return {"ok": False, "detail": "not a CodeSpace name"}
+        from single_instance_lease import AlreadyRunningError, SingleInstance
+
+        lease = SingleInstance(self._root, service="transcript-mirror", lock_name=f"{codespace}.lock")
+        try:
+            lease.acquire()
+        except AlreadyRunningError:
+            return {"ok": True, "changed": 0, "detail": "another pass is mirroring this CodeSpace"}
+        handed_off = False
+        try:
+            stdout = await self._read(codespace)
+            if stdout is None:
+                return {"ok": False, "detail": "read failed"}
+
+            def append_and_push() -> dict[str, Any]:
+                try:
+                    return self._append_and_push(codespace, stdout)
+                finally:
+                    lease.release()
+
+            handed_off = True
+            return await asyncio.to_thread(append_and_push)
+        finally:
+            if not handed_off:
+                lease.release()
+
+    async def _read(self, codespace: str) -> str | None:
+        """What the box has beyond this mirror (the script's output), or None."""
         opener = self._open
         if opener is None:
             from .session_forwards import _open_codespace
@@ -213,18 +249,20 @@ class TranscriptMirror:
             result = await exec_with_retry(
                 manager, codespace, "bash -lc " + shlex.quote(script), timeout=60.0, attempts=2,
             )
-            code = getattr(result, "exit_code", None)
-            if code != 0:
-                return {"ok": False, "detail": f"read failed (exit {code})"}
-            changed = await asyncio.to_thread(
-                self.apply, codespace, getattr(result, "stdout", "") or "",
-            )
+            if getattr(result, "exit_code", None) != 0:
+                log.debug("transcript mirror: read on %s exited %s", codespace,
+                          getattr(result, "exit_code", None))
+                return None
+            return getattr(result, "stdout", "") or ""
         finally:
             if manager is not None:
                 try:
                     await manager.disconnect(codespace)
                 except Exception as exc:
                     log.debug("transcript mirror: disconnect from %s failed: %s", codespace, exc)
+
+    def _append_and_push(self, codespace: str, stdout: str) -> dict[str, Any]:
+        changed = self.apply(codespace, stdout)
         if not changed:
             return {"ok": True, "changed": 0}
         push = self._push
@@ -233,8 +271,7 @@ class TranscriptMirror:
 
             def push(source: Path, label: str) -> tuple[bool, str]:
                 return _push_via_session_sync(source, label, verbose=False)
-        label = f"{LIVE_LABEL_GROUP}/{codespace}"
-        ok, detail = await asyncio.to_thread(push, self._root / codespace, label)
+        ok, detail = push(self._root / codespace, f"{LIVE_LABEL_GROUP}/{codespace}")
         if not ok:
             log.warning("transcript mirror for %s: push failed: %s", codespace, detail)
         return {"ok": ok, "changed": len(changed), "detail": detail}

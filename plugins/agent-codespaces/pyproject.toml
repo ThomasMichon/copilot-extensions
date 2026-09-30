@@ -24,6 +24,7 @@ dependencies = [
     "agent-venue-copilot",
     "agent-zdd",
     "agent-session-liveness-probe",
+    "agent-single-instance-lease",
 ]
 
 [tool.uv.sources]
@@ -89,6 +90,9 @@ agent-zdd = { path = "../../libs/zdd", editable = true }
 # to keep manually in sync -- only a real `main`-branch release
 # (tools/materialize_main.py) ever gets a real local copy.
 agent-session-liveness-probe = { path = "../../libs/session-liveness-probe", editable = true }
+# OS-held lock (module ``single_instance_lease``): one transcript-mirror pass
+# per CodeSpace across Connection Owners. Shared with agent-bridge/agent-dispatch.
+agent-single-instance-lease = { path = "../../libs/single-instance-lease", editable = true }
 
 [project.scripts]
 agent-codespaces = "agent_codespaces.__main__:main"

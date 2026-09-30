@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import os
 import shutil
@@ -193,6 +194,56 @@ async def test_a_failed_read_or_a_bad_name_pushes_nothing(tmp_path, direct_exec)
     assert not (await mirror("cs-1"))["ok"]
     assert not (await mirror("../x"))["ok"]
     assert pushes == []
+
+
+async def test_a_pass_skips_a_codespace_another_owner_is_mirroring(tmp_path, direct_exec):
+    from single_instance_lease import SingleInstance
+
+    pushes = []
+    mirror = _mirror_with(tmp_path, _Manager(_chunk(SID, 0, b'{"a":1}\n') + tm._DONE + "\n"), pushes)
+    other = SingleInstance(tmp_path, service="transcript-mirror", lock_name="cs-1.lock")
+    other.acquire()
+    try:
+        out = await mirror("cs-1")
+        assert out["changed"] == 0 and "another pass" in out["detail"] and pushes == []
+    finally:
+        other.release()
+    assert (await mirror("cs-1"))["changed"] == 1
+
+
+async def test_a_cancelled_pass_keeps_the_codespace_until_its_push_finishes(tmp_path, direct_exec):
+    import threading
+
+    from single_instance_lease import AlreadyRunningError, SingleInstance
+
+    entered, go = threading.Event(), threading.Event()
+
+    def slow_push(source, label):
+        entered.set()
+        go.wait(10)
+        return True, "pushed"
+
+    async def opener(codespace):
+        return _Manager(_chunk(SID, 0, b'{"a":1}\n') + tm._DONE + "\n")
+
+    mirror = tm.TranscriptMirror(open_manager=opener, push=slow_push, root=tmp_path)
+    task = asyncio.ensure_future(mirror("cs-1"))
+    await asyncio.to_thread(entered.wait, 10)
+    task.cancel()  # the Owner shutting down
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    probe = SingleInstance(tmp_path, service="transcript-mirror", lock_name="cs-1.lock")
+    with pytest.raises(AlreadyRunningError):  # the push thread still runs, so the lock holds
+        probe.acquire()
+    go.set()
+    for _ in range(100):
+        try:
+            probe.acquire()
+            break
+        except AlreadyRunningError:
+            await asyncio.sleep(0.05)
+    assert probe.held
+    probe.release()
 
 
 @pytest.fixture
