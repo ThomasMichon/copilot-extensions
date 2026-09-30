@@ -416,7 +416,7 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
         # Fail-loud companion to the fail-closed reconcile: an unidentified host
         # will SKIP every machine-pinned declaration (it cannot confirm membership),
         # so a discovered machine-scoped pool would silently never run. Surface it
-        # so the operator can pass --machine (or fix host identity) -- aperture-labs
+        # so the operator can pass --machine (or fix host identity) -- private-downstream-repo
         # #5001.
         print(
             "agent-dispatch supervise serve: WARNING -- could not resolve this "
@@ -841,11 +841,15 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         evaluator = None
         spec_path = getattr(args, "evaluator", None)
         if spec_path:
-            from .producers.evaluator import EvaluatorError, SpecEvaluator
+            from .producers.evaluator import EvaluatorError, load_registration_evaluator
 
             try:
-                spec = json.loads(Path(spec_path).expanduser().read_text(encoding="utf-8"))
-                evaluator = SpecEvaluator(spec)
+                evaluator = load_registration_evaluator(
+                    {
+                        "evaluator": spec_path,
+                        "evaluator_ref": getattr(args, "evaluator_ref", None),
+                    }
+                )
             except (OSError, ValueError, EvaluatorError) as exc:
                 print(f"agent-dispatch supervise: bad --evaluator spec: {exc}", file=sys.stderr)
                 return 2

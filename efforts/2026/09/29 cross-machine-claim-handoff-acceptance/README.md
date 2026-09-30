@@ -28,7 +28,7 @@ SSH-exec-based implementation to completion.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Host session | Plans, corrects docs/issues, dispatches and supervises implementation, drives PRs to merge | worktree `lambda-core-wsl-20260928-214255-064f` on `lambda-core` |
+| Host session | Plans, corrects docs/issues, dispatches and supervises implementation, drives PRs to merge | worktree `atlas-core-wsl-20260928-214255-064f` on `atlas-core` |
 
 ## Coordination
 
@@ -58,7 +58,7 @@ SSH-exec-based implementation to completion.
   the suite's existing, simpler cross-machine execution pattern: SSH straight
   to the target machine's own binstub and let it run the *same local
   mutation code* that already works for same-machine accept -- e.g. the
-  documented `ssh wheatley -- aperture-labs agent-worktrees cleanup --clean`
+  documented `ssh ember -- private-downstream-repo agent-worktrees cleanup --clean`
   pattern already used for remote worktree cleanup.
 - #4529 ("agent-worktrees: no synchronous remote-mutation surface for
   another machine's WorktreeRecord") was filed on the above wrong premise.
@@ -142,7 +142,7 @@ before Phase 2 execution begins, per the `planning-efforts` skill._
 ## Journal
 
 ### 2026-09-29 — Kickoff
-- Effort created after a peer aperture-labs session investigated #1090's
+- Effort created after a peer downstream session investigated #1090's
   cross-machine gap, over-concluded a new bridge RPC was required, and the
   operator corrected the direction toward the suite's existing SSH-exec
   pattern. Captures the correction and plans the actual fix.

@@ -148,7 +148,7 @@ def test_serve_mode_supports_explicit_machine_scope():
     """Both installers' serve launcher must thread an explicit machine scope
     (AGENT_DISPATCH_SUPERVISE_MACHINE -> `--machine`) so a service-context daemon
     can identify itself and correctly scope machine-pinned declarations
-    (aperture-labs #5001)."""
+    (the downstream tracker)."""
     sh = _text()
     assert 'smachine="\\${AGENT_DISPATCH_SUPERVISE_MACHINE:-}"' in sh
     assert '--machine "\\$smachine"' in sh

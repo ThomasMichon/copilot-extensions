@@ -3,7 +3,7 @@
 ``_abandoned_passive_reap_settings`` is the environment-var parsing seam for
 the periodic sweep wired into ``coordinator.create_app``'s lifespan that
 retires a ``spawn_passive`` daemon a cutover never got to promote
-(aperture-labs #5195). See ``test_reap.py`` for the pure
+(the downstream tracker). See ``test_reap.py`` for the pure
 ``reap_abandoned_passive_backstop``/``is_live_coordinator_pid`` primitives it
 composes, and ``libs/zdd/tests/test_breadcrumb.py`` for the library-level
 ``reap_abandoned_passive`` this ultimately calls.

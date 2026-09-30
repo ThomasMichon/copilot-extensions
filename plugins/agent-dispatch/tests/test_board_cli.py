@@ -2,8 +2,31 @@ from __future__ import annotations
 
 import json
 import types
+from pathlib import Path
 
-from agent_dispatch import board_cli
+from agent_dispatch import board_cli, worktree_status_relay
+
+
+def test_length_display_formats_and_degrades_gracefully():
+    """`_length_display` -- the Tasks board LENGTH column's own unit test,
+    independent of the `_build()`/relay plumbing above."""
+    fresh = {
+        "confirmed": True, "observed_at": 1000.0,
+        "value": {"session_count": 3, "turn_count": 25},
+    }
+    assert worktree_status_relay._length_display(fresh, stale=False) == "3s 25t"
+    assert worktree_status_relay._length_display(fresh, stale=True) is None
+    assert worktree_status_relay._length_display(None, stale=False) is None
+    unconfirmed = {**fresh, "confirmed": False}
+    assert worktree_status_relay._length_display(unconfirmed, stale=False) is None
+    malformed = {"confirmed": True, "observed_at": 1000.0, "value": {"turn_count": 25}}
+    assert worktree_status_relay._length_display(malformed, stale=False) is None
+    # A never-resumed worktree's session_turns is None -- not fabricated as 0.
+    no_turns_yet = {
+        "confirmed": True, "observed_at": 1000.0,
+        "value": {"session_count": 0, "turn_count": None},
+    }
+    assert worktree_status_relay._length_display(no_turns_yet, stale=False) is None
 
 
 def test_build_groups_and_expires_activity(monkeypatch):
@@ -215,8 +238,23 @@ def test_build_populates_subtitle_and_drops_title_repo_from_columns(monkeypatch)
     assert "title" in row  # still present on the row (for `{title}` action templating)
     assert "repo_name" in row  # still present (used to compose the subtitle)
 
-    import json
-    from pathlib import Path
+
+def test_tasks_pivot_manifest_exposes_submitted_complete_and_abandon_actions():
+    manifest = json.loads(
+        (
+            Path(__file__).resolve().parents[1]
+            / "pivots"
+            / "agent-dispatch.json"
+        ).read_text(encoding="utf-8")
+    )
+    actions = {action["key"]: action for action in manifest["actions"]}
+
+    assert actions["complete-submitted"]["run"][:2] == ["agent-dispatch", "confirm"]
+    assert actions["complete-submitted"]["when"] == {
+        "group": "Submitted",
+        "require_verification": "True",
+    }
+    assert "Submitted" in actions["abandon"]["when"]["group"]
 
     manifest = json.loads(
         (Path(__file__).parents[1] / "pivots" / "agent-dispatch.json")
@@ -358,7 +396,12 @@ def test_build_artifacts_summary_reads_claims_from_relay(monkeypatch):
                             "confirmed": True,
                             "observed_at": 995.0,
                             "value": {"resources": [{"kind": "pr"}], "owner_ref": "abc/def"},
-                        }
+                        },
+                        "session_length": {
+                            "confirmed": True,
+                            "observed_at": 995.0,
+                            "value": {"session_count": 3, "turn_count": 25},
+                        },
                     }
                 },
             }
@@ -366,6 +409,47 @@ def test_build_artifacts_summary_reads_claims_from_relay(monkeypatch):
     )
     assert rows[0]["artifacts_summary"] == "1 claim, owner ref"
     assert rows[0]["worktree_status"]["status"] == "fresh"
+    assert rows[0]["length_display"] == "3s 25t"
+
+
+def test_build_length_display_blank_when_no_worktree_or_stale(monkeypatch):
+    """`length_display` (the Tasks board's LENGTH column) is blank -- never a
+    fabricated `0s 0t` -- when there is no claiming worktree at all, and
+    also when the relay entry backing one IS present but stale."""
+    monkeypatch.setattr(board_cli.time, "time", lambda: 1000.0)
+    no_worktree_rows = board_cli._build(
+        [{"id": "t1", "status": "queued"}],
+        machine="m1",
+        recent_mins=120,
+    )
+    assert no_worktree_rows[0]["length_display"] is None
+
+    stale_rows = board_cli._build(
+        [{
+            "id": "t2", "status": "started", "repo": "github.com/example/repo",
+            "owner": "m1/wt1", "target_worktree": "wt1",
+        }],
+        machine="m1",
+        recent_mins=120,
+        relay_fetch_many=lambda refs: {
+            ("github.com/example/repo", "wt1"): {
+                "repo": "github.com/example/repo",
+                "worktree_id": "wt1",
+                "fetched_at": 900.0,
+                "poll_interval_seconds": 10.0,
+                "bundle": {
+                    "facts": {
+                        "session_length": {
+                            "confirmed": True,
+                            "observed_at": 900.0,
+                            "value": {"session_count": 3, "turn_count": 25},
+                        },
+                    }
+                },
+            }
+        },
+    )
+    assert stale_rows[0]["length_display"] is None
 
 
 def test_build_stale_relay_renders_unknown_worktree_status(monkeypatch):

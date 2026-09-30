@@ -120,8 +120,8 @@ class TestRegisterSessionStdin:
 
         assert rc == 0
         rec = load_record(tmp_tracking_dir / "wt-cutover.yaml")
-        # "old" yielded the moment it opened the handoff (gitea
-        # aperture-labs#7230) -- head is vacant, not still "old". The
+        # "old" yielded the moment it opened the handoff -- head is vacant,
+        # not still "old". The
         # candidate association itself still does not hand head to "new";
         # that requires a separate, deliberate link/bind.
         assert rec.resolved_head_session is None

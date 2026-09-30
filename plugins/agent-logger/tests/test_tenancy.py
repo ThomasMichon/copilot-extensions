@@ -29,14 +29,14 @@ def _make_session(source: Path, name: str, git_root: str) -> None:
 def _make_copilot(root: Path) -> Path:
     """A fake ~/.copilot with one session per repo family."""
     src = root / "copilot"
-    _make_session(src, "sess-apl", "/work/aperture-labs/wt")
+    _make_session(src, "sess-apl", "/work/private-downstream-repo/wt")
     _make_session(src, "sess-cext", "/work/copilot-extensions/wt")
     _make_session(src, "sess-dot", "/work/dotfiles/wt")
     _make_session(src, "sess-work", "/work/acme-webapp/wt")
     return src
 
 
-HARNESS = ["aperture-labs", "copilot-extensions", "dotfiles", "acme-webapp"]
+HARNESS = ["private-downstream-repo", "copilot-extensions", "dotfiles", "acme-webapp"]
 
 
 def _write_tenant_repo(repo: Path, block: dict) -> None:
@@ -73,11 +73,11 @@ def test_adopted_repo_paths_absent_registry_is_empty(tmp_path):
 
 def test_adopted_repo_paths_resolves_srcroot(tmp_path):
     src = tmp_path / "src"
-    (src / "aperture-labs").mkdir(parents=True)
+    (src / "private-downstream-repo").mkdir(parents=True)
     (src / "dotfiles").mkdir(parents=True)
-    _write_registry(tmp_path / ".aw", src, ["aperture-labs", "dotfiles"])
+    _write_registry(tmp_path / ".aw", src, ["private-downstream-repo", "dotfiles"])
     resolved = dict(tenancy.adopted_repo_paths(aw_home=tmp_path / ".aw"))
-    assert resolved["aperture-labs"] == src / "aperture-labs"
+    assert resolved["private-downstream-repo"] == src / "private-downstream-repo"
     assert resolved["dotfiles"] == src / "dotfiles"
 
 
@@ -94,9 +94,9 @@ def test_parse_tenant_block_absent_is_none():
 
 def test_parse_tenant_block_defaults_id_and_roles():
     block = tenancy.parse_tenant_block(
-        {"tenant": {}}, source="x", default_id="aperture-labs"
+        {"tenant": {}}, source="x", default_id="private-downstream-repo"
     )
-    assert block["id"] == "aperture-labs"
+    assert block["id"] == "private-downstream-repo"
     assert block["roles"] == ["source"]
     assert block["enabled"] is True
 
@@ -123,14 +123,14 @@ def test_parse_tenant_block_future_schema_is_tolerant():
         {
             "schema_version": 99,
             "tenant": {
-                "id": "aperture-labs",
+                "id": "private-downstream-repo",
                 "roles": ["source", "index"],  # 'index' is a future role
                 "future_field": {"x": 1},
                 "machines": {"book2": {"future_key": 1, "sync": {}}},
             },
         },
         source="x",
-        default_id="aperture-labs",
+        default_id="private-downstream-repo",
     )
     assert block["roles"] == ["source"]  # future role dropped, known kept
     assert block["future_schema"] is True
@@ -184,7 +184,7 @@ def test_parse_tenant_block_rejects_unknown_machine_role():
     [
         ("book2", "book2", True),
         ("book2-wsl", "book2", True),
-        ("book2", "lambda-core", False),
+        ("book2", "atlas-core", False),
         ("book2extra", "book2", False),  # not a "-" boundary
     ],
 )
@@ -201,13 +201,13 @@ def test_resolve_tenant_applies_machine_override_and_lock_name(tmp_path):
     block = tenancy.parse_tenant_block(
         {
             "tenant": {
-                "id": "aperture-labs",
+                "id": "private-downstream-repo",
                 "roles": ["source"],
                 "sync": {"harness_repos": HARNESS},
                 "machines": {
                     "book2": {
                         "sync": {
-                            "repo_allowlist": ["aperture-labs", "copilot-extensions"],
+                            "repo_allowlist": ["private-downstream-repo", "copilot-extensions"],
                             "repo_allowlist_fail_closed": True,
                         }
                     }
@@ -215,27 +215,27 @@ def test_resolve_tenant_applies_machine_override_and_lock_name(tmp_path):
             }
         },
         source="x",
-        default_id="aperture-labs",
+        default_id="private-downstream-repo",
     )
     resolved = tenancy.resolve_tenant(
         block,
-        repo_name="aperture-labs",
+        repo_name="private-downstream-repo",
         repo_path=tmp_path / "repo",
         config_path=tmp_path / "repo" / ".agent-logger.yaml",
         machine="book2",
         home=tmp_path / "home",
     )
     cfg = resolved.config
-    assert cfg.sync_repo_allowlist == ["aperture-labs", "copilot-extensions"]
+    assert cfg.sync_repo_allowlist == ["private-downstream-repo", "copilot-extensions"]
     assert cfg.sync_repo_allowlist_fail_closed is True
     assert cfg.sync_lock_name == "session-sync.lock"  # shared source lock
     # A non-book2 machine takes the unfiltered base scope.
     other = tenancy.resolve_tenant(
         block,
-        repo_name="aperture-labs",
+        repo_name="private-downstream-repo",
         repo_path=tmp_path / "repo",
         config_path=tmp_path / "repo" / ".agent-logger.yaml",
-        machine="lambda-core",
+        machine="atlas-core",
         home=tmp_path / "home",
     )
     assert other.config.sync_repo_allowlist == []
@@ -245,18 +245,18 @@ def test_resolve_tenant_applies_machine_override_and_lock_name(tmp_path):
 def test_resolve_tenant_layers_machine_local_supplement(tmp_path):
     home = tmp_path / "home"
     (home / tenancy.TENANT_SUPPLEMENT_DIR).mkdir(parents=True)
-    (home / tenancy.TENANT_SUPPLEMENT_DIR / "aperture-labs.yaml").write_text(
+    (home / tenancy.TENANT_SUPPLEMENT_DIR / "private-downstream-repo.yaml").write_text(
         yaml.safe_dump(
             {"sync": {"target": "onedrive", "notify": {"url": "https://secret/hook"}}}
         ),
         encoding="utf-8",
     )
     block = tenancy.parse_tenant_block(
-        {"tenant": {"id": "aperture-labs"}}, source="x", default_id="aperture-labs"
+        {"tenant": {"id": "private-downstream-repo"}}, source="x", default_id="private-downstream-repo"
     )
     resolved = tenancy.resolve_tenant(
         block,
-        repo_name="aperture-labs",
+        repo_name="private-downstream-repo",
         repo_path=tmp_path / "repo",
         config_path=tmp_path / "repo" / ".agent-logger.yaml",
         machine="book2",
@@ -272,21 +272,21 @@ def test_resolve_tenant_layers_machine_local_supplement(tmp_path):
 
 
 def _standing_tenants(tmp_path) -> tuple[Path, Path, Path]:
-    """Build the book2 aperture-labs + dotfiles standing tenants + a fake home."""
+    """Build the book2 private-downstream-repo + dotfiles standing tenants + a fake home."""
     src = tmp_path / "src"
     copilot = _make_copilot(tmp_path)
     home = tmp_path / "home"
 
     _write_tenant_repo(
-        src / "aperture-labs",
+        src / "private-downstream-repo",
         {
-            "id": "aperture-labs",
+            "id": "private-downstream-repo",
             "roles": ["source"],
             "sync": {"harness_repos": HARNESS},
             "machines": {
                 "book2": {
                     "sync": {
-                        "repo_allowlist": ["aperture-labs", "copilot-extensions"],
+                        "repo_allowlist": ["private-downstream-repo", "copilot-extensions"],
                         "repo_allowlist_fail_closed": True,
                     }
                 }
@@ -302,7 +302,7 @@ def _standing_tenants(tmp_path) -> tuple[Path, Path, Path]:
             "machines": {
                 "book2": {
                     "sync": {
-                        "repo_denylist": ["aperture-labs", "copilot-extensions"],
+                        "repo_denylist": ["private-downstream-repo", "copilot-extensions"],
                     }
                 }
             },
@@ -317,13 +317,13 @@ def _standing_tenants(tmp_path) -> tuple[Path, Path, Path]:
     )
 
     _write_registry(
-        tmp_path / ".aw", src, ["aperture-labs", "dotfiles", "copilot-extensions"]
+        tmp_path / ".aw", src, ["private-downstream-repo", "dotfiles", "copilot-extensions"]
     )
 
     # Machine-local supplements: transport (local target -> distinct dest) + source.
     supp = home / tenancy.TENANT_SUPPLEMENT_DIR
     supp.mkdir(parents=True)
-    for tid in ("aperture-labs", "dotfiles"):
+    for tid in ("private-downstream-repo", "dotfiles"):
         (supp / f"{tid}.yaml").write_text(
             yaml.safe_dump(
                 {
@@ -343,14 +343,14 @@ def test_discover_only_tenant_blocked_repos(tmp_path):
     _copilot, home, aw = _standing_tenants(tmp_path)
     tenants = tenancy.discover_tenants(machine="book2", home=home, aw_home=aw)
     ids = sorted(t.tenant_id for t in tenants)
-    assert ids == ["aperture-labs", "dotfiles"]  # not copilot-extensions
+    assert ids == ["dotfiles", "private-downstream-repo"]  # not copilot-extensions
 
 
 def test_discover_prefers_dedicated_tenant_file(tmp_path):
     """A dedicated .agent-logger.tenant.yaml carries the tenant, and a log-only
     .agent-logger.yaml alongside it does not shadow it."""
     src = tmp_path / "src"
-    repo = src / "aperture-labs"
+    repo = src / "private-downstream-repo"
     repo.mkdir(parents=True)
     (repo / ".agent-logger.yaml").write_text(
         yaml.safe_dump({"schema_version": 1, "log": {"note_marker": "NOTE:"}}),
@@ -358,15 +358,15 @@ def test_discover_prefers_dedicated_tenant_file(tmp_path):
     )
     (repo / ".agent-logger.tenant.yaml").write_text(
         yaml.safe_dump(
-            {"schema_version": 1, "tenant": {"id": "aperture-labs", "roles": ["source"]}}
+            {"schema_version": 1, "tenant": {"id": "private-downstream-repo", "roles": ["source"]}}
         ),
         encoding="utf-8",
     )
-    _write_registry(tmp_path / ".aw", src, ["aperture-labs"])
+    _write_registry(tmp_path / ".aw", src, ["private-downstream-repo"])
     tenants = tenancy.discover_tenants(
         machine="book2", home=tmp_path / "home", aw_home=tmp_path / ".aw"
     )
-    assert [t.tenant_id for t in tenants] == ["aperture-labs"]
+    assert [t.tenant_id for t in tenants] == ["private-downstream-repo"]
     assert tenants[0].config_path.name == ".agent-logger.tenant.yaml"
 
 
@@ -378,22 +378,22 @@ def test_discover_tenant_ignored_when_not_on_default_branch(tmp_path, monkeypatc
     agent_logger.repo_trust.repo_config_is_trusted), now also applied to
     tenant discovery."""
     src = tmp_path / "src"
-    repo = src / "aperture-labs"
+    repo = src / "private-downstream-repo"
     init_git_repo(
         repo,
-        remote="https://example.test/example-owner/aperture-labs.git",
+        remote="https://example.test/example-owner/private-downstream-repo.git",
         branch="feature-x",
     )
     (repo / ".agent-logger.yaml").write_text(
         yaml.safe_dump(
-            {"schema_version": 1, "tenant": {"id": "aperture-labs", "roles": ["source"]}}
+            {"schema_version": 1, "tenant": {"id": "private-downstream-repo", "roles": ["source"]}}
         ),
         encoding="utf-8",
     )
     aw_home = tmp_path / ".aw"
     aw_home.mkdir(parents=True)
     (aw_home / "projects.yaml").write_text(
-        yaml.safe_dump({"projects": {"aperture-labs": {}}}), encoding="utf-8"
+        yaml.safe_dump({"projects": {"private-downstream-repo": {}}}), encoding="utf-8"
     )
     registry = aw_home / "repos.yaml"
     registry.write_text(
@@ -401,8 +401,8 @@ def test_discover_tenant_ignored_when_not_on_default_branch(tmp_path, monkeypatc
             {
                 "srcroot": {tenancy.current_platform(): str(src)},
                 "repos": {
-                    "aperture-labs": {
-                        "remote": "https://example.test/example-owner/aperture-labs.git",
+                    "private-downstream-repo": {
+                        "remote": "https://example.test/example-owner/private-downstream-repo.git",
                         "default_branch": "main",
                     }
                 },
@@ -435,22 +435,22 @@ def test_discover_future_schema_tenant_carries_advisory(tmp_path):
     """A tenant config from a newer schema is still discovered (tolerant read),
     carrying an advisory that fields were ignored."""
     src = tmp_path / "src"
-    repo = src / "aperture-labs"
+    repo = src / "private-downstream-repo"
     repo.mkdir(parents=True)
     (repo / ".agent-logger.tenant.yaml").write_text(
         yaml.safe_dump(
             {
                 "schema_version": 99,
-                "tenant": {"id": "aperture-labs", "roles": ["source"], "new": 1},
+                "tenant": {"id": "private-downstream-repo", "roles": ["source"], "new": 1},
             }
         ),
         encoding="utf-8",
     )
-    _write_registry(tmp_path / ".aw", src, ["aperture-labs"])
+    _write_registry(tmp_path / ".aw", src, ["private-downstream-repo"])
     tenants = tenancy.discover_tenants(
         machine="book2", home=tmp_path / "home", aw_home=tmp_path / ".aw"
     )
-    assert [t.tenant_id for t in tenants] == ["aperture-labs"]
+    assert [t.tenant_id for t in tenants] == ["private-downstream-repo"]
     assert any("newer schema" in a for a in tenants[0].advisories)
 
 
@@ -486,10 +486,10 @@ def test_run_all_book2_complementary_no_leak(tmp_path):
 
     assert all(o.status == "ok" for o in result.outcomes), result.as_dict()
 
-    apl = _dest_sessions(home, "aperture-labs")
+    apl = _dest_sessions(home, "private-downstream-repo")
     dot = _dest_sessions(home, "dotfiles")
 
-    # aperture-labs takes ONLY facility sessions (fail-closed).
+    # private-downstream-repo takes ONLY facility sessions (fail-closed).
     assert apl == {"sess-apl", "sess-cext"}
     # dotfiles takes EVERYTHING ELSE (denylist catch-all).
     assert dot == {"sess-dot", "sess-work"}
@@ -519,7 +519,7 @@ def test_run_all_source_conflict_fails_closed(tmp_path):
             {
                 "id": name,
                 "roles": ["source"],
-                "sync": {"harness_repos": HARNESS, "repo_allowlist": ["aperture-labs"]},
+                "sync": {"harness_repos": HARNESS, "repo_allowlist": ["private-downstream-repo"]},
             },
         )
     _write_registry(tmp_path / ".aw", src, ["alpha", "beta"])
@@ -553,10 +553,10 @@ def test_run_all_source_conflict_fails_closed(tmp_path):
 def test_run_all_skips_disabled_tenant(tmp_path):
     src = tmp_path / "src"
     _write_tenant_repo(
-        src / "aperture-labs",
-        {"id": "aperture-labs", "roles": ["source"], "enabled": False},
+        src / "private-downstream-repo",
+        {"id": "private-downstream-repo", "roles": ["source"], "enabled": False},
     )
-    _write_registry(tmp_path / ".aw", src, ["aperture-labs"])
+    _write_registry(tmp_path / ".aw", src, ["private-downstream-repo"])
     tenants = tenancy.discover_tenants(
         machine="book2", home=tmp_path / "home", aw_home=tmp_path / ".aw"
     )
@@ -568,7 +568,7 @@ def test_run_all_dry_run_does_not_write(tmp_path):
     _copilot, home, aw = _standing_tenants(tmp_path)
     tenants = tenancy.discover_tenants(machine="book2", home=home, aw_home=aw)
     tenancy.run_all(tenants, roles=("source",), dry_run=True, machine="book2")
-    assert _dest_sessions(home, "aperture-labs") == set()
+    assert _dest_sessions(home, "private-downstream-repo") == set()
     assert _dest_sessions(home, "dotfiles") == set()
 
 
@@ -611,7 +611,7 @@ def test_repo_config_tolerates_tenant_block(tmp_path):
             {
                 "schema_version": 1,
                 "log": {"note_marker": "NOTE:"},
-                "tenant": {"id": "aperture-labs", "roles": ["source"]},
+                "tenant": {"id": "private-downstream-repo", "roles": ["source"]},
             }
         ),
         encoding="utf-8",
@@ -680,4 +680,3 @@ def test_source_include_honors_require_repo_opt_in(tmp_path):
 
     _source_path, include = tenancy._source_include(tenant)
     assert include == {"sess-in"}
-

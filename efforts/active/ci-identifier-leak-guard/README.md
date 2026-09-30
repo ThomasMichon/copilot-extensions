@@ -19,7 +19,7 @@ contributors who do not have the private denylist configured on their machine.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | effort host | Owns the reviewed plan PR and follow-on implementation slices | isolated worktree |
-| aperture-labs agent | Assembles the facility-context denylist (`FORBIDDEN_IDS_FACILITY`) -- not secret from within aperture-labs, only from the public repo -- and pushes it to the repository secret via `gh secret set` | aperture-labs facility session |
+| private-downstream-repo agent | Assembles the facility-context denylist (`FORBIDDEN_IDS_FACILITY`) -- not secret from within private-downstream-repo, only from the public repo -- and pushes it to the repository secret via `gh secret set` | private-downstream-repo facility session |
 | operator's work-context harness agent | Assembles the separate work-context denylist (`FORBIDDEN_IDS_WORK`) from a list the operator keeps on their work OneDrive, and pushes it to the repository secret via `gh secret set` | cross-repo/cross-harness collaboration (private-context harness; not named here) |
 | repository operator | Confirmed (2026-09-27) the denylists are not secret *from* either agent -- only from the public repo -- so both are agent-assembled/pushed rather than operator-typed; keeps the source lists in personal OneDrive locations (facility list does not need Vault, no credential material) | — |
 
@@ -158,9 +158,9 @@ _(Revised 2026-09-27: the operator will not personally type these secrets --
 see the Journal entry below. Both are agent-assembled/pushed instead of
 "operator only.")_
 
-- [ ] An **aperture-labs agent** assembles the `FORBIDDEN_IDS_FACILITY` list
+- [x] A **private-downstream-repo agent** assembles the `FORBIDDEN_IDS_FACILITY` list
   (facility-context identifiers -- machine names, internal hosts, personal
-  names, etc.; not secret from within aperture-labs, only from the public
+  names, etc.; not secret from within private-downstream-repo, only from the public
   repo) and pushes it to the `ThomasMichon/copilot-extensions` repository
   secret via `gh secret set`.
 - [ ] Collaborate with the operator's **private-context work harness agent** to
@@ -292,7 +292,7 @@ _Pending._
   not personally type these secrets. Both are **agent-assembled and
   agent-pushed** instead, because the content is not secret from within either
   source context -- only from the public repo:
-  - `FORBIDDEN_IDS_FACILITY` -- an aperture-labs agent assembles this list and
+  - `FORBIDDEN_IDS_FACILITY` -- an private-downstream-repo agent assembles this list and
     pushes it via `gh secret set`. Storage doesn't need Vault (no credential
     material, just names/identifiers), and can live in the operator's
     personal OneDrive.
@@ -303,3 +303,50 @@ _Pending._
   OneDrive paths, and which agent actually runs `gh secret set` are not yet
   settled -- this entry captures the operator's stated approach, not a
   completed plan.
+
+### 2026-09-29 - `FORBIDDEN_IDS_FACILITY` provisioned
+
+- Storage location changed again from the 2026-09-27 entry's OneDrive plan: the
+  source list now lives as a plain, versioned asset in the private downstream
+  private downstream repository, rather than a personal OneDrive path -- that
+  repo already documents every one of these identifiers openly on its own
+  side; they're secret only *from this public repo*, not from that one -- so
+  keeping the source alongside the facility docs it's derived from (rather
+  than an unversioned OneDrive file) makes the denylist reviewable, diffable,
+  and easy to keep in sync as that roster changes.
+- The downstream agent assembled the `token|reason` list and pushed it to the
+  `FORBIDDEN_IDS_FACILITY` repository secret via `gh secret set` (account-
+  routed through `agent-worktrees repos gh`, never a bare `gh`).
+  `gh secret list --repo ThomasMichon/copilot-extensions` confirms the secret
+  is present.
+- Deliberately excluded from the list: generic English/mythological words used
+  as individual device codenames on the downstream side, and single-word
+  machine names that also double as this repo's own generic example persona/
+  voice-kernel content, as opposed to the compound `<name>.facility.<domain>`
+  hostname form, which is unambiguous. Both classes would produce
+  disproportionate false-positive risk against ordinary public content for a
+  denylist whose whole purpose is precision, not maximal recall.
+- **Real bug found and fixed the same day this list was assembled:** the
+  first push accidentally included the source asset's own header comment
+  lines as literal denylist entries, because the CI-mode loader
+  (`_load_ci_identifiers`) skips blank entries but -- unlike the local
+  single-identifier loader -- has no equivalent skip for `#`-prefixed
+  comment lines. A stray bare `#` line (used for paragraph spacing) became a
+  one-character forbidden token that matched almost any Markdown heading,
+  and the loaded prose comments became giant literal substrings. This
+  surfaced immediately as 37 false-positive matches on this very PR's own
+  diff. Re-pushed a corrected, comment-free secret within ~19 minutes;
+  confirmed no other open PR's `identifier leak guard` check ran during that
+  window. The downstream source asset's header now states this constraint
+  explicitly and its push instructions filter comments/blank lines before
+  piping to `gh secret set`.
+- Left for `FORBIDDEN_IDS_WORK`: unchanged, still the operator's separate
+  work-context harness agent's task, sourced from their work OneDrive.
+- Discovered while assembling this list: a handful of these same personal/
+  facility identifiers (distinct from the ones the 2026-09-26 sweep in #3910
+  already cleaned up) have re-leaked into this repo's own tracked docs post-
+  cleanup (mostly under recent `efforts/active/*` READMEs and one plugin
+  skill doc). That is a real, separate cleanup item -- filed as
+  [#4675](https://github.com/ThomasMichon/copilot-extensions/issues/4675)
+  rather than folded into this effort's scope, and not enumerated here per
+  this same repo's own leak-guard purpose.

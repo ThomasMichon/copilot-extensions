@@ -1,5 +1,5 @@
 """Tests for `agent-worktrees fleet` -- the fleet-wide `list --json`
-aggregator (agent-worktrees-fleet-flows Phase 1, aperture-labs #2740).
+aggregator (agent-worktrees-fleet-flows Phase 1, the downstream tracker).
 
 Validates the Phase 1 Validation Plan bullet: one `list --json` invocation
 per SSH target (never per-worktree), and an unreachable host degrading to a
@@ -35,7 +35,7 @@ def _entry(key, *, envs, ssh_ready=True, copilot=True, alias=""):
     )
 
 
-def _fake_config(tmp_path, *, machine="lambda-core", platform="wsl"):
+def _fake_config(tmp_path, *, machine="atlas-core", platform="wsl"):
     return SimpleNamespace(
         machine=machine,
         platform=platform,
@@ -59,12 +59,12 @@ def test_one_call_per_ssh_target_never_per_worktree(tmp_path):
     """Two machines, three environments total -- exactly 3 subprocess calls,
     each `list --json` (not one per worktree inside them)."""
     entries = {
-        "lambda-core": _entry("lambda-core", envs=[
-            ("windows", "lambda-core"), ("wsl", "lambda-core-wsl"),
+        "atlas-core": _entry("atlas-core", envs=[
+            ("windows", "atlas-core"), ("wsl", "atlas-core-wsl"),
         ]),
-        "wheatley": _entry("wheatley", envs=[("linux", "wheatley")]),
+        "ember": _entry("ember", envs=[("linux", "ember")]),
     }
-    config = _fake_config(tmp_path, machine="lambda-core", platform="wsl")
+    config = _fake_config(tmp_path, machine="atlas-core", platform="wsl")
     calls = []
 
     def _fake_run(cmd, **kwargs):
@@ -85,10 +85,10 @@ def test_offline_host_degrades_to_partial_result(tmp_path):
     """An unreachable host must not fail the whole fleet call -- it shows up
     as `reachable: false` alongside the others' real data."""
     entries = {
-        "lambda-core": _entry("lambda-core", envs=[("wsl", "lambda-core-wsl")]),
+        "atlas-core": _entry("atlas-core", envs=[("wsl", "atlas-core-wsl")]),
         "borealis": _entry("borealis", envs=[("linux", "borealis")]),
     }
-    config = _fake_config(tmp_path, machine="lambda-core", platform="wsl")
+    config = _fake_config(tmp_path, machine="atlas-core", platform="wsl")
 
     def _fake_run(cmd, **kwargs):
         if "borealis" in cmd:
@@ -99,7 +99,7 @@ def test_offline_host_degrades_to_partial_result(tmp_path):
     result = _run_json(["--json"], entries, config, run_side_effect=_fake_run)
 
     by_machine = {row["machine"]: row for row in result["hosts"]}
-    assert by_machine["lambda-core"]["reachable"] is True
+    assert by_machine["atlas-core"]["reachable"] is True
     assert by_machine["borealis"]["reachable"] is False
     assert "error" in by_machine["borealis"]
     # Schema stability (review #3134): `worktrees` is always present, even
@@ -137,11 +137,11 @@ def test_local_environment_runs_locally_not_over_ssh(tmp_path):
     binstub (still a subprocess, not an ssh hop), matching the machine/
     platform this test pretends to be."""
     entries = {
-        "lambda-core": _entry("lambda-core", envs=[
-            ("windows", "lambda-core"), ("wsl", "lambda-core-wsl"),
+        "atlas-core": _entry("atlas-core", envs=[
+            ("windows", "atlas-core"), ("wsl", "atlas-core-wsl"),
         ]),
     }
-    config = _fake_config(tmp_path, machine="lambda-core", platform="wsl")
+    config = _fake_config(tmp_path, machine="atlas-core", platform="wsl")
     calls = []
 
     def _fake_run(cmd, **kwargs):
@@ -163,9 +163,9 @@ def test_machine_level_alias_fallback_is_not_omitted(tmp_path):
     must still get a fleet row -- mirrors `claimant.resolve_machine_ssh`'s
     own fallback (review #3134)."""
     entries = {
-        "wheatley": _entry("wheatley", envs=[], alias="wheatley"),
+        "ember": _entry("ember", envs=[], alias="ember"),
     }
-    config = _fake_config(tmp_path, machine="lambda-core", platform="wsl")
+    config = _fake_config(tmp_path, machine="atlas-core", platform="wsl")
     calls = []
 
     def _fake_run(cmd, **kwargs):
@@ -175,10 +175,10 @@ def test_machine_level_alias_fallback_is_not_omitted(tmp_path):
     result = _run_json(["--json"], entries, config, run_side_effect=_fake_run)
 
     assert len(result["hosts"]) == 1
-    assert result["hosts"][0]["machine"] == "wheatley"
+    assert result["hosts"][0]["machine"] == "ember"
     assert result["hosts"][0]["reachable"] is True
     assert calls[0][0] == "ssh"
-    assert calls[0][-2] == "wheatley"
+    assert calls[0][-2] == "ember"
 
 
 def test_invalid_timeout_fails_fast_with_usage_error(tmp_path, capsys):

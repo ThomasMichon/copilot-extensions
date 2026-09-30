@@ -114,7 +114,7 @@ def _run_sh_patch(plan_cmd: list[str], venv_python: str) -> list[str]:
 def test_ps1_patch_rewrites_stale_runtime_python(tmp_path: Path):
     plan_cmd = [
         "pwsh.exe", "-NoProfile", "-NoLogo", "-File", "default-setup.ps1",
-        "-Machine", "lambda-core", "-ConfigRoot", "C:\\cfg",
+        "-Machine", "atlas-core", "-ConfigRoot", "C:\\cfg",
         "-RuntimePython", "C:\\runtime\\versions\\1.11.0-dev1\\Scripts\\python.exe",
         "-SessionPath", "C:\\session",
     ]
@@ -145,7 +145,7 @@ def test_ps1_launcher_still_has_the_patch():
 @pytest.mark.skipif(_BASH is None, reason="bash not available")
 def test_sh_patch_rewrites_stale_runtime_python():
     plan_cmd = [
-        "bash", "default-setup.sh", "--machine", "lambda-core",
+        "bash", "default-setup.sh", "--machine", "atlas-core",
         "--config-root", "/cfg",
         "--runtime-python", "/runtime/versions/1.11.0-dev1/bin/python",
         "--session-path", "/session",

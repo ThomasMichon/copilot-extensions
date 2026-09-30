@@ -1,8 +1,8 @@
 # SessionStart Static/Dynamic Content Conformance
 
 - **Slug:** `sessionstart-static-dynamic-conformance`
-- **Repo:** copilot-extensions (primary) + aperture-labs (consumer-side audit)
-- **Branch(es):** `worktree/lambda-core-win-20260906-234309-1aa0`
+- **Repo:** copilot-extensions (primary) + private-downstream-repo (consumer-side audit)
+- **Branch(es):** `worktree/atlas-core-win-20260906-234309-1aa0`
 - **Created:** 2026-09-08
 - **Status:** Active
 - **Vision:** vision-closing on the `session-scoped-dynamic-guidance` pattern
@@ -14,7 +14,7 @@
 - **Related work:** successor/sibling of the now-archived
   `custom-context-aggregator-retirement` (copilot-extensions, still **Active**
   with 2 remaining launch-path validation items — see correction note in the
-  Journal below) and `copilot-context-injection-decontamination` (aperture-labs,
+  Journal below) and `copilot-context-injection-decontamination` (private-downstream-repo,
   private, archived Done) effort pair, which established the static-pointer +
   exact-session-guidance-file baseline this effort now audits for actual
   conformance.
@@ -47,7 +47,7 @@ live in a static, checked-in `instructions/*.instructions.md` file.
 ## Context
 
 This surfaced mid-session while closing the `copilot-context-injection-decontamination`
-effort (aperture-labs). Investigating "what happened to the worktree-conduct
+effort (private-downstream-repo). Investigating "what happened to the worktree-conduct
 instructions file" turned up a concrete counter-example:
 
 - `agent-worktrees`'s `worktree-conduct.md` and `account-conduct.md`
@@ -202,9 +202,9 @@ was "the point of this effort, or so I thought":
   `reviewing-customizations` skill's Mode B section, citing the
   `agent-worktrees` conduct case as the canonical example this effort fixed.
 
-### Phase 4 — Facility-side (aperture-labs) audit
+### Phase 4 — Facility-side (private-downstream-repo) audit
 - [ ] Once the plugin-suite-side fixes land and reach the version floor this
-  facility adopts, re-run the aperture-labs launch/budget matrix (the same
+  facility adopts, re-run the private-downstream-repo launch/budget matrix (the same
   `manage-instruction-projections.py sync` + `scan-customizations.py --strict`
   pairing used to close Phase 11 of the decontamination effort) to confirm
   the corrected plugins' new checked-in projections land cleanly and the
@@ -237,7 +237,7 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 - [ ] The Phase 3 mechanical guard exists, is tested (a fixture hook that
   smuggles static prose fails the check; a clean hook passes), and runs in the
   suite's normal CI/guard invocation.
-- [ ] The aperture-labs launch/budget matrix (Phase 4) stays within budget and
+- [ ] The private-downstream-repo launch/budget matrix (Phase 4) stays within budget and
   reports 0 blocking findings after adopting the corrected plugin versions.
 
 ## Proposal
@@ -250,7 +250,7 @@ initial sweep exist._
 ### 2026-09-08 — Kickoff
 
 - Effort created after the operator flagged, while closing
-  `copilot-context-injection-decontamination` (aperture-labs), that a full
+  `copilot-context-injection-decontamination` (private-downstream-repo), that a full
   static-vs-dynamic sweep of every `sessionStart` hook was expected to be part
   of that effort's own validation and was not actually performed — that
   effort validated budget/lock/output-classification, not per-hook
@@ -269,17 +269,17 @@ initial sweep exist._
   `custom-context-aggregator-retirement`'s own README is still
   `Status: Active` with 2 unchecked Validation Plan items (fresh/resume/ACP
   launch-path proof; checked-in pointer + exact-session-writer completeness) —
-  **not** Done as the aperture-labs `copilot-context-injection-decontamination`
+  **not** Done as the private-downstream-repo `copilot-context-injection-decontamination`
   effort's Phase 11 closure (this same session) had stated. The upstream
   substantive fact that closure relied on — PR #2218 merged, `context-injection`
   plugin actually removed from `copilot-extensions` — is independently
   confirmed true and unaffected; only the "the public sibling effort is Done"
   characterization was inaccurate. Filed as a follow-up correction to the
-  archived aperture-labs effort's journal rather than reopening it, since the
+  archived private-downstream-repo effort's journal rather than reopening it, since the
   Phase 11 gate itself did not depend on the sibling effort's own remaining
   (unrelated) launch-path items.
 - Opened this effort as `copilot-extensions` PR #2236 (Draft-status plan) and
-  landed the aperture-labs correction as PR #6680 (merged).
+  landed the downstream correction PR (merged).
 
 ### 2026-09-08 — Phase 1 sweep executed, then corrected
 

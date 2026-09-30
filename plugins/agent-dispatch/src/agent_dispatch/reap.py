@@ -206,7 +206,7 @@ def is_live_coordinator_pid(
     handed to us) into one enumeration pass -- the same guard
     :mod:`single_instance_lease`'s reaper documents as necessary before
     terminating a recorded pid. Used as the injected ``pid_alive`` for
-    :func:`zdd.breadcrumb.reap_abandoned_passive` (aperture-labs #5195).
+    :func:`zdd.breadcrumb.reap_abandoned_passive` (the downstream tracker).
     """
     try:
         procs = list_procs()

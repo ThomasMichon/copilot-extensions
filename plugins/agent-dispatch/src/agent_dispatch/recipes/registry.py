@@ -71,6 +71,7 @@ class Recipe:
     resolution: str
     requires: tuple[str, ...] = ()
     labels: tuple[str, ...] = ()
+    require_verification: bool | None = None
 
     def required_params(self) -> tuple[str, ...]:
         return tuple(p.name for p in self.params if p.required)
@@ -93,6 +94,7 @@ class RenderedRecipe:
     resolution: str
     requires: tuple[str, ...]
     labels: tuple[str, ...]
+    require_verification: bool | None = None
     params: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -106,6 +108,7 @@ class RenderedRecipe:
             "resolution": self.resolution,
             "requires": list(self.requires),
             "labels": list(self.labels),
+            "require_verification": self.require_verification,
             "params": dict(self.params),
         }
 
@@ -378,6 +381,7 @@ def render_recipe(name: str, params: dict[str, str]) -> RenderedRecipe:
         resolution=resolution,
         requires=recipe.requires,
         labels=labels,
+        require_verification=recipe.require_verification,
         params={k: values[k] for k in values},
     )
 

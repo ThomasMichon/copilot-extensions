@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# agent-bridge-cutover/scenario.sh -- Tier-P F1 cutover-resilience scenario.
+# agent-bridge-cutover/scenario.sh -- Tier-P F1 cutover-resilience scenario,
+# plus an opt-in Phase-6 live-turn-survival drill (phase 4, CR_LIVE_TURN_DRILL=1).
 #
 # Validates the BINDING INVARIANT of the correct-install-flows effort
 # (dotfiles#1393) for agent-bridge: a version cutover must NEVER kill in-flight,
@@ -13,13 +14,22 @@
 # The heavy orchestration lives in a portable stdlib-only probe
 # (fixtures/cutover_probe.py) so it is verifiable off-Docker too.
 #
-# FIDELITY: a fully live "turn survives the flip" assertion needs a real model/ACP
-# child (Tier-E). This Tier-P probe proves the cutover MECHANISM the turn-survival
-# guarantee is built on: the active/passive routing flip + old-daemon retirement,
-# the drain gate (turn boundary), and cooperative recovery of an aborted cutover.
+# FIDELITY: phases 0-3's stdlib-only probe proves the cutover MECHANISM the
+# turn-survival guarantee is built on (the active/passive routing flip +
+# old-daemon retirement, the drain gate/turn boundary, cooperative recovery of
+# an aborted cutover) -- it never makes a real model call. Phase 4
+# (fixtures/live_turn_probe.py, opt-in via CR_LIVE_TURN_DRILL=1, Docker-only,
+# consumes real AI credits) closes that gap for real: a genuinely live
+# Copilot/ACP turn, driven through a real local `agent-bridge create
+# --target-dir` Session-Host session, must survive `deploy`'s cutover with
+# zero observed disruption while the daemon's generation actually changes
+# underneath it (agent-bridge-unified-zdd-cutover Phase 6 -- see that effort's
+# design doc for why a plain Tier-E provider-registration transport would
+# prove nothing here).
 #
 # Name-free / public F1. Asserts on daemon/routing OUTCOMES, not exact CLI spelling.
-# Env: CR_MARKETPLACE_REPO / CR_MARKETPLACE_NAME / CR_UV_INDEX / CR_CUTOVER_CHECKS.
+# Env: CR_MARKETPLACE_REPO / CR_MARKETPLACE_NAME / CR_UV_INDEX / CR_CUTOVER_CHECKS /
+#      CR_LIVE_TURN_DRILL / CR_LIVE_TURN_TIMEOUT.
 # MUST be LF.
 set -uo pipefail
 
@@ -139,6 +149,35 @@ else
     done < <(grep '^PROBE: ' "$_log" 2>/dev/null)
     if [ "$_seen" -eq 0 ]; then
         jam "bridge-cutover" "cutover probe emitted no PROBE lines (crash before assertions)" "see cr-logs/cutover-probe.log"
+    fi
+    _summary="$(grep '^PROBE-SUMMARY:' "$_log" 2>/dev/null | tail -1)"
+    [ -n "$_summary" ] && info "$_summary"
+fi
+
+# =========================================================================
+phase 4 "live-turn-survival drill (opt-in, credits-consuming; agent-bridge-unified-zdd-cutover Phase 6)"
+if [ "${CR_LIVE_TURN_DRILL:-0}" != "1" ]; then
+    info "skipped -- opt in with CR_LIVE_TURN_DRILL=1 (needs a real, already-authenticated copilot CLI; consumes real AI credits; Docker-only)"
+elif [ -z "${SLOT_PY:-}" ]; then
+    jam "bridge-cutover" "no slot python -- cannot run the live-turn-survival drill" "fix provisioning (phase 2) first"
+else
+    LIVE_TURN_REPO="$HOME/ab-repo-live-turn"
+    mkdir -p "$LIVE_TURN_REPO" && ( cd "$LIVE_TURN_REPO" && git init -q && git config user.email t@e && git config user.name t && echo '# ab-live-turn' > README.md && git add -A && git commit -qm init )
+    capture "live-turn-probe" -- "$SLOT_PY" "$_SELF_DIR/fixtures/live_turn_probe.py" --python "$SLOT_PY" --repo "$LIVE_TURN_REPO" --turn-timeout "${CR_LIVE_TURN_TIMEOUT:-600}" || true
+    _log="$CR_LOGDIR/live-turn-probe.log"
+    _seen=0
+    while IFS= read -r line; do
+        _seen=1
+        _stat="$(printf '%s' "$line" | awk '{print $3}')"
+        _rest="$(printf '%s' "$line" | cut -d' ' -f4-)"
+        if [ "$_stat" = "PASS" ]; then
+            pass "live-turn-survival: $_rest"
+        else
+            jam "bridge-cutover" "live-turn-survival FAILED: $_rest" "a real live Copilot turn must survive deploy's cutover with zero disruption; see cr-logs/live-turn-probe.log"
+        fi
+    done < <(grep '^PROBE: ' "$_log" 2>/dev/null)
+    if [ "$_seen" -eq 0 ]; then
+        jam "bridge-cutover" "live-turn-survival probe emitted no PROBE lines (crash before assertions)" "see cr-logs/live-turn-probe.log"
     fi
     _summary="$(grep '^PROBE-SUMMARY:' "$_log" 2>/dev/null | tail -1)"
     [ -n "$_summary" ] && info "$_summary"

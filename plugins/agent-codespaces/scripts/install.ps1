@@ -360,6 +360,13 @@ $SessionLivenessProbeDir = Join-Path $PluginDir 'libs\session-liveness-probe'
 if (-not (Test-Path (Join-Path $SessionLivenessProbeDir 'pyproject.toml'))) {
     $SessionLivenessProbeDir = Join-Path $RepoRoot 'libs\session-liveness-probe'
 }
+# single-instance-lease dir (uv-editable canonical reference in a dev
+# checkout, real copy in a materialized release payload): plugin-vendored or
+# repo-root.
+$SingleInstanceLeaseDir = Join-Path $PluginDir 'libs\single-instance-lease'
+if (-not (Test-Path (Join-Path $SingleInstanceLeaseDir 'pyproject.toml'))) {
+    $SingleInstanceLeaseDir = Join-Path $RepoRoot 'libs\single-instance-lease'
+}
 
 $DeploySourcePaths = @('plugins/agent-codespaces/')
 $InstallerRelPath  = 'plugins/agent-codespaces/scripts/install.ps1'
@@ -612,7 +619,7 @@ function Assert-Uv {
 
 function Install-PackageInto {
     <# uv pip install the vendored libs (ssh-manager, credential-relay, zdd,
-       venue-copilot, session-liveness-probe) then agent-codespaces into the
+       venue-copilot, session-liveness-probe, single-instance-lease) then agent-codespaces into the
        given venv python. Non-editable by default;
        deps resolved from pyproject.toml. The vendored libs are force-reinstalled
        so a local code change propagates even without a version bump (uv
@@ -647,6 +654,10 @@ function Install-PackageInto {
     }
     if (-not (Test-Path (Join-Path $SessionLivenessProbeDir 'pyproject.toml'))) {
         Write-ServiceErr "session-liveness-probe source not found at $SessionLivenessProbeDir"
+        return $false
+    }
+    if (-not (Test-Path (Join-Path $SingleInstanceLeaseDir 'pyproject.toml'))) {
+        Write-ServiceErr "single-instance-lease source not found at $SingleInstanceLeaseDir"
         return $false
     }
     # Pre-strip: rename any locked console-script trampoline aside so uv can write
@@ -695,6 +706,13 @@ function Install-PackageInto {
     if ($LASTEXITCODE -ne 0) {
         $ErrorActionPreference = $prevEAP
         Write-ServiceErr "session-liveness-probe install failed"
+        return $false
+    }
+    $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-single-instance-lease' })
+    & uv pip install --python $Python @modeArgs "$SingleInstanceLeaseDir" --quiet 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        $ErrorActionPreference = $prevEAP
+        Write-ServiceErr "single-instance-lease install failed"
         return $false
     }
     $modeArgs = @(if ($Editable) { '--editable' } else { '--reinstall-package', 'agent-codespaces' })

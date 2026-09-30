@@ -403,7 +403,7 @@ def _pr_payload(**over):
         "number": 9, "state": "open", "merged": False, "mergeable": True,
         "title": "A change", "draft": False,
         "head": {"sha": "deadbeef"}, "base": {"ref": "master"},
-        "user": {"login": "cjohnson"},
+        "user": {"login": "contributor_user"},
         "labels": [{"name": "auto-merge"}, {"name": "source:mantis-counter"}],
     }
     base_pr.update(over)
@@ -438,7 +438,7 @@ class TestGiteaGetSnapshot:
         assert snap.mergeable is True
         assert snap.head_sha == "deadbeef"
         assert snap.base_ref == "master"
-        assert snap.author == "cjohnson"
+        assert snap.author == "contributor_user"
         assert snap.title == "A change"
         assert snap.draft is False
         assert snap.labels == ("auto-merge", "source:mantis-counter")

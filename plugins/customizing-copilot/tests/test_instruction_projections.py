@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -113,6 +114,32 @@ def _projection(repo: Path, name: str = "policy") -> Path:
     )
 
 
+def _init_git_repo(repo: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+
+def _git_commit_all(repo: Path, message: str) -> None:
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", message],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+
+
 def test_render_is_deterministic_and_marker_carries_complete_provenance(
     tmp_path: Path,
 ) -> None:
@@ -143,6 +170,835 @@ def test_render_is_deterministic_and_marker_carries_complete_provenance(
         if not line.startswith(projections.MARKER_PREFIX.encode("ascii"))
     )
     assert b"Keep this static fallback useful." in without_marker
+
+
+def test_local_sibling_destination_naming() -> None:
+    assert (
+        projections.local_sibling_destination(
+            ".github/instructions/policy/fallback.instructions.md"
+        )
+        == ".github/instructions/policy/fallback.local.instructions.md"
+    )
+    with pytest.raises(ValueError, match="already a local cache path"):
+        projections.local_sibling_destination(
+            ".github/instructions/policy/fallback.local.instructions.md"
+        )
+    with pytest.raises(ValueError, match="not a plain .instructions.md path"):
+        projections.local_sibling_destination(".github/instructions/policy/README.md")
+
+
+def test_render_local_cache_writes_sibling_without_touching_checked_in_or_lock(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+
+    result = projections.render_local_cache(repo, lambda: [source])
+
+    assert result.blocking == 0
+    assert result.changed == [
+        ".github/instructions/policy/fallback.local.instructions.md"
+    ]
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+    assert local_path.exists()
+    # The checked-in destination and the lock file are untouched by this
+    # render-only path -- only sync_repository_locked/sync_repository ever
+    # write either.
+    assert not _projection(repo, "policy").exists()
+    assert not (repo / ".github" / "copilot" / "context-projections.json").exists()
+
+    # Content matches what the checked-in sync would have rendered (same
+    # render_projection call, just a different destination).
+    specs, _unknown = projections._load_specs(
+        repo, [source], projections.Result(operation="test")
+    )
+    expected = projections.render_projection(specs[0])
+    assert local_path.read_bytes() == expected.content
+
+
+def test_render_local_cache_never_touches_git_and_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+
+    # No .git directory at all -- proves this path has no git dependency.
+    assert not (repo / ".git").exists()
+
+    first = projections.render_local_cache(repo, lambda: [source])
+    second = projections.render_local_cache(repo, lambda: [source])
+
+    assert first.blocking == 0
+    assert second.blocking == 0
+    assert not (repo / ".git").exists()
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+    assert local_path.exists()
+
+
+def test_render_local_cache_reports_root_error_without_raising(
+    tmp_path: Path,
+) -> None:
+    missing = tmp_path / "does-not-exist"
+    result = projections.render_local_cache(missing, lambda: [])
+    assert result.blocking == 1
+    assert result.changed == []
+
+
+def test_render_local_cache_reconciles_stale_siblings_when_source_disabled(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+
+    first = projections.render_local_cache(repo, lambda: [source])
+    assert first.blocking == 0
+    assert local_path.exists()
+
+    # The source is now disabled/removed -- an ordinary sighted user file
+    # that happens to share the naming convention must never be touched,
+    # but this call's own previous output must not linger forever.
+    second = projections.render_local_cache(repo, lambda: [])
+    assert second.blocking == 0
+    assert not local_path.exists()
+    assert local_path.as_posix().endswith("fallback.local.instructions.md")
+
+
+def test_render_local_cache_never_removes_a_file_without_its_own_marker(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    unrelated = (
+        repo
+        / ".github"
+        / "instructions"
+        / "someone-elses"
+        / "notes.local.instructions.md"
+    )
+    unrelated.parent.mkdir(parents=True)
+    unrelated.write_text("Just a note a human left here.\n", encoding="utf-8")
+
+    result = projections.render_local_cache(repo, lambda: [])
+
+    assert result.blocking == 0
+    assert unrelated.exists()
+    assert unrelated.read_text(encoding="utf-8") == "Just a note a human left here.\n"
+
+
+def test_render_local_cache_rejects_ambiguous_destination_collisions(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    # Two distinct sourceIds within the same plugin declaring the identical
+    # checked-in destination (a copy-paste duplicate) both convert to the
+    # same local-cache sibling -- destinations are namespaced per plugin, so
+    # this is the realistic collision shape, not a cross-plugin one.
+    entries = [
+        {
+            "id": "fallback",
+            "template": "instructions/fallback.instructions.md",
+            "destination": ".github/instructions/policy/fallback.instructions.md",
+            "customizationKind": "instructions",
+            "applyTo": "**",
+            "legacyMarkers": [],
+        },
+        {
+            "id": "fallback-dup",
+            "template": "instructions/fallback.instructions.md",
+            "destination": ".github/instructions/policy/fallback.instructions.md",
+            "customizationKind": "instructions",
+            "applyTo": "**",
+            "legacyMarkers": [],
+        },
+    ]
+    _plugin, source = _write_plugin(tmp_path, "market", "policy", entries=entries)
+
+    result = projections.render_local_cache(repo, lambda: [source])
+
+    assert any(
+        finding.check == "projection-local-cache-ambiguous"
+        for finding in result.findings
+    )
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+    assert not local_path.exists()
+
+
+def test_render_local_cache_is_idempotent_and_reports_unchanged(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+
+    first = projections.render_local_cache(repo, lambda: [source])
+    assert first.changed == [
+        ".github/instructions/policy/fallback.local.instructions.md"
+    ]
+    mtime_after_first = local_path.stat().st_mtime_ns
+
+    second = projections.render_local_cache(repo, lambda: [source])
+    assert second.changed == []
+    assert second.unchanged == [
+        ".github/instructions/policy/fallback.local.instructions.md"
+    ]
+    assert local_path.stat().st_mtime_ns == mtime_after_first
+
+
+def test_render_local_cache_enforces_per_file_and_aggregate_budget(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, oversized = _write_plugin(
+        tmp_path,
+        "market",
+        "large",
+        body="x" * 3700 + "\n",
+    )
+    file_result = projections.render_local_cache(repo, lambda: [oversized])
+    assert any(
+        finding.check == "projection-local-cache-budget"
+        for finding in file_result.findings
+    )
+    assert file_result.changed == []
+
+    aggregate_repo = tmp_path / "aggregate-repo"
+    aggregate_repo.mkdir()
+    sources = [
+        _write_plugin(
+            tmp_path,
+            "aggregate-market",
+            f"policy-{index}",
+            body="x" * 2700 + "\n",
+        )[1]
+        for index in range(4)
+    ]
+    aggregate_result = projections.render_local_cache(aggregate_repo, lambda: sources)
+    assert any(
+        finding.check == "projection-local-cache-budget"
+        and "aggregate" in finding.message
+        for finding in aggregate_result.findings
+    )
+    assert aggregate_result.changed == []
+
+
+def test_render_local_cache_stops_publishing_when_budget_config_is_malformed(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+
+    # A cache from an earlier, healthy call already exists.
+    first = projections.render_local_cache(repo, lambda: [source])
+    assert first.blocking == 0
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+    assert local_path.exists()
+
+    _write_budget_config(repo, {"aggregateBytes": "not-a-number"})
+    result = projections.render_local_cache(repo, lambda: [source])
+
+    assert any(finding.check == "projection-config" for finding in result.findings)
+    # Refuses to *publish* (refresh) anything new under a broken config --
+    # but a source that goes away entirely under this same broken config
+    # must still be reconciled, not left to override the checked-in
+    # fallback forever just because the budget couldn't be validated.
+    assert not any(
+        finding.check.startswith("projection-local-cache-budget")
+        for finding in result.findings
+    )
+
+
+def test_render_local_cache_reconciles_stale_siblings_even_when_budget_config_fails(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+
+    first = projections.render_local_cache(repo, lambda: [source])
+    assert first.blocking == 0
+    assert local_path.exists()
+
+    _write_budget_config(repo, {"aggregateBytes": "not-a-number"})
+    # The source is gone *and* the budget config is broken in the same
+    # call -- the stale cache must still be reconciled away.
+    result = projections.render_local_cache(repo, lambda: [])
+
+    assert any(finding.check == "projection-config" for finding in result.findings)
+    assert not local_path.exists()
+
+
+def test_render_local_cache_never_writes_the_wrong_destination_or_loads_it_unbounded(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+    local_path.parent.mkdir(parents=True)
+    oversized = b"x" * (projections.MAX_PROJECTION_BYTES + 1)
+    local_path.write_bytes(oversized)
+
+    result = projections.render_local_cache(repo, lambda: [source])
+
+    assert any(finding.check == "projection-local-cache" for finding in result.findings)
+    assert result.changed == []
+    # Never loaded (and therefore never silently truncated/overwritten)
+    # wholesale just to decide whether to replace it.
+    assert local_path.read_bytes() == oversized
+
+
+def test_render_local_cache_reports_handoff_when_a_source_is_renamed(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    shared_destination = ".github/instructions/policy/shared.instructions.md"
+    old_entries = [
+        {
+            "id": "old-id",
+            "template": "instructions/fallback.instructions.md",
+            "destination": shared_destination,
+            "customizationKind": "instructions",
+            "applyTo": "**",
+            "legacyMarkers": [],
+        }
+    ]
+    _plugin, old_source = _write_plugin(
+        tmp_path, "market", "policy", entries=old_entries
+    )
+    first = projections.render_local_cache(repo, lambda: [old_source])
+    assert first.blocking == 0
+    local_path = repo / ".github" / "instructions" / "policy" / "shared.local.instructions.md"
+    assert local_path.exists()
+
+    new_entries = [
+        {
+            "id": "new-id",
+            "template": "instructions/fallback.instructions.md",
+            "destination": shared_destination,
+            "customizationKind": "instructions",
+            "applyTo": "**",
+            "legacyMarkers": [],
+        }
+    ]
+    _plugin, new_source = _write_plugin(
+        tmp_path, "market", "policy", entries=new_entries
+    )
+
+    result = projections.render_local_cache(repo, lambda: [new_source])
+
+    assert any(
+        finding.check == "projection-local-cache-handoff" for finding in result.findings
+    )
+    assert local_path.exists()
+    assert result.changed == [
+        ".github/instructions/policy/shared.local.instructions.md"
+    ]
+
+
+def test_render_local_cache_write_failure_on_one_source_never_blocks_another(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    entries = [
+        {
+            "id": source_id,
+            "template": "instructions/fallback.instructions.md",
+            "destination": (
+                f".github/instructions/policy/{source_id}.instructions.md"
+            ),
+            "customizationKind": "instructions",
+            "applyTo": "**",
+            "legacyMarkers": [],
+        }
+        for source_id in ("first", "second")
+    ]
+    _plugin, source = _write_plugin(tmp_path, "market", "policy", entries=entries)
+
+    real_atomic_write = projections._atomic_write
+
+    def fail_for_first(path: Path, content: bytes) -> None:
+        if path.name == "first.local.instructions.md":
+            raise OSError("simulated write failure")
+        real_atomic_write(path, content)
+
+    monkeypatch.setattr(projections, "_atomic_write", fail_for_first)
+
+    result = projections.render_local_cache(repo, lambda: [source])
+
+    assert any(
+        finding.check == "projection-local-cache"
+        and "first.local.instructions.md" in finding.path
+        for finding in result.findings
+    )
+    first_path = (
+        repo / ".github" / "instructions" / "policy" / "first.local.instructions.md"
+    )
+    second_path = (
+        repo / ".github" / "instructions" / "policy" / "second.local.instructions.md"
+    )
+    assert not first_path.exists()
+    assert second_path.exists()
+    assert result.changed == [
+        ".github/instructions/policy/second.local.instructions.md"
+    ]
+    # No checked-in destination or lock exists at all -- this render-only
+    # path never touches either, failure or not.
+    assert not (repo / ".github" / "copilot" / "context-projections.json").exists()
+
+
+def test_render_local_cache_removes_stale_content_when_a_refresh_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+
+    first = projections.render_local_cache(repo, lambda: [source])
+    assert first.blocking == 0
+    assert local_path.exists()
+
+    # Change the template so the next render's content differs (forcing an
+    # actual write attempt rather than the unchanged/no-op path), then make
+    # that write fail.
+    template = _plugin / "instructions" / "fallback.instructions.md"
+    template.write_text(
+        '---\napplyTo: "**"\n---\n\n# Fallback\n\nUpdated body.\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    def fail_write(path: Path, content: bytes) -> None:
+        raise OSError("simulated write failure")
+
+    monkeypatch.setattr(projections, "_atomic_write", fail_write)
+
+    result = projections.render_local_cache(repo, lambda: [source])
+
+    assert any(finding.check == "projection-local-cache" for finding in result.findings)
+    # The stale (pre-update) sibling must not be left in place as if it
+    # were still current -- a failed refresh is reconciled away, not
+    # silently preferred.
+    assert not local_path.exists()
+
+
+def test_render_local_cache_rejects_a_checked_in_destination_using_the_reserved_suffix(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    entries = [
+        {
+            "id": "fallback",
+            "template": "instructions/fallback.instructions.md",
+            "destination": (
+                ".github/instructions/policy/fallback.local.instructions.md"
+            ),
+            "customizationKind": "instructions",
+            "applyTo": "**",
+            "legacyMarkers": [],
+        }
+    ]
+    _plugin, source = _write_plugin(tmp_path, "market", "policy", entries=entries)
+
+    result = projections.Result(operation="test")
+    specs, _unknown = projections._load_specs(repo, [source], result)
+
+    assert specs == []
+    assert any(
+        finding.check == "projection-declaration"
+        and "reserved" in finding.message
+        for finding in result.findings
+    )
+
+
+def test_render_local_cache_rejects_duplicate_source_key_different_destinations(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    entries = [
+        {
+            "id": "fallback",
+            "template": "instructions/fallback.instructions.md",
+            "destination": ".github/instructions/policy/fallback.instructions.md",
+            "customizationKind": "instructions",
+            "applyTo": "**",
+            "legacyMarkers": [],
+        },
+        {
+            "id": "fallback",
+            "template": "instructions/fallback.instructions.md",
+            "destination": ".github/instructions/policy/other.instructions.md",
+            "customizationKind": "instructions",
+            "applyTo": "**",
+            "legacyMarkers": [],
+        },
+    ]
+    _plugin, source = _write_plugin(tmp_path, "market", "policy", entries=entries)
+
+    result = projections.render_local_cache(repo, lambda: [source])
+
+    assert any(
+        finding.check == "projection-local-cache-ambiguous"
+        and "declared more than once" in finding.message
+        for finding in result.findings
+    )
+    assert result.changed == []
+
+
+def test_render_local_cache_refuses_to_overwrite_a_foreign_file(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+    local_path.parent.mkdir(parents=True)
+    local_path.write_text("A human wrote this, not the renderer.\n", encoding="utf-8")
+
+    result = projections.render_local_cache(repo, lambda: [source])
+
+    assert any(
+        finding.check == "projection-local-cache-foreign" for finding in result.findings
+    )
+    assert result.changed == []
+    assert (
+        local_path.read_text(encoding="utf-8")
+        == "A human wrote this, not the renderer.\n"
+    )
+
+
+def test_render_local_cache_stale_cleanup_ignores_a_marker_at_the_wrong_path(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+
+    first = projections.render_local_cache(repo, lambda: [source])
+    assert first.blocking == 0
+    genuine_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+    # Copy the genuine, marker-bearing render to an unrelated local-cache
+    # path -- same bytes, same marker, wrong location. It must never be
+    # deleted as "stale" even though the source it actually belongs to is
+    # gone this call, because it does not sit at *its own* matching sibling.
+    misplaced_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "misplaced.local.instructions.md"
+    )
+    misplaced_path.write_bytes(genuine_path.read_bytes())
+
+    projections.render_local_cache(repo, lambda: [])
+
+    assert not genuine_path.exists()
+    assert misplaced_path.exists()
+
+
+def test_render_local_cache_reports_conflict_when_lock_already_held(
+    tmp_path: Path,
+) -> None:
+    # A concurrent holder of this render's own dedicated lock (simulating
+    # a worktree create/resume racing its own sessionStart, or two
+    # overlapping sessions) must make this call fail closed with a
+    # projection-local-cache-lock finding and touch nothing at all, never
+    # silently interleave its render/write/cleanup pass with the other
+    # call's -- the exact race that would otherwise let an older render
+    # clobber a newer one, or delete a sibling the other call just
+    # refreshed.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    root = projections.validate_repository_root(repo)
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+
+    held_lock = projections._local_cache_lock(root)
+    held_lock.__enter__()
+    try:
+        result = projections.render_local_cache(repo, lambda: [source])
+    finally:
+        held_lock.__exit__(None, None, None)
+
+    assert any(
+        finding.check == "projection-local-cache-lock" for finding in result.findings
+    )
+    assert result.changed == []
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+    assert not local_path.exists()
+
+
+def test_render_local_cache_does_not_call_discover_sources_when_lock_is_contended(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    root = projections.validate_repository_root(repo)
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    calls: list[int] = []
+
+    def discover() -> list[object]:
+        calls.append(1)
+        return [source]
+
+    held_lock = projections._local_cache_lock(root)
+    held_lock.__enter__()
+    try:
+        projections.render_local_cache(repo, discover)
+    finally:
+        held_lock.__exit__(None, None, None)
+
+    # A precomputed source list can't be un-computed once it's already an
+    # argument, so the only way to guarantee no call ever acts on stale
+    # information is to never even *resolve* the source set until the lock
+    # is held -- proven here by showing the resolver is never invoked at
+    # all when the lock is contended.
+    assert calls == []
+
+
+def test_render_local_cache_resolves_sources_exactly_once_when_uncontended(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    calls: list[int] = []
+
+    def discover() -> list[object]:
+        calls.append(1)
+        return [source]
+
+    result = projections.render_local_cache(repo, discover)
+
+    assert calls == [1]
+    assert result.blocking == 0
+
+
+def test_render_local_cache_refuses_to_write_a_git_tracked_destination(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+    # Simulate the exact hazard: the *.local.instructions.md ignore rule
+    # was never adopted, so this file got committed like any other.
+    local_path.parent.mkdir(parents=True)
+    local_path.write_text("Accidentally committed before .gitignore existed.\n", encoding="utf-8")
+    _git_commit_all(repo, "accidentally commit a local cache file")
+
+    result = projections.render_local_cache(repo, lambda: [source])
+
+    assert any(
+        finding.check == "projection-local-cache-tracked" for finding in result.findings
+    )
+    assert result.changed == []
+    assert (
+        local_path.read_text(encoding="utf-8")
+        == "Accidentally committed before .gitignore existed.\n"
+    )
+
+
+def test_render_local_cache_never_deletes_a_git_tracked_stale_sibling(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+    local_path.parent.mkdir(parents=True)
+    # A real render's own bytes (owned marker), but this copy got
+    # committed -- the reconciliation pass must never delete a git-tracked
+    # file, even one it can otherwise prove it owns.
+    rendered = projections.render_projection(
+        projections._load_specs(repo, [source], projections.Result(operation="t"))[0][
+            0
+        ]
+    )
+    local_path.write_bytes(rendered.content)
+    _git_commit_all(repo, "accidentally commit a genuine-looking local cache")
+
+    result = projections.render_local_cache(repo, lambda: [])
+
+    assert any(
+        finding.check == "projection-local-cache-tracked" for finding in result.findings
+    )
+    assert local_path.exists()
+
+
+def test_render_local_cache_treats_inconclusive_git_check_as_tracked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+
+    def broken_run(*args, **kwargs):
+        if "rev-parse" in args[0]:
+            return subprocess.CompletedProcess(args[0], 0, stdout=b"true\n", stderr=b"")
+        raise subprocess.TimeoutExpired(cmd="git", timeout=5)
+
+    monkeypatch.setattr(projections.subprocess, "run", broken_run)
+
+    result = projections.render_local_cache(repo, lambda: [source])
+
+    # A real git working tree whose tracked-files query itself failed must
+    # be treated exactly like "tracked" -- never like "confirmed
+    # untracked" -- so nothing gets written on the strength of a broken
+    # check.
+    assert any(
+        finding.check == "projection-local-cache-tracked" for finding in result.findings
+    )
+    assert result.changed == []
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+    assert not local_path.exists()
+
+
+def test_render_local_cache_reports_discovery_failures_without_raising(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def broken_discover() -> list[object]:
+        raise ValueError("repository settings are malformed")
+
+    result = projections.render_local_cache(repo, broken_discover)
+
+    assert any(
+        finding.check == "projection-local-cache-discovery"
+        for finding in result.findings
+    )
+    assert result.changed == []
+
+
+def test_render_local_cache_files_excluded_from_checked_in_orphan_scan(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+
+    sync_result = projections.sync_repository(repo, [source])
+    assert sync_result.blocking == 0
+    local_result = projections.render_local_cache(repo, lambda: [source])
+    assert local_result.blocking == 0
+
+    lock = _lock(repo)
+    scan_result = projections.scan_repository(repo, [source])
+
+    assert not any(
+        finding.check == "projection-orphan-file" for finding in scan_result.findings
+    )
+    assert lock["projections"]
 
 
 def test_sync_safely_creates_then_updates_projection_and_lock(

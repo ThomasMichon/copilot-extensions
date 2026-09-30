@@ -8,7 +8,7 @@ never purges an entry whose ``schemaVersion`` no longer matches what the
 running CLI writes (e.g. after a CLI upgrade bumps the schema). Those entries
 are re-read, re-parsed, and re-rejected on *every* cache hydration attempt,
 forever -- wasted disk I/O inside the runtime's own 2-second hydration
-timeout budget. Confirmed present on multiple facility machines (aperture-labs
+timeout budget. Confirmed present on multiple facility machines (private-downstream-repo
 #7323). This module is the maintenance mitigation, exposed as
 ``agent-mcp clean-tool-cache``.
 

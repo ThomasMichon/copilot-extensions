@@ -53,7 +53,7 @@ that `OptionList` cannot do without a bigger rebuild:
   convention.
 - `worktree-manager/scripts/listview_proto_compare.py` -- drives the REAL
   `PickerApp` (v1, `OptionList`) and the spike (v2, `ListView`) against the
-  *same* derived fixture (the full Aperture Labs demo roster, `demo.py`),
+  *same* derived fixture (the full Example Labs demo roster, `demo.py`),
   and writes `.txt`/`.svg` captures for both, using the existing
   `capture.py` seam so the comparison is apples-to-apples.
 

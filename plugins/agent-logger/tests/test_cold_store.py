@@ -91,6 +91,39 @@ def test_resolve_session_synced_unpacked(tmp_path: Path, monkeypatch) -> None:
     assert ref.path == corpus_root / "box" / "session-state" / "s-synced"
 
 
+def test_resolve_session_synced_from_a_codespace(tmp_path: Path, monkeypatch) -> None:
+    """agent-codespaces lands a CodeSpace's sessions under ``.codespaces/<name>/``."""
+    corpus_root = tmp_path / "sessions"
+    _make_session(corpus_root / ".codespaces" / "cs-one" / "session-state", "s-venue")
+    _make_session(corpus_root / "box" / "session-state", "s-host")
+
+    monkeypatch.setattr(cold_store, "_local_state_root", lambda: None)
+    _cfg_stub(monkeypatch, corpus_root)
+
+    ref = cold_store.resolve_session("s-venue")
+    assert ref is not None and ref.kind == "live"
+    assert ref.path == corpus_root / ".codespaces" / "cs-one" / "session-state" / "s-venue"
+    assert cold_store.resolve_session("s-host") is not None  # flat machines still resolve
+
+
+def test_a_live_mirrored_codespace_session_resolves_and_a_close_out_copy_wins(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The live mirror lands under ``.codespaces-live/<name>/``; a close-out capture
+    of the same session under ``.codespaces/<name>/`` is the complete copy."""
+    corpus_root = tmp_path / "sessions"
+    _make_session(corpus_root / ".codespaces-live" / "cs-one" / "session-state", "s-running")
+    monkeypatch.setattr(cold_store, "_local_state_root", lambda: None)
+    _cfg_stub(monkeypatch, corpus_root)
+
+    ref = cold_store.resolve_session("s-running")
+    assert ref is not None
+    assert ref.path == corpus_root / ".codespaces-live" / "cs-one" / "session-state" / "s-running"
+    _make_session(corpus_root / ".codespaces" / "cs-one" / "session-state", "s-running")
+    ref = cold_store.resolve_session("s-running")
+    assert ref.path == corpus_root / ".codespaces" / "cs-one" / "session-state" / "s-running"
+
+
 def test_resolve_session_synced_packed(tmp_path: Path, monkeypatch) -> None:
     corpus_root = tmp_path / "sessions"
     src = _make_session(tmp_path / "raw", "s-packed")

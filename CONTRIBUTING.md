@@ -78,14 +78,27 @@ explicit admin escalation).** This is enforced on four layers that agree:
    promotion pipeline's own identity, with repo-admin escalation retained for
    genuine emergencies (see Release & Versioning below).
 3. **Review** — `.github/workflows/copilot-review-gate.yml` requests a
-   Copilot review automatically, but **only** when the PR author already has
-   real repository access (any invited collaborator, any permission level —
-   read included). An uninvited outsider's PR gets no automatic review at
-   all; a Maintainer can still request one manually via the "Reviewers"
-   sidebar at any time. (The ruleset-native `copilot_code_review` auto-review
-   rule has no such condition — it would fire for literally anyone — so this
-   repo has removed that rule; see "Everyone else" below for why that
-   matters.) Like `workflow-lockdown-guard.yml` above, this workflow runs on
+   Copilot review automatically, but **only** for a PR authored by a
+   **Maintainer** (the CODEOWNERS root roster, owner included) — not merely
+   any invited collaborator. A Contributor's PR gets no automatic request
+   (a Maintainer can still request one manually via the "Reviewers"
+   sidebar), and an uninvited outsider's PR gets no automatic review at all.
+   This scoping exists because GitHub's `requestReviewers` call for
+   `copilot-pull-request-reviewer[bot]` silently no-ops — no exception, no
+   timeline event — when made by the default `GITHUB_TOKEN`
+   (`github-actions[bot]`) for a PR whose author isn't this repo's owner (a
+   personal, non-org account has no equivalent of the org-only "members
+   without a Copilot license" carve-out). `MAINTAINER_REVIEW_PAT`, a
+   fine-grained PAT for the owner scoped to only this repo (`Pull requests:
+   write` + `Metadata: read`), makes the request instead, as a licensed
+   account rather than the bot — used only for Maintainer-authored PRs,
+   since Maintainers already hold ruleset self-merge bypass (this extends
+   no new trust), and a Contributor's PR still needs a Maintainer's own
+   approving review regardless of Copilot's verdict. (The ruleset-native
+   `copilot_code_review` auto-review rule has no such condition — it would
+   fire for literally anyone — so this repo has removed that rule; see
+   "Everyone else" below for why that matters.) Like
+   `workflow-lockdown-guard.yml` above, this workflow runs on
    `pull_request_target`, so it can't fire until its own file has reached
    `main` via a promotion — request a review manually for any PR opened
    before that first promotion completes.
@@ -314,15 +327,22 @@ that is merely "waited out." Do not spend further review rounds chasing an
 `Approve` that literally cannot land there.
 
 > **This never-`Approve` quirk is specific to the literal GitHub repository
-> *owner* account (ThomasMichon), not the wider Maintainer group.** The other
-> three Maintainers (JakeSchieber, anarmawala, namankanakiya) are ordinary
-> (non-owner) accounts from Copilot's perspective — their own PRs should be
-> treated like a Contributor's for verdict *shape* (wait for a genuine
-> `Approve`, not a clean-`Comment` substitute) even though they don't need
-> anyone else's approving review to merge (the ruleset bypass above). This is
-> an assumption based on GitHub's documented owner-vs-non-owner review
-> behavior, not yet empirically confirmed against this repo's own history for
-> a non-owner Maintainer's PR — revisit this note once one has.
+> *owner* account, not the wider Maintainer group.** The other Maintainers
+> are ordinary (non-owner) accounts from Copilot's perspective — their own
+> PRs should be treated like a Contributor's for verdict *shape* (wait for a
+> genuine `Approve`, not a clean-`Comment` substitute) even though they
+> don't need anyone else's approving review to merge (the ruleset bypass
+> above).
+>
+> This is a bigger gap than verdict *shape* alone: without
+> `MAINTAINER_REVIEW_PAT` (see "Review" above), the automatic request never
+> reaches Copilot at all for a non-owner Maintainer's PR — `requestReviewers`
+> silently no-ops under the default `GITHUB_TOKEN`, with no exception and no
+> timeline event, so no verdict ever arrives to have a shape. Routing the
+> automatic request through a licensed human account instead of the bot
+> identity is what makes a verdict arrive at all; the "wait for a genuine
+> `Approve`, not a `Comment`" guidance above still holds for whatever verdict
+> lands once the request succeeds.
 
 **Everyone — Contributor and Maintainer alike — waits for a verdict before
 merging**, and no one merges past an open Medium/High-severity finding.
@@ -489,6 +509,52 @@ which turn a bounded review loop into an unbounded one:
   solely to make the comment thread read zero is optimizing for a bar
   neither this repo's contribution flow nor the automated reviewer's own
   directives actually require.
+
+### Give the reviewer your context, not just your diff
+
+Self-reviewing against REVIEW.md (above) closes the gap where both roles
+apply the *same* rubric. It does not close a different, asymmetric gap: you
+approach your own PR with whatever subject-matter context you built up while
+authoring it — prior attempts, constraints that ruled out an obvious-looking
+alternative, limitations accepted on purpose; Copilot's review approaches
+every PR **fresh**, with no access to the session or conversation that
+produced it. The PR description and whatever docs it links are the *entire*
+context-transfer channel — not a formality, and not something the reviewer
+can query you about mid-review the way a human reviewer might in a comment
+thread.
+
+When your diff makes a deliberate choice a reviewer might reasonably
+question — you tried the more obvious approach and rejected it, a known
+constraint (a platform limitation, an existing invariant, a prior incident)
+shaped the design, or you're accepting a limitation on purpose rather than by
+oversight — **say so explicitly in the PR description**, and cite the
+doc/effort/vision/issue that grounds it. An unstated rationale is
+indistinguishable, from the reviewer's side, from a gap nobody considered —
+and costs a review round to resolve either way, the same round a single
+sentence in the PR body would have pre-empted.
+
+**This context transfer is bounded by the same public-repo rules as
+everything else you publish here.** This repo is public, and "Contribution
+boundary" above already requires proprietary organization/person-specific
+context to stay in a private control repo. If the actual motivating
+constraint (an incident, a private downstream system, an internal process)
+isn't itself public, cite a **public, identifier-neutral** grounding artifact
+instead — a public doc/effort/vision/issue in *this* repo describing the
+constraint in general terms — rather than describing the private specifics
+in the PR body to satisfy this section. When no such public grounding exists,
+state the constraint generically (what class of limitation, not which private
+incident or system) rather than omit it or leak it.
+
+**This is context supply, not a request for deference.** Explaining a
+decision does not pre-empt the reviewer's right to disagree with it, and
+should not shrink the scrutiny applied to it — particularly for
+vision-conformance and security-relevant choices, where the reviewer's
+outside, fresh-eyes perspective is exactly the check this repo relies on
+Copilot review to provide, precisely because proximity to one's own
+implementation is a common source of blind spots the author cannot
+self-review away. State your reasoning so the reviewer is evaluating your
+*actual* tradeoff instead of a guessed-at one; expect it to still be
+challenged on the merits.
 
 ### Parent trackers stay open across partial slices
 
@@ -1176,6 +1242,36 @@ binstub in `~/.local/bin/`.
 
 ## Code Style
 
+- **Code, comments, docstrings, and non-Journal documentation describe the
+  system's current, timeless state — never the review process that shaped
+  them.** Do not write "fixed per review feedback," "renamed X to Y (reviewer
+  requested)," "previously did Z, now does W," or a parenthetical review-round
+  citation into code, a docstring, a README, or a pattern doc. A future reader
+  has no access to the review thread that motivated it, so it reads as
+  unexplained clutter at best — and at worst references an intermediate state
+  that was proposed, objected to, and fixed before ever being committed, so it
+  describes something that never existed in this repo's actual history at
+  all. A response to a review comment belongs in exactly one place: a reply on
+  that comment thread (the PR body/commit message carry aggregate context) —
+  never as prose baked into the artifact itself. The code/doc simply changes
+  to its new correct state; nothing about *how* it got there needs to live
+  inside it. The one durable exception is a project's own dated `## Journal`
+  (e.g. an effort's own journal section) — that is explicitly a decision log
+  by design, and "review round N caught X" is exactly what belongs in a dated
+  entry there. Do not import that journaling habit into ordinary code
+  comments, docstrings, or a doc's own current-state prose (including an
+  effort's own Plan/Request sections, which describe the present plan, not a
+  history of how it was revised).
+  **Even inside that Journal exception, the justification itself must be
+  self-contained** — record *why* the finding was correct (the invariant it
+  protects, the bug it prevents, the constraint that required it), not merely
+  that a review said so. "Review round N flagged X" citing only the review as
+  authority, with no independent technical reasoning, creates the same
+  circular-reference problem a Wikipedia article has when its only source is
+  itself: a review comment is not guaranteed to stay inspectable, and even
+  when it is, it was never itself the *reason* — it was only the trigger that
+  surfaced a reason that must stand on its own regardless of whether that
+  review ever happened.
 - Python 3.10+, type hints encouraged
 - **Linter: [ruff](https://docs.astral.sh/ruff/).** Each plugin configures its
   own `[tool.ruff]` in `pyproject.toml`. Run the full pass with `ruff check .`

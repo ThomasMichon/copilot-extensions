@@ -153,7 +153,7 @@ def build_coordinator_mcp(
             result = asdict(mutation)
         except TaskError as exc:
             return {"error": str(exc)}
-        if event_type in ("task.submitted", "task.abandoned"):
+        if event_type in ("task.submitted", "task.completed", "task.abandoned"):
             # Shared terminal-transition hook, mirroring coordinator_tasks.py's
             # own _guard: MCP calls queue.complete_with_outcome/abandon
             # directly (in-process), bypassing the HTTP routes entirely, so
@@ -202,6 +202,7 @@ def build_coordinator_mcp(
         source: str | None = None,
         origin_ref: str | None = None,
         evaluator_ref: str | None = None,
+        require_verification: bool = False,
         exclusive_key: str | None = None,
         supersede_exclusive_key: bool = False,
         dedup_key: str | None = None,
@@ -248,6 +249,7 @@ def build_coordinator_mcp(
                 source=source,
                 origin_ref=origin_ref,
                 evaluator_ref=evaluator_ref,
+                require_verification=require_verification,
                 exclusive_key=exclusive_key,
                 supersede_exclusive_key=supersede_exclusive_key,
                 dedup_key=dedup_key,

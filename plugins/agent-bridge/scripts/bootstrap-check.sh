@@ -14,15 +14,21 @@
 # installer's output to ~/.<name>/reconcile.log so a failed auto-update is
 # diagnosable.
 #
-# OPT-IN GATE (reference implementation -- fanned out to sibling plugins, see
-# tools/check-bootstrap-sync.py FAMILIES): gated the same way as the .ps1
-# counterpart -- requires a checked-in
-# <project>/.copilot-extensions/config.yaml with a top-level
-# `background_reconcile_<plugin-name>: true` line, e.g.
-# `background_reconcile_agent-bridge: true` (per-plugin, not a single blanket
-# flag; plain regex match, no yaml parser -- this hook has no python/venv
-# yet). No opt-in -> no background spawn. Deliberate behavior change:
-# previously every session silently self-healed drift.
+# NO OPT-IN GATE (agent-bridge-unified-zdd-cutover Phase 0): background
+# reconcile used to require a checked-in
+# <project>/.copilot-extensions/config.yaml with a top-level, per-project
+# opt-in flag, because a raw reconcile
+# could race a live daemon/session. Now that agent-bridge's own update path
+# is always-ZDD (spawn passive -> health-gate -> flip -> drain -> retire,
+# safe to run unattended), that justification is gone; the gate was removed
+# rather than kept as a redundant consent checkbox. Frequency/trigger stays
+# deliberately bounded -- still only once per session start, only on a real
+# version drift. What DOES still bound concurrency is the single-flight +
+# stale-reap guard below (already present in the .ps1 sibling; this .sh
+# now carries the same guard, not the removed opt-in). Staleness stays
+# observable via `agent-bridge service status`, which now reports
+# days-since-last-reconcile (see _print_reconcile_status in
+# service_process_cli.py).
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PluginDir="$(cd "$ScriptDir/.." && pwd)"
 session_start_json_emitted=0
@@ -64,22 +70,6 @@ fi
 # re-launching the installer on every session start.
 if { [ -e "$InstallDir/.venv" ] || [ -e "$InstallDir/venv" ]; } && [ "$deployed" = "$current" ]; then exit 0; fi
 
-# OPT-IN GATE: drift exists, so we'd normally reconcile -- but only when the
-# current project has explicitly opted THIS plugin in (per-plugin, not a
-# single blanket flag). COPILOT_PROJECT_DIR is the session's project
-# checkout, injected by the CLI at session start; fall back to cwd if unset.
-ProjectDir="${COPILOT_PROJECT_DIR:-$(pwd)}"
-optInFile="$ProjectDir/.copilot-extensions/config.yaml"
-optInKey="background_reconcile_${name}"
-optedIn=0
-if [ -f "$optInFile" ] && grep -qE "^[[:space:]]*${optInKey}:[[:space:]]*true[[:space:]]*\$" "$optInFile" 2>/dev/null; then
-  optedIn=1
-fi
-if [ "$optedIn" -ne 1 ]; then
-  echo "[$name] runtime $deployed -> $current; background reconcile SKIPPED (no opt-in -- add '${optInKey}: true' to $optInFile to enable)" >&2
-  exit 0
-fi
-
 if [ -f "$PluginDir/scripts/init.sh" ]; then
   target=("$PluginDir/scripts/init.sh")
 elif [ -f "$PluginDir/scripts/install.sh" ]; then
@@ -87,12 +77,68 @@ elif [ -f "$PluginDir/scripts/install.sh" ]; then
 else
   exit 0
 fi
-echo "[$name] runtime $deployed -> $current; reconciling in background (log: $InstallDir/reconcile.log)..." >&2
 reconcile_log="$InstallDir/reconcile.log"
 status_file="$InstallDir/reconcile-status.json"
+
+# --- Good boot-citizen guard: single-flight + stale-reap (mirrors the .ps1
+# counterpart) --- This hook fires on EVERY new session now that the opt-in
+# gate is gone: without this, a slow or wedged reconcile gets re-spawned
+# every session, stacking orphaned background installers. Reuses the
+# existing reconcile-status.json (launched_pid/at) rather than a second
+# lock file. If a prior reconcile PID is still alive:
+#   YOUNG (<10m) -> already in flight; do nothing (never stack).
+#   STALE (>=10m) -> wedged; reap it, then relaunch (self-heals a one-off
+#                    wedge instead of poisoning every future session).
+staleSeconds=600
+if [ -f "$status_file" ]; then
+  prevPid="$("$py" -c '
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("launched_pid", "") or "")
+except Exception:
+    print("")
+' "$status_file" 2>/dev/null)"
+  if [ -n "$prevPid" ] && kill -0 "$prevPid" 2>/dev/null; then
+    prevEpoch="$("$py" -c '
+import json, sys, datetime
+try:
+    at = json.load(open(sys.argv[1])).get("at", "")
+    dt = datetime.datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+    print(int(dt.timestamp()))
+except Exception:
+    print(0)
+' "$status_file" 2>/dev/null)"
+    nowEpoch="$(date -u +%s)"
+    if [ "$prevEpoch" -gt 0 ] && [ $((nowEpoch - prevEpoch)) -lt "$staleSeconds" ]; then
+      exit 0
+    fi
+    kill "$prevPid" 2>/dev/null || true
+  fi
+fi
+
+echo "[$name] runtime $deployed -> $current; reconciling in background (log: $InstallDir/reconcile.log)..." >&2
 now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-# Observability (#167): capture the otherwise-silent background reconcile.
-nohup bash "${target[@]}" >"$reconcile_log" 2>&1 &
+# Observability (#167 + agent-bridge-unified-zdd-cutover Phase 0 review):
+# record the attempt immediately (so the single-flight/staleness check
+# above always sees it), THEN have the SAME nohup'd process overwrite the
+# same status file with completion info once the installer actually exits
+# -- otherwise "Last auto-reconcile" would report a launch timestamp even
+# for a reconcile that failed or is still wedged, making real staleness
+# look falsely healthy. Everything (install + completion write) runs
+# inside one flat `bash -c`, so it stays nohup-protected end to end -- no
+# extra un-nohup'd wrapper subshell that could die to a SIGHUP the nohup'd
+# child itself would have survived.
+nohup bash -c '
+  reconcile_log="$1"; status_file="$2"; deployed="$3"; current="$4"; started_at="$5"
+  shift 5
+  bash "$@" >"$reconcile_log" 2>&1
+  rc=$?
+  completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  success="false"; [ "$rc" -eq 0 ] && success="true"
+  printf "{\"at\":\"%s\",\"from\":\"%s\",\"to\":\"%s\",\"launched_pid\":%s,\"log\":\"%s\",\"completed_at\":\"%s\",\"exit_code\":%d,\"success\":%s}\n" \
+    "$started_at" "$deployed" "$current" "${BASHPID:-$$}" "$reconcile_log" "$completed_at" "$rc" "$success" \
+    >"$status_file" 2>/dev/null || true
+' _ "$reconcile_log" "$status_file" "$deployed" "$current" "$now" "${target[@]}" &
 launched_pid=$!
 printf '{"at":"%s","from":"%s","to":"%s","launched_pid":%s,"log":"%s"}\n' \
   "$now" "$deployed" "$current" "$launched_pid" "$reconcile_log" \

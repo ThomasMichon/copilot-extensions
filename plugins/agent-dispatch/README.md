@@ -285,13 +285,23 @@ started -> suspended -> started
 - **suspended** -- previously started but dormant and non-claimable; retains the
   same owner/session, worktree identity, generation, progress, and card while
   clearing active lease/activity.
-- **submitted** -- the worker's provisional completion claim.
+- **submitted** -- the worker's provisional completion claim. A task reaches
+  this state only when `require_verification=true`; it then waits for a
+  whole-goal evaluator (or an operator override) to decide whether the stated
+  goal is actually complete or should be abandoned.
 - **completed** / **abandoned** / **dead_letter** -- terminal (abandon requires
   permission; **dead_letter** is where a task lands when GC has requeued it past
   the attempts cap -- its owner kept going gone -- an actionable failure state).
   `completed`/`submitted` briefly traded names (2026-09-25..2026-09-29) --
   if you see a stray `confirmed` status anywhere, see
   [`docs/status-rename-migration-2026-09-29.md`](docs/status-rename-migration-2026-09-29.md).
+- `require_verification` is explicit and opt-in. The default (`false`) keeps the
+  legacy single-call behavior: `complete` self-attests and lands the task at
+  **completed** immediately. When `true`, `complete` stops at **submitted**
+  instead, and the task needs evaluator corroboration or a manual override.
+- The Tasks pivot is the manual override surface for that gate: a submitted
+  verification-gated task can be **Completed** (accept the claim) or
+  **Force-abandoned** directly from the picker.
 - A **liveness** GC pass returns a held task to **queued** only when its owner's
   **session** is *confirmed gone* (keyed on the captured `owner_session_id`, not
   mere worktree occupancy) -- never on elapsed time, so a long-running live
@@ -342,6 +352,13 @@ started -> suspended -> started
   events, `task.wake` SSE events, and `/health` wake metrics expose
   pending/delivering/delivered/failed/stale state. The steer is durable even
   when all delivery attempts fail.
+- A detached `run --detach --task <id>` wait is also durable: the coordinator
+  records the waiter PID, host, and start-identity fence. On startup it sweeps
+  any still-active waiter records; a confirmed-dead waiter wakes the task with an
+  explicit infrastructure-failure retry note, while a live or indeterminate
+  waiter is left alone. A subscribed emitter's event note can supersede a still-
+  running waiter and wake the task early, with the waiter-generation fence
+  dropping any later stale completion from that superseded process.
 
 ### Goal-bearing tasks -- a durable goal, not a fire-once prompt
 
@@ -800,29 +817,41 @@ agent-dispatch webhook --config webhook.json --host 127.0.0.1 --port 9331
 
 ### Evaluator -- a producer's lifecycle handler (`agent-dispatch evaluate`)
 
-A producer puts work on the queue; an **evaluator** decides what happens *next* as
-that work progresses -- the *judgment* half of emitters-and-evaluators. It is
-hook-like: it receives one task **lifecycle event** (the coordinator shape
-`{"type": "task.submitted", "task": {...}}`) and returns decisions -- emit a
-follow-up task, or nothing. A declarative spec of rules matches on the event and
-mints follow-ups from templates, so a standing domain automates a whole cycle
-(reviewer done -> open a conflict-resolution follow-up; a goal met -> the next
-goal) without a bespoke module.
+A producer puts work on the queue; a **whole-goal evaluator** decides whether a
+verification-gated submitted task is actually done. It is event-triggered, not a
+polling audit loop: the coordinator invokes it when a task first reaches
+`task.submitted`, when an operator explicitly backfills a named submitted task
+(`agent-dispatch verify-submitted --evaluator-ref <name> <task-id>...` for a
+legacy row that is not yet opted in, or the same command without
+`--evaluator-ref` for an already-flagged row), and when a subscribed emitter's
+event note re-triggers a still-submitted task after external state changes.
+
+Two evaluator kinds are supported:
+
+- **Declarative `SpecEvaluator`** — a `rules` list matching on the event/task
+  fields and returning `confirm` / `abandon` / `noop`.
+- **Trusted script evaluator** — a separately registered opaque selector mapped
+  to a fixed `argv`, run with `shell=False` and no caller-supplied arguments;
+  the task's `evaluator_ref` names that selector, never a literal command.
+
+For the verification gate itself, evaluators may decide only **complete**,
+**abandon**, or **noop**. They do not rewrite the task goal, perform a generic
+progress audit, or run as an interval sweep.
 
 ```bash
 # apply an evaluator to an event read from stdin (a hook/producer pipes it in):
 echo '{"type":"task.submitted","task":{"id":"t1","labels":["recipe:reviewer"],"status":"submitted","origin_ref":"o/n#42"}}' \
   | agent-dispatch evaluate --spec evaluator.json --repo o/n
 agent-dispatch evaluate --spec evaluator.json --event-file event.json --dry-run
+agent-dispatch verify-submitted t1 t2
 ```
 
-Spec shape (JSON): a `rules` list, each with `on` (event type, or a list), an
-optional `when` predicate (`labels_any` / `labels_all` / `status` / `source`), and
-an `emit` block that templates the follow-up (`title_template`, `prompt_template`,
-`labels`, `requires`, `dedup_template`, ...). The first matching rule wins; a
-follow-up defaults `source=evaluator`. The **degenerate case is the ad-hoc kick**:
-a one-off task with no evaluator still runs -- an evaluator is opt-in judgment,
-never required. See
+Spec shape (JSON): either a `rules` list, each with `on` (event type, or a
+list), an optional `when` predicate (`labels_any` / `labels_all` / `status` /
+`source`), and `confirm` / `abandon` / `noop` behavior; or a trusted `scripts`
+registry mapping opaque evaluator refs to fixed argv lists. The **degenerate
+case is the ad-hoc kick**: a one-off task with no evaluator still runs -- an
+evaluator is opt-in judgment, never required. See
 [`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
 (§Concepts/*The evaluator*, §Features/*emitters-and-evaluators*).
 
@@ -1001,12 +1030,17 @@ down and re-woken with its context intact when the wait returns. The resume is a
 best-effort bridge nudge -- a genuinely-gone worker is handled by liveness
 recovery, not the nudge.
 
-Always pass `--task` with `--detach`: it atomically suspends that task the
-moment the detached waiter is confirmed spawned (so `started` never outlives
-the session actually doing the work) and journals a `task`-kind
-agent-worktrees claim on the current worktree, blocking finalize/managed-GC
-from reclaiming it out from under the still-open task. Both are best-effort
-and non-fatal -- neither blocks the detach itself. See
+Always pass `--task` with `--detach`: the coordinator transactionally prepares a
+new detached-waiter generation (suspending the task in the same durable step),
+the child process must then **arm** that generation with its PID/host/start-token
+identity fence before it owns the wait, and any pre-arm failure aborts or
+recovers that prepared generation instead of leaving an unrecoverable suspended
+task behind. A `task`-kind agent-worktrees claim is journaled on the current
+worktree as part of the detach flow, blocking finalize/managed-GC from
+reclaiming it out from under the still-open task; durable wake delivery retires
+that claim only while the same waiter generation still owns completion. These
+guardrails are best-effort and non-fatal -- they backstop hibernation rather
+than blocking the detach itself. See
 [`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
 (§Features/*hibernate-the-wait*).
 
@@ -1389,11 +1423,12 @@ Exactly **one** daemon per machine-and-environment runs every registration, each
 in its own subprocess, reconciling on change (start / restart-on-spec-change /
 wind-down-on-remove / crash-revive) and single-instance-guarded by a crash-safe OS
 lock (a second daemon stands down; a crashed one's lock is auto-released so a
-restart reclaims it). All four kinds are daemon-run: **supervised-lane** and
-**evaluator** drive the embody loop (the latter subsuming `supervise
---evaluator`), **schedule** runs the timer producer, while **emitter** runs either a periodic
-lease-gated command or the webhook producer. Re-registering the
-same unit is idempotent (the derived handle identifies it). See
+restart reclaims it). The daemon directly runs the standing **supervised-lane**,
+**schedule**, and **emitter** kinds; **registered evaluator rows are
+coordinator-owned** and run only on the concrete verification triggers described
+below, while the bare `supervise --evaluator` surface remains a one-off local
+manual pass. Re-registering the same unit is idempotent (the derived handle
+identifies it). See
 [`docs/spawn-supervisor.md`](docs/spawn-supervisor.md#the-singleton-daemon-built--one-master-per-unit-subprocesses)
 for the registration + daemon model.
 
@@ -1425,17 +1460,13 @@ reuse. Preparation does not inject the interpreter into launch state or restart
 a healthy companion; selection and cutover are separate lifecycle increments.
 
 
-**Evaluator pass — advance the loop (`--evaluator <spec>`).** With an evaluator
-spec, each cycle feeds every **newly-concluded** task's lifecycle event
-(`task.submitted` / `task.abandoned`) to the evaluator (§ Evaluator) and applies
-its decisions — emitting a follow-up task. This is the **service-driven** half of
-*a-loop-runs-with-or-without-a-service*: a standing supervisor advances a domain's
-loop (reviewer done → conflict-resolution follow-up; goal met → the next goal)
-with no bespoke module. It's idempotent — each task fires once per process and the
-emitted follow-up's `dedup_key` guards duplicates across restarts — and best-effort
-(a bad evaluator or failed create is logged, never crashing the cycle). Add
-`--evaluator-ref <id>` (or the same field in an evaluator registration) to
-consume only tasks explicitly associated by their producing emitter.
+**Evaluator pass — local/manual evaluation (`--evaluator <spec>`).** The bare
+`supervise --evaluator <spec>` surface still exists for a one-off local
+supervisor pass over lifecycle events, but **registered evaluator rows are
+coordinator-owned**, not daemon-launched: the coordinator invokes them only on the
+settled verification triggers (`task.submitted`, explicit `verify-submitted`
+backfill, or an event-note re-trigger on an already-submitted task). That keeps
+verification out of a polling loop and scoped to concrete external events.
 
 Tasks embody as **headless ACP** by default, but the lane can mix bodies by
 label: keep **self-contained sweep** labels headless, opt interactive labels to

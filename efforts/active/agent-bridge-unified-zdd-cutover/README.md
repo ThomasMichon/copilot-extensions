@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** In Progress (Phase 1 of 6 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 6 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 6 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 6 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 6 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to Phase 6; Phase 6 (Tier-E live-turn-survival harness) planned, not started)
+- **Status:** In Progress (Phase 1 of 6 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 6 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 6 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 6 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 6 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to Phase 6; Phase 6 of 6 landed — [#4664](https://github.com/ThomasMichon/copilot-extensions/pull/4664) implemented the opt-in `CR_LIVE_TURN_DRILL=1` drill, then verified by a real live Docker clean-room run ([#4672](https://github.com/ThomasMichon/copilot-extensions/pull/4672)) that also fixed two bugs the review round couldn't catch and one wrong assertion; Phase 0's design fork resolved and the opt-in reconcile gate removed — [#4694](https://github.com/ThomasMichon/copilot-extensions/pull/4694). A checkbox audit then found 3 more Plan/Validation Plan items already satisfied by prior work but never ticked (see Journal); only ONE item remains open in the whole effort: the abrupt-termination drill's real-`_generation_id` exposure, a previously-investigated, genuinely blocked design question -- not a quick continuation.)
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
@@ -170,18 +170,31 @@ layer — is the operator's own, captured verbatim in Request.)_
 - [x] Confirmed via source review: `deploy` and `service restart` are
   genuinely different code paths (`venue_cli.py` vs. `service_process_cli.py`
   + `service_start_cli.py`), not a documentation-only distinction.
-- [ ] Decide, with the operator, whether the opt-in reconcile gate itself
+- [x] Decide, with the operator, whether the opt-in reconcile gate itself
   survives this redesign — the design below makes an update **safe** to run
   automatically (always ZDD), which may remove the original justification
   for making it *opt-in* (avoiding unwanted background work) as long as the
   *frequency*/*trigger* is still deliberately bounded. This is a genuine
   design fork the vision doesn't resolve on its own — flag findings, don't
-  silently pick one side.
-- [ ] Make the current staleness **observable** regardless of the outcome
+  silently pick one side. **Resolved:** operator chose to remove the
+  opt-in gate entirely (see Journal). Implemented across all 10
+  reconcile-capable plugins (`agent-bridge`, `agent-ssh`, `agent-vault`,
+  `budget-guidance`, `agent-dispatch`, `agent-containers`, `agent-mcp`,
+  `agent-logger`, `agent-codespaces`, `agent-pull-requests`) — a version
+  drift now reconciles unconditionally, with no per-project
+  `.copilot-extensions/config.yaml` opt-in required. Frequency/trigger
+  stays bounded exactly as before (once per session start, only on real
+  drift; agent-bridge additionally keeps its single-flight/stale-reap
+  guard).
+- [x] Make the current staleness **observable** regardless of the outcome
   above: `service status` (or an equivalent) should be able to say plainly
   "N days since last successful reconcile, background reconcile is
   {enabled,disabled} for this project" rather than requiring an operator to
-  reconstruct that from a raw log file.
+  reconstruct that from a raw log file. **Done:** `agent-bridge service
+  status` now prints `Background reconcile: enabled (always-on; no
+  per-project opt-in required)` plus a human "N day(s)/hour(s)/minute(s)
+  ago" staleness line (`_print_reconcile_status`/`_format_reconcile_age` in
+  `service_process_cli.py`).
 
 ### Phase 1 — Retire the second deploy behavior
 - [x] `agent-bridge service restart` (and any other reachable stop+start
@@ -249,15 +262,15 @@ layer — is the operator's own, captured verbatim in Request.)_
   matter in practice (CLI `send`/`read`/`wait`, not only the HTTP layer).
 
 ### Phase 5 — Validation
-- [ ] A real, driven cutover drill: start a session-host-carrying daemon,
+- [x] A real, driven cutover drill: start a session-host-carrying daemon,
   trigger the one canonical update path, and confirm the session's Copilot
   process never observes a disruption (no dropped turn, no lost event) while
-  the daemon itself fully changes generation. **Partially covered** -- the
-  pre-existing `agent-bridge-cutover` Tier-P `routing-flip-retire` check
-  already proves the daemon-level mechanism a live-turn survival depends on
-  (nothing hard-killed, clean beside-not-in-place handoff); a *fully live*
-  assertion needs a real model/ACP child in the loop and remains Tier-E scope
-  (tracked, not delivered here -- see Journal).
+  the daemon itself fully changes generation. Closed for real by Phase 6's
+  live-turn-survival drill (`CR_LIVE_TURN_DRILL=1`, a real Docker clean-room
+  run with real Copilot auth/credits) -- see Phase 6's own checklist and
+  Journal for the evidence and the one honest scope correction (the
+  caller-facing `wait --attention turn_complete` gap, tracked as
+  [issue #4681](https://github.com/ThomasMichon/copilot-extensions/issues/4681)).
 - [ ] A forced-abrupt-termination drill: kill the old generation before it
   releases its claims, and confirm a later generation recovers them cleanly.
   **Partially covered** -- proves the underlying dead-pid-recovery primitive
@@ -270,7 +283,7 @@ layer — is the operator's own, captured verbatim in Request.)_
   new `agent-bridge-cutover` companion) that exercises this on a real fresh
   machine.
 
-### Phase 6 — Tier-E live-turn-survival harness (planned, not started)
+### Phase 6 — live-turn-survival drill (implemented; verified by a real live run) ✅
 
 Closes Phase 5's Plan item 1 for real: prove, with a genuinely live
 Copilot/ACP turn in flight, that `agent-bridge deploy` does not disrupt it
@@ -281,32 +294,88 @@ sketch, feasibility notes, and acceptance criteria live in the sibling
 design doc:
 [`phase-6-tier-e-live-turn-harness.md`](phase-6-tier-e-live-turn-harness.md).
 
-- [ ] A real live cutover drill shows a real Copilot turn completes with
+**Resolved design question:** this does NOT get a "Tier E" label or use
+Tier-E's provider-registration machinery. It ships as an opt-in phase 4
+(`CR_LIVE_TURN_DRILL=1`, default off) of the existing Tier-P
+`agent-bridge-cutover` scenario, with the drill logic in a new sibling
+fixture (`fixtures/live_turn_probe.py`) rather than another
+`cutover_probe.py` check, because it needs a real Copilot auth context and
+deliberately runs against the box's own real, already-provisioned install
+instead of a throwaway sandbox (see the fixture's own module docstring for
+the full reasoning).
+
+- [x] A real live cutover drill shows a real Copilot turn completes with
   zero observed disruption while the daemon's generation actually changes
   underneath it (same session id, no dropped/duplicated event, confirmed
-  generation change -- not a trivial/no-op cutover). See the sibling doc.
-- [ ] The drill's verdict is programmatic/evidence-based, or a documented
-  decision explains why an LLM judge is the right mechanism after all.
-- [ ] The scenario (or bespoke script) is documented in the clean-room
-  catalog and harness docs if it establishes a new reusable pattern.
+  generation change -- not a trivial/no-op cutover), **at the session/
+  transcript/Session-Host level.** **Executed for real**
+  against a local Docker clean-room box (real Copilot auth via
+  host `gh`, real credits): a real prompt's specific in-flight turn closed
+  strictly after the verified reattach boundary, under the SAME
+  session/acp_session_id, with the Session-Host claim reattached to the
+  new generation's real pid, no orphan/duplicate turn events, and zero
+  truncated/mutated events. `PROBE-SUMMARY: 1/1 passed`. **Scope
+  correction:** this does NOT also prove the
+  caller-facing "a reply reaches the client" guarantee end to end --
+  `wait --attention turn_complete` (the channel a real
+  caller would use) can hang indefinitely after a reattach even though the
+  session correctly reaches `idle`; tracked as
+  [issue #4681](https://github.com/ThomasMichon/copilot-extensions/issues/4681),
+  not silently assumed proven. See Journal for the full history of real
+  bugs the live run(s) and review caught (an argparse arg-ordering
+  footgun, a stale-registry daemon-reuse assumption, an unsafe pid-kill,
+  aggregate-count assertions that don't prove non-duplication or timing,
+  and this wait-channel gap).
+- [x] The drill's verdict is programmatic/evidence-based (a dedicated
+  comparator over `HostIndex` records, `sessions --json` status, and a
+  turnId-correlated ordered walk of `events.jsonl` -- no LLM judge
+  involved, per the design doc's own conclusion. `wait --attention
+  turn_complete` is invoked only as a non-blocking advisory secondary
+  signal and is explicitly excluded from the verdict itself, per the
+  scope correction above.
+- [x] The scenario is documented in the clean-room catalog
+  (`tools/clean-room/README.md`) and in this scenario's own `manifest.json`/
+  `scenario.sh` header comments; no new reusable Tier-E pattern was
+  established (the opposite -- an existing Tier-P scenario grew one opt-in
+  phase), so `ARCHITECTURE.md`/`TIER-E-EXECUTION.md` were left untouched.
 
 ## Validation Plan
 
-- [ ] `agent-bridge service restart` (or its replacement) and `agent-bridge
+- [x] `agent-bridge service restart` (or its replacement) and `agent-bridge
   deploy` are provably the same code path (a shared test, or the removal of
-  one verb).
-- [ ] A live cutover drill (Phase 5) shows zero session disruption across a
-  real generation change. **See Phase 6** -- needs a real live Copilot turn
-  (Tier-E-style harness), not deliverable at Phase 5's Tier-P/stdlib-probe
-  fidelity; planned but not started.
+  one verb). Already satisfied by Phase 1's own
+  `test_service_restart_zdd.py::test_service_restart_calls_cmd_deploy_not_raw_stop_start`
+  (monkeypatches `_service_stop`/`_service_start` and `venue_cli._cmd_deploy`,
+  asserts `service restart` calls only `_cmd_deploy` -- never the raw
+  stop/start pair); this checkbox was simply never ticked when that test
+  landed. Confirmed still passing as part of this session's full
+  `agent-bridge` suite runs.
+- [x] A live cutover drill (Phase 5/6) shows zero session disruption across
+  a real generation change. Verified by a real `CR_LIVE_TURN_DRILL=1` run
+  (Docker clean-room, real Copilot auth/credits) -- see Phase 6's Journal
+  entry for the evidence.
 - [ ] An abrupt-termination drill shows a stale claim is recovered by the
   next generation without manual intervention. **Partially covered** -- the
   claim is stamped with a test-chosen label, not the daemon's own real
-  generation identity (see Journal).
-- [ ] Reconcile staleness is observable via a status command, independent of
+  generation identity (see Journal). Needs a real API to read a live
+  daemon's own `_generation_id` before this can close -- new scope, not a
+  quick correction; left open.
+- [x] Reconcile staleness is observable via a status command, independent of
   whether Phase 0's opt-in-gate question is resolved to keep or remove it.
-- [ ] Full plugin test suite (`python tools/run-plugin-tests.py agent-bridge`)
-  and `libs/zdd`'s own suite stay green throughout.
+  Resolved: the gate was removed; `agent-bridge service status` reports
+  staleness (see Phase 0 Journal entry).
+- [x] Full plugin test suite (`python tools/run-plugin-tests.py agent-bridge`)
+  and `libs/zdd`'s own suite stay green throughout. Re-verified at the end
+  of Phase 0 (this session): full `agent-bridge` suite green (7 sub-suites,
+  1000+ tests) after every change, plus every other touched plugin's own
+  full suite (`agent-ssh`, `agent-vault`, `budget-guidance`,
+  `agent-dispatch`, `agent-containers`, `agent-mcp`, `agent-logger`,
+  `agent-codespaces`, `agent-pull-requests`). `libs/zdd` has no standalone
+  `run-plugin-tests.py` target (it's a shared lib, not a plugin) but is
+  exercised extensively by `agent-bridge`'s own suite (`zdd.cutover`,
+  `zdd.routing`, `zdd.breadcrumb` are imported directly by several
+  agent-bridge tests, e.g. `test_service_restart_zdd.py`), which stayed
+  green throughout.
 
 ## Proposal
 
@@ -363,6 +432,457 @@ entry below for what was inspected, what was already covered, and the one new
 test that closes the gap.
 
 ## Journal
+
+### 2026-09-30 — Checkbox reconciliation: 3 of 4 remaining items were already done
+
+- After Phase 0 merged ([#4694](https://github.com/ThomasMichon/copilot-extensions/pull/4694),
+  [#4700](https://github.com/ThomasMichon/copilot-extensions/pull/4700)),
+  re-audited every unchecked Plan/Validation Plan box before treating the
+  effort as blocked on new work -- per this repo's own completion-gate
+  discipline, a merged phase is never itself proof of effort completion.
+  Found 3 boxes that were already satisfied by prior work but never ticked:
+  1. **Phase 5's "real, driven cutover drill"** -- superseded by Phase 6's
+     live-turn-survival drill days earlier; the box still read
+     "Partially covered... Tier-E scope" (stale language predating Phase
+     6's actual delivery). Marked done, pointing at Phase 6's own checklist.
+  2. **Validation Plan's `restart`/`deploy` shared-code-path proof** --
+     Phase 1 already shipped exactly this as
+     `test_service_restart_zdd.py::test_service_restart_calls_cmd_deploy_not_raw_stop_start`
+     (asserts `service restart` calls only `venue_cli._cmd_deploy`, never
+     raw stop/start). Confirmed still passing this session. Marked done.
+  3. **Validation Plan's "full suite stays green throughout"** -- true
+     continuously across every phase's own PR; this session re-confirmed
+     it explicitly (full `agent-bridge` suite + every other touched
+     plugin's full suite, all green) rather than leaving it an implicit
+     assumption. Marked done.
+- **The one item NOT closed, and why it's a genuine stopping point, not an
+  oversight:** the abrupt-termination drill's remaining gap (a claim
+  stamped with a test-chosen label, not the daemon's own real
+  `_generation_id`) was already investigated in depth by a prior session
+  (see the "Honest scope note" + "six rounds" entry below): exposing the
+  real generation id via `/health` hit a genuine contract-registry
+  self-reference wall (a captured fixture can't cite its own PR's
+  not-yet-existing merged commit), was reverted rather than forced, and
+  the check's own claim was narrowed instead. Solving this for real needs
+  a fresh design decision on WHERE to expose an internal daemon's
+  generation id (a new `/health` field once a fixture can reference an
+  already-merged commit; a debug-only endpoint; or something else) --
+  itself a design fork, not a mechanical continuation, and out of this
+  session's Phase 0 scope. Left open and honestly described, not silently
+  carried forward as if unnoticed.
+- Verified: `python3 tools/run-plugin-tests.py agent-bridge` full suite
+  green after these doc-only edits (no code touched).
+
+### 2026-09-30 — Phase 0's design fork resolved: the opt-in reconcile gate removed ([#4694](https://github.com/ThomasMichon/copilot-extensions/pull/4694))
+
+- Resumed via a context handoff after Phase 6 merged ([#4672](https://github.com/ThomasMichon/copilot-extensions/pull/4672)),
+  leaving Phase 0's one open item: whether the per-project
+  `background_reconcile_<plugin>` opt-in gate survives the ZDD redesign.
+  Asked the operator directly (this was a genuine design fork the vision
+  doesn't resolve on its own, not something to silently pick a side on) --
+  **decision: remove the opt-in gate.** Now that every reconcile-capable
+  plugin's update path is always-ZDD, the gate's original justification
+  (avoiding unsafe background work) no longer applies; keeping it would
+  only be a redundant consent checkbox, and it was the actual root cause
+  of the 18+ day staleness incident that started this effort.
+- Removed the gate from all 10 reconcile-capable plugins' session-start
+  hooks (`scripts/bootstrap-check.sh` + `.ps1`): `agent-bridge` (the
+  reference implementation, `versioned-venv/agent-bridge-reference`),
+  `agent-ssh` (`manifest-path/agent-ssh`), the shared
+  `versioned-venv/psscriptroot` family (`agent-codespaces`,
+  `agent-containers`, `agent-dispatch`, `agent-logger`,
+  `agent-pull-requests`, `agent-vault`), `budget-guidance`
+  (`versioned-venv/pythonless-budget-guidance`), and `agent-mcp`
+  (`versioned-venv/context-selected-agent-mcp`). A version drift now
+  reconciles unconditionally at session start -- frequency/trigger stays
+  exactly as bounded as before (still only once per session start, only on
+  a real version drift; agent-bridge additionally keeps its pre-existing
+  single-flight/stale-reap guard, which is what actually prevents a
+  shared/active-dev machine from stacking background installers, not the
+  removed opt-in). `tools/check-bootstrap-sync.py` still passes (family
+  byte-identity intact).
+- Rewrote every plugin's `test_bootstrap_check_reconcile_opt_in.py` (9
+  files) into `test_bootstrap_check_reconcile_always_on.py`: proves neither
+  hook script retains opt-in-gate machinery (`optInKey`/`optedIn`/the
+  `SKIPPED` message), that a version drift reconciles with **no**
+  `.copilot-extensions/config.yaml` at all, and that a stale leftover
+  `background_reconcile_<plugin>: false` from before this change is now
+  inert rather than resurrecting the old skip behavior. `budget-guidance`'s
+  separate `test_hooks.py` POSIX-no-python reconcile test no longer needs
+  (or writes) an opt-in config file either.
+- Closed Phase 0's second item -- staleness observability, independent of
+  which side the design fork landed on: `agent-bridge service status` now
+  prints `Background reconcile: enabled (always-on; no per-project opt-in
+  required)` plus a human staleness line (`N day(s)/hour(s)/minute(s) ago`,
+  computed from the existing `reconcile-status.json`'s `at` timestamp via a
+  new `_format_reconcile_age` helper in `service_process_cli.py`), instead
+  of requiring an operator to reconstruct that from `reconcile.log`. New
+  `test_reconcile_status_observability.py` covers the age formatter (day/
+  hour/minute/plural boundaries, unparseable input) and the printer's two
+  branches (never-reconciled vs. a recorded attempt).
+- Verified: `python3 tools/run-plugin-tests.py agent-bridge` (full suite,
+  410 passed/10 skipped) and `python3 tools/run-plugin-tests.py agent-ssh
+  agent-vault budget-guidance agent-dispatch agent-containers agent-mcp
+  agent-logger agent-codespaces agent-pull-requests` (each plugin's own
+  suite) all green; `python3 tools/check-bootstrap-sync.py` OK.
+- **Review round 1** (COMMENTED, non-blocking per this repo's own policy,
+  but every finding was real and got fixed): (1) "once per session start"
+  doesn't bound *concurrent* sessions -- added the single-flight +
+  stale-reap `reconcile.lock` guard agent-bridge's own `.ps1` already
+  carried to every hook that lacked it (agent-bridge's `.sh` sibling, and
+  both `.sh`/`.ps1` for `agent-ssh`, the psscriptroot family,
+  `budget-guidance`, `agent-mcp`); (2) `reconcile-status.json` recorded
+  launch, not completion -- a failed/wedged reconcile looked falsely
+  fresh; both agent-bridge hooks now overwrite the same file with
+  `completed_at`/`exit_code`/`success` once the reconcile actually exits
+  (the `.sh` side runs the install + completion write as one flat
+  nohup'd `bash -c` so it stays nohup-protected end to end), and
+  `_print_reconcile_status` now distinguishes in-progress/unreported from
+  a reported success/failure; (3) `agent-pull-requests` was the one
+  psscriptroot sibling with no dedicated reconcile test -- given the same
+  `test_bootstrap_check_reconcile_always_on.py` its five siblings have;
+  (4) added the required Documentation impact + Graceful cutover impact
+  PR-description statements (the latter documents, rather than silently
+  carries forward, the one honest residual: the stale-reap kill is a
+  plain PID check, not an identity-bound `zdd.diagnostics.
+  terminate_pid_if_identity` check -- a pre-existing pattern already
+  shipped in agent-bridge's own `.ps1`, now merely propagated at the same
+  scope, a short-lived reconcile helper rather than a live daemon). Full
+  suites re-verified green after the fix; automatic re-review on the
+  follow-up push never fired (a pre-existing, unrelated CI infra issue --
+  the `request-review-if-maintainer` workflow failed on a missing
+  `github-token` input, not anything this PR touched); merged via
+  `pr-self-merge` once `guards + lint` and every plugin suite passed,
+  consistent with this repo's own non-blocking `COMMENTED`-review policy.
+- This closes Phase 0 entirely. The only remaining open item in the whole
+  effort is the Validation Plan's shared-code-path proof for
+  `agent-bridge service restart`/`deploy` -- tracked, not part of this PR.
+
+### 2026-09-29 — Phase 6 verified by a real live Docker clean-room run (operator-triggered)
+- Operator had a local Docker host available and asked for the drill to
+  actually be run for real, not left as an implemented-but-untested gap.
+  Built the box via `tools/clean-room/run.sh --scenario agent-bridge-cutover
+  --pass-env CR_LIVE_TURN_DRILL run` with `CR_LIVE_TURN_DRILL=1` (auth
+  auto-injected from the host's own `gh` login -- no device-code step
+  needed) and iterated in-place against the same persistent container
+  until the drill passed cleanly on a final, uncontaminated run:
+  `PROBE: live-turn-survival PASS ... PROBE-SUMMARY: 1/1 passed`. Phases
+  0-3 (the pre-existing stdlib probe) stayed green throughout (4/4) --
+  this round only touched phase 4.
+- **Three real bugs/wrong assumptions the live run caught that the review
+  round's read-only inspection could not:**
+  1. **argparse arg-ordering footgun (real CLI bug in the fixture, not
+     agent-bridge itself).** `create <agent> --target-dir <path> <prompt>`
+     fails closed with `unrecognized arguments: <prompt>` when the
+     positional `prompt` (`nargs="?"`) is placed AFTER a value-taking
+     optional (`--target-dir PATH`) instead of immediately after the
+     agent name -- confirmed by direct reproduction against the real CLI
+     (`agent-bridge: error: unrecognized arguments: hello`). Reordered to
+     `create <agent> <prompt> --target-dir <path> ...`.
+  2. **Stale daemon-reuse assumption.** The original "reuse an
+     already-running daemon" logic found a daemon phase 2's own
+     `copilot -p ...` sessionStart hook had already started -- BEFORE
+     this drill wrote `~/.agent-worktrees/projects.yaml` -- and
+     `agent-bridge agents` on that daemon reported "(no agents
+     registered)": a daemon's static local-agent registry
+     (`discover_local_agents()`) is resolved ONCE at startup
+     (`daemon_resolver(cfg)`), with no periodic reload (unlike
+     `refresh_provider_resolvers`, which only covers namespace/
+     CodeSpace/container providers). Fixed by unconditionally replacing
+     whatever daemon is already running (a plain kill, not `deploy` --
+     this drill wants a clean, project-aware generation 1, not a graceful
+     handoff at this stage) rather than assuming reuse is safe.
+  3. **Wrong assertion: "exactly one `assistant.turn_end`".** The real
+     run showed 6 turn_start/turn_end pairs for the ONE prompt sent --
+     Copilot's ACP loop opens a new turn per model completion, so a
+     multi-tool-call prompt (the deliberately long-running one this drill
+     sends, by design, to create a real mid-turn window) naturally
+     produces several turns, not one. Replaced the exact-count assertion
+     with: every opened turn is balanced by a matching close by the end
+     (nothing left incomplete), AND at least one turn_end lands strictly
+     AFTER the cutover boundary (proving the in-flight turn genuinely
+     continued past `deploy`, not merely finished before it fired).
+  4. **Own tooling mistake, not a fixture bug, but a real hazard worth
+     recording:** an early manual retest backgrounded a `docker exec`
+     invocation with a shell `&` instead of the bash tool's own async
+     mode. That process did NOT die with the parent shell (a `docker exec`
+     keeps running server-side once started) and raced a second, properly
+     async-launched invocation against the SAME real `~/.agent-bridge`
+     state a few seconds later -- both concurrently killing/respawning
+     daemons and firing their own `deploy`, producing a confusing extra
+     generation transition and a spurious `owner_pid` mismatch that briefly
+     looked like a real HostIndex bug. Confirmed via `~/.agent-bridge/
+     lifecycle.log`'s own append-only cutover-begin/-flip/-retire audit
+     trail (two `cutover-begin` events five seconds apart, from two
+     different driving pids) before concluding it was a self-inflicted
+     race, not a product defect. Never manually background a container
+     exec with `&`/nohup -- use the harness's own async execution mode so
+     a stray process can't outlive the caller that started it.
+- Real evidence from that first passing run: a real prompt drove a real
+  Session-Host-backed local target (`agent-bridge create live-turn-target
+  --target-dir <repo>`); `deploy` fired genuinely mid-turn (confirmed via
+  `events.jsonl` turn_start/turn_end counts, not a fixed sleep); the
+  Session-Host claim reattached under the NEW generation's real pid; the
+  transcript was prefix-preserved across the boundary; and `wait
+  --attention turn_complete` reported `rc==0`. **Caveat added after later
+  hardening (see the next Journal entry): that check only verified
+  `rc==0`, never the JSON `settled` field itself -- exactly the gap a
+  later review round flagged. Once fixed to actually check `settled`,
+  real re-runs showed this same channel can hang indefinitely after a
+  reattach (issue #4681). Read this bullet as "the drill passed," not as
+  proof the caller-facing wait channel itself was ever soundly verified.**
+  Zero dropped/duplicated events, zero mid-stream kills, one
+  genuinely-changed daemon generation.
+- Left a real, harmless per-check artifact from the pre-existing
+  `abrupt-kill-recovery`/`routing-flip-retire` Tier-P checks: their own
+  isolated-sandbox daemon subprocesses are sometimes left as zombie/leaked
+  passive processes in the persistent clean-room container after a run
+  (observed during this round's iteration, harmless -- fully isolated
+  temp-dir state, cleaned up by `run.sh down`/container removal). Noted as
+  a minor, pre-existing (Phase 5) cleanup nit, not fixed here -- out of
+  this PR's scope.
+
+### 2026-09-29 — Phase 6: cheap correctness fixes, synthetic analyzer test suite, converging review iteration
+- Round 5 review repeated several already-fixed findings verbatim
+  (re-verified against the actual current code and confirmed correct --
+  e.g. the repeated-turn-start detection via `started_ids` was already
+  present and passes a dedicated synthetic test for exactly that case),
+  alongside genuinely new, cheap findings fixed this round:
+  - `json.loads` accepts bare numbers/strings/arrays/null as valid JSON;
+    a damaged-but-syntactically-valid line was silently treated as
+    "not malformed" while still being skippable by the event walkers,
+    and could raise on `.get()` if it ever reached one. Both
+    `_malformed_line_count` and every event-walk loop now require an
+    `isinstance(ev, dict)` guard.
+  - Tightened the boundary-timestamp capture: it now happens the INSTANT
+    reattach is confirmed (moved before the unrelated old-port-retirement
+    check, which used to run first with its own 1.5s sleep), shrinking
+    the window between the real reattach and this observation.
+  - Considered adopting `zdd.diagnostics.terminate_pid_if_identity`
+    (pidfd-bound termination) in `_service_stop()` per review's specific
+    suggestion; reverted after finding it would silently break existing,
+    passing coverage (`test_service_stop_wedged.py` mocks `_kill_pid`
+    directly) and changes a shared production function's behavior on
+    every platform/caller, not just this drill -- a materially more
+    invasive change than this PR's scope. Documented the residual
+    precheck-to-kill window honestly in the function's own comment
+    instead of claiming it closed.
+  - Added `tools/clean-room/tests/test_live_turn_probe_transcript_analyzer.py`:
+    8 synthetic `events.jsonl`-shaped cases (clean crossing, duplicate
+    event id, repeated turn start via two different production
+    scenarios, an orphan end, a still-open turn, an unrelated turn
+    closing after the boundary, and the boundary turn closing BEFORE
+    reattach) -- all pass, confirming the analyzer already rejects every
+    failure shape review asked about, with no live run required.
+- Per this repo's own commented-verdict review policy: address
+  genuinely valuable findings, correct or dismiss (with reasoning) the
+  rest, and land the change -- a `COMMENTED` verdict here is non-blocking
+  and does not gate merge. Re-verified end-to-end from a fresh box after
+  every fix in this round: 8 passed, 0 failed (final live confirmation);
+  full agent-bridge plugin suite + all new unit tests green throughout.
+
+### 2026-09-29 — Phase 6: production identity gate, transcript-authoritative completion, and a real completion-detection race caught live
+- Continued automated review (round 4) on the same follow-up PR, each
+  fix confirmed by a live re-run:
+  - `agent-bridge service stop` gathers pid-file/port-holder/lock-holder
+    candidates and kills each BEFORE checking identity (only verifies
+    afterward that no bridge process remains). Rather than only hardening
+    this drill's own wrapper, patched the small identity gate directly
+    into `_service_stop()`'s kill loop itself
+    (`plugins/agent-bridge/src/agent_bridge/service_process_cli.py`) --
+    skip any candidate that doesn't identify as an agent-bridge process
+    before ever calling `_kill_pid` on it. Verified the full agent-bridge
+    plugin test suite (`tools/run-plugin-tests.py agent-bridge`) still
+    passes. Added a focused regression test
+    (`tools/clean-room/tests/test_live_turn_probe_identity_stop.py`) for
+    the drill's own wrapper decision logic (accepts a recognized live
+    daemon, rejects an unrelated live pid, WITHOUT ever calling `service
+    stop` on the reject path) using a scripted fake `python` binary --
+    this does not, and cannot from outside, close the residual
+    precheck-to-kill TOCTOU window; that's now documented honestly rather
+    than claimed away.
+  - A depth-only open/close turn counter missed a REPEATED start of the
+    same turn_id (`start(A), start(A), end(A)` still nets to one
+    open/close pair). Now tracks distinct started-turn-ids separately and
+    flags any turn_id starting more than once as its own imbalance.
+  - A malformed/unparseable line in the final `events.jsonl` was silently
+    skipped by both `_count_type` and the turn-balance walk -- a damaged
+    transcript could still report "balanced" if the surviving lines
+    happened to line up. Added an explicit zero-malformed-lines check on
+    the final snapshot.
+  - `proc1`'s cleanup on the generation-1-publish-timeout path now
+    escalates to `kill()` if `terminate()` doesn't exit it within the
+    grace period, instead of silently suppressing a failed cleanup.
+  - Bumped the drill's prompt from `sleep 25` to `sleep 60` for a wider
+    safety margin against deploy/reattach's own worst-case timeout
+    budget (review flagged the original margin as theoretically tight on
+    a slow box, even though every observed real run completed the
+    handoff in 1-5s).
+  - Removed a machine-identifier mention that had crept back into this
+    doc as a literal citation of the string being removed; reworded a
+    Phase 6 checklist item and the design doc's own step 5 that still
+    listed `wait --attention turn_complete` as part of the drill's
+    verdict, contradicting the scope correction above it.
+- **A real completion-detection race, caught by a live re-run of the
+  bumped-timeout prompt, not by review:** one run's transcript froze
+  right after a real `permission.completed` (approved) for the `sleep 60`
+  tool call -- the tool's own `tool.execution_start` never reached a
+  matching completion event -- yet the session's coarse `sessions --json`
+  status still flipped to `idle` and the drill's completion-polling
+  accepted that at face value, producing a FAIL with `still_open=1`
+  (a real gap in the CHECK, not necessarily proof of a stuck child: status
+  and the actual Session-Host child's transcript are not perfectly
+  synchronized immediately after a reattach). Fixed by requiring BOTH
+  `status == "idle"` AND the transcript's own boundary turn actually
+  closed before accepting completion -- continuing to poll otherwise
+  (bounded by the same `turn_timeout`) rather than trusting the coarse
+  status flag alone. A follow-up live re-run with the same 60s-sleep
+  prompt then passed cleanly (`PROBE-SUMMARY: 1/1 passed`), confirming
+  this was exactly the race the fix targets, not a reproducible stuck-child
+  defect -- but if this pattern recurs on a future run, it is now a
+  genuine candidate for its own tracked upstream finding (a Session-Host
+  reattach interaction with an approved-but-not-yet-executing tool call),
+  not silently dismissed as a fluke twice.
+- Re-verified end-to-end from a fresh box via the real `run.sh` entrypoint
+  after every fix in this round: 8 passed, 0 failed.
+
+### 2026-09-29 — Phase 6 hardened after automated review + a real upstream bug found ([issue #4681](https://github.com/ThomasMichon/copilot-extensions/issues/4681))
+- Automated review of the follow-up PR caught real gaps a passing run alone
+  had not surfaced. Fixed each with a live re-run confirming the fix, not
+  just the review's say-so:
+  1. **Unsafe kill.** The pre-existing-daemon replacement signaled whatever
+     pid `active.json` named without confirming it still identified an
+     agent-bridge process -- a dead pid reused by an unrelated process
+     could have been killed instead. Added `/proc/<pid>/cmdline`
+     confirmation before ever signaling, refused non-positive pids, and
+     made a failed replacement a hard stop (never press on to spawn our
+     own daemon over a lingering, unconfirmed-dead old one).
+  2. **Unverified generation-1 identity.** A bare `_active()` read right
+     after spawning our own daemon could still return the JUST-KILLED
+     daemon's own lingering routing entry for a brief window. Now polls
+     specifically for OUR spawned pid before trusting the result as
+     generation 1.
+  3. **`wait`'s own settlement never checked.** `rc==0` from `wait
+     --attention turn_complete` proves nothing by itself -- it can exit 0
+     with JSON `settled: false` on its own internal timeout. Now parses
+     the structured result and requires `settled: true, reason:
+     turn_complete` (see the bigger finding below for why this ultimately
+     became advisory-only).
+  4. **Aggregate turn counts don't prove non-duplication or timing.**
+     Equal `turn_start`/`turn_end` totals would still PASS a replayed
+     duplicate pair, and "some turn_end appears later in the file" doesn't
+     prove the SPECIFIC turn open at deploy-time is what closed --  it
+     could have closed during deploy's own startup, before the generation
+     actually changed. Replaced both aggregate checks with an
+     order-respecting walk (`_turn_balance_and_boundary_crossing`): a
+     running open-turn counter that must return to zero with no orphan
+     ends, AND at least one `turn_end`'s own EVENT TIMESTAMP (not file
+     position) strictly after the real wall-clock instant `deploy` was
+     fired.
+  5. **Cosmetic:** the Phase 6 heading still said "Tier-E" after the
+     design doc's own resolution that it isn't; renamed. Removed two
+     machine-identifier mentions from this public effort doc per the
+     repo's identifier-neutrality rule -- replaced with a generic
+     "local Docker host" description.
+- **A genuine NEW product finding surfaced only by re-running for real
+  after hardening #3 above:** with `wait`'s JSON output now actually
+  trustworthy, real re-runs showed `wait --attention turn_complete` can
+  hang indefinitely after a Session-Host reattach -- past its own advisory
+  1800s command-timeout ceiling, twice -- even though `sessions --json`
+  correctly reported the session `idle` (the turn had genuinely completed:
+  the real "DONE" reply and its `assistant.turn_end` were already in
+  `events.jsonl`). Filed as
+  [issue #4681](https://github.com/ThomasMichon/copilot-extensions/issues/4681)
+  rather than silently worked around. The drill itself does not depend on
+  this channel for its pass/fail verdict -- switched the authoritative
+  completion signal to polling `sessions --json` status directly (already
+  proven reliable), and demoted `wait --attention turn_complete` to a
+  short (20s), non-blocking advisory secondary check so the drill still
+  surfaces the gap in its own output without hanging on a known-broken
+  channel.
+- **A second, smaller real timing race** the above surfaced: the moment
+  session status flips to `idle` can trail the LAST `turn_end`'s own write
+  to `events.jsonl` by a short beat -- a snapshot read immediately on
+  "idle" once caught a still-open turn. Added a brief (15s) bounded
+  re-poll of the events file itself before trusting any snapshot as final.
+- **Credit/cost discipline.** Replaced the original five-paragraph,
+  five-`sleep(6)` story prompt (a real, if modest, credit cost per run,
+  and the reason six turn_end pairs appeared in the first passing run)
+  with a single `sleep 25` + reply prompt -- still long enough to reliably
+  land `deploy` mid-turn, materially cheaper and less variable per run,
+  per the design doc's own feasibility note to tune for exactly this
+  tradeoff.
+- Net effect: `PROBE: live-turn-survival PASS ... PROBE-SUMMARY: 1/1
+  passed` on the final hardened run, with the same evidence as before
+  (real reattach, real generation change, prefix-preserved transcript)
+  now backed by materially stronger, order-aware, timestamp-based
+  assertions instead of aggregate counts.
+
+### 2026-09-29 — Phase 6 implemented (opt-in live-turn-survival drill, PR pending)
+- Consumed the prior session's planning handoff (Phase 6 design doc,
+  `phase-6-tier-e-live-turn-harness.md`, merged as PR #4626) and implemented
+  the drill it specified.
+- **Resolved the design doc's open question:** this is NOT a Tier-E
+  scenario. Read `TIER-E-EXECUTION.md` in full -- its machinery
+  (`bridge_register.py`, the literal-mode judge, `expected_outcome`
+  rubrics) exists to audit whether a driven agent can *follow a plugin's
+  docs*; this drill has no doc-compliance question, so none of that
+  applies. Shipped instead as an opt-in phase 4 of the existing Tier-P
+  `agent-bridge-cutover` scenario, gated behind `CR_LIVE_TURN_DRILL=1`
+  (default off -- Docker-only, needs real Copilot auth, consumes real AI
+  credits, never a routine CI gate).
+- **New fixture, not another `cutover_probe.py` check.** Read
+  `cutover_probe.py`'s own `Ctx` class closely: every existing check
+  deliberately relocates `HOME`/`AGENT_BRIDGE_CONFIG_DIR` into a throwaway
+  sandbox so it never touches a live daemon's real state. That is wrong
+  for this drill: a throwaway `HOME` has no `~/.copilot` credentials, so
+  every real model call would fail closed. Added
+  `fixtures/live_turn_probe.py` instead, which deliberately runs against
+  the box's REAL, already-provisioned install (the one `scenario.sh`
+  phases 1/2 just built) -- safe only because the intended venue is a
+  disposable clean-room container with nothing else concurrently relying
+  on that state, which is also exactly why this drill must stay
+  Docker-only and is never run against a real workstation's real
+  `~/.agent-bridge`/`~/.copilot`.
+- **Read the real source to ground every assertion, not just the design
+  doc's sketch:** `agent_registry_resolver.py` (confirmed a `host`-less,
+  `spawn_command`-less agent config resolves to `SpawnTarget(type="local",
+  ...)`), `agent_registry_topology.py`'s `discover_local_agents` (confirmed
+  a `~/.agent-worktrees/projects.yaml` entry with an `anchor` is exactly
+  how to register a real local target for `agent-bridge create
+  <name> --target-dir <repo>`), `session_host/host_index.py`'s
+  `HostRecord` (confirmed the field set -- `owner_pid`/`owner_generation`
+  only, no `acp_session_id`; that lives in the frontend's own
+  `sessions --json`, not `HostIndex`), `zdd/claims.py`'s `generation_id`
+  (confirmed it is genuinely not independently reproducible from outside
+  the process -- version+pid+wall-clock -- so the drill compares real pids
+  across the boundary instead of trying to recompute the generation
+  string), and `session_streaming_cli.py`'s `wait --attention
+  turn_complete` (the same caller-facing channel a real caller uses,
+  giving a stronger continuity proof than internal bookkeeping alone).
+- **Verdict mechanism (programmatic, per the design doc's own
+  conclusion):** same session id + same `acp_session_id` throughout; the
+  daemon generation genuinely changed (different real pid, old port
+  retired); the `HostIndex` claim reattaches under the NEW generation's
+  real pid (not merely "some record exists"); the `events.jsonl` snapshot
+  taken the instant `deploy` fires is an exact prefix of the final
+  snapshot (no truncation/mutation); exactly one `assistant.turn_end` and
+  no duplicate `session.start`/`session.shutdown`; and the bridge's own
+  `wait --attention turn_complete` settles cleanly across the boundary.
+- **Honest scope note (same discipline Phase 5 used).** This round
+  implemented and reviewed the drill's logic against the real APIs it
+  calls, but did **not** execute it for real -- that needs a Docker
+  clean-room box with real Copilot auth injected and spends real AI
+  credits per run, which is out of scope to trigger interactively from an
+  ordinary coding session on a real workstation (this effort's own safety
+  rules: never risk a real machine's real `~/.agent-bridge`/`~/.copilot`).
+  Triggering the first real run (and iterating on whatever it surfaces --
+  Phase 5's own abrupt-kill-recovery check took nine review rounds to get
+  honest and correct) is the next concrete step; recorded as a known gap
+  rather than silently claimed done.
+- Updated `manifest.json`, `scenario.sh`'s header comments, and
+  `tools/clean-room/README.md`'s catalog entry to document the new opt-in
+  phase/env vars.
 
 ### 2026-09-29 — Phase 6 planned (not started)
 - Planned (operator request, after Phase 5 merged) rather than started

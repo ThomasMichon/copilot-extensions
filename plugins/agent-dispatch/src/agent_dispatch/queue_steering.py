@@ -102,7 +102,7 @@ class QueueSteeringMixin:
         a batch log writer, or an Adjudication Board worker, none of which
         have a human to hand a card to. The **default is permissive**: a
         task is free to post a steering card unless a registration
-        explicitly names one of its labels (see aperture-labs#7589/#7585 and
+        explicitly names one of its labels (see the downstream tracker and
         copilot-extensions#3731 for the confirmed live incident this closes).
         A card with no ``request_input`` (a plain status note) is never
         gated -- it does not block the task's own resume path.

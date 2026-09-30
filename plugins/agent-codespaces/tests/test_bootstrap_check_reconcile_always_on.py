@@ -1,18 +1,16 @@
-"""Guard: bootstrap-check's background reconcile spawn requires an explicit,
-checked-in opt-in (priority hardening: copilot-extensions daemons/hooks were
-observed flooding a shared machine's process table -- every session start,
-in every checked-out project, independently version-checking and potentially
-spawning a background installer process tree).
+"""Guard: bootstrap-check's background reconcile no longer gates on a
+per-plugin opt-in (agent-bridge-unified-zdd-cutover Phase 0). The opt-in
+existed because a raw reconcile could race a live daemon/session; now that
+every reconcile-capable plugin's update path is always-ZDD (safe to run
+unattended), the gate was removed rather than kept as a redundant consent
+checkbox. This test proves:
 
-agent-bridge is the reference implementation (tools/check-bootstrap-sync.py's
-``versioned-venv/agent-bridge-reference`` singleton family) -- this is the
-pilot for the gate; sibling plugins fan out separately.
-
-These are file-shape assertions over the hook scripts (matching this repo's
-existing convention, e.g. test_install_ps1_supervisor_cwd.py) plus one real
-execution of the bash counterpart (available on the Linux CI runner) proving
-the gate actually suppresses the spawn without an opt-in and permits it with
-one.
+* neither hook script still contains opt-in-gate text or a
+  ``background_reconcile_<plugin>`` key reference, and
+* a version drift reconciles unconditionally -- no
+  ``.copilot-extensions/config.yaml`` required, and a stale
+  ``background_reconcile_<plugin>`` key left over from before this change
+  (e.g. set to ``false``) does not resurrect the old skip behavior.
 """
 
 from __future__ import annotations
@@ -26,8 +24,13 @@ from pathlib import Path
 import pytest
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
+_PLUGIN_NAME = _PLUGIN_ROOT.name
 _PS1 = _PLUGIN_ROOT / "scripts" / "bootstrap-check.ps1"
 _SH = _PLUGIN_ROOT / "scripts" / "bootstrap-check.sh"
+# The legacy opt-in key, resolved to this plugin's literal name -- kept
+# only to prove a stale leftover key from before this gate's removal is
+# now inert (see test_sh_reconciles_even_with_stale_opt_in_key_present).
+_OPT_IN_KEY = f"background_reconcile_{_PLUGIN_NAME}"
 # A bare shutil.which("bash") can resolve to a Windows App Execution Alias
 # stub or the classic `C:\Windows\System32\bash.exe` WSL launcher (both
 # invoke an actual WSL distro rather than running this script in the
@@ -55,37 +58,45 @@ def test_hook_scripts_exist():
     assert _SH.is_file()
 
 
-def test_ps1_gates_before_spawn():
+def test_ps1_has_no_opt_in_gate():
     text = _PS1.read_text(encoding="utf-8")
-    gate_at = text.index("OPT-IN GATE")
-    spawn_at = text.index("Start-Process -FilePath 'conhost.exe'")
-    assert gate_at < spawn_at, "the opt-in check must precede the reconcile spawn"
-    assert "background_reconcile_$name" in text
-    assert ".copilot-extensions\\config.yaml" in text
+    assert "optInKey" not in text
+    assert "optedIn" not in text
+    assert "background reconcile SKIPPED" not in text
 
 
-def test_sh_gates_before_spawn():
+def test_sh_has_no_opt_in_gate():
     text = _SH.read_text(encoding="utf-8")
-    gate_at = text.index("OPT-IN GATE")
-    spawn_at = text.index('nohup bash "${target[@]}"')
-    assert gate_at < spawn_at, "the opt-in check must precede the reconcile spawn"
-    assert "background_reconcile_${name}" in text
-    assert ".copilot-extensions/config.yaml" in text
+    assert "optInKey" not in text
+    assert "optedIn" not in text
+    assert "background reconcile SKIPPED" not in text
 
 
-def _make_fake_install(home: Path, name: str = "agent-bridge") -> Path:
-    """A minimally 'drifted' install dir: deployed=1.0.0, payload=1.0.1."""
+def _make_fake_install(home: Path, name: str) -> Path:
+    """A minimally 'drifted' install dir: deployed=1.0.0, payload=1.0.1.
+
+    Multi-line, indented JSON: budget-guidance's bootstrap-check (the
+    'pythonless' family member) parses the manifest with a line-oriented awk
+    script, not a real JSON parser, so it needs 'source'/'version' on their
+    own lines the way a real ``ConvertTo-Json``/``json.dump(indent=...)``
+    deploy would produce -- a compact single-line dump silently fails to
+    match its patterns.
+    """
     install_dir = home / f".{name}"
     install_dir.mkdir(parents=True, exist_ok=True)
     (install_dir / "deploy-manifest.json").write_text(
-        json.dumps({"source": {"version": "1.0.0"}}), encoding="utf-8"
+        json.dumps(
+            {"source": {"version": "1.0.0", "path": str(install_dir / "src")}},
+            indent=2,
+        ),
+        encoding="utf-8",
     )
-    # No .venv/venv/current-version -- runtimeHealthy stays False, so the
-    # drift branch is reached regardless of the version comparison.
+    # No .venv/venv/current-version -- provisioned stays False, so the drift
+    # branch is reached regardless of the version comparison.
     return install_dir
 
 
-def _make_fake_plugin(root: Path, name: str = "agent-bridge") -> Path:
+def _make_fake_plugin(root: Path, name: str) -> Path:
     """An isolated copy of the plugin dir shape bootstrap-check.sh expects,
     with a harmless stub installer so a spawned reconcile does no real work
     (never invoke the REAL install.sh from a test -- it does a live install)."""
@@ -112,48 +123,21 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
     env = dict(os.environ)
     if "PATH" in env:
         parts = env["PATH"].split(os.pathsep)
-        env["PATH"] = os.pathsep.join(
-            p for p in parts if "WindowsApps" not in p
-        )
+        env["PATH"] = os.pathsep.join(p for p in parts if "WindowsApps" not in p)
     env.update(overrides)
     return env
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not available")
-def test_sh_skips_spawn_without_opt_in(tmp_path):
+def test_sh_reconciles_without_any_opt_in_config(tmp_path):
+    """No .copilot-extensions/config.yaml at all -- reconcile must still
+    proceed unconditionally now that the opt-in gate is gone."""
     home = tmp_path / "home"
     home.mkdir()
     project = tmp_path / "project"
     project.mkdir()
-    plugin_dir = _make_fake_plugin(tmp_path)
-    _make_fake_install(home)
-
-    env = _clean_env({"HOME": str(home), "COPILOT_PROJECT_DIR": str(project)})
-
-    result = subprocess.run(
-        [_BASH, str(plugin_dir / "scripts" / "bootstrap-check.sh")],
-        cwd=str(project),
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert "SKIPPED" in result.stderr, result.stderr
-    status_file = home / ".agent-bridge" / "reconcile-status.json"
-    assert not status_file.exists(), "no opt-in -> no reconcile should be attempted"
-
-
-@pytest.mark.skipif(_BASH is None, reason="bash not available")
-def test_sh_attempts_spawn_with_opt_in(tmp_path):
-    home = tmp_path / "home"
-    home.mkdir()
-    project = tmp_path / "project"
-    (project / ".copilot-extensions").mkdir(parents=True)
-    (project / ".copilot-extensions" / "config.yaml").write_text(
-        "background_reconcile_agent-bridge: true\n", encoding="utf-8"
-    )
-    plugin_dir = _make_fake_plugin(tmp_path)
-    _make_fake_install(home)
+    plugin_dir = _make_fake_plugin(tmp_path, _PLUGIN_NAME)
+    _make_fake_install(home, _PLUGIN_NAME)
 
     env = _clean_env({"HOME": str(home), "COPILOT_PROJECT_DIR": str(project)})
 
@@ -166,15 +150,36 @@ def test_sh_attempts_spawn_with_opt_in(tmp_path):
         timeout=30,
     )
     assert "SKIPPED" not in result.stderr, result.stderr
-    status_file = home / ".agent-bridge" / "reconcile-status.json"
-    # The background reconcile is async (nohup ... &); give it a moment.
-    import time
+    assert "reconciling in background" in result.stderr, result.stderr
 
-    for _ in range(50):
-        if status_file.exists():
-            break
-        time.sleep(0.1)
-    assert status_file.exists(), "opted in -> a reconcile attempt should be recorded"
+
+@pytest.mark.skipif(_BASH is None, reason="bash not available")
+def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path):
+    """A leftover `background_reconcile_<plugin>: false` from before this
+    gate's removal must not resurrect the old skip behavior -- the key is
+    now inert."""
+    home = tmp_path / "home"
+    home.mkdir()
+    project = tmp_path / "project"
+    (project / ".copilot-extensions").mkdir(parents=True)
+    (project / ".copilot-extensions" / "config.yaml").write_text(
+        f"{_OPT_IN_KEY}: false\n", encoding="utf-8"
+    )
+    plugin_dir = _make_fake_plugin(tmp_path, _PLUGIN_NAME)
+    _make_fake_install(home, _PLUGIN_NAME)
+
+    env = _clean_env({"HOME": str(home), "COPILOT_PROJECT_DIR": str(project)})
+
+    result = subprocess.run(
+        [_BASH, str(plugin_dir / "scripts" / "bootstrap-check.sh")],
+        cwd=str(project),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert "SKIPPED" not in result.stderr, result.stderr
+    assert "reconciling in background" in result.stderr, result.stderr
 
 
 if __name__ == "__main__":

@@ -280,8 +280,8 @@ class TestExactHandoffLedger:
         handoff = rec.handoffs[0]
         assert handoff.candidate == "new"
         assert handoff.state == "pending"
-        # "old" yielded the moment it opened the handoff (gitea
-        # aperture-labs#7230) -- head is vacant, not still "old"; the
+        # "old" yielded the moment it opened the handoff -- head is vacant,
+        # not still "old"; the
         # candidate association alone does not hand head to "new" either.
         assert rec.resolved_head_session is None
         assert rec.session_entry("old").state == "yielded"

@@ -628,7 +628,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     # later finalized, an install-time backup dir later cleaned up, ...)
     # becomes a ticking time bomb: once that directory is removed, every
     # relative-path subprocess this daemon spawns fails with ENOENT, silently,
-    # for the rest of its (long) life -- confirmed live (aperture-labs, the
+    # for the rest of its (long) life -- confirmed live (private-downstream-repo, the
     # daemon's cwd resolved to a deleted `~/.copilot/.agent-mcp.bak-*`
     # install-backup directory, breaking auth-token minting for every bridge
     # that had not already cached a token, across every session on the host).

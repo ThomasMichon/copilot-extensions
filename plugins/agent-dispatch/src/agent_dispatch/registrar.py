@@ -140,7 +140,7 @@ class Body:
     evaluator-owned auto-reviewer (Intelligence Dampener), a batch log
     writer, or an Adjudication Board sweep/verdict worker are the
     confirmed real cases this closes (copilot-extensions#3731,
-    aperture-labs#7589/#7585)."""
+    the downstream tracker)."""
     no_pair: bool = False
     """Skip the paired-knowledge carve for every worktree this lane
     creates -- for a pool with no bound knowledge repo to give its workers

@@ -44,17 +44,17 @@ def _captured_body(client: BridgeClient, monkeypatch: pytest.MonkeyPatch, **kwar
 
 def test_start_session_body_omits_copilot_args_when_no_charter(cfg_dir: Path, monkeypatch):
     client = BridgeClient.from_config()
-    body = _captured_body(client, monkeypatch, agent="Lambda-Core-wsl")
-    assert body["agent"] == "Lambda-Core-wsl"
+    body = _captured_body(client, monkeypatch, agent="Atlas-Core-wsl")
+    assert body["agent"] == "Atlas-Core-wsl"
     assert "copilot_args" not in body
 
 
 def test_start_session_body_renders_charter_as_agent_flag(cfg_dir: Path, monkeypatch):
     client = BridgeClient.from_config()
     body = _captured_body(
-        client, monkeypatch, agent="Lambda-Core-wsl", charter="cab-sweep-reconciler",
+        client, monkeypatch, agent="Atlas-Core-wsl", charter="cab-sweep-reconciler",
     )
-    assert body["agent"] == "Lambda-Core-wsl"
+    assert body["agent"] == "Atlas-Core-wsl"
     assert body["copilot_args"] == ["--agent", "cab-sweep-reconciler"]
     assert "charter" not in body
 
@@ -64,7 +64,7 @@ def test_start_session_body_charter_precedes_explicit_copilot_args(cfg_dir: Path
     body = _captured_body(
         client,
         monkeypatch,
-        agent="Lambda-Core-wsl",
+        agent="Atlas-Core-wsl",
         charter="module-decomposer",
         copilot_args=["--additional-mcp-config", "@run.json"],
     )

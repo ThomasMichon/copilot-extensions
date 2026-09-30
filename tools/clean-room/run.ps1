@@ -106,7 +106,7 @@ param(
     # succeed under a real substitute feed. Also $env:CR_BLOCK_PUBLIC_FEEDS.
     # Linux arm (-Os linux, the default) only -- errors if combined with
     # -Os windows, which is not wired into this flag.
-    # (aperture-labs feed-neutral-build-config effort, #6755 Phase 3)
+    # (the downstream feed-neutral-build-config effort, Phase 3)
     [switch]$BlockPublicFeeds,
     # Auth: by default the runner injects a Copilot token grabbed from the host
     # `gh` (COPILOT_GITHUB_TOKEN) so NO interactive device-code login is needed.
@@ -490,7 +490,7 @@ function Start-Container {
         )
         Write-Host "harness bind: $hm -> /harness (ro)  [CR_HARNESS_MOUNT=/harness]" -ForegroundColor DarkGray
     }
-    # --block-public-feeds (feed-neutral-build-config, aperture-labs #6755
+    # --block-public-feeds (feed-neutral-build-config, the downstream tracker
     # Phase 3): null-route the known public package-feed hostnames at the
     # container network layer via Docker --add-host, regardless of the HOST's
     # real connectivity. Combine with -UvIndex (a real substitute) to prove

@@ -62,8 +62,8 @@ def test_satellite_project_unset(monkeypatch):
 
 
 def test_satellite_project_set(monkeypatch):
-    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_PROJECT", "aperture-labs")
-    assert config.satellite_project() == "aperture-labs"
+    monkeypatch.setenv("AGENT_DISPATCH_SATELLITE_PROJECT", "private-downstream-repo")
+    assert config.satellite_project() == "private-downstream-repo"
 
 
 def test_satellite_spawn_timeout_default(monkeypatch):
@@ -338,7 +338,7 @@ def test_satellite_retries_deregister_after_a_transient_failure(monkeypatch, dir
 
 class _StubRendezvous:
     def discover_coordinator(self):
-        return {"instance": "lambda-core"}
+        return {"instance": "atlas-core"}
 
     def discover_peers(self, *, role=None):
         return []
@@ -380,13 +380,13 @@ def test_federation_status_omits_gate_state_for_non_satellite_roles(monkeypatch)
     from agent_dispatch import __main__ as main_mod
 
     monkeypatch.setattr(main_mod, "_federation_rendezvous", lambda args: _StubRendezvous())
-    args = argparse.Namespace(role="peer", instance="wheatley", url=None, token=None)
+    args = argparse.Namespace(role="peer", instance="ember", url=None, token=None)
     captured = {}
     monkeypatch.setattr(main_mod, "_emit", lambda value: captured.update(value) or 0)
 
     main_mod._cmd_federation_status(args)
 
-    assert captured["self"] == {"role": "peer", "instance": "wheatley"}
+    assert captured["self"] == {"role": "peer", "instance": "ember"}
 
 
 def test_satellite_cleans_up_a_stale_entry_from_a_prior_process(monkeypatch, directory):

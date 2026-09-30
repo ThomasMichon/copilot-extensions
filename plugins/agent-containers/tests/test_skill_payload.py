@@ -6,7 +6,8 @@ FORBIDDEN = (
     "odsp",
     "onedrive",
     "sharepoint",
-    "tmichon",
+    "tmi" "chon",
+    "owner_user",
     "dotfiles",
     "/workspaces/" + "odsp-web",
 )

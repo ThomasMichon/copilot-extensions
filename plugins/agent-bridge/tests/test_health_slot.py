@@ -1,6 +1,6 @@
 """Tests for the "slot" descriptor agent-bridge's ``/health`` renders.
 
-process-slot-ownership Phase 5 (aperture-labs) parity slice: agent-dispatch's
+process-slot-ownership Phase 5 (private-downstream-repo) parity slice: agent-dispatch's
 coordinator `/health` already renders a `"slot"` descriptor (process -> slot ->
 owner -> alive?); this proves agent-bridge's own `/health` does the same,
 including that the published `self_retire` status is genuinely live-updated by

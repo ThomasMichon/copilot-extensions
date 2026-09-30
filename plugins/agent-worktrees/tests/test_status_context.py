@@ -85,17 +85,17 @@ def test_status_context_resolves_machine_alias_from_tracked_record(monkeypatch, 
     mesh alias (dotfiles machines.yaml's decoupled-hostname convention) showed
     the raw hostname in the mux forever, even after the alias mapping existed."""
     monkeypatch.setattr(
-        m, "_find_record_for_path", lambda _p: _record(machine="cpc-tmich-oixui")
+        m, "_find_record_for_path", lambda _p: _record(machine="raw-host-01")
     )
     monkeypatch.setattr(repos_module, "resolve_path", lambda name: "/repo/test-chamber")
     entry = m.cfg.MachineEntry(
-        key="tmichon-augloop1",
+        key="owner_user-augloop1",
         display_name="augloop1",
         environment="Windows",
         alias="augloop1",
-        hostname="cpc-tmich-oixui",
+        hostname="raw-host-01",
     )
-    monkeypatch.setattr(m.cfg, "load_machines_yaml", lambda repo_dir: {"tmichon-augloop1": entry})
+    monkeypatch.setattr(m.cfg, "load_machines_yaml", lambda repo_dir: {"owner_user-augloop1": entry})
     rc = m.cmd_status_context(_ns())
     assert rc == 0
     assert capsys.readouterr().out.strip() == "augloop1  win  test-chamber:8e45"
@@ -105,10 +105,10 @@ def test_status_context_alias_resolution_fails_open(monkeypatch, capsys):
     """No resolvable repo_dir / no machines.yaml -> the raw value renders
     unchanged rather than raising or blanking the segment."""
     monkeypatch.setattr(
-        m, "_find_record_for_path", lambda _p: _record(machine="cpc-tmich-oixui")
+        m, "_find_record_for_path", lambda _p: _record(machine="raw-host-01")
     )
     monkeypatch.setattr(repos_module, "resolve_path", lambda name: None)
     monkeypatch.setattr(m, "_find_repo_dir", lambda: None)
     rc = m.cmd_status_context(_ns())
     assert rc == 0
-    assert capsys.readouterr().out.strip() == "cpc-tmich-oixui  win  test-chamber:8e45"
+    assert capsys.readouterr().out.strip() == "raw-host-01  win  test-chamber:8e45"

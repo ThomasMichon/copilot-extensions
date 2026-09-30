@@ -290,6 +290,17 @@ core of the principles above; a reviewer checks a change against these.
   *Vision harness-guidance §Features/concise-context-kernel*,
   *§Behaviors/ambient-delivery-fails-open*; see
   [`session-scoped-dynamic-guidance.md`](session-scoped-dynamic-guidance.md).)
+- **Projected static instruction content gets a worktree-scoped local cache,
+  never a per-session rewrite.** A plugin's rendered `instructions.md` body is
+  too large and too stable to belong in the session-scoped file above, but
+  relying solely on a consumer repo's checked-in copy leaves ordinary
+  contributors unable to self-correct sync-lag they lack push rights to fix.
+  A gitignored `*.local.instructions.md` sibling, refreshed at worktree
+  create/resume (backed up by `sessionStart`), sits between the checked-in
+  floor and the fully computed session file. (Serves *Vision harness-guidance
+  §Behaviors/ambient-delivery-fails-open*,
+  *§Behaviors/resume-stable-context*; see
+  [`worktree-scoped-dynamic-guidance.md`](worktree-scoped-dynamic-guidance.md).)
 
 ## Patterns
 
@@ -300,6 +311,7 @@ the exemplars, and the vision it serves):
 |---------|---------|
 | [runtime-agent-plugin](runtime-agent-plugin.md) | The complete “add an `agent-*` plugin” path: choose the smallest runtime shape, implement the cross-platform install contract, generate payload-local commands, wire attributable bootstrap/glossary hooks, write skills against logical commands, and add service/provider ownership without dynamic initial-context snapshots |
 | [session-scoped-dynamic-guidance](session-scoped-dynamic-guidance.md) | The primary delivery path for guidance a harness depends on: a checked-in static pointer projection plus a `sessionStart` hook side effect that writes per-session dynamic content to `~/.copilot/session-state/<sessionId>/instructions/<plugin>/<topic>.instructions.md`, avoiding unreliable `additionalContext` aggregation entirely |
+| [worktree-scoped-dynamic-guidance](worktree-scoped-dynamic-guidance.md) | The sibling delivery path for large/stable projected instruction content (too big for the session-scoped file, too permission-gated to trust the checked-in copy alone): a gitignored `*.local.instructions.md` cache refreshed at worktree create/resume and backed up by `sessionStart`, with a per-file "prefer local" preamble and a repo-wide catch-all for not-yet-synced sources |
 | [context-handoff-lifecycle](context-handoff-lifecycle.md) | How a stored continuation becomes a successor-owned session without losing prompt fidelity, moving the head early, trusting a reused PID, depending on effort/knowledge state, or crossing an ambient/lossy command boundary |
 | [local-endpoint-discovery](local-endpoint-discovery.md) | How a service exposes a discoverable, collision-free, local-first endpoint — the anti-static-port pattern, incl. the rendezvous / port-mapping file |
 | [service-transport](service-transport.md) | Which channel a service exposes — the transport ladder (stdio → OS-native socket/pipe → OS-assigned loopback → tunnel) and the named-pipe/UDS reality |

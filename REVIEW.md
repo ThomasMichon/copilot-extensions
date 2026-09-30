@@ -2,9 +2,11 @@
 
 This file is read by GitHub Copilot code review specifically (this repo's
 `.github/workflows/copilot-review-gate.yml` requests it, non-blocking, on
-every PR targeting `dev` from an already-invited collaborator — see
-CONTRIBUTING.md's "Contribution flow" for why the ruleset-native
-`copilot_code_review` auto-review rule was removed instead of used;
+every PR targeting `dev` authored by a Maintainer (see CONTRIBUTING.md's
+"Contribution flow" for why the automatic request is Maintainer-only, not
+"any invited collaborator") — see CONTRIBUTING.md's "Contribution flow" for
+why the ruleset-native `copilot_code_review` auto-review rule was removed
+instead of used;
 `main`'s ruleset never requests Copilot review at all, since only the
 promotion pipeline's own automated snapshot PR ever targets `main`, and
 re-reviewing regenerated, already-validated content there is redundant) —
@@ -95,6 +97,23 @@ specifically when reviewing a pull request, not a replacement for them.
   relevant `visions/` entry *and* check against `docs/patterns/README.md`'s
   design principles and invariants -- flag a design change that does
   neither.
+- **Fresh eyes are the point — apply full independent scrutiny regardless of
+  a PR's own stated rationale, especially for vision-conformance and
+  security.** A PR description explaining *why* a design choice was made is
+  context about a constraint the author faced, not a substitute for your own
+  judgment on whether that choice is actually sound — evaluate the tradeoff
+  on its merits, and challenge it if you disagree, the same as you would an
+  unexplained one. Treat an unexplained deliberate-looking choice (an
+  obvious-looking alternative visibly not taken, a limitation visibly
+  accepted) as a cue to **investigate**, not as evidence it was already
+  vetted — silence is not proof of due diligence. Consistent with "Concrete
+  over cosmetic" below: only actually comment once that investigation
+  surfaces a concrete concern, not as a speculative open question raised
+  from the absence of an explanation alone. This scrutiny matters most
+  exactly where the author's proximity to their own implementation is a
+  likely source of blind spots: new privilege/trust boundaries, credential
+  or token handling, authentication/authorization assumptions, and any
+  divergence from a documented vision or invariant.
 - **Documentation impact.** Confirm the PR description's required
   Documentation-impact statement actually matches the final diff
   (`CONTRIBUTING.md`, "Documentation impact") -- flag a missing or
@@ -134,6 +153,21 @@ specifically when reviewing a pull request, not a replacement for them.
 - **ruff signal, not noise.** Hold changed Python to at least the `F`/`E9`
   groups; do not block on pre-existing style debt in code the PR did not
   touch.
+- **Timeless code and docs — flag review-artifact language baked into the
+  diff itself.** Code, comments, docstrings, and non-Journal documentation
+  should read as the system's current state, not a trace of the review that
+  produced it. Flag a code comment, docstring, or doc-prose edit that
+  references the review process ("per review feedback," "reviewer
+  requested," "(review round N)") or a prior, possibly-never-committed
+  version of itself ("previously X, now Y") — that response belongs on the
+  review comment thread, not in the artifact (`CONTRIBUTING.md`, "Code
+  Style"). The one exception is a project's own dated `## Journal` section,
+  which is a decision log by design — but even there, flag an entry whose
+  only stated justification is that a review said so, with no independent
+  technical reasoning (the invariant, bug, or constraint actually involved):
+  a review comment citing itself as authority is the same circular-reference
+  problem as a Wikipedia article sourcing only itself, and a review thread
+  is not guaranteed to stay inspectable.
 - **Render `Approve` when ready — on a contributor's PR.** Copilot code
   review can only ever submit `Approve` or `Comment` (there is no
   `Request changes` capability in Copilot code review at all — see

@@ -1,0 +1,9 @@
+{
+  "comment": "A detached session's launch flags survive a resume that omits them: a launch that starts a session records the --copilot-arg values it actually ran with (host-propagated model flags included) and its --driver together with that session's id (per CodeSpace and session tenant), and a later launch that resumes that same session id with no other --copilot-arg and no --driver (like a supervisor's wake after a CodeSpace stop) reuses exactly them, adding none of the host's model defaults. A new session, another session's id, --continue, or explicit flags never inherit the record, and a rejoin of an already running session leaves it alone; the JSON reports what was recalled.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

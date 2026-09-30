@@ -16,7 +16,7 @@
     {"key": "group", "header": "PHASE", "width": 10, "palette": "task_phase", "priority": 2},
     {"key": "target_worktree", "header": "WT", "width": 5, "priority": 3, "style": "bold cyan"},
     {"key": "wt_live", "header": "LIVE", "width": 13, "priority": 4},
-    {"key": "turn_count", "header": "T", "width": 4, "align": "r", "priority": 5},
+    {"key": "length_display", "header": "LENGTH", "width": 9, "align": "r", "priority": 5},
     {"key": "artifacts_summary", "header": "ARTIFACTS", "width": 18}
   ],
   "group_field": "group",
@@ -109,9 +109,17 @@
       "key": "abandon",
       "label": "Force-abandon the task",
       "run": ["agent-dispatch", "abandon", "{task_id}", "--permit", "--reason", "abandoned from picker", "--expected-status", "{status}"],
-      "when": {"group": ["Blocked", "Proposed", "Queued", "Started", "Suspended", "Paused"]},
+      "when": {"group": ["Blocked", "Proposed", "Queued", "Started", "Suspended", "Paused", "Submitted"]},
       "confirm": true,
       "description": "Terminally abandon this task — the user's way to say \"No\". Works even on a Paused task: force-abandon always overrides a hold."
+    },
+    {
+      "key": "complete-submitted",
+      "label": "Complete the verification-gated task",
+      "run": ["agent-dispatch", "confirm", "{task_id}", "--expected-status", "{status}"],
+      "when": {"group": "Submitted", "require_verification": "True"},
+      "confirm": true,
+      "description": "Manual override for a submitted verification-gated task: accept its completion claim and close it as completed."
     }
   ]
 }

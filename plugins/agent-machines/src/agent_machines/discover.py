@@ -105,7 +105,7 @@ def resolve_repo_path(name: str, entry: dict, srcroot: dict, plat: str) -> Path 
     """Resolve a repo's checkout path on ``plat`` from its registry entry.
 
     Paths in ``repos.yaml`` may be written with a ``~`` home shorthand (e.g. a
-    WSL entry ``wsl: ~/src/aperture-labs``), so every resolved path is
+    WSL entry ``wsl: ~/src/private-downstream-repo``), so every resolved path is
     ``expanduser()``-ed. Without this, ``Path('~/src/...').is_dir()`` is False in
     :func:`discover`, the repo is silently skipped, and none of its machine-state
     packages are discovered.

@@ -34,6 +34,7 @@ approval can only ever happen at the operator's terminal.
 
 from __future__ import annotations
 
+import re
 import time
 from collections import deque
 from threading import Lock
@@ -52,6 +53,46 @@ def _text(value: Any) -> str | None:
     if isinstance(value, str) and value:
         return value
     return None
+
+
+# The body is literal (only attribute values are escaped), so it can itself
+# contain "</agent-message>": read through the *final* closing tag.
+_ENVELOPE = re.compile(r"<agent-message\b([^>]*)>\s*(.*)\s*</agent-message>", re.S)
+_ENVELOPE_ATTR = re.compile(r'([a-z][a-z-]*)="([^"]*)"')
+#: Longest relayed message text carried on a represented ``user_message``.
+_RELAY_BODY_MAX = 8000
+
+
+def _unescape_attr(value: str) -> str:
+    """Undo the extension's ``escAttr`` (``&``, ``"``, ``<``, ``>``)."""
+    return (value.replace("&lt;", "<").replace("&gt;", ">")
+            .replace("&quot;", '"').replace("&amp;", "&"))
+
+
+def _relayed(d: dict[str, Any]) -> dict[str, Any]:
+    """What a message delivered through this bridge said, and who sent it.
+
+    The live extension delivers an inbox message as an attributed turn: the
+    CLI records only the one-line ``Message from <sender> (via agent-bridge)``
+    header as ``content`` and the ``<agent-message ...>`` envelope (with the
+    text) as ``transformedContent``. Carrying the text as ``relay_body`` (plus
+    ``relay_from`` / ``relay_kind``) lets a viewer show the actual message.
+    Only bridge deliveries (``source == "agent-bridge"``) are read; anything
+    else returns ``{}``.
+    """
+    if d.get("source") != "agent-bridge":
+        return {}
+    m = _ENVELOPE.search(str(d.get("transformedContent") or ""))
+    if not m:
+        return {}
+    body = m.group(2).strip()
+    out: dict[str, Any] = {"relay_body": body if len(body) <= _RELAY_BODY_MAX else body[:_RELAY_BODY_MAX] + "\u2026"}
+    attrs = {k: _unescape_attr(v) for k, v in _ENVELOPE_ATTR.findall(m.group(1))}
+    if attrs.get("from"):
+        out["relay_from"] = attrs["from"]
+    # The extension omits ``kind`` for an ordinary prompt.
+    out["relay_kind"] = attrs.get("kind") or "prompt"
+    return out
 
 
 def translate_sdk_event(
@@ -84,7 +125,7 @@ def translate_sdk_event(
         content = _text(d.get("content"))
         if content is None:
             return []
-        return [("user_message", _out({"content": content}))]
+        return [("user_message", _out({"content": content, **_relayed(d)}))]
 
     if sdk_type == "assistant.message":
         content = _text(d.get("content"))

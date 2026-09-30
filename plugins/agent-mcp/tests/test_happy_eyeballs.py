@@ -1,4 +1,4 @@
-"""Tests for the Happy-Eyeballs-lite dual-stack connect race (aperture-labs#7553).
+"""Tests for the Happy-Eyeballs-lite dual-stack connect race (the downstream tracker).
 
 These exercise ``happy_eyeballs_connect`` directly against fake
 ``getaddrinfo``/``socket.socket`` seams -- no real network, no real sockets --

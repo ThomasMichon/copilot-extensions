@@ -51,14 +51,14 @@ def _make_home(tmp: Path) -> Path:
     (checkout / ".agent-worktrees" / "machines.yaml").write_text(
         "machines:\n"
         "  book2:\n"
-        "    display_name: tmichon-book2\n"
+        "    display_name: owner_user-book2\n"
         "    hostname: book2.local\n"
         "    ssh:\n"
         "      ready: true\n"
         "      environments:\n"
         "        - {name: windows, alias: book2-win, shell: pwsh}\n"
         "  dev6:\n"
-        "    display_name: tmichon-dev6\n"
+        "    display_name: owner_user-dev6\n"
         "    ssh:\n"
         "      ready: false\n"
     )
@@ -150,11 +150,11 @@ def test_build_projects_reads_wsl_and_roster(tmp_path: Path):
     roster = {m.key: m for m in p.roster}
     assert set(roster) == {"book2", "dev6"}
     book2 = roster["book2"]
-    assert book2.display_name == "tmichon-book2"
+    assert book2.display_name == "owner_user-book2"
     assert book2.hostname == "book2.local"
     assert book2.ssh_ready is True
     assert [e.alias for e in book2.environments] == ["book2-win"]
-    assert book2.identities() == {"book2", "tmichon-book2", "book2.local", "book2-win"}
+    assert book2.identities() == {"book2", "owner_user-book2", "book2.local", "book2-win"}
     assert roster["dev6"].ssh_ready is False
     assert roster["dev6"].environments == ()
 

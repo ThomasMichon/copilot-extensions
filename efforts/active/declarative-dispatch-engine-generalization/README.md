@@ -49,6 +49,12 @@ and the parent agent-dispatch vision:
    cause: policy expressed only as prose in a per-repository declaration is
    weaker than policy expressed structurally in a reusable, named identity.
 
+## Request
+
+Generalize the declarative dispatch engine so new adopters can target multiple
+forges, select reusable worker identities, and embody cheaper event-scoped
+workers without restating the same policy prose in every declaration.
+
 ## Plan
 
 ### Phase 1 - Azure DevOps backlog provider
@@ -93,7 +99,7 @@ and the parent agent-dispatch vision:
   `plugins/agent-dispatch/src/agent_dispatch/identities/odsp-web-harness-backlog.identity.md`
   (see 2026-09-07 journal entry below for why it moved there).
   The packaging fix landed on `main` via PR #2204. **Now applied to the live
-  `dotfiles` declaration** -- switched via `tmichon_microsoft/dotfiles#2080`
+  `dotfiles` declaration** -- switched via `owner_user_microsoft/dotfiles#2080`
   (merged 2026-09-08), gated on confirming the installed agent-dispatch slot
   (`0.1.2-dev49`) resolves `worker_identity: odsp-web-harness-backlog` first.
   Verified end-to-end post-merge: `repository_issue_loops.validate_config`
@@ -222,9 +228,9 @@ other phases actually land in.
   preloaded shared dispatch-behavior supplement on the identity. No
   implementation started; this effort tracks the plan only.
 
-### 2026-09-06 - Reconciled with aperture-labs; started Phase 2
+### 2026-09-06 - Reconciled with private-downstream-repo; started Phase 2
 
-- Reconciled the "aperture-labs" reviewer-loop concern from the prior
+- Reconciled the "private-downstream-repo" reviewer-loop concern from the prior
   handoff: the copilot-extensions PR history for the reviewer module
   (`#1445`..`#2134`) is entirely merged under the one operator account, and
   already matches the vision docs this effort builds on. No separate
@@ -339,8 +345,8 @@ other phases actually land in.
   successfully imports `agent_dispatch.worker_identities`. The daemon-version
   gate for the dotfiles switch is now clear -- this is the next slice, not a
   re-check. A paired `odsp-web-harness` + `dotfiles` knowledge worktree
-  (`tmichon-cloud1-win-20260907-033821-8451` /
-  `tmichon-cloud1-win-20260907-033821-8451-k`) already exists, empty and
+  (`owner_user-cloud1-win-20260907-033821-8451` /
+  `owner_user-cloud1-win-20260907-033821-8451-k`) already exists, empty and
   unused, ready for whoever picks up the switch (edit
   `dotfiles/.agent-dispatch/registrar/odsp-web-harness-issue-loop.json` from
   its `-k` worktree, never the dotfiles anchor).
@@ -663,7 +669,7 @@ other phases actually land in.
   `dotfiles`'s `.agent-dispatch/registrar/odsp-web-harness-issue-loop.json`:
   replaced the inlined `worker_guidance` prose with
   `"worker_identity": "odsp-web-harness-backlog"`. Landed via
-  `tmichon_microsoft/dotfiles#2080` (self-merged, squash), worktree
+  `owner_user_microsoft/dotfiles#2080` (self-merged, squash), worktree
   finalized.
 - Verified end-to-end post-merge (not just pre-merge): fetched
   `origin/main`'s merged declaration content and ran
@@ -938,7 +944,6 @@ state instead.
   `worker_identity: odsp-web-harness-backlog`, verified byte-for-byte
   identical resolved guidance post-merge). Checked it off with a pointer to
   that existing evidence rather than re-proving it.
-
 
 
 

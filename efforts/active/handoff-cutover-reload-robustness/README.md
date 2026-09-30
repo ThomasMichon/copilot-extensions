@@ -10,7 +10,7 @@ visions:
 > repo's `visions/session-hosting`, which covers the same intent. Content
 > below was verbatim at time of migration, and updated on 2026-09-17 to
 > reconcile with Sub D landing directly against the private repo's copy
-> between the migration and this PR's merge (see the aperture-labs migration
+> between the migration and this PR's merge (see the private-downstream-repo migration
 > PR's rebase). **A trailing `†` marks a reference to that private repo's own
 > issue tracker — not resolvable here.**
 
@@ -191,7 +191,7 @@ to the runtime fix (#5253† / upstream #13494). Findings:
       concurrently-merged PR) — confirmed pre-existing via a clean
       `origin/main` checkout before touching either.
 - [ ] Confirm on the next live Windows/psmux cutover in the field.
-- [x] Deployed on lambda-core (`agent-worktrees update` picks up dev122 on
+- [x] Deployed on atlas-core (`agent-worktrees update` picks up dev122 on
       next launch); close #7072† once field-confirmed.
 
 ### Phase 5 — Land + verify
@@ -304,7 +304,7 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
   side-effect cleanup; not itself the fix.
 
 ### 2026-09-15 — Sub D: env-var-free candidate confirmation (psmux stacking-panes fix)
-- **Live incident:** worktree `lambda-core-win-20260725-193449-cd0e` accumulated
+- **Live incident:** worktree `atlas-core-win-20260725-193449-cd0e` accumulated
   **5 stacked live Copilot sessions** on one pending handoff (opened
   2026-09-15T22:07:49Z); `agent-worktrees head-session --json` showed
   `pending_handoffs[0].candidate: null` throughout. Each successor also failed to

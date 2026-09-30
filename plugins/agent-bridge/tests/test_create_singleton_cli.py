@@ -19,7 +19,7 @@ class _Client:
 
     def list_agents(self):
         self.listed += 1
-        return [{"name": "llama.cpp@Lambda-Core", "project": "llama.cpp"}]
+        return [{"name": "llama.cpp@Atlas-Core", "project": "llama.cpp"}]
 
 
 def test_create_refuses_singleton_repo_target(monkeypatch, capsys):
@@ -33,7 +33,7 @@ def test_create_refuses_singleton_repo_target(monkeypatch, capsys):
         ),
     )
     args = argparse.Namespace(
-        target="llama.cpp@Lambda-Core",
+        target="llama.cpp@Atlas-Core",
         prompt=None,
         caller=None,
         json=False,
@@ -51,4 +51,4 @@ def test_create_refuses_singleton_repo_target(monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "[BLOCKED]" in err
     assert "singleton repo 'llama.cpp'" in err
-    assert "agent-bridge resume llama.cpp@Lambda-Core" in err
+    assert "agent-bridge resume llama.cpp@Atlas-Core" in err

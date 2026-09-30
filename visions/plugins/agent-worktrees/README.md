@@ -845,7 +845,7 @@ manager, or session-host implementation.
   worktree's tracking record is currently deleted outright
   (`retire_record`), leaving nothing for a consumer to answer "what
   happened here" beyond hand-reconstructing from an archived session corpus
-  elsewhere. Mined from an operator directive during the `aperture-labs`
+  elsewhere. Mined from an operator directive during the `private-downstream-repo`
   `session-worktree-archive-linkout` effort's Phase 2b: agent-worktrees
   should itself be the durable authority for a worktree's post-life
   identity (a new **archived** state, strictly after finalized), every

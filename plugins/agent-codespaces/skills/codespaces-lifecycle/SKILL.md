@@ -193,6 +193,17 @@ A new detached session starts on **the caller's own model**: the launch adds
 resolution the ACP dispatch path uses. `AGENT_CODESPACES_ACP_MODEL` /
 `_EFFORT` / `_CONTEXT` override it, `AGENT_CODESPACES_MODEL_PROPAGATE=0` turns
 it off, and a flag passed explicitly with `--copilot-arg` always wins.
+A resume that names only the session (`--copilot-arg=--resume=<id>`, as a
+supervisor's automatic wake after a CodeSpace stop does) keeps the
+`--copilot-arg`s (host-propagated model flags included) and `--driver` that
+session actually ran with: a launch that starts a session records them, with
+the session's id, under
+`~/.agent-codespaces/launches/<codespace>/` (its JSON lists what was reused
+under `recalled`), and the resume adds no host model defaults the session didn't
+run with. Only a resume of that same session id with no other flags
+and no `--driver` reuses them -- never a new session, another
+session, `--continue`, or a launch with explicit flags -- and a rejoin of an
+already running session leaves the record alone.
 `--ref-file` (repeatable; a file or a folder, up to 256 MiB per call) copies
 reference material into `~/.agent-bridge/refs/<batch>/` on the venue -- outside <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 the product checkout, so it is never committed -- over the same egress-free
@@ -226,7 +237,17 @@ The **Connection Owner** keeps the
 credential relay and the host-bridge forward alive while its mux session exists
 (checked from the host every couple of minutes, only after the
 launch confirmed the session; never by waking a stopped CodeSpace), up to a 24h
-cap, and both forwards follow a host bridge restart onto its new port. Observe and steer it through agent-bridge
+cap, and both forwards follow a host bridge restart onto its new port. On the same
+check it mirrors the running session's transcript to this host (whole lines, only
+what was appended) and pushes it into the agent-logger hub under
+`.codespaces-live/<name>` (its own namespace: the close-out capture below uses
+`.codespaces/<name>`), so the session's history is still readable here after a host
+or bridge restart. A push that fails, or lands only partly, is retried until
+it lands whole, across Owner restarts and even after the session ends or the
+box stops (it never contacts the box for that); an Owner with nothing else to
+hold stays up to an hour to retry it, and the next Owner start resumes it after
+that. `delete` removes a CodeSpace's local mirror once its hub copy is current,
+then or on a later retry (`AGENT_CODESPACES_TRANSCRIPT_MIRROR=0` turns this off). Observe and steer it through agent-bridge
 (`live-sessions resolve`, `result`, `send`, `ui`). A detached launch keeps the
 CodeSpace claim active; `--stop` settles it like any finished connection and
 deregisters the stopped session from the host bridge at once. When close-out

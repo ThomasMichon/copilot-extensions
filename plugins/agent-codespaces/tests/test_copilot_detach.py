@@ -712,3 +712,87 @@ def test_detached_session_records_its_supervising_worktree(seams, monkeypatch, c
     assert rc == 0
     venue = json.loads(capsys.readouterr().out)["venue"]
     assert venue["kind"] == "codespace" and venue["supervisor_ref"] == "host/example-harness/wt-1"
+
+
+def test_a_bare_resume_keeps_the_flags_the_session_was_launched_with(seams, capsys):
+    # The first launch records its flags; a wake that names only the session
+    # (Harness Board's) comes back with them, not the host's defaults.
+    first = _args(copilot_args=["--no-ask-user", "--reasoning-effort=max"], driver="orchestrator")
+    assert detach.cmd_detach(first, ssh_session=_ssh(seams, stdout=_CREATED)) == 0
+    assert "--driver orchestrator" in seams.ssh[-1]["remote"]
+    capsys.readouterr()
+    wake = _args(copilot_args=["--resume=sid-42"], driver=None, seed=None, dry_run=True)
+    assert detach.cmd_detach(wake, ssh_session=_ssh(seams)) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["recalled"] == ["copilot_args", "driver"] and out["driver"] == "orchestrator"
+    # Still a resume of that session (no new --session-id).
+    assert out["copilot_args"] == ["--no-ask-user", "--reasoning-effort=max", "--resume=sid-42"]
+
+
+def test_a_failed_launch_records_nothing(seams, capsys):
+    bad = _args(copilot_args=["--reasoning-effort=max"], driver="orchestrator")
+    assert detach.cmd_detach(bad, ssh_session=_ssh(seams, stdout="", code=1)) != 0
+    capsys.readouterr()
+    dry = _args(copilot_args=["--resume=sid-42"], driver=None, seed=None, dry_run=True)  # a bare wake
+    assert detach.cmd_detach(dry, ssh_session=_ssh(seams)) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert "recalled" not in out and out["copilot_args"] == ["--resume=sid-42"]
+
+
+def test_a_recalled_session_gains_no_host_model_it_did_not_run_with(seams, monkeypatch, capsys):
+    from agent_codespaces import launch_memory
+
+    # Launched while model propagation was off: its record has no model flags.
+    launch_memory.remember("cs-1", "cli:anchor-example-web@cs-1", [], "cli-mode", "sid-42")
+    monkeypatch.setattr(detach, "model_copilot_args",
+                        lambda existing: [] if any(a.startswith("--model") for a in existing)
+                        else ["--model=host-today", "--reasoning-effort=high"])
+    wake = _args(copilot_args=["--resume=sid-42"], driver=None, seed=None, dry_run=True)
+    assert detach.cmd_detach(wake, ssh_session=_ssh(seams)) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["recalled"] == ["copilot_args"] and out["copilot_args"] == ["--resume=sid-42"]
+    # A resume of a session with no record still gets the host's model, as before.
+    other = _args(copilot_args=["--resume=sid-99"], driver=None, seed=None, dry_run=True)
+    assert detach.cmd_detach(other, ssh_session=_ssh(seams)) == 0
+    assert json.loads(capsys.readouterr().out)["copilot_args"] == [
+        "--resume=sid-99", "--model=host-today", "--reasoning-effort=high"]
+
+
+def test_a_rejoin_of_a_running_session_leaves_the_record_alone(seams, capsys):
+    from agent_codespaces import launch_memory
+
+    tenant = "cli:anchor-example-web@cs-1"
+    launch_memory.remember("cs-1", tenant, ["--no-ask-user", "--reasoning-effort=max"], "orchestrator", "sid-42")
+    before = launch_memory._path("cs-1", tenant).read_text()
+    # A rejoin (say, to add a forward) of the running session: embody applies none of its flags.
+    rejoined = json.dumps({"ok": True, "created": False, "resumed": True})
+    rejoin = _args(copilot_args=["--model=other"], driver=None, seed=None)
+    assert detach.cmd_detach(rejoin, ssh_session=_ssh(seams, stdout=rejoined)) == 0
+    assert launch_memory._path("cs-1", tenant).read_text() == before
+
+
+def test_a_bare_rejoin_of_a_running_session_reports_nothing_recalled(seams, capsys):
+    from agent_codespaces import launch_memory
+
+    launch_memory.remember("cs-1", "cli:anchor-example-web@cs-1", ["--no-ask-user"], "orchestrator", "sid-42")
+    rejoined = json.dumps({"ok": True, "created": False, "resumed": True})
+    bare = _args(copilot_args=["--resume=sid-42"], driver=None, seed=None)
+    assert detach.cmd_detach(bare, ssh_session=_ssh(seams, stdout=rejoined)) == 0
+    assert "recalled" not in json.loads(capsys.readouterr().out)  # the running session applied none of it
+
+
+def test_the_record_keeps_the_model_the_session_actually_ran_with(seams, monkeypatch, capsys):
+    # The launch filled the model from this host's settings; a later wake keeps
+    # that model even after the host's own setting changed.
+    host = ["first-model"]
+    monkeypatch.setattr(detach, "model_copilot_args",
+                        lambda existing: [] if any(a.startswith("--model") for a in existing)
+                        else [f"--model={host[0]}"])
+    first = _args(copilot_args=["--no-ask-user"], driver="orchestrator")
+    assert detach.cmd_detach(first, ssh_session=_ssh(seams, stdout=_CREATED)) == 0
+    host[0] = "changed-model"
+    capsys.readouterr()
+    wake = _args(copilot_args=["--resume=sid-42"], driver=None, seed=None, dry_run=True)
+    assert detach.cmd_detach(wake, ssh_session=_ssh(seams)) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["copilot_args"] == ["--no-ask-user", "--model=first-model", "--resume=sid-42"]

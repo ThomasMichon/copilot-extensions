@@ -5,7 +5,7 @@ This module is the direct answer to a structural-review finding (rubber-duck
 review of agent-dispatch's task-status/spawn-reservation state management,
 2026-09-28, following the incident-driven fixes in PR #4512 and its
 follow-up #4542): three separate cross-FSM orphan gaps were each found only
-*after* a task got stuck for hours in production (aperture-labs PR #7759's
+*after* a task got stuck for hours in production (the downstream PR's
 COLD+QUEUED stall; two more found by inspection: reconcile()'s ``_TERMINAL``
 missing ``COMPLETED``, and ``recover_gone()``'s ``SPAWNED``-only reservation
 loop missing ``DEAD_LETTER``+``COLD``). Each fix closed one specific pairing

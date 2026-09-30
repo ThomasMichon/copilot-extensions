@@ -12,7 +12,7 @@ from agent_worktrees import config as cfg
 from agent_worktrees.config import MachineEntry, SSHEnvironment
 
 
-def _cfg(machine="lambda-core"):
+def _cfg(machine="atlas-core"):
     return types.SimpleNamespace(
         machine=machine,
         default_repo=types.SimpleNamespace(anchor="/anchor"),
@@ -31,14 +31,14 @@ def _machine(key, *, alias="", copilot=True, ssh_ready=True):
 
 class TestKnownMachineKeys:
     def test_excludes_self_and_non_ssh_ready(self, monkeypatch):
-        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _cfg("lambda-core"))
+        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _cfg("atlas-core"))
         monkeypatch.setattr(cfg, "load_machines_yaml", lambda *a, **k: {
-            "lambda-core": _machine("lambda-core", alias="lc-alias"),
+            "atlas-core": _machine("atlas-core", alias="lc-alias"),
             "borealis": _machine("borealis", alias="borealis-alias"),
-            "wheatley": _machine("wheatley", ssh_ready=False),
+            "ember": _machine("ember", ssh_ready=False),
             "non-copilot": _machine("non-copilot", copilot=False, alias="x"),
         })
-        keys = crl._known_machine_keys(exclude="lambda-core")
+        keys = crl._known_machine_keys(exclude="atlas-core")
         assert keys == ["borealis"]
 
     def test_registry_unavailable_returns_empty(self, monkeypatch):
@@ -213,7 +213,7 @@ class TestResolveCodenameCrossMachine:
 
     def test_valid_explicit_project_is_accepted(self, monkeypatch):
         monkeypatch.delenv(crl.NO_REMOTE_ENV, raising=False)
-        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _cfg("lambda-core"))
+        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _cfg("atlas-core"))
         monkeypatch.setattr(crl, "_known_machine_keys", lambda *, exclude: [])
         # Must not raise / must not be rejected as malformed.
         assert crl.resolve_codename_cross_machine(
@@ -223,9 +223,9 @@ class TestResolveCodenameCrossMachine:
     def test_scans_every_known_machine_and_collects_matches(self, monkeypatch):
         monkeypatch.delenv(crl.NO_REMOTE_ENV, raising=False)
         monkeypatch.setattr(cfg, "project_name", lambda: "test-chamber")
-        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _cfg("lambda-core"))
+        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _cfg("atlas-core"))
         monkeypatch.setattr(crl, "_known_machine_keys",
-                            lambda *, exclude: ["borealis", "wheatley"])
+                            lambda *, exclude: ["borealis", "ember"])
 
         def _fake_probe(machine_key, project, codename, *, timeout):
             assert project == "test-chamber"
@@ -239,9 +239,9 @@ class TestResolveCodenameCrossMachine:
     def test_collision_across_two_machines_reported(self, monkeypatch):
         monkeypatch.delenv(crl.NO_REMOTE_ENV, raising=False)
         monkeypatch.setattr(cfg, "project_name", lambda: "test-chamber")
-        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _cfg("lambda-core"))
+        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _cfg("atlas-core"))
         monkeypatch.setattr(crl, "_known_machine_keys",
-                            lambda *, exclude: ["borealis", "wheatley"])
+                            lambda *, exclude: ["borealis", "ember"])
         monkeypatch.setattr(crl, "_probe_machine",
                             lambda machine_key, *a, **k: f"wt-on-{machine_key}")
         matches = crl.resolve_codename_cross_machine("sturdy-crate")
@@ -250,27 +250,27 @@ class TestResolveCodenameCrossMachine:
     def test_collision_raises_ambiguous(self, monkeypatch):
         monkeypatch.delenv(crl.NO_REMOTE_ENV, raising=False)
         monkeypatch.setattr(cfg, "project_name", lambda: "test-chamber")
-        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _cfg("lambda-core"))
+        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _cfg("atlas-core"))
         monkeypatch.setattr(crl, "_known_machine_keys",
-                            lambda *, exclude: ["borealis", "wheatley"])
+                            lambda *, exclude: ["borealis", "ember"])
         monkeypatch.setattr(crl, "_probe_machine",
                             lambda machine_key, *a, **k: f"wt-on-{machine_key}")
         with pytest.raises(crl.AmbiguousCodenameError) as excinfo:
             crl.resolve_codename_cross_machine_unique("sturdy-crate")
-        assert "borealis" in str(excinfo.value) and "wheatley" in str(excinfo.value)
+        assert "borealis" in str(excinfo.value) and "ember" in str(excinfo.value)
         assert len(excinfo.value.matches) == 2
 
     def test_unique_returns_none_when_no_match(self, monkeypatch):
         monkeypatch.delenv(crl.NO_REMOTE_ENV, raising=False)
         monkeypatch.setattr(cfg, "project_name", lambda: "test-chamber")
-        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _cfg("lambda-core"))
+        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _cfg("atlas-core"))
         monkeypatch.setattr(crl, "_known_machine_keys", lambda *, exclude: [])
         assert crl.resolve_codename_cross_machine_unique("sturdy-crate") is None
 
     def test_unique_returns_single_match(self, monkeypatch):
         monkeypatch.delenv(crl.NO_REMOTE_ENV, raising=False)
         monkeypatch.setattr(cfg, "project_name", lambda: "test-chamber")
-        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _cfg("lambda-core"))
+        monkeypatch.setattr(cfg, "load_config", lambda *a, **k: _cfg("atlas-core"))
         monkeypatch.setattr(crl, "_known_machine_keys",
                             lambda *, exclude: ["borealis"])
         monkeypatch.setattr(crl, "_probe_machine",

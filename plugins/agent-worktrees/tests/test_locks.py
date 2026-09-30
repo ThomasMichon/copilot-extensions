@@ -47,7 +47,7 @@ def test_pid_alive_is_public_alias():
 # fail-open contract on an unprovable pid -- an access-denied answer proves the
 # pid exists, so it must read alive) now lives in single_instance_lease, the
 # same primitive the self-retire/reaper backstop uses (process-slot-ownership
-# Phase 4, aperture-labs #5091); its own test suite covers that contract. This
+# Phase 4, the downstream tracker); its own test suite covers that contract. This
 # module's own guard is the ``pid <= 0`` short-circuit and the delegation itself.
 
 def test_pid_alive_non_positive_short_circuits_without_delegating():

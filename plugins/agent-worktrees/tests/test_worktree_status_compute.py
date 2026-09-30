@@ -50,7 +50,7 @@ def _wire_common_internals(monkeypatch, m, *, state=git_ops.WorktreeState.UNUSED
 
 
 class TestWorktreeStatusComputeIsolated:
-    def test_assembles_all_five_facts_for_a_real_record(self, monkeypatch, tmp_path):
+    def test_assembles_all_six_facts_for_a_real_record(self, monkeypatch, tmp_path):
         from agent_worktrees import __main__ as m
 
         project = "iso-proj"
@@ -70,6 +70,7 @@ class TestWorktreeStatusComputeIsolated:
         assert bundle["machine"] == "m1"
         assert set(bundle["facts"]) == {
             "git_state", "lineage", "liveness", "claims", "disposition",
+            "session_length",
         }
         assert bundle["facts"]["git_state"]["confirmed"] is True
         assert bundle["facts"]["git_state"]["value"]["state"] == git_ops.WorktreeState.UNUSED.value
@@ -78,6 +79,10 @@ class TestWorktreeStatusComputeIsolated:
         assert bundle["facts"]["disposition"]["value"]["title"] == "a title"
         assert bundle["facts"]["disposition"]["value"]["resume_count"] == 2
         assert bundle["facts"]["lineage"]["confirmed"] is True
+        assert bundle["facts"]["session_length"]["confirmed"] is True
+        assert bundle["facts"]["session_length"]["value"] == {
+            "session_count": 0, "turn_count": None,
+        }
 
     def test_rejects_a_record_whose_stored_identity_does_not_match_the_filename(
         self, monkeypatch, tmp_path

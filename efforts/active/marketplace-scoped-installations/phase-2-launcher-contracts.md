@@ -130,7 +130,7 @@ bucket) was the fresh pass still needed. It is done below, superseded by the
 `python tools/check-marketplace-isolation.py --json` in a **clean checkout**
 (a fresh `copilot-extensions create` worktree, not a long-lived anchor) now
 reports **70** `global-plugin-binstub` findings — down from 83. Running the
-same guard against the long-lived `/home/tmichon/src/copilot-extensions`
+same guard against the long-lived `/home/owner_user/src/copilot-extensions`
 anchor at the identical commit reported 74; the 4-finding gap is confirmed
 build-time noise (`*.egg-info/PKG-INFO` files a prior local `pip install -e
 .` generated in that anchor, never committed, absent from a fresh checkout)

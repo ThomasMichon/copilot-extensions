@@ -159,10 +159,10 @@ def test_call_verb_arguments_flag(tmp_path, capsys):
 def test_call_verb_request_file(tmp_path, capsys):
     cfg = _write_cfg(tmp_path)
     req = tmp_path / "req.json"
-    req.write_text('{"arguments": {"name": "GLaDOS"}}', encoding="utf-8")
+    req.write_text('{"arguments": {"name": "Iris"}}', encoding="utf-8")
     rc = main(["call", str(cfg), "greet", "--request-file", str(req)])
     assert rc == 0
-    assert capsys.readouterr().out.strip() == "hello GLaDOS"
+    assert capsys.readouterr().out.strip() == "hello Iris"
 
 
 def test_call_verb_tool_error_exit_code(tmp_path, capsys):
@@ -244,7 +244,7 @@ async def test_oneshot_tears_down_transport_when_init_fails():
 
 
 async def test_oneshot_bounds_a_transport_start_that_never_returns():
-    """Regression test for aperture-labs#6673.
+    """Regression test for the downstream tracker.
 
     ``_negotiate`` already bounds each individual JSON-RPC request via
     ``cfg.timeout`` (see ``test_oneshot_times_out_on_silent_upstream`` above),

@@ -2,7 +2,7 @@
 
 - **Slug:** `source-remote-lease-isolation`
 - **Repo:** copilot-extensions
-- **Branch(es):** `worktree/tmichon-cloud1-win-20260831-221938-9ff0`
+- **Branch(es):** `worktree/owner_user-cloud1-win-20260831-221938-9ff0`
 - **Created:** 2026-08-31
 - **Status:** Done
 - **Vision:** `visions/plugins/agent-worktrees` — private coordination state is explicit and source remotes are not state stores
@@ -20,7 +20,7 @@ but must never silently accumulate on the repository being worked on.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| implementation worktree | Plan owner, implementation, validation, and PR | `worktree/tmichon-cloud1-win-20260831-221938-9ff0` |
+| implementation worktree | Plan owner, implementation, validation, and PR | `worktree/owner_user-cloud1-win-20260831-221938-9ff0` |
 
 ## Coordination
 

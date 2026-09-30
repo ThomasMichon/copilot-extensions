@@ -426,9 +426,8 @@ def build_command(
     Each **kind** maps to an ``agent-dispatch`` runtime the daemon drives:
 
     - ``supervised-lane`` -> the embody supervisor loop (``supervise`` + lane flags);
-    - ``evaluator``      -> the same loop with ``--evaluator`` (subsumes the
-      foreground ``supervise --evaluator`` flag), the evaluator spec materialized
-      to a file;
+    - ``evaluator``      -> a coordinator-owned registration consulted on
+      explicit verification triggers; no daemon subprocess is launched for it;
     - ``schedule``       -> the timer producer (``schedule serve``) over a
       one-entry spec materialized to a file (a *self-run emitter*, dedup-keyed
       ``sched:<id>:<epoch>`` by the producer);
@@ -461,24 +460,9 @@ def build_command(
         ]
 
     if kind == RegistrationKind.EVALUATOR:
-        eval_ref = spec.get("evaluator")
-        if spec.get("evaluator_spec") is not None:
-            eval_ref = _need_materialize("evaluator", spec["evaluator_spec"])
-        if not eval_ref:
-            raise UnsupportedKind(
-                "evaluator registration needs 'evaluator_spec' (inline) or "
-                "'evaluator' (a path)"
-            )
-        argv = base + [
-            "supervise",
-            "--supervisor-id",
-            str(reg["id"]),
-            "--evaluator",
-            str(eval_ref),
-        ]
-        if spec.get("evaluator_ref"):
-            argv += ["--evaluator-ref", str(spec["evaluator_ref"])]
-        return argv + _lane_flags(spec)
+        raise UnsupportedKind(
+            "evaluator registrations are coordinator-owned and do not launch a daemon process"
+        )
 
     if kind == RegistrationKind.SCHEDULE:
         entry = spec.get("schedules") and spec or {"schedules": [spec]}

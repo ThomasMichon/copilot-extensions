@@ -45,7 +45,7 @@ def test_approve_is_sourced_from_the_declared_table_not_a_literal(q, monkeypatch
     """Narrowing ``approve``'s declared ``from_states`` to an empty set must
     make the live call refuse a proposed task it would otherwise accept --
     proof the live code reads the table, not a hardcoded copy of it."""
-    task = q.create("t", status=Status.PROPOSED)
+    task = q.create("t", status=Status.PROPOSED, require_verification=True)
     _patch_transition(monkeypatch, "approve", from_states=frozenset())
     with pytest.raises(TaskError):
         q.approve(task.id)
@@ -54,7 +54,7 @@ def test_approve_is_sourced_from_the_declared_table_not_a_literal(q, monkeypatch
 def test_approve_honors_a_widened_declared_to_state(q, monkeypatch):
     """Redirecting ``approve``'s declared ``to_state`` must change where the
     live call actually lands the task."""
-    task = q.create("t", status=Status.PROPOSED)
+    task = q.create("t", status=Status.PROPOSED, require_verification=True)
     _patch_transition(monkeypatch, "approve", to_state=Status.ABANDONED)
     result = q.approve(task.id)
     assert result.status == Status.ABANDONED
@@ -143,7 +143,7 @@ def test_complete_from_suspended_still_allowed_after_phase_10_correction(q):
     assert task_state_machine.TRANSITIONS_BY_NAME["complete"].from_states == frozenset(
         {Status.STARTED, Status.SUSPENDED}
     )
-    task = q.create("t", status=Status.PROPOSED)
+    task = q.create("t", status=Status.PROPOSED, require_verification=True)
     q.approve(task.id)
     claimed = q.claim_one("worker-1")
     assert claimed is not None

@@ -243,6 +243,7 @@ class QueueClaimQueriesMixin:
         target_repo: str | None = None,
         label: str | None = None,
         evaluator_ref: str | None = None,
+        require_verification: bool | None = None,
         source: str | None = None,
         origin_ref: str | None = None,
         exclusive_key: str | None = None,
@@ -273,6 +274,9 @@ class QueueClaimQueriesMixin:
                 params.append(evaluator_ref)
             else:
                 clauses.append("evaluator_ref IS NULL")
+        if require_verification is not None:
+            clauses.append("require_verification = ?")
+            params.append(1 if require_verification else 0)
         if source is not None:
             clauses.append("source = ?")
             params.append(source)

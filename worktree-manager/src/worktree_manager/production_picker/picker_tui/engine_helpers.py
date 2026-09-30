@@ -92,6 +92,7 @@ __all__ = [
     "canonical_key",
     "fit",
     "header_text",
+    "row_sess_pulses",
     "row_text",
     "target_rows",
 ]
@@ -335,6 +336,19 @@ def _claims_cell(rec, w):
     return seg
 
 
+def row_sess_pulses(sess_val: str) -> bool:
+    """True when a row's LIVE (``sess``) glyph pulses at the current frame's
+    color (#3307 render-perf follow-up, 2026-09-30). MUX/ACP/PROC pulse when
+    genuinely live-and-attended; a MUX(0) (unattached mux session -- the old
+    bare "o") does NOT pulse, matching the prior "*" (pulse) vs "o" (no pulse)
+    distinction exactly. Extracted from ``row_text`` so the native list's
+    pulse-only fast repaint (``_try_pulse_repaint``) can find, without a full
+    rebuild, exactly the rows a pulse frame flip actually changes."""
+    return sess_val in ("ACP", "PROC") or (
+        sess_val.startswith("MUX(") and sess_val != "MUX(0)"
+    )
+
+
 def row_text(rec, cols, width, selected, indent=1, pulse=0, mark=None):
     if mark is not None:
         # A left-side selection gutter (#2228): a checkbox glyph + one margin
@@ -384,13 +398,7 @@ def row_text(rec, cols, width, selected, indent=1, pulse=0, mark=None):
             style = C_PR_MERGED
         elif k == "sess":
             sess_val = rec.get("sess", "")
-            # #3307 operator feedback 2026-09-29: MUX/ACP/PROC pulse when
-            # genuinely live-and-attended; a MUX(0) (unattached mux
-            # session -- the old bare "○") does NOT pulse, matching the
-            # prior "●" (pulse) vs "○" (no pulse) distinction exactly.
-            if sess_val in ("ACP", "PROC") or (
-                sess_val.startswith("MUX(") and sess_val != "MUX(0)"
-            ):
+            if row_sess_pulses(sess_val):
                 style = C_PULSE[pulse]
             elif sess_val == "LOCK":
                 style = C_STATE["WIP"]

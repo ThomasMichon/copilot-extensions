@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import shutil
@@ -39,20 +40,75 @@ def _powershell_host() -> str:
 
 
 def _print_reconcile_status() -> None:
-    """Surface the last session-start auto-reconcile attempt, if recorded."""
+    """Surface background-reconcile staleness/observability.
+
+    Background reconcile is unconditional now (no per-project opt-in --
+    agent-bridge-unified-zdd-cutover Phase 0: the opt-in existed only because
+    a raw reconcile could race a live daemon/session, and the daemon's own
+    update path is always-ZDD, so that justification is gone). What remains
+    worth surfacing is *staleness*: how long since the last recorded
+    reconcile attempt, so an operator never has to reconstruct that from a
+    raw log file.
+
+    The status file is written twice per attempt (see bootstrap-check.sh/
+    .ps1): once immediately on launch (``at`` only), then overwritten with
+    ``completed_at``/``exit_code``/``success`` once the reconcile actually
+    finishes. Reporting must distinguish these -- a launch timestamp alone
+    would make a failed or still-wedged reconcile look falsely healthy.
+    """
     core = _core()
+    print("  Background reconcile: enabled (always-on; no per-project opt-in required)")
     status_path = os.path.join(core._INSTALL_DIR, "reconcile-status.json")
     try:
         with open(status_path, encoding="utf-8") as fh:
             st = json.load(fh)
     except (OSError, ValueError):
+        print("  Last auto-reconcile: none recorded yet")
         return
     at = st.get("at", "?")
     frm = st.get("from", "?")
     to = st.get("to", "?")
     log = st.get("log", os.path.join(core._INSTALL_DIR, "reconcile.log"))
-    print(f"  Last auto-reconcile: {at}  {frm} -> {to}")
+    completed_at = st.get("completed_at")
+    success = st.get("success")
+    if completed_at is None:
+        # The launch record hasn't been overwritten with completion info yet
+        # -- either still running, or the hook/session exited before the
+        # background process could report back.
+        age_str = _format_reconcile_age(at)
+        started = f"{age_str} ({at})" if age_str else at
+        print(f"  Last auto-reconcile: started {started}, still in progress or unreported  {frm} -> {to}")
+    else:
+        age_str = _format_reconcile_age(completed_at)
+        finished = f"{age_str} ({completed_at})" if age_str else completed_at
+        outcome = "succeeded" if success else "FAILED"
+        print(f"  Last auto-reconcile: {outcome} {finished}  {frm} -> {to}")
     print(f"    log: {log}")
+
+
+def _format_reconcile_age(at: str) -> str | None:
+    """Render an ISO-8601 UTC timestamp (``YYYY-MM-DDTHH:MM:SSZ``) as a
+    human "N days/hours ago" string, or ``None`` if it can't be parsed."""
+    try:
+        recorded = datetime.datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=datetime.timezone.utc
+        )
+    except (ValueError, TypeError):
+        return None
+    delta = datetime.datetime.now(datetime.timezone.utc) - recorded
+    total_seconds = delta.total_seconds()
+    if total_seconds < 0:
+        return "just now"
+    days = int(total_seconds // 86400)
+    if days >= 1:
+        return f"{days} day{'s' if days != 1 else ''} ago"
+    hours = int(total_seconds // 3600)
+    if hours >= 1:
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    minutes = int(total_seconds // 60)
+    if minutes >= 1:
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    return "just now"
 
 
 def _reconcile_service_marker(pid: int, version: str | None) -> None:
@@ -639,6 +695,26 @@ def _service_stop() -> None:
             victims.add(port_pid)
     victims.discard(None)
     for victim in victims:
+        # Identity-verify at the point of termination, not only afterward
+        # (afterward only confirms no agent-bridge process remains -- it
+        # never proves THIS victim pid was one before it was signaled). A
+        # stale pid-file/port/lock entry whose pid has since been reused by
+        # an unrelated process must never be killed.
+        #
+        # This narrows, but does not fully close, the identity hazard:
+        # `_pid_is_agent_bridge` is a cmdline-substring check, and a tiny
+        # window remains between it and `_kill_pid`'s own signal. Fully
+        # closing that would mean routing every victim through an
+        # OS-object-bound termination (e.g. `zdd.diagnostics.
+        # terminate_pid_if_identity`'s pidfd-based path) -- a real,
+        # available pattern, deliberately NOT adopted here: it changes
+        # this shared production function's behavior on every platform and
+        # caller (not just this clean-room drill), including its own
+        # existing test coverage's mocking seam, and is a separate,
+        # more invasive hardening this PR's scope does not extend to.
+        # Tracked as a known residual, not silently claimed closed.
+        if not core._pid_is_agent_bridge(victim):
+            continue
         core._kill_pid(victim)
         stopped_any = True
     if victims:

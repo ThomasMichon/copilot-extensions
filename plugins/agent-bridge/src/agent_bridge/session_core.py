@@ -758,7 +758,7 @@ class _SessionCoreMixin:
             # this, a daemon restart silently drops it forever (it otherwise
             # lives only on the in-memory Session object) -- the confirmed
             # root cause of a reviewer task permanently losing its dedicated,
-            # credential-bound tools after any restart (aperture-labs #7239).
+            # credential-bound tools after any restart (the downstream tracker).
             config_json = row.get("config_json")
             if config_json:
                 try:

@@ -1,5 +1,5 @@
 """Fleet-wide worktree listing across every reachable machine (agent-
-worktrees-fleet-flows Phase 1, aperture-labs #2740).
+worktrees-fleet-flows Phase 1, the downstream tracker).
 
 ``agent-worktrees fleet`` runs exactly one ``list --json`` per SSH target
 (never per-worktree, per #2732's contract) and merges the results into a
@@ -17,7 +17,7 @@ SSH fan-out mirrors ``claimant.py``'s ``_remote_claimant_alive`` /
 pwsh-EncodedCommand on Windows, ``bash -lc`` elsewhere) -- reuses
 ``claimant.resolve_machine_ssh`` is deliberately NOT used here because it
 only resolves the *first* ready SSH environment per machine key, whereas a
-machine like Lambda-Core carries two independently-reachable environments
+machine like Atlas-Core carries two independently-reachable environments
 (Windows + WSL) that must each be its own fleet row.
 """
 

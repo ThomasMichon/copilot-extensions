@@ -265,7 +265,7 @@ def test_runs_on_machine_respects_permit_filter():
     assert runs_on_machine(pinned, "host-a") is True
     assert runs_on_machine(pinned, "host-b") is False
     # Fail closed: an unidentified host (machine=None) must NOT run a machine-pinned
-    # declaration it cannot confirm membership of (aperture-labs #5001).
+    # declaration it cannot confirm membership of (the downstream tracker).
     assert runs_on_machine(pinned, None) is False
     unpinned = load_declaration({"name": "g"})
     assert runs_on_machine(unpinned, "host-b") is True

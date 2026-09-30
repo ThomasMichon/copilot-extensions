@@ -821,29 +821,118 @@ class _LiveSessionsMixin:
         return None, "stale"
 
     def list_pending_live_messages(self, session_id: str) -> list[dict[str, Any]]:
-        """Undelivered messages for a session, oldest-first (delivery order)."""
+        """Undelivered messages for a session, oldest-first (delivery order).
+
+        Session controls (``kind`` starting with ``control:``, e.g. a mode
+        change) are excluded: they are claimed apart (:meth:`claim_live_controls`),
+        so an extension that predates controls never delivers one as a prompt.
+        """
         rows = self.execute_read(
             "SELECT * FROM live_messages "
-            "WHERE session_id=? AND delivered_at IS NULL ORDER BY id ASC",
+            "WHERE session_id=? AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
+            "ORDER BY id ASC",
             (session_id,),
         )
         return [dict(r) for r in rows]
 
+    def claim_live_controls(
+        self, session_id: str, now: float, max_age: float
+    ) -> list[dict[str, Any]]:
+        """Claim a session's pending controls for its extension to apply.
+
+        One transaction selects the unclaimed controls and stamps
+        ``claimed_at``, so each control goes to exactly one poll, and a
+        claimed control can no longer be withdrawn by its requester's timeout
+        (see :meth:`withdraw_live_control`). Controls older than ``max_age``
+        are expired instead: their requester is gone (e.g. the daemon
+        restarted mid-wait), so they must never apply late.
+        """
+        with self._write_lock:
+            conn = self._get_conn()
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute(
+                    "UPDATE live_messages SET delivered_at=?, outcome='expired' "
+                    "WHERE session_id=? AND kind LIKE 'control:%' "
+                    "AND delivered_at IS NULL AND claimed_at IS NULL AND created_at < ?",
+                    (now, session_id, now - max_age),
+                )
+                rows = [dict(r) for r in conn.execute(
+                    "SELECT * FROM live_messages WHERE session_id=? "
+                    "AND kind LIKE 'control:%' AND delivered_at IS NULL "
+                    "AND claimed_at IS NULL ORDER BY id ASC",
+                    (session_id,),
+                ).fetchall()]
+                if rows:
+                    placeholders = ",".join("?" for _ in rows)
+                    conn.execute(
+                        f"UPDATE live_messages SET claimed_at=? WHERE id IN ({placeholders})",
+                        (now, *(r["id"] for r in rows)),
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return rows
+
+    def withdraw_live_control(self, session_id: str, control_id: int, now: float) -> bool:
+        """Withdraw a control nobody has claimed yet; True when withdrawn.
+
+        False means the extension already claimed it (it may be applying it
+        now) or it already has an outcome -- the requester must then report
+        that outcome, or that the change is in flight, never "not applied".
+        """
+        cur = self.execute_write(
+            "UPDATE live_messages SET delivered_at=?, outcome='withdrawn' "
+            "WHERE session_id=? AND id=? AND kind LIKE 'control:%' "
+            "AND delivered_at IS NULL AND claimed_at IS NULL",
+            (now, session_id, control_id),
+        )
+        return cur.rowcount == 1
+
+    def live_control_state(self, session_id: str, control_id: int) -> dict[str, Any] | None:
+        """A control's ``claimed_at`` and ``outcome`` (``None`` if unknown)."""
+        rows = self.execute_read(
+            "SELECT claimed_at, outcome FROM live_messages "
+            "WHERE session_id=? AND id=? AND kind LIKE 'control:%'",
+            (session_id, control_id),
+        )
+        return dict(rows[0]) if rows else None
+
     def ack_live_messages(
-        self, session_id: str, ids: list[int], now: float
+        self,
+        session_id: str,
+        ids: list[int],
+        now: float,
+        *,
+        controls: bool = False,
+        outcome: str | None = None,
     ) -> int:
         """Mark the given messages delivered; return how many rows changed.
 
         Scoped to ``session_id`` so a caller can only ack its own queue, and
         idempotent (already-delivered rows are left untouched by the
         ``delivered_at IS NULL`` guard), so a redelivered ack never errors.
+        Messages and controls are acked apart (``controls``), so a message ack
+        can't settle a control nor a control ack a message. A control is
+        settled only after its extension claimed it, recording ``outcome``
+        (``applied`` or ``rejected``).
         """
         if not ids:
             return 0
         placeholders = ",".join("?" for _ in ids)
-        cur = self.execute_write(
-            f"UPDATE live_messages SET delivered_at=? "
-            f"WHERE session_id=? AND delivered_at IS NULL AND id IN ({placeholders})",
-            (now, session_id, *ids),
-        )
+        if controls:
+            cur = self.execute_write(
+                f"UPDATE live_messages SET delivered_at=?, outcome=? "
+                f"WHERE session_id=? AND delivered_at IS NULL AND kind LIKE 'control:%' "
+                f"AND claimed_at IS NOT NULL AND id IN ({placeholders})",
+                (now, outcome or "applied", session_id, *ids),
+            )
+        else:
+            cur = self.execute_write(
+                f"UPDATE live_messages SET delivered_at=? "
+                f"WHERE session_id=? AND delivered_at IS NULL AND kind NOT LIKE 'control:%' "
+                f"AND id IN ({placeholders})",
+                (now, session_id, *ids),
+            )
         return cur.rowcount

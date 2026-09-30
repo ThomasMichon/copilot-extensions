@@ -59,6 +59,8 @@ _KNOWN_KEYS = frozenset(
         "worker_guidance",
         "worker_identity",
         "allow_self_config_changes",
+        "require_verification",
+        "evaluator_ref",
     }
 )
 _FORGE_KEYS = frozenset({"provider", "producer_login", "discovery_scope"})
@@ -124,7 +126,6 @@ class ForgeProvider(Protocol):
         reason: str,
     ) -> None: ...
 
-
 def _string(data: Mapping[str, Any], key: str) -> str:
     value = data.get(key)
     if not isinstance(value, str) or not value:
@@ -132,7 +133,6 @@ def _string(data: Mapping[str, Any], key: str) -> str:
             f"repository-issue-loop {key}: expected a non-empty string"
         )
     return value
-
 
 def _number(
     data: Mapping[str, Any],
@@ -151,7 +151,6 @@ def _number(
         )
     return result
 
-
 def _strings(data: Mapping[str, Any], key: str) -> tuple[str, ...]:
     value = data.get(key, ())
     if not isinstance(value, (list, tuple)) or not all(
@@ -161,7 +160,6 @@ def _strings(data: Mapping[str, Any], key: str) -> tuple[str, ...]:
             f"repository-issue-loop {key}: expected a list of non-empty strings"
         )
     return tuple(dict.fromkeys(value))
-
 
 def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -> dict[str, Any]:
     """Validate/normalize a declaration. ``cwd`` (declaring repo root, if
@@ -194,6 +192,14 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
         minimum=1,
     )
     quiet = _number(data, "quiet_period_seconds", default=0, minimum=0)
+    require_verification = data.get("require_verification", False)
+    if not isinstance(require_verification, bool):
+        raise RegistrarError(
+            "repository-issue-loop require_verification: expected true/false"
+        )
+    evaluator_ref = data.get("evaluator_ref")
+    if evaluator_ref is not None and (not isinstance(evaluator_ref, str) or not evaluator_ref):
+        raise RegistrarError("repository-issue-loop evaluator_ref: expected a non-empty string")
     batch_size = _number(data, "batch_size", default=1, minimum=1)
     if not float(batch_size).is_integer():
         raise RegistrarError(
@@ -264,7 +270,6 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
         default=max(cadence, 3600),
         minimum=60,
     )
-
     pool = data.get("pool")
     if not isinstance(pool, Mapping):
         raise RegistrarError("repository-issue-loop pool: expected a mapping")
@@ -317,7 +322,6 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
         raise RegistrarError(
             f"repository-issue-loop pool fields {present} are derived"
         )
-
     owner = data.get("owner")
     description = data.get("description")
     guidance = data.get("worker_guidance")
@@ -348,7 +352,6 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
         raise RegistrarError(
             "repository-issue-loop allow_self_config_changes: expected true/false"
         )
-
     def filters_payload(filters: Filters) -> dict[str, dict[str, list[str]]]:
         return {
             side: {
@@ -392,6 +395,8 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
         "include_labels": list(include),
         "exclude_labels": list(exclude),
         "priority_labels": list(priority),
+        "require_verification": require_verification,
+        "evaluator_ref": evaluator_ref,
         "batch_size": int(batch_size),
         "task_label": task_label,
         "forge": {
@@ -414,10 +419,7 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
         "allow_self_config_changes": allow_self_config,
     }
 
-
-def expand_repository_issue_loop(
-    data: Mapping[str, Any], *, repo_root: str | Path | None = None
-) -> tuple[ProfileDeclaration, ...]:
+def expand_repository_issue_loop(data: Mapping[str, Any], *, repo_root: str | Path | None = None) -> tuple[ProfileDeclaration, ...]:
     """Expand into one emitter + one worker lane. ``repo_root`` resolves
     ``worker_identity`` here and is stamped as the emitter spec's ``cwd`` so
     a later daemon tick's re-validation resolves the same override."""
@@ -457,21 +459,17 @@ def expand_repository_issue_loop(
     )
     return source, pool
 
-
 def occurrence_epoch(now: float, cadence_seconds: float) -> int:
     """Return the stable Unix-epoch-anchored occurrence for ``now``."""
     return int(now // cadence_seconds * cadence_seconds)
-
 
 def _resource_key(config: Mapping[str, Any], issue_number: int) -> str:
     provider = str(config["forge"]["provider"]).casefold()
     repo = str(config["repo"]).casefold()
     return f"forge:{provider}:repository:{repo}:issue:{issue_number}"
 
-
 def _resource_owner(config: Mapping[str, Any], occurrence: int | float) -> str:
     return f"repository-issue-loop:{config['name']}:occurrence:{int(occurrence)}"
-
 
 def _task_resource_keys(task: Mapping[str, Any]) -> tuple[str, ...]:
     payload = task.get("payload_inline")
@@ -489,7 +487,6 @@ def _task_resource_keys(task: Mapping[str, Any]) -> tuple[str, ...]:
         return ()
     return tuple(dict.fromkeys(keys))
 
-
 def _approve_or_reread(client: Any, task_id: str) -> dict[str, Any]:
     try:
         return client.approve(task_id)
@@ -499,10 +496,7 @@ def _approve_or_reread(client: Any, task_id: str) -> dict[str, Any]:
             raise
         return current
 
-
-def _abandon_or_reread(
-    client: Any, task_id: str, *, reason: str
-) -> dict[str, Any]:
+def _abandon_or_reread(client: Any, task_id: str, *, reason: str) -> dict[str, Any]:
     try:
         current = client.abandon(
             task_id,
@@ -1687,6 +1681,8 @@ def run_tick(
             "origin_ref": discovered["origin_ref"],
             "dedup_key": discovered["origin_ref"],
             "exclusive_key": discovered["exclusive_key"],
+            "require_verification": bool(config.get("require_verification", False)),
+            "evaluator_ref": config.get("evaluator_ref"),
             # A repository issue task cannot become runnable until every
             # external-resource reservation is bound successfully.
             "proposed": True,

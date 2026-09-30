@@ -1,16 +1,16 @@
-"""Guard: agent-ssh's bootstrap-check background reconcile spawn requires an
-explicit, checked-in opt-in (priority hardening: copilot-extensions
-daemons/hooks were observed flooding a shared machine's process table).
+"""Guard: bootstrap-check's background reconcile no longer gates on a
+per-plugin opt-in (agent-bridge-unified-zdd-cutover Phase 0). The opt-in
+existed because a raw reconcile could race a live daemon/session; now that
+every reconcile-capable plugin's update path is always-ZDD (safe to run
+unattended), the gate was removed rather than kept as a redundant consent
+checkbox. This test proves:
 
-Fanned out from the agent-bridge reference implementation/pilot. agent-ssh is
-its own deploy-model family (manifest-path/agent-ssh) -- unlike the shared
-psscriptroot template, it hardcodes its plugin name (no plugin.json read) and
-resolves the plugin/pyproject location from the deploy manifest's
-``source.path`` rather than its own script location, so its fake fixture
-differs from the shared family's.
-
-File-shape assertions plus two real executions of the bash counterpart
-against an isolated fake plugin/install dir.
+* neither hook script still contains opt-in-gate text or a
+  ``background_reconcile_<plugin>`` key reference, and
+* a version drift reconciles unconditionally -- no
+  ``.copilot-extensions/config.yaml`` required, and a stale
+  ``background_reconcile_<plugin>`` key left over from before this change
+  (e.g. set to ``false``) does not resurrect the old skip behavior.
 """
 
 from __future__ import annotations
@@ -26,6 +26,9 @@ import pytest
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _PS1 = _PLUGIN_ROOT / "scripts" / "bootstrap-check.ps1"
 _SH = _PLUGIN_ROOT / "scripts" / "bootstrap-check.sh"
+# The legacy opt-in key -- kept only to prove a stale leftover key from
+# before this gate's removal is now inert (see
+# test_sh_reconciles_even_with_stale_opt_in_key_present).
 _OPT_IN_KEY = "background_reconcile_agent-ssh"
 # Resolve bash to its FULL path -- see the agent-bridge/agent-codespaces
 # sibling tests for why (Windows App Execution Alias interception).
@@ -37,22 +40,18 @@ def test_hook_scripts_exist():
     assert _SH.is_file()
 
 
-def test_ps1_gates_before_spawn():
+def test_ps1_has_no_opt_in_gate():
     text = _PS1.read_text(encoding="utf-8")
-    gate_at = text.index("OPT-IN GATE")
-    spawn_at = text.index("Start-Process -FilePath 'conhost.exe'")
-    assert gate_at < spawn_at, "the opt-in check must precede the reconcile spawn"
-    assert _OPT_IN_KEY in text
-    assert ".copilot-extensions\\config.yaml" in text
+    assert "optInKey" not in text
+    assert "optedIn" not in text
+    assert "background reconcile SKIPPED" not in text
 
 
-def test_sh_gates_before_spawn():
+def test_sh_has_no_opt_in_gate():
     text = _SH.read_text(encoding="utf-8")
-    gate_at = text.index("OPT-IN GATE")
-    spawn_at = text.index('nohup bash "$init"')
-    assert gate_at < spawn_at, "the opt-in check must precede the reconcile spawn"
-    assert _OPT_IN_KEY in text
-    assert ".copilot-extensions/config.yaml" in text
+    assert "optInKey" not in text
+    assert "optedIn" not in text
+    assert "background reconcile SKIPPED" not in text
 
 
 def _make_fake_plugin(root: Path) -> Path:
@@ -96,7 +95,9 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not available")
-def test_sh_skips_spawn_without_opt_in(tmp_path):
+def test_sh_reconciles_without_any_opt_in_config(tmp_path):
+    """No .copilot-extensions/config.yaml at all -- reconcile must still
+    proceed unconditionally now that the opt-in gate is gone."""
     home = tmp_path / "home"
     home.mkdir()
     project = tmp_path / "project"
@@ -114,17 +115,21 @@ def test_sh_skips_spawn_without_opt_in(tmp_path):
         text=True,
         timeout=30,
     )
-    assert "SKIPPED" in result.stderr, result.stderr
+    assert "SKIPPED" not in result.stderr, result.stderr
+    assert "reconciling in background" in result.stderr, result.stderr
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not available")
-def test_sh_proceeds_with_opt_in(tmp_path):
+def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path):
+    """A leftover `background_reconcile_<plugin>: false` from before this
+    gate's removal must not resurrect the old skip behavior -- the key is
+    now inert."""
     home = tmp_path / "home"
     home.mkdir()
     project = tmp_path / "project"
     (project / ".copilot-extensions").mkdir(parents=True)
     (project / ".copilot-extensions" / "config.yaml").write_text(
-        f"{_OPT_IN_KEY}: true\n", encoding="utf-8"
+        f"{_OPT_IN_KEY}: false\n", encoding="utf-8"
     )
     plugin_dir = _make_fake_plugin(tmp_path)
     _make_fake_install(home, plugin_dir)

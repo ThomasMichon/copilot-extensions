@@ -245,10 +245,10 @@ class TestPRHeadName:
         repo = tmp_path / "r"
         repo.mkdir()
         _git("init", cwd=repo)
-        _git("config", "user.email", "cjohnson@example.com", cwd=repo)
+        _git("config", "user.email", "contributor_user@example.com", cwd=repo)
         prcfg = cfg.PRConfig(enabled=True, head_pattern="user/{username}/{slug}-{suffix}")
         name = pr_ops.pr_head_name(prcfg, "Add auth", "wt-x-aaaa", cwd=str(repo))
-        assert name == "user/cjohnson/add-auth-aaaa"
+        assert name == "user/contributor-user/add-auth-aaaa"
 
     def test_azure_devops_default_renders_username_tokens(self, tmp_path):
         repo = tmp_path / "r"

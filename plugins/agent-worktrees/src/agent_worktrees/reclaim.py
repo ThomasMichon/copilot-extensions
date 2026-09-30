@@ -30,7 +30,7 @@ import os
 import platform
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from . import locks, sessions, tracking
+from . import locks, process_table_cache, sessions, tracking
 
 __all__ = [
     "build_process_table",
@@ -338,7 +338,7 @@ def resolve_bound_copilots(
 
     ``homing`` is ``mux``/``bare``/``unknown`` (see module docstring).
     """
-    table = build_process_table() if table is None else table
+    table = process_table_cache.cached(build_process_table) if table is None else table
     state_dir = sessions._session_state_dir()
     results: list[dict] = []
     if not state_dir.exists():

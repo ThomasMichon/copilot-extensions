@@ -234,3 +234,7 @@ review mechanism is needed -- only a documented content convention.
 - [`agents-md-vs-instructions-split.md`](agents-md-vs-instructions-split.md)
   -- which content belongs in this mechanism's dynamic half versus a repo's
   root `AGENTS.md` visitor contract.
+- [`worktree-scoped-dynamic-guidance.md`](worktree-scoped-dynamic-guidance.md)
+  -- the sibling pattern for content this one's §2a rule excludes: large or
+  worktree-stable projected instruction bodies, refreshed at worktree
+  create/resume rather than every session start.

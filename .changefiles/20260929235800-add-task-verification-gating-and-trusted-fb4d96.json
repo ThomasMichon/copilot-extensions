@@ -1,0 +1,9 @@
+{
+  "comment": "add task verification gating and trusted script evaluators",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -154,7 +154,7 @@ def test_singleton_repo_handoff_falls_back_to_anchor_key(monkeypatch, capsys):
             if worktree_id != "llama.cpp@anchor"
             else {"status": "idle", "session_id": "succ-anchor-2"}
         ),
-        agents=[{"name": "llama.cpp@Lambda-Core", "project": "llama.cpp"}],
+        agents=[{"name": "llama.cpp@Atlas-Core", "project": "llama.cpp"}],
     )
     _patch_client(monkeypatch, client)
     monkeypatch.setattr(
@@ -166,10 +166,10 @@ def test_singleton_repo_handoff_falls_back_to_anchor_key(monkeypatch, capsys):
         ),
     )
 
-    m._cmd_handoff(_args("llama.cpp@Lambda-Core"))
+    m._cmd_handoff(_args("llama.cpp@Atlas-Core"))
 
     assert client.worktree_calls == [
-        ("llama.cpp@Lambda-Core", None, True),
+        ("llama.cpp@Atlas-Core", None, True),
         ("llama.cpp@anchor", None, True),
     ]
     assert "Repo llama.cpp handed off -> successor succ-anchor-2 (idle)" in (

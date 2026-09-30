@@ -33,7 +33,7 @@ marks an in-progress *or aborted* cutover: if the orchestrator were still alive
 it would have advanced the state, so finding one on disk after the deploy
 process is gone means the cutover aborted mid-flight.
 
-**The matching gap for the *new* daemon (aperture-labs #5195).** The breadcrumb
+**The matching gap for the *new* daemon (the downstream tracker).** The breadcrumb
 above was designed to heal the stranded *old* survivor. It does not, by itself,
 help the *new* passive daemon ``spawn_passive`` just stood up: if the
 orchestrator dies before that passive is ever promoted (flipped to ``active``),
@@ -292,7 +292,7 @@ def reap_abandoned_passive(
     record: dict | None = None,
     now: datetime | None = None,
 ) -> dict:
-    """Terminate a passive daemon spawned by an abandoned cutover (aperture-labs #5195).
+    """Terminate a passive daemon spawned by an abandoned cutover (the downstream tracker).
 
     ``spawn_passive`` stands the new daemon up *before* the breadcrumb can
     prove it was ever promoted. If the orchestrator process itself dies --

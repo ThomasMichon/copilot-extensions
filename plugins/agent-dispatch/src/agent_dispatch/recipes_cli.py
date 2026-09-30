@@ -151,6 +151,11 @@ def _recipe_create_namespace(args: argparse.Namespace, rendered: Any) -> argpars
         source="recipe",
         origin_ref=rendered.recipe,
         evaluator_ref=None,
+        require_verification=(
+            getattr(args, "require_verification", None)
+            if getattr(args, "require_verification", None) is not None
+            else bool(rendered.require_verification)
+        ),
         # spawn passthrough (a recipe worker wants a full checkout -> embody body)
         spawn=getattr(args, "spawn", False),
         spawn_backend=getattr(args, "spawn_backend", "embody"),
@@ -311,6 +316,20 @@ def register_recipes_commands(sub) -> None:
     kp.add_argument("--repo", help="lane (repo) for the task: a local repo name or remote URL (default: the calling repo)")
     kp.add_argument("--dedup-key", help="override the derived reserved-work dedup key")
     kp.add_argument("--label", action="append", metavar="LABEL", help="extra label(s) to stamp on the kicked task (repeatable), merged with the recipe's own labels")
+    verification = kp.add_mutually_exclusive_group()
+    verification.add_argument(
+        "--require-verification",
+        dest="require_verification",
+        action="store_true",
+        default=None,
+        help="override the recipe default and require explicit verification",
+    )
+    verification.add_argument(
+        "--no-require-verification",
+        dest="require_verification",
+        action="store_false",
+        help="override the recipe default and self-attest on completion",
+    )
     kp.add_argument("--spawn", action="store_true", help="after creating, spawn a worker to drive the loop (best effort)")
     kp.add_argument("--spawn-backend", choices=["bridge", "embody"], default="embody")
     kp.add_argument("--spawn-agent", default="task-worker")

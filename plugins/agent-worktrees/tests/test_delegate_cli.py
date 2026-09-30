@@ -62,24 +62,24 @@ def _record(
 
 def test_annotate_delegate_graph_marks_host_finalized_delegate_finalizable():
     host = _row(
-        "lambda-core-wsl-20260101-host",
-        machine="lambda-core",
+        "atlas-core-wsl-20260101-host",
+        machine="atlas-core",
         platform="wsl",
         status="finalized",
     )
     delegate = _row(
-        "wheatley-linux-20260101-delegate",
-        machine="wheatley",
+        "ember-linux-20260101-delegate",
+        machine="ember",
         platform="linux",
         status="active",
-        caller_worktree="lambda-core-wsl-20260101-host",
+        caller_worktree="atlas-core-wsl-20260101-host",
     )
 
     delegate_cli.annotate_delegate_graph(
         [host, delegate],
         reachable_hosts={
-            ("lambda-core", "wsl"): True,
-            ("wheatley", "linux"): True,
+            ("atlas-core", "wsl"): True,
+            ("ember", "linux"): True,
         },
     )
 
@@ -88,10 +88,10 @@ def test_annotate_delegate_graph_marks_host_finalized_delegate_finalizable():
     assert delegate["delegate_finalizable"] is True
     assert delegate["delegate_finalizable_reason"] == "host-finalized"
     assert host["delegates"] == [{
-        "worktree_id": "wheatley-linux-20260101-delegate",
-        "machine": "wheatley",
+        "worktree_id": "ember-linux-20260101-delegate",
+        "machine": "ember",
         "platform": "linux",
-        "path": "/wt/wheatley-linux-20260101-delegate",
+        "path": "/wt/ember-linux-20260101-delegate",
         "status": "active",
         "finalizable": True,
         "reason": "host-finalized",
@@ -100,17 +100,17 @@ def test_annotate_delegate_graph_marks_host_finalized_delegate_finalizable():
 
 def test_annotate_delegate_graph_keeps_active_host_blocking():
     host = _row(
-        "lambda-core-wsl-20260101-host",
-        machine="lambda-core",
+        "atlas-core-wsl-20260101-host",
+        machine="atlas-core",
         platform="wsl",
         status="active",
     )
     delegate = _row(
-        "wheatley-linux-20260101-delegate",
-        machine="wheatley",
+        "ember-linux-20260101-delegate",
+        machine="ember",
         platform="linux",
         status="active",
-        caller_worktree="lambda-core-wsl-20260101-host",
+        caller_worktree="atlas-core-wsl-20260101-host",
     )
 
     delegate_cli.annotate_delegate_graph([host, delegate])
@@ -122,25 +122,25 @@ def test_annotate_delegate_graph_keeps_active_host_blocking():
 
 def test_annotate_delegate_graph_marks_missing_reachable_host_gone():
     delegate = _row(
-        "wheatley-linux-20260101-delegate",
-        machine="wheatley",
+        "ember-linux-20260101-delegate",
+        machine="ember",
         platform="linux",
         status="active",
-        caller_worktree="lambda-core-wsl-20260101-host",
+        caller_worktree="atlas-core-wsl-20260101-host",
     )
 
     delegate_cli.annotate_delegate_graph(
         [delegate],
         reachable_hosts={
-            ("lambda-core", "wsl"): True,
-            ("wheatley", "linux"): True,
+            ("atlas-core", "wsl"): True,
+            ("ember", "linux"): True,
         },
     )
 
     assert delegate["caller_state"] == {
         "state": "gone",
-        "worktree_id": "lambda-core-wsl-20260101-host",
-        "machine": "lambda-core",
+        "worktree_id": "atlas-core-wsl-20260101-host",
+        "machine": "atlas-core",
         "platform": "wsl",
         "repo": "example",
     }
@@ -150,23 +150,23 @@ def test_annotate_delegate_graph_marks_missing_reachable_host_gone():
 
 def test_annotate_delegate_graph_normalizes_windows_platform_token():
     delegate = _row(
-        "wheatley-linux-20260101-delegate",
-        machine="wheatley",
+        "ember-linux-20260101-delegate",
+        machine="ember",
         platform="linux",
         status="active",
-        caller_worktree="lambda-core-win-20260101-host",
+        caller_worktree="atlas-core-win-20260101-host",
     )
 
     delegate_cli.annotate_delegate_graph(
         [delegate],
         reachable_hosts={
-            ("lambda-core", "windows"): True,
-            ("wheatley", "linux"): True,
+            ("atlas-core", "windows"): True,
+            ("ember", "linux"): True,
         },
     )
 
     assert delegate["caller_state"]["state"] == "gone"
-    assert delegate["caller_state"]["machine"] == "lambda-core"
+    assert delegate["caller_state"]["machine"] == "atlas-core"
     assert delegate["caller_state"]["platform"] == "windows"
     assert delegate["delegate_finalizable"] is True
 
@@ -181,17 +181,17 @@ def test_build_list_json_payload_adds_delegate_annotations(monkeypatch):
         profile_assignment_history=False,
     )
     host = _record(
-        "lambda-core-wsl-20260101-host",
-        machine="lambda-core",
+        "atlas-core-wsl-20260101-host",
+        machine="atlas-core",
         platform="wsl",
         status="finalized",
     )
     delegate = _record(
-        "wheatley-linux-20260101-delegate",
-        machine="wheatley",
+        "ember-linux-20260101-delegate",
+        machine="ember",
         platform="linux",
         status="active",
-        caller_worktree="lambda-core-wsl-20260101-host",
+        caller_worktree="atlas-core-wsl-20260101-host",
     )
     monkeypatch.setattr(
         list_cli.sessions,
@@ -202,36 +202,36 @@ def test_build_list_json_payload_adds_delegate_annotations(monkeypatch):
     payload = list_cli._build_list_json_payload(args, [host, delegate], stamp_session_state=False)
     by_id = {row["id"]: row for row in payload["worktrees"]}
 
-    assert by_id["wheatley-linux-20260101-delegate"]["caller_state"]["state"] == "resolved"
-    assert by_id["wheatley-linux-20260101-delegate"]["delegate_finalizable"] is True
-    assert by_id["lambda-core-wsl-20260101-host"]["delegates"][0]["worktree_id"] == (
-        "wheatley-linux-20260101-delegate"
+    assert by_id["ember-linux-20260101-delegate"]["caller_state"]["state"] == "resolved"
+    assert by_id["ember-linux-20260101-delegate"]["delegate_finalizable"] is True
+    assert by_id["atlas-core-wsl-20260101-host"]["delegates"][0]["worktree_id"] == (
+        "ember-linux-20260101-delegate"
     )
 
 
 def test_run_fleet_json_annotates_delegate_graph(monkeypatch):
     hosts = [
         {
-            "machine": "lambda-core",
+            "machine": "atlas-core",
             "env": "wsl",
             "reachable": True,
             "worktrees": [_row(
-                "lambda-core-wsl-20260101-host",
-                machine="lambda-core",
+                "atlas-core-wsl-20260101-host",
+                machine="atlas-core",
                 platform="wsl",
                 status="finalized",
             )],
         },
         {
-            "machine": "wheatley",
+            "machine": "ember",
             "env": "linux",
             "reachable": True,
             "worktrees": [_row(
-                "wheatley-linux-20260101-delegate",
-                machine="wheatley",
+                "ember-linux-20260101-delegate",
+                machine="ember",
                 platform="linux",
                 status="active",
-                caller_worktree="lambda-core-wsl-20260101-host",
+                caller_worktree="atlas-core-wsl-20260101-host",
             )],
         },
     ]
@@ -239,8 +239,8 @@ def test_run_fleet_json_annotates_delegate_graph(monkeypatch):
         list_views_cli,
         "_fleet_targets",
         lambda config: [
-            ("lambda-core", "wsl", "lambda-core-wsl", "bash", True),
-            ("wheatley", "linux", "wheatley", "bash", False),
+            ("atlas-core", "wsl", "atlas-core-wsl", "bash", True),
+            ("ember", "linux", "ember", "bash", False),
         ],
     )
     monkeypatch.setattr(
@@ -251,7 +251,7 @@ def test_run_fleet_json_annotates_delegate_graph(monkeypatch):
     monkeypatch.setattr(
         list_views_cli.cfg,
         "load_config",
-        lambda: SimpleNamespace(machine="lambda-core", platform="wsl", default_repo=SimpleNamespace(anchor=".")),
+        lambda: SimpleNamespace(machine="atlas-core", platform="wsl", default_repo=SimpleNamespace(anchor=".")),
     )
     monkeypatch.setattr(list_views_cli.cfg, "project_name", lambda: "agent-worktrees")
 
@@ -305,36 +305,36 @@ def test_cmd_list_stream_emits_classified_rows_progressively(monkeypatch):
 
 def test_run_delegates_execute_finalizes_only_eligible(monkeypatch):
     eligible = _row(
-        "wheatley-linux-20260101-delegate",
-        machine="wheatley",
+        "ember-linux-20260101-delegate",
+        machine="ember",
         platform="linux",
         status="active",
-        caller_worktree="lambda-core-wsl-20260101-host",
+        caller_worktree="atlas-core-wsl-20260101-host",
     )
-    eligible["caller_state"] = {"state": "resolved", "worktree_id": "lambda-core-wsl-20260101-host"}
+    eligible["caller_state"] = {"state": "resolved", "worktree_id": "atlas-core-wsl-20260101-host"}
     eligible["delegate_finalizable"] = True
     eligible["delegate_finalizable_reason"] = "host-finalized"
     blocked = _row(
-        "wheatley-linux-20260101-blocked",
-        machine="wheatley",
+        "ember-linux-20260101-blocked",
+        machine="ember",
         platform="linux",
         status="active",
-        caller_worktree="lambda-core-wsl-20260101-live",
+        caller_worktree="atlas-core-wsl-20260101-live",
     )
-    blocked["caller_state"] = {"state": "resolved", "worktree_id": "lambda-core-wsl-20260101-live"}
+    blocked["caller_state"] = {"state": "resolved", "worktree_id": "atlas-core-wsl-20260101-live"}
     blocked["delegate_finalizable"] = False
     blocked["delegate_finalizable_reason"] = "host-active"
     monkeypatch.setattr(
         delegate_cli,
         "_fleet_snapshot",
-        lambda **kwargs: [{"machine": "wheatley", "env": "linux", "reachable": True, "worktrees": [eligible, blocked]}],
+        lambda **kwargs: [{"machine": "ember", "env": "linux", "reachable": True, "worktrees": [eligible, blocked]}],
     )
     monkeypatch.setattr(delegate_cli.cfg, "project_name", lambda: "agent-worktrees")
     monkeypatch.setattr(delegate_cli.cfg, "load_config", lambda: SimpleNamespace())
     monkeypatch.setattr(
         delegate_cli.list_views_cli,
         "_fleet_targets",
-        lambda config: [("wheatley", "linux", "wheatley", "bash", False)],
+        lambda config: [("ember", "linux", "ember", "bash", False)],
     )
     seen = []
 
@@ -350,10 +350,10 @@ def test_run_delegates_execute_finalizes_only_eligible(monkeypatch):
     assert rc == 0
     payload = json.loads(buf.getvalue())
 
-    assert seen == ["wheatley-linux-20260101-delegate"]
-    assert [row["id"] for row in payload["eligible"]] == ["wheatley-linux-20260101-delegate"]
-    assert [row["id"] for row in payload["blocked"]] == ["wheatley-linux-20260101-blocked"]
-    assert payload["changed"] == [{"worktree_id": "wheatley-linux-20260101-delegate", "ok": True, "success": True}]
+    assert seen == ["ember-linux-20260101-delegate"]
+    assert [row["id"] for row in payload["eligible"]] == ["ember-linux-20260101-delegate"]
+    assert [row["id"] for row in payload["blocked"]] == ["ember-linux-20260101-blocked"]
+    assert payload["changed"] == [{"worktree_id": "ember-linux-20260101-delegate", "ok": True, "success": True}]
 
 
 def test_finalize_target_parses_banner_noise(monkeypatch):
@@ -373,10 +373,10 @@ def test_finalize_target_parses_banner_noise(monkeypatch):
     )
 
     result = delegate_cli._finalize_target(
-        _row("wt", machine="lambda-core", platform="wsl", status="active"),
+        _row("wt", machine="atlas-core", platform="wsl", status="active"),
         project="agent-worktrees",
         timeout=5,
-        host_index={("lambda-core", "wsl"): ("lambda-core-wsl", "bash", True)},
+        host_index={("atlas-core", "wsl"): ("atlas-core-wsl", "bash", True)},
     )
 
     assert result["ok"] is True

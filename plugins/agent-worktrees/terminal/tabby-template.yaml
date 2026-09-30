@@ -17,7 +17,7 @@ profile:
     env: {}
 
 colorScheme:
-  name: Aperture Science
+  name: Example Research
   foreground: "#E8DFD0"
   background: "#0C0C0C"
   cursor: "#F6A821"

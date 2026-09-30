@@ -379,7 +379,7 @@ Verbatim from the operator:
   primitives and their callers to build session-qualified
   `session:window.pane` targets when the owning session is known and to fail
   closed on ambiguous bare-id fallback instead of guessing.
-- [x] **Session/worktree head-claim tracking fix (gitea aperture-labs#7230).**
+- [x] **Session/worktree head-claim tracking fix.**
   Discovered while live-validating the above: a worktree kept resuming into
   a stale predecessor session instead of its most recent successor, even
   after that predecessor had opened a handoff and successor sessions had
@@ -1294,7 +1294,7 @@ gate land._
 - Cleaned up: disposable successor/predecessor panes and the `--system`
   worktree used for the live test were all removed after validation.
 
-### 2026-09-20 — Session/worktree head-claim tracking fix (gitea aperture-labs#7230)
+### 2026-09-20 — Session/worktree head-claim tracking fix
 
 - Root cause: `register_session`'s auto-claim-of-head branch was gated by
   "no pending handoffs at all", so a predecessor that had merely opened a
@@ -1339,7 +1339,7 @@ gate land._
 ### 2026-09-20 — Symptom-bug sweep + durable instructions.md fallback guidance
 
 - Per operator direction: swept every filed context-handoff/agent-worktrees
-  symptom bug across both trackers (aperture-labs Gitea + this repo's GitHub
+  symptom bug across both trackers (private-downstream-repo Gitea + this repo's GitHub
   issues) to check for a clean, consistent pattern before continuing.
   Notable open items found: GitHub #3006/#3001/#3000/#2830 (unbounded
   cutover-spawn retries, orphaned/stacked panes, three-way state desync

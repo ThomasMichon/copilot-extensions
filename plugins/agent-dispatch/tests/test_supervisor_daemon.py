@@ -321,24 +321,18 @@ def test_build_command_evaluator_inline_spec():
         "evaluator_spec": {"states": {}}, "all_repos": True, "labels": ["code-review"],
         "evaluator_ref": "review-loop",
     })
-    materialized = {}
-
-    def mat(name, payload):
-        materialized[name] = payload
-        return f"/run/{name}.json"
-
-    cmd = build_command(reg, python="PY", materialize=mat)
-    assert cmd[:4] == ["PY", "-m", "agent_dispatch", "supervise"]
-    assert "--evaluator" in cmd and "/run/evaluator.json" in cmd
-    assert "--all-repos" in cmd
-    assert cmd[cmd.index("--evaluator-ref") + 1] == "review-loop"
-    assert materialized["evaluator"] == {"states": {}}
+    with pytest.raises(UnsupportedKind, match="coordinator-owned"):
+        build_command(reg, python="PY", materialize=lambda *_a: "/run/evaluator.json")
 
 
 def test_build_command_evaluator_path_ref():
-    reg = _reg("e", kind="evaluator", spec={"evaluator": "eval.json", "repo": TEST_REPO})
-    cmd = build_command(reg, python="PY")  # no materializer needed for a path ref
-    assert "--evaluator" in cmd and "eval.json" in cmd
+    reg = _reg(
+        "e",
+        kind="evaluator",
+        spec={"evaluator": "eval.json", "repo": TEST_REPO, "evaluator_ref": "review-loop"},
+    )
+    with pytest.raises(UnsupportedKind, match="coordinator-owned"):
+        build_command(reg, python="PY")
 
 
 def test_build_command_schedule():
@@ -1054,6 +1048,54 @@ def test_reconcile_skips_unsupported_kind():
     assert summary.skipped == ["a"]
     assert summary.started == []
     assert launcher.launched == []
+
+
+def test_reconcile_keeps_evaluator_desired_but_never_launches_it():
+    client = FakeClient(
+        [
+            _reg("lane"),
+            _reg(
+                "eval",
+                kind="evaluator",
+                spec={"repo": TEST_REPO, "evaluator": "eval.json", "evaluator_ref": "review-loop"},
+            ),
+        ]
+    )
+    launcher = FakeLauncher()
+    d = _daemon(client, launcher)
+
+    desired = d._desired()
+    summary = d.reconcile_once()
+
+    assert "lane" in desired
+    assert "eval" in desired
+    assert "eval" in summary.skipped
+    assert not any(rid == "eval" for rid, _proc in launcher.launched)
+
+
+def test_reconcile_keeps_declared_evaluator_desired_but_never_launches_it(monkeypatch):
+    client = FakeClient([_reg("lane")])
+    launcher = FakeLauncher()
+    d = _daemon(client, launcher)
+    monkeypatch.setattr(
+        d,
+        "_declared",
+        lambda: [
+            _reg(
+                "declared-eval",
+                kind="evaluator",
+                spec={"repo": TEST_REPO, "evaluator": "eval.json", "evaluator_ref": "review-loop"},
+            )
+        ],
+    )
+
+    desired = d._desired()
+    summary = d.reconcile_once()
+
+    assert "lane" in desired
+    assert "declared-eval" in desired
+    assert "declared-eval" in summary.skipped
+    assert not any(rid == "declared-eval" for rid, _proc in launcher.launched)
 
 
 # -- serve / single-instance -------------------------------------------------

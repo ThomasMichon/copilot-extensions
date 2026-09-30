@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import os
 import subprocess
@@ -10,12 +11,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .client import DispatchError
 from .loop_commands import _resolve_cli_module
 
 
 def _core():
     return _resolve_cli_module()
+
+
+_DETACHED_CLI_ARGS: argparse.Namespace | None = None
 
 
 def _run_resolution_step(step: Any, *, cwd: str | None = None) -> dict:
@@ -95,8 +98,29 @@ def _spawn_detached_waiter(spec: Any) -> dict:
     from .procutil import detached_kwargs, windowless_python, windowless_python_env
 
     python = sys.executable
-    argv = hibernation.detached_run_argv(spec, python=windowless_python(python))
+    argv = hibernation.detached_run_argv(
+        spec,
+        python=windowless_python(python),
+    )
     env = dict(os.environ)
+    cli_args = _DETACHED_CLI_ARGS
+    if cli_args is not None:
+        if getattr(cli_args, "shared", False):
+            shared_url = os.environ.get("AGENT_DISPATCH_SHARED_URL")
+            if shared_url:
+                env["AGENT_DISPATCH_URL"] = shared_url
+            if os.environ.get("AGENT_DISPATCH_SHARED_TOKEN"):
+                env["AGENT_DISPATCH_TOKEN"] = os.environ["AGENT_DISPATCH_SHARED_TOKEN"]
+            if os.environ.get("AGENT_DISPATCH_SHARED_CONTROL_TOKEN"):
+                env["AGENT_DISPATCH_CONTROL_TOKEN"] = os.environ[
+                    "AGENT_DISPATCH_SHARED_CONTROL_TOKEN"
+                ]
+        elif getattr(cli_args, "url", None):
+            env["AGENT_DISPATCH_URL"] = str(cli_args.url)
+        if getattr(cli_args, "token", None):
+            env["AGENT_DISPATCH_TOKEN"] = str(cli_args.token)
+        if getattr(cli_args, "control_token", None):
+            env["AGENT_DISPATCH_CONTROL_TOKEN"] = str(cli_args.control_token)
     env.update(windowless_python_env(python))
     proc = subprocess.Popen(  # noqa: S603 -- fixed argv (interpreter + our own module)
         argv,
@@ -108,63 +132,72 @@ def _spawn_detached_waiter(spec: Any) -> dict:
     )
     return {"pid": proc.pid, "argv": argv}
 
-def _suspend_for_detached_wait(args: argparse.Namespace, spec: Any) -> dict | None:
-    """Atomically suspend ``spec.task_id`` once its detached waiter is live, and
-    journal a ``task``-kind agent-worktrees claim on the current worktree so
-    it cannot be finalized out from under the still-open task (Boundary I /
-    ThomasMichon/copilot-extensions#2584).
 
-    Closes the gap where ``run --detach`` handed a wait off to a cheap
-    detached process, but the caller's own ``agent-dispatch suspend`` call --
-    a second, separate step the task prompt merely *asks* workers to
-    remember -- was skipped or never reached before the session tore down.
-    That left tasks stuck ``started`` (implying a live agent is actively
-    working) for as long as the external wait ran, sometimes indefinitely
-    once the detached waiter itself died with nothing to notice. Separately,
-    without the claim, a worktree-lifecycle sweep that only checks for a
-    *live session* (correctly absent here -- that's the whole point of
-    hibernation) could still reclaim the worktree the suspended task expects
-    to resume in.
+def _register_run_waiter(args: argparse.Namespace, spec: Any, handle: dict, suspended: dict | None) -> dict | None:
+    """Compatibility wrapper retained for re-export/tests.
 
-    Returns ``None`` when no ``--task`` was given (a plain untracked wait --
-    nothing to suspend or claim). Never raises: neither the suspend nor the
-    claim is allowed to fail the overall detach (the wait is already safely
-    handed off by the time this runs), so any error is folded into the
-    returned dict for the caller to see rather than propagated.
+    Detached waiter registration is now prepared atomically via the coordinator
+    before the child process is spawned, so this helper no longer performs any
+    live registration work.
     """
-    if not spec.task_id:
+    _ = (args, spec, handle, suspended)
+    return None
+
+
+def _rollback_detached_wait(
+    args: argparse.Namespace,
+    spec: Any,
+    suspended: dict | None,
+) -> dict | None:
+    if not spec.task_id or not suspended or "status" not in suspended:
+        return None
+    worker_id = suspended.get("worker_id")
+    if not worker_id:
         return None
     from . import hibernation_claims
 
-    reason = f"hibernating: {' '.join(spec.command)}"
-    claim = hibernation_claims.add_hibernation_claim(spec.task_id, note=reason)
-    # Resolve the owner FROM THE TASK ITSELF, not from CWD/machine-worktree
-    # identity: a headless-embodied worker's actual claim identity is a
-    # `headless-<hash>` worker id, never `machine/worktree`, so composing from
-    # CWD here always 409'd for headless workers ("owned by 'headless-xxx',
-    # not 'machine/worktree'") -- leaving the task `started` (never actually
-    # suspended) for the task's entire wait and continuing to occupy its
-    # pool's concurrency slot the whole time (ThomasMichon/copilot-extensions
-    # #2576's remaining scope; gim-home/odsp-web-harness#458 comment thread).
-    # The task's own `owner` field is always correct for whichever kind of
-    # worker actually holds it, so prefer that and fall back to CWD-derived
-    # identity only if the lookup itself fails.
-    worker_id = None
+    cancelled = None
     try:
         with _core()._client(args) as c:
-            worker_id = c.get(spec.task_id).get("owner")
-    except Exception:  # noqa: BLE001 -- owner lookup is best-effort, never fatal here
-        worker_id = None
-    if not worker_id:
-        worker_id = _core()._resolve_owner(args, verb="run --detach")
-    if worker_id is None:
-        return {"error": "could not resolve the owning worker for suspend", "claim": claim}
-    try:
-        with _core()._client(args) as c:
-            task = c.suspend(spec.task_id, worker_id, reason=reason)
-    except DispatchError as exc:
-        return {"error": str(exc), "worker_id": worker_id, "claim": claim}
-    return {"status": task.get("status"), "worker_id": worker_id, "claim": claim}
+            waiter_generation = suspended.get("waiter_generation")
+            if waiter_generation is not None:
+                cancelled = c.abort_run_waiter(
+                    spec.task_id,
+                    generation=int(waiter_generation),
+                    message="Detached waiter spawn failed before the child armed.",
+                    wake=False,
+                )
+            resumed = c.resume(
+                spec.task_id,
+                worker_id,
+                wake=False,
+                reuse_session=True,
+                expected_generation=suspended.get("generation"),
+                expected_owner_session_id=suspended.get("owner_session_id"),
+            )
+    except Exception as exc:  # noqa: BLE001 -- degraded rollback
+        return {"error": str(exc)}
+    claim_key = suspended.get("claim_key")
+    claim = (
+        hibernation_claims.release_hibernation_claim(str(claim_key))
+        if claim_key
+        else None
+    )
+    return {
+        "status": resumed.get("status"),
+        "claim_released": claim,
+        "waiter_cancelled": cancelled,
+    }
+
+
+def _suspend_for_detached_wait(args: argparse.Namespace, spec: Any) -> dict | None:
+    """Compatibility wrapper retained for re-export/tests.
+
+    The atomic detached-waiter prepare path now owns suspension + waiter
+    preparation together, so this legacy helper is no longer used by `_cmd_run`.
+    """
+    _ = (args, spec)
+    return None
 
 def _cmd_run(args: argparse.Namespace) -> int:
     """Hand a blocking wait to the layer (*hibernate-the-wait*): run ``-- <cmd>``
@@ -197,17 +230,127 @@ def _cmd_run(args: argparse.Namespace) -> int:
         resume_worktree=args.resume,
         task_id=args.task,
         message=args.message,
+        waiter_generation=args.waiter_generation,
     )
 
     if args.detach:
-        handle = _core()._spawn_detached_waiter(spec)
-        suspended = _core()._suspend_for_detached_wait(args, spec)
+        suspended = None
+        waiter = None
+        rollback = None
+        prepared = None
+        if spec.task_id:
+            from . import hibernation_claims
+
+            reason = f"hibernating: {' '.join(spec.command)}"
+            worker_id = None
+            try:
+                with _core()._client(args) as c:
+                    worker_id = c.get(spec.task_id).get("owner")
+            except Exception:  # noqa: BLE001
+                worker_id = None
+            if not worker_id:
+                worker_id = _core()._resolve_owner(args, verb="run --detach")
+            if worker_id is None:
+                return _core()._emit(
+                    {
+                        "detached": False,
+                        "error": "could not resolve the owning worker for suspend",
+                        "claim": None,
+                    }
+                )
+            from . import remote_dispatch
+
+            caller_host = remote_dispatch.local_machine()
+            if not caller_host:
+                caller_host = worker_id.partition("/")[0] or None
+            if not caller_host and spec.resume_worktree:
+                caller_host = spec.resume_worktree.partition("/")[0] or None
+            if not caller_host:
+                return _core()._emit(
+                    {
+                        "detached": False,
+                        "error": "could not resolve the caller host for detached wait recovery",
+                        "claim": None,
+                    }
+                )
+            try:
+                with _core()._client(args) as c:
+                    prepared = c.prepare_run_waiter(
+                        spec.task_id,
+                        worker_id=worker_id,
+                        host=caller_host,
+                        reason=reason,
+                        resume_worktree=spec.resume_worktree or "",
+                        command=list(spec.command),
+                    )
+            except Exception as exc:  # noqa: BLE001
+                rollback = (
+                    _rollback_detached_wait(args, spec, suspended)
+                    if suspended and "status" in suspended
+                    else {"error": str(exc), "claim_released": None}
+                )
+            else:
+                suspended = {
+                    "status": "suspended",
+                    "worker_id": worker_id,
+                    "generation": prepared.get("task_generation"),
+                    "waiter_generation": prepared.get("generation"),
+                    "owner_session_id": prepared.get("owner_session_id"),
+                }
+                claim_key = hibernation_claims.waiter_claim_key(
+                    spec.task_id,
+                    int(prepared["generation"]),
+                )
+                claim = hibernation_claims.add_hibernation_claim(claim_key, note=reason)
+                suspended["claim"] = claim
+                suspended["claim_key"] = claim_key
+                spec = dataclasses.replace(
+                    spec,
+                    waiter_child=True,
+                    waiter_generation=int(prepared["generation"]),
+                )
+                waiter = prepared
+        if spec.task_id and prepared is None:
+            return _core()._emit(
+                {
+                    "detached": False,
+                    "resume_worktree": spec.resume_worktree,
+                    "command": list(spec.command),
+                    "suspended": suspended,
+                    "waiter": waiter,
+                    "rollback": rollback,
+                    "error": "could not prepare the detached waiter transactionally",
+                }
+            )
+        try:
+            globals()["_DETACHED_CLI_ARGS"] = args
+            handle = _core()._spawn_detached_waiter(spec)
+        except Exception as exc:  # noqa: BLE001
+            if suspended and suspended.get("claim") is not None:
+                rollback = _rollback_detached_wait(args, spec, suspended)
+            else:
+                rollback = {"error": str(exc)}
+            return _core()._emit(
+                {
+                    "detached": False,
+                    "resume_worktree": spec.resume_worktree,
+                    "command": list(spec.command),
+                    "suspended": suspended,
+                    "waiter": waiter,
+                    "rollback": rollback,
+                    "error": f"could not spawn detached waiter: {exc}",
+                }
+            )
+        finally:
+            globals()["_DETACHED_CLI_ARGS"] = None
         return _core()._emit(
             {
                 "detached": True,
                 "resume_worktree": spec.resume_worktree,
                 "command": list(spec.command),
                 "suspended": suspended,
+                "waiter": waiter,
+                "rollback": rollback,
                 **handle,
             }
         )
@@ -219,17 +362,105 @@ def _cmd_run(args: argparse.Namespace) -> int:
         except (OSError, subprocess.SubprocessError) as exc:
             print(f"agent-dispatch: run: could not execute the wait: {exc}", file=sys.stderr)
             return 127
+    if getattr(args, "waiter_child", False) and spec.task_id:
+        from . import companion, remote_dispatch
+        waiter_generation = spec.waiter_generation
+        if waiter_generation is None:
+            return _core()._emit(
+                {
+                    "command": list(spec.command),
+                    "returncode": 125,
+                    "resume_worktree": spec.resume_worktree,
+                    "message": "Detached waiter has no registered generation fence.",
+                    "resumed": None,
+                    "waiter": {"accepted": False, "waiter": None},
+                    "claim_released": None,
+                }
+            )
+        host = remote_dispatch.local_machine()
+        start_token = companion.process_start_token(os.getpid())
+        if not host or not start_token:
+            aborted = None
+            try:
+                with _core()._client(args) as c:
+                    aborted = c.abort_run_waiter(
+                        spec.task_id,
+                        generation=waiter_generation,
+                        message=(
+                            "The detached wait could not establish its process identity"
+                            " after spawning. Re-check the external state and decide"
+                            " whether to run the wait again."
+                        ),
+                    )
+            except Exception:  # noqa: BLE001 -- degraded report only
+                aborted = None
+            report = {
+                "command": list(spec.command),
+                "returncode": 125,
+                "resume_worktree": spec.resume_worktree,
+                "message": "Detached waiter could not resolve its process identity.",
+            }
+            report["waiter"] = aborted or {"accepted": False, "waiter": None}
+            report["resumed"] = None
+            report["claim_released"] = None
+            return _core()._emit(report)
+        with _core()._client(args) as c:
+            armed = c.arm_run_waiter(
+                spec.task_id,
+                generation=waiter_generation,
+                pid=os.getpid(),
+                host=host,
+                start_token=start_token,
+            )
+        if not armed.get("accepted"):
+            aborted = None
+            try:
+                with _core()._client(args) as c:
+                    aborted = c.abort_run_waiter(
+                        spec.task_id,
+                        generation=waiter_generation,
+                        message=(
+                            "The detached wait could not arm its coordinator-side"
+                            " registration. Re-check the external state and decide"
+                            " whether to run the wait again."
+                        ),
+                    )
+            except Exception:  # noqa: BLE001 -- degraded report only
+                aborted = None
+            return _core()._emit(
+                {
+                    "command": list(spec.command),
+                    "returncode": 125,
+                    "resume_worktree": spec.resume_worktree,
+                    "message": "Detached waiter could not arm its coordinator-side registration.",
+                    "resumed": None,
+                    "waiter": aborted or armed,
+                    "claim_released": None,
+                }
+            )
+        report = run_and_resume(
+            dataclasses.replace(spec, resume_worktree=None),
+            runner=runner,
+            resumer=lambda *_a: True,
+        )
+        report["resume_worktree"] = spec.resume_worktree
+        with _core()._client(args) as c:
+            waiter = c.finish_run_waiter(
+                spec.task_id,
+                generation=waiter_generation,
+                pid=os.getpid(),
+                host=host,
+                start_token=start_token,
+                message=str(report["message"]),
+            )
+        report["waiter"] = waiter
+        report["resumed"] = None
+        report["claim_released"] = None
+        return _core()._emit(report)
 
     report = run_and_resume(spec, runner=runner, resumer=bridge.send_nudge)
     if spec.task_id:
-        # This is the foreground path: for a detached wait, it's the re-exec'd
-        # child running here (see detached_run_argv), reached exactly once the
-        # wait resolves -- the right moment to retire the claim
-        # _suspend_for_detached_wait journaled, regardless of the wait's
-        # outcome or whether the resume nudge itself succeeded.
-        from . import hibernation_claims
-
-        report["claim_released"] = hibernation_claims.release_hibernation_claim(spec.task_id)
+        report["claim_released"] = None
     return _core()._emit(report)
 
 def _cmd_evaluate(args: argparse.Namespace) -> int:
@@ -237,11 +468,16 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
     its decisions (the *evaluator* half of emitters-and-evaluators). The event
     JSON is read from ``--event-file`` or stdin; the coordinator shape is
     ``{"type": "task.submitted", "task": {...}}``."""
-    from .producers.evaluator import EvaluatorError, SpecEvaluator, evaluate_and_apply
+    from .producers.evaluator import (
+        EvaluatorError,
+        evaluate_and_apply,
+        load_evaluator,
+        load_spec,
+    )
 
     try:
-        spec = json.loads(Path(args.spec).expanduser().read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+        spec = load_spec(args.spec)
+    except (OSError, ValueError, EvaluatorError) as exc:
         print(f"agent-dispatch: cannot read evaluator spec: {exc}", file=sys.stderr)
         return 2
     raw = (
@@ -255,7 +491,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
         print(f"agent-dispatch: event is not valid JSON: {exc}", file=sys.stderr)
         return 2
     try:
-        evaluator = SpecEvaluator(spec)
+        evaluator = load_evaluator(spec, evaluator_ref=args.evaluator_ref)
     except EvaluatorError as exc:
         print(f"agent-dispatch: {exc}", file=sys.stderr)
         return 2
@@ -275,6 +511,16 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
             print(f"agent-dispatch: {exc}", file=sys.stderr)
             return 2
     return _core()._emit(report)
+
+
+def _cmd_verify_submitted(args: argparse.Namespace) -> int:
+    """Explicit, scoped re-check for already-submitted verification tasks."""
+    with _core()._client(args) as c:
+        reports = [
+            c.verify_submitted(task_id, evaluator_ref=args.evaluator_ref)
+            for task_id in args.task_id
+        ]
+    return _core()._emit(reports if len(reports) != 1 else reports[0])
 
 def _cmd_charter_show(args: argparse.Namespace) -> int:
     from .worker_charter import charter_text

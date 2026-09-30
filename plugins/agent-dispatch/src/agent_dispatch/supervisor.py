@@ -147,30 +147,19 @@ _CONCLUSION_PER_CYCLE = 10
 _COLD_RESUME_RETRY_SECONDS = 300
 _MIN_RESERVING_TIMEOUT_SECONDS = 600
 
-
 class _ReservationsUnavailable(Exception):
-    """The coordinator couldn't be reached to list reservations.
-
-    Raised only for a ``strict``/capacity-critical caller that must
-    distinguish "genuinely none" from "unknown" (see ``_active_reservations``)
-    rather than treating a transport blip as if nothing were active.
-    """
-
+    """The coordinator couldn't be reached to list reservations."""
 
 class Supervisor:
     """Reserve -> spawn -> record, with terminal-state reconciliation.
 
-    ``max_concurrent`` caps the number of in-flight spawns (``reserving`` +
-    ``spawned`` reservations). ``max_attempts`` bounds failed spawn attempts per
-    task before it is **dead-lettered** (held, no longer auto-retried; 0 disables
-    the bound). ``label_max_attempts`` optionally overrides that bound **per
-    label** (agent type): a task carrying an overridden label uses the override
-    instead of the global ``max_attempts`` (the most-permissive override wins when
-    a task carries several). This decouples unrelated task classes -- e.g.
-    reviving one label's dead-lettered tasks (raise its bound) without also
-    reviving another label's stale tasks. ``repo`` scopes the lane; ``labels`` (if
-    given) restricts spawning to queued tasks carrying at least one of them -- the
-    **opt-in** so a supervisor only embodies work explicitly marked for autopilot.
+    ``max_concurrent`` caps in-flight spawns. ``max_attempts`` bounds failed spawn
+    attempts before a task is **dead-lettered** (held, no longer auto-retried; 0
+    disables the bound). ``label_max_attempts`` optionally overrides that bound
+    per label; the most permissive matching override wins. ``repo`` scopes the
+    lane; ``labels`` restrict spawning to queued tasks carrying at least one of
+    them -- the **opt-in** so a supervisor only embodies work explicitly marked
+    for autopilot.
     """
 
     def __init__(
@@ -524,7 +513,6 @@ class Supervisor:
                 if key:
                     by_key[key] = reservation
         return list(by_key.values())
-
 
     def _spawn_requires_reusable_worktree(self, task: dict) -> bool:
         selector = getattr(
@@ -1918,7 +1906,7 @@ class Supervisor:
         simple deferred-completion contract.
         """
         status = task.get("status")
-        if status != Status.SUBMITTED or not task.get("goal"):
+        if status not in {Status.SUBMITTED, Status.COMPLETED} or not task.get("goal"):
             return f"task {status}"
         if task.get("result_ref"):
             return "task completed (result-ref recorded)"
@@ -2241,7 +2229,7 @@ class Supervisor:
                     session_override=str(acp_session),
                 )
                 return True, outcome
-            if task.get("status") == Status.SUBMITTED and task.get("completed_by"):
+            if task.get("status") in {Status.SUBMITTED, Status.COMPLETED} and task.get("completed_by"):
                 try:
                     if self.local_body_activity_fn(local_sid) == "IDLE":
                         return True, None
@@ -3361,7 +3349,7 @@ class Supervisor:
         try:
             terminal = self.client.list(
                 repo=self.repo,
-                status=[Status.SUBMITTED, Status.ABANDONED],
+                status=[Status.SUBMITTED, Status.COMPLETED, Status.ABANDONED],
                 evaluator_ref=self.evaluator_ref or "",
                 limit=self.evaluate_limit,
             )
@@ -3381,8 +3369,13 @@ class Supervisor:
                 continue
             self._evaluated.add(tid)  # fire once per process, success or not
             status = task.get("status")
+            if status == Status.SUBMITTED and task.get("require_verification"):
+                continue
             event_type = "task.abandoned" if status == Status.ABANDONED else "task.submitted"
-            event = {"type": event_type, "task": task}
+            event_task = dict(task)
+            if status == Status.COMPLETED and not task.get("require_verification"):
+                event_task["status"] = Status.SUBMITTED
+            event = {"type": event_type, "task": event_task}
             try:
                 decisions = self.evaluator.evaluate(event)
                 results = apply_decisions(
@@ -3391,6 +3384,13 @@ class Supervisor:
                     repo=self.repo,
                     task_id=tid,
                     confirmer=self.client.confirm,
+                    abandoner=lambda task_id, **kwargs: self.client.abandon(
+                        task_id,
+                        worker_id=kwargs.get("actor"),
+                        permitted=True,
+                        reason=kwargs.get("reason"),
+                        expected_status=Status.SUBMITTED,
+                    ),
                 )
             except Exception:  # a domain evaluator/create must never crash the loop
                 log.exception("evaluator pass: advancing task %s failed", tid)

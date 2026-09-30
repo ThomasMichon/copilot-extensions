@@ -64,3 +64,11 @@ def _neutralize_l2(monkeypatch):
     # it (None -> no identity -> fence proceeds without shelling out) so the ssh
     # CLI tests never touch host state. Tests covering the fence opt back in.
     monkeypatch.setattr(coordination, "harness_identity", lambda *a, **k: None)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_launch_memory(monkeypatch, tmp_path):
+    """Keep detached launches' flag records (``launch_memory``) out of the host."""
+    from agent_codespaces import launch_memory
+
+    monkeypatch.setattr(launch_memory, "LAUNCHES_DIR", tmp_path / "launches")

@@ -127,7 +127,7 @@ def slot_descriptor(
 ) -> dict:
     """Render this daemon's own slot-ownership view for ``/health``.
 
-    process-slot-ownership Phase 5 (aperture-labs): "doctor"/"activity"/cockpit
+    process-slot-ownership Phase 5 (private-downstream-repo): "doctor"/"activity"/cockpit
     render ``process -> slot -> owner -> alive?`` -- the routing table's
     ``active``/``previous`` entries are the *slot*, this process's own pid is
     the candidate *owner*, and the self-retire loop's own live status dict is

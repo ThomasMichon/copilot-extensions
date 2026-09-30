@@ -53,17 +53,42 @@ def test_full_happy_path(q):
     started = q.start(t.id, "w1")
     assert started.status == Status.STARTED
     done = q.complete(t.id, "w1", result_ref="pr/42")
-    assert done.status == Status.SUBMITTED
+    assert done.status == Status.COMPLETED
     assert done.result_ref == "pr/42"
     assert done.owner is None
     assert done.completed_by == "w1"
+
+
+def test_complete_self_attests_when_verification_is_not_required(q):
+    t = q.create("work")
+    q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1")
+
+    done = q.complete(t.id, "w1")
+
+    assert done.status == Status.COMPLETED
+    events = q.events(t.id)
+    assert events[-2]["to_status"] == Status.SUBMITTED
+    assert events[-1]["to_status"] == Status.COMPLETED
+    assert events[-1]["note"] == "confirmed by self-attestation"
+
+
+def test_complete_requires_explicit_confirmation_when_flagged(q):
+    t = q.create("work", require_verification=True)
+    q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1")
+
+    done = q.complete(t.id, "w1")
+
+    assert done.status == Status.SUBMITTED
+    assert q.confirm(t.id, actor="evaluator").status == Status.COMPLETED
 
 
 # -- confirm / reopen_completed (the submitted -> completed lifecycle) ------
 
 
 def test_confirm_closes_a_completed_task(q):
-    t = q.create("work")
+    t = q.create("work", require_verification=True)
     q.claim_one("w1")
     q.start(t.id, "w1")
     q.complete(t.id, "w1", result_ref="pr/1")
@@ -78,7 +103,7 @@ def test_confirm_rejects_a_non_submitted_task(q):
 
 
 def test_confirm_is_idempotent_on_replay(q):
-    t = q.create("work")
+    t = q.create("work", require_verification=True)
     q.claim_one("w1")
     q.start(t.id, "w1")
     q.complete(t.id, "w1")
@@ -88,7 +113,7 @@ def test_confirm_is_idempotent_on_replay(q):
 
 
 def test_reopen_completed_returns_to_queued_and_clears_the_claim(q):
-    t = q.create("work")
+    t = q.create("work", require_verification=True)
     q.claim_one("w1")
     q.start(t.id, "w1")
     q.complete(t.id, "w1", result_ref="pr/1")
@@ -109,7 +134,7 @@ def test_reopen_completed_rejects_a_non_submitted_task(q):
 
 
 def test_reopen_completed_records_a_steer_atomically(q):
-    t = q.create("work")
+    t = q.create("work", require_verification=True)
     q.claim_one("w1")
     q.start(t.id, "w1")
     q.complete(t.id, "w1")
@@ -132,7 +157,7 @@ def test_confirmed_and_completed_are_both_in_concluded(q):
 
 def test_abandon_permits_a_completed_but_unconfirmed_task(q):
     """The Completion Review card's Abandon action."""
-    t = q.create("work")
+    t = q.create("work", require_verification=True)
     q.claim_one("w1")
     q.start(t.id, "w1")
     q.complete(t.id, "w1")
@@ -141,7 +166,7 @@ def test_abandon_permits_a_completed_but_unconfirmed_task(q):
 
 
 def test_abandon_rejects_an_already_confirmed_task(q):
-    t = q.create("work")
+    t = q.create("work", require_verification=True)
     q.claim_one("w1")
     q.start(t.id, "w1")
     q.complete(t.id, "w1")
@@ -162,7 +187,7 @@ def test_complete_persists_schema_neutral_structured_result(q):
 
     done = q.complete(t.id, "w1", result_ref="artifact/42", result=result)
 
-    assert done.status == Status.SUBMITTED
+    assert done.status == Status.COMPLETED
     assert done.result_ref == "artifact/42"
     assert done.result == result
     assert done.has_result is True
@@ -272,7 +297,7 @@ def test_complete_without_result_remains_backward_compatible(q):
 
     done = q.complete(t.id, "w1", result_ref="artifact/legacy")
 
-    assert done.status == Status.SUBMITTED
+    assert done.status == Status.COMPLETED
     assert done.result_ref == "artifact/legacy"
     assert done.result is None
 
@@ -289,7 +314,7 @@ def test_same_owner_can_retry_completed_task_to_fill_missing_result(q):
     )
 
     assert retried.event_type == "task.result_recorded"
-    assert retried.task.status == Status.SUBMITTED
+    assert retried.task.status == Status.COMPLETED
     assert retried.task.result == result
     assert q.events(t.id)[-1]["note"] == "complete retry: result recorded"
     repeated = q.complete_with_outcome(t.id, "w1", result=result)
@@ -551,7 +576,7 @@ def test_set_hold_refuses_terminal_task(q):
     q.claim_one("w1", task_id=t.id)
     q.start(t.id, "w1")
     q.complete(t.id, "w1")
-    with pytest.raises(TaskError, match="submitted"):
+    with pytest.raises(TaskError, match="completed"):
         q.set_hold(t.id, reason="too late", actor="operator")
 
 
@@ -839,7 +864,7 @@ def test_suspended_successor_adoption_rejects_stale_snapshot(q):
 
 
 def test_suspended_task_can_complete_without_resume(q):
-    t = q.create("wait for merge")
+    t = q.create("wait for merge", require_verification=True)
     claimed = q.claim_one("w1", task_id=t.id)
     q.start(t.id, "w1", owner_session_id="session-1")
     q.suspend(t.id, "w1", reason="waiting for merge")
@@ -1060,7 +1085,7 @@ def test_bind_owner_session_is_owner_and_generation_fenced(q):
 
 def test_attachment_history_records_bind_release_and_handoff(q):
     """durable-attachment-history: releasing/re-embodying a task must NOT
-    discard the prior session's identity -- reproduces the aperture-labs
+    discard the prior session's identity -- reproduces the private-downstream-repo
     incident (a stuck Intelligence Dampener review released twice, each
     release silently losing the previous session's record)."""
     task = q.create("headless", target_worktree="wt-1", target_machine="m1")
@@ -1559,6 +1584,34 @@ def test_migration_adds_nullable_result_column_to_existing_db(tmp_path):
     assert {"result", "completed_by"} <= columns
 
 
+def test_migration_adds_require_verification_with_false_default(tmp_path):
+    db = tmp_path / "legacy-require-verification.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE tasks (id TEXT PRIMARY KEY)")
+        conn.execute("INSERT INTO tasks(id) VALUES ('legacy-task')")
+
+    q = RealTaskQueue(db)
+
+    assert q.get("legacy-task").require_verification is False
+    with sqlite3.connect(db) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
+        applied = conn.execute(
+            "SELECT COUNT(*) FROM queue_migrations "
+            "WHERE name = '2026-09-29-require-verification-flag'"
+        ).fetchone()[0]
+    assert "require_verification" in columns
+    assert applied == 1
+
+    reopened = RealTaskQueue(db)
+    assert reopened.get("legacy-task").require_verification is False
+    with sqlite3.connect(db) as conn:
+        applied_again = conn.execute(
+            "SELECT COUNT(*) FROM queue_migrations "
+            "WHERE name = '2026-09-29-require-verification-flag'"
+        ).fetchone()[0]
+    assert applied_again == 1
+
+
 def test_migration_renames_legacy_completed_and_confirmed_statuses(tmp_path):
     db = tmp_path / "legacy-statuses.db"
     with sqlite3.connect(db) as conn:
@@ -1607,7 +1660,6 @@ def test_migration_renames_legacy_completed_and_confirmed_statuses(tmp_path):
     q.claim_one("worker-1")
     q.start(fresh.id, "worker-1")
     q.complete(fresh.id, "worker-1")
-    q.confirm(fresh.id)
 
     reopened = RealTaskQueue(db)
     assert reopened.get(fresh.id).status == Status.COMPLETED
@@ -1699,7 +1751,13 @@ def test_events_record_transitions(q):
     q.start(t.id, "w1")
     q.complete(t.id, "w1")
     trail = [e["to_status"] for e in q.events(t.id)]
-    assert trail == [Status.QUEUED, Status.CLAIMED, Status.STARTED, Status.SUBMITTED]
+    assert trail == [
+        Status.QUEUED,
+        Status.CLAIMED,
+        Status.STARTED,
+        Status.SUBMITTED,
+        Status.COMPLETED,
+    ]
 
 
 # -- worker identity + targeting-in-claim ------------------------------------
@@ -1826,7 +1884,7 @@ def _seed_all_states(q):
     q.claim_one("w", task_id=started_t.id)
     q.start(started_t.id, "w")
 
-    completed_t = q.create("completed one", prompt="done")
+    completed_t = q.create("completed one", prompt="done", require_verification=True)
     q.claim_one("w", task_id=completed_t.id)
     q.start(completed_t.id, "w")
     q.complete(completed_t.id, "w")
@@ -1889,6 +1947,28 @@ def test_list_applies_label_filter_before_limit(q):
         )
     ] == [matching.id]
     assert q.list(label="rev", limit=10) == []
+
+
+def test_run_waiter_registration_and_supersession_round_trip(q):
+    t = q.create("wait")
+    q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1", owner_session_id="session-1")
+    q.suspend(t.id, "w1", reason="waiting")
+
+    registered = q.register_run_waiter(
+        t.id,
+        pid=123,
+        host="test-host",
+        start_token="token-123",
+        resume_worktree="m/wt-1",
+        command=["sleep", "1"],
+    )
+    assert registered["generation"] == 1
+    assert q.get_active_run_waiter(t.id)["pid"] == 123
+
+    superseded = q.supersede_run_waiter(t.id, reason="event note wake")
+    assert superseded is not None
+    assert q.get_active_run_waiter(t.id) is None
 
 
 def test_sweep_spans_all_states_except_abandoned(q):

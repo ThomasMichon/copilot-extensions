@@ -1435,8 +1435,8 @@ class TestCmdHandoffCutover:
 
         assert rc == 0
         after = _tracking.load_record(tmp_tracking_dir / "wt-retire-late-ack.yaml")
-        # NOT concluded -- opening the handoff yielded "old-sess" (gitea
-        # aperture-labs#7230), but the token is still pending, so the real
+        # NOT concluded -- opening the handoff yielded "old-sess", but the
+        # token is still pending, so the real
         # handoff must remain linkable.
         assert after.session_entry("old-sess").state == "yielded"
 
@@ -3006,7 +3006,7 @@ class TestCmdHandoffsCheck:
         # The bounded activity log has already aged this handoff's spawn
         # event out -- simulate that by returning nothing from it.
         monkeypatch.setattr(activity, "read_events", lambda **kw: [])
-        monkeypatch.setattr(m.cfg, "active_project", lambda: "aperture-labs")
+        monkeypatch.setattr(m.cfg, "active_project", lambda: "private-downstream-repo")
         monkeypatch.setattr(
             m.handoff_trace, "read_trace",
             lambda project, worktree_id: (

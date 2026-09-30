@@ -23,13 +23,29 @@ narrow surface.
 from __future__ import annotations
 
 import json
+import shlex
+import shutil
 import subprocess
 
-from .procutil import agent_worktrees_launch_prefix, no_window_kwargs
+from . import bridge_remote, remote_dispatch
+from .procutil import (
+    agent_worktrees_launch_prefix,
+    no_window_kwargs,
+    run_ssh_capture,
+)
+
+
+def waiter_claim_key(task_id: str, generation: int) -> str:
+    """Generation-scoped worktree-claim id for one detached waiter attempt."""
+    return f"{task_id}:{int(generation)}"
 
 
 def _mirror_task_claim_status(
-    task_id: str, status: str, *, timeout: float = 15.0
+    task_id: str,
+    status: str,
+    *,
+    project: str | None = None,
+    timeout: float = 15.0,
 ) -> None:
     """Best-effort mirror of this task claim's disposition onto agent-worktrees'
     cross-machine ``task_claim_registry`` (ThomasMichon/copilot-extensions#2584).
@@ -46,10 +62,23 @@ def _mirror_task_claim_status(
     prefix = agent_worktrees_launch_prefix()
     if prefix is None:
         return
+    argv = [*prefix]
+    if project:
+        argv += ["--project", project]
+    argv += [
+        "claims",
+        "mirror-status",
+        "task",
+        task_id,
+        "--status",
+        status,
+        "--holder",
+        "agent-dispatch",
+        "--json",
+    ]
     try:
         subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
-            [*prefix, "claims", "mirror-status", "task", task_id,
-             "--status", status, "--holder", "agent-dispatch", "--json"],
+            argv,
             check=False,
             capture_output=True,
             text=True,
@@ -130,4 +159,111 @@ def release_hibernation_claim(task_id: str, *, timeout: float = 15.0) -> dict | 
     if result.returncode != 0 or not isinstance(payload, dict):
         return None
     _mirror_task_claim_status(task_id, "released", timeout=timeout)
+    return payload
+
+
+def release_hibernation_claim_for_worktree(
+    task_id: str,
+    worktree_id: str,
+    *,
+    timeout: float = 15.0,
+) -> dict | None:
+    """Retire a hibernation claim targeting an explicit worktree id."""
+    prefix = agent_worktrees_launch_prefix()
+    if prefix is None:
+        return None
+    try:
+        result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
+            [*prefix, "claims", "release", task_id, "--worktree", worktree_id, "--json"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            **no_window_kwargs(),
+        )
+        payload = json.loads(result.stdout or "{}")
+    except (OSError, subprocess.SubprocessError, TypeError, ValueError):
+        return None
+    if result.returncode != 0 or not isinstance(payload, dict):
+        return None
+    _mirror_task_claim_status(task_id, "released", timeout=timeout)
+    return payload
+
+
+def release_hibernation_claim_for_host_worktree(
+    task_id: str,
+    host: str | None,
+    worktree_id: str,
+    repo: str | None,
+    *,
+    timeout: float = 15.0,
+) -> dict | None:
+    """Retire a hibernation claim on the machine that originally journaled it."""
+    if not worktree_id:
+        return None
+    from . import identity
+
+    project = identity.name_for_repo(repo) if repo else None
+    current = remote_dispatch.local_machine()
+    if host is None or (current is not None and host == current):
+        prefix = agent_worktrees_launch_prefix()
+        if prefix is None:
+            return None
+        argv = [*prefix]
+        if project:
+            argv += ["--project", project]
+        argv += ["claims", "release", task_id, "--worktree", worktree_id, "--json"]
+        try:
+            result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
+                argv,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                **no_window_kwargs(),
+            )
+            payload = json.loads(result.stdout or "{}")
+        except (OSError, subprocess.SubprocessError, TypeError, ValueError):
+            return None
+        if result.returncode != 0 or not isinstance(payload, dict):
+            return None
+        _mirror_task_claim_status(task_id, "released", project=project, timeout=timeout)
+        return payload
+    ssh = shutil.which("ssh")
+    if ssh is None:
+        return None
+    remote_cmd = " ".join(
+        shlex.quote(part)
+        for part in [
+            "agent-worktrees",
+            *(["--project", project] if project else []),
+            "claims",
+            "release",
+            task_id,
+            "--worktree",
+            worktree_id,
+            "--json",
+        ]
+    )
+    result = run_ssh_capture(
+        [
+            ssh,
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=3",
+            bridge_remote.normalize_host(host),
+            remote_cmd,
+        ],
+        timeout=timeout,
+    )
+    if result is None:
+        return None
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except (TypeError, ValueError):
+        return None
+    if result.returncode != 0 or not isinstance(payload, dict):
+        return None
+    _mirror_task_claim_status(task_id, "released", project=project, timeout=timeout)
     return payload

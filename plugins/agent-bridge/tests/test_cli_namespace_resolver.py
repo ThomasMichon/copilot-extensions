@@ -428,7 +428,7 @@ async def test_resolve_worktree_type_with_host_becomes_ssh_target():
 
     def _run(argv, **_kw):
         return _cp(0, json.dumps({
-            "type": "worktree", "worktree_id": "wt-7", "host": "wheatley",
+            "type": "worktree", "worktree_id": "wt-7", "host": "ember",
         }))
 
     with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
@@ -436,7 +436,7 @@ async def test_resolve_worktree_type_with_host_becomes_ssh_target():
             "task-2",
         )
     assert t.type == "ssh"
-    assert t.host == "wheatley"
+    assert t.host == "ember"
     assert t.worktree_id == "wt-7"
 
 

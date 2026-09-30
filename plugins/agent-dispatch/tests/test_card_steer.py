@@ -355,10 +355,10 @@ def test_set_card_request_input_blocked_regardless_of_registration_machine(q):
         "supervised-lane",
         {"all_repos": True, "labels": ["intelligence-dampener-review"],
          "steering_disallowed_labels": ["intelligence-dampener-review"]},
-        machine="wheatley",
+        machine="ember",
     )
     pinned = _held_with_label(
-        q, label="intelligence-dampener-review", target_machine="lambda-core"
+        q, label="intelligence-dampener-review", target_machine="atlas-core"
     )
     unpinned = _held_with_label(
         q, label="intelligence-dampener-review", worker="w2", target_machine=None
@@ -459,7 +459,7 @@ def test_suspend_rejects_steer_that_arrived_after_card(q):
 def test_submit_steer_rejects_terminal_task(q):
     t = _held(q)
     q.complete(t.id, "w1")
-    with pytest.raises(TaskError, match="reopen_completed"):
+    with pytest.raises(TaskError, match="completed"):
         q.submit_steer(t.id, fields={"x": "y"})
 
 
@@ -570,7 +570,10 @@ def api(tmp_path):
 
 
 def _held_over_http(api, worker="w1"):
-    tid = api.post("/tasks", json={"title": "review PR 42"}).json()["id"]
+    tid = api.post(
+        "/tasks",
+        json={"title": "review PR 42", "require_verification": True},
+    ).json()["id"]
     api.post("/claim", json={"worker_id": worker, "repo": TEST_REPO})
     api.post(
         f"/tasks/{tid}/start",

@@ -184,50 +184,42 @@ substantial in its own right.
 ## Plan
 
 ### Phase 0 — Confirm the exact integration seam per plugin
-- [ ] `agent-worktrees`: confirm the native `update` command's implementation
-      path (already located this session: `update_cli.py` / the
-      `_load_full_command_surface`/version-marker machinery); identify the
-      exact point where it currently rewrites `current-version` and decide
-      where a live-daemon-cutover check must be inserted.
-- [ ] `worktree-manager`: same for its own `update` command
-      (`worktree_manager/__main__.py`'s update path); note the *separate*
-      resident `mux-daemon` (companion process, not the Picker CLI itself)
-      needs its own cutover, distinct from the Picker/CLI's own
-      self-versioning.
-- [ ] `agent-ssh`: **corrected premise (Copilot review, round 1)** — this is
-      NOT a persistent-daemon system. `plugins/agent-ssh/README.md:10`
-      states the CLI "does not require a harness, daemon, or sibling
-      plugin"; `libs/ssh-manager/README.md:39-51` states its Windows proxy
-      broker explicitly "lives in the calling process and closes with its
-      SSH root... No persistent broker service or cached loopback port is
-      created." There is no long-lived resident process here for `zdd`
-      cutover semantics to attach to. Audit instead whether
-      `ssh_manager.forward_keeper` (`libs/ssh-manager/src/ssh_manager/forward_keeper.py`)
-      or any other spawned child can genuinely outlive its parent/session
-      across a release and accumulate — if nothing does, this phase's
-      correct conclusion may be "no cutover needed here; the
-      [`ephemeral-process-reaping`](../../../../../docs/patterns/ephemeral-process-reaping.md)
-      pattern (if not already applied) is the right fix for any leak found,
-      not `zdd`." Do not force this system into the cutover shape if the
-      audit finds nothing that needs it.
-- [ ] For each daemon confirmed to genuinely exist (not assumed), name the
-      concrete **safe cutover point** (the drain boundary). **Correction
-      (Copilot review, round 4):** a sweep-tick boundary alone is too weak
-      for `status-monitor` — `status_monitor_cli.cmd_status_monitor` also
-      serves concurrent hook/classify/tracking-write requests and tracks
-      active handlers and in-flight writes *separately* from the sweep
-      loop, so a generation could retire between sweeps while one of those
-      is still non-resumably in flight. The real drain boundary is
+- [x] `agent-worktrees`: the native `update` command's implementation path is
+      `update_cli.py` / the `_load_full_command_surface`/version-marker
+      machinery; Phase 1 wired the live-daemon-cutover check into the point
+      where it rewrites `current-version`.
+- [x] `worktree-manager`: same seam confirmed for its own `update` command
+      (`worktree_manager/__main__.py`'s update path); the *separate* resident
+      `mux-daemon` (companion process, not the Picker CLI itself) needed its
+      own cutover, distinct from the Picker/CLI's own self-versioning — Phase
+      2 wired both.
+- [x] `agent-ssh`: **not a persistent-daemon system.**
+      `plugins/agent-ssh/README.md:10` states the CLI "does not require a
+      harness, daemon, or sibling plugin"; `libs/ssh-manager/README.md:39-51`
+      states its Windows proxy broker explicitly "lives in the calling
+      process and closes with its SSH root... No persistent broker service
+      or cached loopback port is created." There is no long-lived resident
+      process here for `zdd` cutover semantics to attach to. Phase 3 audited
+      `ssh_manager.forward_keeper` and confirmed the correct fix is the
+      lighter [`ephemeral-process-reaping`](../../../../../docs/patterns/ephemeral-process-reaping.md)
+      pattern, not `zdd` — no cutover adoption needed here.
+- [x] Named the concrete **safe cutover point** (the drain boundary) for
+      each daemon confirmed to genuinely exist. A sweep-tick boundary alone
+      is too weak for `status-monitor` — `status_monitor_cli.cmd_status_monitor`
+      also serves concurrent hook/classify/tracking-write requests and
+      tracks active handlers and in-flight writes *separately* from the
+      sweep loop, so a generation could retire between sweeps while one of
+      those is still non-resumably in flight. The real drain boundary is
       **admission closed (refuse new hook/classify/tracking-write
       connections) AND every already-active handler/write has drained** —
       not merely "between sweeps":
       - `agent-worktrees status-monitor`: admission closed + sweep between
         ticks + every active hook/classify/tracking-write handler drained.
-      - `worktree-manager mux-daemon`: between mapping-registry mutations /
-        republish cycles (confirm during Phase 2 whether it has an
-        equivalent concurrent-handler surface needing the same admission-
-        closed treatment, rather than assuming a simpler shape by default).
-      - `agent-ssh`: pending Phase 0's audit outcome above.
+      - `worktree-manager mux-daemon`: Phase 2 confirmed the equivalent
+        concurrent-handler surface and applied the same admission-closed
+        treatment between mapping-registry mutations / republish cycles.
+      - `agent-ssh`: no drain boundary needed — see the no-adoption
+        conclusion above.
 
 ### Phase 1 — `agent-worktrees` `status-monitor`
 - [x] Vendor `zdd` into `plugins/agent-worktrees/libs/zdd/` (byte-identical

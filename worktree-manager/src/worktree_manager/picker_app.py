@@ -7,7 +7,7 @@ to ``agent-worktrees --json``); it owns no worktree logic or state, and imports
 nothing from the plugin — the process boundary that keeps the coupling one-way.
 
 The UI takes an **injected source** (``Callable[[], list[Worktree]]``) so it can
-render live engine data, a fake/demo engine (Aperture Labs), or a fixture in a
+render live engine data, a fake/demo engine (Example Labs), or a fixture in a
 test, all identically. A headless :func:`capture_svg` renders a screenshot with
 no terminal for demos and golden checks.
 """
@@ -650,7 +650,7 @@ def engine_context_source(project: str) -> ContextSource:
 
 
 def demo_source() -> Source:
-    """A source backed by the bundled Aperture Labs fake engine.
+    """A source backed by the bundled Example Labs fake engine.
 
     Routes through ``engine_client`` + a subprocess to the fake engine, so the
     demo exercises the exact render path (spawn → JSON → dataclass) the real

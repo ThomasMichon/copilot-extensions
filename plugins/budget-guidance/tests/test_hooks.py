@@ -127,13 +127,9 @@ def test_powershell_catalog_remains_available_without_python(tmp_path: Path):
 def test_posix_update_reconciles_old_runtime_without_python(tmp_path: Path):
     env = _python_disabled_environment(tmp_path)
     # This test proves the reconcile itself works without python (the whole
-    # point of the 'pythonless' family) -- it must still explicitly opt in to
-    # the background-reconcile gate to actually reach that code path.
-    project = Path(env["COPILOT_PROJECT_DIR"])
-    (project / ".copilot-extensions").mkdir(parents=True, exist_ok=True)
-    (project / ".copilot-extensions" / "config.yaml").write_text(
-        "background_reconcile_budget-guidance: true\n", encoding="utf-8"
-    )
+    # point of the 'pythonless' family). No opt-in config is needed -- the
+    # background-reconcile gate was removed (agent-bridge-unified-zdd-cutover
+    # Phase 0); a version drift now reconciles unconditionally.
     payload = tmp_path / "payload"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)

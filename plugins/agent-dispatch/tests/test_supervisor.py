@@ -9,6 +9,7 @@ double-spawned.
 from __future__ import annotations
 
 import json
+import sqlite3
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -1152,7 +1153,7 @@ def test_cold_resume_missing_worktree_release_failure_backs_off(
 
 # -- recover_stranded_cold_reservations: the queued+cold orphan gap ---------
 #
-# Confirmed live (aperture-labs PR #7759's stall, 5+ hours, survived a full
+# Confirmed live (the downstream PR's stall, 5+ hours, survived a full
 # supervisor restart): a COLD reservation whose task ends up QUEUED/unowned
 # instead of the SUSPENDED-with-owner shape release_resumed_cold_tasks()
 # expects is a permanent orphan no other sweep ever revisits --
@@ -3946,11 +3947,11 @@ def test_make_headless_spawn_charter_overrides_allocation_agent():
     preserving pre-split behavior."""
     from agent_dispatch.supervisor import make_headless_spawn
 
-    with_charter = make_headless_spawn(agent="Lambda-Core-wsl", charter="cab-sweep-reconciler")
+    with_charter = make_headless_spawn(agent="Atlas-Core-wsl", charter="cab-sweep-reconciler")
     assert with_charter.allocation_agent == "cab-sweep-reconciler"
 
-    without_charter = make_headless_spawn(agent="Lambda-Core-wsl")
-    assert without_charter.allocation_agent == "Lambda-Core-wsl"
+    without_charter = make_headless_spawn(agent="Atlas-Core-wsl")
+    assert without_charter.allocation_agent == "Atlas-Core-wsl"
 
 
 @pytest.mark.parametrize(
@@ -7637,10 +7638,16 @@ _REVIEWER_DONE_RULE = {
 
 
 def _complete(q, title, *, labels=None, **fields):
+    fields.setdefault("require_verification", True)
     t = q.create(title, labels=labels or [], **fields)
     q.claim_one("m/wt-1", task_id=t.id, machine="m", worktree="wt-1")
     q.start(t.id, "m/wt-1")
     q.complete(t.id, "m/wt-1")
+    with sqlite3.connect(q.db_path) as conn:
+        conn.execute(
+            "UPDATE tasks SET require_verification = 0 WHERE id = ?",
+            (t.id,),
+        )
     return t
 
 
