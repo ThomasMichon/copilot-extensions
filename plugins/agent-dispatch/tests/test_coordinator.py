@@ -824,17 +824,27 @@ def test_event_note_wakes_and_supersedes_active_run_waiter(api, monkeypatch):
         f"/tasks/{tid}/suspend",
         json={"worker_id": "w1", "reason": "waiting on external state"},
     )
-    registered = api.post(
+    prepared = api.post(
         f"/tasks/{tid}/run-waiter/register",
         json={
-            "pid": 101,
-            "host": "test-host",
-            "start_token": "token-101",
+            "worker_id": "w1",
+            "reason": "hibernating: sleep 1",
             "resume_worktree": "m/wt-1",
             "command": ["sleep", "1"],
         },
     )
-    assert registered.status_code == 200
+    assert prepared.status_code == 200
+    generation = prepared.json()["generation"]
+    armed = api.post(
+        f"/tasks/{tid}/run-waiter/arm",
+        json={
+            "generation": generation,
+            "pid": 101,
+            "host": "test-host",
+            "start_token": "token-101",
+        },
+    )
+    assert armed.status_code == 200
     sender = _register_event_emitter(api)
     r = api.post(
         f"/tasks/{tid}/event-note",
