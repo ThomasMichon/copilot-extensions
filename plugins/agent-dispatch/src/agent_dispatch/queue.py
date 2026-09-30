@@ -78,6 +78,7 @@ from .queue_handoff_fallback import HandoffFallbackMixin
 from .queue_lifecycle import QueueLifecycleMixin
 from .queue_liveness import LivenessMixin
 from .queue_notifications import QueueNotificationMixin
+from .queue_run_waiters import QueueRunWaitersMixin
 from .queue_producer_fences import (  # noqa: F401 -- re-exported for existing call sites/tests
     ProducerFenceError,
     ProducerFenceMixin,
@@ -136,6 +137,7 @@ class TaskQueue(
     QueueCompletionReviewMixin,
     LivenessMixin,
     HandoffFallbackMixin,
+    QueueRunWaitersMixin,
     QueueSteeringMixin,
     QueueNotificationMixin,
 ):
@@ -317,6 +319,30 @@ class TaskQueue(
             except Exception:
                 conn.execute("ROLLBACK")
                 raise
+            verification_flag = "2026-09-29-require-verification-flag"
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                migrated = conn.execute(
+                    "SELECT 1 FROM queue_migrations WHERE name = ?",
+                    (verification_flag,),
+                ).fetchone()
+                if migrated is None:
+                    try:
+                        conn.execute(
+                            "ALTER TABLE tasks ADD COLUMN require_verification "
+                            "INTEGER NOT NULL DEFAULT 0"
+                        )
+                    except sqlite3.OperationalError as exc:
+                        if "duplicate column name" not in str(exc).lower():
+                            raise
+                    conn.execute(
+                        "INSERT INTO queue_migrations(name, applied_at) VALUES (?, ?)",
+                        (verification_flag, self._now(None)),
+                    )
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
             # Rows completed before ``completed_by`` existed retain their
             # original completing identity when the durable audit trail proves
             # exactly one owner.  A completion retry is a completed->completed
@@ -404,7 +430,31 @@ class TaskQueue(
                 "  taken_at REAL"
                 ")"
             )
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_steer_task ON task_steer(task_id)")
+            conn.execute(            "CREATE INDEX IF NOT EXISTS idx_task_steer_task ON task_steer(task_id)"
+            )
+            conn.execute(
+            "CREATE TABLE IF NOT EXISTS run_waiters ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  task_id TEXT NOT NULL,"
+            "  generation INTEGER NOT NULL,"
+            "  pid INTEGER NOT NULL,"
+            "  host TEXT,"
+            "  start_token TEXT,"
+            "  resume_worktree TEXT NOT NULL,"
+            "  command_json TEXT NOT NULL DEFAULT '[]',"
+            "  state TEXT NOT NULL,"
+            "  retired_reason TEXT,"
+            "  created_at REAL NOT NULL,"
+            "  updated_at REAL NOT NULL"
+            ")"
+            )
+            conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_run_waiters_task "
+            "ON run_waiters(task_id, generation)"
+            )
+            conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_run_waiters_state "
+            "ON run_waiters(state, created_at)")
             # Durable wake outbox. A steer/resume transaction inserts the wake
             # row before commit; the coordinator loop claims and delivers it
             # later. The row id is also the downstream idempotency key, so a

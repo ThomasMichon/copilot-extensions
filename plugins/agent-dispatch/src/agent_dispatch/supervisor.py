@@ -1918,7 +1918,7 @@ class Supervisor:
         simple deferred-completion contract.
         """
         status = task.get("status")
-        if status != Status.SUBMITTED or not task.get("goal"):
+        if status not in {Status.SUBMITTED, Status.COMPLETED} or not task.get("goal"):
             return f"task {status}"
         if task.get("result_ref"):
             return "task completed (result-ref recorded)"
@@ -2241,7 +2241,7 @@ class Supervisor:
                     session_override=str(acp_session),
                 )
                 return True, outcome
-            if task.get("status") == Status.SUBMITTED and task.get("completed_by"):
+            if task.get("status") in {Status.SUBMITTED, Status.COMPLETED} and task.get("completed_by"):
                 try:
                     if self.local_body_activity_fn(local_sid) == "IDLE":
                         return True, None
@@ -3361,7 +3361,7 @@ class Supervisor:
         try:
             terminal = self.client.list(
                 repo=self.repo,
-                status=[Status.SUBMITTED, Status.ABANDONED],
+                status=[Status.SUBMITTED, Status.COMPLETED, Status.ABANDONED],
                 evaluator_ref=self.evaluator_ref or "",
                 limit=self.evaluate_limit,
             )
@@ -3381,8 +3381,13 @@ class Supervisor:
                 continue
             self._evaluated.add(tid)  # fire once per process, success or not
             status = task.get("status")
+            if status == Status.SUBMITTED and task.get("require_verification"):
+                continue
             event_type = "task.abandoned" if status == Status.ABANDONED else "task.submitted"
-            event = {"type": event_type, "task": task}
+            event_task = dict(task)
+            if status == Status.COMPLETED and not task.get("require_verification"):
+                event_task["status"] = Status.SUBMITTED
+            event = {"type": event_type, "task": event_task}
             try:
                 decisions = self.evaluator.evaluate(event)
                 results = apply_decisions(
@@ -3391,6 +3396,13 @@ class Supervisor:
                     repo=self.repo,
                     task_id=tid,
                     confirmer=self.client.confirm,
+                    abandoner=lambda task_id, **kwargs: self.client.abandon(
+                        task_id,
+                        worker_id=kwargs.get("actor"),
+                        permitted=True,
+                        reason=kwargs.get("reason"),
+                        expected_status=Status.SUBMITTED,
+                    ),
                 )
             except Exception:  # a domain evaluator/create must never crash the loop
                 log.exception("evaluator pass: advancing task %s failed", tid)

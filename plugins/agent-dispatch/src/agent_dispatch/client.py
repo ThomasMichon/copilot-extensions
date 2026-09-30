@@ -14,8 +14,8 @@ import httpx
 from .client_completion_review import CompletionReviewMixin
 from .client_registrations import RegistrationClientMixin
 from .client_suspend import SuspendClientMixin
+from .client_verification import VerificationClientMixin
 from .client_worktree_status import WorktreeStatusClientMixin
-
 class DispatchError(RuntimeError):
     """A non-2xx response from the coordinator (carries status + detail)."""
 
@@ -42,9 +42,7 @@ class DispatchUpgradeRequired(DispatchError):
         super().__init__(426, detail)
 
 
-class DispatchClient(
-    RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin
-):
+class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(

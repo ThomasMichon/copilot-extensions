@@ -59,6 +59,7 @@ _KNOWN_KEYS = frozenset(
         "worker_guidance",
         "worker_identity",
         "allow_self_config_changes",
+        "require_verification",
     }
 )
 _FORGE_KEYS = frozenset({"provider", "producer_login", "discovery_scope"})
@@ -194,6 +195,11 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
         minimum=1,
     )
     quiet = _number(data, "quiet_period_seconds", default=0, minimum=0)
+    require_verification = data.get("require_verification", False)
+    if not isinstance(require_verification, bool):
+        raise RegistrarError(
+            "repository-issue-loop require_verification: expected true/false"
+        )
     batch_size = _number(data, "batch_size", default=1, minimum=1)
     if not float(batch_size).is_integer():
         raise RegistrarError(
@@ -392,6 +398,7 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
         "include_labels": list(include),
         "exclude_labels": list(exclude),
         "priority_labels": list(priority),
+        "require_verification": require_verification,
         "batch_size": int(batch_size),
         "task_label": task_label,
         "forge": {
@@ -1687,6 +1694,7 @@ def run_tick(
             "origin_ref": discovered["origin_ref"],
             "dedup_key": discovered["origin_ref"],
             "exclusive_key": discovered["exclusive_key"],
+            "require_verification": bool(config.get("require_verification", False)),
             # A repository issue task cannot become runnable until every
             # external-resource reservation is bound successfully.
             "proposed": True,

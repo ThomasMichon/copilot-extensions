@@ -321,24 +321,14 @@ def test_build_command_evaluator_inline_spec():
         "evaluator_spec": {"states": {}}, "all_repos": True, "labels": ["code-review"],
         "evaluator_ref": "review-loop",
     })
-    materialized = {}
-
-    def mat(name, payload):
-        materialized[name] = payload
-        return f"/run/{name}.json"
-
-    cmd = build_command(reg, python="PY", materialize=mat)
-    assert cmd[:4] == ["PY", "-m", "agent_dispatch", "supervise"]
-    assert "--evaluator" in cmd and "/run/evaluator.json" in cmd
-    assert "--all-repos" in cmd
-    assert cmd[cmd.index("--evaluator-ref") + 1] == "review-loop"
-    assert materialized["evaluator"] == {"states": {}}
+    with pytest.raises(UnsupportedKind, match="coordinator-owned"):
+        build_command(reg, python="PY", materialize=lambda *_a: "/run/evaluator.json")
 
 
 def test_build_command_evaluator_path_ref():
     reg = _reg("e", kind="evaluator", spec={"evaluator": "eval.json", "repo": TEST_REPO})
-    cmd = build_command(reg, python="PY")  # no materializer needed for a path ref
-    assert "--evaluator" in cmd and "eval.json" in cmd
+    with pytest.raises(UnsupportedKind, match="coordinator-owned"):
+        build_command(reg, python="PY")
 
 
 def test_build_command_schedule():

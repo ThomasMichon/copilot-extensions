@@ -30,7 +30,8 @@ class RegistrationClientMixin:
             "machine": machine,
             "env": env,
         }
-        return self._unwrap(self._http.post("/registrations", json=body))
+        headers = self._control_headers() if kind == "evaluator" else None
+        return self._unwrap(self._http.post("/registrations", json=body, headers=headers))
 
     def list_registrations(
         self,

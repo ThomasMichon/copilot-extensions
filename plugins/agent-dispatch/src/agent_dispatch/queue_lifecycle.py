@@ -128,7 +128,7 @@ class QueueLifecycleMixin:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
 
-            if task.status == Status.SUBMITTED and encoded_result is not None:
+            if task.status in {Status.SUBMITTED, Status.COMPLETED} and encoded_result is not None:
                 completing_owner = task.completed_by
                 if completing_owner is None:
                     completion_workers = self._completion_event_workers(conn, task_id)
@@ -185,8 +185,8 @@ class QueueLifecycleMixin:
                     conn,
                     task_id,
                     ts=ts,
-                    from_status=Status.SUBMITTED,
-                    to_status=Status.SUBMITTED,
+                    from_status=task.status,
+                    to_status=task.status,
                     worker=worker_id,
                     note="complete retry: result recorded",
                 )
@@ -235,10 +235,26 @@ class QueueLifecycleMixin:
                 worker=worker_id,
                 note="complete",
             )
+            event_type = "task.submitted"
+            if not task.require_verification:
+                conn.execute(
+                    "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
+                    (Status.COMPLETED, ts, task_id),
+                )
+                self._audit(
+                    conn,
+                    task_id,
+                    ts=ts,
+                    from_status=Status.SUBMITTED,
+                    to_status=Status.COMPLETED,
+                    worker=worker_id,
+                    note="confirmed by self-attestation",
+                )
+                event_type = "task.completed"
             completed = self._fetch(conn, task_id)
             assert completed is not None
             conn.execute("COMMIT")
-        return CompletionOutcome(completed, "task.submitted")
+        return CompletionOutcome(completed, event_type)
 
     @staticmethod
     def _completion_event_workers(conn: sqlite3.Connection, task_id: str) -> list[str]:

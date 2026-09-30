@@ -273,6 +273,45 @@ def test_kick_without_labels_is_recipe_labels_only(monkeypatch):
     assert captured["ns"].label == ["recipe:goal-driven", "kind:goal"]
 
 
+def test_kick_inherits_recipe_verification_default_and_allows_override(monkeypatch):
+    recipe = recipes.Recipe(
+        name="verifying",
+        summary="test",
+        params=(recipes.RecipeParam("goal", "goal"),),
+        title_template="{goal}",
+        goal_template="{goal}",
+        done_criteria="done",
+        charter_template="do it",
+        suspend_on=(),
+        resolution="done",
+        require_verification=True,
+    )
+    monkeypatch.setitem(recipes.REGISTRY, "verifying", recipe)
+    captured = {}
+    monkeypatch.setattr(
+        "agent_dispatch.__main__._cmd_create",
+        lambda ns: captured.setdefault("ns", ns) or 0,
+    )
+
+    _cmd_recipes_kick(_args(["recipes", "kick", "verifying", "--param", "goal=x"]))
+    assert captured["ns"].require_verification is True
+
+    captured.clear()
+    _cmd_recipes_kick(
+        _args(
+            [
+                "recipes",
+                "kick",
+                "verifying",
+                "--param",
+                "goal=x",
+                "--no-require-verification",
+            ]
+        )
+    )
+    assert captured["ns"].require_verification is False
+
+
 # -- MCP tools ---------------------------------------------------------------
 
 

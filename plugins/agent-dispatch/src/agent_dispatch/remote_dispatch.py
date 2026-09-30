@@ -180,6 +180,8 @@ def build_remote_create_argv(
         argv += ["--target-repo", args.target_repo]
     if getattr(args, "evaluator_ref", None):
         argv += ["--evaluator-ref", args.evaluator_ref]
+    if getattr(args, "require_verification", False):
+        argv += ["--require-verification"]
     if getattr(args, "target_worktree", None):
         argv += ["--target-worktree", args.target_worktree]
     if getattr(args, "exclusive_key", None):
@@ -190,8 +192,6 @@ def build_remote_create_argv(
         argv += ["--source", args.source]
     if getattr(args, "origin_ref", None):
         argv += ["--origin-ref", args.origin_ref]
-    if getattr(args, "evaluator_ref", None):
-        argv += ["--evaluator-ref", args.evaluator_ref]
     if getattr(args, "dedup_key", None):
         argv += ["--dedup-key", args.dedup_key]
     if getattr(args, "producer_id", None):

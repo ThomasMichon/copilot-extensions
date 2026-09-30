@@ -8,10 +8,12 @@ behavior change.
 from __future__ import annotations
 
 from dataclasses import asdict
+import secrets
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 
+from .registrations import RegistrationKind
 from .queue import TaskError, TaskQueue
 
 
@@ -58,7 +60,19 @@ class RegistrationStatusBody(BaseModel):
     status: str
 
 
-def register_registry_routes(app: FastAPI, queue: TaskQueue) -> None:
+def _bearer_credential(authorization: str) -> str | None:
+    parts = authorization.split(None, 1)
+    if len(parts) != 2 or parts[0].casefold() != "bearer" or not parts[1]:
+        return None
+    return parts[1]
+
+
+def register_registry_routes(
+    app: FastAPI,
+    queue: TaskQueue,
+    *,
+    control_token: str | None = None,
+) -> None:
     # -- schedule registry ---------------------------------------------------
 
     @app.post("/schedules")
@@ -103,9 +117,33 @@ def register_registry_routes(app: FastAPI, queue: TaskQueue) -> None:
     # -- supervisor registrations --------------------------------------------
 
     @app.post("/registrations")
-    def register_registration(body: RegistrationBody) -> dict:
+    def register_registration(request: Request, body: RegistrationBody) -> dict:
         """Register (or upsert) a supervision unit; return its handle. 400 on a
         malformed kind/spec."""
+        if body.kind == RegistrationKind.EVALUATOR:
+            if control_token is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "code": "producer_control_unavailable",
+                        "operation": "register",
+                        "reason": "control_authority_not_configured",
+                        "message": "evaluator registrations require a configured control token",
+                        "retryable": False,
+                    },
+                )
+            credential = _bearer_credential(request.headers.get("authorization", ""))
+            if credential is None or not secrets.compare_digest(credential, control_token):
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "producer_control_forbidden",
+                        "operation": "register",
+                        "reason": "invalid_control_authority",
+                        "message": "invalid or missing control bearer for evaluator registration",
+                        "retryable": False,
+                    },
+                )
         try:
             return asdict(
                 queue.register_registration(

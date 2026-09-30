@@ -84,4 +84,4 @@ def test_lifecycle_mixin_methods_work_end_to_end(tmp_path):
     outcome = q.complete_with_outcome(task.id, "worker-1", result={"ok": True})
 
     assert isinstance(outcome, CompletionOutcome)
-    assert outcome.task.status == "submitted"
+    assert outcome.task.status == "completed"

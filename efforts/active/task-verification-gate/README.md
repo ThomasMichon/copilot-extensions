@@ -209,13 +209,13 @@ briefly executed against and then paused -- see Journal):
 ## Plan
 
 ### Phase 1 -- `require_verification` flag + state-machine gating
-- [ ] Add `require_verification BOOLEAN NOT NULL DEFAULT 0` to `tasks`
+- [x] Add `require_verification BOOLEAN NOT NULL DEFAULT 0` to `tasks`
       (schema migration). **Every existing row defaults to `false`** --
       this migration alone does *not* opt any historical task into
       verification; see Phase 2's explicit backfill note.
-- [ ] `create`/`propose` CLI + API accept `--require-verification` /
+- [x] `create`/`propose` CLI + API accept `--require-verification` /
       `require_verification` kwarg.
-- [ ] `complete()` behavior, reconciled with *verify-the-completion-claim*'s
+- [x] `complete()` behavior, reconciled with *verify-the-completion-claim*'s
       existing self-tracked-task language rather than contradicting it:
       today `complete()` always lands a task at `SUBMITTED`
       (`plugins/agent-dispatch/tests/test_queue.py`) and requires a
@@ -229,29 +229,29 @@ briefly executed against and then paused -- see Journal):
       lands at `SUBMITTED` only; an explicit `confirm()`/`abandon()`
       (evaluator or manual) is required to leave that state, and no
       auto-attestation ever happens.
-- [ ] **Revise `visions/plugins/agent-dispatch/README.md`'s
+- [x] **Revise `visions/plugins/agent-dispatch/README.md`'s
       *verify-the-completion-claim* section** to name this explicit
       `require_verification` flag and its two paths, rather than leaving
       the self-tracked-task path implicit prose only -- this is a
       vision-extending change (new stated intent), not a silent
       reinterpretation.
-- [ ] Recipe/producer-level default inheritance: a producer (e.g. a
+- [x] Recipe/producer-level default inheritance: a producer (e.g. a
       `repository-issue-loop`/`reviewer-loop` recipe declaration) may set a
       default `require_verification` for every task it creates, so a caller
       doesn't need to pass the flag on every dispatch.
-- [ ] Tests: state-machine transition tests for both flag values; schema
+- [x] Tests: state-machine transition tests for both flag values; schema
       migration test (confirms the default is `false` and no existing
       behavior for unflagged tasks changes); CLI flag tests.
 
 ### Phase 2a -- Whole-goal evaluator invocation
-- [ ] Add an **`Abandon`** decision type to `producers/evaluator.py`
+- [x] Add an **`Abandon`** decision type to `producers/evaluator.py`
       (parallel to the existing `Confirm`), wired through `apply_decisions`
       (`abandoner` callable, `client.abandon`-shaped). Retire the framing of
       a general `Requeue`/progress-audit decision -- the evaluator's
       vocabulary stays `Complete` (rename `Confirm` at the decision-name
       level if that reads clearer; the state-machine verb `confirm()`
       itself is unchanged) / `Abandon` / `NoOp` only.
-- [ ] Add a **command/script evaluator kind** alongside the existing
+- [x] Add a **command/script evaluator kind** alongside the existing
       declarative `SpecEvaluator`, matching the operator's own "a task
       itself may be assigned to a script, not an agent" precedent -- with
       an explicit safety boundary: `evaluator_ref` on a task remains an
@@ -265,7 +265,7 @@ briefly executed against and then paused -- see Journal):
       applying any decision. Design the interface so a *future*
       agent-backed evaluator is a drop-in third kind, without over-building
       that future today.
-- [ ] The evaluator has **three trigger paths** (a bare `task.submitted`
+- [x] The evaluator has **three trigger paths** (a bare `task.submitted`
       event alone cannot cover backfill or a re-check when external state
       later changes):
       1. **Event-triggered** at the `task.submitted` lifecycle event -- the
@@ -288,7 +288,7 @@ briefly executed against and then paused -- see Journal):
       three paths is triggered by a specific, real event (a submission, an
       explicit opt-in call, or an external-state event note), never a
       periodic sweep of every flagged row.
-- [ ] Tests: script-evaluator invocation (stdin/stdout contract, timeout,
+- [x] Tests: script-evaluator invocation (stdin/stdout contract, timeout,
       malformed-output handling, no-shell/fixed-argv enforcement), scoping
       (never touches non-`SUBMITTED` or unflagged tasks), `Abandon`/
       `Complete` decisions end-to-end, and each of the three trigger paths
@@ -297,7 +297,7 @@ briefly executed against and then paused -- see Journal):
       left permanently unchecked).
 
 ### Phase 2b -- `run`-outage recovery sweep
-- [ ] **Durable waiter registration is a prerequisite this phase must add**
+- [x] **Durable waiter registration is a prerequisite this phase must add**
       (`doctor` does not already provide this): when a `run --detach`
       waiter spawns, persist its PID, host identity, and a
       process-start/identity fence (matching the same PID-reuse-safe
@@ -314,7 +314,7 @@ briefly executed against and then paused -- see Journal):
       already resolved correctly. The recovery sweep below must
       compare-and-set only against a still-*active* generation, so it can
       never race a normal, concurrent completion.
-- [ ] On coordinator startup (or a bounded post-recovery check), sweep
+- [x] On coordinator startup (or a bounded post-recovery check), sweep
       tasks with a durably-registered outstanding `run` waiter and probe
       each one host-aware, by PID *and* the recorded start-identity fence
       (never bare PID alone, which risks a false "dead" on PID reuse).
@@ -324,17 +324,17 @@ briefly executed against and then paused -- see Journal):
       a cross-host waiter this coordinator can't probe) -> **left alone,
       never treated as dead** (same fail-safe posture `doctor`'s existing
       verdicts already use).
-- [ ] Wake each **confirmed-dead** task's owner with an explicit
+- [x] Wake each **confirmed-dead** task's owner with an explicit
       "infrastructure failure, try again" result -- the same delivery shape
       `run` already uses for a normal wake (buffered stdio + exit code),
       just carrying a synthetic failure payload instead of a real one.
-- [ ] Explicitly out of scope for this phase (per the settled design): a
+- [x] Explicitly out of scope for this phase (per the settled design): a
       `run` command that itself hangs/deadlocks has no system-level
       defense -- only the submitting agent knows a reasonable bound. Also
       out of scope: "blessed" `run` requests routed to a registered emitter
       instead of an arbitrary command -- a possible future refinement noted
       in `inception-transcript.md`, not required here.
-- [ ] Tests: a simulated coordinator-restart scenario with an outstanding
+- [x] Tests: a simulated coordinator-restart scenario with an outstanding
       `run` call resolves to the explicit failure wake-up, not a silent
       stall; a genuinely-still-running `run` call is left alone; **a waiter
       that resolves normally right around the same time a startup sweep
@@ -343,13 +343,13 @@ briefly executed against and then paused -- see Journal):
       fence.
 
 ### Phase 2c -- Subscribed-emitter event notes wake the task's agent
-- [ ] A **subscribed** emitter (one actively watching its target, e.g. a
+- [x] A **subscribed** emitter (one actively watching its target, e.g. a
       webhook on PR events) may append an **event note** to an existing
       task it's monitoring -- a record of a major external event (merged,
       closed, bug fixed/rejected), never a goal rewrite. This is a new,
       narrow write path distinct from task creation; the task's own goal
       field is never touched by it.
-- [ ] Posting an event note wakes the task's current agent: if actively
+- [x] Posting an event note wakes the task's current agent: if actively
       running, deliver the note as part of its next turn's context; if
       hibernating via `run`, resume it early (before the wrapped wait
       command naturally resolves). **Race, identified on review, that must
@@ -365,7 +365,7 @@ briefly executed against and then paused -- see Journal):
       cancellation of the old waiter (if one exists) is a valid alternative
       but the fence must exist either way; an early resume must never leave
       it ambiguous which attempt owns completion.
-- [ ] Tests: an event note posted while the task is actively running
+- [x] Tests: an event note posted while the task is actively running
       surfaces on the next turn; a note posted while hibernating via `run`
       triggers an early wake with the note in the resume context; a
       goal-rewrite attempt through this path is rejected (only an
@@ -375,37 +375,37 @@ briefly executed against and then paused -- see Journal):
       never able to mutate or release the newer attempt's claim.
 
 ### Phase 3 -- agent-worktrees Tasks pivot manual override
-- [ ] Add a `complete`/`abandon` action to the existing Tasks pivot (which
+- [x] Add a `complete`/`abandon` action to the existing Tasks pivot (which
       already carries steering support) for a `require_verification` task
       sitting at `SUBMITTED` with no evaluator resolving it (or an operator
       who wants to override the evaluator's pending verdict).
-- [ ] Tests: pivot action wiring (existing agent-worktrees test conventions).
+- [x] Tests: pivot action wiring (existing agent-worktrees test conventions).
 
 ### Phase 4 -- Docs
-- [ ] `plugins/agent-dispatch/README.md`: document the flag, the two
+- [x] `plugins/agent-dispatch/README.md`: document the flag, the two
       evaluator kinds, the `run`-outage recovery sweep, and the
       manual-override path in the State model section (alongside the
       existing rename footnote).
-- [ ] Cross-link this effort's outcome from
+- [x] Cross-link this effort's outcome from
       `plugins/agent-dispatch/docs/status-rename-migration-2026-09-29.md`.
 
 ## Validation Plan
 
-- [ ] Full `agent-dispatch` plugin suite green
+- [x] Full `agent-dispatch` plugin suite green
       (`test-supervisor -- python3 tools/run-plugin-tests.py agent-dispatch`).
-- [ ] A `require_verification=false` task's `complete()` still reaches
+- [x] A `require_verification=false` task's `complete()` still reaches
       `COMPLETED` in one call, unchanged from today's *external* behavior
       (internally it now also performs the self-attested corroboration
       step explicitly, per Phase 1's vision reconciliation).
-- [ ] A `require_verification=true` task's `complete()` lands at
+- [x] A `require_verification=true` task's `complete()` lands at
       `SUBMITTED` only, and stays there until an evaluator or manual action
       resolves it.
-- [ ] A registered script evaluator is invoked, via its trusted
+- [x] A registered script evaluator is invoked, via its trusted
       registration (never via caller-supplied `evaluator_ref` content), for
       a `require_verification` `SUBMITTED` task, and its
       `Complete`/`Abandon`/`NoOp` decision is applied correctly -- with no
       progress-audit or goal-rewrite behavior anywhere in the path.
-- [ ] The mechanism never touches a `queued`/`claimed`/`started` task, and
+- [x] The mechanism never touches a `queued`/`claimed`/`started` task, and
       never touches a task with `require_verification=false` or no
       registered evaluator -- confirmed by a fixture covering: a target
       that merged -> `COMPLETED`; a target closed unmerged -> `ABANDONED`;
@@ -414,17 +414,17 @@ briefly executed against and then paused -- see Journal):
       merges; an unflagged legacy task -> untouched; an explicit backfill
       invocation resolves a named historical row without touching any
       other unflagged row.
-- [ ] A simulated coordinator outage with an outstanding `run` call
+- [x] A simulated coordinator outage with an outstanding `run` call
       resolves to an explicit failure wake for a confirmed-dead waiter
       (matched by durable PID + host + start-identity, never bare PID);
       a genuinely-still-running or indeterminate waiter is left alone, not
       falsely recovered; a waiter that resolves normally concurrently with
       a sweep never receives a bogus failure wake (generation-fenced).
-- [ ] A subscribed emitter's event note wakes a running or `run`-hibernating
+- [x] A subscribed emitter's event note wakes a running or `run`-hibernating
       task's agent early, without ever mutating the task's own goal field;
       a late wake from the original (superseded) waiter after an early
       resume is confirmed dropped, never double-processed.
-- [ ] agent-worktrees Tasks pivot manual override tested against a stuck
+- [x] agent-worktrees Tasks pivot manual override tested against a stuck
       `require_verification` task.
 
 ## Proposal
@@ -561,3 +561,27 @@ place:
   4's recap) still said "emitters only create tasks"**, not yet reflecting
   Round 5's correction that a subscribed emitter may also append an
   event note. Fixed in place, with a pointer to Round 5.
+
+### 2026-09-30 -- Phase 2a/2b/2c, Phase 3, and Phase 4 landed
+- Reworked the in-flight branch onto the settled redesign after PR #4692:
+  Phase 1 was retained, while the abandoned interval-style verification audit
+  was replaced with the final whole-goal model.
+- Phase 2a landed as three explicit evaluator trigger paths only: the
+  `task.submitted` lifecycle event, an explicit scoped backfill route/CLI
+  (`verify-submitted`), and a Phase 2c event-note re-trigger for already
+  submitted tasks. Verification evaluators are coordinator-owned,
+  repo/environment scoped, and limited to `Complete` / `Abandon` / `NoOp`.
+- Phase 2b landed with durable detached-`run` waiter registration plus a
+  startup recovery sweep, including the atomic active-generation retirement
+  fence so a normal completion and a later outage sweep cannot both wake the
+  same task.
+- Phase 2c landed as append-only subscribed-emitter event notes stored in the
+  task audit trail, with two wake paths: direct next-turn nudges for running
+  owners and early wake/supersession for hibernating `run` waiters, so stale
+  late waiter completions are dropped.
+- Phase 3 added the Tasks pivot manual override affordances: submitted,
+  verification-gated tasks now expose picker actions to complete or abandon
+  them manually.
+- Phase 4 updated `plugins/agent-dispatch/README.md` and cross-linked the
+  status-rename migration note to this effort's landed verification-gate
+  behavior.

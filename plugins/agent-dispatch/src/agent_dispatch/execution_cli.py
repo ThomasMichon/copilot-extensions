@@ -108,6 +108,28 @@ def _spawn_detached_waiter(spec: Any) -> dict:
     )
     return {"pid": proc.pid, "argv": argv}
 
+
+def _register_run_waiter(args: argparse.Namespace, spec: Any, handle: dict, suspended: dict | None) -> dict | None:
+    if not spec.task_id or not suspended or "status" not in suspended:
+        return None
+    from . import companion, remote_dispatch
+
+    pid = handle.get("pid")
+    if not isinstance(pid, int):
+        return None
+    try:
+        with _core()._client(args) as c:
+            return c.register_run_waiter(
+                spec.task_id,
+                pid=pid,
+                host=remote_dispatch.local_machine(),
+                start_token=companion.process_start_token(pid),
+                resume_worktree=spec.resume_worktree or "",
+                command=list(spec.command),
+            )
+    except Exception as exc:  # noqa: BLE001 -- degraded, not fatal to the detach
+        return {"error": str(exc), "pid": pid}
+
 def _suspend_for_detached_wait(args: argparse.Namespace, spec: Any) -> dict | None:
     """Atomically suspend ``spec.task_id`` once its detached waiter is live, and
     journal a ``task``-kind agent-worktrees claim on the current worktree so
@@ -202,12 +224,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if args.detach:
         handle = _core()._spawn_detached_waiter(spec)
         suspended = _core()._suspend_for_detached_wait(args, spec)
+        waiter = _core()._register_run_waiter(args, spec, handle, suspended)
         return _core()._emit(
             {
                 "detached": True,
                 "resume_worktree": spec.resume_worktree,
                 "command": list(spec.command),
                 "suspended": suspended,
+                "waiter": waiter,
                 **handle,
             }
         )
@@ -219,14 +243,39 @@ def _cmd_run(args: argparse.Namespace) -> int:
         except (OSError, subprocess.SubprocessError) as exc:
             print(f"agent-dispatch: run: could not execute the wait: {exc}", file=sys.stderr)
             return 127
+    if getattr(args, "waiter_child", False) and spec.task_id:
+        from . import companion, hibernation_claims, remote_dispatch
+        from .hibernation import resume_message
+
+        returncode = runner(spec.command)
+        report = {
+            "command": list(spec.command),
+            "returncode": returncode,
+            "resume_worktree": spec.resume_worktree,
+            "message": resume_message(spec, returncode),
+            "resumed": None,
+        }
+        with _core()._client(args) as c:
+            waiter = c.finish_run_waiter(
+                spec.task_id,
+                pid=os.getpid(),
+                host=remote_dispatch.local_machine(),
+                start_token=companion.process_start_token(os.getpid()),
+            )
+        report["waiter"] = waiter
+        if waiter.get("accepted") and spec.resume_worktree:
+            report["resumed"] = bridge.send_nudge(
+                spec.resume_worktree,
+                report["message"],
+                sender="agent-dispatch-hibernate",
+            )
+            report["claim_released"] = hibernation_claims.release_hibernation_claim(spec.task_id)
+        else:
+            report["claim_released"] = None
+        return _core()._emit(report)
 
     report = run_and_resume(spec, runner=runner, resumer=bridge.send_nudge)
     if spec.task_id:
-        # This is the foreground path: for a detached wait, it's the re-exec'd
-        # child running here (see detached_run_argv), reached exactly once the
-        # wait resolves -- the right moment to retire the claim
-        # _suspend_for_detached_wait journaled, regardless of the wait's
-        # outcome or whether the resume nudge itself succeeded.
         from . import hibernation_claims
 
         report["claim_released"] = hibernation_claims.release_hibernation_claim(spec.task_id)
@@ -237,11 +286,11 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
     its decisions (the *evaluator* half of emitters-and-evaluators). The event
     JSON is read from ``--event-file`` or stdin; the coordinator shape is
     ``{"type": "task.submitted", "task": {...}}``."""
-    from .producers.evaluator import EvaluatorError, SpecEvaluator, evaluate_and_apply
+    from .producers.evaluator import EvaluatorError, load_evaluator, load_spec, evaluate_and_apply
 
     try:
-        spec = json.loads(Path(args.spec).expanduser().read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+        spec = load_spec(args.spec)
+    except (OSError, ValueError, EvaluatorError) as exc:
         print(f"agent-dispatch: cannot read evaluator spec: {exc}", file=sys.stderr)
         return 2
     raw = (
@@ -255,7 +304,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
         print(f"agent-dispatch: event is not valid JSON: {exc}", file=sys.stderr)
         return 2
     try:
-        evaluator = SpecEvaluator(spec)
+        evaluator = load_evaluator(spec)
     except EvaluatorError as exc:
         print(f"agent-dispatch: {exc}", file=sys.stderr)
         return 2
@@ -275,6 +324,13 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
             print(f"agent-dispatch: {exc}", file=sys.stderr)
             return 2
     return _core()._emit(report)
+
+
+def _cmd_verify_submitted(args: argparse.Namespace) -> int:
+    """Explicit, scoped re-check for already-submitted verification tasks."""
+    with _core()._client(args) as c:
+        reports = [c.verify_submitted(task_id) for task_id in args.task_id]
+    return _core()._emit(reports if len(reports) != 1 else reports[0])
 
 def _cmd_charter_show(args: argparse.Namespace) -> int:
     from .worker_charter import charter_text

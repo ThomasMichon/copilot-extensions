@@ -138,6 +138,7 @@ def detached_run_argv(
         argv += ["--resume", spec.resume_worktree]
     if spec.task_id:
         argv += ["--task", spec.task_id]
+        argv += ["--waiter-child"]
     if spec.message:
         argv += ["--message", spec.message]
     argv.append("--")

@@ -9,6 +9,10 @@ or already picked up the rename's own self-applying migration -- but if you
 land here from a stale checkout, an old backup, or a fork, this is the
 worked procedure.
 
+The follow-on verification-gate effort that builds on these restored names is
+tracked separately at
+[`efforts/active/task-verification-gate/README.md`](../../../efforts/active/task-verification-gate/README.md).
+
 ## Background
 
 - **2026-09-25 (PR #3715):** `CONFIRMED` was introduced as a new terminal

@@ -9,6 +9,7 @@ double-spawned.
 from __future__ import annotations
 
 import json
+import sqlite3
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -7637,10 +7638,16 @@ _REVIEWER_DONE_RULE = {
 
 
 def _complete(q, title, *, labels=None, **fields):
+    fields.setdefault("require_verification", True)
     t = q.create(title, labels=labels or [], **fields)
     q.claim_one("m/wt-1", task_id=t.id, machine="m", worktree="wt-1")
     q.start(t.id, "m/wt-1")
     q.complete(t.id, "m/wt-1")
+    with sqlite3.connect(q.db_path) as conn:
+        conn.execute(
+            "UPDATE tasks SET require_verification = 0 WHERE id = ?",
+            (t.id,),
+        )
     return t
 
 

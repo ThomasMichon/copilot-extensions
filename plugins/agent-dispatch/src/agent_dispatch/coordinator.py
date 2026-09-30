@@ -57,6 +57,7 @@ from .coordinator_worktree_status import register_worktree_status_routes
 from .events import EventBus
 from .loop_governance import LoopGovernance
 from .queue import TaskQueue
+from .run_waiter_recovery import recover_run_waiters
 from .satellites import FleetDirectory
 from .worktree_status_relay import WorktreeStatusRelayStore
 
@@ -241,6 +242,24 @@ def create_app(
             if wake_interval > 0
             else None
         )
+        async def _recover_run_waiters_once() -> None:
+            from . import bridge, companion, hibernation_claims
+
+            counts = await asyncio.to_thread(
+                recover_run_waiters,
+                queue,
+                start_token_for_pid=companion.process_start_token,
+                wake_worktree=bridge.send_nudge,
+                release_claim=hibernation_claims.release_hibernation_claim,
+            )
+            if counts.get("recovered"):
+                log.warning(
+                    "recovered %d task(s) from dead detached run waiters",
+                    counts["recovered"],
+                )
+                bus.publish({"type": "task.run_waiter_recovered", **counts})
+
+        run_waiter_recovery_task = asyncio.create_task(_recover_run_waiters_once())
         sweeper_health = LoopHealth(name="liveness_gc", base_interval=sweep_interval or 0.0)
         orphan_health = LoopHealth(name="orphan_reap", base_interval=sweep_interval or 0.0)
         handoff_fallback_health = LoopHealth(
@@ -687,6 +706,10 @@ def create_app(
                         await orphan_reaper
                     except asyncio.CancelledError:
                         pass
+                if run_waiter_recovery_task is not None and not run_waiter_recovery_task.done():
+                    run_waiter_recovery_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await run_waiter_recovery_task
                 if handoff_fallback_reconciler is not None:
                     handoff_fallback_reconciler.cancel()
                     try:
@@ -708,6 +731,7 @@ def create_app(
     )
     app.state.bus = bus
     app.state.directory = directory
+    app.state.queue = queue
     # Back-compat alias for the pre-generalization attribute name.
     app.state.satellites = directory
     app.state.worktree_status_relay = relay
@@ -755,7 +779,7 @@ def create_app(
         resolve_owner_session_id=lambda worker_id: _resolve_owner_session_id(worker_id),
     )
     register_spawn_routes(app, queue, bus)
-    register_registry_routes(app, queue)
+    register_registry_routes(app, queue, control_token=control_token)
     register_worktree_status_routes(app, relay)
 
     if mcp_app is not None:

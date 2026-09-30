@@ -909,6 +909,20 @@ def test_lost_create_response_requeries_and_binds_committed_task():
     assert reservation["task_id"] == "task-1"
 
 
+def test_repository_issue_loop_stamps_default_require_verification():
+    provider = FakeProvider([_issue(1)])
+    client = FakeClient()
+
+    result = run_tick(
+        client,
+        _config(require_verification=True),
+        provider=provider,
+        clock=lambda: 10_000,
+    )
+
+    assert result["created"][0]["require_verification"] is True
+
+
 def test_proposed_task_retries_transient_approve_failure():
     provider = FakeProvider([_issue(1)])
     client = FakeClient(fail_approve_once=True)

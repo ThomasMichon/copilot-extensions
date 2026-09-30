@@ -87,6 +87,9 @@ def validate_spec(spec: dict[str, Any]) -> None:
         not isinstance(evaluator_ref, str) or not evaluator_ref
     ):
         raise EmitterError("'evaluator_ref' must be a non-empty string")
+    require_verification = spec.get("require_verification")
+    if require_verification is not None and not isinstance(require_verification, bool):
+        raise EmitterError("'require_verification' must be true/false")
     task_output = spec.get("task_output")
     if task_output not in (None, "json"):
         raise EmitterError("'task_output' must be 'json' when present")
@@ -167,6 +170,9 @@ def _author_tasks(
         fields["source"] = spec.get("source") or "emitter"
         fields["origin_ref"] = spec["id"]
         fields["evaluator_ref"] = spec.get("evaluator_ref")
+        fields.setdefault(
+            "require_verification", bool(spec.get("require_verification", False))
+        )
         created.append(client.create(title, **fields))
     return created
 

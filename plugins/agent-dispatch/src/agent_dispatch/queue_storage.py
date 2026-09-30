@@ -316,6 +316,7 @@ class QueueStorageMixin:
         goal: str | None = None,
         done_criteria: str | None = None,
         not_before: float = 0.0,
+        require_verification: bool = False,
         claim_as: str | None = None,
         now: float | None = None,
         _with_outcome: bool = False,
@@ -351,6 +352,8 @@ class QueueStorageMixin:
         """
         if status not in (Status.QUEUED, Status.PROPOSED):
             raise TaskError(f"new task must be 'queued' or 'proposed', not {status!r}")
+        if not isinstance(require_verification, bool):
+            raise TaskError("require_verification must be true/false")
         if exclusive_key is not None:
             exclusive_key = exclusive_key.strip() or None
         if supersede_exclusive_key and exclusive_key is None:
@@ -418,6 +421,7 @@ class QueueStorageMixin:
                 "source": source,
                 "origin_ref": origin_ref,
                 "evaluator_ref": evaluator_ref,
+                "require_verification": require_verification,
                 "exclusive_key": exclusive_key,
                 "dedup_key": dedup_key,
                 "producer_scope": fence["scope"],
@@ -431,6 +435,17 @@ class QueueStorageMixin:
             pre_exclusive_fields = dict(request_fields)
             pre_exclusive_fields.pop("exclusive_key")
             compatible_request_hashes.add(self._producer_request_hash(pre_exclusive_fields))
+            if not require_verification:
+                legacy_verification_fields = dict(request_fields)
+                legacy_verification_fields.pop("require_verification")
+                compatible_request_hashes.add(
+                    self._producer_request_hash(legacy_verification_fields)
+                )
+                legacy_verification_pre_exclusive = dict(legacy_verification_fields)
+                legacy_verification_pre_exclusive.pop("exclusive_key")
+                compatible_request_hashes.add(
+                    self._producer_request_hash(legacy_verification_pre_exclusive)
+                )
             raw_requires = sorted(set(requires or ()))
             raw_excludes = sorted(set(excludes or ()))
             if (
@@ -443,6 +458,17 @@ class QueueStorageMixin:
                 compatible_request_hashes.add(self._producer_request_hash(legacy_fields))
                 legacy_fields.pop("exclusive_key")
                 compatible_request_hashes.add(self._producer_request_hash(legacy_fields))
+                if not require_verification:
+                    legacy_fields_no_verification = dict(legacy_verification_fields)
+                    legacy_fields_no_verification["requires"] = raw_requires
+                    legacy_fields_no_verification["excludes"] = raw_excludes
+                    compatible_request_hashes.add(
+                        self._producer_request_hash(legacy_fields_no_verification)
+                    )
+                    legacy_fields_no_verification.pop("exclusive_key")
+                    compatible_request_hashes.add(
+                        self._producer_request_hash(legacy_fields_no_verification)
+                    )
         ts = self._now(now)
         task_id = uuid.uuid4().hex
         spill_content = (
@@ -811,10 +837,10 @@ class QueueStorageMixin:
                         " affinity, labels, payload_ref, payload_inline, target_machine,"
                         " target_worktree, target_repo,"
                         " source, origin_ref, evaluator_ref, exclusive_key, dedup_key,"
-                        " goal, done_criteria,"
+                        " goal, done_criteria, require_verification,"
                         " producer_fence, producer_request_hash,"
                         " not_before, created_at, updated_at)"
-                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (
                             task_id,
                             title,
@@ -837,6 +863,7 @@ class QueueStorageMixin:
                             dedup_key,
                             goal,
                             done_criteria,
+                            1 if require_verification else 0,
                             fence_json,
                             request_hash,
                             not_before,
