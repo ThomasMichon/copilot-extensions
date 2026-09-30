@@ -264,8 +264,9 @@ class TranscriptMirror:
                 shutil.rmtree(target)
             return True
         finally:
+            # The (empty) lock file stays: unlinking it after the release would
+            # let a waiter lock the old inode while a later pass locks a new one.
             lease.release()
-            lock_file.unlink(missing_ok=True)
 
     async def __call__(self, codespace: str) -> dict[str, Any]:
         """One pass: read what's new on the box, append it here, push the mirror.

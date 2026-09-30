@@ -280,7 +280,7 @@ def test_prune_if_clean_removes_only_settled_mirrors(tmp_path):
     )
     assert mirror.prune_if_clean("cs-1")
     assert not (tmp_path / "cs-1").exists()
-    assert not (tmp_path / "cs-1.lock").exists()
+    assert (tmp_path / "cs-1.lock").exists()  # kept: removing it would split the lock
 
     (tmp_path / "cs-1" / "session-state" / SID).mkdir(parents=True)
     (tmp_path / "cs-1.dirty").touch()
