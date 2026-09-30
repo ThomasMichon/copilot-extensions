@@ -67,15 +67,26 @@ agent-chat-driven flow).
 kept up to date at the end of every session (or handoff point) so a fresh
 session never has to re-derive "what's already done" from the Journal alone.
 
-- **2026-09-29 status, update 2 (row-shape standardization landed; read
-  this first, supersedes the bullet below it):** Phases 0-8 remain
-  COMPLETE. Additionally landed a Phase 3 amendment this session: the
-  Tasks row now uses the SAME two-line shape as Worktrees/CodeSpaces/
-  Containers (columnized stats on line 1, `[tag] repo title - phrase` on
-  line 2) — see Phase 3's own new checklist bullet and the Journal's
-  second 2026-09-29 entry for the full design/heuristic detail. Same
-  worktree, PR not yet opened as of this bullet's own writing — check
+- **2026-09-30 status (LENGTH column landed; read this first, supersedes
+  everything below it):** Phases 0-8 remain COMPLETE, plus the 2026-09-29
+  row-shape standardization. This session closed the operator's follow-up
+  question ("does the T column pull from the worktree?") by landing a real
+  cross-plugin fix: `agent-worktrees`' relay bundle gained a new
+  `session_length` fact (session_count + turn_count, both already-cached
+  `WorktreeRecord` fields — no new live computation), and `agent-dispatch`
+  now renders it as the Tasks board's `LENGTH` column, formatted `"Ns Nt"`
+  — the SAME format the (separate, not-yet-implemented) `worktrees-pivot-
+  ux-overhaul` effort's own planned Worktrees LENGTH-column rename will
+  use, so the two stay visually consistent once that one lands too. See
+  the Journal's 2026-09-30 entry for the full design. Same worktree this
+  landed in, PR not yet opened as of this bullet's own writing — check
   `pr-status` before starting further work here.
+- **2026-09-29 status, update 2 (row-shape standardization landed):**
+  Phases 0-8 remain COMPLETE. Additionally landed a Phase 3 amendment this
+  session: the Tasks row now uses the SAME two-line shape as Worktrees/
+  CodeSpaces/Containers (columnized stats on line 1, `[tag] repo title -
+  phrase` on line 2) — see Phase 3's own new checklist bullet and the
+  Journal's second 2026-09-29 entry for the full design/heuristic detail.
 - **2026-09-29 status (read this bullet first; everything below it in this
   section is historical and was already stale before this update — trust
   the Plan checklist's own `[x]`/`[ ]` marks over any prose here that
@@ -755,6 +766,31 @@ without it.
       signal", not a hard guarantee) — a real `embodiment_kind` backend
       field remains the noted, still-open follow-on if the operator wants
       it made authoritative.
+- [x] **LENGTH column: a real turn/session counter, pulled from the
+      claiming worktree (2026-09-30, operator feedback).** The `T`/
+      `turn_count` column had been declared in the manifest since Phase 3
+      but nothing ever populated it — a genuine, silently-blank gap found
+      by the operator asking "do tasks have their own turn counter, or is
+      it pulled from the worktree?" Answer: neither, until now. Landed as a
+      real cross-plugin fix: `agent-worktrees`' `worktree_status_compute
+      .compute()` gained a new `session_length` relay fact
+      (`{"session_count": ..., "turn_count": ...}`, sourced from the
+      already-cached `WorktreeRecord.sessions`/`.session_turns` — no new
+      live computation, always `confirmed: True`) alongside its existing
+      git_state/liveness/lineage/claims/disposition facts. `agent-dispatch`
+      renders it via a new `worktree_status_relay._length_display()`,
+      formatted `"<session_count>s <turn_count>t"` (e.g. `"3s 25t"`) —
+      deliberately the SAME unit-suffixed format the (separate,
+      not-yet-implemented) `worktrees-pivot-ux-overhaul` effort's own
+      2026-09-29 Journal entry records as the PLANNED replacement for
+      Worktrees' own `SESS/T` column (currently `"1/25"`) — so the two
+      panes read consistently once that rename lands too, without this
+      effort needing to touch Worktrees' own column at all. The manifest's
+      `turn_count`/`T` column became `length_display`/`LENGTH`. Blank
+      (never a fabricated `"0s 0t"`) when there is no claiming worktree, the
+      relay entry is stale, or the fact is missing/unconfirmed — mirrors
+      `wt_live`'s own "blank means no signal, not confirmed absence"
+      contract.
 
 ### Phase 4 — Worktree cross-link
 - [x] Confirm the WT column round-trips against a live coordinator (not just
@@ -2950,5 +2986,83 @@ contributor who runs this effort's own documented build/test commands in a
 fresh worktree before opening a PR; worth a `.gitignore` follow-up in
 `tools/sync-vendored-libs.py`'s own repo if it recurs, but out of scope for
 this effort.
+
+### 2026-09-30 — LENGTH column: a real cross-plugin fix for the previously-blank T column
+Operator asked directly: "Do tasks have a turn counter or is that pulled
+from the assigned worktree?" Investigated before answering -- grepped the
+whole `agent_dispatch` package for `turn_count` and found it nowhere except
+the manifest's own column declaration. The `T` column had been silently
+blank since Phase 3 landed; nothing had ever wired it. Reported this
+honestly rather than assuming either answer.
+
+**Operator's follow-up:** pull it from the assigned worktree, using the SAME
+`"Ns Nt"` format as the (separate) `worktrees-pivot-ux-overhaul` effort's own
+planned `LENGTH` column rename (its 2026-09-29 Journal entry: rename
+Worktrees' `SESS/T` column, reformat from `"1/25"` to `"1s 25t"`). Before
+implementing, investigated whether this was actually available: the
+cross-repo relay bundle `board_cli.py` already consumes (`git_state`/
+`liveness`/`lineage`/`claims`/`disposition`, via `agent_worktrees
+.worktree_status_compute.compute()`) had NO fact carrying session/turn
+counts -- those live only in `agent-worktrees`' own LOCAL `WorktreeRecord
+.session_turns`/`.sessions`, never relayed cross-machine. This is a genuine
+cross-plugin gap, not a quick Tasks-side fix. **Checked in with the
+operator before expanding scope into a different plugin's relay contract**
+(three options offered: add the relay fact now, stub the column blank
+pending a separate change, or use a different proxy signal) -- operator
+chose to add the relay fact now.
+
+**What landed (spans `agent-worktrees` + `agent-dispatch`, same PR):**
+
+1. **`agent-worktrees`**: `worktree_status_compute.compute()` gained a new
+   `session_length` fact -- `{"session_count": len(record.sessions or ()),
+   "turn_count": record.session_turns}` -- inserted right after the
+   existing `lineage` fact. Deliberately always `confirmed: True` (unlike
+   git_state/liveness's degraded-on-failure path): both values are durable,
+   already-cached `WorktreeRecord` fields (the exact same ones the LOCAL
+   Picker's own `session_count`/`turn_count` computation in `__main__.py`
+   already reads), not a fresh probe -- there is no transient-failure case
+   to degrade from. Verified the whole pipeline needs NO other
+   agent-worktrees code change: `cmd_worktree_status_bundle` (the
+   `worktree-status-bundle --json` CLI command `agent-dispatch`'s
+   coordinator loop shells out to) just serializes whatever `compute()`
+   returns, so the new fact flows through automatically. Updated its
+   docstring/help text for discoverability and the fact-assembly test's
+   `set(bundle["facts"])` assertion (renamed "all five facts" -> "all six").
+2. **`agent-dispatch`**: new `worktree_status_relay._length_display()`
+   renders `"<session_count>s <turn_count>t"` from the fact -- `None`
+   (blank cell, never a fabricated `"0s 0t"`) when the relay is stale, the
+   fact is missing/unconfirmed, or `turn_count` is `None` (a never-resumed
+   worktree). Wired into `board_fields_for_task()`'s return dict as
+   `length_display` (including the no-claiming-worktree early-return
+   branch) and into the `worktree_status` card's own body via a new
+   `_fact_body("Session length", ...)` line, so the drill-in card shows it
+   too, not just the column. Manifest: `turn_count`/`T` ->
+   `length_display`/`LENGTH`, width 4 -> 9 to fit `"12s 340t"`-scale values.
+3. **No `board_cli.py` changes needed** beyond the manifest key rename --
+   `row.update(board_fields_for_task(...))` already runs unconditionally
+   per row and merges whatever keys that function returns.
+
+**Validation (2026-09-30):** New tests:
+`test_worktree_status_compute.py::test_assembles_all_six_facts_for_a_real_
+record` (renamed + extended), `test_board_cli.py::test_length_display_
+formats_and_degrades_gracefully` (direct unit test), `test_build_length_
+display_blank_when_no_worktree_or_stale`, plus a `length_display`
+assertion added to the existing fresh-relay test. `agent-worktrees` full
+suite: **6054 passed / 3 pre-existing failed / 42 skipped** -- 2 of the 3
+(`test_profile_assignment.py::test_concurrent_allocation_serializes_bag_
+positions`, `test_tracking.py::TestRecordLockCrossProcess::test_no_lost_
+updates_across_processes`) were a `__pycache__` file-lock contention
+artifact from running three full suites in parallel on this machine at
+once (confirmed: both passed cleanly in isolation); the third
+(`test_mux_status_link.py::test_push_status_via_daemon_reports_daemon_
+unavailable_when_missing`) is a genuine pre-existing failure, confirmed via
+a clean `git stash` of this worktree, entirely unrelated to
+`worktree_status_compute.py`. `agent-dispatch` full suite: **3568 passed /
+1 pre-existing failed / 20 skipped** (the same `test_supervisor.py::
+test_idle_headless_fleet_nudge_includes_remote_host` flake logged in the
+prior entry). `worktree-manager` full suite (unaffected by this change, run
+for completeness since it shares the Tasks pivot's render path): **1484
+passed / 4 pre-existing failed / 1 skipped** -- the same 4 failures logged
+in the prior entry.
 
 

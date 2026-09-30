@@ -256,6 +256,33 @@ def _claims_summary(claims_fact: Mapping[str, object] | None, *, stale: bool) ->
     return ", ".join(parts) if parts else "none"
 
 
+def _length_display(
+    session_length_fact: Mapping[str, object] | None, *, stale: bool
+) -> str | None:
+    """The Tasks board's ``LENGTH`` column: ``"<session_count>s <turn_count>t"``
+    (e.g. ``"3s 25t"``) -- the SAME unit-suffixed format the
+    ``worktrees-pivot-ux-overhaul`` effort's own planned Worktrees `LENGTH`
+    column rename uses (see that effort's 2026-09-29 Journal entry), sourced
+    from the claiming worktree's relayed ``session_length`` fact
+    (``agent_worktrees.worktree_status_compute.compute``) rather than a
+    second, Tasks-specific computation. ``None`` (blank cell) when the relay
+    is stale/cold, the fact is missing or unconfirmed, or there simply is no
+    claiming worktree -- never a fabricated ``0s 0t``.
+    """
+    if stale or not session_length_fact:
+        return None
+    if not bool(session_length_fact.get("confirmed")):
+        return None
+    value = session_length_fact.get("value")
+    if not isinstance(value, Mapping):
+        return None
+    session_count = value.get("session_count")
+    turn_count = value.get("turn_count")
+    if not isinstance(session_count, int) or turn_count is None:
+        return None
+    return f"{session_count}s {turn_count}t"
+
+
 def board_fields_for_task(
     task: Mapping[str, object],
     relay_entry: Mapping[str, object] | None,
@@ -269,6 +296,7 @@ def board_fields_for_task(
     if not worktree_id:
         return {
             "artifacts_summary": None,
+            "length_display": None,
             "worktree_status": {
                 "title": "Worktree status unavailable",
                 "status": "unknown",
@@ -301,12 +329,14 @@ def board_fields_for_task(
             _fact_body("Git state", facts.get("git_state"), stale=stale),
             _fact_body("Liveness", facts.get("liveness"), stale=stale),
             _fact_body("Session lineage", facts.get("lineage"), stale=stale),
+            _fact_body("Session length", facts.get("session_length"), stale=stale),
             _fact_body("Claims", claims_fact, stale=stale),
             _fact_body("Disposition", facts.get("disposition"), stale=stale),
         ]
     )
     return {
         "artifacts_summary": _claims_summary(claims_fact, stale=stale),
+        "length_display": _length_display(facts.get("session_length"), stale=stale),
         "worktree_status": {
             "title": f"Worktree {worktree_id} ({repo_name})",
             "status": status,

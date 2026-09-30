@@ -107,8 +107,8 @@ def add_parsers(sub) -> None:
         "worktree-status-bundle",
         help=(
             "Show one worktree's full status bundle -- git state, session "
-            "lineage, liveness, claims, disposition -- via the resident "
-            "worktree-status accelerator (JSON)"
+            "lineage, liveness, claims, disposition, session length -- via "
+            "the resident worktree-status accelerator (JSON)"
         ),
     )
     sp.add_argument(
@@ -544,10 +544,11 @@ def cmd_worktree_lineage(args: argparse.Namespace) -> int:
 
 def cmd_worktree_status_bundle(args: argparse.Namespace) -> int:
     """Emit one worktree's full status bundle: git state, session lineage,
-    liveness, claims, and disposition (agent-worktrees-external-status-
-    accelerator effort, Phase 4 -- the in-process reference consumer proving
-    the accelerator design before any cross-venv client builds against the
-    same wire contract).
+    liveness, claims, disposition, and session length (session/turn counts --
+    agent-dispatch-tasks-pane-ux-overhaul's own LENGTH-column follow-on,
+    2026-09-30) (agent-worktrees-external-status-accelerator effort, Phase 4
+    -- the in-process reference consumer proving the accelerator design
+    before any cross-venv client builds against the same wire contract).
 
     Tries the resident status-monitor's ``worktree_status`` daemon first
     (booting one via ``_ensure_status_monitor`` when none is reachable and
