@@ -166,11 +166,6 @@ handoff first".
 - Re-run the install-contract and vendored-lib synchronization guards so the
   new cutover wiring remains deployment-safe across platforms.
 
-## Journal
-
-- 2026-09-07: Effort created to land the already-adopted graceful cutover
-  pattern for `agent-mcp serve`.
-
 ### Phase 3 — Generation self-retire backstop (follow-up)
 The pattern doc's "generation self-retire" watchdog (a demoted daemon notices
 on its own that a confirmed live successor has superseded it and exits, for
@@ -188,3 +183,8 @@ no control channel to dial — `agent-mcp cutover` detects this and reports a
 clear error rather than attempting a doomed drain. That one daemon needs a
 plain stop/start once; every cutover after that (both sides now control-
 capable) works gracefully. Inherent to any such migration.
+
+## Journal
+
+- 2026-09-07: Effort created to land the already-adopted graceful cutover
+  pattern for `agent-mcp serve`.

@@ -33,8 +33,8 @@ import datetime as _dt
 #: The project the demo welcome screen opens on.
 DEMO_PROJECT = "copilot-extensions"
 
-#: The demo machine (an Aperture facility, not a real host).
-_MACHINE = "private-downstream-repo"
+#: The demo machine (an Example Labs facility, not a real host).
+_MACHINE = "example-host"
 
 #: Cave-Johnson-memo-style task titles, scraped from the original v1.0.0
 #: screenshot (``docs/assets/worktree-picker.png``, 2026-07-25) -- kept as a

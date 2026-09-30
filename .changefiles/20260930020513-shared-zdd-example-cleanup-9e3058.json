@@ -1,5 +1,5 @@
 {
-  "comment": "Genericize shared public examples",
+  "comment": "Shared zdd example cleanup",
   "changes": [
     {
       "plugin": "agent-index",

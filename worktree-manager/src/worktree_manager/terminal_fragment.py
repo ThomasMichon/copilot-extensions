@@ -95,6 +95,9 @@ __all__ = [
 # agent-worktrees WSL icon is deployed).
 DEFAULT_ICON = r"%USERPROFILE%\.agent-worktrees\aperture-science.ico"
 
+# Serialized into emitted terminal-profile fragments and used by the installer
+# to decide whether an existing scheme is current, so renaming it is an
+# intentional profile/config migration that must stay aligned with tests/docs.
 COLOR_SCHEME_NAME = "Example Research"
 
 # machines.yaml ssh env name -> the selection's short env label
