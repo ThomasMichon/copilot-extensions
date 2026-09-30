@@ -211,15 +211,25 @@ jobs:
           ISSUE_JSON=$(gh issue view "$NUM" --repo "$REPO" --json author,body,labels)
           AUTHOR=$(printf '%s' "$ISSUE_JSON" | jq -r '.author.login')
           BODY=$(printf '%s' "$ISSUE_JSON" | jq -r '.body')
-          # Real review finding (PR #3916): `report-failure`'s `gh issue
-          # create` runs authenticated with `github.token`, so GitHub
-          # records the author as `github-actions[bot]` (the same bot
-          # identity `validate-and-promote.yml`'s `promote` job configures
-          # for its own commits) -- NOT the bare string `github-actions`.
-          # The prior comparison would have rejected every genuine watchdog
-          # issue and permanently disabled the agent job.
-          if [ "$AUTHOR" != "github-actions[bot]" ]; then
-            echo "::warning::Issue #$NUM was authored by '$AUTHOR', not the watchdog's own github-actions[bot] token identity -- refusing to run the agent (a hand-authored issue re-using this label is not an authenticated diagnostic)."
+          # Real review finding (round 2, this session -- the prior
+          # "github-actions[bot]" comparison, itself a fix for an earlier
+          # round's bare "github-actions" mistake, was STILL wrong):
+          # `gh issue view --json author` reports a GitHub App-authored
+          # issue's login as `app/github-actions`, never `github-actions[bot]`
+          # -- confirmed live against every real watchdog-filed issue this
+          # session (#4653, #4618, #4523, #4521 all returned
+          # `{"login":"app/github-actions"}`). The `[bot]` suffix shape
+          # belongs to a literal GITHUB_TOKEN-authored COMMIT's
+          # author/committer identity (what `validate-and-promote.yml`'s
+          # `promote` job configures for its own git commits), not to
+          # `gh issue view`'s own JSON for an issue/PR/comment created via
+          # the same token -- those consistently use the `app/<slug>` login
+          # shape instead. This was never a config or secret gap: every
+          # genuine watchdog issue has been rejected here, unconditionally,
+          # since this check was first written -- the agent job has never
+          # once reached real diagnosis.
+          if [ "$AUTHOR" != "app/github-actions" ]; then
+            echo "::warning::Issue #$NUM was authored by '$AUTHOR', not the watchdog's own app/github-actions token identity -- refusing to run the agent (a hand-authored issue re-using this label is not an authenticated diagnostic)."
             echo "authorized=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -618,7 +628,17 @@ safe-outputs:
      the WRONG run's metadata (a `workflow_run`-triggered run's own `headSha`
      reflects its triggering ref, not the pinned SHA `full`/`worktree-manager`/
      `guards-full-sweep` explicitly check out) and didn't close the TOCTOU gap --
-     both fixed in this final form.)
+     both fixed in this final form.) **Round 5 (this session, 2026-09-30, live
+     testing after both the token and trigger paths were finally working):**
+     "converging" above was itself still wrong -- `AUTHOR != "github-actions[bot]"`
+     rejected literally every real watchdog issue, unconditionally, since this
+     check was first written. `gh issue view --json author` reports a GitHub
+     App-authored issue's login as `app/github-actions`, never the `[bot]`-suffixed
+     shape (confirmed live against #4653, #4618, #4523, #4521 -- all four
+     returned `app/github-actions`); the `[bot]` suffix belongs to a
+     `GITHUB_TOKEN`-authored git commit's author identity, not to `gh issue
+     view`'s JSON for the same token. The mechanism had never once reached real
+     diagnosis on genuine content until this fix.
   3. NO EDIT TOOL -- RESOLVED: `tools.edit:` added (confirmed via gh-aw's own Tools
      reference: "Allows file editing in the GitHub Actions workspace").
   4. PROTECTED-FILES DEFAULT MAY NOT COVER THIS REPO'S SPECIFIC PATHS -- RESOLVED,
