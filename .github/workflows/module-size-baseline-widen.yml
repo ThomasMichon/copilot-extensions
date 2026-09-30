@@ -9,7 +9,6 @@ name: Module size baseline widen
 on:
   push:
     branches: [main]
-  workflow_dispatch:
 
 concurrency:
   group: module-size-baseline-widen
@@ -31,16 +30,22 @@ jobs:
     # that doesn't declare this environment simply can't see it, which is
     # exactly what broke every run of this workflow since the migration:
     # `peter-evans/create-pull-request@v7` received an empty token and
-    # failed with "Input 'token' not supplied." `main-promotion`'s
-    # deployment_branch_policy (protected branches only: `dev`/`main`, no
-    # required reviewer) is already satisfied by this job's own trigger
-    # (`push: branches: [main]`) and its `workflow_dispatch` ref guard
-    # below, so declaring it here adds no new gate.
+    # failed with "Input 'token' not supplied."
+    #
+    # Deliberately NO `workflow_dispatch` trigger: unlike `push`, that event
+    # runs the workflow YAML from whichever ref is dispatched against, not
+    # necessarily `main` -- so a manual dispatch against `dev` (one of
+    # `main-promotion`'s own allowed branches, and one requiring zero
+    # approving reviews to merge a YAML change into) could reach this same
+    # environment-scoped credential regardless of this job's own `if:`
+    # guard below, which can't protect against changes to its own YAML on
+    # the ref actually being dispatched (a real review finding on this
+    # workflow's first version). `push: branches: [main]` alone already
+    # covers every real use case (this job re-runs automatically on every
+    # promotion) without ever exposing a selectable-ref entry point.
     environment: main-promotion
-    # `workflow_dispatch` can be launched against an arbitrary ref -- guard
-    # explicitly so a manual dispatch can never run --allow-widen against a
-    # PR branch's own (unreviewed) growth. `push` is already scoped to main
-    # by the trigger above; this is belt-and-suspenders for both triggers.
+    # Belt-and-suspenders: `push` is already scoped to `main` by the
+    # trigger above, but assert it explicitly too.
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
