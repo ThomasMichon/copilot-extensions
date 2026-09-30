@@ -154,4 +154,23 @@ jobs:
             echo "::error::Required checks did not report success for PR #$pr_number within the wait window -- leaving for manual review; never force past a required status check." >&2
             exit 1
           fi
-          gh pr merge "$pr_number" --squash --admin
+          # The path-scope check above and this merge are separated by up
+          # to six minutes of waiting -- a write collaborator could push a
+          # follow-up commit onto this owner-authored branch in that gap
+          # (workflow-lockdown-guard keys off the PR's author, not its
+          # latest commit, so such a push would not itself be blocked).
+          # Re-read the head and re-verify the diff immediately before
+          # merging, then pass that exact sha to `--match-head-commit` so
+          # the merge itself fails closed (rather than silently merging a
+          # newer, unverified head) if anything changed underneath us
+          # between this check and the merge call.
+          final_head=$(gh pr view "$pr_number" --json headRefOid --jq .headRefOid)
+          if ! final_diff_paths=$(gh pr diff "$pr_number" --name-only); then
+            echo "::error::gh pr diff failed for PR #$pr_number on final check -- refusing to admin-merge." >&2
+            exit 1
+          fi
+          if echo "$final_diff_paths" | grep -qv '^\.changefiles/'; then
+            echo "::error::PR #$pr_number diff touches paths outside .changefiles/ on final check -- refusing to admin-merge." >&2
+            exit 1
+          fi
+          gh pr merge "$pr_number" --squash --admin --match-head-commit "$final_head"

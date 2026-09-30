@@ -2164,7 +2164,10 @@ per-promotion `git cat-file` sweep, avoiding stale-file clutter), never a
 correctness requirement.
 
 **Fix:** added `purge-consumed-changefiles.yml`, a standalone workflow
-(daily cron + `workflow_dispatch`) that reads `main`'s current
+(daily cron + an on-demand `repository_dispatch` custom event,
+`purge-changefiles-requested` -- deliberately not `workflow_dispatch`,
+which would let a `dev`-branch copy of the file execute with this job's
+`main-promotion`-environment token) that reads `main`'s current
 `last_promotion.dev_head` fresh each run and deletes any `.changefiles/*`
 that existed at that commit -- the exact same safe-to-delete criterion the
 per-promotion step used, just decoupled from promotion frequency. Reuses
