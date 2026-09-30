@@ -540,6 +540,39 @@ _Pending._
 
 ## Journal
 
+### 2026-09-30 -- PR #4683 diagnosis and merge
+- After 7 consecutive `COMMENTED` review passes on PR #4683, diagnosed the
+  actual root cause rather than continuing to fix indefinitely: all 7
+  passes ran against the **same unchanged commit** (no intervening push),
+  ~20-40 minutes apart -- a re-review-loop artifact, not fresh regressions.
+  Checked every distinct concern raised across all 7 passes against current
+  HEAD: the lock/stale-source race, git isolated-env + literal-pathspecs,
+  tri-state tracked/inconclusive handling, discovery-exception handling,
+  the SKILL.md lock-contradiction wording, and a docstring review-history
+  reference were **all already resolved** in the pushed code (rounds 1-7's
+  fixes held) -- the reviewer was simply restating stale findings with no
+  memory of prior verdicts, because nothing new had been pushed to
+  re-scope its audit.
+- One concern across the 7 passes was genuinely still open: the checked-in
+  orphan scanner (`_iter_projection_files`) excludes
+  `*.local.instructions.md` by suffix unconditionally, without verifying
+  the adopting repo has actually added the `.gitignore` rule yet -- a
+  stray committed file with that suffix (pre-adoption, or by accident)
+  would be silently skipped by the scan forever. Real but low-severity
+  (WARNING-class, reachable only if the ignore rule is skipped); logged
+  here rather than folded into this already-large PR -- it belongs in the
+  next slice (the `.gitignore` convention item below), keeping each PR
+  reviewably small per the operator's explicit steer this session.
+- Per this repo's ruleset (zero required approving reviews) and the
+  `commented-review-verdict` fallback policy, a `COMMENTED` verdict is
+  non-blocking by design -- posted a comment closing each stale thread
+  with the above findings, then self-merged (`pr-merge 4683 --now`,
+  Maintainer bypass) rather than continuing to wait for a clean pass that
+  was never the actual merge gate.
+- **Going forward:** subsequent Phase 7 slices land as separate, smaller
+  PRs rather than growing `render_local_cache` further in one PR -- this
+  slice's own 8-round history is the concrete case for that.
+
 ### 2026-09-20 -- Kickoff
 - Carved from an operator observation (other agents losing fidelity on
   worktree/claim/session-management concepts), immediately after landing
