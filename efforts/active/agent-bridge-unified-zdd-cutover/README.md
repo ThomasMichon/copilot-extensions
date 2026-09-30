@@ -302,9 +302,9 @@ the full reasoning).
   session/acp_session_id, with the Session-Host claim reattached to the
   new generation's real pid, no orphan/duplicate turn events, and zero
   truncated/mutated events. `PROBE-SUMMARY: 1/1 passed`. **Scope
-  correction (review-caught):** this does NOT also prove the
-  caller-facing "a reply reaches the client" guarantee end to end -- a
-  real run found `wait --attention turn_complete` (the channel a real
+  correction:** this does NOT also prove the
+  caller-facing "a reply reaches the client" guarantee end to end --
+  `wait --attention turn_complete` (the channel a real
   caller would use) can hang indefinitely after a reattach even though the
   session correctly reaches `idle`; tracked as
   [issue #4681](https://github.com/ThomasMichon/copilot-extensions/issues/4681),
@@ -516,9 +516,9 @@ test that closes the gap.
      fired.
   5. **Cosmetic:** the Phase 6 heading still said "Tier-E" after the
      design doc's own resolution that it isn't; renamed. Removed two
-     machine-identifier mentions (`lambda-core`) from this public effort
-     doc per the repo's identifier-neutrality rule -- replaced with a
-     generic "local Docker host" description.
+     machine-identifier mentions from this public effort doc per the
+     repo's identifier-neutrality rule -- replaced with a generic
+     "local Docker host" description.
 - **A genuine NEW product finding surfaced only by re-running for real
   after hardening #3 above:** with `wait`'s JSON output now actually
   trustworthy, real re-runs showed `wait --attention turn_complete` can
