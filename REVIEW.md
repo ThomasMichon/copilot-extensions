@@ -95,6 +95,20 @@ specifically when reviewing a pull request, not a replacement for them.
   relevant `visions/` entry *and* check against `docs/patterns/README.md`'s
   design principles and invariants -- flag a design change that does
   neither.
+- **Fresh eyes are the point — apply full independent scrutiny regardless of
+  a PR's own stated rationale, especially for vision-conformance and
+  security.** A PR description explaining *why* a design choice was made is
+  context about a constraint the author faced, not a substitute for your own
+  judgment on whether that choice is actually sound — evaluate the tradeoff
+  on its merits, and challenge it if you disagree, the same as you would an
+  unexplained one. Treat an unexplained deliberate-looking choice (an
+  obvious-looking alternative visibly not taken, a limitation visibly
+  accepted) as an open question to raise, not as evidence it was already
+  vetted -- silence is not proof of due diligence. This scrutiny matters
+  most exactly where the author's proximity to their own implementation is
+  a likely source of blind spots: new privilege/trust boundaries, credential
+  or token handling, authentication/authorization assumptions, and any
+  divergence from a documented vision or invariant.
 - **Documentation impact.** Confirm the PR description's required
   Documentation-impact statement actually matches the final diff
   (`CONTRIBUTING.md`, "Documentation impact") -- flag a missing or

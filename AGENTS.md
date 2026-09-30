@@ -189,6 +189,18 @@ bypassed PRs skip that second gate. If you are driving a PR toward merge and
 unsure whether you've reached the applicable point, re-read that section
 before assuming a further round is needed.
 
+A shared rubric is not the same as shared context, though, and the two roles
+are asymmetric there: you carry whatever subject-matter context you built up
+authoring the change; Copilot's review approaches every PR fresh, with no
+access to the conversation that produced it. See `CONTRIBUTING.md` § "Give
+the reviewer your context, not just your diff" — state a deliberate design
+choice's rationale in the PR description rather than leaving the reviewer to
+guess whether an unexplained one was considered or missed. This transfers
+context; it does not (and should not) soften the scrutiny applied to it —
+REVIEW.md explicitly directs the reviewer to keep applying full independent
+judgment regardless of a stated rationale, especially for vision-conformance
+and security.
+
 ### Test Portfolio
 
 Required pull-request CI must remain a fast, change-scoped contract gate; do not
