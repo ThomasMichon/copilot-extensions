@@ -297,11 +297,8 @@ jobs:
             // reliably post/update Issues-API comments even with `issues:
             // write` declared above -- GitHub applies an additional
             // anti-privilege-escalation restriction to workflow_run tokens
-            // specifically for the Issues/PR-comment surface (confirmed live
-            // via a 403 "Resource not accessible by integration" during
-            // ci-identifier-leak-guard's own failure-path validation,
-            // despite the identical token succeeding moments earlier at
-            // `checks.create` above, which does not carry that restriction).
+            // specifically for the Issues/PR-comment surface, distinct from
+            // the Checks API (`checks.create` above is not subject to it).
             // The Check Run's own `output.text` (set above, already emitted
             // unconditionally) already carries the full match/reason/file/
             // line/col detail via the Checks API rather than a masked log

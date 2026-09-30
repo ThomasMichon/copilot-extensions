@@ -237,7 +237,7 @@ def test_git_ref_scan_reads_passive_pr_head_data_and_trusted_details(repo: Path,
 
     assert result.returncode == 1
     assert result.stdout.strip() == (
-        "1 forbidden identifier(s) found -- see PR review comments for details."
+        "1 forbidden identifier(s) found -- see the 'identifier leak guard' Check Run output for details."
     )
     assert CI_TOKEN not in json_out.read_text(encoding="utf-8")
     assert CI_REASON not in json_out.read_text(encoding="utf-8")
@@ -272,7 +272,7 @@ def test_ci_mode_stdout_is_count_only(repo: Path):
     assert CI_TOKEN not in result.stdout
     assert CI_REASON not in result.stdout
     assert result.stdout.strip() == (
-        "1 forbidden identifier(s) found -- see PR review comments for details."
+        "1 forbidden identifier(s) found -- see the 'identifier leak guard' Check Run output for details."
     )
 
 

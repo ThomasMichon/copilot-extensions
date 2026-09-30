@@ -19,12 +19,10 @@ A denylist that *named* those strings would itself leak them, so the list is
 **Gotcha specific to source 3:** unlike source 2's local loader, the CI-mode
 loader (``_load_ci_identifiers``) skips blank entries but does **not** skip
 ``#``-prefixed comment lines -- every non-empty line becomes a literal
-token. Never paste a commented source file straight into
+token, including a bare ``#`` on its own line, which matches almost any
+Markdown heading. Never paste a commented source file straight into
 ``COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI`` (or the secrets above) -- strip
-comments and blank lines first (e.g. ``grep -vE '^\\s*#|^\\s*$' file``). A
-stray bare ``#`` line has already turned into a one-character token that
-matched almost every Markdown heading in this repo, in production, before
-being caught and fixed.
+comments and blank lines first (e.g. ``grep -vE '^\\s*#|^\\s*$' file``).
 
 With neither configured (a fresh clone / CI) there is nothing to enforce and
 the check is a no-op (exit 0) -- so it is safe to ship in the public repo. On
@@ -399,7 +397,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.ci:
             print(
                 f"{len(violations)} forbidden identifier(s) found -- "
-                "see PR review comments for details."
+                "see the 'identifier leak guard' Check Run output for details."
             )
         else:
             print("Internal-identifier guard FAILED -- remove these before pushing:")
