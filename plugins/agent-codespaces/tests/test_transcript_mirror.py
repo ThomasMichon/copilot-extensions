@@ -37,6 +37,12 @@ def test_the_script_carries_known_offsets_and_drops_invalid_ids():
     assert tm._DONE in script
 
 
+def test_the_script_carries_limits_for_new_sessions_too():
+    script = tm.remote_script({}, limits={SID: 128, "../etc": 256}, chunk=64)
+    assert f"{SID}:0:128" in script
+    assert "../etc" not in script
+
+
 def test_parse_reads_chunks_and_workspaces_and_skips_garbage():
     text = (
         _chunk(SID, 0, b'{"a":1}\n')
@@ -66,6 +72,18 @@ def test_a_chunk_without_a_whole_line_or_at_a_stale_offset_changes_nothing(tmp_p
     assert mirror.apply("cs-1", _chunk(SID, 8, b'{"partial')) == {}
     assert mirror.apply("cs-1", _chunk(SID, 3, b'{"c":3}\n')) == {}
     assert _events(mirror) == b'{"a":1}\n'
+
+
+def test_a_new_torn_first_line_does_not_create_a_session_dir_or_workspace(tmp_path):
+    mirror = tm.TranscriptMirror(root=tmp_path, chunk=8)
+    text = (
+        _chunk(SID, 0, b'{"partial', size=99)
+        + f"{tm._WORKSPACE}{SID}\n{base64.b64encode(b'cwd: /w').decode()}\n"
+        + tm._DONE + "\n"
+    )
+    assert mirror.apply("cs-1", text) == {}
+    assert not (tmp_path / "cs-1" / "session-state" / SID).exists()
+    assert mirror.limits("cs-1") == {SID: 16}
 
 
 def test_a_replaced_transcript_is_mirrored_again_from_its_start(tmp_path):
@@ -115,11 +133,11 @@ def test_the_script_round_trips_a_real_session_state_tree(tmp_path):
 
 
 @pytest.mark.skipif(_git_bash() is None, reason="needs a GNU bash")
-def test_a_line_longer_than_the_read_is_mirrored_by_reading_more(tmp_path):
+def test_a_new_first_line_longer_than_the_read_is_mirrored_by_reading_more(tmp_path):
     home = tmp_path / "home"
     (home / ".copilot" / "session-state" / SID).mkdir(parents=True)
     big = b'{"blob":"' + b"x" * 300 + b'"}\n'
-    (home / ".copilot" / "session-state" / SID / "events.jsonl").write_bytes(b'{"n":1}\n' + big)
+    (home / ".copilot" / "session-state" / SID / "events.jsonl").write_bytes(big)
     env = {**os.environ, "HOME": str(home)}
     mirror = tm.TranscriptMirror(root=tmp_path / "mirror", chunk=64)
 
@@ -128,12 +146,13 @@ def test_a_line_longer_than_the_read_is_mirrored_by_reading_more(tmp_path):
         return subprocess.run([_git_bash(), "-c", script], capture_output=True, text=True,
                               env=env, check=True).stdout
 
-    mirror.apply("cs-1", run())
-    passes = 0
-    while _events(mirror) != b'{"n":1}\n' + big and passes < 10:
+    assert mirror.apply("cs-1", run()) == {}
+    assert not (mirror._root / "cs-1" / "session-state" / SID).exists()
+    passes = 1
+    while not (mirror._root / "cs-1" / "session-state" / SID / "events.jsonl").is_file() and passes < 10:
         mirror.apply("cs-1", run())
         passes += 1
-    assert _events(mirror) == b'{"n":1}\n' + big
+    assert _events(mirror) == big
     assert mirror.limits("cs-1") == {}  # back to the normal read once it moved
 
 
@@ -186,6 +205,15 @@ async def test_a_pass_pushes_its_own_namespace_only_when_something_changed(tmp_p
     manager.stdout = tm._DONE + "\n"
     assert (await mirror("cs-1"))["changed"] == 0
     assert len(pushes) == 2
+
+
+async def test_a_pass_with_no_whole_new_line_does_not_push(tmp_path, direct_exec):
+    pushes = []
+    manager = _Manager(_chunk(SID, 0, b'{"partial', size=99) + tm._DONE + "\n")
+    mirror = _mirror_with(tmp_path, manager, pushes)
+    assert (await mirror("cs-1"))["changed"] == 0
+    assert pushes == []
+    assert not (tmp_path / "cs-1.dirty").exists()
 
 
 async def test_a_failed_read_or_a_bad_name_pushes_nothing(tmp_path, direct_exec):
@@ -242,6 +270,22 @@ async def test_a_pass_skips_a_codespace_another_owner_is_mirroring(tmp_path, dir
     finally:
         other.release()
     assert (await mirror("cs-1"))["changed"] == 1
+
+
+def test_prune_if_clean_removes_only_settled_mirrors(tmp_path):
+    mirror = tm.TranscriptMirror(root=tmp_path)
+    (tmp_path / "cs-1" / "session-state" / SID).mkdir(parents=True)
+    (tmp_path / "cs-1" / "session-state" / SID / "events.jsonl").write_text(
+        "{}\n", encoding="utf-8",
+    )
+    assert mirror.prune_if_clean("cs-1")
+    assert not (tmp_path / "cs-1").exists()
+    assert not (tmp_path / "cs-1.lock").exists()
+
+    (tmp_path / "cs-1" / "session-state" / SID).mkdir(parents=True)
+    (tmp_path / "cs-1.dirty").touch()
+    assert not mirror.prune_if_clean("cs-1")
+    assert (tmp_path / "cs-1").exists()
 
 
 async def test_a_cancelled_pass_keeps_the_codespace_until_its_push_finishes(tmp_path, direct_exec):

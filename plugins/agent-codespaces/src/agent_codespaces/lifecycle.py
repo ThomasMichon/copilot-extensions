@@ -788,6 +788,13 @@ def delete_codespace(
         account_binding.unbind(name)
     except Exception:
         pass
+    try:
+        from .transcript_mirror import TranscriptMirror
+
+        if TranscriptMirror().prune_if_clean(name):
+            log.info("Pruned clean transcript mirror for deleted codespace: %s", name)
+    except Exception as exc:
+        log.debug("Transcript mirror prune after deleting %s failed: %s", name, exc)
 
 
 def stop_codespace(name: str, account: str | None = None) -> bool:

@@ -94,6 +94,7 @@ class SessionForwards:
         self._bridge_probe = bridge_probe
         self._mirror = transcript_mirror
         self._mirroring: dict[str, asyncio.Task[Any]] = {}
+        self._last_owed_push: dict[str, float] = {}
         self._local_factory = local_factory
         self._probe = session_probe
         self._ttl = ttl
@@ -141,6 +142,7 @@ class SessionForwards:
 
     async def reconcile(self, holds: dict[str, OwnerHold]) -> None:
         """Start/stop forwards so each hold has exactly its daemon + extra reverse forwards."""
+        self._start_owed_pushes()
         for codespace, (port, channel) in list(self._channels.items()):
             hold = holds.get(codespace)
             if hold is None or hold.daemon_port != port:
@@ -198,6 +200,7 @@ class SessionForwards:
 
     async def probe(self, holds: list[OwnerHold]) -> None:
         """Renew/release session tenants from the venue probe (rate-limited per CodeSpace)."""
+        self._start_owed_pushes()
         if self._probe is None:
             return
         now = self._clock()
@@ -241,17 +244,47 @@ class SessionForwards:
         """Mirror ``codespace``'s transcripts in the background (one pass at a time)."""
         if self._mirror is None:
             return
+        self._start_mirror_task(codespace, self._mirror, "transcript mirror")
+
+    def _start_owed_pushes(self) -> None:
+        """Retry dirty host-side transcript pushes without probing any CodeSpace."""
+        mirror = self._mirror
+        owed = getattr(mirror, "owed_codespaces", None)
+        push_owed = getattr(mirror, "push_owed", None)
+        if not callable(owed) or not callable(push_owed):
+            return
+        try:
+            codespaces = owed()
+        except Exception as exc:
+            log.debug("transcript mirror owed-push listing failed: %s", exc)
+            return
+        now = self._clock()
+        for codespace in codespaces:
+            last = self._last_owed_push.get(codespace)
+            if last is not None and now - last < self._probe_interval:
+                continue
+            if self._start_mirror_task(codespace, push_owed, "transcript mirror owed push"):
+                self._last_owed_push[codespace] = now
+
+    def _start_mirror_task(
+        self,
+        codespace: str,
+        runner: Callable[[str], Awaitable[Any]],
+        label: str,
+    ) -> bool:
+        """Start one mirror-related background task for ``codespace`` if none is running."""
         running = self._mirroring.get(codespace)
         if running is not None and not running.done():
-            return
+            return False
 
         async def run() -> None:
             try:
-                await self._mirror(codespace)
+                await runner(codespace)
             except Exception as exc:
-                log.debug("transcript mirror on %s failed: %s", codespace, exc)
+                log.debug("%s on %s failed: %s", label, codespace, exc)
 
         self._mirroring[codespace] = asyncio.get_running_loop().create_task(run())
+        return True
 
     async def _check_bridge(self, codespace: str) -> None:
         """Rebuild ``codespace``'s bridge forward when it no longer serves.

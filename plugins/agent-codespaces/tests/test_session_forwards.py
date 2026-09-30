@@ -12,6 +12,7 @@ import types
 import pytest
 from agent_codespaces import connection_owner as owner
 from agent_codespaces import session_forwards as sf
+from agent_codespaces import transcript_mirror as tm
 
 
 @pytest.fixture
@@ -336,6 +337,64 @@ async def test_probe_failure_neither_renews_nor_releases(store):
     forwards = sf.SessionForwards(_daemon_factory({}), boom)
     await forwards.probe(owner.list_holds())
     assert "cli:a" in owner.get_hold("cs-1").tenants
+
+
+async def _await_mirror_tasks(forwards: sf.SessionForwards) -> None:
+    for task in list(forwards._mirroring.values()):
+        await task
+
+
+def _dirty_mirror(tmp_path):
+    pushes = []
+    root = tmp_path / "mirror"
+    (root / "cs-1" / "session-state" / "0123abcd").mkdir(parents=True)
+    (root / "cs-1" / "session-state" / "0123abcd" / "events.jsonl").write_text(
+        "{}\n", encoding="utf-8",
+    )
+    (root / "cs-1.dirty").touch()
+
+    def push(source, label):
+        pushes.append((source, label))
+        return True, "pushed"
+
+    return tm.TranscriptMirror(root=root, push=push), pushes
+
+
+async def test_probe_retries_owed_transcript_push_on_unknown_verdict(store, tmp_path):
+    mirror, pushes = _dirty_mirror(tmp_path)
+    owner.hold("cs-1", "cli:a", mux_session="wt-a", confirmed=True)
+    forwards = sf.SessionForwards(
+        _daemon_factory({}), _probe({"wt-a": None}, []), transcript_mirror=mirror,
+    )
+    await forwards.probe(owner.list_holds())
+    await _await_mirror_tasks(forwards)
+    assert pushes == [(mirror._root / "cs-1", ".codespaces-live/cs-1")]
+    assert not (mirror._root / "cs-1.dirty").exists()
+
+
+async def test_probe_retries_owed_transcript_push_with_no_holds(store, tmp_path):
+    mirror, pushes = _dirty_mirror(tmp_path)
+    forwards = sf.SessionForwards(_daemon_factory({}), transcript_mirror=mirror)
+    await forwards.probe([])
+    await _await_mirror_tasks(forwards)
+    assert pushes == [(mirror._root / "cs-1", ".codespaces-live/cs-1")]
+    assert not (mirror._root / "cs-1.dirty").exists()
+
+
+async def test_owed_transcript_push_skips_when_the_codespace_lock_is_held(store, tmp_path):
+    from single_instance_lease import SingleInstance
+
+    mirror, pushes = _dirty_mirror(tmp_path)
+    other = SingleInstance(mirror._root, service="transcript-mirror", lock_name="cs-1.lock")
+    other.acquire()
+    try:
+        forwards = sf.SessionForwards(_daemon_factory({}), transcript_mirror=mirror)
+        await forwards.probe([])
+        await _await_mirror_tasks(forwards)
+    finally:
+        other.release()
+    assert pushes == []
+    assert (mirror._root / "cs-1.dirty").exists()
 
 
 # -- SessionForwards: a bridge forward that is up but not serving ------------------

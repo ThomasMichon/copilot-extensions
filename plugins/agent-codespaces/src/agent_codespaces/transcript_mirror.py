@@ -25,6 +25,7 @@ import base64
 import logging
 import re
 import shlex
+import shutil
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -68,8 +69,8 @@ def remote_script(
     written within ``active_minutes``."""
     limits = limits or {}
     known = " ".join(
-        f"{sid}:{int(off)}:{int(limits.get(sid, chunk))}"
-        for sid, off in sorted(offsets.items()) if _SID.match(sid)
+        f"{sid}:{int(offsets.get(sid, 0))}:{int(limits.get(sid, chunk))}"
+        for sid in sorted(set(offsets) | set(limits)) if _SID.match(sid)
     )
     return (
         "cd ~/.copilot/session-state 2>/dev/null || { echo " + shlex.quote(_DONE) + "; exit 0; }; "
@@ -162,7 +163,9 @@ class TranscriptMirror:
     def limits(self, codespace: str) -> dict[str, int]:
         return {sid: n for (cs, sid), n in self._limits.items() if cs == codespace}
 
-    def apply(self, codespace: str, text: str) -> dict[str, list[str]]:
+    def apply(
+        self, codespace: str, text: str, *, on_write_start: Callable[[], None] | None = None,
+    ) -> dict[str, list[str]]:
         """Append the whole lines of each chunk.
 
         Returns the files written, per session (``events.jsonl`` and, on first
@@ -171,7 +174,6 @@ class TranscriptMirror:
         changed: dict[str, list[str]] = {}
         for sid, off, _size, reset, data in chunks:
             path = self._session_dir(codespace, sid) / "events.jsonl"
-            path.parent.mkdir(parents=True, exist_ok=True)
             have = path.stat().st_size if path.is_file() else 0
             if not reset and off != have:
                 continue  # stale offset (a concurrent pass moved it): the next probe resumes
@@ -184,6 +186,9 @@ class TranscriptMirror:
                 if len(data) >= limit and limit < MAX_CHUNK_BYTES:
                     self._limits[key] = min(limit * 2, MAX_CHUNK_BYTES)
                 continue
+            if on_write_start is not None:
+                on_write_start()
+            path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "wb" if reset or off == 0 else "ab") as fh:
                 fh.write(data[:end + 1])
             self._limits.pop(key, None)
@@ -191,9 +196,76 @@ class TranscriptMirror:
         for sid, content in workspaces.items():
             ws = self._session_dir(codespace, sid) / "workspace.yaml"
             if ws.parent.is_dir():
+                if on_write_start is not None:
+                    on_write_start()
                 ws.write_bytes(content)
                 changed.setdefault(sid, []).append("workspace.yaml")
         return changed
+
+    def owed_codespaces(self) -> list[str]:
+        """CodeSpaces with a local mirror push still owed to the hub."""
+        if not self._root.is_dir():
+            return []
+        return sorted(
+            p.stem for p in self._root.glob("*.dirty")
+            if p.is_file() and _CODESPACE.match(p.stem)
+        )
+
+    async def push_owed(self, codespace: str) -> dict[str, Any]:
+        """Push an already-dirty mirror without contacting the CodeSpace."""
+        if not _CODESPACE.match(codespace or ""):
+            return {"ok": False, "detail": "not a CodeSpace name"}
+        dirty = self._root / f"{codespace}.dirty"
+        if not dirty.exists():
+            return {"ok": True, "changed": 0}
+        from single_instance_lease import AlreadyRunningError, SingleInstance
+
+        lease = SingleInstance(self._root, service="transcript-mirror", lock_name=f"{codespace}.lock")
+        try:
+            lease.acquire()
+        except AlreadyRunningError:
+            return {"ok": True, "changed": 0, "detail": "another pass is mirroring this CodeSpace"}
+        handed_off = False
+        try:
+            def push_only() -> dict[str, Any]:
+                try:
+                    return self._append_and_push(codespace, "")
+                finally:
+                    lease.release()
+
+            handed_off = True
+            return await asyncio.to_thread(push_only)
+        finally:
+            if not handed_off:
+                lease.release()
+
+    def prune_if_clean(self, codespace: str) -> bool:
+        """Remove a deleted CodeSpace's local mirror only when no push is owed."""
+        if not _CODESPACE.match(codespace or "") or not self._root.is_dir():
+            return False
+        dirty = self._root / f"{codespace}.dirty"
+        if dirty.exists():
+            return False
+        target = self._root / codespace
+        lock_file = self._root / f"{codespace}.lock"
+        if not target.exists() and not lock_file.exists():
+            return False
+        from single_instance_lease import AlreadyRunningError, SingleInstance
+
+        lease = SingleInstance(self._root, service="transcript-mirror", lock_name=f"{codespace}.lock")
+        try:
+            lease.acquire()
+        except AlreadyRunningError:
+            return False
+        try:
+            if dirty.exists():
+                return False
+            if target.exists():
+                shutil.rmtree(target)
+            return True
+        finally:
+            lease.release()
+            lock_file.unlink(missing_ok=True)
 
     async def __call__(self, codespace: str) -> dict[str, Any]:
         """One pass: read what's new on the box, append it here, push the mirror.
@@ -268,14 +340,16 @@ class TranscriptMirror:
                     log.debug("transcript mirror: disconnect from %s failed: %s", codespace, exc)
 
     def _append_and_push(self, codespace: str, stdout: str) -> dict[str, Any]:
-        # Marked before anything is appended, cleared only once a push succeeds:
+        # Marked before any whole event line is appended, cleared only once a push succeeds:
         # the appended bytes won't be read again, so a failed or interrupted
         # push is retried by the next pass (after a restart too) until it lands.
         dirty = self._root / f"{codespace}.dirty"
-        if _HEAD in stdout:
+
+        def mark_dirty() -> None:
             dirty.parent.mkdir(parents=True, exist_ok=True)
             dirty.touch()
-        changed = self.apply(codespace, stdout)
+
+        changed = self.apply(codespace, stdout, on_write_start=mark_dirty)
         if not changed and not dirty.exists():
             return {"ok": True, "changed": 0}
         push = self._push
