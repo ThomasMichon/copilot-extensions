@@ -63,7 +63,7 @@ def test_run_waiter_wake_drainer_retries_and_releases_claim(q):
                 q,
                 interval=0.01,
                 deliver=deliver,
-                release_claim=lambda task_id, worktree: releases.append((task_id, worktree)),
+                release_claim=lambda task_id, worktree: releases.append((task_id, worktree)) or {"released": True},
                 retry_base=0.01,
             )
         )
@@ -110,3 +110,42 @@ def test_run_waiter_wake_task_advance_fences_stale_delivery(q):
     [stale] = q.list_run_waiter_wakes(task_id)
     assert stale.id == wake.id
     assert stale.status == "stale"
+
+
+def test_run_waiter_wake_retries_when_claim_release_fails(q):
+    task_id, _owner, _retired, _wake = _queued_run_waiter_wake(q)
+    deliveries = []
+
+    def deliver(*args):
+        deliveries.append(args)
+        return True
+
+    releases = []
+
+    async def scenario():
+        loop = asyncio.create_task(
+            drain_run_waiter_wakes(
+                q,
+                interval=0.01,
+                deliver=deliver,
+                release_claim=lambda task_id, worktree: releases.append((task_id, worktree)) or None,
+                retry_base=0.01,
+                max_attempts=2,
+            )
+        )
+        try:
+            for _ in range(200):
+                status = q.list_run_waiter_wakes(task_id)[0].status
+                if status == "failed":
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                raise AssertionError("run waiter wake did not exhaust retries")
+        finally:
+            loop.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await loop
+
+    asyncio.run(scenario())
+    assert len(deliveries) == 2
+    assert len(releases) == 2

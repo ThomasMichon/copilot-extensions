@@ -821,7 +821,9 @@ A producer puts work on the queue; a **whole-goal evaluator** decides whether a
 verification-gated submitted task is actually done. It is event-triggered, not a
 polling audit loop: the coordinator invokes it when a task first reaches
 `task.submitted`, when an operator explicitly backfills a named submitted task
-(`agent-dispatch verify-submitted <task-id>...`), and when a subscribed emitter's
+(`agent-dispatch verify-submitted --evaluator-ref <name> <task-id>...` for a
+legacy row that is not yet opted in, or the same command without
+`--evaluator-ref` for an already-flagged row), and when a subscribed emitter's
 event note re-triggers a still-submitted task after external state changes.
 
 Two evaluator kinds are supported:

@@ -20,6 +20,147 @@ from .queue_records import Status, TaskError
 class QueueRunWaitersMixin:
     """Detached-run waiter and event-note helpers for :class:`TaskQueue`."""
 
+    def prepare_run_waiter(
+        self,
+        task_id: str,
+        *,
+        worker_id: str,
+        resume_worktree: str,
+        command: list[str],
+        reason: str,
+        now: float | None = None,
+    ) -> dict[str, Any]:
+        ts = self._now(now)
+        meaningful = _clip(reason, PROGRESS_SUMMARY_MAX) or "hibernating"
+        if not resume_worktree:
+            raise TaskError("run waiter preparation requires a resume_worktree")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            if task is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such task {task_id!r}")
+            if task.owner != worker_id:
+                conn.execute("COMMIT")
+                raise TaskError(f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}")
+            if task.status not in (Status.STARTED, Status.SUSPENDED):
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"cannot prepare a run waiter on a {task.status!r} task"
+                )
+            previous = conn.execute(
+                "SELECT MAX(generation) AS generation FROM run_waiters WHERE task_id = ?",
+                (task_id,),
+            ).fetchone()
+            generation = int(previous["generation"] or 0) + 1
+            conn.execute(
+                "UPDATE run_waiters SET state = 'superseded', updated_at = ?,"
+                " retired_reason = COALESCE(retired_reason, 'superseded by a new waiter')"
+                " WHERE task_id = ? AND state IN ('preparing', 'active')",
+                (ts, task_id),
+            )
+            if task.status == Status.STARTED:
+                conn.execute(
+                    "UPDATE tasks SET status = ?, updated_at = ?, activity = NULL,"
+                    " activity_updated_at = ?, lease_expires_at = NULL, last_liveness = NULL,"
+                    " monitor_kind = NULL, monitor_not_before = NULL"
+                    " WHERE id = ?",
+                    (Status.SUSPENDED, ts, ts, task_id),
+                )
+                self._audit(
+                    conn,
+                    task_id,
+                    ts=ts,
+                    from_status=Status.STARTED,
+                    to_status=Status.SUSPENDED,
+                    worker=worker_id,
+                    note=f"suspend: {meaningful}",
+                )
+            conn.execute(
+                "INSERT INTO run_waiters ("
+                " task_id, generation, task_generation, owner, owner_session_id,"
+                " pid, host, start_token, resume_worktree,"
+                " command_json, state, created_at, updated_at"
+                ") VALUES (?, ?, ?, ?, ?, 0, '', '', ?, ?, 'preparing', ?, ?)",
+                (
+                    task_id,
+                    generation,
+                    task.generation,
+                    task.owner or "",
+                    task.owner_session_id,
+                    resume_worktree,
+                    json.dumps(command, separators=(",", ":")),
+                    ts,
+                    ts,
+                ),
+            )
+            self._audit(
+                conn,
+                task_id,
+                ts=ts,
+                from_status=Status.SUSPENDED,
+                to_status=Status.SUSPENDED,
+                worker=worker_id,
+                note=f"run waiter prepared (generation {generation})",
+            )
+            conn.execute("COMMIT")
+        return {
+            "task_id": task_id,
+            "generation": generation,
+            "task_generation": task.generation,
+            "owner": task.owner or "",
+            "owner_session_id": task.owner_session_id,
+            "resume_worktree": resume_worktree,
+            "command": list(command),
+            "state": "preparing",
+        }
+
+    def arm_run_waiter(
+        self,
+        task_id: str,
+        *,
+        generation: int,
+        pid: int,
+        host: str,
+        start_token: str,
+        now: float | None = None,
+    ) -> dict[str, Any] | None:
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = self._select_waiter_row(
+                conn,
+                task_id,
+                states=("preparing",),
+                generation=generation,
+            )
+            if row is None:
+                conn.execute("COMMIT")
+                return None
+            waiter = self._run_waiter_from_row(row)
+            task = self._fetch(conn, task_id)
+            if not self._run_waiter_matches_task(waiter, task):
+                conn.execute("COMMIT")
+                return None
+            conn.execute(
+                "UPDATE run_waiters SET state = 'active', pid = ?, host = ?, start_token = ?,"
+                " updated_at = ? WHERE id = ? AND state = 'preparing'",
+                (int(pid), host, start_token, ts, row["id"]),
+            )
+            if task is not None:
+                self._audit(
+                    conn,
+                    task_id,
+                    ts=ts,
+                    from_status=task.status,
+                    to_status=task.status,
+                    worker=task.owner,
+                    note=f"run waiter armed (generation {generation})",
+                )
+            armed = conn.execute("SELECT * FROM run_waiters WHERE id = ?", (row["id"],)).fetchone()
+            conn.execute("COMMIT")
+        return self._run_waiter_from_row(armed)
+
     def register_run_waiter(
         self,
         task_id: str,
@@ -116,6 +257,14 @@ class QueueRunWaitersMixin:
             ).fetchall()
         return [self._run_waiter_from_row(row) for row in rows]
 
+    def list_pending_run_waiters(self) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM run_waiters WHERE state = 'preparing'"
+                " ORDER BY created_at ASC, id ASC"
+            ).fetchall()
+        return [self._run_waiter_from_row(row) for row in rows]
+
     def list_run_waiter_wakes(self, task_id: str) -> list[RunWaiterWakeOperation]:
         with self._connect() as conn:
             rows = conn.execute(
@@ -178,9 +327,10 @@ class QueueRunWaitersMixin:
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            row = self._select_active_waiter_row(
+            row = self._select_waiter_row(
                 conn,
                 task_id,
+                states=("active",),
                 generation=generation,
                 pid=pid,
                 host=host,
@@ -278,6 +428,65 @@ class QueueRunWaitersMixin:
         waiter["wake_id"] = wake.id
         return waiter
 
+    def recover_preparing_run_waiter(
+        self,
+        task_id: str,
+        *,
+        generation: int,
+        reason: str,
+        message: str,
+        sender: str,
+        now: float | None = None,
+    ) -> dict[str, Any] | None:
+        ts = self._now(now)
+        wake_enqueued = False
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = self._select_waiter_row(
+                conn,
+                task_id,
+                states=("preparing",),
+                generation=generation,
+            )
+            if row is None:
+                conn.execute("COMMIT")
+                return None
+            waiter = self._run_waiter_from_row(row)
+            task = self._fetch(conn, task_id)
+            if not self._run_waiter_matches_task(waiter, task):
+                conn.execute("COMMIT")
+                return None
+            conn.execute(
+                "UPDATE run_waiters SET state = 'retired', updated_at = ?, retired_reason = ?"
+                " WHERE id = ? AND state = 'preparing'",
+                (ts, reason, row["id"]),
+            )
+            wake = self._enqueue_run_waiter_wake(
+                conn,
+                waiter,
+                message=message,
+                sender=sender,
+                ts=ts,
+            )
+            if task is not None:
+                self._audit(
+                    conn,
+                    task_id,
+                    ts=ts,
+                    from_status=task.status,
+                    to_status=task.status,
+                    worker=task.owner,
+                    note=f"run waiter recovered ({reason})",
+                )
+            conn.execute("COMMIT")
+            wake_enqueued = True
+        if wake_enqueued:
+            self._notify_wake()
+        waiter["state"] = "retired"
+        waiter["retired_reason"] = reason
+        waiter["wake_id"] = wake.id
+        return waiter
+
     def supersede_run_waiter_with_wake(
         self,
         task_id: str,
@@ -349,7 +558,9 @@ class QueueRunWaitersMixin:
         wake_enqueued = False
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            row = self._select_active_waiter_row(conn, task_id, generation=generation)
+            row = self._select_waiter_row(
+                conn, task_id, states=("active",), generation=generation
+            )
             if row is None:
                 conn.execute("COMMIT")
                 return None
@@ -633,17 +844,20 @@ class QueueRunWaitersMixin:
         return RunWaiterWakeOperation._from_row(row)
 
     @staticmethod
-    def _select_active_waiter_row(
+    def _select_waiter_row(
         conn: sqlite3.Connection,
         task_id: str,
         *,
+        states: tuple[str, ...],
         generation: int | None = None,
         pid: int | None = None,
         host: str | None = None,
         start_token: str | None = None,
     ) -> sqlite3.Row | None:
-        clauses = ["task_id = ?", "state = 'active'"]
+        placeholders = ",".join("?" for _ in states)
+        clauses = ["task_id = ?", f"state IN ({placeholders})"]
         params: list[object] = [task_id]
+        params.extend(states)
         if generation is not None:
             clauses.append("generation = ?")
             params.append(int(generation))

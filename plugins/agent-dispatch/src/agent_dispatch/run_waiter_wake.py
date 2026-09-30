@@ -82,8 +82,27 @@ async def drain_run_waiter_wakes(
             log.warning("run-waiter wake delivery raised for %s", wake.id, exc_info=True)
             delivered = False
             delivery_error = f"wake delivery error: {type(exc).__name__}"
+        if delivered and release_claim is not None:
+            try:
+                released = await asyncio.to_thread(
+                    release_claim,
+                    wake.task_id,
+                    wake.resume_worktree,
+                )
+            except Exception:
+                log.warning(
+                    "run-waiter wake claim release failed for %s",
+                    wake.id,
+                    exc_info=True,
+                )
+                delivered = False
+                delivery_error = "claim release failed"
+            else:
+                if released is None:
+                    delivered = False
+                    delivery_error = "claim release failed"
         try:
-            result = await asyncio.to_thread(
+            await asyncio.to_thread(
                 queue.finish_run_waiter_wake,
                 wake.id,
                 wake.delivery_token or "",
@@ -95,16 +114,3 @@ async def drain_run_waiter_wakes(
         except TaskError:
             log.info("run-waiter wake delivery ownership changed for %s", wake.id)
             continue
-        if delivered and result.status == "delivered" and release_claim is not None:
-            try:
-                await asyncio.to_thread(
-                    release_claim,
-                    wake.task_id,
-                    wake.resume_worktree,
-                )
-            except Exception:
-                log.warning(
-                    "run-waiter wake claim release failed for %s",
-                    wake.id,
-                    exc_info=True,
-                )

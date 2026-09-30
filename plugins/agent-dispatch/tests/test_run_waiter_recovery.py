@@ -156,3 +156,30 @@ def test_recover_run_waiters_treats_missing_start_token_as_unknown(tmp_path):
 
     assert counts == {"checked": 1, "live": 0, "unknown": 1, "recovered": 0}
     assert queue.get_active_run_waiter(task_id) is not None
+
+
+def test_recover_run_waiters_recovers_stale_preparing_waiter(tmp_path):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    task_id = _suspended_task(queue)
+    queue.prepare_run_waiter(
+        task_id,
+        worker_id="worker-1",
+        resume_worktree="m/wt-1",
+        command=["sleep", "1"],
+        reason="hibernating: sleep 1",
+        now=1000.0,
+    )
+
+    counts = recover_run_waiters(
+        queue,
+        process_exists=lambda _pid: False,
+        start_token_for_pid=lambda _pid: None,
+        current_machine=TEST_HOST,
+        arm_grace_seconds=10.0,
+    )
+
+    assert counts == {"checked": 1, "live": 0, "unknown": 0, "recovered": 1}
+    assert queue.get_active_run_waiter(task_id) is None
+    wakes = queue.list_run_waiter_wakes(task_id)
+    assert len(wakes) == 1
+    assert wakes[0].task_id == task_id

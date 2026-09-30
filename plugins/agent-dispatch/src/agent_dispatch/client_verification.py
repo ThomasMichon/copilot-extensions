@@ -27,13 +27,12 @@ class VerificationClientMixin:
             )
         )
 
-    def register_run_waiter(
+    def prepare_run_waiter(
         self,
         task_id: str,
         *,
-        pid: int,
-        host: str,
-        start_token: str,
+        worker_id: str,
+        reason: str,
         resume_worktree: str,
         command: list[str],
     ) -> dict:
@@ -41,11 +40,31 @@ class VerificationClientMixin:
             self._http.post(
                 f"/tasks/{task_id}/run-waiter/register",
                 json={
+                    "worker_id": worker_id,
+                    "reason": reason,
+                    "resume_worktree": resume_worktree,
+                    "command": command,
+                },
+            )
+        )
+
+    def arm_run_waiter(
+        self,
+        task_id: str,
+        *,
+        generation: int,
+        pid: int,
+        host: str,
+        start_token: str,
+    ) -> dict:
+        return self._unwrap(
+            self._http.post(
+                f"/tasks/{task_id}/run-waiter/arm",
+                json={
+                    "generation": generation,
                     "pid": pid,
                     "host": host,
                     "start_token": start_token,
-                    "resume_worktree": resume_worktree,
-                    "command": command,
                 },
             )
         )

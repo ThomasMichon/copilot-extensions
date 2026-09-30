@@ -254,7 +254,7 @@ def test_run_detach_spawns_waiter_without_executing_the_wait(capsys, monkeypatch
 
 
 class _FakeSuspendClient:
-    """A minimal fake standing in for DispatchClient's context-manager + suspend."""
+    """A minimal fake standing in for DispatchClient's context-manager + prepare."""
 
     def __init__(self, *, raises: Exception | None = None, owner: str | None = "headless-abc123"):
         self.calls = []
@@ -270,11 +270,19 @@ class _FakeSuspendClient:
     def get(self, task_id):
         return {"owner": self._owner} if self._owner else {}
 
-    def suspend(self, task_id, worker_id, *, reason):
+    def prepare_run_waiter(self, task_id, *, worker_id, reason, resume_worktree, command):
         self.calls.append((task_id, worker_id, reason))
         if self._raises:
             raise self._raises
-        return {"status": "suspended", "generation": 7, "owner_session_id": "session-1"}
+        return {
+            "task_id": task_id,
+            "generation": 7,
+            "task_generation": 7,
+            "owner_session_id": "session-1",
+            "resume_worktree": resume_worktree,
+            "command": command,
+            "state": "preparing",
+        }
 
 
 class _FakeWaiterFinishClient:
@@ -288,6 +296,10 @@ class _FakeWaiterFinishClient:
         return False
 
     def finish_run_waiter(self, task_id, **payload):
+        self.calls.append((task_id, payload))
+        return {"accepted": True, "waiter": {"generation": payload["generation"]}}
+
+    def arm_run_waiter(self, task_id, **payload):
         self.calls.append((task_id, payload))
         return {"accepted": True, "waiter": {"generation": payload["generation"]}}
 
@@ -517,10 +529,10 @@ def test_run_detach_suspend_failure_does_not_fail_the_detach(capsys, monkeypatch
     rc = _cmd_run(
         _args(["run", "--detach", "--resume", "m/wt-1", "--task", "t-1", "--", "sleep", "1"])
     )
-    assert rc == 0  # the wait is already safely handed off -- this must still succeed
+    assert rc == 0
     out = json.loads(capsys.readouterr().out)
-    assert out["detached"] is True
-    assert "coordinator unreachable" in out["suspended"]["error"]
+    assert out["detached"] is False
+    assert "coordinator unreachable" in out["rollback"]["error"]
 
 
 def test_run_detach_with_task_but_no_resolvable_owner_reports_error(capsys, monkeypatch):
@@ -542,15 +554,13 @@ def test_run_detach_with_task_but_no_resolvable_owner_reports_error(capsys, monk
     )
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
-    assert out["detached"] is True
-    assert "could not resolve" in out["suspended"]["error"]
+    assert out["detached"] is False
+    assert "could not resolve" in out["error"]
 
 
 def test_waiter_child_reattempts_timeout_and_queues_finish(capsys, monkeypatch, tmp_path):
     from agent_dispatch import companion, remote_dispatch
 
-    ready = tmp_path / "waiter-ready.json"
-    ready.write_text('{"generation": 3}', encoding="utf-8")
     calls = []
 
     def fake_run(argv, check=False):
@@ -570,8 +580,8 @@ def test_waiter_child_reattempts_timeout_and_queues_finish(capsys, monkeypatch, 
             [
                 "run",
                 "--waiter-child",
-                "--waiter-ready-file",
-                str(ready),
+                "--waiter-generation",
+                "3",
                 "--resume",
                 "m/wt-1",
                 "--task",

@@ -24,18 +24,20 @@ class VerifySubmittedBody(BaseModel):
 
 
 class RunWaiterRegisterBody(BaseModel):
-    pid: StrictInt
-    host: str
-    start_token: str
+    worker_id: str
+    reason: str
     resume_worktree: str
     command: list[str] = Field(default_factory=list)
 
 
-class RunWaiterFinishBody(BaseModel):
+class RunWaiterArmBody(BaseModel):
     generation: StrictInt
     pid: StrictInt
     host: str
     start_token: str
+
+
+class RunWaiterFinishBody(RunWaiterArmBody):
     message: str
 
 
@@ -169,11 +171,10 @@ def register_verification_routes(
     @app.post("/tasks/{task_id}/run-waiter/register")
     def register_run_waiter(task_id: str, body: RunWaiterRegisterBody) -> dict:
         try:
-            return queue.register_run_waiter(
+            return queue.prepare_run_waiter(
                 task_id,
-                pid=body.pid,
-                host=body.host,
-                start_token=body.start_token,
+                worker_id=body.worker_id,
+                reason=body.reason,
                 resume_worktree=body.resume_worktree,
                 command=body.command,
             )
@@ -181,6 +182,22 @@ def register_verification_routes(
             msg = str(exc)
             status = 404 if msg.startswith("no such task") else 409
             raise HTTPException(status_code=status, detail=msg) from exc
+
+    @app.post("/tasks/{task_id}/run-waiter/arm")
+    def arm_run_waiter(task_id: str, body: RunWaiterArmBody) -> dict:
+        try:
+            waiter = queue.arm_run_waiter(
+                task_id,
+                generation=body.generation,
+                pid=body.pid,
+                host=body.host,
+                start_token=body.start_token,
+            )
+        except TaskError as exc:
+            msg = str(exc)
+            status = 404 if msg.startswith("no such task") else 409
+            raise HTTPException(status_code=status, detail=msg) from exc
+        return {"accepted": waiter is not None, "waiter": waiter}
 
     @app.post("/tasks/{task_id}/run-waiter/finish")
     def finish_run_waiter(task_id: str, body: RunWaiterFinishBody) -> dict:

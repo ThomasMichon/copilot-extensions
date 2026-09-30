@@ -585,3 +585,15 @@ place:
 - Phase 4 updated `plugins/agent-dispatch/README.md` and cross-linked the
   status-rename migration note to this effort's landed verification-gate
   behavior.
+
+### 2026-09-30 (follow-up hardening) -- shared durability abstraction clarified
+- Review hardening on the implementation PR confirmed that Phase 2a's
+  submitted-verification trigger and Phase 2b's detached-`run` outage
+  recovery are the same architectural family even though they fence on
+  different facts: both are **durable queued follow-up work with fenced
+  claim/drain/recovery semantics**. The waiter path fences on process
+  identity (`pid` + start token + owner/session/task generation), while the
+  verification path fences on the submitted task incarnation itself
+  (generation-scoped queued verification requests). This PR keeps them as
+  separate queues in code for now to land safely, but the shared abstraction
+  is now explicit for any future simplification pass.
