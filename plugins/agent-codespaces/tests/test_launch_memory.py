@@ -105,6 +105,7 @@ def test_the_record_is_owner_only_and_leaves_no_temp_file():
 
 def test_records_under_an_unsafe_directory_are_never_trusted(tmp_path):
     import os
+    import stat
 
     import pytest
 
@@ -113,12 +114,13 @@ def test_records_under_an_unsafe_directory_are_never_trusted(tmp_path):
     if os.name == "nt":
         pytest.skip("POSIX permission bits and symlinks")
     runtime = lm.LAUNCHES_DIR.parent
-    runtime.chmod(0o777)  # a runtime dir others could write: its write bits are dropped
-    assert lm.apply("cs-1", TENANT, ["--resume=s1"], None)[2] == ["copilot_args", "driver"]
-    assert (runtime.stat().st_mode & 0o022) == 0
-    lm.LAUNCHES_DIR.chmod(0o777)  # made group/world-writable after the fact
-    assert lm.apply("cs-1", TENANT, ["--resume=s1"], None)[2] == ["copilot_args", "driver"]
-    assert (lm.LAUNCHES_DIR.stat().st_mode & 0o077) == 0  # tightened again, not trusted as is
+    for unsafe in (runtime, lm.LAUNCHES_DIR, lm.LAUNCHES_DIR / "cs-1"):
+        unsafe.chmod(0o777)  # writable by others: what it holds could have been swapped in
+        assert lm.apply("cs-1", TENANT, ["--resume=s1"], None) == (["--resume=s1"], D, [])
+        assert stat.S_IMODE(unsafe.stat().st_mode) == 0o777  # a read never repairs and then trusts
+        lm.remember("cs-1", TENANT, ["--no-ask-user"], "o", "s1")  # only a write tightens it
+        assert (unsafe.stat().st_mode & 0o022) == 0
+        assert lm.apply("cs-1", TENANT, ["--resume=s1"], None)[2] == ["copilot_args", "driver"]
     rec = lm._path("cs-1", TENANT)
     rec.chmod(0o666)  # a record others could have written is ignored
     assert lm.apply("cs-1", TENANT, ["--resume=s1"], None) == (["--resume=s1"], D, [])

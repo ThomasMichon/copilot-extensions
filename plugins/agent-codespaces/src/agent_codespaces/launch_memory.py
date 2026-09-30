@@ -80,11 +80,12 @@ def _path(codespace: str, tenant: str) -> Path | None:
     return LAUNCHES_DIR / codespace / f"{label}-{digest}.json"
 
 
-def _owned_unwritable_by_others(path: Path) -> bool:
+def _owned_unwritable_by_others(path: Path, *, repair: bool) -> bool:
     """The runtime dir holding ``launches/``: a real directory of this user's
     that nobody else can write (else another user could swap ``launches/``
-    between the checks and the open). Its group/other write bits are dropped
-    if set; it's never recreated or loosened."""
+    between the checks and the open). Only a write (``repair``) drops its
+    group/other write bits: a read refuses it, since whatever it holds could
+    have been put there while it was writable. Never recreated or loosened."""
     import stat
 
     try:
@@ -104,6 +105,8 @@ def _owned_unwritable_by_others(path: Path) -> bool:
     if st.st_uid != os.getuid():
         return False
     if st.st_mode & 0o022:
+        if not repair:
+            return False
         try:
             path.chmod(stat.S_IMODE(st.st_mode) & ~0o022)
         except OSError:
@@ -115,7 +118,8 @@ def _private(path: Path, *, create: bool) -> bool:
     """Whether ``path`` is a real directory only this user controls (made so
     first when ``create``): never a symlink or reparse point; on POSIX owned
     by this user and not writable by anyone else. Another local user who could
-    write here could plant a record that injects flags into a later resume."""
+    write here could plant a record that injects flags into a later resume, so
+    a read refuses a directory others can write; only a write tightens it."""
     if create:
         try:
             path.mkdir(mode=0o700, exist_ok=True)
@@ -136,10 +140,13 @@ def _private(path: Path, *, create: bool) -> bool:
     if st.st_uid != os.getuid():
         return False
     if st.st_mode & 0o077:
-        try:
-            path.chmod(0o700)
-        except OSError:
+        if not create and st.st_mode & 0o022:
             return False
+        if create:
+            try:
+                path.chmod(0o700)
+            except OSError:
+                return False
     return True
 
 
@@ -147,7 +154,7 @@ def _record_dir(path: Path, *, create: bool) -> bool:
     """The runtime dir safe, then ``launches/`` and ``launches/<codespace>/``
     private: every ancestor another user could otherwise change under us."""
     return (
-        _owned_unwritable_by_others(path.parent.parent.parent)
+        _owned_unwritable_by_others(path.parent.parent.parent, repair=create)
         and _private(path.parent.parent, create=create)
         and _private(path.parent, create=create)
     )
