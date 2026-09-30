@@ -113,9 +113,9 @@ same way.
 - Related, narrower effort: `review-automation-reliability` (#2357/#2423)
   and its completed ancestor `turnkey-reviewer-loops` already hardened the
   reviewer recipe's reliability; this effort's reviewer-facing phase (4) is
-  scoped to the genuine remaining delta (provider adapters, a 7-day
-  stale-exit criterion, confirmed verification-gate wiring), not a repeat of
-  that work.
+  scoped to the genuine remaining delta (provider adapters, a
+  **configurable** stale-exit parameter, confirmed verification-gate
+  wiring), not a repeat of that work.
 
 ## Request
 
@@ -169,13 +169,26 @@ organization-neutral contribution boundary):
 > a reviewer, source/query/tagging for a backlog worker — referencing a
 > shared recipe, never a repo-local copy of the loop/prompt/evaluator logic.
 
+**Follow-up correction (2026-09-30, same day):**
+
+> The review "staleness" needs to be a parameter for the reviewer loop. 30
+> days for odsp-web ADO, 7 days for odsp-web-harness or copilot-extensions,
+> etc.
+
+This replaces the fixed "7-day-since-last-commit" reading of item (b) above:
+staleness is a **per-declaration parameter** (e.g. `stale_after_days`), not a
+hardcoded engine constant — different consuming repos/venues need materially
+different values (a slower-moving ADO backlog vs. a fast-moving GitHub repo).
+Plan Phase 4 and the Validation Plan below are revised accordingly.
+
 **Reconciliation with what already ships** (this effort's actual scope,
 settled against the Context above): (a) is very likely already satisfied by
 the existing manual/self-tracked-task path plus the `goal-driven` recipe —
 Phase 1 confirms this and closes only a genuine documentation/naming gap, not
 a new engine. (b) is mostly already shipped by the existing `reviewer`
 recipe plus `task-verification-gate`; the genuine remainder is the ADO/Gitea
-driver, the 7-day stale-exit, and confirmed verification-gate wiring (Phase
+driver, a **configurable** stale-exit parameter (not a fixed 7 days — see the
+follow-up correction above), and confirmed verification-gate wiring (Phase
 4). (c)/(d)/(e)/(f) are genuinely new — named, canned parameterizations of
 the existing `repository-issue-loop`/`goal-driven` archetypes (Phases 5-8),
 not new engines either. The `extends:` model (Phase 3) and provider adapters
@@ -230,8 +243,15 @@ not new engines either. The `extends:` model (Phase 3) and provider adapters
       reference both resolve correctly.
 
 ### Phase 4 — Reviewer-recipe delta (Request item b's remainder)
-- [ ] Add the 7-day-since-last-commit stale-exit criterion to the reviewer
-      recipe's resolution logic (alongside merged/abandoned).
+- [ ] Add a **configurable stale-exit parameter** to the reviewer recipe
+      (e.g. `stale_after_days`, measured since the target change's last
+      commit) alongside merged/abandoned in its resolution logic. This is a
+      **per-declaration param, not an engine constant** — different
+      consuming repos/venues need materially different values (e.g. 30 days
+      for a slower-moving Azure DevOps backlog vs. 7 days for a fast-moving
+      GitHub repo like this one or a harness repo). No default bakes in a
+      single "one true" cadence; a declaration that omits the param leaves
+      staleness un-checked (never silently applies a guessed default).
 - [ ] Confirm (and extend if needed) the reviewer recipe's evaluator uses
       `task-verification-gate`'s `require_verification` +
       suspend-requires-verdict pattern: when a reviewer task suspends
@@ -239,8 +259,12 @@ not new engines either. The `extends:` model (Phase 3) and provider adapters
       the `run`-outage recovery sweep, whichever owns this case) wakes it
       rather than leaving it silently parked.
 - [ ] Tests: a reviewer task that suspends without a verdict is woken, not
-      left parked; a target PR aging past 7 days without a new commit
-      resolves via the stale-exit path.
+      left parked; two fixture declarations with different
+      `stale_after_days` values (e.g. 7 and 30) each resolve via the
+      stale-exit path only once *their own* configured threshold is crossed,
+      confirming the parameter is genuinely per-declaration, not a shared
+      constant; a declaration with no `stale_after_days` set never triggers
+      a stale-exit.
 
 ### Phase 5 — Named recipe: backlog-triager (Request item c)
 - [ ] Ship a global `extends:`-able recipe parameterizing
@@ -335,3 +359,15 @@ _Pending review._
   private-consumer identifiers per this repo's contribution boundary;
   demarcated the "reconciliation with what already ships" analysis as this
   effort's own scoping work, not part of the operator's original ask.
+
+### 2026-09-30 (same day) — Correction: staleness is a per-declaration parameter
+- Operator follow-up: the reviewer recipe's stale-exit threshold must be a
+  **configurable parameter**, not the fixed 7 days item (b) originally
+  named — concretely, 30 days for an Azure DevOps-backed loop (odsp-web)
+  vs. 7 days for a faster-moving GitHub loop (odsp-web-harness or this
+  repo). Captured verbatim as a Request follow-up rather than silently
+  editing the original quote.
+- Revised Phase 4 (`stale_after_days`-shaped param, no baked-in default —
+  an unset value leaves staleness unchecked rather than guessing a cadence)
+  and its test item (two fixture declarations with different thresholds
+  each resolve independently) to match. No other phase is affected.
