@@ -36,7 +36,7 @@ is procedural (a review gap), and the output is a proposal, not a mandate.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| ThomasMichon | Reviews current state, drafts proposed adjustments | `lambda-core` worktree |
+| ThomasMichon | Reviews current state, drafts proposed adjustments | local worktree |
 
 ## Coordination
 

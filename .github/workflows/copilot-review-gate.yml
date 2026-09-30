@@ -256,7 +256,12 @@ jobs:
               return;
             }
 
-            const attempts = 6;
+            // Observed real-world latency between a successful request and
+            // Copilot actually appearing as a requested reviewer or a
+            // completed review ranges from seconds to a few minutes.
+            // 18 x 10s = 3 minutes, comfortably inside this job's 5-minute
+            // timeout, without treating normal latency as a false failure.
+            const attempts = 18;
             const delayMs = 10_000;
             for (let attempt = 1; attempt <= attempts; attempt += 1) {
               if (await copilotIsRequested(preexistingReviewIds, headSha)) {
