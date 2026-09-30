@@ -357,7 +357,7 @@ def test_run_detach_with_task_suspends_atomically(capsys, monkeypatch):
         ("t-1", "headless-abc123", "hibernating: agent-worktrees pr-watch 42")
     ]
     # the claim is journaled for the task, independent of who resolves as owner
-    assert claimed["call"][0] == "t-1"
+    assert claimed["call"][0] == "t-1:7"
     assert claimed["call"][1]["note"] == "hibernating: agent-worktrees pr-watch 42"
 
 

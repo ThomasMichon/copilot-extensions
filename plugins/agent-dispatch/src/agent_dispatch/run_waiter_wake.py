@@ -19,6 +19,10 @@ def _worktree_id(worktree: str) -> str:
     return tail if sep and tail else worktree
 
 
+def _claim_key(task_id: str, generation: int) -> str:
+    return f"{task_id}:{int(generation)}"
+
+
 def _default_deliver(
     owner: str,
     task_id: str,
@@ -101,7 +105,7 @@ async def drain_run_waiter_wakes(
                     task = await asyncio.to_thread(queue.get, wake.task_id)
                     released = await asyncio.to_thread(
                         release_claim,
-                        wake.task_id,
+                        _claim_key(wake.task_id, wake.waiter_generation),
                         wake.waiter_host,
                         _worktree_id(wake.resume_worktree),
                         None if task is None else task.repo,

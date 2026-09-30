@@ -177,7 +177,12 @@ def _rollback_detached_wait(
             )
     except Exception as exc:  # noqa: BLE001 -- degraded rollback
         return {"error": str(exc)}
-    claim = hibernation_claims.release_hibernation_claim(spec.task_id)
+    claim_key = suspended.get("claim_key")
+    claim = (
+        hibernation_claims.release_hibernation_claim(str(claim_key))
+        if claim_key
+        else None
+    )
     return {
         "status": resumed.get("status"),
         "claim_released": claim,
@@ -253,7 +258,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
                         "claim": None,
                     }
                 )
-            claim = hibernation_claims.add_hibernation_claim(spec.task_id, note=reason)
             try:
                 with _core()._client(args) as c:
                     prepared = c.prepare_run_waiter(
@@ -267,17 +271,23 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 rollback = (
                     _rollback_detached_wait(args, spec, suspended)
                     if suspended and "status" in suspended
-                    else {"error": str(exc), "claim_released": hibernation_claims.release_hibernation_claim(spec.task_id)}
+                    else {"error": str(exc), "claim_released": None}
                 )
             else:
                 suspended = {
                     "status": "suspended",
                     "worker_id": worker_id,
-                    "claim": claim,
                     "generation": prepared.get("task_generation"),
                     "waiter_generation": prepared.get("generation"),
                     "owner_session_id": prepared.get("owner_session_id"),
                 }
+                claim_key = hibernation_claims.waiter_claim_key(
+                    spec.task_id,
+                    int(prepared["generation"]),
+                )
+                claim = hibernation_claims.add_hibernation_claim(claim_key, note=reason)
+                suspended["claim"] = claim
+                suspended["claim_key"] = claim_key
                 spec = dataclasses.replace(
                     spec,
                     waiter_child=True,
@@ -434,9 +444,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     report = run_and_resume(spec, runner=runner, resumer=bridge.send_nudge)
     if spec.task_id:
-        from . import hibernation_claims
-
-        report["claim_released"] = hibernation_claims.release_hibernation_claim(spec.task_id)
+        report["claim_released"] = None
     return _core()._emit(report)
 
 def _cmd_evaluate(args: argparse.Namespace) -> int:

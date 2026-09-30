@@ -35,6 +35,11 @@ from .procutil import (
 )
 
 
+def waiter_claim_key(task_id: str, generation: int) -> str:
+    """Generation-scoped worktree-claim id for one detached waiter attempt."""
+    return f"{task_id}:{int(generation)}"
+
+
 def _mirror_task_claim_status(
     task_id: str, status: str, *, timeout: float = 15.0
 ) -> None:

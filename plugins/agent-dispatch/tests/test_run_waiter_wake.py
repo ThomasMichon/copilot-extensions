@@ -86,7 +86,7 @@ def test_run_waiter_wake_drainer_retries_and_releases_claim(q):
     assert {call[3] for call in calls} == {wake.id}
     assert {call[4] for call in calls} == {"agent-dispatch-run-waiter-recovery"}
     assert {call[5] for call in calls} == {"session-1"}
-    assert releases == [(task_id, TEST_HOST, "wt-1", "example.com/acme/widget")]
+    assert releases == [(f"{task_id}:1", TEST_HOST, "wt-1", "example.com/acme/widget")]
 
 
 def test_run_waiter_wake_restart_recovers_inflight_lease(q):
