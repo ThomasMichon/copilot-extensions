@@ -103,10 +103,12 @@ def _is_safe_ref(ref: SessionRef) -> bool:
     return True
 
 
-#: agent-codespaces lands each CodeSpace's sessions one level down, under
-#: ``<corpus>/.codespaces/<codespace>/`` (a capture at close-out, or the
-#: Connection Owner's live transcript mirror).
-_NESTED_MACHINE_GROUPS = (".codespaces",)
+#: agent-codespaces lands each CodeSpace's sessions one level down: its
+#: close-out capture under ``<corpus>/.codespaces/<codespace>/``, and the
+#: Connection Owner's live transcript mirror of running sessions under
+#: ``<corpus>/.codespaces-live/<codespace>/``. Searched in that order, so a
+#: complete close-out copy wins over a live mirror of the same session.
+_NESTED_MACHINE_GROUPS = (".codespaces", ".codespaces-live")
 
 
 def _machine_dirs(corpus_root: Path) -> list[Path]:
@@ -129,7 +131,7 @@ def _machine_dirs(corpus_root: Path) -> list[Path]:
 
 def _resolve_from_synced_corpus(session_id: str, corpus_root: Path) -> SessionRef | None:
     """Search every ``<machine>/`` subtree of the local sync target, including
-    the per-CodeSpace ones under ``.codespaces/``."""
+    the per-CodeSpace ones under ``.codespaces/`` and ``.codespaces-live/``."""
     real_corpus_root = existing_real_directory(corpus_root)
     if real_corpus_root is None:
         return None

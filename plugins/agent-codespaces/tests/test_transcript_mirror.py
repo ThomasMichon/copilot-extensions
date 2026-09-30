@@ -168,19 +168,20 @@ def direct_exec(monkeypatch):
     monkeypatch.setattr(tm, "exec_with_retry", run)
 
 
-async def test_a_pass_pushes_only_what_it_changed(tmp_path, direct_exec):
+async def test_a_pass_pushes_its_own_namespace_only_when_something_changed(tmp_path, direct_exec):
     pushes = []
     manager = _Manager(_chunk(SID, 0, b'{"a":1}\n') + _chunk(SID2, 0, b'{"b":1}\n') + tm._DONE + "\n")
     mirror = _mirror_with(tmp_path, manager, pushes)
     result = await mirror("cs-1")
     assert result["ok"] and result["changed"] == 2
-    assert pushes[-1][1] == ".codespaces/cs-1"
+    # Its own label: the close-out capture's ``.codespaces/<name>`` is never touched.
+    assert pushes[-1][1] == ".codespaces-live/cs-1"
     assert pushes[-1][0] == {f"session-state/{SID}/events.jsonl", f"session-state/{SID2}/events.jsonl"}
     assert manager.disconnected == 1
-    # Only SID2 grew: SID (maybe since captured in full on close-out) is not pushed again.
+    # A snapshot of a directory that only grows: nothing it pushed before goes missing.
     manager.stdout = _chunk(SID2, 8, b'{"b":2}\n') + tm._DONE + "\n"
     assert (await mirror("cs-1"))["changed"] == 1
-    assert pushes[-1][0] == {f"session-state/{SID2}/events.jsonl"}
+    assert pushes[-1][0] == {f"session-state/{SID}/events.jsonl", f"session-state/{SID2}/events.jsonl"}
     manager.stdout = tm._DONE + "\n"
     assert (await mirror("cs-1"))["changed"] == 0
     assert len(pushes) == 2

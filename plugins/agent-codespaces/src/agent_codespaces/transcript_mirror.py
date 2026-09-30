@@ -5,12 +5,13 @@ A live session's history lives in its CodeSpace
 in-memory tail, so after a host restart nothing on this machine could show what
 came before. The Connection Owner already probes each running session every
 couple of minutes. On that probe it also pulls the bytes appended since last
-time to each transcript it mirrors (one short exec, by byte offset), and hands
-the files that changed to agent-logger's ``session-sync push`` under
-``.codespaces/<name>`` -- the same storage and label the close-out capture uses,
-where the bridge's cold-store lookup (agent-logger ``session-fetch``) finds it.
-Only changed files are pushed, so an older copy here never replaces a complete
-close-out capture of a session that has since ended.
+time to each transcript it mirrors (one short exec, by byte offset), and pushes
+its mirror with agent-logger's ``session-sync push`` under its own label,
+``.codespaces-live/<name>``, where the bridge's cold-store lookup (agent-logger
+``session-fetch``) finds it. That namespace is the mirror's alone: the
+close-out capture lands under ``.codespaces/<name>``, so neither ever replaces
+or deletes the other's files (the lookup prefers the complete close-out copy),
+and each push is an ordinary snapshot of a directory that only grows.
 
 Only whole lines are mirrored, so a reader never sees a torn event; a line
 longer than one read makes the next read larger. A remote transcript that
@@ -24,8 +25,6 @@ import base64
 import logging
 import re
 import shlex
-import shutil
-import tempfile
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -37,6 +36,8 @@ log = logging.getLogger("agent-codespaces")
 
 #: Where the host keeps each CodeSpace's mirror: ``<root>/<codespace>/session-state/<id>/``.
 MIRROR_ROOT = RUNTIME_DIR / "transcripts"
+#: The hub label group for live mirrors (close-out captures use ``.codespaces``).
+LIVE_LABEL_GROUP = ".codespaces-live"
 #: New transcripts written within this many minutes are mirrored (a running
 #: session's is); one already mirrored keeps catching up regardless.
 ACTIVE_MINUTES = 30
@@ -165,8 +166,7 @@ class TranscriptMirror:
         """Append the whole lines of each chunk.
 
         Returns the files written, per session (``events.jsonl`` and, on first
-        sight, ``workspace.yaml``): only those are pushed, so an older copy
-        here never replaces what a close-out capture already landed."""
+        sight, ``workspace.yaml``); the mirror is pushed only when some were."""
         chunks, workspaces, _complete = parse_output(text)
         changed: dict[str, list[str]] = {}
         for sid, off, _size, reset, data in chunks:
@@ -194,15 +194,6 @@ class TranscriptMirror:
                 ws.write_bytes(content)
                 changed.setdefault(sid, []).append("workspace.yaml")
         return changed
-
-    def stage(self, codespace: str, changed: dict[str, list[str]], into: Path) -> Path:
-        """Copy just ``changed`` into ``into/session-state/<id>/`` for the push."""
-        for sid, names in changed.items():
-            dest = into / "session-state" / sid
-            dest.mkdir(parents=True, exist_ok=True)
-            for name in names:
-                shutil.copy2(self._session_dir(codespace, sid) / name, dest / name)
-        return into
 
     async def __call__(self, codespace: str) -> dict[str, Any]:
         if not _CODESPACE.match(codespace or ""):
@@ -242,13 +233,8 @@ class TranscriptMirror:
 
             def push(source: Path, label: str) -> tuple[bool, str]:
                 return _push_via_session_sync(source, label, verbose=False)
-        label = f".codespaces/{codespace}"
-
-        def stage_and_push() -> tuple[bool, str]:
-            with tempfile.TemporaryDirectory(prefix="acs-mirror-") as tmp:
-                return push(self.stage(codespace, changed, Path(tmp)), label)
-
-        ok, detail = await asyncio.to_thread(stage_and_push)
+        label = f"{LIVE_LABEL_GROUP}/{codespace}"
+        ok, detail = await asyncio.to_thread(push, self._root / codespace, label)
         if not ok:
             log.warning("transcript mirror for %s: push failed: %s", codespace, detail)
         return {"ok": ok, "changed": len(changed), "detail": detail}
