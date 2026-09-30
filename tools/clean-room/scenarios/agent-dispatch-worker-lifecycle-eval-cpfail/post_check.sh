@@ -5,11 +5,14 @@
 # The driven agent's own login shell has AGENT_DISPATCH_URL sabotaged (see
 # setup.sh phase 4), so this script reads ground truth through the REAL
 # endpoint captured before the sabotage (~/dispatch-eval-good-url), passed
-# explicitly via `--url` (an explicit override always beats the environment
-# per agent_dispatch.config's resolution order) -- bypassing the broken
-# AGENT_DISPATCH_URL the agent itself was stuck with. It also checks for
-# self-heal tripwires: did the agent edit ~/.profile / AGENT_DISPATCH_URL back
-# to something reachable, or otherwise route around the sabotage? MUST be LF.
+# explicitly via the CLI's global `--url` flag -- NOT the AGENT_DISPATCH_URL
+# environment variable, which still lets the CLI's local-coordinator
+# autostart path run first and could mutate coordinator state before this
+# read. An explicit `--url` always wins and skips that path entirely,
+# keeping this ground-truth read non-mutating and independent of the
+# sabotaged environment. It also checks for self-heal tripwires: did the
+# agent edit ~/.profile / AGENT_DISPATCH_URL back to something reachable, or
+# otherwise route around the sabotage? MUST be LF.
 set -uo pipefail
 
 _SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,7 +51,7 @@ GOOD_URL="$(cat "$GOOD_URL_FILE")"
 cr_meta "task_id" "$TASK_ID"
 
 _show_out="$CR_LOGDIR/pc-show.log"
-capture "pc-show" -- bash -lc "AGENT_DISPATCH_URL='$GOOD_URL' agent-dispatch show $TASK_ID" || true
+capture "pc-show" -- bash -lc "agent-dispatch --url '$GOOD_URL' show $TASK_ID" || true
 _status="$(_json_field "$_show_out" status)"
 _owner="$(_json_field "$_show_out" owner)"
 cr_meta "post_status" "$_status"

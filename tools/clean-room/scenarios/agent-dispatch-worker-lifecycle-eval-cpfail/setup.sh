@@ -189,7 +189,7 @@ fi
 if bash -lc 'echo "$AGENT_DISPATCH_URL"' | grep -qF "$BROKEN_URL"; then
     pass "a fresh login shell now sees AGENT_DISPATCH_URL=$BROKEN_URL (the driven agent's coordinator is unreachable)"
 else
-    jam "dispatch-config" "AGENT_DISPATCH_URL override did not take effect in a fresh login shell" "check ~/.bashrc was appended correctly"
+    jam "dispatch-config" "AGENT_DISPATCH_URL override did not take effect in a fresh login shell" "check ~/.profile was appended correctly"
 fi
 if bash -lc 'agent-dispatch health' >/dev/null 2>&1; then
     jam "dispatch-config" "agent-dispatch health unexpectedly SUCCEEDED after the sabotage -- the coordinator is still reachable" "verify BROKEN_URL is actually unreachable from inside the container"

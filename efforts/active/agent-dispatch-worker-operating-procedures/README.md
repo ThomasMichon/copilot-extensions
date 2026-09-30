@@ -509,7 +509,7 @@ box, via the `validating-in-clean-room` skill's Tier-E flow and the
       itself never depends on the thing under test.
 - [x] Ran both variants through `-Mode eval` on a real Docker clean-room box
       (governed-feed fixtures: `-NpmRegistry`/`-UvIndex` against this
-      machine's internal `packagefeedproxy.microsoft.io` proxies), hand-
+      machine's own configured internal npm/PyPI proxies), hand-
       verified the mechanics with a manual dry run of each `setup.sh` +
       `post_check.sh` first (catching and fixing two real scenario bugs:
       `agent-dispatch create`/`show` output is preceded by a
@@ -862,10 +862,10 @@ _Pending._
      afterward.
   3. This session's governed machine needed both `-NpmRegistry` (Copilot
      CLI install) and `-UvIndex` (agent-dispatch's own Python runtime
-     provisioning) pointed at the internal
-     `https://packagefeedproxy.microsoft.io/{npm,pypi/simple}/` proxies --
-     resolved from the host's own `npm config get registry` / `pip config
-     list`, per the clean-room README's own governed-box guidance.
+     provisioning) pointed at the machine's own configured internal
+     npm/PyPI feed proxies -- resolved from the host's own `npm config get
+     registry` / `pip config list`, per the clean-room README's own
+     governed-box guidance.
 - **Ran both variants through `-Mode eval` for real** (a live Docker
   container, a real `agent-bridge`-registered Copilot session per run,
   Sonnet 4.5/`claude-sonnet-5`): happy path completed in 146s, the
