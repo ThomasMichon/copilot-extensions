@@ -2,9 +2,11 @@
 
 This file is read by GitHub Copilot code review specifically (this repo's
 `.github/workflows/copilot-review-gate.yml` requests it, non-blocking, on
-every PR targeting `dev` from an already-invited collaborator — see
-CONTRIBUTING.md's "Contribution flow" for why the ruleset-native
-`copilot_code_review` auto-review rule was removed instead of used;
+every PR targeting `dev` authored by a Maintainer (see CONTRIBUTING.md's
+"Contribution flow" for why the automatic request is Maintainer-only, not
+"any invited collaborator") — see CONTRIBUTING.md's "Contribution flow" for
+why the ruleset-native `copilot_code_review` auto-review rule was removed
+instead of used;
 `main`'s ruleset never requests Copilot review at all, since only the
 promotion pipeline's own automated snapshot PR ever targets `main`, and
 re-reviewing regenerated, already-validated content there is redundant) —

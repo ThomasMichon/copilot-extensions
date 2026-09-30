@@ -48,8 +48,9 @@ protected_branches: [main, dev]
 #      unassociated direct commit is rejected. Layer 1 keeps agents off that
 #      path regardless.)
 #   3. `.github/workflows/copilot-review-gate.yml` requests a **non-blocking**
-#      Copilot review on every PR from an already-invited collaborator (see
-#      CONTRIBUTING.md's "Contribution flow"). It is a review, not a required
+#      Copilot review on every PR authored by a Maintainer (see
+#      CONTRIBUTING.md's "Contribution flow" for why it's Maintainer-only,
+#      not "any invited collaborator"). It is a review, not a required
 #      status check, so it never gates the merge. (The ruleset-native
 #      `copilot_code_review` rule that used to do this unconditionally for
 #      anyone has been removed -- it had no "collaborators only" condition.)
