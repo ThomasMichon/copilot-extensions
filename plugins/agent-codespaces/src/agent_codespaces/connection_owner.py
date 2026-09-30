@@ -509,6 +509,7 @@ def _write_liveness(
             "interval": float(interval),
             "active": sorted(active or ()),
             "bridge_forwards": sorted(bridge_forwards or ()),
+            "heals": ["bridge-serving", "single-owner"],  # what this Owner repairs itself
         }
         tmp = LIVE_FILE.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload), encoding="utf-8")

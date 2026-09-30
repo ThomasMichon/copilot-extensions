@@ -778,3 +778,9 @@ async def test_await_owner_relay_becomes_served(store):
     result = await owner.await_owner_relay("cs-a", timeout=1.0, poll=0.01)
     await task
     assert result is True
+
+
+def test_the_beacon_says_what_this_owner_heals(store):
+    """Consumers (a board deciding whether to wait before relaunching) read it."""
+    owner._write_liveness(15.0)
+    assert set(json.loads(owner.LIVE_FILE.read_text("utf-8"))["heals"]) >= {"bridge-serving", "single-owner"}
