@@ -34,6 +34,9 @@ def recover_run_waiters(
         except Exception:
             counts["unknown"] += 1
             continue
+        if exists and not waiter.get("start_token"):
+            counts["unknown"] += 1
+            continue
         if exists and current is None:
             counts["unknown"] += 1
             continue

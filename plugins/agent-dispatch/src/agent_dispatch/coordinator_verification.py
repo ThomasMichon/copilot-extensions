@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+import secrets
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, StrictInt
 
 from . import remote_dispatch
-from .coordinator_auth import _make_control_auth
+from .coordinator_auth import scoped_control_token
 from .events import EventBus
 from .queue import RegistrationKind, Status, Task, TaskError, TaskQueue
 from .verification import evaluate_submitted_task
@@ -44,7 +46,7 @@ def register_verification_routes(
     task_dict,
     event_task_dict,
 ) -> None:
-    def _wake_for_event_note(task: Task, note: str) -> None:
+    def _wake_for_event_note(task: Task, note: str) -> bool:
         message = (
             f"Task {task.id} received an event note: {note}. "
             "Re-read the task history and handle the new external state before finalizing."
@@ -55,14 +57,14 @@ def register_verification_routes(
             message=message,
             sender="agent-dispatch-event-note",
         )
-        if waiter is not None:
-            return
+        return waiter is not None
 
     def _emit_producer_event(event_type: str, detail: dict[str, object]) -> None:
         bus.publish({"type": event_type, "producer_fence": detail})
 
     current_machine = remote_dispatch.local_machine()
     current_env = os.environ.get("AGENT_DISPATCH_ENV") or "default"
+    emitter_bearer = HTTPBearer(auto_error=False)
 
     def _require_trusted_emitter(task: Task, sender: str) -> None:
         record = queue.get_registration(sender)
@@ -89,8 +91,34 @@ def register_verification_routes(
     def append_event_note(
         task_id: str,
         body: EventNoteBody,
-        _auth: None = Depends(_make_control_auth(control_token, _emit_producer_event)),  # noqa: B008
+        creds: HTTPAuthorizationCredentials | None = Depends(emitter_bearer),  # noqa: B008
     ) -> dict:
+        if control_token is None:
+            _emit_producer_event(
+                "producer_scope.transition_rejected",
+                {
+                    "code": "producer_control_unavailable",
+                    "operation": "event_note",
+                    "reason": "control_authority_not_configured",
+                    "retryable": False,
+                },
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="managed producer transitions require a configured control token",
+            )
+        expected = scoped_control_token(control_token, f"event-note:{body.sender}")
+        if creds is None or not secrets.compare_digest(creds.credentials, expected):
+            _emit_producer_event(
+                "producer_scope.transition_rejected",
+                {
+                    "code": "producer_control_forbidden",
+                    "operation": "event_note",
+                    "reason": "invalid_control_authority",
+                    "retryable": False,
+                },
+            )
+            raise HTTPException(status_code=403, detail="invalid or missing producer control bearer")
         task = queue.get(task_id)
         if task is None:
             raise HTTPException(status_code=404, detail=f"no such task {task_id!r}")
@@ -113,9 +141,10 @@ def register_verification_routes(
         if task.status == Status.SUBMITTED and task.require_verification and task.evaluator_ref:
             evaluate_submitted_task(queue, task.id, bus=bus, trigger="event-note")
         elif task.status in (Status.CLAIMED, Status.STARTED, Status.SUSPENDED):
+            woke_waiter = False
             if queue.get_active_run_waiter(task.id) is not None:
-                _wake_for_event_note(task, body.note)
-            elif task.owner and task.owner_session_id is not None:
+                woke_waiter = _wake_for_event_note(task, body.note)
+            if (not woke_waiter) and task.owner and task.owner_session_id is not None:
                 from . import bridge
 
                 bridge.resume_steered_owner(

@@ -17,6 +17,7 @@ from agent_dispatch.client import (
     DispatchError,
     DispatchUpgradeRequired,
 )
+from agent_dispatch.coordinator_auth import scoped_control_token
 from agent_dispatch.coordinator_loops import _refresh_worktree_status_relay
 from agent_dispatch.coordinator import create_app
 from agent_dispatch.queue import Status
@@ -42,8 +43,11 @@ def _registration_machine() -> str:
     return remote_dispatch.local_machine() or "test-host"
 
 
-def _control_headers() -> dict[str, str]:
-    return {"Authorization": f"Bearer {CONTROL_TOKEN}"}
+def _control_headers(sender: str) -> dict[str, str]:
+    return {
+        "Authorization": "Bearer "
+        + scoped_control_token(CONTROL_TOKEN, f"event-note:{sender}")
+    }
 
 
 def _register_event_emitter(api, *, reg_id: str = "emitter-review") -> str:
@@ -699,7 +703,7 @@ def test_complete_over_http_retriggers_whole_goal_verification(api, tmp_path):
     noted = api.post(
         f"/tasks/{tid}/event-note",
         json={"sender": sender, "note": "merged"},
-        headers=_control_headers(),
+        headers=_control_headers(sender),
     )
     assert noted.status_code == 200
     assert api.get(f"/tasks/{tid}").json()["status"] == Status.COMPLETED
@@ -760,7 +764,7 @@ def test_event_note_wakes_and_supersedes_active_run_waiter(api, monkeypatch):
     r = api.post(
         f"/tasks/{tid}/event-note",
         json={"sender": sender, "note": "merged upstream"},
-        headers=_control_headers(),
+        headers=_control_headers(sender),
     )
 
     assert r.status_code == 200
@@ -791,7 +795,7 @@ def test_event_note_nudges_running_owner(api, monkeypatch):
     r = api.post(
         f"/tasks/{tid}/event-note",
         json={"sender": sender, "note": "new review comment"},
-        headers=_control_headers(),
+        headers=_control_headers(sender),
     )
 
     assert r.status_code == 200
@@ -809,7 +813,7 @@ def test_event_note_rejects_untrusted_sender(api):
     r = api.post(
         f"/tasks/{tid}/event-note",
         json={"sender": "review-emitter", "note": "forged"},
-        headers=_control_headers(),
+        headers=_control_headers("review-emitter"),
     )
 
     assert r.status_code == 403

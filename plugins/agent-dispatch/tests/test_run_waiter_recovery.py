@@ -132,3 +132,26 @@ def test_recover_run_waiters_treats_hostless_records_as_unknown(tmp_path):
 
     assert counts == {"checked": 1, "live": 0, "unknown": 1, "recovered": 0}
     assert queue.get_active_run_waiter(task_id) is not None
+
+
+def test_recover_run_waiters_treats_missing_start_token_as_unknown(tmp_path):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    task_id = _suspended_task(queue)
+    queue.register_run_waiter(
+        task_id,
+        pid=101,
+        host=TEST_HOST,
+        start_token=None,
+        resume_worktree="m/wt-1",
+        command=["sleep", "1"],
+    )
+
+    counts = recover_run_waiters(
+        queue,
+        process_exists=lambda _pid: True,
+        start_token_for_pid=lambda _pid: "token-101",
+        current_machine=TEST_HOST,
+    )
+
+    assert counts == {"checked": 1, "live": 0, "unknown": 1, "recovered": 0}
+    assert queue.get_active_run_waiter(task_id) is not None

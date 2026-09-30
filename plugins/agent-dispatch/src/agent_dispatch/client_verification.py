@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .coordinator_auth import scoped_control_token
+
 
 class VerificationClientMixin:
     """Coordinator calls for whole-goal verification and detached run waiters."""
@@ -10,11 +12,17 @@ class VerificationClientMixin:
         return self._unwrap(self._http.post(f"/tasks/{task_id}/verify-submitted"))
 
     def append_event_note(self, task_id: str, *, sender: str, note: str) -> dict:
+        headers = None
+        if self._control_token:
+            headers = {
+                "Authorization": "Bearer "
+                + scoped_control_token(self._control_token, f"event-note:{sender}")
+            }
         return self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/event-note",
                 json={"sender": sender, "note": note},
-                headers=self._control_headers(),
+                headers=headers,
             )
         )
 
