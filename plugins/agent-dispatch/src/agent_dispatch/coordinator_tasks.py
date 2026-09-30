@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
-import threading
 from dataclasses import asdict
 from collections.abc import Callable
 from typing import Annotated, Any
@@ -38,9 +36,6 @@ from .queue import (
     encode_result,
     worker_id_for,
 )
-from .verification import evaluate_submitted_task
-
-log = logging.getLogger("agent-dispatch.coordinator-tasks")
 
 
 def _strict_structured_result(value: Any) -> Any:
@@ -302,23 +297,6 @@ def register_task_routes(
         bus.publish({"type": event_type, "producer_fence": detail})
         telemetry.emit(telemetry.producer_fence_event(event_type, detail))
 
-    def _nudge_submitted_verification(task_id: str) -> None:
-        def _runner() -> None:
-            try:
-                evaluate_submitted_task(queue, task_id, bus=bus, trigger="submitted")
-            except TaskError:
-                log.debug(
-                    "submitted verification skipped after task %s changed before async evaluation",
-                    task_id,
-                    exc_info=True,
-                )
-
-        threading.Thread(
-            target=_runner,
-            name=f"agent-dispatch-verify-{task_id[:8]}",
-            daemon=True,
-        ).start()
-
     def _producer_rejection(exc: ProducerFenceError) -> None:
         _emit_producer_event(
             "task.create_rejected", exc.event(operation="create")
@@ -354,12 +332,6 @@ def register_task_routes(
             handoff_claim_release.release_if_handoff(result)
         if event_type is not None:
             _emit(event_type, result)
-            if (
-                event_type == "task.submitted"
-                and result.get("require_verification")
-                and result.get("evaluator_ref")
-            ):
-                _nudge_submitted_verification(result["id"])
         return result
 
     @app.get("/producer-scopes/status")

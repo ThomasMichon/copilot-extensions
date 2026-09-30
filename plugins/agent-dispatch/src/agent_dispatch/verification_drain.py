@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 
 from .events import EventBus
 from .queue import TaskError, TaskQueue
 from .verification import evaluate_submitted_task
 
 log = logging.getLogger(__name__)
+
+WakeActive = Callable[[], bool]
 
 
 async def drain_verification_requests(
@@ -20,6 +23,7 @@ async def drain_verification_requests(
     max_attempts: int = 8,
     retry_base: float = 1.0,
     delivery_lease: float = 60.0,
+    is_active: WakeActive | None = None,
     signal: asyncio.Queue[None] | None = None,
 ) -> None:
     """Drain pending submitted-verification requests until cancelled."""
@@ -34,6 +38,15 @@ async def drain_verification_requests(
             pass
 
     while True:
+        if is_active is not None:
+            try:
+                active = await asyncio.to_thread(is_active)
+            except Exception:
+                log.warning("verification active-route check failed", exc_info=True)
+                active = False
+            if not active:
+                await _wait(interval)
+                continue
         await asyncio.to_thread(
             queue.recover_inflight_verification_requests,
             lease_seconds=delivery_lease,

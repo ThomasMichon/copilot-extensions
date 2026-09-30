@@ -23,9 +23,7 @@ importable (otherwise the REST API still serves).
 # (non-stringized) annotations resolve at def-time via the enclosing scope.
 
 import json
-import logging
 import secrets
-import threading
 from dataclasses import asdict
 from typing import Annotated, Any
 
@@ -44,9 +42,6 @@ from .queue import (
     TaskQueue,
     worker_id_for,
 )
-from .verification import evaluate_submitted_task
-
-log = logging.getLogger("agent-dispatch.mcp-http")
 
 MACHINE_HEADER = "x-agent-machine"
 WORKTREE_HEADER = "x-agent-worktree"
@@ -150,23 +145,6 @@ def build_coordinator_mcp(
 
     def _mutate(op, event_type: str | None) -> dict:
         """Run a queue mutation; map TaskError to an error dict; emit on success."""
-        def _nudge_submitted_verification(task_id: str) -> None:
-            def _runner() -> None:
-                try:
-                    evaluate_submitted_task(queue, task_id, bus=bus, trigger="submitted")
-                except TaskError:
-                    log.debug(
-                        "submitted verification skipped after task %s changed before async evaluation",
-                        task_id,
-                        exc_info=True,
-                    )
-
-            threading.Thread(
-                target=_runner,
-                name=f"agent-dispatch-mcp-verify-{task_id[:8]}",
-                daemon=True,
-            ).start()
-
         try:
             mutation = op()
             if isinstance(mutation, CompletionOutcome):
@@ -186,12 +164,6 @@ def build_coordinator_mcp(
             handoff_claim_release.release_if_handoff(result)
         if event_type is not None:
             _emit(event_type, result)
-            if (
-                event_type == "task.submitted"
-                and result.get("require_verification")
-                and result.get("evaluator_ref")
-            ):
-                _nudge_submitted_verification(result["id"])
         return result
 
     def _identity(

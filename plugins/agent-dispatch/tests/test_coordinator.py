@@ -714,7 +714,8 @@ def test_complete_over_http_retriggers_whole_goal_verification(api, tmp_path):
 
     backfill = api.post(f"/tasks/{tid}/verify-submitted")
     assert backfill.status_code == 200
-    assert backfill.json()["applied"][0]["decision"] == "noop"
+    assert backfill.json()["queued"] is True
+    assert api.app.state.queue.list_verification_requests(tid)
     sender = _register_event_emitter(api)
     noted = api.post(
         f"/tasks/{tid}/event-note",
@@ -767,7 +768,13 @@ def test_verify_submitted_can_opt_in_legacy_row_and_assign_evaluator(api, tmp_pa
     )
 
     assert backfill.status_code == 200
-    assert api.get(f"/tasks/{tid}").json()["status"] == Status.COMPLETED
+    assert backfill.json()["queued"] is True
+    for _ in range(100):
+        if api.get(f"/tasks/{tid}").json()["status"] == Status.COMPLETED:
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("backfill verification did not complete asynchronously")
 
 
 def test_complete_over_http_triggers_immediate_whole_goal_verification(api, tmp_path):

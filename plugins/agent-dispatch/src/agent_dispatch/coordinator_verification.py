@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 import os
 import secrets
-import threading
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field, StrictInt
@@ -14,9 +12,6 @@ from . import remote_dispatch
 from .coordinator_auth import _make_control_auth, scoped_control_token
 from .events import EventBus
 from .queue import RegistrationKind, Status, Task, TaskError, TaskQueue
-from .verification import evaluate_submitted_task
-
-log = logging.getLogger("agent-dispatch.coordinator-verification")
 
 
 class EventNoteBody(BaseModel):
@@ -94,23 +89,6 @@ def register_verification_routes(
                 detail="event note sender is not subscribed to this task",
             )
 
-    def _nudge_event_note_verification(task_id: str) -> None:
-        def _runner() -> None:
-            try:
-                evaluate_submitted_task(queue, task_id, bus=bus, trigger="event-note")
-            except TaskError:
-                log.debug(
-                    "event-note verification skipped after task %s changed before async evaluation",
-                    task_id,
-                    exc_info=True,
-                )
-
-        threading.Thread(
-            target=_runner,
-            name=f"agent-dispatch-event-note-verify-{task_id[:8]}",
-            daemon=True,
-        ).start()
-
     @app.post("/tasks/{task_id}/verify-submitted")
     def verify_submitted(task_id: str, body: VerifySubmittedBody | None = None) -> dict:
         try:
@@ -120,7 +98,8 @@ def register_verification_routes(
                     evaluator_ref=body.evaluator_ref,
                     actor="backfill",
                 )
-            return evaluate_submitted_task(queue, task_id, bus=bus, trigger="backfill")
+            request = queue.request_submitted_verification(task_id, trigger="backfill")
+            return {"task_id": task_id, "queued": True, "request_id": request.id}
         except TaskError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -168,9 +147,7 @@ def register_verification_routes(
                 "note": body.note,
             }
         )
-        if task.status == Status.SUBMITTED and task.require_verification and task.evaluator_ref:
-            _nudge_event_note_verification(task.id)
-        elif task.status in (Status.CLAIMED, Status.STARTED, Status.SUSPENDED):
+        if task.status in (Status.CLAIMED, Status.STARTED, Status.SUSPENDED):
             woke_waiter = False
             if queue.get_active_run_waiter(task.id) is not None:
                 woke_waiter = _wake_for_event_note(task, body.note)

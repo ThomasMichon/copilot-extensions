@@ -253,7 +253,7 @@ def create_app(
             asyncio.create_task(
                 drain_wake_outbox(queue, bus, **wake_options)
             )
-            if verification_interval > 0
+            if wake_interval > 0
             else None
         )
         verification_task = (
@@ -264,10 +264,11 @@ def create_app(
                     interval=verification_interval,
                     max_attempts=wake_max_attempts,
                     retry_base=wake_retry_base,
+                    is_active=wake_is_active,
                     signal=verification_signal,
                 )
             )
-            if wake_interval > 0
+            if verification_interval > 0
             else None
         )
         run_waiter_wake_task = (
