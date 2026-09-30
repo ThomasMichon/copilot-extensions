@@ -50,18 +50,32 @@ note) is enough to prove a REAL reattach, not a no-op:
   3. The events.jsonl snapshot taken the instant ``deploy`` was fired is an
      exact PREFIX of the final snapshot -- no line already written before the
      cutover was lost, truncated, or mutated.
-  4. Every turn opened is balanced by a matching close by the end (no
-     turn left incomplete), AND at least one turn_end lands strictly AFTER
-     the cutover boundary (the in-flight turn genuinely continued past
-     deploy, not merely already-done before it fired) -- one prompt can
+  4. Every turn opened is balanced by exactly one matching close (turnId-
+     correlated, not aggregate counts -- a replayed duplicate pair would
+     still balance by count alone), no orphan ends, no duplicate event
+     ids, AND the SPECIFIC turn open at the verified-reattach boundary
+     closes strictly AFTER it (not merely "some" turn_end appearing later
+     in the file, which could have closed during deploy's own startup,
+     before the generation actually changed) -- one prompt can
      legitimately open several turn_start/turn_end pairs (one per model
      completion in an agentic tool-calling loop), so an exact count of 1
      is the wrong assertion; no duplicate ``session.start`` (the child was
-     reattached, never respawned).
-  5. The bridge's own caller-facing ``wait --attention turn_complete`` (the
-     SAME channel a real caller uses) settles cleanly across the boundary --
-     this is the actual continuity guarantee callers depend on, not merely an
-     internal bookkeeping fact.
+     reattached, never respawned); the ``acp_session_id`` itself never
+     changes after settling (never silently replaced by reattach).
+
+**Scope note (review-caught -- read before trusting this drill's PASS as
+proof of caller-facing continuity).** This drill's own PASS/FAIL verdict
+proves session- and transcript-level survival at the daemon/Session-Host
+level (points 1-4 above) -- it does **not** prove the caller-facing "a
+reply reaches the client" guarantee end to end. `agent-bridge wait
+<sid> --attention turn_complete` -- the same channel a real caller uses to
+learn a turn is done -- is invoked only as a best-effort, non-blocking
+**advisory** secondary check: a real live run found it can hang
+indefinitely after a Session-Host reattach even though the session
+correctly reaches `idle` (tracked as
+[issue #4681](https://github.com/ThomasMichon/copilot-extensions/issues/4681),
+not silently worked around). Until that upstream gap is resolved, treat
+this drill as proving points 1-4 only.
 
 Usage:
     python live_turn_probe.py --python <agent-bridge-venv-python> \\
@@ -75,6 +89,7 @@ parse it identically.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import socket
@@ -208,22 +223,32 @@ def _host_record(python: str, config_dir: str, session_id: str):
         raise _IndexReadError(f"unparseable index read output {text!r}") from exc
 
 
-def _pid_is_agent_bridge(pid: int) -> bool:
-    """Best-effort confirm ``pid`` is really an agent-bridge daemon process
-    before we ever signal it -- ``active.json`` is a routing SNAPSHOT, not
-    proof the pid still identifies that daemon (the pid could have died and
-    been reused by an unrelated process). Reads ``/proc/<pid>/cmdline``
-    (Linux-only, which is all this Docker-only drill ever runs on); refuses
-    to vouch for a pid it cannot positively confirm.
+def _stop_daemon_identity_safe(python: str) -> tuple[bool, str]:
+    """Replace whatever agent-bridge daemon is currently running via the
+    daemon's OWN production stop path (``agent-bridge service stop``)
+    instead of hand-rolling a pid signal.
+
+    A hand-rolled ``os.kill(pid, 15)`` on the pid named in ``active.json``
+    is a real identity hazard (review-caught): that file is a routing
+    SNAPSHOT, not proof the pid still identifies that daemon -- the
+    process could have died and its pid been reused by something
+    unrelated, and there is a TOCTOU window between confirming and
+    signaling even with a cmdline check. ``service stop`` avoids the whole
+    class: it cross-checks the pid file, the port's actual holder, AND the
+    singleton lock file (three independent sources, not one snapshot)
+    before ever calling its own internal ``_kill_pid``, then verifies via
+    ``_pid_is_agent_bridge`` AND the singleton lock's release -- not
+    merely "the port stopped answering", which does not by itself prove
+    the process exited or that its singleton lease was released (the lease
+    is only released on shutdown) -- with its own bounded retry (up to
+    10s). Returns ``(ok, detail)``; ``ok`` is False on anything other than
+    a clean stop or "nothing was running".
     """
-    if pid <= 0:
-        return False
-    try:
-        with open(f"/proc/{pid}/cmdline", "rb") as f:
-            cmdline = f.read().decode("utf-8", "replace")
-    except OSError:
-        return False
-    return "agent_bridge" in cmdline
+    out = _run(python, "service", "stop", timeout=30)
+    text = (out.stdout or "") + (out.stderr or "")
+    if out.returncode == 0 and ("[OK]" in text or "[SKIP]" in text):
+        return True, text.strip()
+    return False, f"rc={out.returncode}; {text.strip()[:300]}"
 
 
 def _get_session(python: str, session_id: str) -> dict | None:
@@ -280,44 +305,75 @@ def _parse_event_ts(raw: object) -> float | None:
     return None
 
 
-def _turn_balance_and_boundary_crossing(lines: list[str], boundary_ts: float) -> dict:
-    """Walk ``events.jsonl`` lines IN ORDER (never by aggregate count alone
-    -- a replayed/duplicated start+end pair keeps totals equal while hiding
-    a real delivery bug) and report:
+def _turn_balance_and_boundary_crossing(lines: list[str], boundary_ts: float, boundary_turn_id: str | None = None) -> dict:
+    """Walk ``events.jsonl`` lines IN ORDER, correlating each
+    ``assistant.turn_end`` with its OWN ``assistant.turn_start`` via the
+    transcript's own ``data.turnId`` field (confirmed present on both event
+    types against a real transcript) rather than aggregate counts or an
+    open/close depth guess -- neither proves non-duplication or which
+    SPECIFIC turn closed when (both review-caught gaps in an earlier
+    revision):
 
-    - ``balanced``: every opened turn was eventually closed, and no
-      ``turn_end`` ever arrived without a matching open ``turn_start``
-      (an orphan/duplicate end).
-    - ``crossed``: at least one ``turn_end`` has its own event timestamp
-      strictly AFTER ``boundary_ts`` (the moment we actually fired
-      ``deploy``) -- proving a turn that was genuinely open across the
-      real cutover boundary is the one that closed afterward, not merely
-      that some turn_end byte-offset appears later in the file (which
-      could have closed during deploy's own startup, before the
-      generation actually changed).
-    - ``orphan_ends``: count of turn_end events with no open turn (a real
-      duplicate-delivery finding, not just unequal totals).
+    - Aggregate ``turn_start``/``turn_end`` totals being equal would still
+      PASS a replayed ``start(A), end(A), start(A), end(A)`` duplicate.
+      Every event also carries its own ``id`` (``peek_snapshot.py``'s own
+      documented schema); reject any repeated ``id`` as a real duplicate
+      delivery, not just unequal totals.
+    - "Some turn_end appears later in the file" doesn't prove the turn
+      that was open AT THE VERIFIED BOUNDARY MOMENT (a confirmed reattach,
+      not merely "deploy was launched") is the one that closed afterward
+      -- it could have been a different turn entirely, or the original
+      one could have closed during deploy's own startup, before the
+      generation actually changed. When ``boundary_turn_id`` is given,
+      ``crossed`` requires THAT turn's own recorded close to have a
+      timestamp after ``boundary_ts``; without it, this falls back to
+      "any turn_end after the boundary" (still ordered/duplicate-safe, but
+      not turn-specific).
+
+    Returns a dict with ``balanced`` (every started turn was closed by
+    exactly one turn_end, no orphans, no duplicate ids), ``crossed``, and
+    diagnostic counts.
     """
-    open_count = 0
+    open_turns: dict[str, float | None] = {}
+    boundary_close_ts: float | None = None
     orphan_ends = 0
-    crossed = False
+    duplicate_ids = 0
+    seen_ids: set[str] = set()
     for line in lines:
         try:
             ev = json.loads(line)
         except Exception:
             continue
+        eid = ev.get("id")
+        if eid is not None:
+            if eid in seen_ids:
+                duplicate_ids += 1
+                continue  # never let a replayed event double-count below
+            seen_ids.add(eid)
         t = ev.get("type")
+        turn_id = str((ev.get("data") or {}).get("turnId") or "")
         if t == "assistant.turn_start":
-            open_count += 1
+            open_turns[turn_id] = None
         elif t == "assistant.turn_end":
-            if open_count <= 0:
+            if turn_id not in open_turns:
                 orphan_ends += 1
                 continue
-            open_count -= 1
             ts = _parse_event_ts(ev.get("timestamp"))
-            if ts is not None and ts > boundary_ts:
-                crossed = True
-    return {"balanced": open_count == 0 and orphan_ends == 0, "crossed": crossed, "orphan_ends": orphan_ends, "still_open": open_count}
+            del open_turns[turn_id]
+            if boundary_turn_id is not None and turn_id == boundary_turn_id:
+                boundary_close_ts = ts
+    if boundary_turn_id is not None:
+        crossed = boundary_close_ts is not None and boundary_close_ts > boundary_ts
+    else:
+        crossed = boundary_close_ts is not None  # unreachable fallback path kept for callers with no turn id
+    return {
+        "balanced": not open_turns and orphan_ends == 0 and duplicate_ids == 0,
+        "crossed": crossed,
+        "orphan_ends": orphan_ends,
+        "duplicate_ids": duplicate_ids,
+        "still_open": len(open_turns),
+        "boundary_close_ts": boundary_close_ts,
+    }
 
 
 def run(python: str, repo: str, project_name: str, turn_timeout: float) -> Result:
@@ -341,43 +397,22 @@ def run(python: str, repo: str, project_name: str, turn_timeout: float) -> Resul
     # closed with "not a known agent name", even though the file on disk
     # was already correct. Any daemon this drill uses for `create` MUST
     # have started AFTER the write above, so unconditionally replace
-    # whatever is running (a plain kill, not `deploy` -- we want a clean
-    # generation 1 for this drill, not a graceful handoff at this stage)
+    # whatever is running via the daemon's OWN production stop path
+    # (`agent-bridge service stop` -- see `_stop_daemon_identity_safe`'s
+    # own docstring for why a hand-rolled pid signal is NOT safe here)
     # rather than assuming reuse is safe.
-    #
-    # `active.json` is a routing SNAPSHOT, not proof its pid still
-    # identifies that daemon (the process could have died and its pid been
-    # reused) -- confirm via /proc/<pid>/cmdline before ever signaling it,
-    # and STOP rather than press on if replacement doesn't provably finish
-    # (a lingering old daemon can make the singleton guard reject our own
-    # launch, silently exercising the wrong process).
-    stale = _active(cfg_dir, tries=1)
-    if stale is not None and stale.get("pid"):
-        stale_pid = int(stale["pid"])
-        if _pid_is_agent_bridge(stale_pid):
-            try:
-                os.kill(stale_pid, 15)
-            except ProcessLookupError:
-                pass
-            deadline = time.monotonic() + 15.0
-            while time.monotonic() < deadline and _listening(stale["port"]):
-                time.sleep(0.25)
-            if not r.check(not _listening(stale["port"]),
-                           f"replaced a pre-existing daemon (pid {stale_pid}) that predated project registration"):
-                return r
-        else:
-            if not r.check(False, f"pid {stale_pid} in active.json no longer identifies an agent-bridge process (stale/reused pid) -- refusing to signal it"):
-                return r
+    stopped_ok, stop_detail = _stop_daemon_identity_safe(python)
+    if not r.check(stopped_ok, f"replaced any pre-existing daemon via 'agent-bridge service stop' ({stop_detail})"):
+        return r
 
     proc1 = subprocess.Popen(
         [python, "-m", "agent_bridge", "start", "--port", "0", "--bind", "127.0.0.1"],
         start_new_session=True,
     )
-    # A bare `_active()` read can still return the JUST-KILLED daemon's own
-    # lingering routing entry (any entry with a port, not necessarily
-    # ours) for a brief window before `proc1`'s own publish overwrites it.
-    # Poll specifically for OUR pid, not merely "some port", before
-    # trusting the result as generation 1.
+    # A bare `_active()` read can still return a stale routing entry (not
+    # necessarily ours) for a brief window before `proc1`'s own publish
+    # overwrites it. Poll specifically for OUR pid, not merely "some
+    # port", before trusting the result as generation 1.
     a1 = None
     deadline = time.monotonic() + 30.0
     while time.monotonic() < deadline:
@@ -386,7 +421,15 @@ def run(python: str, repo: str, project_name: str, turn_timeout: float) -> Resul
             a1 = candidate
             break
         time.sleep(0.25)
-    if not r.check(a1 is not None, f"a daemon (generation 1, our own real pid {proc1.pid}) is up and has published routing"):
+    if a1 is None:
+        # Never leave an unpublished daemon subprocess running in this
+        # PERSISTENT clean-room container -- it could confuse a later
+        # retry (review-caught: this failure path used to return without
+        # reaping proc1 at all).
+        with contextlib.suppress(Exception):
+            proc1.terminate()
+            proc1.wait(timeout=10)
+        r.check(False, f"a daemon (generation 1, our own real pid {proc1.pid}) published routing within 30s")
         return r
     old_port = a1["port"]
     old_pid = a1.get("pid")
@@ -448,23 +491,32 @@ def run(python: str, repo: str, project_name: str, turn_timeout: float) -> Resul
         events_path = _events_path(acp_session_id)
         deadline = time.monotonic() + 60.0
         mid_turn = False
+        boundary_turn_id = None
         while time.monotonic() < deadline:
             lines = _read_events(events_path)
-            if _count_type(lines, "assistant.turn_start") > _count_type(lines, "assistant.turn_end"):
+            open_ids = []
+            for line in lines:
+                try:
+                    ev = json.loads(line)
+                except Exception:
+                    continue
+                tid = str((ev.get("data") or {}).get("turnId") or "")
+                if ev.get("type") == "assistant.turn_start":
+                    open_ids.append(tid)
+                elif ev.get("type") == "assistant.turn_end" and tid in open_ids:
+                    open_ids.remove(tid)
+            if open_ids:
                 mid_turn = True
+                boundary_turn_id = open_ids[-1]  # the most-recently-opened still-open turn
                 break
             time.sleep(0.5)
         r.check(mid_turn, "confirmed genuinely mid-turn (turn_start with no matching turn_end yet) before firing deploy")
+        r.check(bool(boundary_turn_id), f"identified the SPECIFIC turn (turnId={boundary_turn_id!r}) open at the moment we fire deploy")
 
         before_snapshot = _read_events(events_path)
 
         # Fire the cutover from OUTSIDE the driven session -- the harness
-        # racing the turn, exactly as a real operator update would. Record
-        # the wall-clock instant we fired it so later checks can prove a
-        # turn closed AFTER this real boundary, not merely later in the
-        # file (which could be an artifact of read timing, not the actual
-        # cutover).
-        deploy_fired_at = time.time()
+        # racing the turn, exactly as a real operator update would.
         deploy = _run(python, "deploy", "--health-timeout", "60", "--drain-timeout", "5", timeout=180, json_out=True)
         r.check(deploy.returncode == 0, f"deploy rc==0 (rc={deploy.returncode}; {deploy.stderr.strip()[:200]})")
 
@@ -495,6 +547,11 @@ def run(python: str, repo: str, project_name: str, turn_timeout: float) -> Resul
                 break
             time.sleep(0.5)
         r.check(reattached, f"Session-Host claim reattached under the NEW generation's real pid (record now {rec2!r})")
+
+        # The real proof boundary: the VERIFIED reattach moment above, not
+        # merely "we launched deploy" (review-caught -- deploy launching is
+        # not the same instant as the generation actually taking over).
+        boundary_ts = time.time()
 
         # Completion detection: the session status (`sessions --json`,
         # already proven reliable above) is the authoritative signal that
@@ -530,17 +587,34 @@ def run(python: str, repo: str, project_name: str, turn_timeout: float) -> Resul
             settle_deadline = time.monotonic() + 15.0
             while time.monotonic() < settle_deadline:
                 probe_lines = _read_events(events_path)
-                probe_analysis = _turn_balance_and_boundary_crossing(probe_lines, deploy_fired_at)
+                probe_analysis = _turn_balance_and_boundary_crossing(probe_lines, boundary_ts, boundary_turn_id)
                 if probe_analysis["balanced"]:
                     break
                 time.sleep(0.5)
 
+        # Session-identity check (review-caught): "idle" alone doesn't
+        # prove the reattach preserved the SAME child -- if reattach ever
+        # replaced the child while keeping the bridge session id, this
+        # would read a stale/wrong transcript path and could still PASS.
+        # Confirm the acp_session_id (hence the events.jsonl path itself)
+        # never changed after settling.
+        session_final = _get_session(python, session_id)
+        acp_session_id_after = (session_final or {}).get("acp_session_id") or ""
+        r.check(acp_session_id_after == acp_session_id,
+                f"acp_session_id unchanged after settling ({acp_session_id!r} -> {acp_session_id_after!r} -- "
+                "the reattach preserved the SAME child, never replaced it)")
+
         # Best-effort secondary signal on the SAME caller-facing channel a
         # real caller uses. Bounded to a short window (the session is
         # already known idle above, so a working wait should return near-
-        # instantly) -- advisory only, never blocks the drill's verdict,
-        # since the authoritative status check above already proves the
-        # invariant this drill exists to test.
+        # instantly) -- advisory only, never blocks the drill's verdict.
+        # NOTE (scope, review-caught): this means the drill does NOT prove
+        # the caller-facing "a reply reaches the client" guarantee end to
+        # end -- only session/transcript survival at the daemon/Session-
+        # Host level. The `wait --attention turn_complete` channel itself
+        # is tracked separately as a real, reproducible gap (issue #4681)
+        # and deliberately excluded from this drill's own PASS/FAIL
+        # verdict rather than silently assumed proven.
         wait_settled = False
         wait_reason = None
         wait_note = ""
@@ -556,10 +630,11 @@ def run(python: str, repo: str, project_name: str, turn_timeout: float) -> Resul
             else:
                 wait_note = f"rc={waited.returncode}"
         except subprocess.TimeoutExpired:
-            wait_note = "did not settle within the 20s advisory window (tracked upstream finding, not a drill failure)"
+            wait_note = "did not settle within the 20s advisory window (tracked upstream finding #4681, not a drill failure)"
         r.detail.append(
             ("ok" if wait_settled and wait_reason == "turn_complete" else "advisory")
-            + f": 'wait --attention turn_complete' secondary check -- settled={wait_settled!r}, reason={wait_reason!r}"
+            + ": 'wait --attention turn_complete' secondary check (NOT part of this drill's verdict -- see issue #4681) "
+            + f"-- settled={wait_settled!r}, reason={wait_reason!r}"
             + (f" ({wait_note})" if wait_note else "")
         )
 
@@ -585,13 +660,15 @@ def run(python: str, repo: str, project_name: str, turn_timeout: float) -> Resul
         # some turn_end appears later in the file (which could have closed
         # during deploy's own startup, before the generation actually
         # changed).
-        analysis = _turn_balance_and_boundary_crossing(after_snapshot, deploy_fired_at)
+        analysis = _turn_balance_and_boundary_crossing(after_snapshot, boundary_ts, boundary_turn_id)
         r.check(analysis["balanced"],
-                f"every turn_start is closed by exactly one turn_end, in order, with no orphan/duplicate ends "
-                f"(orphan_ends={analysis['orphan_ends']}, still_open={analysis['still_open']})")
+                f"every turn_start is closed by exactly one turn_end (turnId-correlated), no orphan ends, no "
+                f"duplicate event ids (orphan_ends={analysis['orphan_ends']}, duplicate_ids={analysis['duplicate_ids']}, "
+                f"still_open={analysis['still_open']})")
         r.check(analysis["crossed"],
-                "at least one turn_end's own event timestamp is strictly AFTER the real moment deploy fired -- "
-                "the turn genuinely open across the cutover boundary is the one that closed on the far side")
+                f"the SPECIFIC turn (turnId={boundary_turn_id!r}) open at the verified-reattach boundary closed "
+                f"strictly AFTER it (its own recorded close ts={analysis['boundary_close_ts']!r} vs boundary "
+                f"ts={boundary_ts!r}) -- not merely some unrelated turn_end appearing later in the file")
         r.check(_count_type(after_snapshot, "session.start") <= 1,
                 "no duplicate session.start (the child was reattached, never respawned)")
         r.check(_count_type(after_snapshot, "session.shutdown") == 0,

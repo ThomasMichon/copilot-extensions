@@ -126,20 +126,28 @@ Plan).**
 - [x] A real live cutover drill shows a real Copilot turn completes with
   zero observed disruption while the daemon's generation actually changes
   underneath it (same session id, no dropped/duplicated event, confirmed
-  generation change -- not a trivial/no-op cutover). Implemented as
+  generation change -- not a trivial/no-op cutover), at the session/
+  transcript/Session-Host level. Implemented as
   `fixtures/live_turn_probe.py`, wired as scenario phase 4
   (`CR_LIVE_TURN_DRILL=1`); **executed for real** against a Docker
   clean-room box (real Copilot auth via host `gh`, real credits) --
-  `PROBE-SUMMARY: 1/1 passed`. See the effort README's Journal for the
-  real bugs the live run caught (an argparse arg-ordering footgun, a
-  stale-registry daemon-reuse assumption, and a wrong exactly-one-turn_end
-  assertion) that a read-only review round could not have found.
+  `PROBE-SUMMARY: 1/1 passed`. **Scope correction:** does NOT also prove
+  the caller-facing "reply reaches the client" guarantee -- `wait
+  --attention turn_complete` can hang after a reattach even with the
+  session correctly idle; tracked as
+  [issue #4681](https://github.com/ThomasMichon/copilot-extensions/issues/4681).
+  See the effort README's Journal for the full real-bug history the live
+  run(s) and review caught (an argparse arg-ordering footgun, a
+  stale-registry daemon-reuse assumption, an unsafe pid-kill, aggregate
+  turn-count assertions that don't prove non-duplication or timing, and
+  this wait-channel gap).
 - [x] The drill's verdict is programmatic/evidence-based, or a documented
   decision explains why an LLM judge is the right mechanism after all. It
   is programmatic: `HostIndex` record reattach, `sessions --json` status,
-  `wait --attention turn_complete`, and an `events.jsonl` before/after
-  diff -- no LLM judge, confirming this doc's own §"why this doesn't fit
-  the harness's standard Tier-E shape".
+  a turnId-correlated ordered walk of `events.jsonl` (not aggregate
+  counts), and (advisory-only, per the scope correction above) `wait
+  --attention turn_complete` -- no LLM judge, confirming this doc's own
+  §"why this doesn't fit the harness's standard Tier-E shape".
 - [x] The scenario (or bespoke script) is documented in `tools/clean-room/
   README.md`'s catalog, and in `ARCHITECTURE.md`/`TIER-E-EXECUTION.md` if
   it establishes a new "objective-only Tier-E" pattern other plugins could

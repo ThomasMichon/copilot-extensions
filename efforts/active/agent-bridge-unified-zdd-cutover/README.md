@@ -294,18 +294,25 @@ the full reasoning).
 - [x] A real live cutover drill shows a real Copilot turn completes with
   zero observed disruption while the daemon's generation actually changes
   underneath it (same session id, no dropped/duplicated event, confirmed
-  generation change -- not a trivial/no-op cutover). **Executed for real**
+  generation change -- not a trivial/no-op cutover), **at the session/
+  transcript/Session-Host level.** **Executed for real**
   against a local Docker clean-room box (real Copilot auth via
-  host `gh`, real credits): a real prompt reached 6 real
-  `assistant.turn_end` events, all landing AFTER `deploy` fired mid-turn,
-  under the SAME session/acp_session_id, with the Session-Host claim
-  reattached to the new generation's real pid and zero
-  truncated/duplicated/mid-stream-killed events. `PROBE-SUMMARY: 1/1
-  passed`. See Journal for two real bugs the live run caught that a
-  read-only review round could not (an argparse arg-ordering footgun and
-  a stale-registry daemon-reuse assumption) and one wrong assertion
-  (assuming exactly one `turn_end` per prompt) corrected from real
-  evidence.
+  host `gh`, real credits): a real prompt's specific in-flight turn closed
+  strictly after the verified reattach boundary, under the SAME
+  session/acp_session_id, with the Session-Host claim reattached to the
+  new generation's real pid, no orphan/duplicate turn events, and zero
+  truncated/mutated events. `PROBE-SUMMARY: 1/1 passed`. **Scope
+  correction (review-caught):** this does NOT also prove the
+  caller-facing "a reply reaches the client" guarantee end to end -- a
+  real run found `wait --attention turn_complete` (the channel a real
+  caller would use) can hang indefinitely after a reattach even though the
+  session correctly reaches `idle`; tracked as
+  [issue #4681](https://github.com/ThomasMichon/copilot-extensions/issues/4681),
+  not silently assumed proven. See Journal for the full history of real
+  bugs the live run(s) and review caught (an argparse arg-ordering
+  footgun, a stale-registry daemon-reuse assumption, an unsafe pid-kill,
+  aggregate-count assertions that don't prove non-duplication or timing,
+  and this wait-channel gap).
 - [x] The drill's verdict is programmatic/evidence-based (a dedicated
   comparator over `HostIndex` records, `sessions --json` status, `wait
   --attention turn_complete`, and an `events.jsonl` before/after diff) --
@@ -450,15 +457,21 @@ test that closes the gap.
      race, not a product defect. Never manually background a container
      exec with `&`/nohup -- use the harness's own async execution mode so
      a stray process can't outlive the caller that started it.
-- Real evidence from the passing run: a real prompt drove a real
+- Real evidence from that first passing run: a real prompt drove a real
   Session-Host-backed local target (`agent-bridge create live-turn-target
   --target-dir <repo>`); `deploy` fired genuinely mid-turn (confirmed via
   `events.jsonl` turn_start/turn_end counts, not a fixed sleep); the
   Session-Host claim reattached under the NEW generation's real pid; the
   transcript was prefix-preserved across the boundary; and `wait
-  --attention turn_complete` -- the same caller-facing channel a real
-  caller uses -- settled cleanly. Zero dropped/duplicated events, zero
-  mid-stream kills, one genuinely-changed daemon generation.
+  --attention turn_complete` reported `rc==0`. **Caveat added after later
+  hardening (see the next Journal entry): that check only verified
+  `rc==0`, never the JSON `settled` field itself -- exactly the gap a
+  later review round flagged. Once fixed to actually check `settled`,
+  real re-runs showed this same channel can hang indefinitely after a
+  reattach (issue #4681). Read this bullet as "the drill passed," not as
+  proof the caller-facing wait channel itself was ever soundly verified.**
+  Zero dropped/duplicated events, zero mid-stream kills, one
+  genuinely-changed daemon generation.
 - Left a real, harmless per-check artifact from the pre-existing
   `abrupt-kill-recovery`/`routing-flip-retire` Tier-P checks: their own
   isolated-sandbox daemon subprocesses are sometimes left as zombie/leaked
