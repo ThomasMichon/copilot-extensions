@@ -77,6 +77,14 @@ def register_verification_routes(
         spec = record.spec or {}
         if not (spec.get("all_repos") or spec.get("repo") == task.repo):
             raise HTTPException(status_code=403, detail="event note sender is not registered for this task's repo")
+        emitter_id = spec.get("id")
+        if not isinstance(emitter_id, str) or not emitter_id:
+            raise HTTPException(status_code=403, detail="event note sender has no stable emitter id")
+        if task.origin_ref != emitter_id:
+            raise HTTPException(
+                status_code=403,
+                detail="event note sender is not subscribed to this task",
+            )
 
     @app.post("/tasks/{task_id}/verify-submitted")
     def verify_submitted(task_id: str) -> dict:

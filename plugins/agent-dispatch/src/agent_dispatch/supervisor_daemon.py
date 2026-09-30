@@ -423,11 +423,6 @@ class SupervisorDaemon:
         regs = self.client.list_registrations(
             machine=self.machine, env=self.env, include_paused=False
         )
-        regs = [
-            r
-            for r in regs
-            if r.get("kind") != RegistrationKind.EVALUATOR
-        ]
         regs = [r for r in regs if r.get("id") not in self._published_declared_ids]
         merged = merge_registration_sources(regs, declared)
         diagnostics = (tuple(merged.deduplicated), tuple(merged.conflicts))
@@ -452,9 +447,6 @@ class SupervisorDaemon:
             if replacement:
                 desired.pop(replacement, None)
         for rid, registration in list(desired.items()):
-            if registration.get("kind") == RegistrationKind.EVALUATOR:
-                desired.pop(rid, None)
-                continue
             if registration_override_ids(registration) & overridden:
                 desired.pop(rid, None)
         self._resolve_companion_desired(desired)
@@ -1569,6 +1561,9 @@ class SupervisorDaemon:
                 return
             proc = launched.process
         else:
+            if reg.get("kind") == RegistrationKind.EVALUATOR:
+                summary.skipped.append(rid)
+                return
             try:
                 cmd = build_command(
                     reg, python=self._own_python(), materialize=self._materializer(reg),

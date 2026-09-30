@@ -1046,7 +1046,7 @@ def test_reconcile_skips_unsupported_kind():
     assert launcher.launched == []
 
 
-def test_desired_filters_coordinator_owned_evaluators():
+def test_reconcile_keeps_evaluator_desired_but_never_launches_it():
     client = FakeClient(
         [
             _reg("lane"),
@@ -1057,12 +1057,15 @@ def test_desired_filters_coordinator_owned_evaluators():
     d = _daemon(client, launcher)
 
     desired = d._desired()
+    summary = d.reconcile_once()
 
     assert "lane" in desired
-    assert "eval" not in desired
+    assert "eval" in desired
+    assert "eval" in summary.skipped
+    assert not any(rid == "eval" for rid, _proc in launcher.launched)
 
 
-def test_desired_filters_declared_evaluators(monkeypatch):
+def test_reconcile_keeps_declared_evaluator_desired_but_never_launches_it(monkeypatch):
     client = FakeClient([_reg("lane")])
     launcher = FakeLauncher()
     d = _daemon(client, launcher)
@@ -1079,9 +1082,12 @@ def test_desired_filters_declared_evaluators(monkeypatch):
     )
 
     desired = d._desired()
+    summary = d.reconcile_once()
 
     assert "lane" in desired
-    assert "declared-eval" not in desired
+    assert "declared-eval" in desired
+    assert "declared-eval" in summary.skipped
+    assert not any(rid == "declared-eval" for rid, _proc in launcher.launched)
 
 
 # -- serve / single-instance -------------------------------------------------

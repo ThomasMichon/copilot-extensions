@@ -215,12 +215,33 @@ def evaluate_submitted_task(
     applied: list[dict[str, Any]] = []
     try:
         for decision in decisions:
+            current = queue.get(task_id)
+            if (
+                current is None
+                or current.status != Status.SUBMITTED
+                or current.generation != task.generation
+                or current.updated_at != task.updated_at
+            ):
+                return _verification_report(
+                    task_id=task_id,
+                    trigger=trigger,
+                    eligible=True,
+                    reason="task changed while verification was in flight; retry required",
+                    decisions=rendered,
+                    applied=applied,
+                )
             if isinstance(decision, Confirm):
-                current = queue.get(task_id)
                 if current is not None and current.status == Status.COMPLETED:
                     applied.append({"decision": "complete", "completed": asdict(current)})
                     continue
-                confirmed = asdict(queue.confirm(task_id, actor="evaluator"))
+                confirmed = asdict(
+                    queue.confirm(
+                        task_id,
+                        actor="evaluator",
+                        expected_generation=task.generation,
+                        expected_status=Status.SUBMITTED,
+                    )
+                )
                 _publish(bus, "task.completed", confirmed)
                 applied.append({"decision": "complete", "completed": confirmed})
                 continue
@@ -231,6 +252,7 @@ def evaluate_submitted_task(
                     permitted=True,
                     reason=decision.reason,
                     expected_status=Status.SUBMITTED,
+                    expected_generation=task.generation,
                 )
                 abandoned = asdict(outcome.task)
                 if outcome.event_type is not None:

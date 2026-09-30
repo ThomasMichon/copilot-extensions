@@ -690,7 +690,13 @@ def test_complete_over_http_retriggers_whole_goal_verification(api, tmp_path):
     )
     tid = api.post(
         "/tasks",
-        json={"title": "x", "repo": TEST_REPO, "require_verification": True, "evaluator_ref": "review-loop"},
+        json={
+            "title": "x",
+            "repo": TEST_REPO,
+            "require_verification": True,
+            "evaluator_ref": "review-loop",
+            "origin_ref": "review-emitter",
+        },
     ).json()["id"]
     api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
@@ -741,7 +747,9 @@ def test_complete_over_http_triggers_immediate_whole_goal_verification(api, tmp_
 
 
 def test_event_note_wakes_and_supersedes_active_run_waiter(api, monkeypatch):
-    tid = api.post("/tasks", json={"title": "x", "repo": TEST_REPO}).json()["id"]
+    tid = api.post(
+        "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
+    ).json()["id"]
     api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(
         f"/tasks/{tid}/start",
@@ -780,7 +788,9 @@ def test_event_note_wakes_and_supersedes_active_run_waiter(api, monkeypatch):
 def test_event_note_nudges_running_owner(api, monkeypatch):
     from agent_dispatch import bridge
 
-    tid = api.post("/tasks", json={"title": "x", "repo": TEST_REPO}).json()["id"]
+    tid = api.post(
+        "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
+    ).json()["id"]
     api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(
         f"/tasks/{tid}/start",
@@ -805,7 +815,9 @@ def test_event_note_nudges_running_owner(api, monkeypatch):
 
 
 def test_event_note_rejects_untrusted_sender(api):
-    tid = api.post("/tasks", json={"title": "x", "repo": TEST_REPO}).json()["id"]
+    tid = api.post(
+        "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
+    ).json()["id"]
     api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(
         f"/tasks/{tid}/start",
