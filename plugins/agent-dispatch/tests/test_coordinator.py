@@ -860,9 +860,7 @@ def test_event_note_wakes_and_supersedes_active_run_waiter(api, monkeypatch):
     assert wakes[0].status == "pending"
 
 
-def test_event_note_nudges_running_owner(api, monkeypatch):
-    from agent_dispatch import bridge
-
+def test_event_note_wakes_and_supersedes_preparing_run_waiter(api):
     tid = api.post(
         "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
     ).json()["id"]
@@ -871,11 +869,107 @@ def test_event_note_nudges_running_owner(api, monkeypatch):
         f"/tasks/{tid}/start",
         json={"worker_id": "w1", "owner_session_id": "session-1"},
     )
-    nudges = []
-    monkeypatch.setattr(
-        bridge,
-        "resume_steered_owner",
-        lambda owner, task_id, message, **_k: nudges.append((owner, task_id, message)) or True,
+    api.post(
+        f"/tasks/{tid}/suspend",
+        json={"worker_id": "w1", "reason": "waiting on external state"},
+    )
+    prepared = api.post(
+        f"/tasks/{tid}/run-waiter/register",
+        json={
+            "worker_id": "w1",
+            "reason": "hibernating: sleep 1",
+            "resume_worktree": "m/wt-1",
+            "command": ["sleep", "1"],
+        },
+    )
+    assert prepared.status_code == 200
+
+    sender = _register_event_emitter(api)
+    r = api.post(
+        f"/tasks/{tid}/event-note",
+        json={"sender": sender, "note": "merged upstream"},
+        headers=_control_headers(sender),
+    )
+
+    assert r.status_code == 200
+    wakes = api.app.state.queue.list_run_waiter_wakes(tid)
+    assert len(wakes) == 1
+    assert wakes[0].status == "pending"
+    assert (
+        api.app.state.queue.arm_run_waiter(
+            tid,
+            generation=prepared.json()["generation"],
+            pid=101,
+            host="test-host",
+            start_token="token-101",
+        )
+        is None
+    )
+
+
+def test_event_note_after_waiter_finish_does_not_queue_duplicate_wake(api):
+    tid = api.post(
+        "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
+    ).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(
+        f"/tasks/{tid}/start",
+        json={"worker_id": "w1", "owner_session_id": "session-1"},
+    )
+    api.post(
+        f"/tasks/{tid}/suspend",
+        json={"worker_id": "w1", "reason": "waiting on external state"},
+    )
+    prepared = api.post(
+        f"/tasks/{tid}/run-waiter/register",
+        json={
+            "worker_id": "w1",
+            "reason": "hibernating: sleep 1",
+            "resume_worktree": "m/wt-1",
+            "command": ["sleep", "1"],
+        },
+    )
+    generation = prepared.json()["generation"]
+    api.post(
+        f"/tasks/{tid}/run-waiter/arm",
+        json={
+            "generation": generation,
+            "pid": 101,
+            "host": "test-host",
+            "start_token": "token-101",
+        },
+    )
+    api.post(
+        f"/tasks/{tid}/run-waiter/finish",
+        json={
+            "generation": generation,
+            "pid": 101,
+            "host": "test-host",
+            "start_token": "token-101",
+            "message": "wait completed",
+        },
+    )
+    sender = _register_event_emitter(api)
+    r = api.post(
+        f"/tasks/{tid}/event-note",
+        json={"sender": sender, "note": "merged upstream"},
+        headers=_control_headers(sender),
+    )
+
+    assert r.status_code == 200
+    wakes = api.app.state.queue.list_run_waiter_wakes(tid)
+    assert len(wakes) == 1
+    assert wakes[0].message == "wait completed"
+
+
+def test_event_note_queues_running_owner_wake(api):
+    tid = api.post(
+        "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
+    ).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(
+        f"/tasks/{tid}/start",
+        json={"worker_id": "w1", "owner_session_id": "session-1"},
     )
 
     sender = _register_event_emitter(api)
@@ -886,7 +980,10 @@ def test_event_note_nudges_running_owner(api, monkeypatch):
     )
 
     assert r.status_code == 200
-    assert nudges and nudges[0][0] == "w1"
+    wakes = api.app.state.queue.list_wakes(tid)
+    assert len(wakes) == 1
+    assert wakes[0].status == "pending"
+    assert wakes[0].owner == "w1"
 
 
 def test_event_note_rejects_untrusted_sender(api):

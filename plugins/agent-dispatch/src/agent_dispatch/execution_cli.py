@@ -340,13 +340,27 @@ def _cmd_run(args: argparse.Namespace) -> int:
         host = remote_dispatch.local_machine()
         start_token = companion.process_start_token(os.getpid())
         if not host or not start_token:
+            aborted = None
+            try:
+                with _core()._client(args) as c:
+                    aborted = c.abort_run_waiter(
+                        spec.task_id,
+                        generation=waiter_generation,
+                        message=(
+                            "The detached wait could not establish its process identity"
+                            " after spawning. Re-check the external state and decide"
+                            " whether to run the wait again."
+                        ),
+                    )
+            except Exception:  # noqa: BLE001 -- degraded report only
+                aborted = None
             report = {
                 "command": list(spec.command),
                 "returncode": 125,
                 "resume_worktree": spec.resume_worktree,
                 "message": "Detached waiter could not resolve its process identity.",
             }
-            report["waiter"] = {"accepted": False, "waiter": None}
+            report["waiter"] = aborted or {"accepted": False, "waiter": None}
             report["resumed"] = None
             report["claim_released"] = None
             return _core()._emit(report)
@@ -359,6 +373,20 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 start_token=start_token,
             )
         if not armed.get("accepted"):
+            aborted = None
+            try:
+                with _core()._client(args) as c:
+                    aborted = c.abort_run_waiter(
+                        spec.task_id,
+                        generation=waiter_generation,
+                        message=(
+                            "The detached wait could not arm its coordinator-side"
+                            " registration. Re-check the external state and decide"
+                            " whether to run the wait again."
+                        ),
+                    )
+            except Exception:  # noqa: BLE001 -- degraded report only
+                aborted = None
             return _core()._emit(
                 {
                     "command": list(spec.command),
@@ -366,7 +394,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     "resume_worktree": spec.resume_worktree,
                     "message": "Detached waiter could not arm its coordinator-side registration.",
                     "resumed": None,
-                    "waiter": armed,
+                    "waiter": aborted or armed,
                     "claim_released": None,
                 }
             )

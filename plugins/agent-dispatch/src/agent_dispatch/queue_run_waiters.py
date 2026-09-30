@@ -104,6 +104,7 @@ class QueueRunWaitersMixin:
                 note=f"run waiter prepared (generation {generation})",
             )
             conn.execute("COMMIT")
+        self._notify_run_waiter_prepare()
         return {
             "task_id": task_id,
             "generation": generation,
@@ -381,9 +382,10 @@ class QueueRunWaitersMixin:
         wake_enqueued = False
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            row = self._select_active_waiter_row(
+            row = self._select_waiter_row(
                 conn,
                 task_id,
+                states=("active",),
                 generation=generation,
                 pid=pid,
                 host=host,
@@ -500,11 +502,11 @@ class QueueRunWaitersMixin:
         wake_enqueued = False
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                "SELECT * FROM run_waiters WHERE task_id = ? AND state = 'active'"
-                " ORDER BY generation DESC LIMIT 1",
-                (task_id,),
-            ).fetchone()
+            row = self._select_waiter_row(
+                conn,
+                task_id,
+                states=("preparing", "active"),
+            )
             if row is None:
                 conn.execute("COMMIT")
                 return None
@@ -515,7 +517,7 @@ class QueueRunWaitersMixin:
                 return None
             conn.execute(
                 "UPDATE run_waiters SET state = 'superseded', updated_at = ?, retired_reason = ?"
-                " WHERE id = ? AND state = 'active'",
+                " WHERE id = ? AND state IN ('preparing', 'active')",
                 (ts, reason, row["id"]),
             )
             wake = self._enqueue_run_waiter_wake(
@@ -599,6 +601,25 @@ class QueueRunWaitersMixin:
         waiter["retired_reason"] = reason
         waiter["wake_id"] = wake.id
         return waiter
+
+    def abort_preparing_run_waiter(
+        self,
+        task_id: str,
+        *,
+        generation: int,
+        reason: str,
+        message: str,
+        sender: str,
+        now: float | None = None,
+    ) -> dict[str, Any] | None:
+        return self.recover_preparing_run_waiter(
+            task_id,
+            generation=generation,
+            reason=reason,
+            message=message,
+            sender=sender,
+            now=now,
+        )
 
     def has_pending_run_waiter_wakes(self) -> bool:
         with self._connect() as conn:
@@ -745,12 +766,18 @@ class QueueRunWaitersMixin:
         sender: str,
         note: str,
         enqueue_verification: bool = False,
+        wake_agent: bool = False,
         now: float | None = None,
-    ) -> tuple[Task, int]:
+    ) -> tuple[Task, int, str | None]:
         ts = self._now(now)
         meaningful = _clip(note, PROGRESS_SUMMARY_MAX)
         if meaningful is None:
             raise TaskError("event note requires a non-empty note")
+        wake_message = (
+            f"Task {task_id} received an event note: {meaningful}. "
+            "Re-read the task history and handle the new external state before finalizing."
+        )
+        wake_kind: str | None = None
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             task = self._fetch(conn, task_id)
@@ -776,6 +803,53 @@ class QueueRunWaitersMixin:
                 and task.evaluator_ref
             ):
                 self._insert_verification_request(conn, task_id, task.generation, "event-note", ts)
+            current = self._fetch(conn, task_id)
+            if (
+                wake_agent
+                and current is not None
+                and current.status == Status.STARTED
+                and current.owner
+                and current.owner_session_id is not None
+            ):
+                self._enqueue_wake(
+                    conn,
+                    current,
+                    message=wake_message,
+                    ts=ts,
+                )
+                wake_kind = "owner"
+            elif wake_agent and current is not None and current.status == Status.SUSPENDED:
+                waiter_row = self._select_waiter_row(
+                    conn,
+                    task_id,
+                    states=("preparing", "active"),
+                )
+                if waiter_row is not None:
+                    waiter = self._run_waiter_from_row(waiter_row)
+                    if self._run_waiter_matches_task(waiter, current):
+                        cur_waiter = conn.execute(
+                            "UPDATE run_waiters SET state = 'superseded', updated_at = ?,"
+                            " retired_reason = ? WHERE id = ? AND state IN ('preparing', 'active')",
+                            (ts, "event note wake", waiter_row["id"]),
+                        )
+                        if cur_waiter.rowcount:
+                            self._enqueue_run_waiter_wake(
+                                conn,
+                                waiter,
+                                message=wake_message,
+                                sender="agent-dispatch-event-note",
+                                ts=ts,
+                            )
+                            self._audit(
+                                conn,
+                                task_id,
+                                ts=ts,
+                                from_status=current.status,
+                                to_status=current.status,
+                                worker=current.owner,
+                                note="run waiter superseded (event note wake)",
+                            )
+                            wake_kind = "waiter"
             result = self._fetch(conn, task_id)
             conn.execute("COMMIT")
         if (
@@ -785,7 +859,9 @@ class QueueRunWaitersMixin:
             and task.evaluator_ref
         ):
             self._notify_verification()
-        return result, int(cur.lastrowid)  # type: ignore[return-value]
+        if wake_kind is not None:
+            self._notify_wake()
+        return result, int(cur.lastrowid), wake_kind  # type: ignore[return-value]
 
     @staticmethod
     def _run_waiter_matches_task(waiter: dict[str, Any], task: Task | None) -> bool:
@@ -820,8 +896,9 @@ class QueueRunWaitersMixin:
         conn.execute(
             "INSERT INTO run_waiter_wakes ("
             " id, task_id, waiter_generation, task_generation, owner, owner_session_id,"
-            " resume_worktree, sender, message, status, attempts, not_before, created_at, updated_at"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)",
+            " waiter_host, resume_worktree, sender, message, status, attempts, not_before,"
+            " created_at, updated_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)",
             (
                 wake_id,
                 waiter["task_id"],
@@ -829,6 +906,7 @@ class QueueRunWaitersMixin:
                 waiter["task_generation"],
                 waiter["owner"],
                 waiter.get("owner_session_id"),
+                waiter.get("host"),
                 waiter["resume_worktree"],
                 sender,
                 message,

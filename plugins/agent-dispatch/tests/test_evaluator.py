@@ -54,6 +54,10 @@ def test_script_registry_rejects_timeouts_longer_than_verification_lease():
         )
 
 
+def test_verification_request_lease_outlasts_max_script_timeout():
+    assert ev.VERIFICATION_REQUEST_DELIVERY_LEASE > ev.MAX_SCRIPT_EVALUATOR_TIMEOUT
+
+
 # -- matching ----------------------------------------------------------------
 
 

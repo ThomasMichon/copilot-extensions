@@ -8,7 +8,7 @@ from collections.abc import Callable
 
 from .events import EventBus
 from .queue import TaskError, TaskQueue
-from .producers.evaluator import MAX_SCRIPT_EVALUATOR_TIMEOUT
+from .producers.evaluator import VERIFICATION_REQUEST_DELIVERY_LEASE
 from .verification import evaluate_submitted_task
 
 log = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ async def drain_verification_requests(
     interval: float = 0.25,
     max_attempts: int = 8,
     retry_base: float = 1.0,
-    delivery_lease: float = MAX_SCRIPT_EVALUATOR_TIMEOUT + 60.0,
+    delivery_lease: float = VERIFICATION_REQUEST_DELIVERY_LEASE,
     is_active: WakeActive | None = None,
     signal: asyncio.Queue[None] | None = None,
 ) -> None:

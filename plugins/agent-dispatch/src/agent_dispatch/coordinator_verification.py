@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field, StrictInt
 from . import remote_dispatch
 from .coordinator_auth import _make_control_auth, scoped_control_token
 from .events import EventBus
-from .queue import RegistrationKind, Status, Task, TaskError, TaskQueue
+from .queue import RegistrationKind, Task, TaskError, TaskQueue
 
 
 class EventNoteBody(BaseModel):
@@ -41,6 +41,11 @@ class RunWaiterFinishBody(RunWaiterArmBody):
     message: str
 
 
+class RunWaiterAbortBody(BaseModel):
+    generation: StrictInt
+    message: str
+
+
 def register_verification_routes(
     app: FastAPI,
     queue: TaskQueue,
@@ -50,19 +55,6 @@ def register_verification_routes(
     task_dict,
     event_task_dict,
 ) -> None:
-    def _wake_for_event_note(task: Task, note: str) -> bool:
-        message = (
-            f"Task {task.id} received an event note: {note}. "
-            "Re-read the task history and handle the new external state before finalizing."
-        )
-        waiter = queue.supersede_run_waiter_with_wake(
-            task.id,
-            reason="event note wake",
-            message=message,
-            sender="agent-dispatch-event-note",
-        )
-        return waiter is not None
-
     def _emit_producer_event(event_type: str, detail: dict[str, object]) -> None:
         bus.publish({"type": event_type, "producer_fence": detail})
 
@@ -131,11 +123,12 @@ def register_verification_routes(
             raise HTTPException(status_code=404, detail=f"no such task {task_id!r}")
         _require_trusted_emitter(task, body.sender)
         try:
-            task, event_id = queue.append_event_note(
+            task, _event_id, _wake_kind = queue.append_event_note(
                 task_id,
                 sender=body.sender,
                 note=body.note,
                 enqueue_verification=True,
+                wake_agent=True,
             )
         except TaskError as exc:
             msg = str(exc)
@@ -150,23 +143,6 @@ def register_verification_routes(
                 "note": body.note,
             }
         )
-        if task.status in (Status.CLAIMED, Status.STARTED, Status.SUSPENDED):
-            woke_waiter = False
-            if queue.get_active_run_waiter(task.id) is not None:
-                woke_waiter = _wake_for_event_note(task, body.note)
-            if (not woke_waiter) and task.owner and task.owner_session_id is not None:
-                from . import bridge
-
-                bridge.resume_steered_owner(
-                    task.owner,
-                    task.id,
-                    (
-                        f"Task {task.id} received an event note: {body.note}. "
-                        "Re-read the task history and handle the new external state before finalizing."
-                    ),
-                    owner_session_id=task.owner_session_id,
-                    idempotency_key=f"event-note:{task.id}:{event_id}",
-                )
         return result
 
     @app.post("/tasks/{task_id}/run-waiter/register")
@@ -209,6 +185,17 @@ def register_verification_routes(
             host=body.host,
             start_token=body.start_token,
             reason="waiter completed",
+            message=body.message,
+            sender="agent-dispatch-hibernate",
+        )
+        return {"accepted": waiter is not None, "waiter": waiter}
+
+    @app.post("/tasks/{task_id}/run-waiter/abort")
+    def abort_run_waiter(task_id: str, body: RunWaiterAbortBody) -> dict:
+        waiter = queue.abort_preparing_run_waiter(
+            task_id,
+            generation=body.generation,
+            reason="waiter failed before arming",
             message=body.message,
             sender="agent-dispatch-hibernate",
         )

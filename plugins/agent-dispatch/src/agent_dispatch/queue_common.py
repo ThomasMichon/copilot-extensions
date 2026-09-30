@@ -353,6 +353,7 @@ class RunWaiterWakeOperation:
     task_generation: int
     owner: str
     owner_session_id: str | None
+    waiter_host: str | None
     resume_worktree: str
     sender: str
     message: str

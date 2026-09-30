@@ -9,9 +9,14 @@ from collections.abc import Callable
 from .queue import TaskError, TaskQueue
 
 DeliverWake = Callable[[str, str, str, str, str, str | None], bool]
-ReleaseClaim = Callable[[str, str], object | None]
+ReleaseClaim = Callable[[str, str | None, str], object | None]
 WakeActive = Callable[[], bool]
 log = logging.getLogger(__name__)
+
+
+def _worktree_id(worktree: str) -> str:
+    _machine, sep, tail = worktree.partition("/")
+    return tail if sep and tail else worktree
 
 
 def _default_deliver(
@@ -87,7 +92,8 @@ async def drain_run_waiter_wakes(
                 released = await asyncio.to_thread(
                     release_claim,
                     wake.task_id,
-                    wake.resume_worktree,
+                    wake.waiter_host,
+                    _worktree_id(wake.resume_worktree),
                 )
             except Exception:
                 log.warning(

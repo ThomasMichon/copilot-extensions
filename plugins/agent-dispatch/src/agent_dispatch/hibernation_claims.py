@@ -23,9 +23,16 @@ narrow surface.
 from __future__ import annotations
 
 import json
+import shlex
+import shutil
 import subprocess
 
-from .procutil import agent_worktrees_launch_prefix, no_window_kwargs
+from . import bridge_remote, remote_dispatch
+from .procutil import (
+    agent_worktrees_launch_prefix,
+    no_window_kwargs,
+    run_ssh_capture,
+)
 
 
 def _mirror_task_claim_status(
@@ -154,6 +161,58 @@ def release_hibernation_claim_for_worktree(
         )
         payload = json.loads(result.stdout or "{}")
     except (OSError, subprocess.SubprocessError, TypeError, ValueError):
+        return None
+    if result.returncode != 0 or not isinstance(payload, dict):
+        return None
+    _mirror_task_claim_status(task_id, "released", timeout=timeout)
+    return payload
+
+
+def release_hibernation_claim_for_host_worktree(
+    task_id: str,
+    host: str | None,
+    worktree_id: str,
+    *,
+    timeout: float = 15.0,
+) -> dict | None:
+    """Retire a hibernation claim on the machine that originally journaled it."""
+    if not worktree_id:
+        return None
+    current = remote_dispatch.local_machine()
+    if host is None or (current is not None and host == current):
+        return release_hibernation_claim_for_worktree(task_id, worktree_id, timeout=timeout)
+    ssh = shutil.which("ssh")
+    if ssh is None:
+        return None
+    remote_cmd = " ".join(
+        shlex.quote(part)
+        for part in [
+            "agent-worktrees",
+            "claims",
+            "release",
+            task_id,
+            "--worktree",
+            worktree_id,
+            "--json",
+        ]
+    )
+    result = run_ssh_capture(
+        [
+            ssh,
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=3",
+            bridge_remote.normalize_host(host),
+            remote_cmd,
+        ],
+        timeout=timeout,
+    )
+    if result is None:
+        return None
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except (TypeError, ValueError):
         return None
     if result.returncode != 0 or not isinstance(payload, dict):
         return None

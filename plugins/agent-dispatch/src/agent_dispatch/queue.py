@@ -189,6 +189,7 @@ class TaskQueue(
         self.result_max_bytes = result_max_bytes
         self._wake_notifier: Callable[[], None] | None = None
         self._owned_transition_notifier: Callable[[], None] | None = None
+        self._run_waiter_prepare_notifier: Callable[[], None] | None = None
         # Blobs live in a ``payloads/`` directory beside the queue DB unless the
         # caller overrides it (e.g. a shared blob volume).
         if payload_dir is None:
@@ -479,6 +480,7 @@ class TaskQueue(
                 "  task_generation INTEGER NOT NULL,"
                 "  owner TEXT NOT NULL,"
                 "  owner_session_id TEXT,"
+                "  waiter_host TEXT,"
                 "  resume_worktree TEXT NOT NULL,"
                 "  sender TEXT NOT NULL,"
                 "  message TEXT NOT NULL,"
@@ -497,6 +499,11 @@ class TaskQueue(
                 "CREATE INDEX IF NOT EXISTS idx_run_waiter_wakes_due "
                 "ON run_waiter_wakes(status, not_before, created_at)"
             )
+            run_waiter_wake_columns = {
+                r["name"] for r in conn.execute("PRAGMA table_info(run_waiter_wakes)")
+            }
+            if "waiter_host" not in run_waiter_wake_columns:
+                conn.execute("ALTER TABLE run_waiter_wakes ADD COLUMN waiter_host TEXT")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_run_waiter_wakes_task "
                 "ON run_waiter_wakes(task_id, waiter_generation)"

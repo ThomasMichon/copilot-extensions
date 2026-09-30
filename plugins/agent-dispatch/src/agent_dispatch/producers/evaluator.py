@@ -45,6 +45,7 @@ EVENT_PROGRESS = "task.progress"
 
 log = logging.getLogger("agent-dispatch.evaluator")
 MAX_SCRIPT_EVALUATOR_TIMEOUT = 1800.0
+VERIFICATION_REQUEST_DELIVERY_LEASE = MAX_SCRIPT_EVALUATOR_TIMEOUT + 60.0
 
 
 class EvaluatorError(ValueError):

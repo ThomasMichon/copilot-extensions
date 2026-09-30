@@ -9,6 +9,7 @@ from . import remote_dispatch
 from .queue import TaskQueue
 
 log = logging.getLogger("agent-dispatch.run-waiter-recovery")
+DEFAULT_RUN_WAITER_ARM_GRACE_SECONDS = 60.0
 
 
 def recover_run_waiters(
@@ -17,7 +18,7 @@ def recover_run_waiters(
     process_exists: Callable[[int], bool],
     start_token_for_pid: Callable[[int], str | None],
     current_machine: str | None = None,
-    arm_grace_seconds: float = 60.0,
+    arm_grace_seconds: float = DEFAULT_RUN_WAITER_ARM_GRACE_SECONDS,
 ) -> dict[str, int]:
     """Wake tasks whose detached `run` waiter died while the coordinator was down."""
     if current_machine is None:

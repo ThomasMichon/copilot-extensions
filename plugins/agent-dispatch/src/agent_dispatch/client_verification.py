@@ -91,3 +91,20 @@ class VerificationClientMixin:
                 },
             )
         )
+
+    def abort_run_waiter(
+        self,
+        task_id: str,
+        *,
+        generation: int,
+        message: str,
+    ) -> dict:
+        return self._unwrap(
+            self._http.post(
+                f"/tasks/{task_id}/run-waiter/abort",
+                json={
+                    "generation": generation,
+                    "message": message,
+                },
+            )
+        )

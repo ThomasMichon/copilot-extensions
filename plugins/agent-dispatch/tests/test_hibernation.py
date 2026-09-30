@@ -303,6 +303,10 @@ class _FakeWaiterFinishClient:
         self.calls.append((task_id, payload))
         return {"accepted": True, "waiter": {"generation": payload["generation"]}}
 
+    def abort_run_waiter(self, task_id, **payload):
+        self.calls.append((task_id, {"abort": payload}))
+        return {"accepted": True, "waiter": {"generation": payload["generation"]}}
+
 
 def test_run_detach_with_task_suspends_atomically(capsys, monkeypatch):
     from agent_dispatch import hibernation_claims, identity
@@ -601,3 +605,36 @@ def test_waiter_child_reattempts_timeout_and_queues_finish(capsys, monkeypatch, 
     assert fake.calls[0][0] == "t-1"
     assert fake.calls[0][1]["generation"] == 3
     assert out["resumed"] is None
+
+
+def test_waiter_child_aborts_preparing_waiter_when_identity_missing(capsys, monkeypatch):
+    from agent_dispatch import companion, remote_dispatch
+
+    monkeypatch.setattr(companion, "process_start_token", lambda _pid: None)
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "test-host")
+    fake = _FakeWaiterFinishClient()
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda args: fake)
+
+    rc = _cmd_run(
+        _args(
+            [
+                "run",
+                "--waiter-child",
+                "--waiter-generation",
+                "3",
+                "--resume",
+                "m/wt-1",
+                "--task",
+                "t-1",
+                "--",
+                "sleep",
+                "1",
+            ]
+        )
+    )
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["returncode"] == 125
+    assert fake.calls[0][0] == "t-1"
+    assert fake.calls[0][1]["abort"]["generation"] == 3
