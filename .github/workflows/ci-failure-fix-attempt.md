@@ -145,6 +145,7 @@ jobs:
       github.event_name != 'workflow_dispatch' ||
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     permissions:
+      contents: read
       issues: read
       actions: read
     outputs:

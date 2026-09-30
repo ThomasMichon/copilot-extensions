@@ -635,9 +635,9 @@ def test_main_returns_nonzero_when_a_job_log_fetch_fails_in_file_issue_mode(watc
 
 
 # ---------------------------------------------------------------------------
-# reverify_signature -- verify-issue's independent re-derivation (review
-# finding on PR #4689: an issue's claimed excerpt/signature match was never
-# actually cross-checked against the referenced run's real log content).
+# reverify_signature -- verify-issue's independent re-derivation: binds a
+# claimed excerpt/signature to the referenced run's real, current log
+# content instead of trusting the issue body's own claim.
 # ---------------------------------------------------------------------------
 
 def test_reverify_signature_returns_the_matching_signature(watchdog, monkeypatch):

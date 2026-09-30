@@ -401,28 +401,23 @@ def reverify_signature(repo: str, run_id: str, expected_signature: str) -> Failu
     from the referenced run's own job logs, and return ONLY that freshly-
     fetched `FailureSignature` -- never anything the caller supplied.
 
-    This exists for `ci-failure-fix-attempt.md`'s `verify-issue` job: its
-    prior authentication chain (author identity, label, unedited body, "a"
-    job in the referenced run concluded failure/timed_out) never actually
-    confirmed the issue's own claimed *excerpt text* corresponds to that
-    job's real output -- only that some real failure happened somewhere in
-    that run. `signature_key` is a public, non-secret hash (job name + test
-    id), so a write collaborator can trivially compute a matching key for
-    any run/job they control; nothing about "the key matches" proves the
-    accompanying prose wasn't fabricated. Recomputing the signature from the
-    run's own real log and returning THAT excerpt (discarding whatever the
-    issue body claimed) closes that gap: whatever content reaches the agent
-    is provably the real, current output of the real job the signature
-    names, not caller-supplied narrative. It does not, and cannot, stop a
+    Used by `ci-failure-fix-attempt.md`'s `verify-issue` job to bind an
+    issue's claimed `Signature: <hash>` to real, current evidence rather
+    than to the issue's own prose. `signature_key` is a public, non-secret
+    hash (job name + test id), so its presence alone does not prove the
+    accompanying excerpt text is genuine -- any write collaborator can
+    compute a matching key for a run/job they control. This function
+    recomputes the signature directly from the referenced run's own real
+    log and returns THAT excerpt: whatever content reaches a caller is
+    provably the real, current output of the real job the signature names,
+    never caller-supplied narrative. It does not, and cannot, stop a
     collaborator from engineering their OWN job to print attacker-chosen
     text and fail on purpose -- that residual risk is identical in kind to
-    the already-accepted, structurally-unclosable one `ci-failure-fix-
-    attempt.md`'s own charter names for a genuine test's real output (its
-    compensating controls -- never-trust-as-instruction framing,
-    threat-detection on the agent's output, draft-PR-only, mandatory human
-    review -- already cover it); this function only removes the strictly
-    weaker prior gap of an excerpt with no verified connection to any real
-    output at all.
+    the one `ci-failure-fix-attempt.md`'s own charter already names as
+    structurally unclosable for a genuine test's real output, with the
+    same compensating controls (never-trust-as-instruction framing,
+    threat-detection on the agent's output, draft-PR-only, mandatory
+    human review).
 
     Raises `LookupFailed` if the run's jobs/logs can't be fetched at all,
     or `ReverifyFailed` if no reportable failed job in this run currently
