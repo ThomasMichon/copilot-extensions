@@ -283,7 +283,7 @@ def create_app(
             if wake_interval > 0
             else None
         )
-        async def _recover_run_waiters_once() -> None:
+        async def _recover_run_waiters_pass() -> None:
             from . import companion
 
             counts = await asyncio.to_thread(
@@ -298,8 +298,13 @@ def create_app(
                     counts["recovered"],
                 )
                 bus.publish({"type": "task.run_waiter_recovered", **counts})
+        async def _recover_run_waiters_loop() -> None:
+            interval = max(wake_interval, 30.0)
+            while True:
+                await _recover_run_waiters_pass()
+                await asyncio.sleep(interval)
 
-        run_waiter_recovery_task = asyncio.create_task(_recover_run_waiters_once())
+        run_waiter_recovery_task = asyncio.create_task(_recover_run_waiters_loop())
         sweeper_health = LoopHealth(name="liveness_gc", base_interval=sweep_interval or 0.0)
         orphan_health = LoopHealth(name="orphan_reap", base_interval=sweep_interval or 0.0)
         handoff_fallback_health = LoopHealth(

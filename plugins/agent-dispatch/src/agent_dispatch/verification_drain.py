@@ -72,7 +72,6 @@ async def drain_verification_requests(
             delivered = bool(
                 report.get("applied") is not None
                 or reason == "submitted verification evaluated"
-                or reason == "task changed while verification was in flight; retry required"
             )
             error = None if delivered else reason or "verification did not reach a terminal report"
         except TaskError as exc:

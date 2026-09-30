@@ -29,7 +29,7 @@ class QueueCompletionReviewMixin:
         expected_status: str | None = None,
         expected_generation: int | None = None,
         now: float | None = None,
-    ) -> tuple[Task, VerificationRequest]:
+    ) -> Task:
         """Corroborate a completion claim and close the task for good.
 
         The true lifecycle terminal beyond a provisional ``submitted`` --
@@ -60,7 +60,7 @@ class QueueCompletionReviewMixin:
         actor: str | None = None,
         now: float | None = None,
         trigger: str = "backfill",
-    ) -> Task:
+    ) -> tuple[Task, VerificationRequest]:
         """Atomically opt one submitted task into verification/backfill."""
         if not evaluator_ref:
             raise TaskError("submitted verification backfill requires a non-empty evaluator_ref")
