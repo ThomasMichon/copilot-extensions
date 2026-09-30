@@ -1,0 +1,9 @@
+{
+  "comment": "Expose a new session_length relay fact (session_count + turn_count) from the worktree-status accelerator bundle",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}

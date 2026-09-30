@@ -120,6 +120,29 @@ def compute(project: str, worktree_id: str) -> dict:
     except Exception:
         facts["lineage"] = _worktree_status_fact(None, confirmed=False, observed_at=time.time())
 
+    try:
+        # Cheap and always confirmable: both values are durable record state
+        # (``WorktreeRecord.sessions``/``.session_turns``, already cached by
+        # every refresh -- see ``tracking.py``'s own `session_turns` field
+        # docstring) rather than a fresh probe, so this never needs the
+        # "best available last-known value" degraded path the git/liveness
+        # facts above use. Mirrors the LOCAL Picker's own `session_count`/
+        # `turn_count` computation (`__main__.py`'s `len(rec.sessions)`) so a
+        # remote relay consumer (e.g. agent-dispatch's Tasks board) renders
+        # the exact same numbers a local Worktrees row would.
+        facts["session_length"] = _worktree_status_fact(
+            {
+                "session_count": len(record.sessions or ()),
+                "turn_count": record.session_turns,
+            },
+            confirmed=True,
+            observed_at=time.time(),
+        )
+    except Exception:
+        facts["session_length"] = _worktree_status_fact(
+            None, confirmed=False, observed_at=time.time()
+        )
+
     def _liveness_last_known() -> dict | None:
         # `WorktreeRecord` persists cached `mux_live`/`bound_live` hints
         # (see `tracking.stamp_mux_live`/`stamp_bound_live`) even though the

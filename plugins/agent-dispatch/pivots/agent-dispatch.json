@@ -16,7 +16,7 @@
     {"key": "group", "header": "PHASE", "width": 10, "palette": "task_phase", "priority": 2},
     {"key": "target_worktree", "header": "WT", "width": 5, "priority": 3, "style": "bold cyan"},
     {"key": "wt_live", "header": "LIVE", "width": 13, "priority": 4},
-    {"key": "turn_count", "header": "T", "width": 4, "align": "r", "priority": 5},
+    {"key": "length_display", "header": "LENGTH", "width": 9, "align": "r", "priority": 5},
     {"key": "artifacts_summary", "header": "ARTIFACTS", "width": 18}
   ],
   "group_field": "group",
