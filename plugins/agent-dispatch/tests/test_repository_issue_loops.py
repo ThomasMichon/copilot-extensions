@@ -923,6 +923,18 @@ def test_repository_issue_loop_stamps_default_require_verification():
     assert result["created"][0]["require_verification"] is True
 
 
+def test_repository_issue_loop_stamps_evaluator_ref():
+    provider = FakeProvider([_issue(12)])
+    result = run_tick(
+        FakeClient(),
+        _config(require_verification=True, evaluator_ref="review-loop"),
+        provider=provider,
+        clock=lambda: 10_000,
+    )
+
+    assert result["created"][0]["evaluator_ref"] == "review-loop"
+
+
 def test_proposed_task_retries_transient_approve_failure():
     provider = FakeProvider([_issue(1)])
     client = FakeClient(fail_approve_once=True)

@@ -60,6 +60,7 @@ _KNOWN_KEYS = frozenset(
         "worker_identity",
         "allow_self_config_changes",
         "require_verification",
+        "evaluator_ref",
     }
 )
 _FORGE_KEYS = frozenset({"provider", "producer_login", "discovery_scope"})
@@ -199,6 +200,11 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
     if not isinstance(require_verification, bool):
         raise RegistrarError(
             "repository-issue-loop require_verification: expected true/false"
+        )
+    evaluator_ref = data.get("evaluator_ref")
+    if evaluator_ref is not None and (not isinstance(evaluator_ref, str) or not evaluator_ref):
+        raise RegistrarError(
+            "repository-issue-loop evaluator_ref: expected a non-empty string"
         )
     batch_size = _number(data, "batch_size", default=1, minimum=1)
     if not float(batch_size).is_integer():
@@ -399,6 +405,7 @@ def validate_config(data: Mapping[str, Any], *, cwd: str | Path | None = None) -
         "exclude_labels": list(exclude),
         "priority_labels": list(priority),
         "require_verification": require_verification,
+        "evaluator_ref": evaluator_ref,
         "batch_size": int(batch_size),
         "task_label": task_label,
         "forge": {
@@ -1695,6 +1702,7 @@ def run_tick(
             "dedup_key": discovered["origin_ref"],
             "exclusive_key": discovered["exclusive_key"],
             "require_verification": bool(config.get("require_verification", False)),
+            "evaluator_ref": config.get("evaluator_ref"),
             # A repository issue task cannot become runnable until every
             # external-resource reservation is bound successfully.
             "proposed": True,
