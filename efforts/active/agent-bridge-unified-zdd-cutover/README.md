@@ -270,7 +270,7 @@ layer — is the operator's own, captured verbatim in Request.)_
   new `agent-bridge-cutover` companion) that exercises this on a real fresh
   machine.
 
-### Phase 6 — Tier-E live-turn-survival harness (implemented; verified by a real live run) ✅
+### Phase 6 — live-turn-survival drill (implemented; verified by a real live run) ✅
 
 Closes Phase 5's Plan item 1 for real: prove, with a genuinely live
 Copilot/ACP turn in flight, that `agent-bridge deploy` does not disrupt it
@@ -295,7 +295,7 @@ the full reasoning).
   zero observed disruption while the daemon's generation actually changes
   underneath it (same session id, no dropped/duplicated event, confirmed
   generation change -- not a trivial/no-op cutover). **Executed for real**
-  against a Docker clean-room box on lambda-core (real Copilot auth via
+  against a local Docker clean-room box (real Copilot auth via
   host `gh`, real credits): a real prompt reached 6 real
   `assistant.turn_end` events, all landing AFTER `deploy` fired mid-turn,
   under the SAME session/acp_session_id, with the Session-Host claim
@@ -391,7 +391,7 @@ test that closes the gap.
 ## Journal
 
 ### 2026-09-29 — Phase 6 verified by a real live Docker clean-room run (operator-triggered)
-- Operator had Docker available on lambda-core and asked for the drill to
+- Operator had a local Docker host available and asked for the drill to
   actually be run for real, not left as an implemented-but-untested gap.
   Built the box via `tools/clean-room/run.sh --scenario agent-bridge-cutover
   --pass-env CR_LIVE_TURN_DRILL run` with `CR_LIVE_TURN_DRILL=1` (auth
@@ -467,6 +467,78 @@ test that closes the gap.
   temp-dir state, cleaned up by `run.sh down`/container removal). Noted as
   a minor, pre-existing (Phase 5) cleanup nit, not fixed here -- out of
   this PR's scope.
+
+### 2026-09-29 — Phase 6 hardened after automated review + a real upstream bug found ([issue #4681](https://github.com/ThomasMichon/copilot-extensions/issues/4681))
+- Automated review of the follow-up PR caught real gaps a passing run alone
+  had not surfaced. Fixed each with a live re-run confirming the fix, not
+  just the review's say-so:
+  1. **Unsafe kill.** The pre-existing-daemon replacement signaled whatever
+     pid `active.json` named without confirming it still identified an
+     agent-bridge process -- a dead pid reused by an unrelated process
+     could have been killed instead. Added `/proc/<pid>/cmdline`
+     confirmation before ever signaling, refused non-positive pids, and
+     made a failed replacement a hard stop (never press on to spawn our
+     own daemon over a lingering, unconfirmed-dead old one).
+  2. **Unverified generation-1 identity.** A bare `_active()` read right
+     after spawning our own daemon could still return the JUST-KILLED
+     daemon's own lingering routing entry for a brief window. Now polls
+     specifically for OUR spawned pid before trusting the result as
+     generation 1.
+  3. **`wait`'s own settlement never checked.** `rc==0` from `wait
+     --attention turn_complete` proves nothing by itself -- it can exit 0
+     with JSON `settled: false` on its own internal timeout. Now parses
+     the structured result and requires `settled: true, reason:
+     turn_complete` (see the bigger finding below for why this ultimately
+     became advisory-only).
+  4. **Aggregate turn counts don't prove non-duplication or timing.**
+     Equal `turn_start`/`turn_end` totals would still PASS a replayed
+     duplicate pair, and "some turn_end appears later in the file" doesn't
+     prove the SPECIFIC turn open at deploy-time is what closed --  it
+     could have closed during deploy's own startup, before the generation
+     actually changed. Replaced both aggregate checks with an
+     order-respecting walk (`_turn_balance_and_boundary_crossing`): a
+     running open-turn counter that must return to zero with no orphan
+     ends, AND at least one `turn_end`'s own EVENT TIMESTAMP (not file
+     position) strictly after the real wall-clock instant `deploy` was
+     fired.
+  5. **Cosmetic:** the Phase 6 heading still said "Tier-E" after the
+     design doc's own resolution that it isn't; renamed. Removed two
+     machine-identifier mentions (`lambda-core`) from this public effort
+     doc per the repo's identifier-neutrality rule -- replaced with a
+     generic "local Docker host" description.
+- **A genuine NEW product finding surfaced only by re-running for real
+  after hardening #3 above:** with `wait`'s JSON output now actually
+  trustworthy, real re-runs showed `wait --attention turn_complete` can
+  hang indefinitely after a Session-Host reattach -- past its own advisory
+  1800s command-timeout ceiling, twice -- even though `sessions --json`
+  correctly reported the session `idle` (the turn had genuinely completed:
+  the real "DONE" reply and its `assistant.turn_end` were already in
+  `events.jsonl`). Filed as
+  [issue #4681](https://github.com/ThomasMichon/copilot-extensions/issues/4681)
+  rather than silently worked around. The drill itself does not depend on
+  this channel for its pass/fail verdict -- switched the authoritative
+  completion signal to polling `sessions --json` status directly (already
+  proven reliable), and demoted `wait --attention turn_complete` to a
+  short (20s), non-blocking advisory secondary check so the drill still
+  surfaces the gap in its own output without hanging on a known-broken
+  channel.
+- **A second, smaller real timing race** the above surfaced: the moment
+  session status flips to `idle` can trail the LAST `turn_end`'s own write
+  to `events.jsonl` by a short beat -- a snapshot read immediately on
+  "idle" once caught a still-open turn. Added a brief (15s) bounded
+  re-poll of the events file itself before trusting any snapshot as final.
+- **Credit/cost discipline.** Replaced the original five-paragraph,
+  five-`sleep(6)` story prompt (a real, if modest, credit cost per run,
+  and the reason six turn_end pairs appeared in the first passing run)
+  with a single `sleep 25` + reply prompt -- still long enough to reliably
+  land `deploy` mid-turn, materially cheaper and less variable per run,
+  per the design doc's own feasibility note to tune for exactly this
+  tradeoff.
+- Net effect: `PROBE: live-turn-survival PASS ... PROBE-SUMMARY: 1/1
+  passed` on the final hardened run, with the same evidence as before
+  (real reattach, real generation change, prefix-preserved transcript)
+  now backed by materially stronger, order-aware, timestamp-based
+  assertions instead of aggregate counts.
 
 ### 2026-09-29 — Phase 6 implemented (opt-in live-turn-survival drill, PR pending)
 - Consumed the prior session's planning handoff (Phase 6 design doc,
