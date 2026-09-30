@@ -400,7 +400,7 @@ async def test_remote_operation_service_forwards_copilot_args_in_envelope() -> N
     service._request = fake_request  # type: ignore[attr-defined]
 
     await service.create_session(
-        "wheatley",
+        "ember",
         agent="task-worker",
         prompt="do the work",
         caller_id="fleet-task-a",

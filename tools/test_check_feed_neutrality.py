@@ -1,4 +1,4 @@
-"""Tests for the feed-neutrality guard (aperture-labs feed-neutral-build-config
+"""Tests for the feed-neutrality guard (private-downstream-repo feed-neutral-build-config
 effort follow-through; see #2389 / tools/clean-room's --block-public-feeds).
 
 The guard flags a hardcoded public package-feed URL (pypi.org,

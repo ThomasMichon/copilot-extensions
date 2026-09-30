@@ -4,7 +4,7 @@ override mechanism.
 
 This repo is cloned and run on machines whose default package feed is
 network-blocked and replaced with an internal mirror (see #2389 / the
-aperture-labs "feed-neutral-build-config" effort that motivated this guard,
+private-downstream-repo "feed-neutral-build-config" effort that motivated this guard,
 and ``tools/clean-room``'s own ``--block-public-feeds`` mode, which reproduces
 that condition in the validation harness). A build/install/CI file that
 hardcodes ``pypi.org``, ``files.pythonhosted.org``, ``registry.npmjs.org``, or

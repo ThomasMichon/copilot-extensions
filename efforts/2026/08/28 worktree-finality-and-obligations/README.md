@@ -428,7 +428,7 @@ below for the carved implementation plan.
   `resource-claim`/`other`); the `worktree` skill's obligation-gate section
   now explicitly tells an agent to `follow-ups add "<summary>" --ref
   issue:<repo>#<n>` for a bug it files related to the current task. The
-  `file-issue` skill itself was **not** touched (cross-repo, aperture-labs-
+  `file-issue` skill itself was **not** touched (cross-repo, private-downstream-repo-
   owned) -- that pointer is the follow-up work.
 
 ### Phase 4 - Derive canonical finality once
@@ -619,7 +619,7 @@ below for the carved implementation plan.
 - [x] Update `file-issue` guidance to proactively open a follow-up/claim on any
   issue the agent files for its current task. Already done in Phase 3 (the
   `worktree` skill's obligation-gate section); the cross-repo `file-issue`
-  skill itself (aperture-labs-owned) still isn't touched -- unchanged from
+  skill itself (private-downstream-repo-owned) still isn't touched -- unchanged from
   the Phase 3 note.
 
 ### Phase 6 - Release and prove the lifecycle

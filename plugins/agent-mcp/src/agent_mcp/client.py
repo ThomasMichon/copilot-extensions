@@ -165,7 +165,7 @@ class OneShotSession:
             # per-bridge lock (WarmPool), one such hang doesn't just fail one
             # call -- it wedges every subsequent call to that bridge
             # permanently, with no way to recover short of restarting the
-            # daemon (see aperture-labs#6673). Bound just this step under the
+            # daemon (see private-downstream-repo#6673). Bound just this step under the
             # same ``cfg.timeout`` already used for individual requests --
             # deliberately *not* wrapping ``_negotiate()`` here too, since that
             # would race the outer bound against the inner per-request bound

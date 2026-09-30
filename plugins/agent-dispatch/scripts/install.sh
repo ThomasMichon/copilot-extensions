@@ -1226,7 +1226,7 @@ AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=
 AGENT_DISPATCH_SUPERVISE_MODE=
 # MODE=serve only: explicit machine scope for this host's daemon. Recommended in a
 # service context -- CWD-based identity resolution can fail there, and without a
-# machine the daemon SKIPS every machine-pinned declaration (aperture-labs #5001).
+# machine the daemon SKIPS every machine-pinned declaration (private-downstream-repo #5001).
 # Leave blank to fall back to the host node name at runtime; set to this host's
 # alias (e.g. mantis-counter) to pin it explicitly.
 AGENT_DISPATCH_SUPERVISE_MACHINE=
@@ -1276,7 +1276,7 @@ if [[ "\$mode" == "serve" ]]; then
     serve_args=(supervise serve --legacy-env --interval "\$interval")
     # Explicit machine scope (recommended for a service context, where CWD-based
     # identity resolution can fail and leave the daemon unable to scope
-    # machine-pinned declarations -- aperture-labs #5001). Falls back to the host
+    # machine-pinned declarations -- private-downstream-repo #5001). Falls back to the host
     # node name at runtime when unset.
     smachine="\${AGENT_DISPATCH_SUPERVISE_MACHINE:-}"
     [[ -n "\$smachine" ]] && serve_args+=(--machine "\$smachine")

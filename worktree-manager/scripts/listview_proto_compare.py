@@ -35,7 +35,7 @@ SIZE = (118, 44)
 
 
 def _fixture_source():
-    """The full Aperture Labs roster (demo.py) as a picker fixture source --
+    """The full Example Labs roster (demo.py) as a picker fixture source --
     real-shaped, richer than the 2-row unit-test fixture, so this spike's
     v1/v2 comparison exercises Active/Recent/Completed all at once."""
     local = (demo._MACHINE, "Win")

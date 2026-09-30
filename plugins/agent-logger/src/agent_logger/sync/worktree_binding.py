@@ -1,5 +1,5 @@
 """Worktree-binding derivation + sidecar marking (session-worktree-archive
--linkout Phase 3, aperture-labs).
+-linkout Phase 3, private-downstream-repo).
 
 Mirrors :mod:`agent_logger.sync.origin` exactly: a per-session-dir sidecar
 (``worktree.json``) that syncs with the session, so a downstream consumer
@@ -11,7 +11,7 @@ best-effort CWD-pattern match against an archived, possibly-gone worktree.
 
 This closes the loop for **future** sessions only. Permanent Record's own
 ``correlate_cwd()`` reconstruction pass
-(``efforts/active/session-worktree-archive-linkout`` Phase 1, aperture-labs)
+(``efforts/active/session-worktree-archive-linkout`` Phase 1, private-downstream-repo)
 remains the one-time (plus ongoing best-effort) backfill for **past**
 sessions synced before this module existed.
 

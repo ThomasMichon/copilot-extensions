@@ -7,7 +7,7 @@ Installing FROM the pristine payload directory (``$PLUGIN_DIR``, under
 ``build/lib/`` can silently shadow fresh ``src/`` on a later install if
 setuptools' incremental-build mtime check decides nothing "changed" -- the
 exact failure mode that crashed agent-bridge's deployed daemon in a restart
-loop (aperture-labs#7281/#7279): a since-added function existed only in
+loop (private-downstream-repo#7281/#7279): a since-added function existed only in
 ``src/``, never made it into the stale ``build/lib`` copy that got installed,
 and importing it crashed the daemon on every startup attempt. agent-dispatch
 shares the identical "install straight from $PLUGIN_DIR" pattern, so

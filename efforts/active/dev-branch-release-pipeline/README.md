@@ -576,7 +576,7 @@ Round 2 (operator's response to that evaluation):
       (PRs #3623/#3627/#3628).
 - [ ] Audit every machine's local `copilot-extensions` anchor checkout for
       the same stale-`default_branch: main` config-resolution hazard found
-      on `lambda-core` (Journal, 2026-09-25) — at minimum the second operator workstation,
+      on `atlas-core` (Journal, 2026-09-25) — at minimum the second operator workstation,
       already known to carry other stale-vs-`dev` state from the same
       migration window.
 
@@ -1451,7 +1451,7 @@ contributor's) silently jammed.
   already-finalized/pruned worktree here — confirming it was safe to work
   on them directly. Also traced one hop further for #3505: its owning
   `copilot-extensions` worktree is itself owned by a long-lived,
-  currently-very-active `aperture-labs` worktree (a *root* claim, no further
+  currently-very-active `private-downstream-repo` worktree (a *root* claim, no further
   owner recorded) — not a private-downstream worktree; #3498's worktree has
   no recorded owner at all (a root itself, or created out-of-band).
 - **Wrote the migration guide the sweep itself proved necessary.** Added a
@@ -1669,7 +1669,7 @@ efforts' own PRs).
     *own* new logic and passed `main-gate` cleanly, unassisted — merged with
     a plain `gh pr merge --squash`, no `--admin` required, dogfooding the
     fix on its first real use.
-  - **Separately, root-cause layer**: this machine's (`lambda-core`) local
+  - **Separately, root-cause layer**: this machine's (`atlas-core`) local
     **anchor checkout** of `copilot-extensions` was still sitting on an old,
     already-merged topic branch (`fix/efforts-completion-gate-owner-version-
     drift`) whose on-disk `.agent-worktrees/config.yaml` still read
@@ -1967,7 +1967,7 @@ efforts' own PRs).
   validates.
 
 ### 2026-09-29 — Promotion pipeline starved by unfiltered CI-completion volume; fixed with a separate, cheap outer filter workflow (two flawed attempts first caught by review)
-- Diagnosed live while chasing why an aperture-labs PR's merged
+- Diagnosed live while chasing why an private-downstream-repo PR's merged
   `context-handoff` fix (#4489) hadn't reached `main` yet. `validate-and-
   promote.yml`'s `workflow_run: workflows: ["CI"]` trigger has no branch
   filter -- deliberately, per this same effort's earlier finding that

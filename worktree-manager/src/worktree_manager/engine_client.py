@@ -35,7 +35,7 @@ ENGINE_BIN = "agent-worktrees"
 #: instead of the real one -- the seam that makes the Manager (and its Picker)
 #: buildable, testable, and demo-able without a live agent-worktrees, faithfully
 #: through the same subprocess + JSON-parse path. The ``--demo`` Picker mode sets
-#: this to the bundled Aperture Labs fake engine.
+#: this to the bundled Example Labs fake engine.
 ENGINE_CMD_ENV = "WORKTREE_MANAGER_ENGINE_CMD"
 
 #: Exact provider argv handed to the Manager by agent-worktrees. JSON avoids

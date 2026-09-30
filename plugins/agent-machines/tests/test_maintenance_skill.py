@@ -44,5 +44,5 @@ def test_maintenance_skill_does_not_hardcode_issue_provider_or_machine():
     assert "gitea" not in text
     assert "github" not in text
     assert "borealis" not in text
-    assert "tmichon" not in text
+    assert "owner_user" not in text
     assert len(text.splitlines()) < 500

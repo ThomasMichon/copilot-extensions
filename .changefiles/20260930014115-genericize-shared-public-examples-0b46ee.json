@@ -1,0 +1,13 @@
+{
+  "comment": "Genericize shared public examples",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

@@ -108,7 +108,7 @@ def test_find_shadowed_aliases_flags_alias_duplicated_in_root_config(
 ) -> None:
     config_d = tmp_path / "config.d"
     registry, module_path, registry_data, module_data = _sources(
-        tmp_path, "dtssh", aliases=("tmichon-cloud1",)
+        tmp_path, "dtssh", aliases=("owner_user-cloud1",)
     )
     fragment = _managed_fragment(
         config_d,
@@ -120,7 +120,7 @@ def test_find_shadowed_aliases_flags_alias_duplicated_in_root_config(
     ssh_config = tmp_path / "config"
     ssh_config.write_text(
         "Include ~/.ssh/config.d/*\n"
-        "Host tmichon-cloud1\n"
+        "Host owner_user-cloud1\n"
         "    ProxyCommand dtssh.exe proxy fresh-tunnel-id --port 2222\n",
         encoding="utf-8",
     )
@@ -134,7 +134,7 @@ def test_find_shadowed_aliases_flags_alias_duplicated_in_root_config(
     assert [finding.entry for finding in shadow_findings] == [str(fragment)]
     finding = shadow_findings[0]
     assert finding.reason == "shadowed-alias"
-    assert "tmichon-cloud1" in finding.remedy
+    assert "owner_user-cloud1" in finding.remedy
     assert str(ssh_config) in finding.remedy
 
     payload = fragment_registry.doctor_payload(report, config_d, ssh_config=ssh_config)
@@ -146,7 +146,7 @@ def test_find_shadowed_aliases_flags_alias_duplicated_in_root_config(
 def test_find_shadowed_aliases_is_empty_when_no_collision(tmp_path: Path) -> None:
     config_d = tmp_path / "config.d"
     registry, module_path, registry_data, module_data = _sources(
-        tmp_path, "dtssh", aliases=("tmichon-cloud1",)
+        tmp_path, "dtssh", aliases=("owner_user-cloud1",)
     )
     _managed_fragment(config_d, registry, module_path, registry_data, module_data)
     ssh_config = tmp_path / "config"

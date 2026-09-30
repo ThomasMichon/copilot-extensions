@@ -143,7 +143,7 @@ must also update your own code: old `"completed"` (provisional) becomes
 `"submitted"`; old `"confirmed"` (terminal) becomes `"completed"`. The
 `confirm()` transition/verb/CLI subcommand is unchanged.
 
-See PR #4597 (this rename) for the full plugin-side diff, and aperture-labs
+See PR #4597 (this rename) for the full plugin-side diff, and private-downstream-repo
 PR #7777 (`services/intelligence-dampener/.../harness/dispatch_review.py`)
 for a worked real-world example of adopting the new mapping in a consumer.
 

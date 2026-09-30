@@ -4444,7 +4444,7 @@ class TestRehydrate:
         """A session's declared per-session MCP toolset must survive a daemon
         restart, not just an in-process resume -- regression for a reviewer
         task permanently losing its dedicated credential-bound tools after
-        any restart (aperture-labs #7239)."""
+        any restart (private-downstream-repo #7239)."""
         now = time.time()
         tmp_db.create_session(
             "s1", "test", None, ".", "local", "idle", now,

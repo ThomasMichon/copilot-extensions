@@ -218,7 +218,7 @@ Full audit (repo/file/what's restated) recorded in this session's transcript
       restates *generic* PR mechanics now owned by the dynamic guidance,
       after the Phase 2/3/4 corrections -- each repo's remaining PR content
       is legitimate visitor-contract self-description.
-- [ ] `dev.tmichon` (ADO, `bypass_policy: true` self-merge) or any other
+- [ ] `dev.owner_user` (ADO, `bypass_policy: true` self-merge) or any other
       coordinated repo needing the same review is **not checked this
       pass** -- explicitly deferred, not silently dropped; a follow-on for
       whoever picks this effort back up.
@@ -390,7 +390,7 @@ _Pending._
   this pass -- the Phase 1/1b unit tests already cover that rendering path
   with equivalent synthetic fixtures, and a live multi-repo session-restart
   validation was judged lower-value than the phases already completed.
-- **Deliberately left open**: whether `dev.tmichon` (ADO) or any other
+- **Deliberately left open**: whether `dev.owner_user` (ADO) or any other
   coordinated repo needs the same review. Not silently dropped -- recorded
   as the effort's one remaining open item for whoever picks it back up.
 - Six PRs landed total across two repos this effort: copilot-extensions

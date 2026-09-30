@@ -4,7 +4,7 @@ Run as ``python -m worktree_manager.demo_pivot list``. Prints a JSON array of
 synthetic entries in the shape the generic pivot renderer
 (``production_picker.picker_tui``) expects from any manifest-declared ``list``
 command -- the same contract a real plugin (e.g. ``agent-containers fleet
---json``) fulfills. Themed to match ``demo.py``'s Aperture Labs fixture, so a
+--json``) fulfills. Themed to match ``demo.py``'s Example Labs fixture, so a
 preview screenshot showing this pivot alongside the (also faked) Worktrees
 pivot is obviously synthetic.
 
@@ -29,9 +29,9 @@ import sys
 _ROWS = [
     {
         "id": "chamber-request-0091",
-        "title": "Recalibrate the Aperture Science Handheld Portal Device",
+        "title": "Recalibrate the Example Research Handheld Portal Device",
         "state": "running",
-        "owner": "GLaDOS",
+        "owner": "Iris",
         "claims_summary": "PR #91 (open)",
     },
     {
@@ -45,7 +45,7 @@ _ROWS = [
         "id": "chamber-request-0203",
         "title": "Audit the neurotoxin generator maintenance schedule",
         "state": "done",
-        "owner": "GLaDOS",
+        "owner": "Iris",
         "claims_summary": "issue #203 (closed)",
     },
 ]

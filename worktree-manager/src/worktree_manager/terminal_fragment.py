@@ -95,7 +95,7 @@ __all__ = [
 # agent-worktrees WSL icon is deployed).
 DEFAULT_ICON = r"%USERPROFILE%\.agent-worktrees\aperture-science.ico"
 
-COLOR_SCHEME_NAME = "Aperture Science"
+COLOR_SCHEME_NAME = "Example Research"
 
 # machines.yaml ssh env name -> the selection's short env label
 # (install.ps1 ``Get-SelEnvLabel``).
@@ -256,7 +256,7 @@ class FragmentResult:
 # ---------------------------------------------------------------------------
 
 def color_scheme() -> dict:
-    """The 'Aperture Science' color scheme embedded in the fragment."""
+    """The 'Example Research' color scheme embedded in the fragment."""
     return {
         "name": COLOR_SCHEME_NAME,
         "background": "#0C0C0C",

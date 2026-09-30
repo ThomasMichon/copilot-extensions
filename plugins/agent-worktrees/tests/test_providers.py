@@ -317,41 +317,41 @@ class TestValidateEffectiveHead:
         # source_attribution: true already accepts full raw exposure -- any
         # head is fine, including one containing the worktree id.
         attribution.validate_effective_head(
-            "worktree/lambda-core-20260101-abcd",
-            worktree_id="lambda-core-20260101-abcd",
-            machine="lambda-core",
+            "worktree/atlas-core-20260101-abcd",
+            worktree_id="atlas-core-20260101-abcd",
+            machine="atlas-core",
             source_attribution=True,
         )
 
     def test_safe_default_pattern_passes(self):
         attribution.validate_effective_head(
             "pr/my-change-abcd",
-            worktree_id="lambda-core-20260101-abcd",
-            machine="lambda-core",
+            worktree_id="atlas-core-20260101-abcd",
+            machine="atlas-core",
             source_attribution=False,
         )
         attribution.validate_effective_head(
             "pr/my-change-abcd",
-            worktree_id="lambda-core-20260101-abcd",
-            machine="lambda-core",
+            worktree_id="atlas-core-20260101-abcd",
+            machine="atlas-core",
             source_attribution="codename",
         )
 
     def test_raw_worktree_id_in_head_is_blocked(self):
         with pytest.raises(attribution.BranchLeakError, match="raw worktree id"):
             attribution.validate_effective_head(
-                "worktree/lambda-core-20260101-abcd",
-                worktree_id="lambda-core-20260101-abcd",
-                machine="lambda-core",
+                "worktree/atlas-core-20260101-abcd",
+                worktree_id="atlas-core-20260101-abcd",
+                machine="atlas-core",
                 source_attribution=False,
             )
 
     def test_machine_name_in_head_is_blocked(self):
         with pytest.raises(attribution.BranchLeakError, match="machine name"):
             attribution.validate_effective_head(
-                "user/lambda-core/my-change",
+                "user/atlas-core/my-change",
                 worktree_id="wt-abcd",
-                machine="lambda-core",
+                machine="atlas-core",
                 source_attribution=False,
             )
 
@@ -383,7 +383,7 @@ class TestValidateEffectiveHead:
         attribution.validate_effective_head(
             "pr/my-change-abcd",
             worktree_id="wt-abcd",
-            machine=("lambda-core", ""),
+            machine=("atlas-core", ""),
             source_attribution=False,
         )
 
@@ -399,8 +399,8 @@ class TestValidateEffectiveHead:
     def test_worktree_id_match_is_case_insensitive(self):
         with pytest.raises(attribution.BranchLeakError, match="raw worktree id"):
             attribution.validate_effective_head(
-                "worktree/LAMBDA-CORE-20260101-ABCD",
-                worktree_id="lambda-core-20260101-abcd",
+                "worktree/ATLAS-CORE-20260101-ABCD",
+                worktree_id="atlas-core-20260101-abcd",
                 machine="",
                 source_attribution=False,
             )
@@ -471,13 +471,13 @@ class TestValidateEffectiveHead:
             attribution.validate_effective_head(
                 "worktree/wt-abcd",
                 worktree_id="wt-abcd",
-                machine="lambda-core",
+                machine="atlas-core",
                 source_attribution="codename",
             )
 
     def test_empty_head_is_a_noop(self):
         attribution.validate_effective_head(
-            "", worktree_id="wt-abcd", machine="lambda-core",
+            "", worktree_id="wt-abcd", machine="atlas-core",
             source_attribution=False,
         )
 

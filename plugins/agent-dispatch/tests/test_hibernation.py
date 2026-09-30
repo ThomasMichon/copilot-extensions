@@ -353,7 +353,7 @@ def test_run_detach_with_task_suspends_using_headless_owner_not_cwd_identity(
     # CWD identity resolves to something entirely different from the task's
     # real owner -- the old bug composed THIS as the suspend worker_id.
     monkeypatch.setattr(
-        identity, "resolve_identity", lambda: ("tmichon-cloud1", "some-other-worktree")
+        identity, "resolve_identity", lambda: ("owner_user-cloud1", "some-other-worktree")
     )
     monkeypatch.setattr(
         hibernation_claims, "add_hibernation_claim", lambda task_id, **k: {"state": "active"}

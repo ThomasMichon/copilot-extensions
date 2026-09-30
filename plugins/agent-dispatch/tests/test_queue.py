@@ -1060,7 +1060,7 @@ def test_bind_owner_session_is_owner_and_generation_fenced(q):
 
 def test_attachment_history_records_bind_release_and_handoff(q):
     """durable-attachment-history: releasing/re-embodying a task must NOT
-    discard the prior session's identity -- reproduces the aperture-labs
+    discard the prior session's identity -- reproduces the private-downstream-repo
     incident (a stuck Intelligence Dampener review released twice, each
     release silently losing the previous session's record)."""
     task = q.create("headless", target_worktree="wt-1", target_machine="m1")

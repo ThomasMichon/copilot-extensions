@@ -180,7 +180,7 @@ def test_summarize_claims_all_non_live_is_empty_string():
 # URL resolution, and the structured claim_entries_for_worktree() list -----
 
 def test_format_claim_worktree_same_repo_has_wt_prefix():
-    ref = "host-win/copilot-extensions/aperture-labs-testchamber-4b8a"
+    ref = "host-win/copilot-extensions/private-downstream-repo-testchamber-4b8a"
     assert claims_rank.format_claim(
         "worktree", ref, own_repo="copilot-extensions",
     ) == "WT 4b8a"
@@ -248,7 +248,7 @@ def test_claim_entries_for_worktree_pairs_label_with_url():
         ResourceClaim(kind="pr", ref="acme-org/sample-repo#2481"),
         ResourceClaim(
             kind="worktree",
-            ref="host-win/copilot-extensions/aperture-labs-testchamber-4b8a",
+            ref="host-win/copilot-extensions/private-downstream-repo-testchamber-4b8a",
         ),
     ]
     entries = claims_rank.claim_entries_for_worktree(

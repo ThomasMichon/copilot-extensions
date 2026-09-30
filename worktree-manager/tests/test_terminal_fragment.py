@@ -179,7 +179,7 @@ def test_local_launcher_shape_matches_powershell():
     assert p.commandline == r'cmd /c "%USERPROFILE%\.local\bin\test-chamber.cmd"'
     wt = p.to_wt()
     assert wt["startingDirectory"] == "%USERPROFILE%"
-    assert wt["colorScheme"] == "Aperture Science"
+    assert wt["colorScheme"] == "Example Research"
     assert wt["hidden"] is False
 
 
@@ -331,7 +331,7 @@ def test_fragment_carries_profiles_and_scheme():
                         selection=None, roster=_roster())
     frag = _build(proj).fragment()
     assert "profiles" in frag and "schemes" in frag
-    assert frag["schemes"][0]["name"] == "Aperture Science"
+    assert frag["schemes"][0]["name"] == "Example Research"
     # Every profile object is fully formed.
     for p in frag["profiles"]:
         assert set(p) >= {"guid", "name", "commandline", "icon",

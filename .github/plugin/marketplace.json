@@ -2,7 +2,7 @@
   "name": "copilot-extensions",
   "owner": {
     "name": "Thomas Michon",
-    "email": "thomas@thomasmichon.com"
+    "email": "maintainer@example.com"
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, budget posture, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",

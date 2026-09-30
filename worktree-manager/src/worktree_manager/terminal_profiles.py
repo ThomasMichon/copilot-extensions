@@ -17,8 +17,8 @@ Storage: a top-level ``terminal_profiles`` list in the machine-local, per-repo
 key there is implicitly scoped to this repo + this machine):
 
     terminal_profiles:
-      - {machine: tmichon-book2, env: Win, kind: agent}   # self (locked)
-      - {machine: tmichon-dev6, env: WSL, kind: shell}
+      - {machine: owner_user-book2, env: Win, kind: agent}   # self (locked)
+      - {machine: owner_user-dev6, env: WSL, kind: shell}
 
 The ``machine`` field is the roster **key** (the canonical full name), not the
 cosmetic ``display_name``.
@@ -55,7 +55,7 @@ class TargetSel:
     """One selected launch target in a machine's terminal-profile column.
 
     ``machine`` is the target's **roster key** -- its canonical full name
-    (e.g. ``tmichon-book2``), matching the machines.yaml keys and
+    (e.g. ``owner_user-book2``), matching the machines.yaml keys and
     ``config.machine``. It is *not* the cosmetic ``display_name`` (the fragment
     generator accepts a legacy display-name column for back-compat but always
     writes and prefers the key). ``env`` is the short env label

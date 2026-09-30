@@ -1,9 +1,9 @@
-"""Aperture Labs demo fixture — mock worktrees for building/validating the Picker.
+"""Example Labs demo fixture — mock worktrees for building/validating the Picker.
 
 Because the Manager reaches the engine only across a process boundary
 (``engine_client``), the Picker can be built, screenshotted, and demoed with a
 **fake engine** that emits this fixture — no live ``agent-worktrees`` required.
-The data is deliberately themed (Aperture Science / Cave Johnson) so a demo
+The data is deliberately themed (Example Research / Cave Johnson) so a demo
 screenshot is obviously synthetic and never leaks real machine/repo/session
 particulars.
 
@@ -16,9 +16,9 @@ treats employees as expendable test subjects rather than people) is scraped
 verbatim from ``docs/assets/worktree-picker.png`` -- the original Textual-
 picker-era screenshot (``v1.0.0``, 2026-07-25) -- so the durable mock source
 and the historical baseline stay the same voice rather than drifting apart.
-The original 7-row roster (the "Portal quote" titles referencing GLaDOS, the
+The original 7-row roster (the "Portal quote" titles referencing Iris, the
 Companion Cube, the cake, etc.) predates that screenshot and is kept
-unmodified for compatibility (see ``test_picker_app.py``'s "lemons"/"GLaDOS"
+unmodified for compatibility (see ``test_picker_app.py``'s "lemons"/"Iris"
 assertions). ``_MEMO_TITLES`` is deliberately separated from ``_ROWS`` so a
 future generator (more volume than this fixed roster) has a clearly-labeled,
 reusable bank of on-theme phrasing to draw from or extend, rather than
@@ -33,7 +33,7 @@ import datetime as _dt
 DEMO_PROJECT = "copilot-extensions"
 
 #: The demo machine (an Aperture facility, not a real host).
-_MACHINE = "aperture-labs"
+_MACHINE = "private-downstream-repo"
 
 #: Cave-Johnson-memo-style task titles, scraped from the original v1.0.0
 #: screenshot (``docs/assets/worktree-picker.png``, 2026-07-25) -- kept as a
@@ -74,7 +74,7 @@ _MEMO_TITLES: dict[str, tuple[str, ...]] = {
 def _wt(idx: str, state: str, ahead: int, behind: int, dirty: bool,
         status: str, title: str, branch: str, **extra: object) -> dict:
     row = {
-        "id": f"aperture-labs-testchamber-{idx}",
+        "id": f"private-downstream-repo-testchamber-{idx}",
         "repo": DEMO_PROJECT,
         "machine": _MACHINE,
         "branch": branch,
@@ -107,8 +107,8 @@ _ROWS = [
         "Repulsion gel: do NOT drink the science juice",
         "fix/propulsion-gel-viscosity"),
     _wt("3b7e", "wip", 1, 0, False, "active",
-        "GLaDOS boot sequence — still testing, for science",
-        "feat/glados-genetic-lifeform"),
+        "Iris boot sequence — still testing, for science",
+        "feat/iris-genetic-lifeform"),
     _wt("4f22", "clean", 0, 0, False, "complete",
         "Weighted Companion Cube must be incinerated (regrettably)",
         "chore/companion-cube-incinerator"),
@@ -217,7 +217,7 @@ def _memo_rows() -> list[dict]:
             # style actually applied, not just the plain string.
             claims_links=[{
                 "label": "PR #83",
-                "url": "https://github.com/aperture-labs/testchambers/pull/83",
+                "url": "https://github.com/private-downstream-repo/testchambers/pull/83",
             }]),
         _wt("0545", "wip", 1, 0, False, "active", titles["active"][8],
             "feat/vending-machine-neural-net", started_at=_ago(days=8),
@@ -248,7 +248,7 @@ def _memo_rows() -> list[dict]:
             pr={"number": 65, "state": "open"}, claims_summary="PR #65"),
         _wt("6b68", "", 0, 0, False, "finalized", titles["completed"][2],
             "fix/break-room-black-hole", completed_at=_ago(days=2),
-            claims_summary="ssh aperture-labs-bench2"),
+            claims_summary="ssh private-downstream-repo-bench2"),
         _wt("2d3d", "", 0, 0, False, "finalized", titles["completed"][3],
             "feat/help-desk-sarcasm-module", completed_at=_ago(days=8),
             pr={"number": 90, "state": "merged"}),
@@ -262,7 +262,7 @@ def _memo_rows() -> list[dict]:
 
 
 def aperture_worktrees() -> list[dict]:
-    """The Aperture Labs worktree roster (engine ``list --json`` row shape)."""
+    """The Example Labs worktree roster (engine ``list --json`` row shape)."""
     return [dict(r) for r in _ROWS] + _memo_rows()
 
 
@@ -276,11 +276,11 @@ def resolve_plan(worktree_id: str | None = None, *,
     """A harmless demo launch plan (the shape ``resolve --json`` emits).
 
     Obviously synthetic and side-effect-free: it "launches" a Python one-liner that
-    just prints an Aperture Science line, so a demo of the Picker's launch/resume
+    just prints an Example Research line, so a demo of the Picker's launch/resume
     action exercises the whole resolve -> compose path without ever starting a real
     Copilot session. ``new`` invents a fresh test-chamber id.
     """
-    wid = worktree_id or "aperture-labs-testchamber-new0"
+    wid = worktree_id or "private-downstream-repo-testchamber-new0"
     what = "creating + launching" if new else (
         "bare-resuming" if bare_resume else "resuming")
     return {
@@ -288,7 +288,7 @@ def resolve_plan(worktree_id: str | None = None, *,
         "work_dir": f"/aperture/testchambers/{wid[-4:]}",
         "status_path": f"/aperture/testchambers/{wid[-4:]}",
         "cmd": ["python", "-c",
-                f"print('Aperture Labs: {what} {wid} -- for science.')"],
+                f"print('Example Labs: {what} {wid} -- for science.')"],
         "env": {"APERTURE_DEMO": "1"},
         "worktree_id": wid,
         "post_exit": True,

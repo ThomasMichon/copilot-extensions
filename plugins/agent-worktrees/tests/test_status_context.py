@@ -89,13 +89,13 @@ def test_status_context_resolves_machine_alias_from_tracked_record(monkeypatch, 
     )
     monkeypatch.setattr(repos_module, "resolve_path", lambda name: "/repo/test-chamber")
     entry = m.cfg.MachineEntry(
-        key="tmichon-augloop1",
+        key="owner_user-augloop1",
         display_name="augloop1",
         environment="Windows",
         alias="augloop1",
         hostname="cpc-tmich-oixui",
     )
-    monkeypatch.setattr(m.cfg, "load_machines_yaml", lambda repo_dir: {"tmichon-augloop1": entry})
+    monkeypatch.setattr(m.cfg, "load_machines_yaml", lambda repo_dir: {"owner_user-augloop1": entry})
     rc = m.cmd_status_context(_ns())
     assert rc == 0
     assert capsys.readouterr().out.strip() == "augloop1  win  test-chamber:8e45"

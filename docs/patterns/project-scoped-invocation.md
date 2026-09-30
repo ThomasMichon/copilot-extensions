@@ -32,7 +32,7 @@ It has two failure modes the suite has now hit for real:
   cross-project script, cron job, or reviewer/producer daemon.
 
 - **The per-project entry point fronts only one layer.** The per-project binstub
-  `<repo>` (e.g. `aperture-labs`) is generated to run `agent-worktrees --project
+  `<repo>` (e.g. `private-downstream-repo`) is generated to run `agent-worktrees --project
   <repo> …`. It is a great "act on *this* repo" shortcut — but it is welded to
   **one** layer. There is no symmetric way to scope *another* layer
   (coordination, delegation, a venue provider, the vault) to a project without
@@ -49,7 +49,7 @@ one per-project entry point reaches every layer.**
    active project; `--project` simply removes the "must stand inside it"
    precondition. Precedence is explicit `--project` → CWD discovery → documented
    error. (agent-worktrees already does this: `agent-worktrees --project
-   aperture-labs embody …` works from any directory.)
+   private-downstream-repo embody …` works from any directory.)
 
 2. **The per-project `<repo>` binstub is a uniform namespace dispatcher.** Its
    first token selects the layer:
@@ -62,15 +62,15 @@ one per-project entry point reaches every layer.**
 
    | Invocation | Runs |
    |------------|------|
-   | `aperture-labs worktrees finalize` | `agent-worktrees --project aperture-labs finalize` |
-   | `aperture-labs bridge send …`      | `agent-bridge     --project aperture-labs send …` |
-   | `aperture-labs dispatch list`      | `agent-dispatch   --project aperture-labs list` |
-   | `aperture-labs codespaces ssh`     | `agent-codespaces --project aperture-labs ssh` |
-   | `aperture-labs vault cache-populate` | `agent-vault    --project aperture-labs cache-populate` |
+   | `private-downstream-repo worktrees finalize` | `agent-worktrees --project private-downstream-repo finalize` |
+   | `private-downstream-repo bridge send …`      | `agent-bridge     --project private-downstream-repo send …` |
+   | `private-downstream-repo dispatch list`      | `agent-dispatch   --project private-downstream-repo list` |
+   | `private-downstream-repo codespaces ssh`     | `agent-codespaces --project private-downstream-repo ssh` |
+   | `private-downstream-repo vault cache-populate` | `agent-vault    --project private-downstream-repo cache-populate` |
 
    **Backward-compatible:** when the first token is **not** a known layer
    namespace, the binstub falls back to today's behavior —
-   `agent-worktrees --project <repo> <args…>` — so `aperture-labs finalize`
+   `agent-worktrees --project <repo> <args…>` — so `private-downstream-repo finalize`
    keeps working unchanged. The layer-namespace set is a small **reserved word
    list** (`worktrees`, `bridge`, `dispatch`, `codespaces`, `containers`,
    `vault`, `logger`, …); a first token in that set dispatches, anything else is

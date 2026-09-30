@@ -1,5 +1,5 @@
 """Static structural tests for the --block-public-feeds / -BlockPublicFeeds
-wiring in run.sh / run.ps1 (aperture-labs feed-neutral-build-config effort,
+wiring in run.sh / run.ps1 (private-downstream-repo feed-neutral-build-config effort,
 #6755 Phase 3).
 
 Docker is not assumed to be available wherever these tests run, so these are

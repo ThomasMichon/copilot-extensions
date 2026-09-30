@@ -37,7 +37,7 @@ async def health(request: Request) -> dict:
         "min_protocol_version": HTTP_PROTOCOL_MIN_SUPPORTED,
         "ssh_carriers": get_default_manager().carrier_diagnostics(),
     }
-    # process-slot-ownership Phase 5 (aperture-labs): "doctor"/"activity"/cockpit
+    # process-slot-ownership Phase 5 (private-downstream-repo): "doctor"/"activity"/cockpit
     # render process -> slot -> owner -> alive?. Read-only and best-effort; see
     # slot_descriptor's own docstring for why agent-bridge's shape omits the
     # abandoned_passive_reap key agent-dispatch's coordinator publishes.
