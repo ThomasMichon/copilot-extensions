@@ -160,12 +160,12 @@ jobs:
         if: steps.status.outputs.is_maintainer == 'true'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
-          # Authenticated as ThomasMichon (a real, licensed account) via a
+          # Authenticated as the owner (a real, licensed account) via a
           # fine-grained PAT scoped to ONLY this repo with ONLY
           # `Pull requests: write` + `Metadata: read` -- not the default
-          # `GITHUB_TOKEN` (`github-actions[bot]`), whose identical call was
-          # confirmed to silently no-op for a non-owner PR author. See this
-          # file's header comment for the empirical basis.
+          # `GITHUB_TOKEN` (`github-actions[bot]`), whose identical call
+          # silently no-ops for a non-owner PR author. See this file's
+          # header comment for the underlying reason.
           github-token: ${{ secrets.MAINTAINER_REVIEW_PAT }}
           script: |
             const author = context.payload.pull_request.user.login;
@@ -178,7 +178,11 @@ jobs:
               });
               core.info(`Requested Copilot review for ${author}'s PR.`);
             } catch (error) {
-              // Non-fatal: a stale/duplicate request, or Copilot review being
-              // unavailable, shouldn't fail the PR's checks.
-              core.warning(`Could not request Copilot review: ${error.message}`);
+              // Fail the job (this workflow is non-required/non-blocking,
+              // so this never gates the PR) rather than warn: with the PAT
+              // as the only credential that makes this request work, a
+              // swallowed error here (missing/expired/revoked secret, lost
+              // permission) would silently reopen the exact failure mode
+              // this workflow exists to close, with no visible signal.
+              core.setFailed(`Could not request Copilot review: ${error.message}`);
             }
