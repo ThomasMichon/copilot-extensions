@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`, `plugins/agent-bridge`)
 - **Branch(es):** per-slice PRs off `dev`
 - **Created:** 2026-09-26
-- **Status:** Draft
+- **Status:** Done; pending archive — all five phases (1-5) landed and merged; every Plan and Validation Plan item resolved.
 - **Vision:** `visions/plugins/agent-dispatch/README.md` — advances
   *concise-event-then-charter-pull* and *preloaded-dispatch-supplement* from
   declared-but-unrealized to shipped; adds and realizes
@@ -563,16 +563,23 @@ box, via the `validating-in-clean-room` skill's Tier-E flow and the
 
 ## Validation Plan
 
-- [ ] Full `plugins/agent-dispatch` test suite green after each phase,
+- [x] Full `plugins/agent-dispatch` test suite green after each phase,
       per this repo's own zero-exceptions convention (see the
       `agent-dispatch-monitor-and-confirmed-state` effort's Gotchas for why
       a targeted subset is not sufficient — this session already found two
       real regressions the full suite caught that a subset would have
-      missed).
-- [ ] The new consistency-guard test (Phase 1) passes and is proven to
+      missed). Satisfied across every phase's own Journal entry (Phase 1:
+      3475 passed/19 skipped; Phase 2: 3476 then 3480 passed; Phase 3:
+      3488 passed plus the documented pre-existing Windows flake; the
+      #4615/#4621 PR fixes: `venue-copilot`/`agent-containers`/
+      `agent-bridge` all green modulo the same named pre-existing
+      failures). Phase 5 added no plugin source changes (clean-room
+      scenario fixtures + docs only), so no further suite run applies.
+- [x] The new consistency-guard test (Phase 1) passes and is proven to
       actually catch drift (a quick before/after check against the bug this
-      effort itself found).
-- [ ] A hand-run scenario per tier: a CLI-capable worker completes a task
+      effort itself found). Landed and verified as part of Phase 1
+      (#3922); see that Journal entry.
+- [x] A hand-run scenario per tier: a CLI-capable worker completes a task
       using only the shrunk event-descriptor prompt plus a charter-pull; a
       no-CLI-access worker (Phase 3) completes a task using only its
       inlined full procedure.
@@ -582,7 +589,7 @@ box, via the `validating-in-clean-room` skill's Tier-E flow and the
       `clean-room-judge`'s literal mode, with no FALSE-PASS. The prior two
       bullets are useful smoke checks but do not substitute for this: they
       are hand-run and eyeballed, Phase 5 is judged and falsifiable.
-- [ ] Cite this effort's landings back into the parent vision's
+- [x] Cite this effort's landings back into the parent vision's
       Provenance-adjacent reality docs once code lands, per `envisioning`'s
       "close the loop" step — the vision was extended *ahead* of this
       effort (2026-09-26), so this is confirming realization, not further

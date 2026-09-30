@@ -1237,7 +1237,7 @@ configured, from that repo via the repos registry. Both knobs are **pluggable**
 via environment variables — `WORKTREE_GATE_MANIFEST` (the filename) and
 `WORKTREE_GATE_ANCHOR` (the anchor repo name) — so any control harness can point
 the gate at its own manifest; the defaults (`external-repos.yaml`, anchor
-`test-chamber`) match this repo's reference facility. With no gate info
+`private downstream reference repo`) match this repo's reference facility. With no gate info
 available, a `machine-gated` runtime is **skipped** (safe default — never
 auto-install a machine-specific runtime where the policy is unknown).
 Reconciliation is local and version-keyed, so a re-launch with no version change
@@ -1835,14 +1835,26 @@ command capture, the transient-uv-race retry helpers (SRE module mismatch
 self-bootstrap, schema-version-3 deploy-manifest writing, and a minimal
 self-provisioning binstub writer (`Write-SimpleBinstub`) for a plugin with no
 scheduled-task/service lifecycle. Adoption is **opt-in and byte-vendored, not
-imported**: an adopting plugin's own `scripts/installer-engine.{ps1,sh}` is a
-byte-identical copy of the canonical pair, kept in sync by
-`tools/sync-installer-engine.py` (`--check` verifies in CI/pre-push; edit the
-canonical files and re-run the tool without `--check` to fan the update out).
-`tools/sync-installer-engine.py`'s own `unregistered_adopters()` check also
-fails closed if a plugin's `scripts/` carries an installer-engine copy without
-being registered in the tool's `ADOPTERS` tuple, so a hand-copied file cannot
-drift silently forever.
+imported** at ship time, but there are now **two valid dev-time authoring
+forms**:
+
+- **Byte-vendored form** — the adopter keeps a real
+  `scripts/installer-engine.{ps1,sh}` copy in its own tree, byte-identical to
+  canonical and kept in sync by `tools/sync-installer-engine.py` (`--check`
+  verifies; write mode repairs or refreshes the local copies).
+- **Canonical-reference form** — the adopter's `install.sh` / `install.ps1`
+  sources `libs/installer-engine/installer-engine.{sh,ps1}` directly while
+  working on `dev`, and keeps **no** plugin-local engine copy there.
+
+Regardless of the dev-time form, the **shipped payload is always materialized
+back to a real local `scripts/installer-engine.{ps1,sh}` copy** before release:
+`materialize_main.py` / `preview_release.py` copy canonical into the plugin's
+own `scripts/` directory and rewrite the wrapper back to the local source line,
+so the installed artifact never reaches across a plugin boundary at install or
+runtime. `tools/sync-installer-engine.py`'s own `unregistered_adopters()`
+check also fails closed if a plugin references or carries installer-engine
+content without being registered in the tool's `ADOPTERS` tuple, so a
+hand-added adopter cannot drift silently forever.
 
 The engine deliberately does **not** cover per-service concerns that
 genuinely differ across plugins — scheduled-task/service lifecycle,

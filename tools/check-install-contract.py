@@ -41,6 +41,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import installer_engine_ref as ier
+
 from install_contract_guard import (
     PERSISTENT_ENV_END,
     PERSISTENT_ENV_START,
@@ -254,17 +257,8 @@ def _non_comment_lines(text: str) -> list[str]:
 
 
 def _uses_installer_engine(text: str, ext: str) -> bool:
-    if ext == "ps1":
-        return any(
-            re.search(
-                r"""\.\s*\(Join-Path\s+\$PSScriptRoot\s+['"]installer-engine\.ps1['"]\)""",
-                line,
-            )
-            for line in _non_comment_lines(text)
-        )
     return any(
-        re.search(r"""(?:^|\s)(?:source|\.)\s+["']?\$SCRIPT_DIR/installer-engine\.sh["']?""", line)
-        for line in _non_comment_lines(text)
+        ier.source_match_count_text(line, ext) > 0 for line in _non_comment_lines(text)
     )
 
 

@@ -566,6 +566,12 @@ class _FakeMaterializeMain:
         assert canonical_root == self._canonical_root
         return []
 
+    def materialize_installer_engine_ref_into(
+        self, *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path
+    ) -> list[str]:
+        assert canonical_root == self._canonical_root
+        return []
+
 
 def test_materialize_file_pointers_into_preview_writes_only_into_dest(
     isolated: Path, monkeypatch: pytest.MonkeyPatch,
@@ -628,4 +634,84 @@ def test_build_materializes_a_uv_editable_reference_into_the_preview(isolated: P
     manifest = json.loads((dest / "PREVIEW.json").read_text())
     assert any(
         line.startswith("OK") for line in manifest["vendored_uv_editable_refs_materialize_log"]
+    )
+
+
+def test_build_materializes_a_canonical_installer_engine_reference_into_the_preview(
+    isolated: Path,
+):
+    plugin_dir = _plugin(isolated, "agent-pull-requests", "1.0.0")
+    scripts = plugin_dir / "scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    (scripts / "install.sh").write_text(
+        '#!/usr/bin/env bash\n. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n',
+        encoding="utf-8",
+    )
+    (scripts / "install.ps1").write_text(
+        ". (Join-Path $PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')\n",
+        encoding="utf-8",
+    )
+    engine = isolated / "libs" / "installer-engine"
+    engine.mkdir(parents=True)
+    (engine / "installer-engine.sh").write_text("# canonical sh\n", encoding="utf-8")
+    (engine / "installer-engine.ps1").write_text("# canonical ps1\n", encoding="utf-8")
+
+    dest = preview_release.build("agent-pull-requests", isolated / "work")
+
+    assert (dest / "scripts" / "installer-engine.sh").read_text() == "# canonical sh\n"
+    assert (dest / "scripts" / "installer-engine.ps1").read_text() == "# canonical ps1\n"
+    assert (dest / "scripts" / "install.sh").read_text(encoding="utf-8").splitlines() == [
+        "#!/usr/bin/env bash",
+        '. "$SCRIPT_DIR/installer-engine.sh"',
+    ]
+    assert (dest / "scripts" / "install.ps1").read_text(encoding="utf-8").splitlines() == [
+        ". (Join-Path $PSScriptRoot 'installer-engine.ps1')"
+    ]
+    manifest = json.loads((dest / "PREVIEW.json").read_text())
+    assert any(
+        line.startswith("OK")
+        for line in manifest["vendored_installer_engine_materialize_log"]
+    )
+
+
+def test_build_preview_reports_missing_canonical_installer_engine(isolated: Path):
+    plugin_dir = _plugin(isolated, "agent-pull-requests", "1.0.0")
+    scripts = plugin_dir / "scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    (scripts / "install.sh").write_text(
+        '#!/usr/bin/env bash\n. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n',
+        encoding="utf-8",
+    )
+
+    dest = preview_release.build("agent-pull-requests", isolated / "work")
+
+    assert not (dest / "scripts" / "installer-engine.sh").exists()
+    manifest = json.loads((dest / "PREVIEW.json").read_text())
+    assert any(
+        "canonical source missing" in line
+        for line in manifest["vendored_installer_engine_materialize_log"]
+    )
+
+
+def test_build_preview_reports_escaping_installer_engine_reference(isolated: Path):
+    plugin_dir = _plugin(isolated, "agent-pull-requests", "1.0.0")
+    scripts = plugin_dir / "scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    (scripts / "install.sh").write_text(
+        '#!/usr/bin/env bash\n. "$SCRIPT_DIR/../../../outside/installer-engine.sh"\n',
+        encoding="utf-8",
+    )
+    (isolated / "outside").mkdir(parents=True)
+    (isolated / "outside" / "installer-engine.sh").write_text("# nope\n", encoding="utf-8")
+    engine = isolated / "libs" / "installer-engine"
+    engine.mkdir(parents=True)
+    (engine / "installer-engine.sh").write_text("# canonical sh\n", encoding="utf-8")
+
+    dest = preview_release.build("agent-pull-requests", isolated / "work")
+
+    assert not (dest / "scripts" / "installer-engine.sh").exists()
+    manifest = json.loads((dest / "PREVIEW.json").read_text())
+    assert any(
+        "is not libs/installer-engine/installer-engine.sh" in line
+        for line in manifest["vendored_installer_engine_materialize_log"]
     )

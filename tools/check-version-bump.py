@@ -50,6 +50,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import installer_engine_ref as ier  # noqa: E402
 import uv_editable_ref as uer  # noqa: E402
 
 try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
@@ -218,6 +219,13 @@ def _vendored_consumers() -> dict[str, list[str]]:
                 consumers.setdefault(lib, []).append(name)
     for lib in consumers:
         consumers[lib] = sorted(consumers[lib])
+    installer_engine_consumers = [
+        plugin for plugin in ier.ADOPTERS if (PLUGINS_DIR / plugin).is_dir()
+    ]
+    if installer_engine_consumers:
+        consumers["installer-engine"] = sorted(
+            set(consumers.get("installer-engine", ())) | set(installer_engine_consumers)
+        )
     packaged_peers = [
         plugin for plugin in (
             "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",

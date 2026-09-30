@@ -640,14 +640,18 @@ shape before committing to a design)_
       `src-passthrough` lacked.
 
 ### Phase 2 — Canonical-reference form for the shared installer engine
-> **Note (2026-09-27, updated):** libs' mechanism pivoted away to
+> **Status note (2026-09-30, updated):** libs' mechanism pivoted away to
 > `src-passthrough` on 2026-09-26, then reverted back to `uv`-editable on
 > 2026-09-27 (see both "course correction" Journal entries) — Phase 2's
 > live-reference idea (this phase's own corollary of the SAME mechanism)
-> is therefore valid again, though it still hasn't been formally executed
-> or re-confirmed against the current libs design. Revisit and confirm
-> before executing this phase, rather than assuming it's settled purely
-> because libs' mechanism happens to match again.
+> is therefore valid again. That evaluation has now been formally executed
+> for the proof adopter `agent-pull-requests`: the operator-approved
+> cross-effort decision is recorded in both effort Journals below, the
+> canonical-reference + promotion-materialize-back mechanism is implemented,
+> and the Phase 2 checklist items for materialize/preview/check-contract
+> support are complete. Future resumptions should treat Phase 2 as
+> demonstrated on the proof adopter, with only later adopter rollouts still
+> remaining.
 - [x] **Scope correction (from review, still holds): this applies only to
       `vendored-installer-engine`'s shared engine files**
       (`scripts/installer-engine.{sh,ps1}`), never to a whole plugin's
@@ -661,9 +665,10 @@ shape before committing to a design)_
       in `dev`) matches libs' own current mechanism again as of the second
       course correction above. Left `[x]` for the underlying dot-source-
       preservation ANALYSIS (still holds regardless of which pointer
-      mechanism is in play) — but this phase itself has NOT been formally
-      executed or re-confirmed; do not treat this as "Phase 2 is done."
-- [ ] At promotion, `materialize_main.py` (extended the same way as the
+      mechanism is in play) — and that premise is now concretely exercised
+      by the proof-adopter execution recorded below, not an unexecuted
+      caution against treating Phase 2 as already demonstrated.
+- [x] At promotion, `materialize_main.py` (extended the same way as the
       libs case) rewrites that `source`/`.` line to reference (or fully
       inline) a freshly-copied-in local `scripts/installer-engine.{sh,ps1}`
       copy — the same copy-then-rewrite operation as Phase 1's libs
@@ -671,16 +676,18 @@ shape before committing to a design)_
       `promote_release.py`'s existing fail-closed-on-`SKIP` behavior.
       Regression coverage for a missing/escaping engine reference in both
       materializers (real + preview).
-- [ ] Extend `tools/preview_release.py` to perform the same copy-then-
+- [x] Extend `tools/preview_release.py` to perform the same copy-then-
       rewrite for a plugin referencing the engine canonically.
-- [ ] Coordinate with `vendored-installer-engine`'s own driver/Journal
+- [x] Coordinate with `vendored-installer-engine`'s own driver/Journal
       before adopting this for its canonical engine, once that engine
       exists to reference — this effort does not fork that effort's design
       or timeline; it only proposes a simpler mechanism than that effort's
       current `sync-installer-engine.py --check` byte-vendor-and-verify
       approach, for that effort's own driver to evaluate and decide
-      whether/when to adopt.
-- [ ] If adopted, resolve `tools/check-install-contract.py`'s existing call
+      whether/when to adopt. **Resolved for the `agent-pull-requests`
+      proof point by an explicit operator-approved cross-effort decision in
+      the driving session, then recorded in both efforts' Journals.**
+- [x] If adopted, resolve `tools/check-install-contract.py`'s existing call
       into `sync-installer-engine.py`'s `verify()` (which currently
       byte-compares every adopter) so it recognizes the canonical-reference
       form as in-sync rather than rejecting every converted adopter.
@@ -2679,3 +2686,67 @@ _Pending._
   gets its own resolution, or Phase 2 removes the need for it entirely);
   Phase 2 (installer engine); Phase 3 (pattern doc / Phase 0-style
   broader audit).
+
+### 2026-09-29 — Phase 2: `agent-pull-requests`'s installer-engine converted to canonical-reference form
+
+- Re-opened the sibling `vendored-installer-engine` effort's
+  2026-09-12 byte-vendoring decision **with explicit operator approval in
+  the driving session**, and recorded that approval in both efforts here
+  rather than treating it as an implicit local call. The narrow approved
+  change: use the same dev-time/live-reference -> promotion-time/materialize
+  pattern already proven for shared Python libs, but only for the shared
+  installer engine file pair itself. The shipped runtime/install path stays
+  fully self-contained: promotion copies canonical back into each plugin's
+  own `scripts/installer-engine.{sh,ps1}` and rewrites the source line to
+  the old local form before anything reaches `main`.
+- Converted the only current engine adopter, `agent-pull-requests`, to that
+  form. Re-verified first that its local `scripts/installer-engine.sh` and
+  `.ps1` were byte-identical to `libs/installer-engine/installer-engine.*`,
+  then deleted both local copies entirely. Rewrote `scripts/install.sh` and
+  `install.ps1` to source the canonical engine directly via
+  `../../../libs/installer-engine/installer-engine.sh` and
+  `..\..\..\libs\installer-engine\installer-engine.ps1`, respectively,
+  matching the same "escape the consumer root to reach canonical" depth the
+  `uv`-editable lib form uses from a plugin consumer.
+- Extended `tools/check-install-contract.py`'s composed wrapper/engine
+  detection to accept either a plugin-local engine source line or the new
+  canonical relative-path source line, still only when the wrapper also
+  makes a real engine-function call (`Invoke-UvPipInstallResilient` /
+  `invoke_uv_pip_install_resilient`, `Write-DeployManifest` /
+  `write_deploy_manifest`) rather than merely mentioning the file or a
+  function name in comments/strings.
+- Extended `tools/sync-installer-engine.py`'s own `--check`/`verify()` to
+  recognize the canonical-reference form as valid instead of "missing":
+  it now validates a plugin whose installer source line escapes the plugin
+  root, confirms the reference resolves to
+  `libs/installer-engine/installer-engine.{sh,ps1}`, and enforces the Phase 2
+  dev-tree invariant that no plugin-local `scripts/installer-engine.*` copy
+  remains for that adopter. The old byte-vendored form still validates for
+  adopters that continue to use it.
+- Added a new shared helper module, `tools/installer_engine_ref.py`, then
+  extended both materializers to reverse the dev-time reference at promotion
+  time: `tools/materialize_main.py` now copies canonical back into
+  `scripts/installer-engine.{sh,ps1}` and rewrites the source lines to the
+  local form for a real release snapshot; `tools/preview_release.py` now
+  performs the same copy-then-rewrite in its scratch preview copy. Added
+  regression coverage in both paths for the success case and for missing /
+  escaping engine references, mirroring Phase 1's `uv`-editable hardening.
+- Found/fixed one implementation wrinkle along the way: Windows-style
+  `..\..\..` source paths inside PowerShell installers need separator-aware
+  normalization when validated from Linux-hosted tests, or the path check
+  falsely treats them as literal filename characters instead of parent
+  traversals. The new shared helper resolves both `/` and `\` separators
+  explicitly, which made the cross-platform tests faithful to the real
+  PowerShell semantics instead of host-path accidents.
+- Validation completed for the conversion tooling slice and the real plugin:
+  targeted unit coverage for the new helper/materializers/guard path, then
+  the full repo gate (`sync-vendored-libs.py --check`,
+  `sync-installer-engine.py --check`, `check-vendored-libs-sync.py`,
+  `check-install-contract.py`, `check-version-consistency.py`,
+  `check-module-size.py`, `check-docs-consistency.py`,
+  `check-changefile-presence.py --base origin/dev`), `agent-pull-requests`'s
+  full suite, fresh non-editable install probes with no local
+  `scripts/installer-engine.*` present in the dev checkout, and both
+  materializers' copy/rewrite outputs. Phase 3's pattern doc is still not
+  started; the remaining future work is still the other 10 eventual engine
+  adopters plus that separate documentation leg.

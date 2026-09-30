@@ -18,7 +18,7 @@
     {
       "name": "agent-pull-requests",
       "description": "Cross-repository pull-request CLI for API-driven status/create/merge/wait flows, addressed directly by owner/repo with no local checkout required. Deployed as a self-contained versioned runtime via the shared vendored installer engine, with a real agent-pull-requests binstub; initially mediated through agent-worktrees account resolution.",
-      "version": "0.1.3-dev1",
+      "version": "0.1.4-dev1",
       "source": "plugins/agent-pull-requests",
       "defaultEnabled": false
     },
@@ -109,7 +109,7 @@
     {
       "name": "agent-index",
       "description": "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem, with good-citizen ingestion.",
-      "version": "0.5.3-dev1",
+      "version": "0.5.4-dev1",
       "source": "plugins/agent-index"
     },
     {

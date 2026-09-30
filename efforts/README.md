@@ -60,7 +60,7 @@ that pattern to this repository.
 | [Module Componentization Discipline](active/module-componentization-discipline/README.md) | Active | #2805 |
 | [Componentization Campaign Auto-Worker](active/componentization-campaign-auto-worker/README.md) | Draft | #3372 |
 | [Authoritative Write-Through Daemon](active/agent-worktrees-authoritative-daemon/README.md) | Active | #3761 |
-| [agent-dispatch Worker Operating Procedures](active/agent-dispatch-worker-operating-procedures/README.md) | Draft | #3897 |
+| [agent-dispatch Worker Operating Procedures](active/agent-dispatch-worker-operating-procedures/README.md) | Done; pending archive | #3897 |
 | [Mux Companion Manual Cutover Diagnostics](active/mux-companion-manual-cutover-diagnostics/README.md) | Active | #4369 |
 | [Coverage-Guided CI Test Selection](active/coverage-guided-ci/README.md) | Draft | #4453 |
 

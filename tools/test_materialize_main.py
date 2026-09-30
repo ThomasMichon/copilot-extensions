@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import installer_engine_ref as ier
 import materialize_main as mm
 import uv_editable_ref as uer
 
@@ -1675,3 +1676,242 @@ def test_materialize_nested_uv_editable_refs_refuses_stale_mismatched_content(tm
     assert any("does not match canonical" in line for line in log), log
     # The stale content is untouched, not silently overwritten.
     assert (stale_dir / "__init__.py").read_text() == "stale = True\n"
+
+
+def test_materialize_installer_engine_ref_into_copies_and_rewrites(tmp_path: Path):
+    root = tmp_path / "repo"
+    engine = root / "libs" / "installer-engine"
+    engine.mkdir(parents=True)
+    (engine / "installer-engine.sh").write_text("# canonical sh\n", encoding="utf-8")
+    (engine / "installer-engine.ps1").write_text("# canonical ps1\n", encoding="utf-8")
+    consumer = root / "plugins" / "agent-pull-requests"
+    (consumer / "scripts").mkdir(parents=True)
+    (consumer / "scripts" / "install.sh").write_text(
+        '#!/usr/bin/env bash\n. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n',
+        encoding="utf-8",
+    )
+    (consumer / "scripts" / "install.ps1").write_text(
+        ". (Join-Path $PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')\n",
+        encoding="utf-8",
+    )
+
+    log = mm.materialize_installer_engine_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+
+    assert sum(1 for line in log if line.startswith("OK")) == 2
+    assert (consumer / "scripts" / "installer-engine.sh").read_text() == "# canonical sh\n"
+    assert (consumer / "scripts" / "installer-engine.ps1").read_text() == "# canonical ps1\n"
+    assert (consumer / "scripts" / "install.sh").read_text(encoding="utf-8").splitlines() == [
+        "#!/usr/bin/env bash",
+        '. "$SCRIPT_DIR/installer-engine.sh"',
+    ]
+    assert (consumer / "scripts" / "install.ps1").read_text(encoding="utf-8").splitlines() == [
+        ". (Join-Path $PSScriptRoot 'installer-engine.ps1')"
+    ]
+
+
+def test_materialize_installer_engine_ref_into_reports_missing_canonical(tmp_path: Path):
+    root = tmp_path / "repo"
+    consumer = root / "plugins" / "agent-pull-requests"
+    (consumer / "scripts").mkdir(parents=True)
+    (consumer / "scripts" / "install.sh").write_text(
+        '#!/usr/bin/env bash\n. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n',
+        encoding="utf-8",
+    )
+
+    log = mm.materialize_installer_engine_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+
+    assert any("canonical source missing" in line for line in log)
+    assert not (consumer / "scripts" / "installer-engine.sh").exists()
+
+
+def test_materialize_installer_engine_ref_into_refuses_an_escaping_reference(tmp_path: Path):
+    root = tmp_path / "repo"
+    engine = root / "libs" / "installer-engine"
+    engine.mkdir(parents=True)
+    (engine / "installer-engine.sh").write_text("# canonical sh\n", encoding="utf-8")
+    consumer = root / "plugins" / "agent-pull-requests"
+    (consumer / "scripts").mkdir(parents=True)
+    (consumer / "scripts" / "install.sh").write_text(
+        '#!/usr/bin/env bash\n. "$SCRIPT_DIR/../../../outside/installer-engine.sh"\n',
+        encoding="utf-8",
+    )
+    (root / "outside").mkdir()
+    (root / "outside" / "installer-engine.sh").write_text("# nope\n", encoding="utf-8")
+
+    log = mm.materialize_installer_engine_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+
+    assert any("is not libs/installer-engine/installer-engine.sh" in line for line in log)
+    assert not (consumer / "scripts" / "installer-engine.sh").exists()
+
+
+def test_materialize_installer_engine_ref_into_refuses_a_symlinked_canonical_ancestor(
+    tmp_path: Path,
+):
+    root = tmp_path / "repo"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    real_engine = outside / "installer-engine"
+    real_engine.mkdir()
+    (real_engine / "installer-engine.sh").write_text("# canonical sh\n", encoding="utf-8")
+    (real_engine / "installer-engine.ps1").write_text("# canonical ps1\n", encoding="utf-8")
+    (root / "libs").mkdir(parents=True)
+    (root / "libs" / "installer-engine").symlink_to(real_engine, target_is_directory=True)
+    consumer = root / "plugins" / "agent-pull-requests"
+    (consumer / "scripts").mkdir(parents=True)
+    (consumer / "scripts" / "install.sh").write_text(
+        '#!/usr/bin/env bash\n. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n',
+        encoding="utf-8",
+    )
+
+    log = mm.materialize_installer_engine_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+
+    assert any("is a symlink -- refusing" in line for line in log)
+    assert not (consumer / "scripts" / "installer-engine.sh").exists()
+
+
+def test_materialize_installer_engine_ref_into_refuses_duplicate_source_lines(tmp_path: Path):
+    root = tmp_path / "repo"
+    engine = root / "libs" / "installer-engine"
+    engine.mkdir(parents=True)
+    (engine / "installer-engine.sh").write_text("# canonical sh\n", encoding="utf-8")
+    consumer = root / "plugins" / "agent-pull-requests"
+    (consumer / "scripts").mkdir(parents=True)
+    (consumer / "scripts" / "install.sh").write_text(
+        '#!/usr/bin/env bash\n'
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n'
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n',
+        encoding="utf-8",
+    )
+
+    log = mm.materialize_installer_engine_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+
+    assert any("expected exactly one" in line for line in log)
+    assert not (consumer / "scripts" / "installer-engine.sh").exists()
+
+
+def test_rewrite_to_local_refuses_duplicate_source_lines(tmp_path: Path):
+    script = tmp_path / "install.sh"
+    script.write_text(
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n'
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n',
+        encoding="utf-8",
+    )
+
+    assert ier.rewrite_to_local(script, "sh") is False
+    assert script.read_text(encoding="utf-8").count("../../../libs/installer-engine") == 2
+
+
+def test_rewrite_to_local_preserves_following_comment_lines(tmp_path: Path):
+    sh_script = tmp_path / "install.sh"
+    sh_script.write_text(
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n'
+        "# keep me\n",
+        encoding="utf-8",
+    )
+    ps1_script = tmp_path / "install.ps1"
+    ps1_script.write_text(
+        ". (Join-Path $PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')\n"
+        "# keep me\n",
+        encoding="utf-8",
+    )
+
+    assert ier.rewrite_to_local(sh_script, "sh") is True
+    assert ier.rewrite_to_local(ps1_script, "ps1") is True
+    assert sh_script.read_text(encoding="utf-8").splitlines() == [
+        '. "$SCRIPT_DIR/installer-engine.sh"',
+        "# keep me",
+    ]
+    assert ps1_script.read_text(encoding="utf-8").splitlines() == [
+        ". (Join-Path $PSScriptRoot 'installer-engine.ps1')",
+        "# keep me",
+    ]
+
+
+def test_rewrite_to_local_preserves_trailing_same_line_comments(tmp_path: Path):
+    sh_script = tmp_path / "install.sh"
+    sh_script.write_text(
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh" # keep me\n',
+        encoding="utf-8",
+    )
+    ps1_script = tmp_path / "install.ps1"
+    ps1_script.write_text(
+        ". (Join-Path $PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1') # keep me\n",
+        encoding="utf-8",
+    )
+
+    assert ier.rewrite_to_local(sh_script, "sh") is True
+    assert ier.rewrite_to_local(ps1_script, "ps1") is True
+    assert sh_script.read_text(encoding="utf-8").splitlines() == [
+        '. "$SCRIPT_DIR/installer-engine.sh" # keep me'
+    ]
+    assert ps1_script.read_text(encoding="utf-8").splitlines() == [
+        ". (Join-Path $PSScriptRoot 'installer-engine.ps1') # keep me"
+    ]
+
+
+def test_materialize_installer_engine_ref_into_skips_malformed_local_reference_for_registered_adopter(
+    tmp_path: Path,
+):
+    root = tmp_path / "repo"
+    engine = root / "libs" / "installer-engine"
+    engine.mkdir(parents=True)
+    (engine / "installer-engine.sh").write_text("# canonical sh\n", encoding="utf-8")
+    consumer = root / "plugins" / "agent-pull-requests"
+    (consumer / "scripts").mkdir(parents=True)
+    (consumer / "scripts" / "install.sh").write_text(
+        '#!/usr/bin/env bash\n. "$SCRIPT_DIR/missing/installer-engine.sh"\n',
+        encoding="utf-8",
+    )
+
+    log = mm.materialize_installer_engine_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+
+    assert any("neither the exact local form" in line for line in log)
+    assert not (consumer / "scripts" / "installer-engine.sh").exists()
+
+
+def test_materialize_installer_engine_ref_into_preserves_following_comment_lines(tmp_path: Path):
+    root = tmp_path / "repo"
+    engine = root / "libs" / "installer-engine"
+    engine.mkdir(parents=True)
+    (engine / "installer-engine.sh").write_text("# canonical sh\n", encoding="utf-8")
+    (engine / "installer-engine.ps1").write_text("# canonical ps1\n", encoding="utf-8")
+    consumer = root / "plugins" / "agent-pull-requests"
+    (consumer / "scripts").mkdir(parents=True)
+    (consumer / "scripts" / "install.sh").write_text(
+        '#!/usr/bin/env bash\n'
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n'
+        "# keep me\n",
+        encoding="utf-8",
+    )
+    (consumer / "scripts" / "install.ps1").write_text(
+        ". (Join-Path $PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')\n"
+        "# keep me\n",
+        encoding="utf-8",
+    )
+
+    log = mm.materialize_installer_engine_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+
+    assert sum(1 for line in log if line.startswith("OK")) == 2
+    assert (consumer / "scripts" / "install.sh").read_text(encoding="utf-8").splitlines() == [
+        "#!/usr/bin/env bash",
+        '. "$SCRIPT_DIR/installer-engine.sh"',
+        "# keep me",
+    ]
+    assert (consumer / "scripts" / "install.ps1").read_text(encoding="utf-8").splitlines() == [
+        ". (Join-Path $PSScriptRoot 'installer-engine.ps1')",
+        "# keep me",
+    ]

@@ -1044,6 +1044,21 @@ does **not** quietly undo it.
 - Realization effort:
   [`efforts/active/declarative-dispatch-engine-generalization/`](../../../efforts/active/declarative-dispatch-engine-generalization/)
   owns *concise-event-then-charter-pull* and *preloaded-dispatch-supplement*.
+- Realization effort:
+  [`efforts/active/agent-dispatch-worker-operating-procedures/`](../../../efforts/active/agent-dispatch-worker-operating-procedures/)
+  realizes *status-through-tool-calls-not-prose*,
+  *every-turn-ends-terminal-steered-or-waited*,
+  *fail-fast-on-control-plane-failure*,
+  *declared-safety-exceptions-not-improvised*, and
+  *reachability-tiered-charter-delivery* — the operating-procedures charter;
+  the shrunk event-descriptor seeds for the CLI-capable and interactive
+  tiers, each pointing at the charter rather than inlining it; the no-CLI
+  tier's full operating procedure and task charter inlined directly instead
+  (it cannot pull what it has no reach to fetch — the tiered-delivery
+  contract itself, not a shrunk seed); and a clean-room Tier-E behavioral
+  proof (`agent-dispatch-worker-lifecycle-eval` / `-cpfail`) that a fresh agent
+  actually honors the mechanical, tool-call-only completion contract and the
+  fail-fast-on-control-plane-failure posture under literal mode.
 
 ## Provenance
 

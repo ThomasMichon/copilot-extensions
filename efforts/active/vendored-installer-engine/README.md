@@ -370,6 +370,17 @@ Concretely:
 
 ### Phase 2+ — Roll remaining plugins onto the engine, one small batch per PR
 
+> **Forward note (2026-09-29):** `agent-pull-requests`, the current proof
+> adopter, no longer keeps a byte-vendored `scripts/installer-engine.*` copy
+> on `dev`. By explicit operator-approved cross-effort decision (recorded in
+> the Journal below), it now sources canonical
+> `libs/installer-engine/installer-engine.{sh,ps1}` directly during authoring
+> and promotion materializes the local copy back into the shipped payload.
+> Future adopters in this Phase 2+ list should therefore go straight to that
+> canonical-reference form rather than first landing a new byte-vendored dev
+> copy. The runtime/install-time constraint that shipped payloads remain fully
+> self-contained is unchanged.
+
 **Non-exempt adopter set — every plugin this effort requires to actually
 adopt the engine (10 plugins):** `agent-bridge`, `agent-logger`,
 `agent-vault`, `agent-ssh`, `agent-codespaces`, `agent-index`,
@@ -823,3 +834,35 @@ appropriately larger/riskier for one sitting):
   --check`, a drift detector) — not forking the design unilaterally. No
   mechanism change is proposed or made here; this is a forward pointer only,
   so this effort's own driver sees it on next resume.
+
+### 2026-09-29 — Narrow operator-approved revisit: dev-time canonical reference adopted for the shared engine proof point
+
+- The 2026-09-12 "vendoring over git-fetch" decision has now been **narrowly
+  revisited with explicit operator approval**, but only for the *dev-time*
+  authoring shape of the shared installer engine. The original decision's
+  core reasoning still fully stands: a shipped plugin install/update must NOT
+  fetch or resolve a shared module from a sibling plugin, git checkout, or
+  network location at install/runtime; the payload a real user receives from
+  `main` remains completely self-contained.
+- What changed is only how `dev` keeps the shared engine in sync. The proof
+  adopter (`agent-pull-requests`, still this effort's only current adopter)
+  now sources canonical
+  `libs/installer-engine/installer-engine.{sh,ps1}` directly during
+  authoring, with **no** local `scripts/installer-engine.*` copy remaining on
+  `dev`. Promotion/materialization then copies canonical back into
+  `scripts/installer-engine.{sh,ps1}` and rewrites the wrapper's source line
+  to the local form before anything ships to `main`, preserving the original
+  self-contained install/runtime contract exactly.
+- `vendor-pointer-generalization` Phase 2 landed the supporting changes in
+  this same coordinated leg: `tools/sync-installer-engine.py --check` now
+  recognizes this canonical-reference form as valid, `tools/check-install-
+  contract.py` accepts the wrapper + real engine-function-call shape with the
+  canonical relative-path source line, and both `materialize_main.py` and
+  `preview_release.py` now perform the promotion-time/scratch-preview
+  copy-then-rewrite.
+- Consequence for this effort's future rollout only: the remaining Phase 2+
+  adopters listed above should go straight to this canonical-reference form
+  when their individual adoption PRs happen, rather than first creating a
+  fresh byte-vendored dev copy. This does **not** redesign the effort into a
+  runtime/install-time shared module, and it does **not** reverse the
+  documented rejection of git-fetch / shared install-time resolution.

@@ -32,6 +32,8 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+from agent_procutil import no_window_kwargs
+
 from agent_index.sources.base import FileEntry
 
 logger = logging.getLogger(__name__)
@@ -458,6 +460,7 @@ class GitRepoConnector:
             text=True,
             encoding="utf-8",
             errors="replace",
+            **no_window_kwargs(),
         )
         return completed.stdout
 
@@ -472,6 +475,7 @@ class GitRepoConnector:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                **no_window_kwargs(),
             )
         except OSError:
             return ""
@@ -483,6 +487,7 @@ class GitRepoConnector:
             cwd=self.repo_path,
             check=True,
             capture_output=True,
+            **no_window_kwargs(),
         )
         return completed.stdout
 

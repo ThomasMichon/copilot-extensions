@@ -3,9 +3,13 @@
 # Canonical vendored installer-engine helpers for runtime plugins.
 #
 # This file is the canonical source of truth for the shared installer-engine
-# helpers that runtime plugins vendor into their own `scripts/` directories.
-# Plugins do NOT source it across plugin boundaries at install or runtime;
-# `tools/sync-installer-engine.py` copies it byte-for-byte into each adopter.
+# helpers that runtime plugins use in one of two valid dev-time forms:
+# (1) a canonical-reference adopter sources this file directly from
+# `libs/installer-engine/` while working in `dev`, and promotion materializes
+# a real plugin-local `scripts/installer-engine.sh` copy back into the shipped
+# payload; or (2) a byte-vendored adopter keeps that plugin-local copy on
+# `dev`, kept byte-identical by `tools/sync-installer-engine.py`. In the
+# shipped artifact, plugins never source this file across plugin boundaries.
 
 invoke_native_capture() {
     local output rc
