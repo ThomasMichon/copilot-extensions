@@ -1,0 +1,9 @@
+{
+  "comment": "Picker: skip full worktree-list rebuild on pulse-only render ticks (render-perf follow-up, over-painting fix)",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
