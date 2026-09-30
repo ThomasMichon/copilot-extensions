@@ -375,13 +375,12 @@ def check_abrupt_kill_recovery(python):
     REAL fresh daemon's own real startup reattach scan, not just the
     pure-function unit tests in ``libs/zdd/tests/test_claims.py``.
 
-    **Real generation id (closes the prior review-caught gap).** The claim
-    below is now stamped with the killed daemon's own REAL
-    ``_generation_id`` -- read back from ``running-version.json``, the
-    local marker file ``runtime_version.set_running_generation_id()`` writes
-    once the daemon's ``SessionManager`` computes it at boot (see that
-    module's own docstring for why this file rather than ``/health``, which
-    hit a real contract-registry wall in a prior attempt). This still does
+    **Real generation id.** The claim below is stamped with the killed
+    daemon's own REAL ``_generation_id`` -- read back from
+    ``running-version.json``, the local marker file
+    ``runtime_version.set_running_generation_id()`` writes once the
+    daemon's ``SessionManager`` computes it at boot (see that module's own
+    docstring for why this file rather than ``/health``). This still does
     NOT exercise the graceful exit-contract release path
     (``release_all(self._generation_id)``) -- that path never runs on an
     abrupt SIGKILL by design, which is the entire point of this drill (see

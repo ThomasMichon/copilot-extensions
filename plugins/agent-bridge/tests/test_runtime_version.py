@@ -8,6 +8,7 @@ import os
 from agent_bridge import __version__
 from agent_bridge.runtime_version import (
     RUNNING_VERSION_FILE,
+    read_running_generation_id,
     set_running_generation_id,
     write_running_version,
 )
@@ -86,3 +87,34 @@ def test_set_running_generation_id_never_raises(tmp_path):
     afile.write_text("x", encoding="utf-8")
     set_running_generation_id("whatever", afile / "sub")  # must not raise
     assert not (afile / "sub" / RUNNING_VERSION_FILE).exists()
+
+
+def test_set_running_generation_id_recovers_from_non_dict_marker(tmp_path):
+    # A malformed/legacy marker that parses as JSON but isn't an object (a
+    # bare list, in this case) must not raise on payload["generation_id"] =
+    # ... -- fall back to a fresh dict instead of assuming dict-shape.
+    (tmp_path / RUNNING_VERSION_FILE).write_text("[1, 2, 3]", encoding="utf-8")
+    set_running_generation_id("recovered-gen-id", tmp_path)
+    data = json.loads((tmp_path / RUNNING_VERSION_FILE).read_text(encoding="utf-8"))
+    assert data["generation_id"] == "recovered-gen-id"
+    assert data["pid"] == os.getpid()
+
+
+def test_read_running_generation_id_roundtrip(tmp_path):
+    assert read_running_generation_id(tmp_path) is None  # no marker yet
+    set_running_generation_id("roundtrip-gen-id", tmp_path)
+    assert read_running_generation_id(tmp_path) == "roundtrip-gen-id"
+
+
+def test_read_running_generation_id_none_when_marker_missing_field(tmp_path):
+    write_running_version(tmp_path)  # no generation_id
+    assert read_running_generation_id(tmp_path) is None
+
+
+def test_read_running_generation_id_none_on_non_dict_marker(tmp_path):
+    (tmp_path / RUNNING_VERSION_FILE).write_text("[1, 2, 3]", encoding="utf-8")
+    assert read_running_generation_id(tmp_path) is None
+
+
+def test_read_running_generation_id_none_on_missing_file(tmp_path):
+    assert read_running_generation_id(tmp_path / "nonexistent") is None

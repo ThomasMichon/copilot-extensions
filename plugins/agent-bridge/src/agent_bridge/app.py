@@ -370,16 +370,18 @@ async def lifespan(app: FastAPI):
 
     mgr = session_manager_from_config(db, cfg)
     app.state.session_manager = mgr
-    if getattr(cfg, "enable_credential_relay", True):
-        # Follow-up to the early write_running_version() call above: the
-        # SessionManager (constructed just now) is the only place that
-        # computes this process's real generation_id, so record it into the
-        # SAME marker file once it exists (agent-bridge-unified-zdd-cutover
-        # effort's abrupt-termination-drill real-id gap -- see
-        # runtime_version.py's own module docstring for why this file, not
-        # /health).
+    # Record this process's real generation_id (SessionManager, just
+    # constructed, is the only place that computes it) EXCEPT for the
+    # elevated sub-daemon, which shares the primary's runtime dir and is
+    # never promoted -- writing its own id there would silently steal the
+    # marker from whichever daemon actually owns it. A --passive ZDD
+    # successor ALSO sets enable_credential_relay=False (for the unrelated
+    # relay-binding reason above) but DOES get promoted, so it needs its id
+    # recorded too -- is_passive distinguishes the two `enable_credential_
+    # relay=False` cases. See runtime_version.py's own module docstring for
+    # why this file, not /health.
+    if getattr(cfg, "enable_credential_relay", True) or getattr(cfg, "is_passive", False):
         from .runtime_version import record_manager_generation_id
-
         record_manager_generation_id(mgr)
     governance = LoopGovernance()
     app.state.resolver = AgentResolver({}, {})

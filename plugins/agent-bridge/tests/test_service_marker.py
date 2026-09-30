@@ -91,6 +91,45 @@ def test_reconcile_service_marker_unknown_version_only_updates_pid(
     assert not (tmp_path / RUNNING_VERSION_FILE).exists()
 
 
+def test_reconcile_service_marker_preserves_existing_generation_id(
+    tmp_path, monkeypatch
+):
+    # The being-promoted daemon's own boot already recorded its real
+    # generation_id into this marker (it must be health-gated, hence
+    # already running, before promotion reaches this call) -- the
+    # pid/version rewrite here must not silently drop it.
+    monkeypatch.setattr(runtime_version, "install_dir", lambda: tmp_path)
+    runtime_version.write_running_version(
+        tmp_path, pid=999, version="9.9.8", generation_id="9.9.8-999-123.456"
+    )
+    pid_file = tmp_path / "agent-bridge.pid"
+    monkeypatch.setattr(m, "_PID_FILE", str(pid_file))
+
+    m._reconcile_service_marker(222, "9.9.9")
+
+    data = json.loads(
+        (tmp_path / RUNNING_VERSION_FILE).read_text(encoding="utf-8")
+    )
+    assert data["pid"] == 222
+    assert data["version"] == "9.9.9"
+    assert data["generation_id"] == "9.9.8-999-123.456"
+
+
+def test_reconcile_service_marker_no_prior_generation_id_omits_field(
+    tmp_path, monkeypatch
+):
+    pid_file = tmp_path / "agent-bridge.pid"
+    monkeypatch.setattr(m, "_PID_FILE", str(pid_file))
+    monkeypatch.setattr(runtime_version, "install_dir", lambda: tmp_path)
+
+    m._reconcile_service_marker(222, "9.9.9")
+
+    data = json.loads(
+        (tmp_path / RUNNING_VERSION_FILE).read_text(encoding="utf-8")
+    )
+    assert "generation_id" not in data
+
+
 def test_retired_daemon_exits_gracefully_without_kill(monkeypatch):
     states = iter([True, False])
     killed = []

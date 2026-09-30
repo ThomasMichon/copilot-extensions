@@ -141,6 +141,7 @@ def _cmd_start(args: argparse.Namespace) -> None:
     passive = bool(getattr(args, "passive", False))
     if passive:
         cfg.enable_credential_relay = False
+        cfg.is_passive = True
 
     singleton = SingleInstance(config_dir(), port=cfg.port)
     try:
