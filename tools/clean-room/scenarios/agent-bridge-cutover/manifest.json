@@ -1,6 +1,6 @@
 {
   "name": "agent-bridge-cutover",
-  "description": "Tier-P F1 cutover-resilience scenario: install + provision agent-bridge on a fresh box, then drive the installer's real `agent-bridge deploy` seam (the OS-agnostic zdd active/passive graceful cutover) through a battery of THORNY situations and assert the binding invariant of the correct-install-flows effort (dotfiles#1393) -- a version cutover must NEVER kill in-flight, non-resumable work. agent-bridge stands a new daemon up beside the old (start --passive on a fresh port), health-gates it, flips the routing table (active.json), drains the old at the TURN boundary, and retires it. Checks: (routing-flip-retire) deploy stands a new daemon up beside the old, flips the routing table, and retires the old, and clients resolve the new daemon (beside-not-in-place; nothing hard-killed); (drain-gate) `drain` opens the gate (/health -> draining -- the turn boundary at which new work is refused and in-flight work is waited on) and `undrain` releases it; (breadcrumb-recover) an aborted cutover that strands a DRAINED survivor is healed by recovery (deploy --recover undrains it); (abrupt-kill-recovery) a genuinely-dead process's synthetically-labeled session-host claim (a test-chosen generation id, not the daemon's own real identity -- the dead-PID recovery primitive, not interruption of a daemon-owned claim) does not wedge a fresh generation's own real startup recovery scan behind it -- Phase 5 of the agent-bridge-unified-zdd-cutover effort. FIDELITY: a fully live 'turn survives the flip' assertion needs a real model/ACP child and is a Tier-E concern; this Tier-P probe proves the cutover MECHANISM the turn-survival guarantee is built on (routing flip + retirement, the drain gate/turn boundary, cooperative recovery). The probe is portable stdlib-only, so it is verifiable off-Docker too. Name-free / public.",
+  "description": "Tier-P F1 cutover-resilience scenario: install + provision agent-bridge on a fresh box, then drive the installer's real `agent-bridge deploy` seam (the OS-agnostic zdd active/passive graceful cutover) through a battery of THORNY situations and assert the binding invariant of the correct-install-flows effort (dotfiles#1393) -- a version cutover must NEVER kill in-flight, non-resumable work. agent-bridge stands a new daemon up beside the old (start --passive on a fresh port), health-gates it, flips the routing table (active.json), drains the old at the TURN boundary, and retires it. Checks: (routing-flip-retire) deploy stands a new daemon up beside the old, flips the routing table, and retires the old, and clients resolve the new daemon (beside-not-in-place; nothing hard-killed); (drain-gate) `drain` opens the gate (/health -> draining -- the turn boundary at which new work is refused and in-flight work is waited on) and `undrain` releases it; (breadcrumb-recover) an aborted cutover that strands a DRAINED survivor is healed by recovery (deploy --recover undrains it); (abrupt-kill-recovery) a genuinely-dead process's synthetically-labeled session-host claim (a test-chosen generation id, not the daemon's own real identity -- the dead-PID recovery primitive, not interruption of a daemon-owned claim) does not wedge a fresh generation's own real startup recovery scan behind it -- Phase 5 of the agent-bridge-unified-zdd-cutover effort. FIDELITY: phases 0-3's stdlib-only probe proves the cutover MECHANISM the turn-survival guarantee is built on (routing flip + retirement, the drain gate/turn boundary, cooperative recovery) and never makes a real model call; it is verifiable off-Docker too. An opt-in phase 4 (CR_LIVE_TURN_DRILL=1, Docker-only, real AI credits) closes that gap for real -- see live-turn-survival below (agent-bridge-unified-zdd-cutover Phase 6). Name-free / public.",
   "tier": "P",
   "family": "F1",
   "image": "base",
@@ -11,7 +11,9 @@
     "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
     "CR_MARKETPLACE_NAME": "copilot-extensions",
     "CR_UV_INDEX": "(opt-in uv-index fixture)",
-    "CR_CUTOVER_CHECKS": "comma-separated subset of: routing-flip-retire,drain-gate,breadcrumb-recover,abrupt-kill-recovery"
+    "CR_CUTOVER_CHECKS": "comma-separated subset of: routing-flip-retire,drain-gate,breadcrumb-recover,abrupt-kill-recovery",
+    "CR_LIVE_TURN_DRILL": "opt-in (default 0); set to 1 to run phase 4's live-turn-survival drill -- Docker-only, needs a real already-authenticated copilot CLI, consumes real AI credits, not a routine CI gate",
+    "CR_LIVE_TURN_TIMEOUT": "max seconds to wait for the driven turn to complete in phase 4 (default 600)"
   },
   "expected_artifacts": [
     "~/.copilot/installed-plugins/<marketplace>/agent-bridge",
@@ -22,6 +24,7 @@
     { "n": 0, "title": "environment (fresh machine)" },
     { "n": 1, "title": "install agent-bridge" },
     { "n": 2, "title": "runtime provisions on first session" },
-    { "n": 3, "title": "cutover resilience battery (thorny situations)" }
+    { "n": 3, "title": "cutover resilience battery (thorny situations)" },
+    { "n": 4, "title": "live-turn-survival drill (opt-in, credits-consuming; agent-bridge-unified-zdd-cutover Phase 6)" }
   ]
 }
