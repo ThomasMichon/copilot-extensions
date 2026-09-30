@@ -201,9 +201,11 @@ jobs:
               // polls, it has already left this list, not because the
               // request failed but because it succeeded and completed.
               // Accept a review it already submitted for the current head
-              // commit as success too.
+              // commit as success too. Paginated: a PR can accumulate more
+              // reviews than fit on the API's default single page, and a
+              // recent Copilot review could land past that page.
               const headSha = context.payload.pull_request.head.sha;
-              const { data: reviews } = await github.rest.pulls.listReviews({
+              const reviews = await github.paginate(github.rest.pulls.listReviews, {
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 pull_number,
