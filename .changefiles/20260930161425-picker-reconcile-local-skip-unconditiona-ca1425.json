@@ -1,0 +1,9 @@
+{
+  "comment": "picker-reconcile-local: skip unconditional cfg.load_config() when no record in scope has a PR to reconcile (Actions-dialog render-perf fix)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

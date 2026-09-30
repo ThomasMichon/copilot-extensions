@@ -95,17 +95,32 @@ def build_payload(*, worktree_ids: list[str] | None = None) -> dict:
     if requested_set:
         records = [rec for rec in records if rec.worktree_id in requested_set]
 
-    try:
-        config = cfg.load_config()
-    except Exception:
-        config = None
+    # Only pay for ``cfg.load_config()`` -- which pulls in a full, unbounded
+    # tracking-records re-scan (``_control_plane_related_pr_map``) plus
+    # plugin-activation resolution, together ~10s+ on a machine with a large
+    # tracking history -- when a record in scope actually HAS a PR left to
+    # reconcile. Profiling a single-worktree call (the Picker's per-row
+    # Actions-dialog refine, #3307 2026-09-30 render-perf follow-up) found
+    # this was the dominant cost, paid in full even though the overwhelming
+    # common case (no PR, or an already-terminal one) never uses ``config``
+    # at all.
+    reconcilable = []
+    for rec in records:
+        active = rec.active_pr()
+        if active is None or active.number is None or tracking._pr_is_terminal(active):
+            continue
+        reconcilable.append(rec)
+
+    config = None
+    if reconcilable:
+        try:
+            config = cfg.load_config()
+        except Exception:
+            config = None
 
     pr_terminal_count = 0
     if config is not None:
-        for rec in records:
-            active = rec.active_pr()
-            if active is None or active.number is None or tracking._pr_is_terminal(active):
-                continue
+        for rec in reconcilable:
             try:
                 pr_ops._reconcile_active_pr(rec, config, best_effort=True)
             except Exception:

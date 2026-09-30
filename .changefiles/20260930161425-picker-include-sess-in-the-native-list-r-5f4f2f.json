@@ -1,0 +1,9 @@
+{
+  "comment": "Picker: include sess in the native-list render signature so an async mux-reconcile correction (e.g. PROC -> MUX(1)) is never silently stuck on its stale first-paint glyph",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

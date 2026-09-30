@@ -240,7 +240,15 @@ class _PickerNativeData(OptionList):
         # additionally fingerprints every sort-dependent field (id/title/state/
         # age_secs) -- nrows alone cannot see a same-cardinality reload that
         # swaps a row's content (title/state/age change), which would
-        # otherwise leave a query/sort-narrowed view silently stale.
+        # otherwise leave a query/sort-narrowed view silently stale. ``sess``
+        # (render-perf follow-up, #3307 2026-09-30) closes a real staleness
+        # bug: the Group C mux reconcile lands asynchronously AFTER first
+        # paint and can flip a row's LIVE value (e.g. ``PROC`` -> ``MUX(1)``)
+        # with its id/title/state/age_secs all unchanged (mux attachment
+        # doesn't affect ``state``, which already collapsed to ACTIVE via the
+        # cache-only bound/lock-live hint) -- so without ``sess`` in the
+        # fingerprint, that correction never triggered a rebuild and the row
+        # stayed showing its stale first-paint glyph indefinitely.
         try:
             if kind == "registered":
                 rows = scr._task_rows()
@@ -250,7 +258,7 @@ class _PickerNativeData(OptionList):
                 rows = scr.list_records()
             nrows = len(rows)
             fp = tuple((r.get("id"), r.get("title"), r.get("state"),
-                        r.get("age_secs"))
+                        r.get("age_secs"), r.get("sess"))
                        for r in rows)
         except Exception:
             nrows, fp = -1, ()
