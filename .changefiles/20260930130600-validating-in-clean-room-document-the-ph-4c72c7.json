@@ -1,0 +1,9 @@
+{
+  "comment": "validating-in-clean-room: document the Phase 5 agent-dispatch-worker-lifecycle-eval scenario pair",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "dev"
+    }
+  ]
+}
