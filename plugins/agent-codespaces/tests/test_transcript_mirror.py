@@ -257,6 +257,47 @@ async def test_a_failed_push_is_retried_until_it_lands_even_after_a_restart(tmp_
     assert (await settled("cs-1"))["ok"] is False and len(pushes) == 4  # nothing owed: no push
 
 
+@pytest.mark.parametrize("output, landed", [
+    ("session-sync: ok -> /hub/.codespaces-live/cs-1 (3 files)", True),
+    ("session-sync: ok -> /hub/x (3 files)\nsession-sync: excluded 1 detritus file(s) in 1 root(s) (0.1 MiB)", True),
+    ("session-sync: disabled via AGENT_LOGGER_SYNC_DISABLED", False),
+    ("session-sync: ok -> /hub/x (skipped 1 locked file(s), will retry: a/events.jsonl) (3 files)", False),
+    ("", False),
+])
+def test_only_a_whole_publication_counts_as_landed(output, landed):
+    assert tm.landed_whole(output) is landed
+
+
+async def test_a_zero_exit_push_that_did_not_land_whole_keeps_the_debt(tmp_path, direct_exec, monkeypatch):
+    import agent_codespaces.sessions as sessions
+
+    outputs = [
+        "session-sync: disabled via AGENT_LOGGER_SYNC_DISABLED",
+        "session-sync: ok -> /hub/x (skipped 1 locked file(s), will retry: e) (1 files)",
+        "session-sync: ok -> /hub/x (1 files)",
+    ]
+    calls = []
+
+    def fake(source, label, *, verbose):
+        calls.append(label)
+        return True, outputs[len(calls) - 1]  # session-sync exits 0 every time
+
+    monkeypatch.setattr(sessions, "_push_via_session_sync", fake)
+    manager = _Manager(_chunk(SID, 0, b'{"a":1}\n') + tm._DONE + "\n")
+
+    async def opener(codespace):
+        return manager
+
+    mirror = tm.TranscriptMirror(open_manager=opener, root=tmp_path)
+    assert (await mirror("cs-1"))["ok"] is False  # disabled: nothing was pushed
+    assert (tmp_path / "cs-1.dirty").exists()
+    manager.stdout = tm._DONE + "\n"
+    assert (await mirror("cs-1"))["ok"] is False  # partial: a locked file was skipped
+    assert (tmp_path / "cs-1.dirty").exists()
+    assert (await mirror("cs-1"))["ok"] is True
+    assert not (tmp_path / "cs-1.dirty").exists() and len(calls) == 3
+
+
 async def test_a_pass_skips_a_codespace_another_owner_is_mirroring(tmp_path, direct_exec):
     from single_instance_lease import SingleInstance
 

@@ -128,6 +128,26 @@ def parse_output(text: str) -> tuple[list[Chunk], dict[str, bytes], bool]:
     return chunks, workspaces, complete
 
 
+def landed_whole(output: str) -> bool:
+    """Whether ``session-sync push`` output confirms the whole snapshot landed.
+    It exits 0 for a disabled sync (``AGENT_LOGGER_SYNC_DISABLED``) and for a
+    partial push that skipped locked files too; neither may clear the push debt."""
+    return any(
+        line.startswith("session-sync: ok ") and "locked file(s), will retry" not in line
+        for line in (ln.strip() for ln in (output or "").splitlines())
+    )
+
+
+def push_complete(source: Path, label: str) -> tuple[bool, str]:
+    """``session-sync push`` of the mirror: ``ok`` only when all of it landed."""
+    from .sessions import _push_via_session_sync
+
+    ok, detail = _push_via_session_sync(source, label, verbose=False)
+    if ok and not landed_whole(detail):
+        return False, f"push incomplete, retried next pass: {detail}"
+    return ok, detail
+
+
 class TranscriptMirror:
     """``await mirror(codespace)``: pull new transcript bytes, then push the mirror."""
 
@@ -353,12 +373,7 @@ class TranscriptMirror:
         changed = self.apply(codespace, stdout, on_write_start=mark_dirty)
         if not changed and not dirty.exists():
             return {"ok": True, "changed": 0}
-        push = self._push
-        if push is None:
-            from .sessions import _push_via_session_sync
-
-            def push(source: Path, label: str) -> tuple[bool, str]:
-                return _push_via_session_sync(source, label, verbose=False)
+        push = self._push or push_complete
         ok, detail = push(self._root / codespace, f"{LIVE_LABEL_GROUP}/{codespace}")
         if ok:
             dirty.unlink(missing_ok=True)
