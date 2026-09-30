@@ -632,3 +632,118 @@ def test_main_returns_nonzero_when_a_job_log_fetch_fails_in_file_issue_mode(watc
 
     assert rc == 1
     assert "could not fetch log" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# reverify_signature -- verify-issue's independent re-derivation: binds a
+# claimed excerpt/signature to the referenced run's real, current log
+# content instead of trusting the issue body's own claim.
+# ---------------------------------------------------------------------------
+
+def test_reverify_signature_returns_the_matching_signature(watchdog, monkeypatch):
+    monkeypatch.setattr(
+        watchdog,
+        "_fetch_run_jobs",
+        lambda repo, run_id: [
+            {"id": 1, "name": "full - agent-worktrees", "conclusion": "failure"},
+        ],
+    )
+    monkeypatch.setattr(watchdog, "_fetch_job_log", lambda repo, job_id: SAMPLE_PYTEST_LOG)
+
+    [sig] = watchdog.build_signatures(
+        "full - agent-worktrees", SAMPLE_PYTEST_LOG
+    )
+    result = watchdog.reverify_signature("owner/repo", "1", sig.key)
+
+    assert result.key == sig.key
+    assert result.job_name == "full - agent-worktrees"
+    assert result.test_id == sig.test_id
+    assert result.excerpt == sig.excerpt
+
+
+def test_reverify_signature_raises_when_no_job_matches(watchdog, monkeypatch):
+    monkeypatch.setattr(
+        watchdog,
+        "_fetch_run_jobs",
+        lambda repo, run_id: [
+            {"id": 1, "name": "full - agent-worktrees", "conclusion": "failure"},
+        ],
+    )
+    monkeypatch.setattr(watchdog, "_fetch_job_log", lambda repo, job_id: SAMPLE_PYTEST_LOG)
+
+    with pytest.raises(watchdog.ReverifyFailed):
+        watchdog.reverify_signature("owner/repo", "1", "0" * 12)
+
+
+def test_reverify_signature_skips_control_jobs_and_non_reportable_conclusions(watchdog, monkeypatch):
+    calls: list[int] = []
+
+    def _fake_log(repo, job_id):
+        calls.append(job_id)
+        return SAMPLE_PYTEST_LOG
+
+    monkeypatch.setattr(
+        watchdog,
+        "_fetch_run_jobs",
+        lambda repo, run_id: [
+            {"id": 1, "name": "gate (confirm this is a dev commit)", "conclusion": "failure"},
+            {"id": 2, "name": "full - agent-worktrees", "conclusion": "success"},
+        ],
+    )
+    monkeypatch.setattr(watchdog, "_fetch_job_log", _fake_log)
+
+    with pytest.raises(watchdog.ReverifyFailed):
+        watchdog.reverify_signature("owner/repo", "1", "anything")
+
+    assert calls == []
+
+
+def test_reverify_signature_propagates_lookup_failed_from_jobs_fetch(watchdog, monkeypatch):
+    def _raise(repo, run_id):
+        raise watchdog.LookupFailed("simulated")
+
+    monkeypatch.setattr(watchdog, "_fetch_run_jobs", _raise)
+
+    with pytest.raises(watchdog.LookupFailed):
+        watchdog.reverify_signature("owner/repo", "1", "anything")
+
+
+def test_main_reverify_signature_mode_prints_json_and_ignores_other_flags(watchdog, monkeypatch, capsys):
+    fake_sig = watchdog.FailureSignature(
+        job_name="full - agent-worktrees",
+        test_id="tests/test_x.py::test_y",
+        key="abc123def456",
+        excerpt="the real excerpt",
+    )
+    monkeypatch.setattr(
+        watchdog, "reverify_signature", lambda repo, run_id, sig: fake_sig
+    )
+
+    # No --sha given -- must not be required in this mode.
+    rc = watchdog.main(["--repo", "owner/repo", "--run-id", "1", "--reverify-signature", "abc123def456"])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "job_name": "full - agent-worktrees",
+        "test_id": "tests/test_x.py::test_y",
+        "title": "CI failure: tests/test_x.py::test_y",
+        "excerpt": "the real excerpt",
+    }
+
+
+def test_main_reverify_signature_mode_returns_nonzero_on_mismatch(watchdog, monkeypatch, capsys):
+    def _raise(repo, run_id, sig):
+        raise watchdog.ReverifyFailed("no match")
+
+    monkeypatch.setattr(watchdog, "reverify_signature", _raise)
+
+    rc = watchdog.main(["--repo", "owner/repo", "--run-id", "1", "--reverify-signature", "deadbeef0000"])
+
+    assert rc == 1
+    assert "reverify failed" in capsys.readouterr().err
+
+
+def test_main_requires_sha_when_not_reverifying(watchdog):
+    with pytest.raises(SystemExit):
+        watchdog.main(["--repo", "owner/repo", "--run-id", "1"])

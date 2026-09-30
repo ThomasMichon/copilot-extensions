@@ -1,5 +1,5 @@
-# gh-aw-metadata: {"schema_version":"v4","frontmatter_hash":"3ae273f2bdb2c122e34738a079eac61190c87ba4e5533d24a87d2bd2ec56d74a","body_hash":"61bd9d48790672506a0a364ace5b402452ee395e987c92d961bda0a4c05d56e1","compiler_version":"v0.89.21","strict":true,"agent_id":"copilot","engine_versions":{"copilot":"1.0.87"}}
-# gh-aw-manifest: {"version":1,"secrets":["COPILOT_GITHUB_TOKEN","GH_AW_CI_TRIGGER_TOKEN","GH_AW_DEFAULT_OTLP_ENDPOINT","GH_AW_DEFAULT_OTLP_HEADERS","GH_AW_GITHUB_MCP_SERVER_TOKEN","GH_AW_GITHUB_TOKEN","GITHUB_TOKEN"],"actions":[{"repo":"actions/checkout","sha":"3d3c42e5aac5ba805825da76410c181273ba90b1","version":"v7.0.1"},{"repo":"actions/download-artifact","sha":"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c","version":"v8.0.1"},{"repo":"actions/github-script","sha":"3a2844b7e9c422d3c10d287c895573f7108da1b3","version":"v9.0.0"},{"repo":"actions/setup-node","sha":"820762786026740c76f36085b0efc47a31fe5020","version":"v7.0.0"},{"repo":"actions/upload-artifact","sha":"043fb46d1a93c77aae656e7c1c64a875d1fc6a0a","version":"v7.0.1"},{"repo":"github/gh-aw/actions/setup","sha":"c35393777e5604a63721d09512263b1383301d4f","version":"c35393777e5604a63721d09512263b1383301d4f"}],"containers":[{"image":"ghcr.io/github/gh-aw-firewall/agent:0.28.23","digest":"sha256:2c78aaba1c108e130e2d6d01e4f2cca334ea04c53e6f258913ac34173fe7e3b2","pinned_image":"ghcr.io/github/gh-aw-firewall/agent:0.28.23@sha256:2c78aaba1c108e130e2d6d01e4f2cca334ea04c53e6f258913ac34173fe7e3b2"},{"image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.28.23","digest":"sha256:c15c3d1208df10c5b588a3657be53742aa982ae0909d1eb1812525268794ca64","pinned_image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.28.23@sha256:c15c3d1208df10c5b588a3657be53742aa982ae0909d1eb1812525268794ca64"},{"image":"ghcr.io/github/gh-aw-firewall/squid:0.28.23","digest":"sha256:02ffc56dd40158223064ef03a78c2d9717473c93723b4e403d455ea6f0b09ae0","pinned_image":"ghcr.io/github/gh-aw-firewall/squid:0.28.23@sha256:02ffc56dd40158223064ef03a78c2d9717473c93723b4e403d455ea6f0b09ae0"},{"image":"ghcr.io/github/gh-aw-mcpg:v0.4.25","digest":"sha256:9be0a86220e807a0ecc89e53d7453468f7a53fbc6b3d1efd2299025ffe01d086","pinned_image":"ghcr.io/github/gh-aw-mcpg:v0.4.25@sha256:9be0a86220e807a0ecc89e53d7453468f7a53fbc6b3d1efd2299025ffe01d086"},{"image":"ghcr.io/github/gh-aw-node","digest":"sha256:11c2c544876cdbaffefe0f7f1283b74838c209654b4934a78e23ed11f750490f","pinned_image":"ghcr.io/github/gh-aw-node@sha256:11c2c544876cdbaffefe0f7f1283b74838c209654b4934a78e23ed11f750490f"},{"image":"ghcr.io/github/github-mcp-server:v1.12.2","digest":"sha256:508a0857ec762b1ab1cece29193345b501fab1dd9d1228a7b617062954cecac6","pinned_image":"ghcr.io/github/github-mcp-server:v1.12.2@sha256:508a0857ec762b1ab1cece29193345b501fab1dd9d1228a7b617062954cecac6"}],"mcp_servers":[{"name":"github","tools":["get_commit","get_file_contents","get_latest_release","get_me","get_pull_request","get_pull_request_comments","get_pull_request_diff","get_pull_request_files","get_pull_request_review_comments","get_pull_request_reviews","get_pull_request_status","get_release_by_tag","get_tag","issue_read","list_branches","list_commits","list_issue_types","list_issues","list_pull_requests","list_releases","list_starred_repositories","list_tags","pull_request_read","search_code","search_issues","search_pull_requests","search_repositories"]},{"name":"safeoutputs","tools":["create_pull_request","missing_data","missing_tool","noop"]}]}
+# gh-aw-metadata: {"schema_version":"v4","frontmatter_hash":"25b922d6251205b1bfe93c0919a3c430df9eb50fcaf62644f7eb9d56e97ccd31","body_hash":"b465327a9d598f4c3032f4c8ce5e1a1ef03436bc76c2168ab2f5371e938a6f27","compiler_version":"v0.89.21","strict":true,"agent_id":"copilot","engine_versions":{"copilot":"1.0.87"}}
+# gh-aw-manifest: {"version":1,"secrets":["COPILOT_GITHUB_TOKEN","GH_AW_CI_TRIGGER_TOKEN","GH_AW_DEFAULT_OTLP_ENDPOINT","GH_AW_DEFAULT_OTLP_HEADERS","GH_AW_GITHUB_MCP_SERVER_TOKEN","GH_AW_GITHUB_TOKEN","GITHUB_TOKEN"],"actions":[{"repo":"actions/checkout","sha":"11d5960a326750d5838078e36cf38b85af677262","version":"v4"},{"repo":"actions/checkout","sha":"3d3c42e5aac5ba805825da76410c181273ba90b1","version":"v7.0.1"},{"repo":"actions/download-artifact","sha":"3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c","version":"v8.0.1"},{"repo":"actions/github-script","sha":"3a2844b7e9c422d3c10d287c895573f7108da1b3","version":"v9.0.0"},{"repo":"actions/setup-node","sha":"820762786026740c76f36085b0efc47a31fe5020","version":"v7.0.0"},{"repo":"actions/upload-artifact","sha":"043fb46d1a93c77aae656e7c1c64a875d1fc6a0a","version":"v7.0.1"},{"repo":"github/gh-aw/actions/setup","sha":"c35393777e5604a63721d09512263b1383301d4f","version":"c35393777e5604a63721d09512263b1383301d4f"}],"containers":[{"image":"ghcr.io/github/gh-aw-firewall/agent:0.28.23","digest":"sha256:2c78aaba1c108e130e2d6d01e4f2cca334ea04c53e6f258913ac34173fe7e3b2","pinned_image":"ghcr.io/github/gh-aw-firewall/agent:0.28.23@sha256:2c78aaba1c108e130e2d6d01e4f2cca334ea04c53e6f258913ac34173fe7e3b2"},{"image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.28.23","digest":"sha256:c15c3d1208df10c5b588a3657be53742aa982ae0909d1eb1812525268794ca64","pinned_image":"ghcr.io/github/gh-aw-firewall/api-proxy:0.28.23@sha256:c15c3d1208df10c5b588a3657be53742aa982ae0909d1eb1812525268794ca64"},{"image":"ghcr.io/github/gh-aw-firewall/squid:0.28.23","digest":"sha256:02ffc56dd40158223064ef03a78c2d9717473c93723b4e403d455ea6f0b09ae0","pinned_image":"ghcr.io/github/gh-aw-firewall/squid:0.28.23@sha256:02ffc56dd40158223064ef03a78c2d9717473c93723b4e403d455ea6f0b09ae0"},{"image":"ghcr.io/github/gh-aw-mcpg:v0.4.25","digest":"sha256:9be0a86220e807a0ecc89e53d7453468f7a53fbc6b3d1efd2299025ffe01d086","pinned_image":"ghcr.io/github/gh-aw-mcpg:v0.4.25@sha256:9be0a86220e807a0ecc89e53d7453468f7a53fbc6b3d1efd2299025ffe01d086"},{"image":"ghcr.io/github/gh-aw-node","digest":"sha256:11c2c544876cdbaffefe0f7f1283b74838c209654b4934a78e23ed11f750490f","pinned_image":"ghcr.io/github/gh-aw-node@sha256:11c2c544876cdbaffefe0f7f1283b74838c209654b4934a78e23ed11f750490f"},{"image":"ghcr.io/github/github-mcp-server:v1.12.2","digest":"sha256:508a0857ec762b1ab1cece29193345b501fab1dd9d1228a7b617062954cecac6","pinned_image":"ghcr.io/github/github-mcp-server:v1.12.2@sha256:508a0857ec762b1ab1cece29193345b501fab1dd9d1228a7b617062954cecac6"}],"mcp_servers":[{"name":"github","tools":["get_commit","get_file_contents","get_latest_release","get_me","get_pull_request","get_pull_request_comments","get_pull_request_diff","get_pull_request_files","get_pull_request_review_comments","get_pull_request_reviews","get_pull_request_status","get_release_by_tag","get_tag","issue_read","list_branches","list_commits","list_issue_types","list_issues","list_pull_requests","list_releases","list_starred_repositories","list_tags","pull_request_read","search_code","search_issues","search_pull_requests","search_repositories"]},{"name":"safeoutputs","tools":["create_pull_request","missing_data","missing_tool","noop"]}]}
 # This file was automatically generated by gh-aw (v0.89.21). DO NOT EDIT. To debug this workflow, load the skill at https://github.com/github/gh-aw/blob/main/debug.md
 #
 #    ___                   _   _
@@ -37,6 +37,7 @@
 #   - GITHUB_TOKEN
 #
 # Custom actions used:
+#   - actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 #   - actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 #   - actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
 #   - actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
@@ -1989,6 +1990,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: read
+      contents: read
       issues: read
     outputs:
       authorized: ${{ steps.check.outputs.authorized }}
@@ -2044,6 +2046,13 @@ jobs:
         env:
           RAW_ISSUE_NUMBER: ${{ github.event.issue.number }}
           RAW_ITEM_NUMBER: ${{ github.event.inputs.item_number }}
+      - name: Check out the reverification helper only
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            tools/ci_failure_watchdog.py
+          sparse-checkout-cone-mode: false
       - name: Verify the issue was genuinely filed by the watchdog
         id: check
         run: |
@@ -2051,15 +2060,16 @@ jobs:
           ISSUE_JSON=$(gh issue view "$NUM" --repo "$REPO" --json author,body,labels)
           AUTHOR=$(printf '%s' "$ISSUE_JSON" | jq -r '.author.login')
           BODY=$(printf '%s' "$ISSUE_JSON" | jq -r '.body')
-          # Real review finding (PR #3916): `report-failure`'s `gh issue
-          # create` runs authenticated with `github.token`, so GitHub
-          # records the author as `github-actions[bot]` (the same bot
-          # identity `validate-and-promote.yml`'s `promote` job configures
-          # for its own commits) -- NOT the bare string `github-actions`.
-          # The prior comparison would have rejected every genuine watchdog
-          # issue and permanently disabled the agent job.
-          if [ "$AUTHOR" != "github-actions[bot]" ]; then
-            echo "::warning::Issue #$NUM was authored by '$AUTHOR', not the watchdog's own github-actions[bot] token identity -- refusing to run the agent (a hand-authored issue re-using this label is not an authenticated diagnostic)."
+          # `gh issue view --json author` reports a GitHub App-authored
+          # issue's login as `app/github-actions`, never `github-actions[bot]`.
+          # The `[bot]` suffix shape belongs to a `GITHUB_TOKEN`-authored
+          # git COMMIT's author/committer identity (what
+          # `validate-and-promote.yml`'s `promote` job configures for its
+          # own git commits), not to `gh issue view`'s own JSON for an
+          # issue/PR/comment created via the same token -- those
+          # consistently use the `app/<slug>` login shape instead.
+          if [ "$AUTHOR" != "app/github-actions" ]; then
+            echo "::warning::Issue #$NUM was authored by '$AUTHOR', not the watchdog's own app/github-actions token identity -- refusing to run the agent (a hand-authored issue re-using this label is not an authenticated diagnostic)."
             echo "authorized=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -2081,7 +2091,7 @@ jobs:
           # Real review finding (PR #3916): author + signature-format checks
           # alone are NOT authentication -- any write-access collaborator who
           # can edit issue bodies (a real capability on a public repo) could
-          # edit a genuine `github-actions[bot]` watchdog issue's body to
+          # edit a genuine `app/github-actions` watchdog issue's body to
           # attacker-controlled content while its own hex `Signature:` line
           # (and its bot authorship) stay intact, then dispatch the agent
           # against it via `workflow_dispatch` -- which also bypasses the
@@ -2132,13 +2142,32 @@ jobs:
             echo "authorized=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          JOBS_JSON=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" 2>/dev/null || echo '')
-          FAILED_JOB_COUNT=$(printf '%s' "$JOBS_JSON" | jq '[.jobs[]? | select(.conclusion == "failure" or .conclusion == "timed_out")] | length' 2>/dev/null || echo 0)
-          if [ -z "$FAILED_JOB_COUNT" ] || [ "$FAILED_JOB_COUNT" -lt 1 ]; then
-            echo "::warning::Issue #$NUM references run $RUN_ID, but no job in that run has an independently verified failure/timed_out conclusion -- refusing to run the agent."
+          # Real review finding (PR #4689): the prior version of this check
+          # only confirmed "some job in $RUN_ID concluded failure/timed_out"
+          # -- it never confirmed the issue's own claimed `## Log excerpt`
+          # text has any relationship to that job's real output at all.
+          # `signature_key` (tools/ci_failure_watchdog.py) is a public,
+          # non-secret hash of job name + test id -- any write collaborator
+          # can compute a matching key for a run/job they control, so "the
+          # key matches" alone proves nothing about the accompanying prose.
+          # `reverify_signature` closes this: it independently re-fetches
+          # the run's own REAL job logs right now, recomputes signatures
+          # from that real content, and returns the freshly-derived
+          # excerpt/job/test-id ONLY if one genuinely matches -- the
+          # forwarded content is provably the real, current output of the
+          # real job the signature names, never the issue's own narrative.
+          # This does not, and cannot, stop a collaborator from engineering
+          # their OWN job to print attacker-chosen text and fail on purpose
+          # -- that residual risk is identical in kind to the already-
+          # accepted, structurally-unclosable one this file's own charter
+          # names for a genuine test's real output (see blocking issue #5
+          # below); this only removes the strictly weaker prior gap of an
+          # excerpt with no verified connection to any real output at all.
+          REVERIFY_JSON=$(python3 tools/ci_failure_watchdog.py --repo "$REPO" --run-id "$RUN_ID" --reverify-signature "$SIGNATURE" 2>/dev/null) || {
+            echo "::warning::Issue #$NUM's Signature: $SIGNATURE could not be independently reproduced from run $RUN_ID's own current job logs -- refusing to run the agent."
             echo "authorized=false" >> "$GITHUB_OUTPUT"
             exit 0
-          fi
+          }
           # Real review finding (PR #3916): all the checks above verify the
           # issue at THIS moment, but the agent job runs later and would
           # otherwise re-fetch the body live via `issue_read` -- a TOCTOU
@@ -2155,17 +2184,28 @@ jobs:
           # prompt is
           # simply not populated yet; the compiler's own diagnostic
           # confirmed this and recommends a file instead, which the
-          # markdown body below reads from a fixed path). This does
-          # reintroduce direct body content reaching the agent (the shape
-          # blocking issue #5 originally flagged) -- but this copy is
-          # provably the exact, unaltered, authenticated record from THIS
-          # check, not a live re-fetch of whatever the issue says *now*.
-          # gh-aw's `threat-detection` stage (see
-          # `safe-outputs.threat-detection` below) remains the backstop for
-          # injection content that was ALREADY present in the watchdog's
-          # own genuine log excerpt, which no authentication check here can
-          # distinguish from legitimate diagnostic text.
-          BODY_B64=$(printf '%s' "$BODY" | base64 -w0)
+          # markdown body below reads from a fixed path). The forwarded
+          # body is now built from `reverify_signature`'s own
+          # independently-fetched fields (job name, test id, real excerpt),
+          # never from the issue's own `$BODY` text -- provably the real,
+          # current output of the real job the signature names, not
+          # caller-supplied narrative (see the review-finding comment
+          # above `REVERIFY_JSON` for the full reasoning). It does NOT, and
+          # structurally cannot, isolate the agent from injection content a
+          # collaborator's own engineered job genuinely prints -- gh-aw's
+          # `threat-detection` stage (see `safe-outputs.threat-detection`
+          # below) remains the backstop for that residual, already-accepted
+          # class of risk (blocking issue #5).
+          VERIFIED_JOB_NAME=$(printf '%s' "$REVERIFY_JSON" | jq -r '.job_name')
+          VERIFIED_TEST_ID=$(printf '%s' "$REVERIFY_JSON" | jq -r '.test_id // empty')
+          VERIFIED_EXCERPT=$(printf '%s' "$REVERIFY_JSON" | jq -r '.excerpt')
+          WHERE=""
+          if [ -n "$VERIFIED_TEST_ID" ]; then
+            WHERE=" on test \`$VERIFIED_TEST_ID\`"
+          fi
+          VERIFIED_BODY=$(printf '## Summary\n\nJob **%s** failed%s during a `dev` validation run (independently reproduced from its own current log by ci-failure-fix-attempt.md'"'"'s verify-issue job -- not the issue body'"'"'s own claim).\n\nSignature: %s\n\n- Run: https://github.com/%s/actions/runs/%s\n\n## Log excerpt\n\n```\n%s\n```\n' \
+            "$VERIFIED_JOB_NAME" "$WHERE" "$SIGNATURE" "$REPO" "$RUN_ID" "$VERIFIED_EXCERPT")
+          BODY_B64=$(printf '%s' "$VERIFIED_BODY" | base64 -w0)
           echo "body-b64=$BODY_B64" >> "$GITHUB_OUTPUT"
           echo "authorized=true" >> "$GITHUB_OUTPUT"
         env:

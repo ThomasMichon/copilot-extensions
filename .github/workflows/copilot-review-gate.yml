@@ -1,17 +1,40 @@
-# Requests a Copilot code review only for PRs authored by an invited
-# collaborator (Maintainer or Contributor) -- never automatically for an
-# uninvited outsider. GitHub's `copilot_code_review` ruleset rule
-# (`review_on_push`) has no "collaborators only" condition, so it would
-# otherwise auto-review every PR, including from people who were never
-# granted any access (billed to the repo owner, and giving an unreviewed
-# outsider a free automated pass through the same visible review surface
-# trusted contributors get). This workflow replaces that automatic trigger
-# with an explicit, permission-checked one -- see CONTRIBUTING.md for the
+# Requests a Copilot code review automatically only for PRs authored by a
+# Maintainer (the CODEOWNERS root roster) -- never automatically for a
+# Contributor, and never for an uninvited outsider. GitHub's
+# `copilot_code_review` ruleset rule (`review_on_push`) has no
+# "collaborators only" condition, so it would otherwise auto-review every
+# PR, including from people who were never granted any access (billed to
+# the repo owner, and giving an unreviewed outsider a free automated pass
+# through the same visible review surface trusted contributors get). This
+# workflow replaces that automatic trigger -- see CONTRIBUTING.md for the
 # ruleset-side change removing the native `copilot_code_review` rule.
 #
+# Why Maintainer-only, not "any invited collaborator": GitHub's
+# `requestReviewers` API call for `copilot-pull-request-reviewer[bot]`
+# returns success with NO exception, and even NO timeline event at all,
+# when made by `github-actions[bot]` (the default `GITHUB_TOKEN`) for a PR
+# whose author is any account other than this repo's owner. The same call,
+# authenticated as a real licensed human account (the owner) instead of the
+# bot identity, reliably works regardless of PR author -- Copilot code
+# review appears to require the review to be attributable to a licensed
+# account (author OR requester), and this repo (a personal, non-org
+# account) has no equivalent of the org-only "members without a Copilot
+# license" policy to cover an unlicensed author. `MAINTAINER_REVIEW_PAT`
+# (a fine-grained PAT for the owner, scoped to ONLY this repo, with ONLY
+# `Pull requests: write` + `Metadata: read` -- no other scopes) exists to
+# make the request as that licensed account instead of the bot. A
+# Maintainer already holds ruleset self-merge bypass (see CONTRIBUTING.md),
+# so requesting on their behalf extends no new trust. A Contributor's PR
+# still requires a Maintainer's own approving review before merge regardless
+# of Copilot's verdict, so leaving Contributors on the manual-only path
+# doesn't weaken the review gate -- the automatic leg was never reliable for
+# a non-owner author, so this workflow no longer attempts (or silently
+# pretends to succeed at) it for them.
+#
 # A maintainer can still manually request Copilot's review on any PR
-# (including an outsider's) via the normal "Reviewers" sidebar or the REST
-# API at any time -- this workflow only controls the *automatic* path.
+# (including a Contributor's or an outsider's) via the normal "Reviewers"
+# sidebar or the REST API at any time -- this workflow only controls the
+# *automatic* path.
 #
 # `edited` is included in `types` below: a PR originally opened against a
 # different base branch and later RETARGETED to `dev` fires `edited` (with
@@ -22,14 +45,15 @@
 #
 # Uses `pull_request_target`, not `pull_request`: a same-repo Write
 # collaborator's own PR would otherwise run their edited copy of this file
-# (which requests `pull-requests: write` and calls a write API), and a
-# fork PR's forced-read-only `GITHUB_TOKEN` under plain `pull_request` would
-# make `requestReviewers` fail outright for a legitimate collaborator who
-# happens to submit via a fork. `pull_request_target` runs the trusted
-# default-branch definition either way. This job never checks out or
-# executes PR content -- only reads PR/collaborator metadata via the REST
-# API -- so it carries none of the classic `pull_request_target`
-# secret-exfiltration risk.
+# (which requests `pull-requests: write` and calls a write API, and for
+# Maintainers a repo-scoped PAT), and a fork PR's forced-read-only
+# `GITHUB_TOKEN` under plain `pull_request` would make `requestReviewers`
+# fail outright for a legitimate collaborator who happens to submit via a
+# fork. `pull_request_target` runs the trusted default-branch definition
+# either way. This job never checks out or executes PR content -- only
+# reads PR/collaborator/CODEOWNERS metadata via the REST API -- so it
+# carries none of the classic `pull_request_target` secret-exfiltration
+# risk, and the PAT itself is never passed anything derived from PR content.
 name: Copilot review gate
 
 on:
@@ -39,18 +63,23 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
+  # The default `GITHUB_TOKEN` only ever reads (collaborator status,
+  # CODEOWNERS) in this workflow -- the one write call (requesting a
+  # review) always uses `MAINTAINER_REVIEW_PAT` instead, supplied
+  # explicitly to that step; this permissions block doesn't affect it.
+  pull-requests: read
 
 jobs:
   request-review:
-    name: request-review-if-collaborator
+    name: request-review-if-maintainer
     if: >-
       github.event.pull_request.draft == false &&
       (github.event.action != 'edited' || github.event.changes.base != null)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Request Copilot review for known collaborators only
+      - name: Determine collaborator / Maintainer status
+        id: status
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
@@ -81,25 +110,168 @@ jobs:
               }
             }
 
+            // The Maintainer roster lives in exactly one place, CODEOWNERS'
+            // own root (`*`) pattern -- read it fresh each run instead of
+            // duplicating the list here, so the two never drift. Reads the
+            // trusted base ref (`dev`), never the PR's own head -- this is
+            // metadata about the base repo, not PR content.
+            async function getMaintainerRoster() {
+              const { data } = await github.rest.repos.getContent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path: ".github/CODEOWNERS",
+                ref: context.payload.pull_request.base.ref,
+              });
+              const text = Buffer.from(data.content, "base64").toString("utf8");
+              // Match the root pattern's first token EXACTLY to `*` -- not
+              // merely a line that starts with `*`, which would also match
+              // an unrelated pattern like `*.md` if one were ever placed
+              // above the root entry.
+              const rootLine = text
+                .split("\n")
+                .map((line) => line.trim())
+                .find((line) => line.split(/\s+/)[0] === "*");
+              if (!rootLine) {
+                throw new Error("CODEOWNERS has no root (`*`) pattern; cannot resolve Maintainer roster.");
+              }
+              return rootLine
+                .split(/\s+/)
+                .slice(1)
+                .map((owner) => owner.replace(/^@/, ""));
+            }
+
             const trusted = await isInvitedCollaborator(author);
             if (!trusted) {
               core.info(
                 `${author} is not an invited collaborator; skipping automatic Copilot review. ` +
                   "A maintainer may still request one manually via the Reviewers sidebar.",
               );
+              core.setOutput("is_maintainer", "false");
               return;
             }
+
+            const roster = await getMaintainerRoster();
+            const isMaintainer = roster.includes(author);
+            core.setOutput("is_maintainer", String(isMaintainer));
+            if (!isMaintainer) {
+              core.info(
+                `${author} is an invited collaborator but not a Maintainer; skipping automatic Copilot review. ` +
+                  "A maintainer may still request one manually via the Reviewers sidebar.",
+              );
+            }
+
+      - name: Request Copilot review as a licensed Maintainer account
+        if: steps.status.outputs.is_maintainer == 'true'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          # Authenticated as the owner (a real, licensed account) via a
+          # fine-grained PAT scoped to ONLY this repo with ONLY
+          # `Pull requests: write` + `Metadata: read` -- not the default
+          # `GITHUB_TOKEN` (`github-actions[bot]`), whose identical call
+          # silently no-ops for a non-owner PR author. See this file's
+          # header comment for the underlying reason.
+          github-token: ${{ secrets.MAINTAINER_REVIEW_PAT }}
+          script: |
+            const author = context.payload.pull_request.user.login;
+            const pull_number = context.payload.pull_request.number;
+
+            function sleep(ms) {
+              return new Promise((resolve) => setTimeout(resolve, ms));
+            }
+
+            // A successful `requestReviewers` call does NOT reliably show
+            // Copilot in its own response's `requested_reviewers` -- GitHub
+            // adds the bot reviewer as a short-lived async follow-up, not
+            // synchronously in the same request/response cycle. That's
+            // exactly why the original failure mode was invisible: an API
+            // call that returns 2xx is not proof the reviewer was actually
+            // added. Poll the PR's live requested-reviewer list afterward
+            // instead of trusting the call's own response.
+            //
+            // Snapshot pre-existing Copilot review IDs BEFORE requesting: on
+            // `reopened` or a base-retarget `edited` event the head SHA can
+            // be unchanged, so an older review already sitting at that same
+            // commit must not count as confirmation of THIS request -- only
+            // a review submitted after the snapshot does.
+            async function copilotReviewIdsAtHeadSha(headSha) {
+              const reviews = await github.paginate(github.rest.pulls.listReviews, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number,
+              });
+              return new Set(
+                reviews
+                  .filter(
+                    (review) =>
+                      review.user.login === "copilot-pull-request-reviewer[bot]" &&
+                      review.commit_id === headSha,
+                  )
+                  .map((review) => review.id),
+              );
+            }
+
+            async function copilotIsRequested(preexistingReviewIds, headSha) {
+              const { data } = await github.rest.pulls.listRequestedReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number,
+              });
+              if (data.users.some((user) => user.login === "copilot-pull-request-reviewer[bot]")) {
+                return true;
+              }
+              // `listRequestedReviewers` only reports reviewers whose review
+              // is still PENDING -- if Copilot finishes fast enough between
+              // polls, it has already left this list, not because the
+              // request failed but because it succeeded and completed.
+              // Accept a NEW review it submitted for the current head
+              // commit as success too (never one that already existed
+              // before this run's request).
+              const currentReviewIds = await copilotReviewIdsAtHeadSha(headSha);
+              for (const id of currentReviewIds) {
+                if (!preexistingReviewIds.has(id)) {
+                  return true;
+                }
+              }
+              return false;
+            }
+
+            const headSha = context.payload.pull_request.head.sha;
+            const preexistingReviewIds = await copilotReviewIdsAtHeadSha(headSha);
 
             try {
               await github.rest.pulls.requestReviewers({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                pull_number: context.payload.pull_request.number,
+                pull_number,
                 reviewers: ["copilot-pull-request-reviewer[bot]"],
               });
-              core.info(`Requested Copilot review for ${author}'s PR.`);
             } catch (error) {
-              // Non-fatal: a stale/duplicate request, or Copilot review being
-              // unavailable, shouldn't fail the PR's checks.
-              core.warning(`Could not request Copilot review: ${error.message}`);
+              // Fail the job (this workflow is non-required/non-blocking,
+              // so this never gates the PR) rather than warn: with the PAT
+              // as the only credential that makes this request work, a
+              // swallowed error here (missing/expired/revoked secret, lost
+              // permission) would silently reopen the exact failure mode
+              // this workflow exists to close, with no visible signal.
+              core.setFailed(`Could not request Copilot review: ${error.message}`);
+              return;
             }
+
+            const attempts = 6;
+            const delayMs = 10_000;
+            for (let attempt = 1; attempt <= attempts; attempt += 1) {
+              if (await copilotIsRequested(preexistingReviewIds, headSha)) {
+                core.info(`Confirmed Copilot review requested for ${author}'s PR.`);
+                return;
+              }
+              if (attempt < attempts) {
+                await sleep(delayMs);
+              }
+            }
+
+            // The API call itself reported success, but Copilot never
+            // actually showed up as a requested reviewer -- this is the
+            // exact silent-no-op this workflow exists to close. Fail loudly
+            // instead of trusting the call's own response.
+            core.setFailed(
+              `requestReviewers reported success, but Copilot never appeared as a requested reviewer on ${author}'s PR after ${attempts} checks.`,
+            );
