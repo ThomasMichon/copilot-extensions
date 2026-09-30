@@ -932,18 +932,6 @@ class ServiceConfig(BaseModel):
         "never evicts) the primary's relay -- local elevated agents reuse the "
         "primary's relay on the same host.",
     )
-    is_passive: bool = Field(
-        default=False,
-        description="True for a ZDD-cutover --passive successor spawned beside "
-        "the current active daemon (deliberately ALSO sets "
-        "enable_credential_relay=False, for an unrelated reason -- see that "
-        "field -- so this is a distinct signal, not a derived one). Unlike the "
-        "elevated sub-daemon (which also sets enable_credential_relay=False but "
-        "is never promoted), a passive successor DOES become the active "
-        "generation once health-gated and promoted, so its boot-time "
-        "generation_id recording must not be skipped the way the reconciler's "
-        "canonical running-version write correctly is.",
-    )
     session_host_stale_reap_seconds: int = Field(
         default=0,
         description="Version-mux sprawl bound (Phase 4, #1765). When > 0, a "

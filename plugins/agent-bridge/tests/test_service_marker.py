@@ -91,17 +91,14 @@ def test_reconcile_service_marker_unknown_version_only_updates_pid(
     assert not (tmp_path / RUNNING_VERSION_FILE).exists()
 
 
-def test_reconcile_service_marker_preserves_existing_generation_id(
+def test_reconcile_service_marker_consumes_staged_generation_id_for_confirmed_pid(
     tmp_path, monkeypatch
 ):
-    # The being-promoted daemon's own boot already recorded its real
-    # generation_id into this marker (it must be health-gated, hence
-    # already running, before promotion reaches this call) -- the
-    # pid/version rewrite here must not silently drop it.
+    # The being-PROMOTED daemon's own boot already staged its real
+    # generation_id under its own (now CONFIRMED) pid -- the pid/version
+    # rewrite here must consume and carry it through, not drop it.
     monkeypatch.setattr(runtime_version, "install_dir", lambda: tmp_path)
-    runtime_version.write_running_version(
-        tmp_path, pid=999, version="9.9.8", generation_id="9.9.8-999-123.456"
-    )
+    runtime_version.stage_pending_generation_id(222, "9.9.9-222-456.789", tmp_path)
     pid_file = tmp_path / "agent-bridge.pid"
     monkeypatch.setattr(m, "_PID_FILE", str(pid_file))
 
@@ -112,10 +109,37 @@ def test_reconcile_service_marker_preserves_existing_generation_id(
     )
     assert data["pid"] == 222
     assert data["version"] == "9.9.9"
-    assert data["generation_id"] == "9.9.8-999-123.456"
+    assert data["generation_id"] == "9.9.9-222-456.789"
 
 
-def test_reconcile_service_marker_no_prior_generation_id_omits_field(
+def test_reconcile_service_marker_ignores_a_different_pids_staged_id(
+    tmp_path, monkeypatch
+):
+    # An aborted/never-promoted passive's staged entry (a DIFFERENT pid than
+    # the one actually confirmed) must never leak into the promoted
+    # daemon's own record.
+    monkeypatch.setattr(runtime_version, "install_dir", lambda: tmp_path)
+    runtime_version.stage_pending_generation_id(
+        111, "abandoned-passive-gen", tmp_path
+    )
+    pid_file = tmp_path / "agent-bridge.pid"
+    monkeypatch.setattr(m, "_PID_FILE", str(pid_file))
+
+    m._reconcile_service_marker(222, "9.9.9")  # confirmed pid is 222, not 111
+
+    data = json.loads(
+        (tmp_path / RUNNING_VERSION_FILE).read_text(encoding="utf-8")
+    )
+    assert data["pid"] == 222
+    assert "generation_id" not in data
+    # The abandoned entry is untouched -- still available if 111 is ever
+    # (implausibly) confirmed later, but never silently discarded either.
+    assert runtime_version.consume_pending_generation_id(111, tmp_path) == (
+        "abandoned-passive-gen"
+    )
+
+
+def test_reconcile_service_marker_no_staged_generation_id_omits_field(
     tmp_path, monkeypatch
 ):
     pid_file = tmp_path / "agent-bridge.pid"

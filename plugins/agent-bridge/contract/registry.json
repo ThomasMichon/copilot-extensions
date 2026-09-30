@@ -71,9 +71,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "ce567f5d987083dc9e3570fe40b5c446f4d55b26f07b3759cc0e5bd82657e8c4",
+          "sha256": "713bf04a93fcf284b832459c2e295dd38ef5a9dfa5ded7a6b09367b3033c838e",
           "semantic": false,
-          "non_semantic_reason": "ServiceConfig gained a new internal-only is_passive field (agent-bridge-unified-zdd-cutover effort) distinguishing a --passive ZDD-cutover successor from an elevated sub-daemon for local generation_id-recording purposes; it is never serialized into any HTTP wire message -- the representative session-create wire shape is unchanged."
+          "non_semantic_reason": "Live-message request/response models gained an optional delivery urgency field; the representative session-create wire shape is unchanged."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",

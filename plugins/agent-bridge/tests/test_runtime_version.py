@@ -7,9 +7,11 @@ import os
 
 from agent_bridge import __version__
 from agent_bridge.runtime_version import (
+    PENDING_GENERATION_IDS_FILE,
     RUNNING_VERSION_FILE,
-    read_running_generation_id,
+    consume_pending_generation_id,
     set_running_generation_id,
+    stage_pending_generation_id,
     write_running_version,
 )
 
@@ -100,21 +102,63 @@ def test_set_running_generation_id_recovers_from_non_dict_marker(tmp_path):
     assert data["pid"] == os.getpid()
 
 
+def test_stage_pending_generation_id_recovers_from_non_dict_pending_file(tmp_path):
+    (tmp_path / PENDING_GENERATION_IDS_FILE).write_text("[1, 2, 3]", encoding="utf-8")
+    stage_pending_generation_id(111, "fresh-gen", tmp_path)
+    data = json.loads(
+        (tmp_path / PENDING_GENERATION_IDS_FILE).read_text(encoding="utf-8")
+    )
+    assert data == {"111": "fresh-gen"}
+
+
 def test_read_running_generation_id_roundtrip(tmp_path):
-    assert read_running_generation_id(tmp_path) is None  # no marker yet
-    set_running_generation_id("roundtrip-gen-id", tmp_path)
-    assert read_running_generation_id(tmp_path) == "roundtrip-gen-id"
+    assert consume_pending_generation_id(555, tmp_path) is None  # nothing staged
+    stage_pending_generation_id(555, "roundtrip-gen-id", tmp_path)
+    assert consume_pending_generation_id(555, tmp_path) == "roundtrip-gen-id"
+    # Consumed exactly once -- a second pop finds nothing.
+    assert consume_pending_generation_id(555, tmp_path) is None
 
 
-def test_read_running_generation_id_none_when_marker_missing_field(tmp_path):
-    write_running_version(tmp_path)  # no generation_id
-    assert read_running_generation_id(tmp_path) is None
+def test_stage_pending_generation_id_keys_by_pid(tmp_path, monkeypatch):
+    from agent_bridge.session_host import osutil
+
+    # Keep both fake pids "alive" from the pruning step's perspective --
+    # this test is about keying by pid, not pruning (see the dedicated
+    # pruning test below).
+    monkeypatch.setattr(osutil, "pid_alive", lambda pid: True)
+    stage_pending_generation_id(111, "gen-for-111", tmp_path)
+    stage_pending_generation_id(222, "gen-for-222", tmp_path)
+    assert consume_pending_generation_id(111, tmp_path) == "gen-for-111"
+    # 222's own entry survives consuming a DIFFERENT pid's.
+    assert consume_pending_generation_id(222, tmp_path) == "gen-for-222"
 
 
-def test_read_running_generation_id_none_on_non_dict_marker(tmp_path):
-    (tmp_path / RUNNING_VERSION_FILE).write_text("[1, 2, 3]", encoding="utf-8")
-    assert read_running_generation_id(tmp_path) is None
+def test_stage_pending_generation_id_prunes_dead_pids(tmp_path, monkeypatch):
+    from agent_bridge.session_host import osutil
+
+    # A dead pid's stale entry (an earlier aborted/retired passive) must be
+    # pruned the next time anything stages a new entry, so this file never
+    # grows unbounded across many cutover attempts.
+    monkeypatch.setattr(osutil, "pid_alive", lambda pid: pid != 999999)
+    stage_pending_generation_id(999999, "abandoned-gen", tmp_path)
+    stage_pending_generation_id(111, "fresh-gen", tmp_path)
+    data = json.loads(
+        (tmp_path / PENDING_GENERATION_IDS_FILE).read_text(encoding="utf-8")
+    )
+    assert "999999" not in data
+    assert data["111"] == "fresh-gen"
 
 
-def test_read_running_generation_id_none_on_missing_file(tmp_path):
-    assert read_running_generation_id(tmp_path / "nonexistent") is None
+def test_consume_pending_generation_id_none_when_never_staged(tmp_path):
+    assert consume_pending_generation_id(12345, tmp_path) is None
+
+
+def test_consume_pending_generation_id_none_on_missing_file(tmp_path):
+    assert consume_pending_generation_id(1, tmp_path / "nonexistent") is None
+
+
+def test_stage_pending_generation_id_never_raises(tmp_path):
+    afile = tmp_path / "afile"
+    afile.write_text("x", encoding="utf-8")
+    stage_pending_generation_id(1, "whatever", afile / "sub")  # must not raise
+    assert not (afile / "sub" / PENDING_GENERATION_IDS_FILE).exists()
