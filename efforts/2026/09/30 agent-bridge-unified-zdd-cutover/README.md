@@ -9,9 +9,9 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** In Progress (Phase 1 of 6 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 6 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 6 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 6 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 6 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to Phase 6; Phase 6 of 6 landed — [#4664](https://github.com/ThomasMichon/copilot-extensions/pull/4664) implemented the opt-in `CR_LIVE_TURN_DRILL=1` drill, then verified by a real live Docker clean-room run ([#4672](https://github.com/ThomasMichon/copilot-extensions/pull/4672)) that also fixed two bugs the review round couldn't catch and one wrong assertion; Phase 0's design fork resolved and the opt-in reconcile gate removed — [#4694](https://github.com/ThomasMichon/copilot-extensions/pull/4694). A checkbox audit then found 3 more Plan/Validation Plan items already satisfied by prior work but never ticked (see Journal); only ONE item remains open in the whole effort: the abrupt-termination drill's real-`_generation_id` exposure, a previously-investigated, genuinely blocked design question -- not a quick continuation.)
+- **Status:** Done (Phase 1 of 6 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 6 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 6 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 6 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 6 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to Phase 6; Phase 6 of 6 landed — [#4664](https://github.com/ThomasMichon/copilot-extensions/pull/4664) implemented the opt-in `CR_LIVE_TURN_DRILL=1` drill, then verified by a real live Docker clean-room run ([#4672](https://github.com/ThomasMichon/copilot-extensions/pull/4672)) that also fixed two bugs the review round couldn't catch and one wrong assertion; Phase 0's design fork resolved and the opt-in reconcile gate removed — [#4694](https://github.com/ThomasMichon/copilot-extensions/pull/4694). A checkbox audit found 3 more Plan/Validation Plan items already satisfied by prior work but never ticked; the one remaining item -- the abrupt-termination drill's real-`_generation_id` exposure -- closed via a new local `running-version.json` field (not `/health`, which had hit a real contract-registry wall), run for real (`PROBE-SUMMARY: 4/4 passed`). Every Plan and Validation Plan item is now checked.)
 - **Vision:** closes
-  [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
+  [`visions/plugins/agent-bridge`](../../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
   §Features/*one-canonical-deploy-path*, and §Behaviors/*the next generation
   earns the handoff, never assumes it* and *the outgoing generation waits for
@@ -25,7 +25,7 @@ visions:
 - **Related:** [`efforts/active/agent-bridge-truthful-terminal-state`](../agent-bridge-truthful-terminal-state/README.md)
   (sibling effort — session terminal-state truthfulness; this effort is the
   daemon-generation cutover mechanism those sessions ride through) ·
-  [`libs/zdd`](../../../libs/zdd/README.md) (the shared cutover/routing
+  [`libs/zdd`](../../../../libs/zdd/README.md) (the shared cutover/routing
   library this effort extends, used by 9 plugins)
 
 ## Guiding Intent
@@ -271,14 +271,13 @@ layer — is the operator's own, captured verbatim in Request.)_
   Journal for the evidence and the one honest scope correction (the
   caller-facing `wait --attention turn_complete` gap, tracked as
   [issue #4681](https://github.com/ThomasMichon/copilot-extensions/issues/4681)).
-- [ ] A forced-abrupt-termination drill: kill the old generation before it
+- [x] A forced-abrupt-termination drill: kill the old generation before it
   releases its claims, and confirm a later generation recovers them cleanly.
-  **Partially covered** -- proves the underlying dead-pid-recovery primitive
-  against a genuinely killed real process; the claim is stamped with a
-  test-chosen generation label, not the killed daemon's own real
-  `_generation_id` (no API exposes it -- see Journal's honest scope note),
-  so this does not yet demonstrate a claim *actually owned by that daemon
-  generation* being interrupted and recovered.
+  Closed for real: the claim is now stamped with the killed daemon's own
+  REAL `_generation_id`, not a test-chosen label -- exposed via a new local
+  `running-version.json` field (`runtime_version.set_running_generation_id`,
+  no `/health` contract involved) and read back by the drill. Run for real
+  (`PROBE-SUMMARY: 4/4 passed`, including this check) -- see Journal.
 - [x] Extend or add a clean-room scenario (Tier P, `agent-bridge-solo` or a
   new `agent-bridge-cutover` companion) that exercises this on a real fresh
   machine.
@@ -354,12 +353,10 @@ the full reasoning).
   a real generation change. Verified by a real `CR_LIVE_TURN_DRILL=1` run
   (Docker clean-room, real Copilot auth/credits) -- see Phase 6's Journal
   entry for the evidence.
-- [ ] An abrupt-termination drill shows a stale claim is recovered by the
-  next generation without manual intervention. **Partially covered** -- the
-  claim is stamped with a test-chosen label, not the daemon's own real
-  generation identity (see Journal). Needs a real API to read a live
-  daemon's own `_generation_id` before this can close -- new scope, not a
-  quick correction; left open.
+- [x] An abrupt-termination drill shows a stale claim is recovered by the
+  next generation without manual intervention. Resolved: the claim is now
+  stamped with the killed daemon's own real generation identity (exposed
+  via a new local marker file, not `/health`) -- see Journal.
 - [x] Reconcile staleness is observable via a status command, independent of
   whether Phase 0's opt-in-gate question is resolved to keep or remove it.
   Resolved: the gate was removed; `agent-bridge service status` reports
@@ -432,6 +429,54 @@ entry below for what was inspected, what was already covered, and the one new
 test that closes the gap.
 
 ## Journal
+
+### 2026-09-30 — Effort Done: the real generation-id gap closed, every box checked
+
+- After the checkbox reconciliation below identified this as the sole
+  remaining item, discussed the design options with the operator rather
+  than silently picking one (per this effort's own precedent from Phase 0):
+  (1) split the `/health` field across two PRs to dodge the contract-
+  registry self-reference wall, (2) a new debug-only, non-contract HTTP
+  endpoint, or (3) extend the existing local `running-version.json` marker
+  file (`runtime_version.py`) that already exists for exactly this class of
+  "truthful running-state signal" problem, is read locally (never over
+  HTTP), and was already purely additive. **Operator chose (3).**
+- Implemented: `runtime_version.write_running_version()` gained an optional
+  `generation_id` kwarg; a new `set_running_generation_id()` does a
+  read-merge-write onto the SAME marker so it never contradicts the
+  earlier boot-time write. `app.py`'s `lifespan()` calls it right after
+  `session_manager_from_config()` constructs the real `SessionManager` --
+  the only place that computes `_generation_id` -- passing that exact
+  in-memory value through (no independent recomputation, which would be
+  unreproducible: the id's timestamp component is minted at an arbitrary
+  boot instant). The earlier boot-time `write_running_version()` call
+  (before the manager exists) is untouched; this is a pure follow-up merge.
+- Updated the abrupt-kill-recovery clean-room drill
+  (`fixtures/cutover_probe.py`) to read this real id back (a new
+  `_read_generation_id()` poll helper) and stamp the simulated claim with
+  it instead of the literal `'test-label-gen-1'` -- the claim now
+  genuinely represents the killed daemon's own generation, closing the
+  exact gap the "Honest scope note" flagged. The drill still does NOT
+  exercise the graceful `release_all()` exit-contract path (a SIGKILL
+  never runs it, by design -- that narrower claim stays
+  `test_admin_routes_phase3.py`'s job), so the docstring was corrected to
+  say so plainly rather than overclaim.
+- New unit tests: `test_runtime_version.py` (the `generation_id` kwarg,
+  `set_running_generation_id`'s merge/fresh-start/never-raises behavior)
+  and a new `test_running_version_generation_id.py` driving the REAL
+  FastAPI lifespan via `TestClient` end to end, asserting the marker file
+  ends up holding the SessionManager's own real `_generation_id` with the
+  earlier write's `pid`/`version`/`started_at` intact.
+- **Run for real** (not just unit-tested): the full Tier-P
+  `agent-bridge-cutover` probe against the actual built package (the same
+  editable install `tools/run-plugin-tests.py` uses) --
+  `PROBE-SUMMARY: 4/4 passed`, including `abrupt-kill-recovery` with the
+  real generation id verified end to end (claimed, then genuinely reaped
+  by a real fresh daemon's own real startup scan, host/child process
+  confirmed terminated too). Full `agent-bridge` suite (471 + 416 across
+  its two pytest markers) stayed green throughout.
+- This was the LAST open item in the entire effort. Every Plan and
+  Validation Plan checkbox is now checked -- see the Status line above.
 
 ### 2026-09-30 — Checkbox reconciliation: 3 of 4 remaining items were already done
 
@@ -1562,7 +1607,7 @@ test that closes the gap.
 
 ## See Also
 
-- Vision: [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
-- Extends: [`libs/zdd`](../../../libs/zdd/README.md)
+- Vision: [`visions/plugins/agent-bridge`](../../../../visions/plugins/agent-bridge/README.md)
+- Extends: [`libs/zdd`](../../../../libs/zdd/README.md)
 - Sibling effort: [`agent-bridge-truthful-terminal-state`](../agent-bridge-truthful-terminal-state/README.md)
 - Phase 6 design: [`phase-6-tier-e-live-turn-harness.md`](phase-6-tier-e-live-turn-harness.md)

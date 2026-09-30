@@ -6,7 +6,11 @@ import json
 import os
 
 from agent_bridge import __version__
-from agent_bridge.runtime_version import RUNNING_VERSION_FILE, write_running_version
+from agent_bridge.runtime_version import (
+    RUNNING_VERSION_FILE,
+    set_running_generation_id,
+    write_running_version,
+)
 
 
 def test_write_running_version_content(tmp_path):
@@ -39,4 +43,46 @@ def test_write_running_version_never_raises(tmp_path):
     afile = tmp_path / "afile"
     afile.write_text("x", encoding="utf-8")
     write_running_version(afile / "sub")  # must not raise
+    assert not (afile / "sub" / RUNNING_VERSION_FILE).exists()
+
+
+def test_write_running_version_includes_generation_id_when_given(tmp_path):
+    write_running_version(tmp_path, generation_id="0.4.1-1234-1700000000.000000")
+    data = json.loads((tmp_path / RUNNING_VERSION_FILE).read_text(encoding="utf-8"))
+    assert data["generation_id"] == "0.4.1-1234-1700000000.000000"
+
+
+def test_write_running_version_omits_generation_id_by_default(tmp_path):
+    # The boot-time caller (app.py's lifespan) runs BEFORE the SessionManager
+    # that computes the real id exists -- must not fabricate one.
+    write_running_version(tmp_path)
+    data = json.loads((tmp_path / RUNNING_VERSION_FILE).read_text(encoding="utf-8"))
+    assert "generation_id" not in data
+
+
+def test_set_running_generation_id_merges_onto_existing_marker(tmp_path):
+    # The follow-up call must preserve the earlier write's pid/version/
+    # started_at verbatim, only adding generation_id.
+    write_running_version(tmp_path, pid=4242, version="9.9.9")
+    set_running_generation_id("9.9.9-4242-1700000000.500000", tmp_path)
+    data = json.loads((tmp_path / RUNNING_VERSION_FILE).read_text(encoding="utf-8"))
+    assert data["pid"] == 4242
+    assert data["version"] == "9.9.9"
+    assert data["generation_id"] == "9.9.9-4242-1700000000.500000"
+
+
+def test_set_running_generation_id_starts_fresh_marker_if_absent(tmp_path):
+    # Unusual ordering (or an earlier write failure) -- still best-effort,
+    # never raises, and the generation_id is recorded regardless.
+    d = tmp_path / ".agent-bridge"
+    set_running_generation_id("1.0.0-1-1700000000.000000", d)
+    data = json.loads((d / RUNNING_VERSION_FILE).read_text(encoding="utf-8"))
+    assert data["generation_id"] == "1.0.0-1-1700000000.000000"
+    assert data["pid"] == os.getpid()
+
+
+def test_set_running_generation_id_never_raises(tmp_path):
+    afile = tmp_path / "afile"
+    afile.write_text("x", encoding="utf-8")
+    set_running_generation_id("whatever", afile / "sub")  # must not raise
     assert not (afile / "sub" / RUNNING_VERSION_FILE).exists()

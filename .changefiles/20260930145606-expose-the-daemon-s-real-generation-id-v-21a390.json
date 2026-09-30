@@ -1,0 +1,9 @@
+{
+  "comment": "Expose the daemon's real generation_id via running-version.json (not /health) so the abrupt-termination clean-room drill stamps claims with the daemon's own real generation identity instead of a test-chosen label.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
