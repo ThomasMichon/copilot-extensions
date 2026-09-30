@@ -67,20 +67,40 @@ agent-chat-driven flow).
 kept up to date at the end of every session (or handoff point) so a fresh
 session never has to re-derive "what's already done" from the Journal alone.
 
-- **2026-09-30 status (LENGTH column landed; read this first, supersedes
-  everything below it):** Phases 0-8 remain COMPLETE, plus the 2026-09-29
-  row-shape standardization. This session closed the operator's follow-up
-  question ("does the T column pull from the worktree?") by landing a real
-  cross-plugin fix: `agent-worktrees`' relay bundle gained a new
+- **2026-09-30 status, update 2 (Phase 10 status-checked; a real
+  prerequisite gap found and spun into a sibling effort — read this
+  first):** Phases 0-8 remain COMPLETE, plus the 2026-09-29 row-shape
+  standardization and the LENGTH column (this session, see the bullet
+  below). Operator asked to check on Phase 10's "New task…" button;
+  confirmed it's still entirely unimplemented, and investigating WHY
+  surfaced that Phase 10's own Plan text had a wrong assumption baked in
+  (see the new bullet added to Phase 10's section above: the
+  `PivotAction`/`kind:"form"` mechanism is row-scoped by design; Worktrees'
+  "+ New worktree…" is hand-coded, not a generic mechanism to mirror).
+  Rather than solve this narrowly, folded it together with a second,
+  related operator want (a Prompt field on "New worktree…" itself) into a
+  new sibling effort:
+  [`picker-new-session-prompt-and-composer`](../picker-new-session-prompt-and-composer/README.md)
+  (Phase A = New-worktree Prompt field, Phase B = the generic pivot-level
+  create-action Phase 10 actually needs). **Phase 10 here now explicitly
+  depends on that effort's Phase B** — do not attempt Phase 10 until it
+  lands. No code changed in THIS effort this update; see that sibling
+  effort's own Runbook/Journal for where to pick up next (its own Phase A
+  is the recommended starting point — shared groundwork, and no cross-effort
+  dependency of its own).
+- **2026-09-30 status (LENGTH column landed):** Phases 0-8 remain COMPLETE,
+  plus the 2026-09-29 row-shape standardization. This session closed the
+  operator's follow-up question ("does the T column pull from the
+  worktree?") by landing a real cross-plugin fix: `agent-worktrees`' relay
+  bundle gained a new
   `session_length` fact (session_count + turn_count, both already-cached
   `WorktreeRecord` fields — no new live computation), and `agent-dispatch`
   now renders it as the Tasks board's `LENGTH` column, formatted `"Ns Nt"`
   — the SAME format the (separate, not-yet-implemented) `worktrees-pivot-
   ux-overhaul` effort's own planned Worktrees LENGTH-column rename will
   use, so the two stay visually consistent once that one lands too. See
-  the Journal's 2026-09-30 entry for the full design. Same worktree this
-  landed in, PR not yet opened as of this bullet's own writing — check
-  `pr-status` before starting further work here.
+  the Journal's 2026-09-30 entry for the full design. Landed via PR #4714,
+  merged.
 - **2026-09-29 status, update 2 (row-shape standardization landed):**
   Phases 0-8 remain COMPLETE. Additionally landed a Phase 3 amendment this
   session: the Tasks row now uses the SAME two-line shape as Worktrees/
@@ -1239,6 +1259,19 @@ primitives (PR #3622/#3625). No backend dependency on this effort's Phase 1
 sibling `agent-dispatch-monitor-and-confirmed-state` — composing and queuing
 a task is exactly today's `propose` + `queue` (already implemented), just
 never surfaced as a picker action.
+
+**Depends on** the sibling effort
+[`picker-new-session-prompt-and-composer`](../picker-new-session-prompt-and-composer/README.md)'s
+**Phase B** (2026-09-30) — investigation that session did (see that effort's
+own README) found the Plan bullet below's own assumption wrong: the
+registered-pivot `PivotAction`/`kind:"form"` mechanism is **row-scoped by
+design** (every field spec resolves against an already-selected entry), and
+Worktrees' own "+ New worktree…" button — the thing this Plan says to
+"mirror" — turns out to be hand-coded UI chrome, not a generic mechanism any
+registered pivot can opt into via its manifest. Do not start this phase
+until that sibling effort's Phase B lands a real pivot-level "create" action
+concept; this phase then just declares agent-dispatch's own field list
+against it.
 - [ ] A **New task…** pivot action on the Tasks pivot (`PivotAction`,
       mirroring the Worktrees pane's **New worktree…**), opening the SAME
       declarative composer machinery already proven for steering
@@ -3065,4 +3098,47 @@ for completeness since it shares the Tasks pivot's render path): **1484
 passed / 4 pre-existing failed / 1 skipped** -- the same 4 failures logged
 in the prior entry.
 
+### 2026-09-30 (later same day) — Phase 10 status check surfaces a real prerequisite gap; spun into a sibling effort
+Operator asked to check on Phase 10's "New task…" button. Confirmed via a
+fresh `git log`/grep against `origin/dev` that it remains entirely
+unimplemented (Phase 10's checklist still all `[ ]`). Investigated WHY
+before just reporting "not started," per this effort's own established
+practice of grounding status claims in real code rather than trusting a
+Plan's own prose.
+
+That investigation found Phase 10's own Plan text carries a wrong
+assumption: it says the "New task…" action should mirror Worktrees' own
+"+ New worktree…" button using the "SAME declarative composer machinery
+already proven for steering" -- but `pivot_manifest.py`'s `PivotAction`/
+`kind:"form"` mechanism is **row-scoped by design** (every field spec is
+resolved against an already-selected entry via `_pivots.resolve_path(rec,
+...)`), and "+ New worktree…" itself turns out to be entirely hand-coded
+Worktrees-specific UI chrome (`engine_selection.py`'s `new_worktree_row` +
+the `"N"` button-zone case), not a generic, manifest-driven mechanism any
+registered pivot can opt into. This is a genuine, previously-undocumented
+prerequisite this phase cannot skip.
+
+In the same conversation, the operator independently raised a second,
+related want -- an optional Prompt field on Worktrees' "New worktree…"
+dialog itself, so a freshly created session can launch `--interactive`
+with a seed prompt already queued ("fire and forget", skipping the wait
+through the lengthy auto-update/bootstrap flow). Rather than solve either
+piecemeal, spun up a new sibling effort,
+[`picker-new-session-prompt-and-composer`](../picker-new-session-prompt-and-composer/README.md),
+covering both (they share the same missing capability: a field-spec-driven
+form opened with no row selected, plus reusable field-rendering code
+extracted from the existing, steer-coupled `PivotFormScreen`). That
+effort's own Journal records a full five-layer investigation of the
+New-worktree activation-to-launch path, including a genuinely useful find:
+a seed-prompt mechanism (`--seed`/`--seed-ready-timeout`) already exists on
+`agent-worktrees copilot`, just unreachable from the Picker's actual
+creation flow today.
+
+Phase 10's own section here now explicitly depends on that sibling
+effort's Phase B. No code changed in this effort this session; the
+Runbook's new top bullet + this Journal entry + the cross-link in Phase
+10's section are this session's full contribution. Next real Tasks-pane
+work should wait for the sibling effort's Phase B (or, if the operator
+wants continued forward motion on this effort specifically in the
+meantime, Phase 6/9/11 remain independent and unblocked).
 
