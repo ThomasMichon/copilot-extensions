@@ -1958,7 +1958,7 @@ def test_run_waiter_registration_and_supersession_round_trip(q):
     registered = q.register_run_waiter(
         t.id,
         pid=123,
-        host="lambda-core",
+        host="test-host",
         start_token="token-123",
         resume_worktree="m/wt-1",
         command=["sleep", "1"],

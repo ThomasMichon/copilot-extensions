@@ -37,7 +37,7 @@ def api(app):
 
 
 def _registration_machine() -> str:
-    return remote_dispatch.local_machine() or "lambda-core"
+    return remote_dispatch.local_machine() or "test-host"
 
 
 def test_resource_reservation_api_elects_binds_and_owner_releases(api):
@@ -728,7 +728,7 @@ def test_event_note_wakes_and_supersedes_active_run_waiter(api, monkeypatch):
         f"/tasks/{tid}/run-waiter/register",
         json={
             "pid": 101,
-            "host": "lambda-core",
+            "host": "test-host",
             "start_token": "token-101",
             "resume_worktree": "m/wt-1",
             "command": ["sleep", "1"],

@@ -3,6 +3,8 @@ from __future__ import annotations
 from agent_dispatch.run_waiter_recovery import recover_run_waiters
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
+TEST_HOST = "test-host"
+
 
 def _suspended_task(queue: TaskQueue) -> str:
     task = queue.create("wait")
@@ -18,7 +20,7 @@ def test_recover_run_waiters_leaves_live_waiter_alone(tmp_path):
     queue.register_run_waiter(
         task_id,
         pid=101,
-        host="lambda-core",
+        host=TEST_HOST,
         start_token="token-101",
         resume_worktree="m/wt-1",
         command=["sleep", "1"],
@@ -30,7 +32,7 @@ def test_recover_run_waiters_leaves_live_waiter_alone(tmp_path):
         start_token_for_pid=lambda pid: "token-101" if pid == 101 else None,
         wake_worktree=lambda *_a: False,
         release_claim=lambda *_a: None,
-        current_machine="lambda-core",
+        current_machine=TEST_HOST,
     )
 
     assert counts == {"checked": 1, "live": 1, "unknown": 0, "recovered": 0}
@@ -43,7 +45,7 @@ def test_recover_run_waiters_wakes_dead_waiter_and_releases_claim(tmp_path):
     queue.register_run_waiter(
         task_id,
         pid=101,
-        host="lambda-core",
+        host=TEST_HOST,
         start_token="token-101",
         resume_worktree="m/wt-1",
         command=["sleep", "1"],
@@ -57,7 +59,7 @@ def test_recover_run_waiters_wakes_dead_waiter_and_releases_claim(tmp_path):
         start_token_for_pid=lambda _pid: None,
         wake_worktree=lambda worktree, message: wakes.append((worktree, message)) or True,
         release_claim=lambda task_id, worktree: claims.append((task_id, worktree)) or {"released": True},
-        current_machine="lambda-core",
+        current_machine=TEST_HOST,
     )
 
     assert counts == {"checked": 1, "live": 0, "unknown": 0, "recovered": 1}
@@ -72,7 +74,7 @@ def test_superseded_waiter_drops_late_completion(tmp_path):
     queue.register_run_waiter(
         task_id,
         pid=101,
-        host="lambda-core",
+        host=TEST_HOST,
         start_token="token-101",
         resume_worktree="m/wt-1",
         command=["sleep", "1"],
@@ -83,7 +85,7 @@ def test_superseded_waiter_drops_late_completion(tmp_path):
         queue.retire_run_waiter(
             task_id,
             pid=101,
-            host="lambda-core",
+            host=TEST_HOST,
             start_token="token-101",
             reason="waiter completed",
         )
@@ -97,7 +99,7 @@ def test_recover_run_waiters_treats_uncertain_tokens_as_unknown(tmp_path):
     queue.register_run_waiter(
         task_id,
         pid=101,
-        host="lambda-core",
+        host=TEST_HOST,
         start_token="token-101",
         resume_worktree="m/wt-1",
         command=["sleep", "1"],
@@ -109,7 +111,7 @@ def test_recover_run_waiters_treats_uncertain_tokens_as_unknown(tmp_path):
         start_token_for_pid=lambda _pid: None,
         wake_worktree=lambda *_a: False,
         release_claim=lambda *_a: None,
-        current_machine="lambda-core",
+        current_machine=TEST_HOST,
     )
 
     assert counts == {"checked": 1, "live": 0, "unknown": 1, "recovered": 0}

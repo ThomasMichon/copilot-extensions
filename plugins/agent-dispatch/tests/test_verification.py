@@ -18,7 +18,7 @@ class _Bus:
 
 
 def _registration_machine() -> str:
-    return remote_dispatch.local_machine() or "lambda-core"
+    return remote_dispatch.local_machine() or "test-host"
 
 
 def _submitted_task(
