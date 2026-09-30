@@ -38,9 +38,8 @@ jobs:
     # `main-promotion`'s own allowed branches, and one requiring zero
     # approving reviews to merge a YAML change into) could reach this same
     # environment-scoped credential regardless of this job's own `if:`
-    # guard below, which can't protect against changes to its own YAML on
-    # the ref actually being dispatched (a real review finding on this
-    # workflow's first version). `push: branches: [main]` alone already
+    # guard, which can't protect against changes to its own YAML on the ref
+    # actually being dispatched. `push: branches: [main]` alone already
     # covers every real use case (this job re-runs automatically on every
     # promotion) without ever exposing a selectable-ref entry point.
     environment: main-promotion

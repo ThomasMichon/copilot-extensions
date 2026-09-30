@@ -485,9 +485,10 @@ jobs:
     # squash-merge produces a new sha; the pre-merge candidate commit this
     # job built locally is never the thing that actually lands).
     #
-    # Token: uses the `APERTURE_RELEASE_TOKEN` repository secret (a
-    # fine-grained PAT scoped to this repo, Contents: Read and write +
-    # Pull requests: Read and write), NOT the default `github.token`. GitHub
+    # Token: uses the `APERTURE_RELEASE_TOKEN` environment secret (scoped to
+    # `main-promotion`; a fine-grained PAT scoped to this repo, Contents:
+    # Read and write + Pull requests: Read and write), NOT the default
+    # `github.token`. GitHub
     # never fires other workflow events (including `pull_request`) for
     # content pushed/authored with the default `GITHUB_TOKEN` -- a
     # documented anti-recursion safeguard -- so a `GITHUB_TOKEN`-authored
