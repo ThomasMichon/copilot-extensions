@@ -84,7 +84,8 @@ jobs:
           # tightened that gate, e.g. #2994-#3914). Use the same
           # APERTURE_RELEASE_TOKEN PAT validate-and-promote.yml's own
           # main-targeting PR already relies on for exactly this reason, so
-          # this PR is authored as ThomasMichon and triggers CI normally.
+          # this PR is authored as the repo's configured MAINTAINER_LOGIN
+          # and triggers CI normally.
           token: ${{ secrets.APERTURE_RELEASE_TOKEN }}
           commit-message: "tools: widen-safe module-size baseline refresh (automated)"
           title: "tools: widen-safe module-size baseline refresh (automated)"

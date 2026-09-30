@@ -1,6 +1,11 @@
-# Enforces the "only ThomasMichon modifies workflows/actions/CODEOWNERS"
-# policy (governance: maintainer-tier access model). Branch rulesets alone
-# can't express this on a personal (non-Enterprise) account: the
+# Enforces the "only the configured maintainer login modifies
+# workflows/actions/CODEOWNERS" policy (governance: maintainer-tier access
+# model). The login is a non-secret repository variable
+# (`vars.MAINTAINER_LOGIN`, e.g. `ThomasMichon` on this repo's own copy) --
+# a fork sets its own value rather than editing this file, so this guard
+# protects the fork's own owner instead of silently still gating on the
+# upstream owner's login. Branch rulesets alone can't express this on a
+# personal (non-Enterprise) account: the
 # `file_path_restriction` rule type that would do it natively returns
 # `Validation Failed` here (Enterprise-only), and CODEOWNERS review
 # requirements are skipped entirely for any actor already bypassing PR
@@ -9,25 +14,25 @@
 # So this is enforced as a required status check instead: a check with no
 # bypass actors at all (see the "workflow/CODEOWNERS lockdown" ruleset)
 # fails whenever a protected path is touched by a PR whose registered
-# author (`pull_request.user.login`) is not ThomasMichon.
+# author (`pull_request.user.login`) does not match `MAINTAINER_LOGIN`.
 #
 # This deliberately validates the PR's SUBMITTER, not individual commit
 # authorship. Per-commit `author.login`/`committer.login` are just GitHub's
 # resolution of the commit's plain-text git identity (name + email) against
 # an account -- not a cryptographic proof. Any contributor can locally set
-# `git commit --author="ThomasMichon <NNN+ThomasMichon@users.noreply.github.com>"`
-# and have it resolve to that same login with zero access to the real
-# account, so validating commit metadata would buy nothing but complexity. A
-# PR's `user.login`, by contrast, is an authenticated fact set once by
-# GitHub itself at PR-creation time (you cannot open a PR as another
-# account) -- there is no equivalent way to forge it, and it doesn't change
-# on close/reopen the way an event's `sender` can be gamed into laundering a
-# stale failing result into a passing one.
+# a commit author string that resolves to the maintainer's login with zero
+# access to the real account, so validating commit metadata would buy
+# nothing but complexity. A PR's `user.login`, by contrast, is an
+# authenticated fact set once by GitHub itself at PR-creation time (you
+# cannot open a PR as another account) -- there is no equivalent way to
+# forge it, and it doesn't change on close/reopen the way an event's
+# `sender` can be gamed into laundering a stale failing result into a
+# passing one.
 #
 # KNOWN, ACCEPTED RESIDUAL RISK: this checks who OPENED the PR, not who
 # pushed every commit in it. An already-invited Write collaborator with
 # push access to the same repo could push a follow-up commit directly onto
-# ThomasMichon's own already-open PR branch, and this check would still
+# the maintainer's own already-open PR branch, and this check would still
 # pass (the PR's author is unchanged). Closing that gap fully would need
 # either commit-signature verification (this repo has decided against
 # setting up commit signing -- too much operational hassle for the
@@ -105,19 +110,22 @@ permissions:
   contents: read
   pull-requests: read
 
-env:
-  ALLOWED_LOGIN: ThomasMichon
-
 jobs:
   workflow-lockdown-guard:
     name: workflow-lockdown-guard
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check protected-path changes are ThomasMichon-submitted
+      - name: Check protected-path changes are submitted by the maintainer
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
-          ALLOWED_LOGIN: ${{ env.ALLOWED_LOGIN }}
+          # A non-secret repository *variable* (Settings > Actions >
+          # Variables), not a hardcoded login -- so a fork only needs to set
+          # its own MAINTAINER_LOGIN to reuse this guard for its own owner,
+          # without editing this file or exposing anything secret. Empty/
+          # unset fails closed (no PR can ever match an empty string), which
+          # is the correct default until a fork's own owner configures it.
+          ALLOWED_LOGIN: ${{ vars.MAINTAINER_LOGIN }}
         with:
           script: |
             const protectedPrefixes = [
