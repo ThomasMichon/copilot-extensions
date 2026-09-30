@@ -413,12 +413,13 @@ conflict-dispatch label there.
       runtime behavior, and this Plan does not gate on it.
 
 ### Phase 7 -- Worktree-scoped dynamic guidance for projected instructions
-Closes a gap found while a downstream consumer repo (aperture-labs) drove
-Phase 5 to a live deployment and proof (its own tracked issue #7741): the
-checked-in projection alone leaves an ordinary contributor without push
-rights unable to self-correct sync-lag, and a fully hookless/headless launch
-path never gets fresher content than that same checked-in floor even when a
-hooked path could. See
+Closes a gap found while a downstream consumer repo drove Phase 5 to a live
+deployment and proof (tracked in that repo's own private tracking issue, not
+cited here per this repo's identifier-neutrality rule): the checked-in
+projection alone leaves an ordinary contributor without push rights unable
+to self-correct sync-lag, and a fully hookless/headless launch path never
+gets fresher content than that same checked-in floor even when a hooked path
+could. See
 [ThomasMichon/copilot-extensions#4674](https://github.com/ThomasMichon/copilot-extensions/issues/4674)
 and the new sibling pattern doc,
 `docs/patterns/worktree-scoped-dynamic-guidance.md`, for the full design.
@@ -1030,39 +1031,6 @@ honestly rather than guessing at the full answer.
   `test_projection_reflect_consent.py`); and three CLI-level tests proving
   the wiring (default ignores the requirement, `true` blocks an unpinned
   source, `true` permits a pinned one, in `test_projection_sync_worker.py`).
-
-### 2026-09-29 -- Carved Phase 7 from a downstream deployment's live findings
-
-- Prompted by aperture-labs driving Phase 5 (`projection-reflect`
-  instantiation) to a real live deployment and forced-drift proof, tracked
-  in that repo's own issue #7741: an ordinary contributor without push
-  rights hit an error from a session-start mechanism attempting the sync
-  on their behalf, and a separate architectural discussion (this repo has
-  no visibility into that private conversation; only the resulting design
-  is carried here) concluded that headless/cloud/sandboxed launch paths
-  with no hook and no session-state folder need the checked-in floor to
-  remain authoritative regardless, while every other launch path could
-  reasonably do better.
-- Re-read `docs/patterns/session-scoped-dynamic-guidance.md` before
-  proposing anything new, per this repo's own root `AGENTS.md` orientation
-  discipline -- confirmed its §2a rule already excludes large/stable
-  projected content from the session-scoped file by design, so the right
-  move is a sibling pattern at worktree granularity, not a literal reuse or
-  a modification of the existing one.
-- Filed [#4674](https://github.com/ThomasMichon/copilot-extensions/issues/4674)
-  and added Phase 7 to this effort's Plan/Validation Plan (above): the
-  `.gitignore`/`*.local.instructions.md` convention, the per-file "prefer
-  local" preamble, the repo-wide catch-all for not-yet-synced sources, the
-  shared render-only entry point (no git/PR side effects, ever), and the
-  `agent-worktrees` create/resume + `sessionStart` wiring. Authored the new
-  sibling pattern doc, `docs/patterns/worktree-scoped-dynamic-guidance.md`,
-  and cross-linked it from `session-scoped-dynamic-guidance.md`, the
-  `docs/patterns/README.md` index, and this vision's Reality docs.
-- Not yet built: this entry records the design and its tracking issue only.
-  The actual render-only entry point, the projection-template preamble
-  change, the catch-all projection, and the `agent-worktrees` wiring remain
-  open Plan items above, each its own worktree/PR per this repo's phase
-  convention.
   Updated `reviewing-customizations/SKILL.md` and
   `setting-up-instruction-sync-worker/SKILL.md` (including its consent-
   schema example and scheduler-config description, which still described
@@ -1165,5 +1133,39 @@ honestly rather than guessing at the full answer.
   `Status: Active` rather than `Done` pending the downstream companion
   effort and the umbrella issue's own closure -- not a false completion
   claim; see the umbrella issue for the durable pointer to what remains.
+
+### 2026-09-29 -- Carved Phase 7 from a downstream deployment's live findings
+
+- Prompted by a private downstream consumer repository driving Phase 5
+  (`projection-reflect` instantiation) to a real live deployment and
+  forced-drift proof, tracked in that repo's own private tracking issue
+  (not cited here, per this repo's identifier-neutrality rule): an
+  ordinary contributor without push rights hit an error from a
+  session-start mechanism attempting the sync on their behalf, and a
+  separate architectural discussion (this repo has no visibility into that
+  private conversation; only the resulting design is carried here)
+  concluded that headless/cloud/sandboxed launch paths with no hook and no
+  session-state folder need the checked-in floor to remain authoritative
+  regardless, while every other launch path could reasonably do better.
+- Re-read `docs/patterns/session-scoped-dynamic-guidance.md` before
+  proposing anything new, per this repo's own root `AGENTS.md` orientation
+  discipline -- confirmed its §2a rule already excludes large/stable
+  projected content from the session-scoped file by design, so the right
+  move is a sibling pattern at worktree granularity, not a literal reuse or
+  a modification of the existing one.
+- Filed [#4674](https://github.com/ThomasMichon/copilot-extensions/issues/4674)
+  and added Phase 7 to this effort's Plan/Validation Plan (above): the
+  `.gitignore`/`*.local.instructions.md` convention, the per-file "prefer
+  local" preamble, the repo-wide catch-all for not-yet-synced sources, the
+  shared render-only entry point (no git/PR side effects, ever), and the
+  `agent-worktrees` create/resume + `sessionStart` wiring. Authored the new
+  sibling pattern doc, `docs/patterns/worktree-scoped-dynamic-guidance.md`,
+  and cross-linked it from `session-scoped-dynamic-guidance.md`, the
+  `docs/patterns/README.md` index, and this vision's Reality docs.
+- Not yet built: this entry records the design and its tracking issue only.
+  The actual render-only entry point, the projection-template preamble
+  change, the catch-all projection, and the `agent-worktrees` wiring remain
+  open Plan items above, each its own worktree/PR per this repo's phase
+  convention.
 
 
