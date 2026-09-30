@@ -1,0 +1,9 @@
+{
+  "comment": "Suppress console windows popping per git.exe subprocess call in GitRepoConnector (git: sources) -- production headless crawl of a large repo could flash hundreds of windows.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
