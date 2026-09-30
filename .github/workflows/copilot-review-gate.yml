@@ -193,7 +193,26 @@ jobs:
                 repo: context.repo.repo,
                 pull_number,
               });
-              return data.users.some((user) => user.login === "copilot-pull-request-reviewer[bot]");
+              if (data.users.some((user) => user.login === "copilot-pull-request-reviewer[bot]")) {
+                return true;
+              }
+              // `listRequestedReviewers` only reports reviewers whose review
+              // is still PENDING -- if Copilot finishes fast enough between
+              // polls, it has already left this list, not because the
+              // request failed but because it succeeded and completed.
+              // Accept a review it already submitted for the current head
+              // commit as success too.
+              const headSha = context.payload.pull_request.head.sha;
+              const { data: reviews } = await github.rest.pulls.listReviews({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number,
+              });
+              return reviews.some(
+                (review) =>
+                  review.user.login === "copilot-pull-request-reviewer[bot]" &&
+                  review.commit_id === headSha,
+              );
             }
 
             try {
