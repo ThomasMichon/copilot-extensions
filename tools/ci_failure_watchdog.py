@@ -391,6 +391,62 @@ def process_signature(
     return 0 if _comment_occurrence(repo, existing["number"], sig, run_id, sha) else 1
 
 
+class ReverifyFailed(RuntimeError):
+    """The claimed signature could not be independently reproduced from the
+    referenced run's own real job logs -- see `reverify_signature`."""
+
+
+def reverify_signature(repo: str, run_id: str, expected_signature: str) -> FailureSignature:
+    """Independently re-derive a failure signature's real content directly
+    from the referenced run's own job logs, and return ONLY that freshly-
+    fetched `FailureSignature` -- never anything the caller supplied.
+
+    This exists for `ci-failure-fix-attempt.md`'s `verify-issue` job: its
+    prior authentication chain (author identity, label, unedited body, "a"
+    job in the referenced run concluded failure/timed_out) never actually
+    confirmed the issue's own claimed *excerpt text* corresponds to that
+    job's real output -- only that some real failure happened somewhere in
+    that run. `signature_key` is a public, non-secret hash (job name + test
+    id), so a write collaborator can trivially compute a matching key for
+    any run/job they control; nothing about "the key matches" proves the
+    accompanying prose wasn't fabricated. Recomputing the signature from the
+    run's own real log and returning THAT excerpt (discarding whatever the
+    issue body claimed) closes that gap: whatever content reaches the agent
+    is provably the real, current output of the real job the signature
+    names, not caller-supplied narrative. It does not, and cannot, stop a
+    collaborator from engineering their OWN job to print attacker-chosen
+    text and fail on purpose -- that residual risk is identical in kind to
+    the already-accepted, structurally-unclosable one `ci-failure-fix-
+    attempt.md`'s own charter names for a genuine test's real output (its
+    compensating controls -- never-trust-as-instruction framing,
+    threat-detection on the agent's output, draft-PR-only, mandatory human
+    review -- already cover it); this function only removes the strictly
+    weaker prior gap of an excerpt with no verified connection to any real
+    output at all.
+
+    Raises `LookupFailed` if the run's jobs/logs can't be fetched at all,
+    or `ReverifyFailed` if no reportable failed job in this run currently
+    produces a signature matching `expected_signature`.
+    """
+    jobs = _fetch_run_jobs(repo, run_id)
+    failed_jobs = [
+        job for job in jobs
+        if job.get("conclusion") in REPORTABLE_CONCLUSIONS and job.get("name") not in SKIP_JOB_NAMES
+    ]
+    for job in failed_jobs:
+        try:
+            log_text = _fetch_job_log(repo, job["id"])
+        except LookupFailed:
+            continue
+        for sig in build_signatures(job["name"], log_text):
+            if sig.key == expected_signature:
+                return sig
+    raise ReverifyFailed(
+        f"no reportable failed job in run {run_id} currently reproduces "
+        f"signature {expected_signature!r}"
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=DEFAULT_REPO, help=f"owner/name (default {DEFAULT_REPO})")
@@ -399,11 +455,12 @@ def main(argv: list[str] | None = None) -> int:
         help="the CURRENT validate-and-promote run id (github.run_id) -- its own failed jobs are what get reported",
     )
     parser.add_argument(
-        "--sha", required=True,
+        "--sha",
         help=(
             "the already-verified dev SHA this run validated "
             "(needs.gate.outputs.sha) -- never re-derive this from a "
-            "workflow_run payload; carry the value gate already confirmed"
+            "workflow_run payload; carry the value gate already confirmed. "
+            "Required unless --reverify-signature is given."
         ),
     )
     parser.add_argument("--rate-limit-hours", type=int, default=DEFAULT_RATE_LIMIT_HOURS)
@@ -411,7 +468,42 @@ def main(argv: list[str] | None = None) -> int:
         "--file-issue", action="store_true",
         help="actually file/comment via `gh` (default: dry-run/report only)",
     )
+    parser.add_argument(
+        "--reverify-signature",
+        help=(
+            "Independently re-derive mode for ci-failure-fix-attempt.md's "
+            "verify-issue job: given --run-id and this expected signature "
+            "hash, re-fetch that run's own real job logs, recompute "
+            "signatures, and print the matching one's job_name/test_id/"
+            "title/excerpt as JSON on success (exit 0). Exits 1 with no "
+            "output if no reportable failed job in the run currently "
+            "reproduces this signature. Ignores --sha/--file-issue/"
+            "--rate-limit-hours entirely -- this mode never files or "
+            "comments on anything."
+        ),
+    )
     args = parser.parse_args(argv)
+
+    if args.reverify_signature:
+        try:
+            sig = reverify_signature(args.repo, args.run_id, args.reverify_signature)
+        except (LookupFailed, ReverifyFailed) as error:
+            print(f"[ERROR] reverify failed: {error}", file=sys.stderr)
+            return 1
+        json.dump(
+            {
+                "job_name": sig.job_name,
+                "test_id": sig.test_id,
+                "title": sig.title,
+                "excerpt": sig.excerpt,
+            },
+            sys.stdout,
+        )
+        print()
+        return 0
+
+    if not args.sha:
+        parser.error("--sha is required unless --reverify-signature is given")
 
     try:
         jobs = _fetch_run_jobs(args.repo, args.run_id)
