@@ -1005,6 +1005,57 @@ def test_event_note_rejects_untrusted_sender(api):
     assert r.status_code == 403
 
 
+def test_event_note_rejects_goal_rewrite_fields(api):
+    tid = api.post(
+        "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
+    ).json()["id"]
+    sender = _register_event_emitter(api)
+
+    r = api.post(
+        f"/tasks/{tid}/event-note",
+        json={"sender": sender, "note": "merged", "goal": "replacement"},
+        headers=_control_headers(sender),
+    )
+
+    assert r.status_code == 422
+
+
+def test_run_waiter_arm_rejects_empty_identity_fields(api):
+    tid = api.post(
+        "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
+    ).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(
+        f"/tasks/{tid}/start",
+        json={"worker_id": "w1", "owner_session_id": "session-1"},
+    )
+    api.post(
+        f"/tasks/{tid}/suspend",
+        json={"worker_id": "w1", "reason": "waiting on external state"},
+    )
+    prepared = api.post(
+        f"/tasks/{tid}/run-waiter/register",
+        json={
+            "worker_id": "w1",
+            "reason": "hibernating: sleep 1",
+            "resume_worktree": "m/wt-1",
+            "command": ["sleep", "1"],
+        },
+    )
+
+    r = api.post(
+        f"/tasks/{tid}/run-waiter/arm",
+        json={
+            "generation": prepared.json()["generation"],
+            "pid": 0,
+            "host": "",
+            "start_token": "",
+        },
+    )
+
+    assert r.status_code == 422
+
+
 def test_complete_over_http_releases_handoff_claim(api, monkeypatch):
     """The `/tasks/{id}/complete` route's shared _guard hook releases a
     handoff task's target-worktree claim on a genuine (non-retry)

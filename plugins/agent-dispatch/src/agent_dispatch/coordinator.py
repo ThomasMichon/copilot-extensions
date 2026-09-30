@@ -277,6 +277,7 @@ def create_app(
                     retry_base=wake_retry_base,
                     is_active=wake_is_active,
                     signal=verification_signal,
+                    idle_interval=max(verification_interval, 5.0),
                 )
             )
             if verification_interval > 0

@@ -15,6 +15,9 @@ log = logging.getLogger(__name__)
 
 WakeActive = Callable[[], bool]
 
+def _next_wait_interval(*, has_pending: bool, retry_interval: float, idle_interval: float) -> float:
+    return retry_interval if has_pending else idle_interval
+
 
 async def drain_verification_requests(
     queue: TaskQueue,
@@ -26,8 +29,10 @@ async def drain_verification_requests(
     delivery_lease: float = VERIFICATION_REQUEST_DELIVERY_LEASE,
     is_active: WakeActive | None = None,
     signal: asyncio.Queue[None] | None = None,
+    idle_interval: float | None = None,
 ) -> None:
     """Drain pending submitted-verification requests until cancelled."""
+    idle_interval = interval if idle_interval is None else idle_interval
 
     async def _wait(delay: float) -> None:
         if signal is None:
@@ -58,7 +63,13 @@ async def drain_verification_requests(
         )
         if request is None:
             has_pending = await asyncio.to_thread(queue.has_pending_verification_requests)
-            await _wait(interval if has_pending else interval)
+            await _wait(
+                _next_wait_interval(
+                    has_pending=has_pending,
+                    retry_interval=interval,
+                    idle_interval=idle_interval,
+                )
+            )
             continue
         try:
             report = await asyncio.to_thread(

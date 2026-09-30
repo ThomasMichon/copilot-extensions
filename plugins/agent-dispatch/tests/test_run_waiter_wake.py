@@ -149,3 +149,50 @@ def test_run_waiter_wake_retries_when_claim_release_fails(q):
     asyncio.run(scenario())
     assert len(deliveries) == 2
     assert len(releases) == 2
+
+
+def test_run_waiter_wake_skips_claim_release_after_newer_waiter_prepares(q):
+    task_id, owner, _retired, _wake = _queued_run_waiter_wake(q)
+    releases = []
+    prepared = []
+
+    def deliver(*_args):
+        if not prepared:
+            prepared.append(
+                q.prepare_run_waiter(
+                    task_id,
+                    worker_id=owner,
+                    resume_worktree="m/wt-1",
+                    command=["sleep", "1"],
+                    reason="hibernating: sleep 1",
+                )
+            )
+        return True
+
+    async def scenario():
+        loop = asyncio.create_task(
+            drain_run_waiter_wakes(
+                q,
+                interval=0.01,
+                deliver=deliver,
+                release_claim=lambda task_id, host, worktree, repo: releases.append((task_id, host, worktree, repo)) or {"released": True},
+                retry_base=0.01,
+                max_attempts=1,
+            )
+        )
+        try:
+            for _ in range(200):
+                status = q.list_run_waiter_wakes(task_id)[0].status
+                if status == "stale":
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                raise AssertionError("run waiter wake was not fenced stale")
+        finally:
+            loop.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await loop
+
+    asyncio.run(scenario())
+    assert releases == []
+    assert prepared and prepared[0]["generation"] == 2

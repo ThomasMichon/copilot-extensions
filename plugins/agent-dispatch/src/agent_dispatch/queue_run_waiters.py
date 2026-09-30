@@ -254,10 +254,7 @@ class QueueRunWaitersMixin:
 
     def list_run_waiter_wakes(self, task_id: str) -> list[RunWaiterWakeOperation]:
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM run_waiter_wakes WHERE task_id = ? ORDER BY created_at ASC, id ASC",
-                (task_id,),
-            ).fetchall()
+            rows = conn.execute("SELECT * FROM run_waiter_wakes WHERE task_id = ? ORDER BY created_at ASC, id ASC", (task_id,)).fetchall()
         return [RunWaiterWakeOperation._from_row(row) for row in rows]
 
     def supersede_run_waiter(
@@ -701,10 +698,7 @@ class QueueRunWaitersMixin:
                 )
                 if not cur.rowcount:
                     continue
-                claimed = conn.execute(
-                    "SELECT * FROM run_waiter_wakes WHERE id = ?",
-                    (wake.id,),
-                ).fetchone()
+                claimed = conn.execute("SELECT * FROM run_waiter_wakes WHERE id = ?", (wake.id,)).fetchone()
                 conn.execute("COMMIT")
                 return RunWaiterWakeOperation._from_row(claimed)
 
@@ -764,12 +758,26 @@ class QueueRunWaitersMixin:
                         " last_error = ? WHERE id = ?",
                         (ts, ts + delay, error or "delivery failed", wake.id),
                     )
-            result = conn.execute(
-                "SELECT * FROM run_waiter_wakes WHERE id = ?",
-                (wake.id,),
-            ).fetchone()
+            result = conn.execute("SELECT * FROM run_waiter_wakes WHERE id = ?", (wake.id,)).fetchone()
             conn.execute("COMMIT")
         return RunWaiterWakeOperation._from_row(result)
+
+    def run_waiter_wake_current(self, wake_id: str, delivery_token: str) -> bool:
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT * FROM run_waiter_wakes WHERE id = ?", (wake_id,)).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                return False
+            wake = RunWaiterWakeOperation._from_row(row)
+            task = self._fetch(conn, wake.task_id)
+            ok = (
+                wake.status == "delivering"
+                and wake.delivery_token == delivery_token
+                and self._run_waiter_wake_is_current(conn, task, wake)
+            )
+            conn.execute("COMMIT")
+        return bool(ok)
 
     def append_event_note(
         self,
@@ -831,11 +839,7 @@ class QueueRunWaitersMixin:
                 )
                 wake_kind = "owner"
             elif wake_agent and current is not None and current.status == Status.SUSPENDED:
-                waiter_row = self._select_waiter_row(
-                    conn,
-                    task_id,
-                    states=("preparing", "active"),
-                )
+                waiter_row = self._select_waiter_row(conn, task_id, states=("preparing", "active"))
                 if waiter_row is not None:
                     waiter = self._run_waiter_from_row(waiter_row)
                     if self._run_waiter_matches_task(waiter, current):
@@ -935,10 +939,7 @@ class QueueRunWaitersMixin:
                 ts,
             ),
         )
-        row = conn.execute(
-            "SELECT * FROM run_waiter_wakes WHERE id = ?",
-            (wake_id,),
-        ).fetchone()
+        row = conn.execute("SELECT * FROM run_waiter_wakes WHERE id = ?", (wake_id,)).fetchone()
         return RunWaiterWakeOperation._from_row(row)
 
     @staticmethod

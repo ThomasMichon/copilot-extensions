@@ -89,6 +89,15 @@ async def drain_run_waiter_wakes(
             delivery_error = f"wake delivery error: {type(exc).__name__}"
         if delivered and release_claim is not None:
             try:
+                    current = await asyncio.to_thread(
+                        queue.run_waiter_wake_current,
+                        wake.id,
+                        wake.delivery_token or "",
+                    )
+                    if not current:
+                        delivered = False
+                        delivery_error = "waiter wake superseded before claim release"
+                        raise TaskError(delivery_error)
                     task = await asyncio.to_thread(queue.get, wake.task_id)
                     released = await asyncio.to_thread(
                         release_claim,
@@ -97,6 +106,8 @@ async def drain_run_waiter_wakes(
                         _worktree_id(wake.resume_worktree),
                         None if task is None else task.repo,
                     )
+            except TaskError:
+                pass
             except Exception:
                 log.warning(
                     "run-waiter wake claim release failed for %s",

@@ -4,46 +4,55 @@ from __future__ import annotations
 
 import os
 import secrets
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from pydantic import BaseModel, Field, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from . import remote_dispatch
 from .coordinator_auth import _make_control_auth, scoped_control_token
 from .events import EventBus
 from .queue import RegistrationKind, Task, TaskError, TaskQueue
 
+PositiveInt = Annotated[int, Field(strict=True, gt=0)]
+NonEmptyText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
 
 class EventNoteBody(BaseModel):
-    sender: str
-    note: str
+    model_config = ConfigDict(extra="forbid")
+    sender: NonEmptyText
+    note: NonEmptyText
 
 
 class VerifySubmittedBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     evaluator_ref: str | None = None
 
 
 class RunWaiterRegisterBody(BaseModel):
-    worker_id: str
-    reason: str
-    resume_worktree: str
+    model_config = ConfigDict(extra="forbid")
+    worker_id: NonEmptyText
+    reason: NonEmptyText
+    resume_worktree: NonEmptyText
     command: list[str] = Field(default_factory=list)
 
 
 class RunWaiterArmBody(BaseModel):
-    generation: StrictInt
-    pid: StrictInt
-    host: str
-    start_token: str
+    model_config = ConfigDict(extra="forbid")
+    generation: PositiveInt
+    pid: PositiveInt
+    host: NonEmptyText
+    start_token: NonEmptyText
 
 
 class RunWaiterFinishBody(RunWaiterArmBody):
-    message: str
+    message: NonEmptyText
 
 
 class RunWaiterAbortBody(BaseModel):
-    generation: StrictInt
-    message: str
+    model_config = ConfigDict(extra="forbid")
+    generation: PositiveInt
+    message: NonEmptyText
     wake: bool = True
 
 

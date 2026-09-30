@@ -1030,12 +1030,17 @@ down and re-woken with its context intact when the wait returns. The resume is a
 best-effort bridge nudge -- a genuinely-gone worker is handled by liveness
 recovery, not the nudge.
 
-Always pass `--task` with `--detach`: it atomically suspends that task the
-moment the detached waiter is confirmed spawned (so `started` never outlives
-the session actually doing the work) and journals a `task`-kind
-agent-worktrees claim on the current worktree, blocking finalize/managed-GC
-from reclaiming it out from under the still-open task. Both are best-effort
-and non-fatal -- neither blocks the detach itself. See
+Always pass `--task` with `--detach`: the coordinator transactionally prepares a
+new detached-waiter generation (suspending the task in the same durable step),
+the child process must then **arm** that generation with its PID/host/start-token
+identity fence before it owns the wait, and any pre-arm failure aborts or
+recovers that prepared generation instead of leaving an unrecoverable suspended
+task behind. A `task`-kind agent-worktrees claim is journaled on the current
+worktree as part of the detach flow, blocking finalize/managed-GC from
+reclaiming it out from under the still-open task; durable wake delivery retires
+that claim only while the same waiter generation still owns completion. These
+guardrails are best-effort and non-fatal -- they backstop hibernation rather
+than blocking the detach itself. See
 [`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
 (§Features/*hibernate-the-wait*).
 
