@@ -24,6 +24,7 @@ import hashlib
 import json
 import os
 import re
+import uuid
 from pathlib import Path
 
 from venue_copilot import SESSION_SELECTORS
@@ -42,10 +43,11 @@ _NO_ID = ("--continue",)
 def split_selectors(args: list[str]) -> tuple[list[str], list[str], str | None]:
     """``(own, selectors, session_id)``: the flags that aren't a session
     selector, the selector tokens (a split ``-r <id>`` stays together), and the
-    session id a selector names, if any."""
+    session id -- only when exactly one selector is given and it names one."""
     own: list[str] = []
     selectors: list[str] = []
-    session_id: str | None = None
+    ids: list[str] = []
+    count = 0
     i = 0
     while i < len(args):
         arg = str(args[i])
@@ -55,13 +57,17 @@ def split_selectors(args: list[str]) -> tuple[list[str], list[str], str | None]:
             i += 1
             continue
         selectors.append(arg)
+        count += 1
         if not eq and flag not in _NO_ID and i + 1 < len(args) and not str(args[i + 1]).startswith("-"):
             value = str(args[i + 1])
             selectors.append(value)
             i += 1
         if value and flag not in _NO_ID:
-            session_id = value
+            ids.append(value)
         i += 1
+    # More than one selector (``--continue --resume=x``, two ``--resume``s) is
+    # ambiguous: it names no one session to match a record to.
+    session_id = ids[0] if count == 1 and len(ids) == 1 else None
     return own, selectors, session_id
 
 
@@ -75,13 +81,23 @@ def _path(codespace: str, tenant: str) -> Path | None:
 
 
 def _load(path: Path | None) -> dict:
+    """The record, only if its whole payload is well-formed (else ``{}``)."""
     if path is None:
         return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    args, driver = data.get("copilot_args"), data.get("driver")
+    if (
+        not isinstance(data.get("tenant"), str) or not isinstance(data.get("session_id"), str)
+        or not isinstance(args, list) or not all(isinstance(a, str) and a for a in args)
+        or not isinstance(driver, str) or not driver
+    ):
+        return {}
+    return data
 
 
 def apply(
@@ -97,13 +113,11 @@ def apply(
     if record.get("tenant") != tenant or record.get("session_id") != session_id:
         return own + selectors, driver, []
     recalled: list[str] = []
-    saved = record.get("copilot_args")
-    if isinstance(saved, list) and saved:
-        own = split_selectors([str(a) for a in saved])[0]
+    if record["copilot_args"]:
+        own = split_selectors(record["copilot_args"])[0]
         recalled.append("copilot_args")
-    saved_driver = record.get("driver")
-    if isinstance(saved_driver, str) and saved_driver != DEFAULT_DRIVER:
-        driver = saved_driver
+    if record["driver"] != DEFAULT_DRIVER:
+        driver = record["driver"]
         recalled.append("driver")
     return own + selectors, driver, recalled
 
@@ -117,10 +131,21 @@ def remember(
         return
     data = {"tenant": tenant, "session_id": session_id,
             "copilot_args": split_selectors(copilot_args)[0], "driver": driver}
+    # Owner-only (a record another local user could edit would inject flags,
+    # permission flags included, into a later resume), atomic, like lease.py.
+    tmp = path.with_name(f".{path.name}.tmp-{uuid.uuid4().hex}")
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(f".{os.getpid()}.tmp")
-        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(json.dumps(data, indent=2).encode("utf-8"))
+            fh.flush()
+            os.fsync(fh.fileno())
         os.replace(tmp, path)
     except OSError:
         pass  # best-effort: a launch never fails over its own memory
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass

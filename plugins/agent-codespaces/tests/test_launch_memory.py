@@ -71,3 +71,32 @@ def test_a_corrupt_or_foreign_record_is_ignored():
     assert lm.apply("cs-1", TENANT, ["--resume=s1"], D) == (["--resume=s1"], D, [])
     path.write_text(json.dumps({"tenant": "cli:else", "session_id": "s1", "copilot_args": ["--x"]}), encoding="utf-8")
     assert lm.apply("cs-1", TENANT, ["--resume=s1"], D)[2] == []
+
+
+def test_more_than_one_selector_is_ambiguous_and_recalls_nothing():
+    lm.remember("cs-1", TENANT, ["--allow-all-tools"], "orchestrator", "s1")
+    for sel in (["--continue", "--resume=s1"], ["--resume=s0", "--resume=s1"], ["-r", "s1", "--session-id=s1"]):
+        assert lm.apply("cs-1", TENANT, sel, D) == (sel, D, []), sel
+
+
+def test_a_schema_corrupt_record_is_ignored_whole():
+    path = lm._path("cs-1", TENANT)
+    base = {"tenant": TENANT, "session_id": "s1", "copilot_args": ["--no-ask-user"], "driver": "o"}
+    for bad in ({**base, "copilot_args": ["--x", 7]}, {**base, "copilot_args": "--x"},
+                {**base, "driver": None}, {**base, "session_id": 1}):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(bad), encoding="utf-8")
+        assert lm.apply("cs-1", TENANT, ["--resume=s1"], D) == (["--resume=s1"], D, []), bad
+
+
+def test_the_record_is_owner_only_and_leaves_no_temp_file():
+    import os
+    import stat
+
+    lm.remember("cs-1", TENANT, ["--no-ask-user"], "o", "s1")
+    path = lm._path("cs-1", TENANT)
+    assert [p.name for p in path.parent.iterdir()] == [path.name]
+    if os.name != "nt":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(path.parent.stat().st_mode) & 0o077 == 0
+
