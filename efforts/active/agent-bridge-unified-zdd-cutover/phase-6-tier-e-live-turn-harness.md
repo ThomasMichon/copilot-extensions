@@ -126,10 +126,20 @@ Plan).**
 - [ ] A real live cutover drill shows a real Copilot turn completes with
   zero observed disruption while the daemon's generation actually changes
   underneath it (same session id, no dropped/duplicated event, confirmed
-  generation change -- not a trivial/no-op cutover).
-- [ ] The drill's verdict is programmatic/evidence-based, or a documented
-  decision explains why an LLM judge is the right mechanism after all.
-- [ ] The scenario (or bespoke script) is documented in `tools/clean-room/
+  generation change -- not a trivial/no-op cutover). Implemented as
+  `fixtures/live_turn_probe.py`, wired as scenario phase 4
+  (`CR_LIVE_TURN_DRILL=1`); not yet executed for real (needs Docker + real
+  Copilot auth + real credits -- see the effort README's Journal).
+- [x] The drill's verdict is programmatic/evidence-based, or a documented
+  decision explains why an LLM judge is the right mechanism after all. It
+  is programmatic: `HostIndex` record reattach, `sessions --json` status,
+  `wait --attention turn_complete`, and an `events.jsonl` before/after
+  diff -- no LLM judge, confirming this doc's own §"why this doesn't fit
+  the harness's standard Tier-E shape".
+- [x] The scenario (or bespoke script) is documented in `tools/clean-room/
   README.md`'s catalog, and in `ARCHITECTURE.md`/`TIER-E-EXECUTION.md` if
   it establishes a new "objective-only Tier-E" pattern other plugins could
-  reuse for similar infra-reliability drills.
+  reuse for similar infra-reliability drills. Documented in the catalog;
+  it does NOT establish a new Tier-E pattern (it deliberately isn't Tier-E
+  at all -- an opt-in phase of an existing Tier-P scenario instead), so
+  `ARCHITECTURE.md`/`TIER-E-EXECUTION.md` were left untouched.

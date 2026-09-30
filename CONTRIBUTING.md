@@ -1242,6 +1242,16 @@ binstub in `~/.local/bin/`.
   comments, docstrings, or a doc's own current-state prose (including an
   effort's own Plan/Request sections, which describe the present plan, not a
   history of how it was revised).
+  **Even inside that Journal exception, the justification itself must be
+  self-contained** — record *why* the finding was correct (the invariant it
+  protects, the bug it prevents, the constraint that required it), not merely
+  that a review said so. "Review round N flagged X" citing only the review as
+  authority, with no independent technical reasoning, creates the same
+  circular-reference problem a Wikipedia article has when its only source is
+  itself: a review comment is not guaranteed to stay inspectable, and even
+  when it is, it was never itself the *reason* — it was only the trigger that
+  surfaced a reason that must stand on its own regardless of whether that
+  review ever happened.
 - Python 3.10+, type hints encouraged
 - **Linter: [ruff](https://docs.astral.sh/ruff/).** Each plugin configures its
   own `[tool.ruff]` in `pyproject.toml`. Run the full pass with `ruff check .`

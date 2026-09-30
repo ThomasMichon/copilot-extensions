@@ -451,20 +451,17 @@ jobs:
     # fully-unattended promotion run waiting on a manual click, which
     # would defeat the whole point of this pipeline.
     #
-    # **Not yet closed:** `APERTURE_RELEASE_TOKEN` below is still a plain
-    # REPOSITORY secret, not an environment secret -- an environment's
-    # branch policy cannot restrict a repository secret's visibility, so
-    # today a workflow on an unprotected scratch branch can still read it
-    # regardless of this job's `environment:` declaration. Migrating it to
-    # an environment-scoped secret under `main-promotion` (then deleting
-    # the repository-level copy) is the step that actually closes this —
-    # see the dev-branch-release-pipeline journal (2026-09-25 entry) for
-    # why that step needs the operator's own `gh secret set` and hasn't
-    # happened yet. Until it does, treat this environment's protection as
-    # configured-but-not-yet-effective for this specific secret.
+    # **Migration complete (confirmed live, 2026-09-29):**
+    # `APERTURE_RELEASE_TOKEN` is now an ENVIRONMENT secret scoped to
+    # `main-promotion` (the repository-level copy has been removed;
+    # `gh secret list` no longer shows it) -- the scratch-branch variant of
+    # the risk described below is closed: a job that doesn't declare this
+    # `environment:` genuinely cannot read the secret at all (confirmed by
+    # the exact failure this caused in a sibling workflow,
+    # `module-size-baseline-widen.yml`, until it also declared this same
+    # `environment:`).
     #
-    # **Even after that migration, this only closes the scratch-branch
-    # variant of the risk, not the through-`dev` variant:** `dev` is
+    # **Still open -- the through-`dev` variant:** `dev` is
     # itself one of the two branches this policy allows (it has to be --
     # that's this job's own real ref), and `dev`'s ruleset requires zero
     # approving reviews to merge. A Write collaborator could still merge
@@ -488,9 +485,10 @@ jobs:
     # squash-merge produces a new sha; the pre-merge candidate commit this
     # job built locally is never the thing that actually lands).
     #
-    # Token: uses the `APERTURE_RELEASE_TOKEN` repository secret (a
-    # fine-grained PAT scoped to this repo, Contents: Read and write +
-    # Pull requests: Read and write), NOT the default `github.token`. GitHub
+    # Token: uses the `APERTURE_RELEASE_TOKEN` environment secret (scoped to
+    # `main-promotion`; a fine-grained PAT scoped to this repo, Contents:
+    # Read and write + Pull requests: Read and write), NOT the default
+    # `github.token`. GitHub
     # never fires other workflow events (including `pull_request`) for
     # content pushed/authored with the default `GITHUB_TOKEN` -- a
     # documented anti-recursion safeguard -- so a `GITHUB_TOKEN`-authored

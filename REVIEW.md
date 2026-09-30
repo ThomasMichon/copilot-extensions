@@ -160,7 +160,12 @@ specifically when reviewing a pull request, not a replacement for them.
   version of itself ("previously X, now Y") — that response belongs on the
   review comment thread, not in the artifact (`CONTRIBUTING.md`, "Code
   Style"). The one exception is a project's own dated `## Journal` section,
-  which is a decision log by design.
+  which is a decision log by design — but even there, flag an entry whose
+  only stated justification is that a review said so, with no independent
+  technical reasoning (the invariant, bug, or constraint actually involved):
+  a review comment citing itself as authority is the same circular-reference
+  problem as a Wikipedia article sourcing only itself, and a review thread
+  is not guaranteed to stay inspectable.
 - **Render `Approve` when ready — on a contributor's PR.** Copilot code
   review can only ever submit `Approve` or `Comment` (there is no
   `Request changes` capability in Copilot code review at all — see

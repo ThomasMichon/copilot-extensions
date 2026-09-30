@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** In Progress (Phase 1 of 6 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 6 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 6 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 6 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 6 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to Phase 6; Phase 6 (Tier-E live-turn-survival harness) planned, not started)
+- **Status:** In Progress (Phase 1 of 6 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 6 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 6 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 6 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 6 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to Phase 6; Phase 6 of 6 implemented, PR open — closes Phase 5's deferred live-turn Plan item as an opt-in `CR_LIVE_TURN_DRILL=1` extension of the Tier-P `agent-bridge-cutover` scenario, not a Tier-E harness)
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
@@ -270,7 +270,7 @@ layer — is the operator's own, captured verbatim in Request.)_
   new `agent-bridge-cutover` companion) that exercises this on a real fresh
   machine.
 
-### Phase 6 — Tier-E live-turn-survival harness (planned, not started)
+### Phase 6 — Tier-E live-turn-survival harness (implemented; live run pending)
 
 Closes Phase 5's Plan item 1 for real: prove, with a genuinely live
 Copilot/ACP turn in flight, that `agent-bridge deploy` does not disrupt it
@@ -281,24 +281,47 @@ sketch, feasibility notes, and acceptance criteria live in the sibling
 design doc:
 [`phase-6-tier-e-live-turn-harness.md`](phase-6-tier-e-live-turn-harness.md).
 
+**Resolved design question:** this does NOT get a "Tier E" label or use
+Tier-E's provider-registration machinery. It ships as an opt-in phase 4
+(`CR_LIVE_TURN_DRILL=1`, default off) of the existing Tier-P
+`agent-bridge-cutover` scenario, with the drill logic in a new sibling
+fixture (`fixtures/live_turn_probe.py`) rather than another
+`cutover_probe.py` check, because it needs a real Copilot auth context and
+deliberately runs against the box's own real, already-provisioned install
+instead of a throwaway sandbox (see the fixture's own module docstring for
+the full reasoning).
+
 - [ ] A real live cutover drill shows a real Copilot turn completes with
   zero observed disruption while the daemon's generation actually changes
   underneath it (same session id, no dropped/duplicated event, confirmed
-  generation change -- not a trivial/no-op cutover). See the sibling doc.
-- [ ] The drill's verdict is programmatic/evidence-based, or a documented
-  decision explains why an LLM judge is the right mechanism after all.
-- [ ] The scenario (or bespoke script) is documented in the clean-room
-  catalog and harness docs if it establishes a new reusable pattern.
+  generation change -- not a trivial/no-op cutover). Implemented in
+  `fixtures/live_turn_probe.py`, wired as opt-in scenario phase 4. **Not yet
+  executed for real** in this round (Docker + real Copilot auth + real
+  credits are needed; see Journal) -- the assertions and bounded-poll
+  mechanics were built and reviewed against the real `HostIndex`/session
+  CLI contracts, matching the same rigor `abrupt-kill-recovery` (Phase 5)
+  used, but a live run is the next session's/operator's job to trigger and
+  observe.
+- [x] The drill's verdict is programmatic/evidence-based (a dedicated
+  comparator over `HostIndex` records, `sessions --json` status, `wait
+  --attention turn_complete`, and an `events.jsonl` before/after diff) --
+  no LLM judge involved, per the design doc's own conclusion.
+- [x] The scenario is documented in the clean-room catalog
+  (`tools/clean-room/README.md`) and in this scenario's own `manifest.json`/
+  `scenario.sh` header comments; no new reusable Tier-E pattern was
+  established (the opposite -- an existing Tier-P scenario grew one opt-in
+  phase), so `ARCHITECTURE.md`/`TIER-E-EXECUTION.md` were left untouched.
 
 ## Validation Plan
 
 - [ ] `agent-bridge service restart` (or its replacement) and `agent-bridge
   deploy` are provably the same code path (a shared test, or the removal of
   one verb).
-- [ ] A live cutover drill (Phase 5) shows zero session disruption across a
-  real generation change. **See Phase 6** -- needs a real live Copilot turn
-  (Tier-E-style harness), not deliverable at Phase 5's Tier-P/stdlib-probe
-  fidelity; planned but not started.
+- [ ] A live cutover drill (Phase 5/6) shows zero session disruption across
+  a real generation change. Implemented as Phase 6's opt-in
+  `CR_LIVE_TURN_DRILL=1` drill; **not yet executed for real** this round
+  (needs Docker + real Copilot auth + real credits -- see Phase 6's Journal
+  entry).
 - [ ] An abrupt-termination drill shows a stale claim is recovered by the
   next generation without manual intervention. **Partially covered** -- the
   claim is stamped with a test-chosen label, not the daemon's own real
@@ -363,6 +386,72 @@ entry below for what was inspected, what was already covered, and the one new
 test that closes the gap.
 
 ## Journal
+
+### 2026-09-29 — Phase 6 implemented (opt-in live-turn-survival drill, PR pending)
+- Consumed the prior session's planning handoff (Phase 6 design doc,
+  `phase-6-tier-e-live-turn-harness.md`, merged as PR #4626) and implemented
+  the drill it specified.
+- **Resolved the design doc's open question:** this is NOT a Tier-E
+  scenario. Read `TIER-E-EXECUTION.md` in full -- its machinery
+  (`bridge_register.py`, the literal-mode judge, `expected_outcome`
+  rubrics) exists to audit whether a driven agent can *follow a plugin's
+  docs*; this drill has no doc-compliance question, so none of that
+  applies. Shipped instead as an opt-in phase 4 of the existing Tier-P
+  `agent-bridge-cutover` scenario, gated behind `CR_LIVE_TURN_DRILL=1`
+  (default off -- Docker-only, needs real Copilot auth, consumes real AI
+  credits, never a routine CI gate).
+- **New fixture, not another `cutover_probe.py` check.** Read
+  `cutover_probe.py`'s own `Ctx` class closely: every existing check
+  deliberately relocates `HOME`/`AGENT_BRIDGE_CONFIG_DIR` into a throwaway
+  sandbox so it never touches a live daemon's real state. That is wrong
+  for this drill: a throwaway `HOME` has no `~/.copilot` credentials, so
+  every real model call would fail closed. Added
+  `fixtures/live_turn_probe.py` instead, which deliberately runs against
+  the box's REAL, already-provisioned install (the one `scenario.sh`
+  phases 1/2 just built) -- safe only because the intended venue is a
+  disposable clean-room container with nothing else concurrently relying
+  on that state, which is also exactly why this drill must stay
+  Docker-only and is never run against a real workstation's real
+  `~/.agent-bridge`/`~/.copilot`.
+- **Read the real source to ground every assertion, not just the design
+  doc's sketch:** `agent_registry_resolver.py` (confirmed a `host`-less,
+  `spawn_command`-less agent config resolves to `SpawnTarget(type="local",
+  ...)`), `agent_registry_topology.py`'s `discover_local_agents` (confirmed
+  a `~/.agent-worktrees/projects.yaml` entry with an `anchor` is exactly
+  how to register a real local target for `agent-bridge create
+  <name> --target-dir <repo>`), `session_host/host_index.py`'s
+  `HostRecord` (confirmed the field set -- `owner_pid`/`owner_generation`
+  only, no `acp_session_id`; that lives in the frontend's own
+  `sessions --json`, not `HostIndex`), `zdd/claims.py`'s `generation_id`
+  (confirmed it is genuinely not independently reproducible from outside
+  the process -- version+pid+wall-clock -- so the drill compares real pids
+  across the boundary instead of trying to recompute the generation
+  string), and `session_streaming_cli.py`'s `wait --attention
+  turn_complete` (the same caller-facing channel a real caller uses,
+  giving a stronger continuity proof than internal bookkeeping alone).
+- **Verdict mechanism (programmatic, per the design doc's own
+  conclusion):** same session id + same `acp_session_id` throughout; the
+  daemon generation genuinely changed (different real pid, old port
+  retired); the `HostIndex` claim reattaches under the NEW generation's
+  real pid (not merely "some record exists"); the `events.jsonl` snapshot
+  taken the instant `deploy` fires is an exact prefix of the final
+  snapshot (no truncation/mutation); exactly one `assistant.turn_end` and
+  no duplicate `session.start`/`session.shutdown`; and the bridge's own
+  `wait --attention turn_complete` settles cleanly across the boundary.
+- **Honest scope note (same discipline Phase 5 used).** This round
+  implemented and reviewed the drill's logic against the real APIs it
+  calls, but did **not** execute it for real -- that needs a Docker
+  clean-room box with real Copilot auth injected and spends real AI
+  credits per run, which is out of scope to trigger interactively from an
+  ordinary coding session on a real workstation (this effort's own safety
+  rules: never risk a real machine's real `~/.agent-bridge`/`~/.copilot`).
+  Triggering the first real run (and iterating on whatever it surfaces --
+  Phase 5's own abrupt-kill-recovery check took nine review rounds to get
+  honest and correct) is the next concrete step; recorded as a known gap
+  rather than silently claimed done.
+- Updated `manifest.json`, `scenario.sh`'s header comments, and
+  `tools/clean-room/README.md`'s catalog entry to document the new opt-in
+  phase/env vars.
 
 ### 2026-09-29 — Phase 6 planned (not started)
 - Planned (operator request, after Phase 5 merged) rather than started
