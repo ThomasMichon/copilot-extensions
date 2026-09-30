@@ -1222,6 +1222,26 @@ binstub in `~/.local/bin/`.
 
 ## Code Style
 
+- **Code, comments, docstrings, and non-Journal documentation describe the
+  system's current, timeless state — never the review process that shaped
+  them.** Do not write "fixed per review feedback," "renamed X to Y (reviewer
+  requested)," "previously did Z, now does W," or a parenthetical review-round
+  citation into code, a docstring, a README, or a pattern doc. A future reader
+  has no access to the review thread that motivated it, so it reads as
+  unexplained clutter at best — and at worst references an intermediate state
+  that was proposed, objected to, and fixed before ever being committed, so it
+  describes something that never existed in this repo's actual history at
+  all. A response to a review comment belongs in exactly one place: a reply on
+  that comment thread (the PR body/commit message carry aggregate context) —
+  never as prose baked into the artifact itself. The code/doc simply changes
+  to its new correct state; nothing about *how* it got there needs to live
+  inside it. The one durable exception is a project's own dated `## Journal`
+  (e.g. an effort's own journal section) — that is explicitly a decision log
+  by design, and "review round N caught X" is exactly what belongs in a dated
+  entry there. Do not import that journaling habit into ordinary code
+  comments, docstrings, or a doc's own current-state prose (including an
+  effort's own Plan/Request sections, which describe the present plan, not a
+  history of how it was revised).
 - Python 3.10+, type hints encouraged
 - **Linter: [ruff](https://docs.astral.sh/ruff/).** Each plugin configures its
   own `[tool.ruff]` in `pyproject.toml`. Run the full pass with `ruff check .`
