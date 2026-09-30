@@ -1,4 +1,4 @@
-"""Tests for gitea the downstream tracker -- session/worktree association must
+"""Tests for durable session/worktree association -- it must
 always be durably recorded, and a session that yields to a handoff must open
 the head position for the *next* session, not just its own formally-linked
 successor.

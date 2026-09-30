@@ -79,7 +79,7 @@ def session_state_worktree_binding_path(session_id: str | None) -> Path | None:
     Unconditional counterpart to `session_state_handoff_path` (which only
     exists for a handoff flow): every session that registers against a
     worktree gets this record, regardless of whether a handoff was ever
-    involved (gitea the downstream tracker, wish 1 -- durable session recording
+    involved (wish 1 -- durable session recording
     must not depend on the handoff mechanism succeeding).
     """
     if not session_id:

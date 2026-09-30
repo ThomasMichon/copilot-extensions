@@ -26,8 +26,8 @@
 # Copilot CLI prereq on a governed box (a build-time given, not the experiment).
 # --uv-index is the RUNTIME analog: opt-in, points the deploy stage's uv at an
 # internal index; default off so the governed uv jam surfaces.
-# --block-public-feeds (the downstream feed-neutral-build-config effort, Phase 3
-# Phase 3) is the inverse control: it null-routes pypi.org/
+# --block-public-feeds (the downstream feed-neutral-build-config effort, Phase 3)
+# is the inverse control: it null-routes pypi.org/
 # files.pythonhosted.org/registry.npmjs.org/download.pytorch.org via Docker
 # --add-host, regardless of the HOST's real connectivity, so an unrestricted
 # dev box can still exercise "public feed genuinely unreachable" -- the same
@@ -295,7 +295,7 @@ print("true" if manifest.get("tier") == "P" and manifest.get("auth", {}).get("co
         harness_args=(-v "$HARNESS_MOUNT:/harness:ro" -e "CR_HARNESS_MOUNT=/harness")
         echo "harness bind: $HARNESS_MOUNT -> /harness (ro)  [CR_HARNESS_MOUNT=/harness]"
     fi
-    # --block-public-feeds (feed-neutral-build-config, the downstream tracker
+    # --block-public-feeds (feed-neutral-build-config, downstream effort
     # Phase 3): null-route the known public package-feed hostnames at the
     # container network layer via Docker's --add-host, regardless of what
     # the HOST machine can actually reach. This reproduces a network-blocked

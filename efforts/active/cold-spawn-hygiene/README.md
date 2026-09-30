@@ -5,7 +5,7 @@
 - **Branch(es):** `effort/cold-spawn-hygiene`
 - **Created:** 2026-09-21
 - **Status:** Active <!-- Draft | Active | Blocked | Done -->
-- **Umbrella issue:** the downstream tracker (facility Gitea; this repo's own
+- **Umbrella issue:** a downstream tracker entry (facility Gitea; this repo's own
   issue-linking convention doesn't apply cross-repo — see Context)
 - **Sub-issues:** _none yet — file per-phase as scope firms up_
 
@@ -13,7 +13,7 @@
 
 Reduce the number and cost of Windows process spawns triggered by plugin
 hooks and extensions at session start. This does not aim to fix the
-Windows-only extension-host `ready-timeout` race directly (the downstream tracker
+Windows-only extension-host `ready-timeout` race directly (the downstream ready-timeout report
 — that race is inside the CLI host's own process, outside this repo) — it
 aims to reduce the facility's own contribution to concurrent process-creation
 load at the exact moment that race is decided, on the theory (not yet
@@ -26,7 +26,7 @@ Single-repo, single-agent effort for now — no cross-machine dispatch.
 
 ## Context
 
-- **Origin:** a live investigation into the downstream tracker (Windows-only
+- **Origin:** a live investigation into the downstream ready-timeout race (Windows-only
   `ready-timeout` mass-reload/never-loaded extension race) led to empirical
   process-spawn diagnostics on a Windows facility machine, which surfaced two
   independently un-optimized flows:
@@ -59,13 +59,13 @@ Single-repo, single-agent effort for now — no cross-machine dispatch.
   The facility (private-downstream-repo monorepo) that operates this machine files all
   tracking issues in its own Gitea instance regardless of which repo the code
   lives in (its `file-issue` skill's Gitea-only filing policy) — so the
-  umbrella issue for this effort is the downstream tracker, referenced by number/
+  umbrella issue for this effort lives in a downstream tracker, referenced by name/
   URL rather than a direct in-repo link. Sub-issues, if filed, follow the same
   convention.
 
 ## Request
 
-Operator (in a facility Copilot CLI session investigating the downstream tracker):
+Operator (in a facility Copilot CLI session investigating the downstream ready-timeout race):
 > "What seems the most-optimum way to define our hooks and extensions? Stick
 > with JS until we feel compelled to hand off to python?"
 
@@ -115,7 +115,7 @@ Followed by, after the diagnostic answer:
       and total wall-clock at session start.
 - [ ] If facility tooling allows correlating session-start spawn load against
       `ready-timeout` frequency over time, report that correlation on
-      the downstream tracker — but do not claim this effort "fixes" #7326 unless
+      the downstream ready-timeout report — but do not claim this effort fixes that host-side race unless
       that correlation is actually observed; the host-side race is a
       separate, unconfirmed causal link.
 
@@ -145,12 +145,12 @@ effort._
 ## Journal
 
 ### 2026-09-21 — Kickoff
-- Effort created directly off the the downstream tracker investigation and the
+- Effort created directly off the downstream tracker investigation and the
   operator's explicit ask to turn the resulting diagnostics into planned
   work. Umbrella tracker filed as the downstream tracker. New pattern doc
   `docs/patterns/cold-spawn-latency-budget.md` written and indexed in
   `docs/patterns/README.md` in the same change.
 - Scope deliberately kept to the session-start hook/extension launch batch —
-  the narrower cross-version-runtime-consolidation idea (the downstream tracker)
+  the narrower cross-version-runtime-consolidation idea (a separate downstream tracker)
   is related but not required for this effort's phases and is left as its
   own separate thread.

@@ -349,7 +349,7 @@ determine whether this section needs anything beyond the Plan above._
   was investigated separately (see the later dated entry above) and is
   very likely historical, not a confirmed open Phase 3 item.
 
-### 2026-09-27 — Phase 3 first item: the downstream tracker fixed
+### 2026-09-27 — Phase 3 first item: flaky first-use provisioning fixed
 - Reproduced the flake directly (read-only diagnostic sub-agents, WSL,
   ~5-10% failure rate observed across repeated runs) rather than guessing
   from the shell logic alone -- pure code-reading had suggested the

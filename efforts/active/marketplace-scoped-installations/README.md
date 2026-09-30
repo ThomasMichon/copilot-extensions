@@ -1084,8 +1084,8 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   hook has a 20-second timeout with output suppressed, and a full
   provision can easily exceed that on a pristine box, silently
   truncating and preserving a variant of the original bug; (2)/(4) low
-  — the changefile comment and a new test comment both embedded the
-  private `the downstream tracker` tracker identifier, violating the
+  — the changefile comment and a new test comment both embedded a
+  private downstream-tracker identifier, violating the
   public-artifact identifier-neutrality convention; (3) low — the fix
   contradicted two checked-in docs (`docs/standalone-service-lifecycle.md`,
   `skills/setting-up-agent-index/SKILL.md`) that explicitly document
