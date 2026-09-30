@@ -1,0 +1,176 @@
+name: Purge consumed changefiles
+
+# Standalone daily companion to `validate-and-promote.yml` (Phase 3 of the
+# dev-branch-release-pipeline effort, ThomasMichon/copilot-extensions#3336).
+# Deletes any `.changefiles/*.json` on `dev` that already existed at
+# `main`'s persisted `last_promotion.dev_head`
+# (`.github/release-pipeline-state.json`) -- `tools/promote_release.py`'s
+# own bump computation already excludes any such changefile regardless of
+# whether it still physically exists on `dev` (a pure historical git
+# check against that same commit), so this purge is pure housekeeping,
+# never load-bearing for promotion correctness. See the
+# dev-branch-release-pipeline effort's Journal (2026-09-30 entry) for why
+# this runs as its own daily workflow instead of a per-promotion step.
+#
+# Trigger: `schedule` plus a `repository_dispatch` custom event for
+# on-demand runs (`gh api repos/<owner>/<repo>/dispatches -f
+# event_type=purge-changefiles-requested`) -- deliberately NOT
+# `workflow_dispatch`. This job's `main-promotion` environment grants it
+# `APERTURE_RELEASE_TOKEN`; `workflow_dispatch` resolves a workflow's own
+# YAML from whichever ref is dispatched (not the default branch), so
+# adding it here would let a `dev`-branch (zero-review-required) copy of
+# this file execute with that same privileged token -- the identical
+# untrusted-YAML risk `module-size-baseline-widen.yml` and
+# `validate-and-promote.yml`'s own design notes already document.
+# `repository_dispatch` shares `workflow_run`'s default-branch-only YAML
+# resolution instead (confirmed against GitHub's own docs, not assumed).
+
+on:
+  schedule:
+    - cron: "0 9 * * *" # once daily; time is not load-bearing
+  repository_dispatch:
+    types: [purge-changefiles-requested]
+
+concurrency:
+  group: purge-consumed-changefiles
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  purge:
+    name: Purge changefiles already consumed by a completed promotion
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: main-promotion
+    env:
+      GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: dev
+          token: ${{ secrets.APERTURE_RELEASE_TOKEN }}
+      - name: Configure git identity for the generated commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Purge changefiles that existed at main's last recorded promotion
+        run: |
+          git fetch origin main
+          state_json=$(git show origin/main:.github/release-pipeline-state.json 2>/dev/null || echo '{}')
+          dev_head=$(python3 -c "
+          import json, sys
+          try:
+              state = json.loads(sys.argv[1])
+          except json.JSONDecodeError:
+              state = {}
+          print((state.get('last_promotion') or {}).get('dev_head', ''))
+          " "$state_json")
+          if [ -z "$dev_head" ]; then
+            echo "::notice::No prior promotion recorded on main yet -- nothing to purge."
+            exit 0
+          fi
+          echo "::notice::Purging changefiles that existed at main's last_promotion.dev_head=$dev_head"
+          cleanup_branch="chore/purge-changefiles-${{ github.run_id }}"
+          git switch -c "$cleanup_branch"
+          removed=0
+          for f in .changefiles/*.json; do
+            [ -f "$f" ] || continue
+            name=$(basename "$f")
+            # A changefile present at dev_head was already excluded from
+            # bump computation by that same promotion (or an earlier one)
+            # -- see this file's top-of-file comment. Safe to delete.
+            if git cat-file -e "$dev_head:.changefiles/$name" 2>/dev/null; then
+              git rm -q -- "$f"
+              removed=$((removed + 1))
+            fi
+          done
+          if [ "$removed" -eq 0 ] || git diff --cached --quiet; then
+            echo "::notice::Nothing to purge (no consumed changefiles found, or already clean)."
+            exit 0
+          fi
+          # Safety assertion: this step only ever stages `git rm` calls
+          # against .changefiles/ above -- assert that explicitly before
+          # the narrow admin-bypass merge below is allowed to rely on it.
+          staged_paths=$(git diff --cached --name-only)
+          if echo "$staged_paths" | grep -qv '^\.changefiles/'; then
+            echo "::error::Purge diff touches paths outside .changefiles/ -- refusing to admin-merge; leaving for manual review." >&2
+            echo "$staged_paths" >&2
+            exit 1
+          fi
+          git commit -m "chore: purge changefiles consumed by promotions through ${dev_head:0:8}"
+          git push origin "HEAD:$cleanup_branch"
+          pr_url=$(gh pr create --base dev --head "$cleanup_branch" \
+            --title "chore: purge changefiles consumed by promotions through ${dev_head:0:8}" \
+            --body "Generated by purge-consumed-changefiles.yml. Removes changefiles already consumed by a completed dev->main promotion (each existed at main's persisted \`last_promotion.dev_head=$dev_head\` in .github/release-pipeline-state.json, which tools/promote_release.py's own bump computation already treats as fully consumed regardless of physical presence on dev). Do not edit by hand.")
+          pr_number=$(basename "$pr_url")
+          # Re-verify the merged diff is STILL confined to .changefiles/**
+          # (defense against something unexpected landing on the branch
+          # between push and merge) before exercising this repo owner's
+          # own named bypass-actor entry on dev's ruleset (see
+          # `.github/CODEOWNERS`'s top-of-file comment). Capture the
+          # command's own exit status explicitly rather than piping
+          # straight into `grep` -- without that, an API failure (`gh pr
+          # diff` erroring, e.g. a transient GitHub-side fault) would
+          # produce empty output, `grep -v` would then report "no
+          # violating paths" (a false negative), and this safety
+          # assertion would fail OPEN, letting the admin-bypass merge
+          # below proceed unchecked.
+          if ! diff_paths=$(gh pr diff "$pr_number" --name-only); then
+            echo "::error::gh pr diff failed for PR #$pr_number -- refusing to admin-merge without a verified diff." >&2
+            exit 1
+          fi
+          if echo "$diff_paths" | grep -qv '^\.changefiles/'; then
+            echo "::error::PR #$pr_number diff touches paths outside .changefiles/ -- refusing to admin-merge." >&2
+            exit 1
+          fi
+          # `dev`'s separate "workflow/CODEOWNERS lockdown" ruleset
+          # (workflow-lockdown-guard.yml) enforces its
+          # required_status_checks rule with NO bypass actors at all, by
+          # design -- `--admin` cannot skip a required check that simply
+          # hasn't reported yet; it has to actually complete. That guard
+          # triggers async on PR creation and can take a few seconds to
+          # tens of seconds to report, so merging immediately after `gh pr
+          # create` above would race it. Wait for it to physically report
+          # rather than skip waiting; bounded to 6 minutes total (the
+          # guard's own job timeout is 5) so a genuinely broken/hung check
+          # fails this step instead of hanging the job.
+          deadline=$(( $(date +%s) + 360 ))
+          until gh pr checks "$pr_number" --json name --jq '.[] | select(.name == "workflow-lockdown-guard")' 2>/dev/null | grep -q .; do
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::workflow-lockdown-guard never appeared as a check run on PR #$pr_number within the wait window -- leaving for manual review." >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          remaining=$(( deadline - $(date +%s) ))
+          if [ "$remaining" -lt 1 ]; then
+            remaining=1
+          fi
+          if ! timeout "$remaining" gh pr checks "$pr_number" --watch --required --interval 10; then
+            echo "::error::Required checks did not report success for PR #$pr_number within the wait window -- leaving for manual review; never force past a required status check." >&2
+            exit 1
+          fi
+          # The path-scope check above and this merge are separated by up
+          # to six minutes of waiting -- a write collaborator could push a
+          # follow-up commit onto this owner-authored branch in that gap
+          # (workflow-lockdown-guard keys off the PR's author, not its
+          # latest commit, so such a push would not itself be blocked).
+          # Re-read the head and re-verify the diff immediately before
+          # merging, then pass that exact sha to `--match-head-commit` so
+          # the merge itself fails closed (rather than silently merging a
+          # newer, unverified head) if anything changed underneath us
+          # between this check and the merge call.
+          final_head=$(gh pr view "$pr_number" --json headRefOid --jq .headRefOid)
+          if ! final_diff_paths=$(gh pr diff "$pr_number" --name-only); then
+            echo "::error::gh pr diff failed for PR #$pr_number on final check -- refusing to admin-merge." >&2
+            exit 1
+          fi
+          if echo "$final_diff_paths" | grep -qv '^\.changefiles/'; then
+            echo "::error::PR #$pr_number diff touches paths outside .changefiles/ on final check -- refusing to admin-merge." >&2
+            exit 1
+          fi
+          gh pr merge "$pr_number" --squash --admin --match-head-commit "$final_head"

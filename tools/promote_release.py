@@ -655,20 +655,13 @@ def main(argv: list[str] | None = None) -> int:
     for plugin, (old, new) in sorted(report["bumps"].items()):
         print(f"  bump: {plugin} {old} -> {new}")
     for name in report.get("changefiles_consumed", []):
-        # Machine-readable marker: validate-and-promote.yml greps these to
-        # know exactly which .changefiles/*.json to delete from dev in a
-        # follow-up PR.
-        # This tool NEVER touches dev's own tree itself -- `consume_pending_
-        # changes()` only deletes changefiles inside the isolated scratch
-        # worktree that becomes main's snapshot, so dev's real files are
-        # untouched by this run. Without that follow-up cleanup, the same
-        # already-landed changefiles keep being read from dev's still-
-        # unbumped plugin.json on every later promotion, recomputing the
-        # identical target version each time -- harmless only until a
-        # genuine new changefile for the same plugin lands and collides
-        # with that stale target (confirmed live: two consecutive real
-        # promotions computed the exact same "agent-bridge 0.4.0-dev551 ->
-        # 0.4.1-dev1" bump).
+        # Diagnostic log line: every changefile this promotion consumed (a
+        # bump input, or one already landed by an earlier promotion but
+        # still physically present on dev -- see consume_pending_changes()'s
+        # own docstring). `purge-consumed-changefiles.yml` independently
+        # re-derives its own safe-to-delete set from `main`'s persisted
+        # `last_promotion.dev_head`, so nothing greps this line any more;
+        # it's for human/log visibility only.
         print(f"  changefile-consumed: {name}")
     for path in report.get("projections_synced", []):
         # Confirms the version-drift sweep (#3378-recurrence) actually

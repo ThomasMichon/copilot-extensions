@@ -2133,3 +2133,53 @@ efforts' own PRs).
   entry claimed "4 new tests" when the diff (and this entry's own prose)
   only added 3 -- corrected in place.
 
+### 2026-09-30 — Decoupled changefile cleanup from promotion cadence: a
+### standalone daily `purge-consumed-changefiles.yml`, not a per-run step
+
+`validate-and-promote.yml`'s own "Clear consumed changefiles on dev" step
+ran on every single promotion -- under real load, every ~15-30 min -- and
+had already needed two rounds of hardening for real incidents hit exactly
+because of that frequency: a `gh pr merge --auto` race against an
+already-clean PR, and a `workflow-lockdown-guard` required-check race.
+During a 12-hour monitoring window it hit a third, different failure mode:
+`gh pr create` itself failed with a transient GitHub-side GraphQL error
+(`Something went wrong while executing your query`, with a GitHub-issued
+tracking id) -- nothing wrong with this repo's own logic, just an upstream
+hiccup, but one this step's per-promotion frequency made it far more likely
+to eventually hit.
+
+**Confirmed genuinely safe to decouple before touching anything:** read
+`tools/promote_release.py`'s `consume_pending_changes()` closely rather
+than assuming. Its bump computation filters every pending changefile via
+`_changefile_existed_at(last_dev_head, name)` -- a pure historical git
+check (`git cat-file -e <rev>:.changefiles/<name>`) against
+`last_promotion.dev_head`, which is durably persisted in
+`.github/release-pipeline-state.json` **on `main` itself**, not derived
+from whether the changefile still physically exists on `dev`. A changefile
+already present at that commit is excluded from bump computation
+regardless of how long it keeps sitting on `dev` afterward -- this was
+already the fix for the "two promotions compute the same bump twice" bug
+(#3542). Prompt deletion was therefore pure housekeeping (bounding the
+per-promotion `git cat-file` sweep, avoiding stale-file clutter), never a
+correctness requirement.
+
+**Fix:** added `purge-consumed-changefiles.yml`, a standalone workflow
+(daily cron + an on-demand `repository_dispatch` custom event,
+`purge-changefiles-requested` -- deliberately not `workflow_dispatch`,
+which would let a `dev`-branch copy of the file execute with this job's
+`main-promotion`-environment token) that reads `main`'s current
+`last_promotion.dev_head` fresh each run and deletes any `.changefiles/*`
+that existed at that commit -- the exact same safe-to-delete criterion the
+per-promotion step used, just decoupled from promotion frequency. Reuses
+the same narrow path-scoped admin-bypass pattern (verify the diff stays
+confined to `.changefiles/**`, wait for `workflow-lockdown-guard` to
+actually report before merging, never force past a required check).
+Removed the old step and its now-unused `consumed_changefiles` output from
+`validate-and-promote.yml` entirely. Trades a small amount of housekeeping
+lag (up to a day) for a large reduction in how often this mechanical PR's
+known failure modes can surface at all -- and when one does, it
+self-repairs on the very next scheduled run rather than needing manual
+intervention, since the purge set is always recomputed fresh against
+whatever `main` currently records, never a stale run-scoped list.
+
+
