@@ -1,5 +1,5 @@
 """Fleet-wide worktree listing across every reachable machine (agent-
-worktrees-fleet-flows Phase 1, private-downstream-repo #2740).
+worktrees-fleet-flows Phase 1, the downstream tracker).
 
 ``agent-worktrees fleet`` runs exactly one ``list --json`` per SSH target
 (never per-worktree, per #2732's contract) and merges the results into a

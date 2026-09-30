@@ -50,7 +50,7 @@ WorktreeStatus = Literal[
 #                     stored/paste handoff, an operator manually opening a new
 #                     pane, etc.), and claiming head from a yielded state is a
 #                     separate, non-blocking concern from consuming the actual
-#                     handoff charter (gitea private-downstream-repo#7230).
+#                     handoff charter (gitea the downstream tracker).
 #   * "handed-off" -- concluded *into* a successor via a handoff cutover.
 #   * "concluded"  -- deliberately finished / sunset.
 # Conclusion ("handed-off"/"concluded") is an ASSERTED act, never inferred from
@@ -70,7 +70,7 @@ _CONCLUDED_SESSION_STATES: tuple[SessionState, ...] = ("handed-off", "concluded"
 
 # States that make a session ineligible to BE resolved as the current head --
 # a superset of `_CONCLUDED_SESSION_STATES` that also excludes "yielded"
-# (gitea private-downstream-repo#7230). Used only by head resolution
+# (gitea the downstream tracker). Used only by head resolution
 # (`resolved_head_session`/`replayed_head_session`); NOT used by
 # `conclude_session` (a yielded session has not concluded -- it may still be
 # alive) or `link_handoff`'s already-concluded successor check.
@@ -1050,7 +1050,7 @@ class WorktreeRecord:
         formally linked to a specific successor) is deliberately excluded here
         so the *next* session to register in this worktree -- regardless of
         whether it consumes that handoff's charter -- can freely claim head
-        (see `register_session`; gitea private-downstream-repo#7230). This is distinct
+        (see `register_session`; gitea the downstream tracker). This is distinct
         from `_CONCLUDED_SESSION_STATES`, which `conclude_session` and
         `link_handoff` still use unchanged: a yielded session has not
         concluded and may still be alive/resumable.

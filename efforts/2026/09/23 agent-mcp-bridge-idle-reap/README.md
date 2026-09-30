@@ -6,9 +6,9 @@
 - **Created:** 2026-09-23
 - **Status:** Done <!-- Draft | Active | Blocked | Done -->
 - **Vision:** `visions/plugin-services` §`work-coalescing-singleton`, §`process-count-scales-with-services-not-sessions` — reality has one `agent-mcp bridge` process (+ its stdio-heavy upstream child, e.g. `bunx gitea-mcp`) per **sub-agent delegation**, unbounded and never reclaimed for the life of the top-level session, directly violating "process count scales with services, not sessions/invocations." **Vision-closing.**
-- **Umbrella issue:** [owner_user/private-downstream-repo#3876](https://your-git-host/owner_user/private-downstream-repo/issues/3876) (bug — the reap gap itself; 3 field-evidence comments, WSL 2026-07-31/08-18/08-22 + Windows 2026-09-23)
+- **Umbrella issue:** the downstream tracker (bug — the reap gap itself; 3 field-evidence comments, WSL 2026-07-31/08-18/08-22 + Windows 2026-09-23)
 - **Related:**
-  [owner_user/private-downstream-repo#3877](https://your-git-host/owner_user/private-downstream-repo/issues/3877)
+  the downstream tracker
   (proposed warmth-daemon attach — complementary, reduces per-instance heaviness
   but doesn't bound instance *count* on its own) ·
   `efforts/active/mcp-to-cli-migration` (private-downstream-repo — the longer-horizon fix:
@@ -55,7 +55,7 @@ per-instance cost (the #3877 warmth daemon) without bounding instance count.
 
 ## Context
 
-**Evidence trail (full detail lives in owner_user/private-downstream-repo#3876, not
+**Evidence trail (full detail lives in the downstream tracker, not
 duplicated here — read it before touching code):**
 - 2026-07-31 (WSL): 14 bridges (7 `gitea.mcp.yaml` + 7 `vei.mcp.yaml`) in one
   65-min session, one pair per sub-agent delegation, all idle/0% CPU, no live
@@ -166,7 +166,7 @@ issue)."*
 
 ### Phase 3 — Validate against tonight's exact reproduction
 - [x] Windows: reproduced the `Get-CimInstance Win32_Process` evidence style
-  from owner_user/private-downstream-repo#3876's 2026-09-23 comment against the *fixed*
+  from the downstream tracker's 2026-09-23 comment against the *fixed*
   code. Spawned a real `agent-mcp bridge` subprocess (`AGENT_MCP_NO_MULTIPLEX`,
   the classic in-process bridge path #3876 evidence targeted) over a stdio
   upstream that itself spawns a live descendant child (mirroring the
@@ -187,10 +187,10 @@ issue)."*
 - [x] PR through copilot-extensions' normal review/version-bump flow: PR
   #3406, squash-merged as `c7e8fd7a5` (agent-mcp `0.2.0-dev137`). Blocked
   twice on unrelated pre-existing main-red guard failures along the way
-  (owner_user/private-downstream-repo#7491, then #7495); both diagnosed as out-of-scope
+  (the downstream tracker, then #7495); both diagnosed as out-of-scope
   drift on `main` rather than this effort's own content, and picked up as
   trivial one-line fixes only where genuinely blocking (see Journal).
-- [x] Comment on owner_user/private-downstream-repo#3876 with the fix version, close it:
+- [x] Comment on the downstream tracker with the fix version, close it:
   commented (id 125682) and closed.
 - [x] Cross-reference from #3877 (still open — the idle self-reap bounds
   instance *count*; #3877's warmth daemon is the separate, still-valid fix
@@ -209,7 +209,7 @@ issue)."*
 - [x] Live reproduction (Phase 3) on both Windows and WSL shows bridges
   self-reaping within the configured idle window with zero operator
   intervention, matching the exact evidence commands already used in
-  owner_user/private-downstream-repo#3876 (`Get-CimInstance Win32_Process` on Windows;
+  the downstream tracker (`Get-CimInstance Win32_Process` on Windows;
   `ps` process-tree inspection on WSL) -- see Phase 3 above for the
   specific evidence.
 - [x] No regression: a bridge actively relaying traffic (a live, in-progress
@@ -228,11 +228,11 @@ tasks), landed as PR ThomasMichon/copilot-extensions#3406.
 ### 2026-09-23 — Kickoff
 - Effort created directly following a live "what's eating our RAM" facility
   investigation (unrelated CPU/memory/disk-I/O telemetry sweep, owner_user/
-  private-downstream-repo#7467/#7479/#7483) that surfaced this as the actual top
+  the downstream tracker) that surfaced this as the actual top
   Windows-host process/RAM consumer tonight — 136 conhost/cmd + 140 python.exe
   processes traced via `CommandLine` inspection to `agent-mcp bridge`
   invocations, not (as first assumed) a Copilot CLI defect. Confirmed the
-  private-downstream-repo-tracked bug (#3876) already existed with WSL-side evidence
+  downstream-tracked bug already existed with WSL-side evidence
   from three prior sessions (07-31, 08-18, 08-22); added the fresh
   Windows-side reproduction as comment #125604 on that issue before starting
   this effort.
@@ -261,7 +261,7 @@ tasks), landed as PR ThomasMichon/copilot-extensions#3406.
   `libs/peer-launch/tests/test_packaging.py::test_converted_codespaces_paths_have_no_unexplained_sibling_launches`
   fails on `main` itself (an `agent_codespaces/__main__.py` ambient-PATH
   resolution the peer-launch packaging test flags), failing CI on every PR
-  regardless of content. Filed as owner_user/private-downstream-repo#7491 (not fixed here
+  regardless of content. Filed as the downstream tracker (not fixed here
   -- needs agent-codespaces-specific judgment on the correct fix shape).
 - **Next session:** check #7491/CI status first -- if `main`'s CI is green
   again (someone else fixed it, or it was itself fixed upstream), rebase/
@@ -299,13 +299,13 @@ tasks), landed as PR ThomasMichon/copilot-extensions#3406.
   misdirected push+cleanup). Hit a **second**, fresh unrelated main-red state
   (worktree-manager version-consistency drift dev73/dev74 + two new
   module-size overruns from other merged PRs) -- filed
-  owner_user/private-downstream-repo#7495, fixed only the trivial one-line version bump
+  the downstream tracker, fixed only the trivial one-line version bump
   inline (blocking, mechanical, zero risk), deliberately left the two
   module-size overruns (especially a +274 line jump on
   `worktree-manager/__main__.py`) for their own owner's judgment rather than
   rubber-stamping a widen from an unrelated PR.
 - CI went green; merged PR #3406 (squash, `c7e8fd7a5`, this repo's
-  `pr-self-merge` profile). Commented + closed owner_user/private-downstream-repo#3876
+  `pr-self-merge` profile). Commented + closed the downstream tracker
   with the fix version; commented (cross-reference only, left open)
-  owner_user/private-downstream-repo#3877.
+  the downstream tracker.
 - Status: Done. Archiving this effort folder now.

@@ -7,7 +7,7 @@
 - **Status:** Active — Phases 0/1/2 Done (reconciliation, telemetry
   pipeline, ranked report); Phase 3 (fix the top offenders) not yet started
 - **Umbrella issue:** _pending — file once this effort's plan is reviewed and merged_
-- **Sub-issues:** private-downstream-repo#7715 (flaky `test_first_use_provision_is_serialized`, filed on Gitea per facility convention, tracked here as the first known concrete item)
+- **Sub-issues:** the downstream tracker (flaky `test_first_use_provision_is_serialized`, filed on Gitea per facility convention, tracked here as the first known concrete item)
 
 ## Guiding Intent
 
@@ -41,7 +41,7 @@ scope.
   aggregate required-check job), and along the way hit
   `libs/payload-invocation/tests/test_generate.py::test_first_use_provision_is_serialized`
   fail independently twice, unrelated to either PR's own diff — filed as
-  private-downstream-repo#7715.
+  the downstream tracker.
 - Also observed, every single time this session checked `pr checks` on any
   PR: an `identifier leak guard` check that is **always red**, because
   `FORBIDDEN_IDS_FACILITY`/`FORBIDDEN_IDS_WORK` repository secrets are not
@@ -189,7 +189,7 @@ find the noisiest and blocking issues, and fix them"
   explicitly excludes the organically-observed `identifier leak guard` job
   from PR-run mining (`PR_SKIP_JOB_NAMES`) so it can never double-count under
   a second, differently-derived key.
-- [x] Confirm private-downstream-repo#7715 (`test_first_use_provision_is_serialized`)
+- [x] Confirm the downstream tracker (`test_first_use_provision_is_serialized`)
   surfaces near the top given this session's direct, repeated observation of
   it; use it as a sanity check for the pipeline's own correctness.
   **Confirmed, live, 2026-09-27:** the matching signature
@@ -201,7 +201,7 @@ find the noisiest and blocking issues, and fix them"
   confirmation the pipeline's own logic (not just its plumbing) is correct.
 
 ### Phase 3 — Fix the top offenders
-- [x] Fix private-downstream-repo#7715 (tighten the lock-serialization test/harness so
+- [x] Fix the downstream tracker (tighten the lock-serialization test/harness so
   the race is deterministic under CI load, per that issue's own body).
   **Fixed, 2026-09-27:** root-caused via direct instrumented reproduction
   (not guesswork) to a genuine TOCTOU in `posix-shim.tmpl`'s flock-less
@@ -349,7 +349,7 @@ determine whether this section needs anything beyond the Plan above._
   was investigated separately (see the later dated entry above) and is
   very likely historical, not a confirmed open Phase 3 item.
 
-### 2026-09-27 — Phase 3 first item: private-downstream-repo#7715 fixed
+### 2026-09-27 — Phase 3 first item: the downstream tracker fixed
 - Reproduced the flake directly (read-only diagnostic sub-agents, WSL,
   ~5-10% failure rate observed across repeated runs) rather than guessing
   from the shell logic alone -- pure code-reading had suggested the
@@ -390,7 +390,7 @@ determine whether this section needs anything beyond the Plan above._
   `(created_at, run_id, attempt)`, with a dedicated regression test.
 - Ran a real 7-day-lookback `refresh` (1403 run/attempt rows, 121 failure
   occurrences persisted) and confirmed both Validation Plan spot-checks this
-  phase could reach: private-downstream-repo#7715's matching signature showed a real
+  phase could reach: the downstream tracker's matching signature showed a real
   42% (5/12) recovery rate, and the identifier-leak-guard entry renders in
   its own tracked, non-mined section. Full Phase 2 ranked report:
   noisiest by frequency `tools/test_check_marketplace_isolation.py::
@@ -399,7 +399,7 @@ determine whether this section needs anything beyond the Plan above._
   blocking impact `tests/test_install_signed_python_probe.py::
   test_missing_newest_candidate_does_not_abort_probe[pwsh]` (122 `dev`-push
   runs stalled). Both are strong Phase 3 candidates alongside #7715.
-- Next: Phase 3 — fix private-downstream-repo#7715, then work down the ranking.
+- Next: Phase 3 — fix the downstream tracker, then work down the ranking.
 
 ### 2026-09-27 — Phase 0 reconciliation resolved
 - Read `promotion-failure-reactive-fix-agent`'s README in full and the
@@ -415,7 +415,7 @@ determine whether this section needs anything beyond the Plan above._
 - Effort created directly following a live session that root-caused and fixed
   two `dev`-CI-stalling regressions (#4239, #4242), closed a governance gap
   (CODEOWNERS + review-gate rulesets) that let them merge red, and along the
-  way surfaced a repeat flaky test (private-downstream-repo#7715) and a permanently-red
+  way surfaced a repeat flaky test (the downstream tracker) and a permanently-red
   non-blocking `identifier leak guard` check. Operator asked to file the flake
   and hand off toward systematic flakiness telemetry + fixing the noisiest/
   blocking issues, rather than continuing to react one flake at a time.

@@ -246,7 +246,7 @@ class _SessionStartMixin:
         # session's declared per-session MCP toolset (e.g. a reviewer's
         # dedicated, credential-bound tools) lives ONLY in this in-memory
         # Session object and is silently lost on any daemon restart, not just
-        # a resume within the same process (private-downstream-repo #7239).
+        # a resume within the same process (the downstream tracker).
         config_json = (
             json.dumps({"mcp_servers": session.mcp_servers})
             if session.mcp_servers else None

@@ -231,7 +231,7 @@ else
         # A plain check-then-destroy is still a real TOCTOU even when the
         # destroy step itself is atomic (an `mv`-based claim) -- see
         # libs/payload-invocation/templates/posix-shim.tmpl's matching fix
-        # (private-downstream-repo#7715) for the full analysis and reproduction
+        # (the downstream tracker) for the full analysis and reproduction
         # history: the staleness verdict above can go stale itself before
         # the destroy runs, letting one racer destroy a FRESH lock another
         # racer already recreated. Serializing the decision-and-destroy via

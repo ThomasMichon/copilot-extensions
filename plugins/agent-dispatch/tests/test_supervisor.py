@@ -1152,7 +1152,7 @@ def test_cold_resume_missing_worktree_release_failure_backs_off(
 
 # -- recover_stranded_cold_reservations: the queued+cold orphan gap ---------
 #
-# Confirmed live (private-downstream-repo PR #7759's stall, 5+ hours, survived a full
+# Confirmed live (the downstream PR's stall, 5+ hours, survived a full
 # supervisor restart): a COLD reservation whose task ends up QUEUED/unowned
 # instead of the SUSPENDED-with-owner shape release_resumed_cold_tasks()
 # expects is a permanent orphan no other sweep ever revisits --

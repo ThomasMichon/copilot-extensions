@@ -381,11 +381,11 @@ because they provide tools or services.
       open, partial), `#1110` (Phase 6, open/reopened, guard-blocking
       precondition unmet at 681 findings/1344 files), and the
       module-size-ceiling tracker
-      [private-downstream-repo#7672](https://your-git-host/owner_user/private-downstream-repo/issues/7672)
+      the downstream tracker
       (open, unclaimed). None require return-for-disposition.
 - [x] Place each accepted public tracker item in exactly one existing phase
       (2026-09-27): the confirmed Phase 2/cross-plugin-JSON backlog already
-      lives correctly under Phase 2 (`#1103`) and `private-downstream-repo#7672` — no
+      lives correctly under Phase 2 (`#1103`) and `the downstream tracker` — no
       new phase needed. The two Bug sweep items below are now placed under
       Phase 3 (Agent Index installer follow-ups), the only remaining
       unplaced candidates found this leg.
@@ -495,7 +495,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   failures** (`test_bootstrap_context_selection.py`,
   `test_legacy_entrypoint_probe.py`) are unrelated to this change —
   identical failures with and without it applied. Filed
-  [private-downstream-repo#7753](https://your-git-host/owner_user/private-downstream-repo/issues/7753)
+  the downstream tracker
   rather than silently living with them or scope-creeping into fixing them
   here.
 - **Fixed `agent-worktrees`'s `register-nudge.{sh,ps1}`** using the new
@@ -723,7 +723,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   2 tracker) is open/partial, `#1110` (Phase 6 tracker) is open/reopened with
   its blocking-guard precondition still unmet (681 findings across 1344
   files as of its last recheck — nowhere close to "all runtime plugins
-  conform"), and `private-downstream-repo#7672` (module-size-ceiling tracker) is open
+  conform"), and `the downstream tracker` (module-size-ceiling tracker) is open
   and unclaimed. None of the confirmed-backlog items (Phase 2 launcher-
   contract script clusters, `installer-readiness.json`/`payload-
   invocation.json` cross-plugin questions) are obsolete or need re-
@@ -812,7 +812,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   **4 pre-existing bugs found and filed** via clean-room checkpoints and
   test-suite isolation (#7688, #7719, #7722, #7737), and **8 module-
   size-ceiling hits** resolved without ever force-widening a baseline
-  (tracked cumulatively in private-downstream-repo#7672).
+  (tracked cumulatively in the downstream tracker).
 - Verified: `check-marketplace-isolation.py`, `check-skills.py`,
   `check-docs-consistency.py` all clean. Merged via `pr-merge --now`
   after a clean advisory review.
@@ -903,7 +903,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   positive and `test_cli_entry_honors_registration_home`'s `gh`
   device-id credential-home write -- both confirmed pre-existing via
   `git stash` isolation, filed
-  [private-downstream-repo#7737](https://your-git-host/owner_user/private-downstream-repo/issues/7737)).
+  the downstream tracker).
   All required CI checks passed on GitHub before merge.
 - **Takeaway for future legs**: delegating a large, well-specified
   mechanical task to a sub-agent is still valuable at this scale, but
@@ -933,7 +933,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   "~/.agent-lease"`, a deliberately shared, not cell-scoped, home-dir
   lockfile -- and a **genuine** lease-keyword match this time, not the
   release/lease false-positive class from the prior entry).
-  - Hit the **module-size ceiling a 10th time** (private-downstream-repo#7672):
+  - Hit the **module-size ceiling a 10th time** (the downstream tracker):
     `config.py` was at its exact 2583-line baseline. Resolved without any
     net line growth by keeping the marker on the *existing* return-
     statement line (fits at 98/99 chars) instead of extracting a new
@@ -973,7 +973,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   the coordinator's expected autostart, a subsequent `agent-dispatch
   health` call then also fails (`Connection refused`) as a knock-on
   effect, not a separate defect. Filed
-  [private-downstream-repo#7722](https://your-git-host/owner_user/private-downstream-repo/issues/7722).
+  the downstream tracker.
   This is the **fourth** clean-room-checkpoint-found defect this session
   (after agent-bridge's `--version` race #7688, agent-index's fresh-
   install bug #7702 which was fixed inline, and agent-dispatch's flaky
@@ -1038,7 +1038,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
     test: `tests/test_supervisor.py::test_idle_headless_fleet_nudge_includes_remote_host`
     fails identically with and without this session's changes (confirmed
     via `git stash`/`git stash pop` isolation). Filed
-    [private-downstream-repo#7719](https://your-git-host/owner_user/private-downstream-repo/issues/7719).
+    the downstream tracker.
     Oddly, the equivalent CI job on both PRs (#4287, #4288) reported the
     full suite passing -- possibly timing-sensitive/order-dependent;
     left as filed rather than chased further, consistent with the
@@ -1070,7 +1070,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   (3511 passed, 11 skipped, 1 pre-existing failure noted above). Both
   PRs merged via `pr-merge --now` after a clean advisory review.
 
-### 2026-09-27 — Fixed the `agent-index` fresh-install bug found by the clean-room checkpoint (PR #4272, fixes private-downstream-repo#7702)
+### 2026-09-27 — Fixed the `agent-index` fresh-install bug found by the clean-room checkpoint (PR #4272, fixes the downstream tracker)
 
 - Root cause confirmed (see the prior entry below): `install.sh`'s/
   `install.ps1`'s `ensure` action never stamped the CLI binstub, so a
@@ -1085,7 +1085,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   provision can easily exceed that on a pristine box, silently
   truncating and preserving a variant of the original bug; (2)/(4) low
   — the changefile comment and a new test comment both embedded the
-  private `private-downstream-repo#7702` tracker identifier, violating the
+  private `the downstream tracker` tracker identifier, violating the
   public-artifact identifier-neutrality convention; (3) low — the fix
   contradicted two checked-in docs (`docs/standalone-service-lifecycle.md`,
   `skills/setting-up-agent-index/SKILL.md`) that explicitly document
@@ -1161,14 +1161,14 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   appears, so every subsequent command cascades to "command not
   found." No existing tracking issue found (checked #4808/#4807/#7686,
   all different plugins or different root causes); filed
-  [private-downstream-repo#7702](https://your-git-host/owner_user/private-downstream-repo/issues/7702),
+  the downstream tracker,
   flagged as possibly warranting priority above the routine guard-
   triage backlog given the severity (agent-index is completely
   non-functional on a fresh install until someone manually runs
   `install.sh install`).
 - This is now the **third** clean-room checkpoint this session and the
   **second** genuine pre-existing defect found this way (after
-  `agent-bridge`'s `--version` race, private-downstream-repo#7688) -- the
+  `agent-bridge`'s `--version` race, the downstream tracker) -- the
   operator's periodic-validation directive is earning its keep: neither
   defect would have surfaced from guard-triage work alone, since guard
   annotations never exercise the actual install/provision flow.
@@ -1220,7 +1220,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   ceiling -- baseline 5145, 7th file this session at zero headroom) and
   `resolve_effective_config.py` (3, baseline 1136, 8th file) -- both
   tracked in
-  [private-downstream-repo#7672](https://your-git-host/owner_user/private-downstream-repo/issues/7672).
+  the downstream tracker.
   `install.sh`/`install.ps1` (20, confirmed-genuine Phase 2 launcher-
   contract backlog), `payload-invocation.json` (7), `installer-
   readiness.json` (3), `setting-up-agent-index/SKILL.md` (6) -- not yet
@@ -1251,7 +1251,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   Phase 2 launcher-contract backlog), `payload-invocation.json` (1,
   cross-plugin open question), `transport.py` + `session_host/spawner.py`
   (4, module-size-ceiling deferral, tracked in
-  [private-downstream-repo#7672](https://your-git-host/owner_user/private-downstream-repo/issues/7672)).
+  the downstream tracker).
   Same end-state pattern as `agent-ssh`/`agent-mcp`/`agent-machines` this
   session -- five plugins now fully triaged to confirmed-backlog-only.
 - Verified: PowerShell Parser API syntax check, `check-docs-
@@ -1298,7 +1298,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
     unrelated to any of this leg's `agent-bridge` triage PRs. Searched
     for and found no existing tracking issue (checked #1236 and #823,
     both near-misses on the wrong root cause); filed
-    [private-downstream-repo#7688](https://your-git-host/owner_user/private-downstream-repo/issues/7688).
+    the downstream tracker.
   - **Review's own review-comment content on PR #4240 flagged a possible
     concern with the new `$_log = "..."` PowerShell assignment** ("suppress
     the standalone assignment output") -- verified empirically
@@ -1358,7 +1358,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
 - Left deliberately untouched: `transport.py` (3) and `session_host/
   spawner.py` (1) both hit the SAME module-size-ceiling wall as 4 other
   files this session (baselines 1282/1028, both at exact current size --
-  see [private-downstream-repo#7672](https://your-git-host/owner_user/private-downstream-repo/issues/7672),
+  see the downstream tracker,
   now a 5th and 6th occurrence). `install.sh`/`install.ps1` (9,
   confirmed-genuine Phase 2 launcher-contract backlog),
   `repair-scheduled-task.ps1` (2), `payload-invocation.json` (1), and 3
@@ -1424,7 +1424,7 @@ See [`design.md`](design.md), [`installation-mode-governance.md`](installation-m
   **4th file this session** hit at zero headroom (after `agent-
   containers/__main__.py`, `agent-ssh/fragment_registry.py`,
   `agent-mcp/config.py`; tracked in the just-filed
-  [private-downstream-repo#7672](https://your-git-host/owner_user/private-downstream-repo/issues/7672)).
+  the downstream tracker).
   This time, made the fix net line-NEUTRAL instead of deferring again: one
   marker fit on its existing line for free, and a 3-line list
   comprehension collapsed to a 2-line form (a named constant + one-line

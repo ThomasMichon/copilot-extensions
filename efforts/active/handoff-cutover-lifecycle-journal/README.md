@@ -575,7 +575,7 @@ renumbering from the "acknowledges handoff" step onward.)
       agents"). Fixed with a lock-independent, identity-verified OS pid
       check as a fallback. See Journal for full evidence and the fix.
 - [ ] **New item (2026-09-20), tracked as
-      `private-downstream-repo#7246`:**
+      `the downstream tracker`:**
       a fifth root cause -- `_monitor_claim_handoff_cutover` /
       `_monitor_handoff_claim_staleness` reclaim a handoff-cutover claim
       purely on age (`AGENT_WORKTREES_STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS`,
@@ -1360,7 +1360,7 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
 
 ### 2026-09-20 — Fifth root cause: claim reclaimed on age alone, no successor-liveness check
 
-- **New live recurrence, tracked as private-downstream-repo issue `#7246`.**
+- **New live recurrence, tracked as the downstream issue.**
   Worktree `atlas-core-win-20260826-223842-c332` (a different machine/repo
   from this effort's home, private-downstream-repo) got stuck in a repeat cutover
   loop: `handoff_requested` fired, but the successor never reached stage 9

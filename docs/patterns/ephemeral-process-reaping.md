@@ -6,7 +6,7 @@ host-health failure whether or not it is a registered "service".
 **Exemplars:** agent-worktrees (per-worktree `git fsmonitor--daemon`, the
 `status-monitor`'s `pane_reaper.py` dead-mux-pane reconciliation, `gc.py`'s
 orphan-directory sweep); agent-mcp's stdio `Bridge.run()` idle self-reap
-(owner_user/private-downstream-repo#3876 — a *different* shape, see the Variant below).
+(the downstream tracker — a *different* shape, see the Variant below).
 
 ## Problem
 
@@ -112,7 +112,7 @@ that reason is a **logical** scope nested *inside* the physical parent, and
 the physical parent is much longer-lived than that inner scope.
 
 `agent-mcp`'s stdio `Bridge.run()` is the exemplar
-(owner_user/private-downstream-repo#3876): a `task()` sub-agent delegation spawns a
+(the downstream tracker): a `task()` sub-agent delegation spawns a
 per-delegation `agent-mcp bridge` process (and, for a `stdio` upstream, its
 own heavier child, e.g. `bunx gitea-mcp`). The bridge's OS parent is the
 **top-level Copilot session**, which stays alive long after that one

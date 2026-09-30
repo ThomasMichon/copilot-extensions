@@ -2,7 +2,7 @@
 superseded.
 
 Thin adapter over the shared ``single_instance_lease`` supersession decision
-(process-slot-ownership Phase 4, private-downstream-repo #5091 -- the same lib agent-bridge
+(process-slot-ownership Phase 4, the downstream tracker -- the same lib agent-bridge
 already adopted via copilot-extensions #737). Detachment (a zero-downtime
 redeploy stands the new coordinator up beside the old one and flips the shared
 routing table so clients follow it) can leave a *demoted* coordinator running

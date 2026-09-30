@@ -94,7 +94,7 @@ uninstall in addition to install, explicit update, rollback, and isolation.
 > arm only (`-Os linux`, the default) -- `run.ps1` errors if combined with
 > `-Os windows`, which uses a different container networking model and does
 > not consume this flag.
-> (private-downstream-repo `feed-neutral-build-config` effort, #6755 Phase 3.)
+> (the downstream feed-neutral-build-config effort, Phase 3.)
 
 ## Usage
 

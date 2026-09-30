@@ -58,7 +58,7 @@ def _pid_alive(pid: int) -> bool:
 
     Delegates to :func:`single_instance_lease.pid_alive` -- the shared
     liveness primitive also used by the self-retire/reaper backstop
-    (process-slot-ownership Phase 4, private-downstream-repo #5091) -- rather than
+    (process-slot-ownership Phase 4, the downstream tracker) -- rather than
     reimplementing the same OS-level probe a second time in this module.
     """
     if pid <= 0:

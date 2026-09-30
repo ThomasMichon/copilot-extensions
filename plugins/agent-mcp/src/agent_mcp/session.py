@@ -78,7 +78,7 @@ class BridgeSession:
         ctx = BridgeContext(new_id=self._client.new_id, emit_to_client=self._write)
         self._pipeline = Pipeline(build_decorators(self.cfg, ctx), self._client.request)
         # Bound the upstream spawn/connect the same way OneShotSession does
-        # (see private-downstream-repo#6673): an unbounded ``transport.start()`` here
+        # (see the downstream tracker): an unbounded ``transport.start()`` here
         # doesn't wedge a shared lock the way a WarmPool entry-open would, but
         # it still leaves one caller (the ``agent-mcp bridge`` stdio process,
         # or one ``serve`` attach connection) hanging forever with no

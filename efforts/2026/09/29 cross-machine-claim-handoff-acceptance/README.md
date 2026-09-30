@@ -142,7 +142,7 @@ before Phase 2 execution begins, per the `planning-efforts` skill._
 ## Journal
 
 ### 2026-09-29 — Kickoff
-- Effort created after a peer private-downstream-repo session investigated #1090's
+- Effort created after a peer downstream session investigated #1090's
   cross-machine gap, over-concluded a new bridge RPC was required, and the
   operator corrected the direction toward the suite's existing SSH-exec
   pattern. Captures the correction and plans the actual fix.
