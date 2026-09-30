@@ -712,3 +712,28 @@ def test_detached_session_records_its_supervising_worktree(seams, monkeypatch, c
     assert rc == 0
     venue = json.loads(capsys.readouterr().out)["venue"]
     assert venue["kind"] == "codespace" and venue["supervisor_ref"] == "host/example-harness/wt-1"
+
+
+def test_a_bare_resume_keeps_the_flags_the_session_was_launched_with(seams, capsys):
+    # The first launch records its flags; a wake that names only the session
+    # (Harness Board's) comes back with them, not the host's defaults.
+    first = _args(copilot_args=["--no-ask-user", "--reasoning-effort=max"], driver="orchestrator")
+    assert detach.cmd_detach(first, ssh_session=_ssh(seams, stdout=_CREATED)) == 0
+    assert "--driver orchestrator" in seams.ssh[-1]["remote"]
+    capsys.readouterr()
+    wake = _args(copilot_args=["--resume=sid-42"], driver="cli-mode", seed=None, dry_run=True)
+    assert detach.cmd_detach(wake, ssh_session=_ssh(seams)) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["recalled"] == ["copilot_args", "driver"] and out["driver"] == "orchestrator"
+    # Still a resume of that session (no new --session-id).
+    assert out["copilot_args"] == ["--no-ask-user", "--reasoning-effort=max", "--resume=sid-42"]
+
+
+def test_a_failed_launch_records_nothing(seams, capsys):
+    bad = _args(copilot_args=["--reasoning-effort=max"], driver="orchestrator")
+    assert detach.cmd_detach(bad, ssh_session=_ssh(seams, stdout="", code=1)) != 0
+    capsys.readouterr()
+    dry = _args(copilot_args=["--resume=sid-42"], driver="cli-mode", dry_run=True)
+    assert detach.cmd_detach(dry, ssh_session=_ssh(seams)) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert "recalled" not in out and out["copilot_args"] == ["--resume=sid-42"]

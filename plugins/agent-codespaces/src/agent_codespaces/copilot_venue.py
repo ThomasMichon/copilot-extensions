@@ -16,6 +16,7 @@ import threading
 from collections.abc import Callable
 
 from ._ssh_retry import exec_with_retry
+from .launch_memory import DEFAULT_DRIVER as _DEFAULT_DRIVER
 
 # Mirrors __main__._BUSY_EXIT / __main__._COORDINATION_EXIT exactly (kept as a
 # separate copy, not an import, to preserve this module's existing no-
@@ -49,7 +50,7 @@ def add_copilot_subparser(sub) -> None:
              "behavior of running straight in the venue's workspace_folder.",
     )
     copilot_parser.add_argument(
-        "--driver", default="cli-mode",
+        "--driver", default=_DEFAULT_DRIVER,
         help="Forwarded to the remote `agent-worktrees copilot --driver` "
              "(stamps the 'driven by' banner; default 'cli-mode')",
     )

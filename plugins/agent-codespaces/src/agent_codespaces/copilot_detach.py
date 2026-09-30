@@ -363,7 +363,13 @@ def cmd_detach(
         seed = read_seed(args)
     except (OSError, ValueError) as exc:
         return _fail(str(exc), plan)
-    requested = list(getattr(args, "copilot_args", None) or [])
+    from . import launch_memory
+
+    # A resume that names only the session (Harness Board's wake, say) keeps
+    # the flags the session was launched with, like a rejoin keeps its forwards.
+    requested, args.driver, recalled = launch_memory.apply(
+        args.name, plan["tenant"], list(getattr(args, "copilot_args", None) or []), args.driver,
+    )
     copilot_args = with_new_session(requested + model_copilot_args(requested))
     try:
         reverse_forwards = parse_reverse_forwards(getattr(args, "reverse_forwards", None) or [])
@@ -380,7 +386,9 @@ def cmd_detach(
             return _fail(str(exc), plan)
     if getattr(args, "dry_run", False):
         print(json.dumps({"ok": True, "dry_run": True, **plan, "seed_len": len(seed or ""),
-                          "copilot_args": copilot_args, "reverse_forwards": reverse_forwards,
+                          "copilot_args": copilot_args, "driver": args.driver,
+                          **({"recalled": recalled} if recalled else {}),
+                          "reverse_forwards": reverse_forwards,
                           "local_forwards": local_forwards,
                           "ref_files": [n for n, _ in refs_upload[2]] if ref_files else []}, indent=2))
         return 0
@@ -560,6 +568,7 @@ def cmd_detach(
                 "message" if deliver_note(session_id, refs_note_text) else "failed"
             )
         ok = True
+        launch_memory.remember(args.name, plan["tenant"], requested, args.driver)
         forwards_ready = (
             _venue_ports_listening(args.name, sorted(reverse_forwards)) if reverse_forwards else {}
         )
@@ -569,6 +578,7 @@ def cmd_detach(
             **({"ref_files": refs_note_text.splitlines()[1:], "refs_delivered": refs_delivered}
                if refs_note_text else {}),
             "resumed": not created, "seeded": bool(created and seed),
+            **({"recalled": recalled} if recalled else {}),
             "plugin_dirs": captured.get("plugin_dirs", []),
             **({"reverse_forwards": reverse_forwards,
                 "reverse_forwards_ready": forwards_ready} if reverse_forwards else {}),

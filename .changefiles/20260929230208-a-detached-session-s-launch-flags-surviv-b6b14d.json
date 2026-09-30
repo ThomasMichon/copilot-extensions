@@ -1,0 +1,9 @@
+{
+  "comment": "A detached session's launch flags survive a resume that omits them: each launch records its --copilot-arg values and --driver per CodeSpace and session, and a launch that names only the session (--copilot-arg=--resume=<id>, like a supervisor's wake after a CodeSpace stop) reuses them instead of falling back to the host's defaults. Anything passed explicitly replaces the record; the JSON reports what was recalled.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
