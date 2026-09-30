@@ -50,9 +50,14 @@ note) is enough to prove a REAL reattach, not a no-op:
   3. The events.jsonl snapshot taken the instant ``deploy`` was fired is an
      exact PREFIX of the final snapshot -- no line already written before the
      cutover was lost, truncated, or mutated.
-  4. Exactly one ``assistant.turn_end`` for the one prompt we sent (no
-     duplicate ``session.start``/turn indicating the child was restarted, not
-     reattached).
+  4. Every turn opened is balanced by a matching close by the end (no
+     turn left incomplete), AND at least one turn_end lands strictly AFTER
+     the cutover boundary (the in-flight turn genuinely continued past
+     deploy, not merely already-done before it fired) -- one prompt can
+     legitimately open several turn_start/turn_end pairs (one per model
+     completion in an agentic tool-calling loop), so an exact count of 1
+     is the wrong assertion; no duplicate ``session.start`` (the child was
+     reattached, never respawned).
   5. The bridge's own caller-facing ``wait --attention turn_complete`` (the
      SAME channel a real caller uses) settles cleanly across the boundary --
      this is the actual continuity guarantee callers depend on, not merely an
@@ -240,17 +245,36 @@ def run(python: str, repo: str, project_name: str, turn_timeout: float) -> Resul
         f.write(f"projects:\n  {project_name}:\n    anchor: {repo!r}\n    expose_agent: true\n")
     r.check(os.path.exists(projects_yaml), f"registered local project {project_name!r} -> {repo}")
 
-    # Reuse an already-running daemon (matches production reality -- a real
-    # box will very likely already have one from an earlier session/first
-    # use) rather than assuming a clean slate.
-    proc1 = None
-    a1 = _active(cfg_dir, tries=1)
-    if a1 is None:
-        proc1 = subprocess.Popen(
-            [python, "-m", "agent_bridge", "start", "--port", "0", "--bind", "127.0.0.1"],
-            start_new_session=True,
-        )
-        a1 = _active(cfg_dir)
+    # NB: a daemon's static local-agent registry (discover_local_agents())
+    # is resolved ONCE at startup (`daemon_resolver(cfg)`, no periodic
+    # reload -- unlike `refresh_provider_resolvers`, which only covers
+    # namespace/CodeSpace/container providers) -- confirmed via a real
+    # run: a box's already-running daemon (started earlier by phase 2's
+    # own `copilot -p ...` sessionStart hook, well before projects.yaml
+    # above existed) reported "(no agents registered)" and `create` failed
+    # closed with "not a known agent name", even though the file on disk
+    # was already correct. Any daemon this drill uses for `create` MUST
+    # have started AFTER the write above, so unconditionally replace
+    # whatever is running (a plain kill, not `deploy` -- we want a clean
+    # generation 1 for this drill, not a graceful handoff at this stage)
+    # rather than assuming reuse is safe.
+    stale = _active(cfg_dir, tries=1)
+    if stale is not None and stale.get("pid"):
+        try:
+            os.kill(int(stale["pid"]), 15)
+        except ProcessLookupError:
+            pass
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline and _listening(stale["port"]):
+            time.sleep(0.25)
+        r.check(not _listening(stale["port"]),
+                f"replaced a pre-existing daemon (pid {stale['pid']}) that predated project registration")
+
+    proc1 = subprocess.Popen(
+        [python, "-m", "agent_bridge", "start", "--port", "0", "--bind", "127.0.0.1"],
+        start_new_session=True,
+    )
+    a1 = _active(cfg_dir)
     if not r.check(a1 is not None, "a daemon (generation 1) is up and has published routing"):
         return r
     old_port = a1["port"]
@@ -261,8 +285,15 @@ def run(python: str, repo: str, project_name: str, turn_timeout: float) -> Resul
     session_id = ""
     try:
         create = _run(
-            python, "create", project_name, "--target-dir", repo,
-            "--no-wait", "--session-id-file", session_id_file, DEFAULT_PROMPT,
+            # NB: the positional prompt must come immediately after the
+            # agent name, before --target-dir/other flags -- argparse's
+            # nargs="?" positional interleaved with a value-taking optional
+            # (--target-dir PATH) placed BEFORE it fails closed with
+            # "unrecognized arguments" (confirmed against the real CLI: a
+            # real bug an earlier revision of this fixture had, caught only
+            # by an actual live run, not by review).
+            python, "create", project_name, DEFAULT_PROMPT, "--target-dir", repo,
+            "--no-wait", "--session-id-file", session_id_file,
             timeout=60,
         )
         r.check(create.returncode == 0, f"create --no-wait rc==0 (rc={create.returncode}; {create.stderr.strip()[:200]})")
@@ -359,8 +390,25 @@ def run(python: str, repo: str, project_name: str, turn_timeout: float) -> Resul
         r.check(len(after_snapshot) >= len(before_snapshot), "events.jsonl only grew across the boundary (never shrank)")
         prefix_intact = after_snapshot[: len(before_snapshot)] == before_snapshot
         r.check(prefix_intact, "every event already written before the cutover is byte-identical afterward (no truncation/mutation)")
-        r.check(_count_type(after_snapshot, "assistant.turn_end") == 1,
-                "exactly one assistant.turn_end for the one prompt we sent (no duplicate/second turn)")
+        # NB: one user prompt can legitimately produce SEVERAL
+        # assistant.turn_start/turn_end pairs -- confirmed against a real
+        # run: Copilot's ACP loop opens a new turn per model completion, so
+        # a multi-tool-call prompt (the deliberately long-running one this
+        # drill sends) produced 6 turn_end events, not 1. Asserting an exact
+        # count of 1 was wrong (a bug an earlier revision of this fixture
+        # had, caught only by a real live run). What actually matters:
+        # every opened turn eventually closed (balanced, nothing left
+        # incomplete by the boundary) and genuine NEW turn activity
+        # happened after the cutover fired (the in-flight turn we caught
+        # mid-flight really did continue and finish on the far side, not
+        # merely already-done before deploy).
+        turn_starts_after = _count_type(after_snapshot, "assistant.turn_start")
+        turn_ends_after = _count_type(after_snapshot, "assistant.turn_end")
+        turn_ends_before = _count_type(before_snapshot, "assistant.turn_end")
+        r.check(turn_ends_after == turn_starts_after,
+                f"every opened turn settled by the end (turn_start={turn_starts_after}, turn_end={turn_ends_after} -- none left incomplete)")
+        r.check(turn_ends_after > turn_ends_before,
+                f"at least one turn completed AFTER the cutover boundary ({turn_ends_before} -> {turn_ends_after} turn_end events -- the in-flight turn genuinely continued past deploy, not merely already-done before it fired)")
         r.check(_count_type(after_snapshot, "session.start") <= 1,
                 "no duplicate session.start (the child was reattached, never respawned)")
         r.check(_count_type(after_snapshot, "session.shutdown") == 0,

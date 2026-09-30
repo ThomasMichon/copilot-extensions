@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** In Progress (Phase 1 of 6 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 6 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 6 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 6 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 6 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to Phase 6; Phase 6 of 6 implemented, PR open — closes Phase 5's deferred live-turn Plan item as an opt-in `CR_LIVE_TURN_DRILL=1` extension of the Tier-P `agent-bridge-cutover` scenario, not a Tier-E harness)
+- **Status:** In Progress (Phase 1 of 6 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 6 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 6 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 6 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 6 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to Phase 6; Phase 6 of 6 landed — [#4664](https://github.com/ThomasMichon/copilot-extensions/pull/4664) implemented the opt-in `CR_LIVE_TURN_DRILL=1` drill, then verified by a real live Docker clean-room run (this PR) that also fixed two bugs the review round couldn't catch and one wrong assertion)
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
@@ -270,7 +270,7 @@ layer — is the operator's own, captured verbatim in Request.)_
   new `agent-bridge-cutover` companion) that exercises this on a real fresh
   machine.
 
-### Phase 6 — Tier-E live-turn-survival harness (implemented; live run pending)
+### Phase 6 — Tier-E live-turn-survival harness (implemented; verified by a real live run) ✅
 
 Closes Phase 5's Plan item 1 for real: prove, with a genuinely live
 Copilot/ACP turn in flight, that `agent-bridge deploy` does not disrupt it
@@ -291,17 +291,21 @@ deliberately runs against the box's own real, already-provisioned install
 instead of a throwaway sandbox (see the fixture's own module docstring for
 the full reasoning).
 
-- [ ] A real live cutover drill shows a real Copilot turn completes with
+- [x] A real live cutover drill shows a real Copilot turn completes with
   zero observed disruption while the daemon's generation actually changes
   underneath it (same session id, no dropped/duplicated event, confirmed
-  generation change -- not a trivial/no-op cutover). Implemented in
-  `fixtures/live_turn_probe.py`, wired as opt-in scenario phase 4. **Not yet
-  executed for real** in this round (Docker + real Copilot auth + real
-  credits are needed; see Journal) -- the assertions and bounded-poll
-  mechanics were built and reviewed against the real `HostIndex`/session
-  CLI contracts, matching the same rigor `abrupt-kill-recovery` (Phase 5)
-  used, but a live run is the next session's/operator's job to trigger and
-  observe.
+  generation change -- not a trivial/no-op cutover). **Executed for real**
+  against a Docker clean-room box on lambda-core (real Copilot auth via
+  host `gh`, real credits): a real prompt reached 6 real
+  `assistant.turn_end` events, all landing AFTER `deploy` fired mid-turn,
+  under the SAME session/acp_session_id, with the Session-Host claim
+  reattached to the new generation's real pid and zero
+  truncated/duplicated/mid-stream-killed events. `PROBE-SUMMARY: 1/1
+  passed`. See Journal for two real bugs the live run caught that a
+  read-only review round could not (an argparse arg-ordering footgun and
+  a stale-registry daemon-reuse assumption) and one wrong assertion
+  (assuming exactly one `turn_end` per prompt) corrected from real
+  evidence.
 - [x] The drill's verdict is programmatic/evidence-based (a dedicated
   comparator over `HostIndex` records, `sessions --json` status, `wait
   --attention turn_complete`, and an `events.jsonl` before/after diff) --
@@ -317,11 +321,10 @@ the full reasoning).
 - [ ] `agent-bridge service restart` (or its replacement) and `agent-bridge
   deploy` are provably the same code path (a shared test, or the removal of
   one verb).
-- [ ] A live cutover drill (Phase 5/6) shows zero session disruption across
-  a real generation change. Implemented as Phase 6's opt-in
-  `CR_LIVE_TURN_DRILL=1` drill; **not yet executed for real** this round
-  (needs Docker + real Copilot auth + real credits -- see Phase 6's Journal
-  entry).
+- [x] A live cutover drill (Phase 5/6) shows zero session disruption across
+  a real generation change. Verified by a real `CR_LIVE_TURN_DRILL=1` run
+  (Docker clean-room, real Copilot auth/credits) -- see Phase 6's Journal
+  entry for the evidence.
 - [ ] An abrupt-termination drill shows a stale claim is recovered by the
   next generation without manual intervention. **Partially covered** -- the
   claim is stamped with a test-chosen label, not the daemon's own real
@@ -386,6 +389,84 @@ entry below for what was inspected, what was already covered, and the one new
 test that closes the gap.
 
 ## Journal
+
+### 2026-09-29 — Phase 6 verified by a real live Docker clean-room run (operator-triggered)
+- Operator had Docker available on lambda-core and asked for the drill to
+  actually be run for real, not left as an implemented-but-untested gap.
+  Built the box via `tools/clean-room/run.sh --scenario agent-bridge-cutover
+  --pass-env CR_LIVE_TURN_DRILL run` with `CR_LIVE_TURN_DRILL=1` (auth
+  auto-injected from the host's own `gh` login -- no device-code step
+  needed) and iterated in-place against the same persistent container
+  until the drill passed cleanly on a final, uncontaminated run:
+  `PROBE: live-turn-survival PASS ... PROBE-SUMMARY: 1/1 passed`. Phases
+  0-3 (the pre-existing stdlib probe) stayed green throughout (4/4) --
+  this round only touched phase 4.
+- **Three real bugs/wrong assumptions the live run caught that the review
+  round's read-only inspection could not:**
+  1. **argparse arg-ordering footgun (real CLI bug in the fixture, not
+     agent-bridge itself).** `create <agent> --target-dir <path> <prompt>`
+     fails closed with `unrecognized arguments: <prompt>` when the
+     positional `prompt` (`nargs="?"`) is placed AFTER a value-taking
+     optional (`--target-dir PATH`) instead of immediately after the
+     agent name -- confirmed by direct reproduction against the real CLI
+     (`agent-bridge: error: unrecognized arguments: hello`). Reordered to
+     `create <agent> <prompt> --target-dir <path> ...`.
+  2. **Stale daemon-reuse assumption.** The original "reuse an
+     already-running daemon" logic found a daemon phase 2's own
+     `copilot -p ...` sessionStart hook had already started -- BEFORE
+     this drill wrote `~/.agent-worktrees/projects.yaml` -- and
+     `agent-bridge agents` on that daemon reported "(no agents
+     registered)": a daemon's static local-agent registry
+     (`discover_local_agents()`) is resolved ONCE at startup
+     (`daemon_resolver(cfg)`), with no periodic reload (unlike
+     `refresh_provider_resolvers`, which only covers namespace/
+     CodeSpace/container providers). Fixed by unconditionally replacing
+     whatever daemon is already running (a plain kill, not `deploy` --
+     this drill wants a clean, project-aware generation 1, not a graceful
+     handoff at this stage) rather than assuming reuse is safe.
+  3. **Wrong assertion: "exactly one `assistant.turn_end`".** The real
+     run showed 6 turn_start/turn_end pairs for the ONE prompt sent --
+     Copilot's ACP loop opens a new turn per model completion, so a
+     multi-tool-call prompt (the deliberately long-running one this drill
+     sends, by design, to create a real mid-turn window) naturally
+     produces several turns, not one. Replaced the exact-count assertion
+     with: every opened turn is balanced by a matching close by the end
+     (nothing left incomplete), AND at least one turn_end lands strictly
+     AFTER the cutover boundary (proving the in-flight turn genuinely
+     continued past `deploy`, not merely finished before it fired).
+  4. **Own tooling mistake, not a fixture bug, but a real hazard worth
+     recording:** an early manual retest backgrounded a `docker exec`
+     invocation with a shell `&` instead of the bash tool's own async
+     mode. That process did NOT die with the parent shell (a `docker exec`
+     keeps running server-side once started) and raced a second, properly
+     async-launched invocation against the SAME real `~/.agent-bridge`
+     state a few seconds later -- both concurrently killing/respawning
+     daemons and firing their own `deploy`, producing a confusing extra
+     generation transition and a spurious `owner_pid` mismatch that briefly
+     looked like a real HostIndex bug. Confirmed via `~/.agent-bridge/
+     lifecycle.log`'s own append-only cutover-begin/-flip/-retire audit
+     trail (two `cutover-begin` events five seconds apart, from two
+     different driving pids) before concluding it was a self-inflicted
+     race, not a product defect. Never manually background a container
+     exec with `&`/nohup -- use the harness's own async execution mode so
+     a stray process can't outlive the caller that started it.
+- Real evidence from the passing run: a real prompt drove a real
+  Session-Host-backed local target (`agent-bridge create live-turn-target
+  --target-dir <repo>`); `deploy` fired genuinely mid-turn (confirmed via
+  `events.jsonl` turn_start/turn_end counts, not a fixed sleep); the
+  Session-Host claim reattached under the NEW generation's real pid; the
+  transcript was prefix-preserved across the boundary; and `wait
+  --attention turn_complete` -- the same caller-facing channel a real
+  caller uses -- settled cleanly. Zero dropped/duplicated events, zero
+  mid-stream kills, one genuinely-changed daemon generation.
+- Left a real, harmless per-check artifact from the pre-existing
+  `abrupt-kill-recovery`/`routing-flip-retire` Tier-P checks: their own
+  isolated-sandbox daemon subprocesses are sometimes left as zombie/leaked
+  passive processes in the persistent clean-room container after a run
+  (observed during this round's iteration, harmless -- fully isolated
+  temp-dir state, cleaned up by `run.sh down`/container removal). Noted as
+  a minor, pre-existing (Phase 5) cleanup nit, not fixed here -- out of
+  this PR's scope.
 
 ### 2026-09-29 — Phase 6 implemented (opt-in live-turn-survival drill, PR pending)
 - Consumed the prior session's planning handoff (Phase 6 design doc,

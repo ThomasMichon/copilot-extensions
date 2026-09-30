@@ -123,13 +123,17 @@ correct, budget comparable iteration here.
 
 **Acceptance criteria (also tracked in the effort README's Validation
 Plan).**
-- [ ] A real live cutover drill shows a real Copilot turn completes with
+- [x] A real live cutover drill shows a real Copilot turn completes with
   zero observed disruption while the daemon's generation actually changes
   underneath it (same session id, no dropped/duplicated event, confirmed
   generation change -- not a trivial/no-op cutover). Implemented as
   `fixtures/live_turn_probe.py`, wired as scenario phase 4
-  (`CR_LIVE_TURN_DRILL=1`); not yet executed for real (needs Docker + real
-  Copilot auth + real credits -- see the effort README's Journal).
+  (`CR_LIVE_TURN_DRILL=1`); **executed for real** against a Docker
+  clean-room box (real Copilot auth via host `gh`, real credits) --
+  `PROBE-SUMMARY: 1/1 passed`. See the effort README's Journal for the
+  real bugs the live run caught (an argparse arg-ordering footgun, a
+  stale-registry daemon-reuse assumption, and a wrong exactly-one-turn_end
+  assertion) that a read-only review round could not have found.
 - [x] The drill's verdict is programmatic/evidence-based, or a documented
   decision explains why an LLM judge is the right mechanism after all. It
   is programmatic: `HostIndex` record reattach, `sessions --json` status,
