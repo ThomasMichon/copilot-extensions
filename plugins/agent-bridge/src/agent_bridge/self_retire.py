@@ -26,7 +26,7 @@ from zdd import routing
 
 __all__ = [
     "_is_listening", "initial_self_retire_status", "is_replaced_by_forward",
-    "is_superseded",
+    "is_superseded", "retire_check",
     "slot_descriptor",
 ]
 
@@ -53,6 +53,20 @@ def is_superseded(
     return _lib_is_superseded(
         table, my_pid, my_generation, is_listening=is_listening
     )
+
+
+def retire_check(config_dir, my_pid: int, my_generation: int, count_active) -> tuple[bool, bool, str]:
+    """``(superseded, ready_to_retire, why)`` for one self-retire poll.
+
+    A route an explicit live forward replaced retires at once: the daemon's
+    only registrations are the ones it took from the host, so waiting for them
+    to go idle would never end. A newer generation waits for idle
+    (``count_active()`` -- only called when superseded -- reaching 0)."""
+    if is_replaced_by_forward(config_dir):
+        return True, True, "Route replaced by a live forward (not waiting for idle registrations)"
+    if not is_superseded(config_dir, my_pid, my_generation):
+        return False, False, ""
+    return True, count_active() == 0, "Superseded by a live newer generation and idle"
 
 
 def is_replaced_by_forward(

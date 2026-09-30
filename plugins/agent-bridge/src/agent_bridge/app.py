@@ -868,8 +868,7 @@ async def lifespan(app: FastAPI):
             from .config import config_dir
             from .self_retire import (
                 initial_self_retire_status,
-                is_replaced_by_forward,
-                is_superseded,
+                retire_check,
             )
 
             my_pid = _os.getpid()
@@ -905,24 +904,16 @@ async def lifespan(app: FastAPI):
                     status["confirms"] = 0
                     continue
                 try:
-                    replaced_by_forward = bool(await asyncio.to_thread(
-                        is_replaced_by_forward, config_dir()
-                    ))
-                    if replaced_by_forward:
-                        superseded = status["superseded"] = True
-                        idle = True
-                    else:
-                        superseded = status["superseded"] = bool(await asyncio.to_thread(
-                            is_superseded, config_dir(), my_pid, my_gen
-                        ))
-                        idle = superseded and (
-                            await asyncio.to_thread(_count_active_sessions, mgr, db) == 0
-                        )
+                    superseded, ready, why = await asyncio.to_thread(
+                        retire_check, config_dir(), my_pid, my_gen,
+                        lambda: _count_active_sessions(mgr, db),
+                    )
+                    status["superseded"] = superseded
                 except Exception:
                     status.update(superseded=False, confirms=0)
                     log.debug("Self-retire supersession check failed", exc_info=True)
                     continue
-                if not (superseded and idle):
+                if not ready:
                     status["confirms"] = 0  # any miss resets: only sustained acts
                     continue
                 status["confirms"] += 1
@@ -934,18 +925,7 @@ async def lifespan(app: FastAPI):
                     ):
                         status["confirms"] = 0
                         continue
-                    log.info(
-                        (
-                            "Route replaced by a live forward -- self-retiring "
-                            "without waiting for idle registrations "
-                            "(was gen %d, pid %d)"
-                            if replaced_by_forward
-                            else "Superseded by a live newer generation and idle -- "
-                            "self-retiring (was gen %d, pid %d)"
-                        ),
-                        my_gen,
-                        my_pid,
-                    )
+                    log.info("%s -- self-retiring (was gen %d, pid %d)", why, my_gen, my_pid)
                     server = getattr(app.state, "uvicorn_server", None)
                     if server is not None:
                         server.should_exit = True

@@ -101,6 +101,14 @@ class CutoverResult:
         }
 
 
+class _NeverRaised(Exception):
+    """Stands in for a refusal a routing module can't raise."""
+
+
+class _UnguardedRouting(Exception):
+    """A refusal hook was given, but the routing module can't publish guarded."""
+
+
 class CutoverOrchestrator:
     """Drive one active/passive cutover. See module docstring for the sequence."""
 
@@ -349,14 +357,40 @@ class CutoverOrchestrator:
             # Flip the route: new active, old demoted to previous. From here a
             # new CLI resolution lands on the new daemon; long-lived sockets stay
             # on the old one until their turn completes (migrate at a breakpoint).
+            # Without ``refuse_old`` this is exactly the plain publish it always
+            # was (a caller's routing stand-in may override ``publish_active``,
+            # e.g. to promote its passive first). With it, the publish is
+            # guarded: the current route is re-checked under the routing lock
+            # that writes the new one -- and only a routing object that itself
+            # defines the guarded publish can do that (``getattr_static``, so a
+            # stand-in forwarding unknown names to zdd.routing doesn't count);
+            # otherwise the cutover refuses rather than flip unguarded.
+            refused = _NeverRaised
             try:
-                self.routing.publish_active_with_previous_guarded(
-                    self.config_dir, bind=self.bind, port=new_port,
-                    pid=getattr(handle, "pid", None), version=self.version,
-                    demote_existing=True, expected_active=old,
-                    refuse_current=self.refuse_old,
-                )
-            except self.routing.ActivePublicationRefused as exc:
+                if self.refuse_old is None:
+                    self.routing.publish_active(
+                        self.config_dir, bind=self.bind, port=new_port,
+                        pid=getattr(handle, "pid", None), version=self.version,
+                        demote_existing=True,
+                    )
+                else:
+                    import inspect
+
+                    if inspect.getattr_static(
+                        self.routing, "publish_active_with_previous_guarded", None,
+                    ) is None:
+                        raise _UnguardedRouting(
+                            "the routing module can't publish guarded; refusing to flip "
+                            "a route that must be re-checked first"
+                        )
+                    refused = self.routing.ActivePublicationRefused
+                    self.routing.publish_active_with_previous_guarded(
+                        self.config_dir, bind=self.bind, port=new_port,
+                        pid=getattr(handle, "pid", None), version=self.version,
+                        demote_existing=True, expected_active=old,
+                        refuse_current=self.refuse_old,
+                    )
+            except (refused, _UnguardedRouting) as exc:
                 result.error = str(exc)
                 result.steps.append(f"refused: {exc}")
                 try:
