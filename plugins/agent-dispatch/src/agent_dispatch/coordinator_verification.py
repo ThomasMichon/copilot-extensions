@@ -44,6 +44,7 @@ class RunWaiterFinishBody(RunWaiterArmBody):
 class RunWaiterAbortBody(BaseModel):
     generation: StrictInt
     message: str
+    wake: bool = True
 
 
 def register_verification_routes(
@@ -192,11 +193,18 @@ def register_verification_routes(
 
     @app.post("/tasks/{task_id}/run-waiter/abort")
     def abort_run_waiter(task_id: str, body: RunWaiterAbortBody) -> dict:
-        waiter = queue.abort_preparing_run_waiter(
-            task_id,
-            generation=body.generation,
-            reason="waiter failed before arming",
-            message=body.message,
-            sender="agent-dispatch-hibernate",
-        )
+        if body.wake:
+            waiter = queue.abort_preparing_run_waiter(
+                task_id,
+                generation=body.generation,
+                reason="waiter failed before arming",
+                message=body.message,
+                sender="agent-dispatch-hibernate",
+            )
+        else:
+            waiter = queue.cancel_preparing_run_waiter(
+                task_id,
+                generation=body.generation,
+                reason="waiter cancelled before arming",
+            )
         return {"accepted": waiter is not None, "waiter": waiter}

@@ -621,6 +621,46 @@ class QueueRunWaitersMixin:
             now=now,
         )
 
+    def cancel_preparing_run_waiter(
+        self,
+        task_id: str,
+        *,
+        generation: int,
+        reason: str,
+        now: float | None = None,
+    ) -> dict[str, Any] | None:
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = self._select_waiter_row(
+                conn,
+                task_id,
+                states=("preparing",),
+                generation=generation,
+            )
+            if row is None:
+                conn.execute("COMMIT")
+                return None
+            conn.execute(
+                "UPDATE run_waiters SET state = 'retired', updated_at = ?, retired_reason = ?"
+                " WHERE id = ? AND state = 'preparing'",
+                (ts, reason, row["id"]),
+            )
+            task = self._fetch(conn, task_id)
+            if task is not None:
+                self._audit(
+                    conn,
+                    task_id,
+                    ts=ts,
+                    from_status=task.status,
+                    to_status=task.status,
+                    worker=task.owner,
+                    note=f"run waiter cancelled ({reason})",
+                )
+            result = conn.execute("SELECT * FROM run_waiters WHERE id = ?", (row["id"],)).fetchone()
+            conn.execute("COMMIT")
+        return self._run_waiter_from_row(result)
+
     def has_pending_run_waiter_wakes(self) -> bool:
         with self._connect() as conn:
             row = conn.execute(
@@ -673,7 +713,7 @@ class QueueRunWaitersMixin:
                     return None
                 wake = RunWaiterWakeOperation._from_row(row)
                 task = self._fetch(conn, wake.task_id)
-                if not self._run_waiter_wake_is_current(task, wake):
+                if not self._run_waiter_wake_is_current(conn, task, wake):
                     conn.execute(
                         "UPDATE run_waiter_wakes SET status = 'stale', updated_at = ?,"
                         " last_error = 'task fence advanced' WHERE id = ? AND status = 'pending'",
@@ -722,7 +762,7 @@ class QueueRunWaitersMixin:
                 conn.execute("COMMIT")
                 raise TaskError(f"run waiter wake {wake_id!r} is not held by this delivery")
             task = self._fetch(conn, wake.task_id)
-            if not self._run_waiter_wake_is_current(task, wake):
+            if not self._run_waiter_wake_is_current(conn, task, wake):
                 conn.execute(
                     "UPDATE run_waiter_wakes SET status = 'stale', updated_at = ?,"
                     " delivery_token = NULL, delivery_expires_at = NULL,"
@@ -873,15 +913,26 @@ class QueueRunWaitersMixin:
             and task.owner_session_id == waiter.get("owner_session_id")
         )
 
-    @staticmethod
-    def _run_waiter_wake_is_current(task: Task | None, wake: RunWaiterWakeOperation) -> bool:
-        return bool(
+    def _run_waiter_wake_is_current(
+        self,
+        conn: sqlite3.Connection,
+        task: Task | None,
+        wake: RunWaiterWakeOperation,
+    ) -> bool:
+        if not (
             task is not None
             and task.status == Status.SUSPENDED
             and task.owner == wake.owner
             and task.generation == wake.task_generation
             and task.owner_session_id == wake.owner_session_id
-        )
+        ):
+            return False
+        row = conn.execute(
+            "SELECT MAX(generation) AS generation FROM run_waiters WHERE task_id = ?",
+            (wake.task_id,),
+        ).fetchone()
+        latest_generation = int((row["generation"] if row is not None else 0) or 0)
+        return latest_generation == int(wake.waiter_generation)
 
     def _enqueue_run_waiter_wake(
         self,

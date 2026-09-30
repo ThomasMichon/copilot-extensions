@@ -307,7 +307,7 @@ def test_script_evaluator_uses_fixed_argv_and_shell_false():
     assert json.loads(captured["kwargs"]["input"])["task"]["id"] == "t-1"
 
 
-def test_script_evaluator_timeout_returns_noop():
+def test_script_evaluator_timeout_raises_runtime_error():
     def runner(argv, **kwargs):
         raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
 
@@ -317,13 +317,11 @@ def test_script_evaluator_timeout_returns_noop():
         runner=runner,
     )
 
-    [decision] = evaluator.evaluate(_completed_event())
-
-    assert isinstance(decision, ev.NoOp)
-    assert "timed out" in (decision.reason or "")
+    with pytest.raises(ev.EvaluatorRuntimeError, match="timed out"):
+        evaluator.evaluate(_completed_event())
 
 
-def test_script_evaluator_malformed_output_returns_noop():
+def test_script_evaluator_malformed_output_raises_runtime_error():
     def runner(*_args, **_kwargs):
         return SimpleNamespace(returncode=0, stdout="not-json", stderr="")
 
@@ -333,10 +331,8 @@ def test_script_evaluator_malformed_output_returns_noop():
         runner=runner,
     )
 
-    [decision] = evaluator.evaluate(_completed_event())
-
-    assert isinstance(decision, ev.NoOp)
-    assert "invalid" in (decision.reason or "")
+    with pytest.raises(ev.EvaluatorRuntimeError, match="invalid"):
+        evaluator.evaluate(_completed_event())
 
 
 # -- CLI ---------------------------------------------------------------------

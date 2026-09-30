@@ -156,8 +156,17 @@ def _rollback_detached_wait(
         return None
     from . import hibernation_claims
 
+    cancelled = None
     try:
         with _core()._client(args) as c:
+            waiter_generation = suspended.get("waiter_generation")
+            if waiter_generation is not None:
+                cancelled = c.abort_run_waiter(
+                    spec.task_id,
+                    generation=int(waiter_generation),
+                    message="Detached waiter spawn failed before the child armed.",
+                    wake=False,
+                )
             resumed = c.resume(
                 spec.task_id,
                 worker_id,
@@ -169,7 +178,11 @@ def _rollback_detached_wait(
     except Exception as exc:  # noqa: BLE001 -- degraded rollback
         return {"error": str(exc)}
     claim = hibernation_claims.release_hibernation_claim(spec.task_id)
-    return {"status": resumed.get("status"), "claim_released": claim}
+    return {
+        "status": resumed.get("status"),
+        "claim_released": claim,
+        "waiter_cancelled": cancelled,
+    }
 
 
 def _suspend_for_detached_wait(args: argparse.Namespace, spec: Any) -> dict | None:
@@ -262,6 +275,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     "worker_id": worker_id,
                     "claim": claim,
                     "generation": prepared.get("task_generation"),
+                    "waiter_generation": prepared.get("generation"),
                     "owner_session_id": prepared.get("owner_session_id"),
                 }
                 spec = dataclasses.replace(

@@ -220,7 +220,6 @@ def evaluate_submitted_task(
                 current is None
                 or current.status != Status.SUBMITTED
                 or current.generation != task.generation
-                or current.updated_at != task.updated_at
             ):
                 return _verification_report(
                     task_id=task_id,
@@ -239,7 +238,9 @@ def evaluate_submitted_task(
                         task_id,
                         actor="evaluator",
                         expected_generation=task.generation,
+                        expected_owner_session_id=task.owner_session_id,
                         expected_status=Status.SUBMITTED,
+                        expected_updated_at=task.updated_at,
                     )
                 )
                 _publish(bus, "task.completed", confirmed)
@@ -253,6 +254,8 @@ def evaluate_submitted_task(
                     reason=decision.reason,
                     expected_status=Status.SUBMITTED,
                     expected_generation=task.generation,
+                    expected_owner_session_id=task.owner_session_id,
+                    expected_updated_at=task.updated_at,
                 )
                 abandoned = asdict(outcome.task)
                 if outcome.event_type is not None:

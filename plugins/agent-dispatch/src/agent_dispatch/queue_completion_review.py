@@ -28,6 +28,8 @@ class QueueCompletionReviewMixin:
         actor: str | None = None,
         expected_status: str | None = None,
         expected_generation: int | None = None,
+        expected_owner_session_id: str | None = None,
+        expected_updated_at: float | None = None,
         now: float | None = None,
     ) -> Task:
         """Corroborate a completion claim and close the task for good.
@@ -49,6 +51,8 @@ class QueueCompletionReviewMixin:
             note=f"confirmed by {actor}" if actor else "confirmed",
             expected_status=expected_status,
             expected_generation=expected_generation,
+            expected_owner_session_id=expected_owner_session_id,
+            expected_updated_at=expected_updated_at,
             idempotent_replay=True,
         )
 

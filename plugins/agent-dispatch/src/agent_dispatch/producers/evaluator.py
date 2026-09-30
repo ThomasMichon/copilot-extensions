@@ -52,6 +52,10 @@ class EvaluatorError(ValueError):
     """Raised for a malformed evaluator spec."""
 
 
+class EvaluatorRuntimeError(RuntimeError):
+    """Raised when a trusted evaluator could not produce a valid decision."""
+
+
 @dataclass(frozen=True)
 class Emit:
     """A decision to create a follow-up task. ``fields`` are ``create`` kwargs
@@ -308,10 +312,10 @@ class ScriptEvaluator:
             )
         except subprocess.TimeoutExpired:
             log.warning("script evaluator %s timed out after %.1fs", self.name, self.timeout_seconds)
-            return [NoOp(reason="script evaluator timed out")]
+            raise EvaluatorRuntimeError("script evaluator timed out") from None
         except OSError as exc:
             log.warning("script evaluator %s failed to start: %s", self.name, exc)
-            return [NoOp(reason=f"script evaluator failed to start: {exc}")]
+            raise EvaluatorRuntimeError(f"script evaluator failed to start: {exc}") from exc
         if int(completed.returncode) != 0:
             log.warning(
                 "script evaluator %s exited %s: %s",
@@ -319,16 +323,16 @@ class ScriptEvaluator:
                 completed.returncode,
                 str(completed.stderr or "").strip()[:400],
             )
-            return [NoOp(reason=f"script evaluator exited {completed.returncode}")]
+            raise EvaluatorRuntimeError(f"script evaluator exited {completed.returncode}")
         stdout = str(completed.stdout or "").strip()
         if not stdout:
             log.warning("script evaluator %s produced no output", self.name)
-            return [NoOp(reason="script evaluator produced no decision")]
+            raise EvaluatorRuntimeError("script evaluator produced no decision")
         try:
             return [decision_from_dict(json.loads(stdout))]
         except (EvaluatorError, ValueError) as exc:
             log.warning("script evaluator %s returned malformed output: %s", self.name, exc)
-            return [NoOp(reason=f"script evaluator output invalid: {exc}")]
+            raise EvaluatorRuntimeError(f"script evaluator output invalid: {exc}") from exc
 
 
 class ScriptEvaluatorRegistry:

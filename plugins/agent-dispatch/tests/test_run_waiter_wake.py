@@ -63,7 +63,7 @@ def test_run_waiter_wake_drainer_retries_and_releases_claim(q):
                 q,
                 interval=0.01,
                 deliver=deliver,
-                release_claim=lambda task_id, host, worktree: releases.append((task_id, host, worktree)) or {"released": True},
+                release_claim=lambda task_id, host, worktree, repo: releases.append((task_id, host, worktree, repo)) or {"released": True},
                 retry_base=0.01,
             )
         )
@@ -86,7 +86,7 @@ def test_run_waiter_wake_drainer_retries_and_releases_claim(q):
     assert {call[3] for call in calls} == {wake.id}
     assert {call[4] for call in calls} == {"agent-dispatch-run-waiter-recovery"}
     assert {call[5] for call in calls} == {"session-1"}
-    assert releases == [(task_id, TEST_HOST, "wt-1")]
+    assert releases == [(task_id, TEST_HOST, "wt-1", "example.com/acme/widget")]
 
 
 def test_run_waiter_wake_restart_recovers_inflight_lease(q):
@@ -128,7 +128,7 @@ def test_run_waiter_wake_retries_when_claim_release_fails(q):
                 q,
                 interval=0.01,
                 deliver=deliver,
-                release_claim=lambda task_id, host, worktree: releases.append((task_id, host, worktree)) or None,
+                release_claim=lambda task_id, host, worktree, repo: releases.append((task_id, host, worktree, repo)) or None,
                 retry_base=0.01,
                 max_attempts=2,
             )

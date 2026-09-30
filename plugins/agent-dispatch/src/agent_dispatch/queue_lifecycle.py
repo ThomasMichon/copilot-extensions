@@ -459,6 +459,7 @@ class QueueLifecycleMixin:
         expected_status: str | None = None,
         expected_generation: int | None = None,
         expected_owner_session_id: str | None = None,
+        expected_updated_at: float | None = None,
         now: float | None = None,
     ) -> Task:
         """Move a task to terminal ``abandoned`` -- requires ``permitted=True``.
@@ -467,7 +468,9 @@ class QueueLifecycleMixin:
         return self.abandon_with_outcome(
             task_id, worker_id=worker_id, permitted=permitted, reason=reason,
             expected_status=expected_status, expected_generation=expected_generation,
-            expected_owner_session_id=expected_owner_session_id, now=now,
+            expected_owner_session_id=expected_owner_session_id,
+            expected_updated_at=expected_updated_at,
+            now=now,
         ).task
 
     def abandon_with_outcome(
@@ -480,6 +483,7 @@ class QueueLifecycleMixin:
         expected_status: str | None = None,
         expected_generation: int | None = None,
         expected_owner_session_id: str | None = None,
+        expected_updated_at: float | None = None,
         now: float | None = None,
     ) -> CompletionOutcome:
         """Like :meth:`abandon`, but returns a :class:`CompletionOutcome`
@@ -497,6 +501,7 @@ class QueueLifecycleMixin:
             extra={"owner": None, "lease_expires_at": None},
             expected_generation=expected_generation,
             expected_owner_session_id=expected_owner_session_id,
+            expected_updated_at=expected_updated_at,
             expected_status=expected_status,
             idempotent_replay=True, report_replay=True,
         )
@@ -765,6 +770,7 @@ class QueueLifecycleMixin:
         bump_generation: bool = False,
         expected_owner_session_id: str | None = None,
         expected_generation: int | None = None,
+        expected_updated_at: float | None = None,
         expected_status: str | None = None,
         reembody_headless_on_wake: bool = False,
         reject_pending_steer: bool = False,
@@ -846,6 +852,9 @@ class QueueLifecycleMixin:
             ):
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} ownership incarnation changed")
+            if expected_updated_at is not None and task.updated_at != expected_updated_at:
+                conn.execute("COMMIT")
+                raise TaskError(f"task {task_id!r} changed while the transition was in flight")
             if (
                 reembody_headless_on_wake
                 and task.owner_session_id is None

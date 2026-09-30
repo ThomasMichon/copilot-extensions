@@ -172,15 +172,41 @@ def release_hibernation_claim_for_host_worktree(
     task_id: str,
     host: str | None,
     worktree_id: str,
+    repo: str | None,
     *,
     timeout: float = 15.0,
 ) -> dict | None:
     """Retire a hibernation claim on the machine that originally journaled it."""
     if not worktree_id:
         return None
+    from . import identity
+
+    project = identity.name_for_repo(repo) if repo else None
     current = remote_dispatch.local_machine()
     if host is None or (current is not None and host == current):
-        return release_hibernation_claim_for_worktree(task_id, worktree_id, timeout=timeout)
+        prefix = agent_worktrees_launch_prefix()
+        if prefix is None:
+            return None
+        argv = [*prefix]
+        if project:
+            argv += ["--project", project]
+        argv += ["claims", "release", task_id, "--worktree", worktree_id, "--json"]
+        try:
+            result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
+                argv,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                **no_window_kwargs(),
+            )
+            payload = json.loads(result.stdout or "{}")
+        except (OSError, subprocess.SubprocessError, TypeError, ValueError):
+            return None
+        if result.returncode != 0 or not isinstance(payload, dict):
+            return None
+        _mirror_task_claim_status(task_id, "released", timeout=timeout)
+        return payload
     ssh = shutil.which("ssh")
     if ssh is None:
         return None
@@ -188,6 +214,7 @@ def release_hibernation_claim_for_host_worktree(
         shlex.quote(part)
         for part in [
             "agent-worktrees",
+            *(["--project", project] if project else []),
             "claims",
             "release",
             task_id,

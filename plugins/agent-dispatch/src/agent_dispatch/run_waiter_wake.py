@@ -9,7 +9,7 @@ from collections.abc import Callable
 from .queue import TaskError, TaskQueue
 
 DeliverWake = Callable[[str, str, str, str, str, str | None], bool]
-ReleaseClaim = Callable[[str, str | None, str], object | None]
+ReleaseClaim = Callable[[str, str | None, str, str | None], object | None]
 WakeActive = Callable[[], bool]
 log = logging.getLogger(__name__)
 
@@ -89,12 +89,14 @@ async def drain_run_waiter_wakes(
             delivery_error = f"wake delivery error: {type(exc).__name__}"
         if delivered and release_claim is not None:
             try:
-                released = await asyncio.to_thread(
-                    release_claim,
-                    wake.task_id,
-                    wake.waiter_host,
-                    _worktree_id(wake.resume_worktree),
-                )
+                    task = await asyncio.to_thread(queue.get, wake.task_id)
+                    released = await asyncio.to_thread(
+                        release_claim,
+                        wake.task_id,
+                        wake.waiter_host,
+                        _worktree_id(wake.resume_worktree),
+                        None if task is None else task.repo,
+                    )
             except Exception:
                 log.warning(
                     "run-waiter wake claim release failed for %s",

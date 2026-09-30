@@ -98,6 +98,7 @@ class VerificationClientMixin:
         *,
         generation: int,
         message: str,
+        wake: bool = True,
     ) -> dict:
         return self._unwrap(
             self._http.post(
@@ -105,6 +106,7 @@ class VerificationClientMixin:
                 json={
                     "generation": generation,
                     "message": message,
+                    "wake": wake,
                 },
             )
         )
