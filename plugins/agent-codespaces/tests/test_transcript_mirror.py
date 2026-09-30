@@ -329,6 +329,50 @@ def test_prune_if_clean_removes_only_settled_mirrors(tmp_path):
     assert (tmp_path / "cs-1").exists()
 
 
+async def test_a_prune_requested_while_a_push_is_owed_happens_once_it_lands(tmp_path):
+    from single_instance_lease import SingleInstance
+
+    results = [(False, "hub down"), (True, "pushed")]
+    pushes = []
+
+    def push(source, label):
+        pushes.append(label)
+        return results[len(pushes) - 1]
+
+    mirror = tm.TranscriptMirror(push=push, root=tmp_path)
+    (tmp_path / "cs-1" / "session-state" / SID).mkdir(parents=True)
+    (tmp_path / "cs-1.dirty").touch()
+    assert not mirror.request_prune("cs-1")  # deleted with a push still owed: kept, and remembered
+    assert (tmp_path / "cs-1.prune").exists() and mirror.owed_codespaces() == ["cs-1"]
+    restarted = tm.TranscriptMirror(push=push, root=tmp_path)
+    await restarted.push_owed("cs-1")  # the push fails: still owed, still there
+    assert (tmp_path / "cs-1").exists() and (tmp_path / "cs-1.prune").exists()
+    await restarted.push_owed("cs-1")  # it lands: the requested prune follows
+    assert not (tmp_path / "cs-1").exists() and not (tmp_path / "cs-1.prune").exists()
+    assert restarted.owed_codespaces() == [] and len(pushes) == 2
+
+    # Deleted mid-pass (its lock held, nothing owed): the next owed pass prunes it.
+    (tmp_path / "cs-2" / "session-state" / SID).mkdir(parents=True)
+    held = SingleInstance(tmp_path, service="transcript-mirror", lock_name="cs-2.lock")
+    held.acquire()
+    try:
+        assert not mirror.request_prune("cs-2")
+    finally:
+        held.release()
+    assert mirror.owed_codespaces() == ["cs-2"]
+    assert (await mirror.push_owed("cs-2")) == {"ok": True, "changed": 0}
+    assert not (tmp_path / "cs-2").exists() and mirror.owed_codespaces() == []
+
+
+async def test_a_push_debt_with_no_mirror_left_is_dropped_not_retried_forever(tmp_path):
+    pushes = []
+    mirror = tm.TranscriptMirror(push=lambda source, label: pushes.append(label) or (False, "no source"),
+                                 root=tmp_path)
+    (tmp_path / "cs-1.dirty").touch()  # its directory never made it (or was removed by hand)
+    assert (await mirror.push_owed("cs-1")) == {"ok": True, "changed": 0}
+    assert pushes == [] and mirror.owed_codespaces() == []
+
+
 async def test_a_cancelled_pass_keeps_the_codespace_until_its_push_finishes(tmp_path, direct_exec):
     import threading
 

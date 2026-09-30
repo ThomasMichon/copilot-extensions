@@ -381,6 +381,15 @@ async def test_probe_retries_owed_transcript_push_with_no_holds(store, tmp_path)
     assert not (mirror._root / "cs-1.dirty").exists()
 
 
+def test_an_owed_push_extends_the_idle_owners_stay_only_while_owed(store, tmp_path):
+    mirror, _ = _dirty_mirror(tmp_path)
+    forwards = sf.SessionForwards(_daemon_factory({}), transcript_mirror=mirror)
+    assert forwards.owed_grace() == sf.OWED_PUSH_GRACE_SECONDS
+    (mirror._root / "cs-1.dirty").unlink()
+    assert forwards.owed_grace() == 0.0
+    assert sf.SessionForwards(_daemon_factory({})).owed_grace() == 0.0
+
+
 async def test_owed_transcript_push_skips_when_the_codespace_lock_is_held(store, tmp_path):
     from single_instance_lease import SingleInstance
 

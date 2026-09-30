@@ -791,7 +791,7 @@ def delete_codespace(
     try:
         from .transcript_mirror import TranscriptMirror
 
-        if TranscriptMirror().prune_if_clean(name):
+        if TranscriptMirror().request_prune(name):
             log.info("Pruned clean transcript mirror for deleted codespace: %s", name)
     except Exception as exc:
         log.debug("Transcript mirror prune after deleting %s failed: %s", name, exc)

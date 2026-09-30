@@ -355,6 +355,9 @@ class _FakeOwner:
     def active_codespaces(self):
         return set()
 
+    def idle_limit(self, idle):
+        return idle
+
 
 async def test_run_owner_daemon_reconciles_until_stopped(store):
     fake = _FakeOwner(stop_after=3)
@@ -459,6 +462,37 @@ async def test_run_owner_daemon_idle_shutdown_resets_on_new_hold(store):
     fake.stop_event.set()
     await task
     assert fake.shutdowns == 1
+
+
+async def test_an_owed_transcript_push_keeps_an_idle_owner_up_until_it_lands(store):
+    """No holds, but a mirror push is still owed: the Owner stays to retry it
+    (bounded by the grace), then idles out as usual once it has landed."""
+    fake = _FakeOwner(stop_after=10**9)
+    owed = {"grace": 60.0}
+    fake.idle_limit = lambda idle: max(idle, owed["grace"])
+    task = asyncio.create_task(owner.run_owner_daemon(
+        fake, interval=0.01, stop_event=fake.stop_event, idle_shutdown_after=0.05,
+    ))
+    await asyncio.sleep(0.2)
+    assert not task.done()  # well past the idle threshold: the owed push holds it
+    owed["grace"] = 0.0  # the push landed
+    await asyncio.wait_for(task, timeout=5)
+    assert fake.shutdowns == 1
+
+
+def test_the_idle_limit_grows_only_while_a_transcript_push_is_owed():
+    class _Sessions:
+        grace = 0.0
+
+        def owed_grace(self):
+            return self.grace
+
+    sessions = _Sessions()
+    o = owner.ConnectionOwner(lambda cs: None, sessions=sessions)
+    assert o.idle_limit(300.0) == 300.0
+    sessions.grace = 3600.0
+    assert o.idle_limit(300.0) == 3600.0
+    assert owner.ConnectionOwner(lambda cs: None).idle_limit(300.0) == 300.0
 
 
 async def test_run_owner_daemon_idle_shutdown_disabled_by_none(store):

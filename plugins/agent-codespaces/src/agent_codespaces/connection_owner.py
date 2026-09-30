@@ -747,6 +747,10 @@ class ConnectionOwner:
         self._channels: dict[str, RelayChannel] = {}
         self._sessions = sessions
 
+    def idle_limit(self, idle: float) -> float:
+        """How long it stays up with no hold: longer while a transcript push is owed."""
+        return max(idle, self._sessions.owed_grace()) if self._sessions is not None else idle
+
     def active_codespaces(self) -> set[str]:
         """CodeSpaces with a currently-live relay channel under this Owner."""
         return {cs for cs, channel in self._channels.items() if channel.is_alive}
@@ -941,13 +945,9 @@ async def run_owner_daemon(
                 else:
                     if idle_since is None:
                         idle_since = time.monotonic()
-                    elif time.monotonic() - idle_since >= idle_shutdown_after:
-                        log.info(
-                            "Connection Owner idle (no held CodeSpaces) for "
-                            "%.0fs -- exiting; a tenant will start it back up "
-                            "on demand when needed.",
-                            idle_shutdown_after,
-                        )
+                    elif time.monotonic() - idle_since >= owner.idle_limit(idle_shutdown_after):
+                        log.info("Connection Owner idle (no held CodeSpaces, no owed push) -- exiting;"
+                                 " a tenant starts it back up on demand.")
                         break
             try:
                 await asyncio.wait_for(stop.wait(), timeout=interval)

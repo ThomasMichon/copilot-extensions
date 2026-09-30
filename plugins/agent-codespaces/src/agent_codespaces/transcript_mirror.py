@@ -223,18 +223,25 @@ class TranscriptMirror:
         return changed
 
     def owed_codespaces(self) -> list[str]:
-        """CodeSpaces with a local mirror push still owed to the hub."""
+        """CodeSpaces with a mirror push, or a deleted one's prune, still owed."""
         if not self._root.is_dir():
             return []
-        return sorted(
-            p.stem for p in self._root.glob("*.dirty")
+        return sorted({
+            p.stem for pattern in ("*.dirty", "*.prune") for p in self._root.glob(pattern)
             if p.is_file() and _CODESPACE.match(p.stem)
-        )
+        })
 
     async def push_owed(self, codespace: str) -> dict[str, Any]:
-        """Push an already-dirty mirror without contacting the CodeSpace."""
+        """Push an already-dirty mirror without contacting the CodeSpace, then
+        prune it if its CodeSpace was deleted meanwhile and nothing is owed."""
         if not _CODESPACE.match(codespace or ""):
             return {"ok": False, "detail": "not a CodeSpace name"}
+        result = await self._push_dirty(codespace)
+        if (self._root / f"{codespace}.prune").exists():
+            await asyncio.to_thread(self.prune_if_clean, codespace)
+        return result
+
+    async def _push_dirty(self, codespace: str) -> dict[str, Any]:
         dirty = self._root / f"{codespace}.dirty"
         if not dirty.exists():
             return {"ok": True, "changed": 0}
@@ -259,16 +266,28 @@ class TranscriptMirror:
             if not handed_off:
                 lease.release()
 
+    def request_prune(self, codespace: str) -> bool:
+        """A deleted CodeSpace's mirror goes once no push is owed: now, or (a
+        persisted ``<codespace>.prune`` request) by a later owed-push pass."""
+        if not _CODESPACE.match(codespace or "") or not self._root.is_dir():
+            return False
+        if not (self._root / codespace).exists():
+            return False
+        (self._root / f"{codespace}.prune").touch()
+        return self.prune_if_clean(codespace)
+
     def prune_if_clean(self, codespace: str) -> bool:
         """Remove a deleted CodeSpace's local mirror only when no push is owed."""
         if not _CODESPACE.match(codespace or "") or not self._root.is_dir():
             return False
         dirty = self._root / f"{codespace}.dirty"
+        request = self._root / f"{codespace}.prune"
         if dirty.exists():
             return False
         target = self._root / codespace
         lock_file = self._root / f"{codespace}.lock"
         if not target.exists() and not lock_file.exists():
+            request.unlink(missing_ok=True)
             return False
         from single_instance_lease import AlreadyRunningError, SingleInstance
 
@@ -282,6 +301,7 @@ class TranscriptMirror:
                 return False
             if target.exists():
                 shutil.rmtree(target)
+            request.unlink(missing_ok=True)
             return True
         finally:
             # The (empty) lock file stays: unlinking it after the release would
@@ -372,6 +392,9 @@ class TranscriptMirror:
 
         changed = self.apply(codespace, stdout, on_write_start=mark_dirty)
         if not changed and not dirty.exists():
+            return {"ok": True, "changed": 0}
+        if not changed and not (self._root / codespace).is_dir():
+            dirty.unlink(missing_ok=True)  # nothing here to push: a debt that could never settle
             return {"ok": True, "changed": 0}
         push = self._push or push_complete
         ok, detail = push(self._root / codespace, f"{LIVE_LABEL_GROUP}/{codespace}")

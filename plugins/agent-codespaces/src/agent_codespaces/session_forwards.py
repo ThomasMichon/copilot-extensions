@@ -73,6 +73,8 @@ TranscriptMirrorFn = Callable[[str], Awaitable[Any]]
 
 # How often (seconds) the Owner probes a CodeSpace's session tenants.
 DEFAULT_SESSION_PROBE_INTERVAL = 120.0
+# An otherwise idle Owner stays up this long to retry an owed transcript push.
+OWED_PUSH_GRACE_SECONDS = 3600.0
 
 
 class SessionForwards:
@@ -255,6 +257,17 @@ class SessionForwards:
         if self._mirror is None:
             return True
         return self._start_mirror_task(codespace, self._mirror, "transcript mirror")
+
+    def owed_grace(self) -> float:
+        """How long an otherwise idle Owner stays up to retry owed transcript
+        pushes (and prunes); 0 when none is owed. Bounded, so a hub that stays
+        down (or a disabled sync) never pins it resident: the markers persist,
+        and the next Owner start resumes them."""
+        owed = getattr(self._mirror, "owed_codespaces", None)
+        try:
+            return OWED_PUSH_GRACE_SECONDS if callable(owed) and owed() else 0.0
+        except Exception:
+            return 0.0
 
     def _start_owed_pushes(self) -> None:
         """Retry dirty host-side transcript pushes without probing any CodeSpace."""
