@@ -1435,8 +1435,8 @@ class TestCmdHandoffCutover:
 
         assert rc == 0
         after = _tracking.load_record(tmp_tracking_dir / "wt-retire-late-ack.yaml")
-        # NOT concluded -- opening the handoff yielded "old-sess" (gitea
-        # private-downstream-repo#7230), but the token is still pending, so the real
+        # NOT concluded -- opening the handoff yielded "old-sess", but the
+        # token is still pending, so the real
         # handoff must remain linkable.
         assert after.session_entry("old-sess").state == "yielded"
 

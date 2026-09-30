@@ -834,7 +834,7 @@ This is not a hypothetical footgun: agent-dispatch's `owner_session_id` was
 captured from the ephemeral `session_id` instead of the durable one for every
 headless dispatch task, silently breaking Intelligence Dampener's "View
 reviewer" deep link for every completed review (copilot-extensions PR #2964,
-private-downstream-repo PR #7223 fixed the fallout). Retrofit any code that reads a
+the downstream PR fixed the fallout). Retrofit any code that reads a
 bridge session's id and stores or forwards it — check it uses
 `durable_session_id`, not `session_id`.
 

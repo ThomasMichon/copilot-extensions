@@ -2466,7 +2466,7 @@ claiming discipline alone.
   this effort's own Picker/Mux surface -- and is a candidate for whoever
   picks it up next.
 - **2026-09-15** — Audited the Picker/Mux duplicate-implementation problem
-  private-downstream-repo #6764 was filed against, from the `agent-worktrees` (bundled
+  captured in the downstream architecture discussion, from the `agent-worktrees` (bundled
   Picker) side: `git log` comparison of the two `engine.py` files since the
   `#1244` transplant shows both sides have continued receiving independent
   commits (agent-worktrees-only: #1938, #2453/#2499, #2589, #2590;

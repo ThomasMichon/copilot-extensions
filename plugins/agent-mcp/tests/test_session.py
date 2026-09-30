@@ -26,7 +26,7 @@ def _cfg(extra: dict | None = None):
 
 
 async def test_bridge_session_bounds_a_transport_start_that_never_returns(monkeypatch):
-    """Regression test for private-downstream-repo#6673 (session.py side of the fix).
+    """Regression test for the downstream tracker (session.py side of the fix).
 
     A ``transport.start()`` that never returns (a hung/slow upstream spawn)
     previously left :meth:`BridgeSession.start` suspended forever -- with no

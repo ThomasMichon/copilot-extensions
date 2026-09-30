@@ -218,7 +218,7 @@ def _memo_rows() -> list[dict]:
             # style actually applied, not just the plain string.
             claims_links=[{
                 "label": "PR #83",
-                "url": "https://github.com/private-downstream-repo/testchambers/pull/83",
+                "url": "https://github.com/example-owner/testchambers/pull/83",
             }]),
         _wt("0545", "wip", 1, 0, False, "active", titles["active"][8],
             "feat/vending-machine-neural-net", started_at=_ago(days=8),

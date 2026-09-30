@@ -79,7 +79,7 @@ pure stdlib and imports nothing from any consuming plugin; **keep it that way.**
 |--------|------|
 | `zdd.routing` | The file-based routing table `active.json` (no front proxy). The daemon `publish_active`s its endpoint on startup and flips `active`/`previous` atomically on cutover; short-lived clients re-read it every invocation and self-heal (dead `active` → `previous` → the caller's static config). API: `Endpoint`, `read_active_endpoint`, `publish_active`, `clear_if_owner`, `routing_table_path`. |
 | `zdd.cutover` | `CutoverOrchestrator` drives one cutover: spawn passive → health-gate → flip → drain → retire, reversible up to an explicit commit point, with **rollback** (pre-commit failure) and **commit-forward** (retire the old even if unreachable, rather than strand clients). |
-| `zdd.breadcrumb` | Recovers a **stranded survivor** left drained by an *aborted* cutover: `recover_stale_cutover` undrains it so it is not stuck closed to new work (agent-bridge `deploy --recover`). `reap_abandoned_passive` is the matching backstop for the *new* side: a `spawn_passive` daemon whose cutover's orchestrator died before promoting it never becomes anyone's "old" (private-downstream-repo #5195) -- see § Never-Promoted Abandoned Passive below. |
+| `zdd.breadcrumb` | Recovers a **stranded survivor** left drained by an *aborted* cutover: `recover_stale_cutover` undrains it so it is not stuck closed to new work (agent-bridge `deploy --recover`). `reap_abandoned_passive` is the matching backstop for the *new* side: a `spawn_passive` daemon whose cutover's orchestrator died before promoting it never becomes anyone's "old" (the downstream tracker) -- see § Never-Promoted Abandoned Passive below. |
 | `zdd.diagnostics` | Shared daemon-health audit + repair: report-only and apply modes that surface the four field-proven abnormality classes uniformly (duplicate resident daemon, stranded survivor, never-promoted abandoned passive, stale superseded generation) and gate destructive repair on a validated live owner plus identity-bound termination. |
 
 **Why a routing *table*, not a front proxy:** a proxy on a stable port is itself
@@ -242,7 +242,7 @@ and begins watching. A normal boot daemon satisfies that as soon as it publishes
 a cutover-promoted daemon satisfies it the moment the orchestrator flips to it; a
 passive daemon that is never promoted never satisfies it and arms nothing.
 
-### Never-Promoted Abandoned Passive (private-downstream-repo #5195)
+### Never-Promoted Abandoned Passive (the downstream tracker)
 
 Self-retire's active-ness gate is exactly the reason it **cannot** rescue a
 `spawn_passive` daemon whose cutover never reached the flip: if the

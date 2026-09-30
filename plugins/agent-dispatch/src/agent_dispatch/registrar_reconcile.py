@@ -168,7 +168,7 @@ def runs_on_machine(decl: ProfileDeclaration, machine: str | None) -> bool:
     unidentified host must not run a machine-pinned pool it cannot confirm it is a
     permitted member of. (The prior behavior ran *everything* on an unidentified
     host, so a host with a registrar pointer would run cross-machine declarations
-    it should skip -- see private-downstream-repo #5001.) A **machine-agnostic** declaration
+    it should skip -- see the downstream tracker.) A **machine-agnostic** declaration
     (no ``machine`` permit/reject) still runs anywhere, including on an
     unidentified host.
     """

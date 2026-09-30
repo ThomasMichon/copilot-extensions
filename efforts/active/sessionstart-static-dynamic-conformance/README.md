@@ -279,7 +279,7 @@ initial sweep exist._
   Phase 11 gate itself did not depend on the sibling effort's own remaining
   (unrelated) launch-path items.
 - Opened this effort as `copilot-extensions` PR #2236 (Draft-status plan) and
-  landed the private-downstream-repo correction as PR #6680 (merged).
+  landed the downstream correction PR (merged).
 
 ### 2026-09-08 — Phase 1 sweep executed, then corrected
 

@@ -20,7 +20,7 @@ Windows). Before this effort, replacing that daemon with a new version meant
 stopping the old one and starting the new one — a window, however brief, where
 the fixed handle resolves to nothing and any call/attach in that window has no
 live instance to reach. (Concretely: `agent-mcp materialize`'s own hardening
-against a *different* hang — private-downstream-repo #6601 / copilot-extensions#2184 —
+against a *different* downstream hang — copilot-extensions#2184 —
 established that a fresh materialize can be slow; a version cutover happening
 at the same moment used to make that window a real "no instance answers"
 outage, not just a slow one.)

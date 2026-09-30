@@ -56,7 +56,7 @@ distinct but related gaps were found:
    now."
 2. **No shared, origin-agnostic resolver.** A first attempt to fix
    Intelligence Dampener's own "View reviewer" link
-   (`private-downstream-repo` PR #7200, since reverted) hardcoded Dampener's own
+   (the downstream PR, since reverted) hardcoded Dampener's own
    `dampener-pr<N>` worktree-naming convention directly into the link
    builder — solving Dampener's problem while leaving every *other* consumer
    (an Adjudication Board run, Permanent Record's journal, a plain

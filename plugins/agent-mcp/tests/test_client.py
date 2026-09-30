@@ -244,7 +244,7 @@ async def test_oneshot_tears_down_transport_when_init_fails():
 
 
 async def test_oneshot_bounds_a_transport_start_that_never_returns():
-    """Regression test for private-downstream-repo#6673.
+    """Regression test for the downstream tracker.
 
     ``_negotiate`` already bounds each individual JSON-RPC request via
     ``cfg.timeout`` (see ``test_oneshot_times_out_on_silent_upstream`` above),

@@ -713,7 +713,7 @@ watching it -- the case the nudge exists for.
 `agent-dispatch card set --request-input` suspends a task in
 `awaiting_steer` until a human answers it -- a capability every task type
 gets by default, whether or not a human is actually watching. Confirmed
-live (private-downstream-repo#7589/#7585): Intelligence Dampener's reviewer reached
+live (the downstream tracker): Intelligence Dampener's reviewer reached
 for this on its own initiative, blocking its normal automatic resume path
 for over 2 hours because nothing was going to answer a card it should
 never have posted in the first place.

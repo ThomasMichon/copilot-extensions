@@ -55,7 +55,7 @@ def recover_stranded_cold_reservations(supervisor: Any) -> int:
     zone no automatic path ever revisits again -- confirmed live: a PR
     review sat unrecoverable for 5+ hours, surviving a full supervisor
     restart, until an operator manually failed the reservation by hand
-    (private-downstream-repo PR #7759's stall).
+    (the downstream PR's stall).
 
     The exact trigger that reclaims a dormant ``SUSPENDED`` task to
     ``QUEUED``/unowned ahead of its resume is, as of this writing, **not

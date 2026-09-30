@@ -2,9 +2,9 @@
 
 - **Parent effort:** [`README.md`](README.md) § Phase 3 (parity) / § Phase 6 (retirement)
 - **Tracks:** [#352](https://github.com/ThomasMichon/copilot-extensions/issues/352) (coordination token,
-  slice claimed here) · private-downstream-repo #6764 (duplicate-implementation architecture decision,
+  slice claimed here) · the downstream architecture decision
   **recorded 2026-09-12**: Worktree Manager is the canonical owner of the Picker/Mux UI;
-  `agent-worktrees` keeps worktree lifecycle only) · private-downstream-repo #6914 (two-way hook-contract
+  `agent-worktrees` keeps worktree lifecycle only) · the downstream hook-contract follow-up
   follow-up, out of scope here) · [#117](https://github.com/ThomasMichon/copilot-extensions/issues/117)
   (the smaller NF5-5 opt-out-toggle cleanup this supersedes)
 - **Governing vision:** [`visions/picker`](../../../visions/picker/README.md) §Behaviors/
@@ -16,9 +16,9 @@
   focus bridge, native `OptionList` data body with sticky headers + clickable checkboxes —
   see `plugins/agent-worktrees/docs/architecture.md`'s NF sections for the original design
   record). Since that transplant, **both copies have kept receiving independent commits** —
-  exactly the failure mode private-downstream-repo #6764 was filed against (that issue's own example:
+  exactly the failure mode captured in the downstream architecture discussion (its own example:
   an env-sanitization fix landed only on the Worktree Manager side via #2359/#2384, later
-  parity-restored by #2391). The decision on #6764 makes Worktree Manager canonical, but
+  parity-restored by #2391). The recorded decision makes Worktree Manager canonical, but
   does not by itself guarantee every agent-worktrees-only fix actually made it across before
   the bundled Picker is deleted.
 - **Status:** Completed (2026-09-15/16) — the fresh audit closed Step 0, the required
@@ -50,7 +50,7 @@ every historical "AW-only" commit resolves to one of:
   **into** `agent-worktrees` (`_run_pivot_form_draft_save`/`_run_pivot_form_draft_clear`/
   `SubmitErrorScreen` all pre-date this commit on the Worktree Manager side). Nothing to
   port back.
-- **Already explicitly deferred by the #6764 operator decision:** the four perf/threading
+- **Already explicitly deferred by the operator decision:** the four perf/threading
   commits (`19de6e569` #1511, `034621379` #1562, `9d07a8a38` #1589, `4b759a20a` #1938) —
   per that issue's own resolution comment, these are "architectural, not drop-in" and
   intentionally left unported.
@@ -231,8 +231,8 @@ Worktree Manager seam or the install trigger instead of any fallback to dead cod
 - This repo now uses **`pr-self-merge`**, not direct push (confirmed 2026-09-15 via
   `copilot-extensions get pr-profile`) — land each step as its own reviewed, self-merged PR,
   not a direct push to `main`.
-- Re-check private-downstream-repo #6764/#6914 for any updates before starting — the hook-contract
-  design in #6914 may have implications for exactly when it's safe to delete the bundled
+- Re-check whether anything still depends on the old bundled Picker binstub
+  seam before starting — that design question may have implications for exactly when it's safe to delete the bundled
   Picker (e.g. if anything still depends on the old binstub-seam behavior during a
   transition window).
 - Per the parent effort's Coordination section: **re-confirm no one else has claimed this

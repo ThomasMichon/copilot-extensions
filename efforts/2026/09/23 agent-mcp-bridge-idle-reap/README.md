@@ -6,16 +6,16 @@
 - **Created:** 2026-09-23
 - **Status:** Done <!-- Draft | Active | Blocked | Done -->
 - **Vision:** `visions/plugin-services` §`work-coalescing-singleton`, §`process-count-scales-with-services-not-sessions` — reality has one `agent-mcp bridge` process (+ its stdio-heavy upstream child, e.g. `bunx gitea-mcp`) per **sub-agent delegation**, unbounded and never reclaimed for the life of the top-level session, directly violating "process count scales with services, not sessions/invocations." **Vision-closing.**
-- **Umbrella issue:** [owner_user/private-downstream-repo#3876](https://your-git-host/owner_user/private-downstream-repo/issues/3876) (bug — the reap gap itself; 3 field-evidence comments, WSL 2026-07-31/08-18/08-22 + Windows 2026-09-23)
+- **Umbrella issue:** downstream bug tracker entry (the reap gap itself; 3 field-evidence comments, WSL 2026-07-31/08-18/08-22 + Windows 2026-09-23)
 - **Related:**
-  [owner_user/private-downstream-repo#3877](https://your-git-host/owner_user/private-downstream-repo/issues/3877)
+  companion downstream tracker entry
   (proposed warmth-daemon attach — complementary, reduces per-instance heaviness
   but doesn't bound instance *count* on its own) ·
-  `efforts/active/mcp-to-cli-migration` (private-downstream-repo — the longer-horizon fix:
+  `efforts/active/mcp-to-cli-migration` (the longer-horizon downstream fix:
   migrating sub-agents off MCP frontmatter entirely removes the bridge, but is a
   large multi-phase migration not yet complete for `gitea`/`home-assistant`,
   the two agents actually observed leaking tonight) ·
-  #411, #1041, #588, #2347, #2960 (prior art / compounding issues, see #3876 body)
+  #411, #1041, #588, #2347, #2960 (prior art / compounding issues; see the downstream bug report)
 
 ## Guiding Intent
 
@@ -35,14 +35,14 @@ waiting for it to be fixed leaves this leak unbounded indefinitely.
 This effort's operator directive is **"kill it dead"** — stop the recurring
 symptom now, from the one side we *do* control (`agent-mcp` itself), rather
 than a) waiting on an upstream CLI fix we can't drive, or b) only reducing
-per-instance cost (the #3877 warmth daemon) without bounding instance count.
+per-instance cost (the companion warmth-daemon work) without bounding instance count.
 
 ## Participants
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | atlas-core (Windows) | Author + validate the fix; primary reproduction host (tonight's evidence) | this worktree |
-| atlas-core (WSL) | Cross-platform validation (the original #3876 reproduction host) | `wsl -d Ubuntu` from atlas-core |
+| atlas-core (WSL) | Cross-platform validation (the original reproduction host) | `wsl -d Ubuntu` from atlas-core |
 
 ## Coordination
 
@@ -55,8 +55,8 @@ per-instance cost (the #3877 warmth daemon) without bounding instance count.
 
 ## Context
 
-**Evidence trail (full detail lives in owner_user/private-downstream-repo#3876, not
-duplicated here — read it before touching code):**
+**Evidence trail (the summary below is the public source of truth for this
+effort's diagnosis):**
 - 2026-07-31 (WSL): 14 bridges (7 `gitea.mcp.yaml` + 7 `vei.mcp.yaml`) in one
   65-min session, one pair per sub-agent delegation, all idle/0% CPU, no live
   sub-agent process remaining. Manual `TERM` reaped them cleanly (confirmed
@@ -79,14 +79,14 @@ duplicated here — read it before touching code):**
   up to 2x`conhost.exe` + 2x`python.exe` vs. the flatter WSL chain.
 
 **Code-level root-cause boundary (confirmed by reading `bridge.py` this
-session, not guessed):** `Bridge.run()` already has both defenses #3876's own
+session, not guessed):** `Bridge.run()` already has both defenses the original downstream report's own
 "suspected location" section proposed (stdin-EOF close, parent-death
 watchdog via `agent_mcp.watchdog.install_parent_death_watchdog`) — so the
 existing code is not missing the *general* orphan case. The specific gap is
 that a sub-agent finishing does **not** close its bridge's stdin (the pipe
 stays open, held by the still-live top-level `copilot` process) and does
 **not** kill the parent process (same reason) — so *neither* existing
-defense fires. This is why #3876's 2026-08-22 evidence explicitly found every
+defense fires. This is why the 2026-08-22 downstream evidence explicitly found every
 leaked bridge parented to a **live** process.
 
 ## Request
@@ -166,9 +166,9 @@ issue)."*
 
 ### Phase 3 — Validate against tonight's exact reproduction
 - [x] Windows: reproduced the `Get-CimInstance Win32_Process` evidence style
-  from owner_user/private-downstream-repo#3876's 2026-09-23 comment against the *fixed*
+  from the downstream tracker's 2026-09-23 comment against the *fixed*
   code. Spawned a real `agent-mcp bridge` subprocess (`AGENT_MCP_NO_MULTIPLEX`,
-  the classic in-process bridge path #3876 evidence targeted) over a stdio
+  the classic in-process bridge path used in the original field evidence) over a stdio
   upstream that itself spawns a live descendant child (mirroring the
   `bunx gitea-mcp` shape), with `idle_timeout: 3`. `Get-CimInstance
   Win32_Process` confirmed both the bridge PID and its descendant present
@@ -177,7 +177,7 @@ issue)."*
   removed after use (not committed).
 - [x] WSL: same live reproduction on the original 2026-07-31/08-18/08-22
   host (`wsl -d Ubuntu`), using its own venv build of the fixed `agent-mcp`
-  and `ps -o pid,ppid,cmd` (matching #3876's WSL evidence style) instead of
+  and `ps -o pid,ppid,cmd` (matching the original WSL evidence style) instead of
   `Get-CimInstance`. Same result: bridge PID + upstream child both present
   before the idle window, both gone after, confirming the fix holds
   cross-platform as expected (the self-reap logic is platform-agnostic
@@ -187,15 +187,15 @@ issue)."*
 - [x] PR through copilot-extensions' normal review/version-bump flow: PR
   #3406, squash-merged as `c7e8fd7a5` (agent-mcp `0.2.0-dev137`). Blocked
   twice on unrelated pre-existing main-red guard failures along the way
-  (owner_user/private-downstream-repo#7491, then #7495); both diagnosed as out-of-scope
+  (the downstream tracker, then a separate pre-existing CI failure); both diagnosed as out-of-scope
   drift on `main` rather than this effort's own content, and picked up as
   trivial one-line fixes only where genuinely blocking (see Journal).
-- [x] Comment on owner_user/private-downstream-repo#3876 with the fix version, close it:
+- [x] Comment on the downstream tracker with the fix version, close it:
   commented (id 125682) and closed.
-- [x] Cross-reference from #3877 (still open — the idle self-reap bounds
-  instance *count*; #3877's warmth daemon is the separate, still-valid fix
+- [x] Cross-reference from the companion warmth-daemon tracker (still open — the idle self-reap bounds
+  instance *count*; the warmth daemon is the separate, still-valid fix
   for per-instance upstream duplication): commented (id 125684), left open
-  as intended. `efforts/active/mcp-to-cli-migration` (private-downstream-repo) is the
+  as intended. `efforts/active/mcp-to-cli-migration` is the
   longer-horizon alternative; not touched by this effort, noted for context
   only.
 
@@ -209,7 +209,7 @@ issue)."*
 - [x] Live reproduction (Phase 3) on both Windows and WSL shows bridges
   self-reaping within the configured idle window with zero operator
   intervention, matching the exact evidence commands already used in
-  owner_user/private-downstream-repo#3876 (`Get-CimInstance Win32_Process` on Windows;
+  the downstream tracker (`Get-CimInstance Win32_Process` on Windows;
   `ps` process-tree inspection on WSL) -- see Phase 3 above for the
   specific evidence.
 - [x] No regression: a bridge actively relaying traffic (a live, in-progress
@@ -227,14 +227,14 @@ tasks), landed as PR ThomasMichon/copilot-extensions#3406.
 
 ### 2026-09-23 — Kickoff
 - Effort created directly following a live "what's eating our RAM" facility
-  investigation (unrelated CPU/memory/disk-I/O telemetry sweep, owner_user/
-  private-downstream-repo#7467/#7479/#7483) that surfaced this as the actual top
+  investigation (an unrelated CPU/memory/disk-I/O telemetry sweep in a downstream
+  private tracker) that surfaced this as the actual top
   Windows-host process/RAM consumer tonight — 136 conhost/cmd + 140 python.exe
   processes traced via `CommandLine` inspection to `agent-mcp bridge`
   invocations, not (as first assumed) a Copilot CLI defect. Confirmed the
-  private-downstream-repo-tracked bug (#3876) already existed with WSL-side evidence
+  downstream-tracked bug already existed with WSL-side evidence
   from three prior sessions (07-31, 08-18, 08-22); added the fresh
-  Windows-side reproduction as comment #125604 on that issue before starting
+  Windows-side reproduction as a downstream follow-up comment before starting
   this effort.
 - Read `bridge.py`/`watchdog.py` directly (not guessed): confirmed the
   existing stdin-EOF and parent-death defenses are real and correct for the
@@ -244,11 +244,11 @@ tasks), landed as PR ThomasMichon/copilot-extensions#3406.
   a bug in the existing defenses.
 - Operator directive: "kill it dead" — this effort scopes to the bounded,
   in-our-control fix (idle self-reap), explicitly not the larger
-  mcp-to-cli-migration architecture change or the #3877 warmth-daemon
+  mcp-to-cli-migration architecture change or the companion warmth-daemon
   (both remain valid, complementary, separately-tracked work).
 - Handing off to a fresh session to execute Phase 1's remaining design
   question (idle-timeout trigger semantics + default duration) through
-  Phase 4 (landed + #3876 closed).
+  Phase 4 (landed + downstream bug closed).
 
 ### 2026-09-23 — Effort PR opened; blocked on unrelated pre-existing CI break
 - Opened PR #3406 (this effort's plan, submitted for review per the
@@ -261,9 +261,9 @@ tasks), landed as PR ThomasMichon/copilot-extensions#3406.
   `libs/peer-launch/tests/test_packaging.py::test_converted_codespaces_paths_have_no_unexplained_sibling_launches`
   fails on `main` itself (an `agent_codespaces/__main__.py` ambient-PATH
   resolution the peer-launch packaging test flags), failing CI on every PR
-  regardless of content. Filed as owner_user/private-downstream-repo#7491 (not fixed here
+  regardless of content. Filed as the downstream tracker (not fixed here
   -- needs agent-codespaces-specific judgment on the correct fix shape).
-- **Next session:** check #7491/CI status first -- if `main`'s CI is green
+- **Next session:** check CI status first -- if `main`'s CI is green
   again (someone else fixed it, or it was itself fixed upstream), rebase/
   re-run this PR's checks and proceed to merge before starting Phase 2. If
   still red, Phase 2 implementation work can still proceed locally
@@ -271,7 +271,7 @@ tasks), landed as PR ThomasMichon/copilot-extensions#3406.
   around a genuinely broken CI gate.
 
 ### 2026-09-23 — Phase 1 design resolved, Phase 2/3 implemented, PR merged, closed the loop
-- Resumed via context-handoff. #7491 was already fixed upstream (PR #3407
+- Resumed via context-handoff. The pre-existing CI blocker was already fixed upstream (PR #3407
   widened the agent_codespaces module-size baseline) by the time of resume;
   rebased and confirmed CI unblocked on that front.
 - Resolved Phase 1's remaining design questions by reading `serve.py`
@@ -291,7 +291,7 @@ tasks), landed as PR ThomasMichon/copilot-extensions#3406.
   itself spawns a live descendant child, on both Windows
   (`Get-CimInstance Win32_Process`) and WSL (`ps -o pid,ppid,cmd`, via
   `wsl -d Ubuntu`) -- confirmed the bridge + its descendant both fully
-  self-reap within the idle window, matching #3876's own evidence commands.
+  self-reap within the idle window, matching the original field-evidence commands.
   Scratch probe files were removed after use, never committed.
 - Pushed to PR #3406's actual head branch
   (`pr/efforts-agent-mcp-bridge-idle-self-reap-3867` -- discovered the
@@ -299,13 +299,13 @@ tasks), landed as PR ThomasMichon/copilot-extensions#3406.
   misdirected push+cleanup). Hit a **second**, fresh unrelated main-red state
   (worktree-manager version-consistency drift dev73/dev74 + two new
   module-size overruns from other merged PRs) -- filed
-  owner_user/private-downstream-repo#7495, fixed only the trivial one-line version bump
+  the downstream tracker, fixed only the trivial one-line version bump
   inline (blocking, mechanical, zero risk), deliberately left the two
   module-size overruns (especially a +274 line jump on
   `worktree-manager/__main__.py`) for their own owner's judgment rather than
   rubber-stamping a widen from an unrelated PR.
 - CI went green; merged PR #3406 (squash, `c7e8fd7a5`, this repo's
-  `pr-self-merge` profile). Commented + closed owner_user/private-downstream-repo#3876
+  `pr-self-merge` profile). Commented + closed the downstream tracker
   with the fix version; commented (cross-reference only, left open)
-  owner_user/private-downstream-repo#3877.
+  the downstream tracker.
 - Status: Done. Archiving this effort folder now.
