@@ -83,7 +83,7 @@
   "plugins/agent-worktrees/src/agent_worktrees/tracking.py": 4078,
   "plugins/budget-guidance/scripts/versioned_runtime.py": 1415,
   "plugins/customizing-copilot/libs/plugin-activation/src/plugin_activation/resolver.py": 1270,
-  "plugins/customizing-copilot/skills/reviewing-customizations/scripts/instruction_projections.py": 1806,
+  "plugins/customizing-copilot/skills/reviewing-customizations/scripts/instruction_projections.py": 2418,
   "plugins/harness-knowledge/skills/binding-knowledge/scripts/bind_knowledge.py": 1043,
   "tools/clean-room/scenarios/agent-index-installation-cells/scenario.py": 2429,
   "tools/clean-room/scenarios/agent-machines-installation-cells/scenario.py": 1117,
