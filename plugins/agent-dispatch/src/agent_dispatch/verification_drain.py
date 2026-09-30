@@ -15,6 +15,7 @@ log = logging.getLogger(__name__)
 
 WakeActive = Callable[[], bool]
 
+
 def _next_wait_interval(*, has_pending: bool, retry_interval: float, idle_interval: float) -> float:
     return retry_interval if has_pending else idle_interval
 
@@ -86,8 +87,20 @@ async def drain_verification_requests(
             )
             error = None if delivered else reason or "verification did not reach a terminal report"
         except TaskError as exc:
-            log.info("verification request %s became stale: %s", request.id, exc)
-            delivered = True
+            current = await asyncio.to_thread(queue.get, request.task_id)
+            delivered = not bool(
+                current is not None
+                and current.status == "submitted"
+                and current.require_verification
+                and current.generation == request.generation
+                and current.evaluator_ref
+            )
+            log.info(
+                "verification request %s %s: %s",
+                request.id,
+                "became stale" if delivered else "will retry",
+                exc,
+            )
             error = str(exc)
         except Exception as exc:  # noqa: BLE001 -- report and retry boundedly
             log.warning("verification request %s raised", request.id, exc_info=True)

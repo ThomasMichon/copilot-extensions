@@ -597,3 +597,25 @@ place:
   (generation-scoped queued verification requests). This PR keeps them as
   separate queues in code for now to land safely, but the shared abstraction
   is now explicit for any future simplification pass.
+
+### 2026-09-30 (final PR #4709 hardening) -- review gaps closed without widening the cap
+- Closed the remaining substantive review findings before merge: generation-N
+  claim-release wakes now stay deliverable even after generation N+1 is
+  prepared, and a successful owner wake still releases the retired waiter's
+  generation-scoped worktree claim even if a newer waiter supersedes it before
+  the post-delivery cleanup step runs.
+- Automatic submitted-task verification now fires the same handoff-claim
+  release hook as the HTTP/CLI terminal mutation paths, so evaluator-driven
+  `confirm` / `abandon` resolutions do not leave a handoff worktree claim
+  behind.
+- Evaluator registrations now require an explicit non-empty `evaluator_ref`
+  instead of silently defaulting to the derived registration id, which was not
+  a valid script selector and therefore produced "active" registrations that
+  could never match a task.
+- The submitted-verification drain now retries `TaskError`s only while the same
+  submitted verification generation remains current, preventing a same-task
+  CAS race from dropping the sole verification trigger and stranding a task at
+  `submitted`.
+- Added focused direct tests for these durability boundaries and kept
+  `queue_run_waiters.py` shrink-only: no module-size baseline widen was needed
+  or retained.

@@ -39,6 +39,12 @@ def _publish(bus: EventBus | None, event_type: str, task: dict[str, Any]) -> Non
     telemetry.emit(telemetry.task_lifecycle_event(event_type, event_task))
 
 
+def _release_handoff_claim(task: dict[str, Any]) -> None:
+    from . import handoff_claim_release
+
+    handoff_claim_release.release_if_handoff(task)
+
+
 def _event_notes(queue: TaskQueue, task_id: str) -> list[dict[str, Any]]:
     notes: list[dict[str, Any]] = []
     for row in queue.events(task_id):
@@ -243,6 +249,7 @@ def evaluate_submitted_task(
                         expected_updated_at=task.updated_at,
                     )
                 )
+                _release_handoff_claim(confirmed)
                 _publish(bus, "task.completed", confirmed)
                 applied.append({"decision": "complete", "completed": confirmed})
                 continue
@@ -258,6 +265,8 @@ def evaluate_submitted_task(
                     expected_updated_at=task.updated_at,
                 )
                 abandoned = asdict(outcome.task)
+                if outcome.event_type is not None:
+                    _release_handoff_claim(abandoned)
                 if outcome.event_type is not None:
                     _publish(bus, outcome.event_type, abandoned)
                 applied.append({"decision": "abandon", "abandoned": abandoned})

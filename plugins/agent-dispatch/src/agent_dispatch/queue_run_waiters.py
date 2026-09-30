@@ -888,19 +888,14 @@ class QueueRunWaitersMixin:
         task: Task | None,
         wake: RunWaiterWakeOperation,
     ) -> bool:
+        if wake.sender == CLAIM_RELEASE_SENDER:
+            return task is not None and task.generation == wake.task_generation
         if not (
-            (
-                wake.sender == CLAIM_RELEASE_SENDER
-                and task is not None
-                and task.generation == wake.task_generation
-            )
-            or (
-                task is not None
-                and task.status == Status.SUSPENDED
-                and task.owner == wake.owner
-                and task.generation == wake.task_generation
-                and task.owner_session_id == wake.owner_session_id
-            )
+            task is not None
+            and task.status == Status.SUSPENDED
+            and task.owner == wake.owner
+            and task.generation == wake.task_generation
+            and task.owner_session_id == wake.owner_session_id
         ):
             return False
         row = conn.execute("SELECT MAX(generation) AS generation FROM run_waiters WHERE task_id = ?", (wake.task_id,)).fetchone()

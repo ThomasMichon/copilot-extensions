@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import sys
 
-from agent_dispatch.queue import Status
+import pytest
+
+from agent_dispatch import handoff_claim_release
 from agent_dispatch import remote_dispatch
+from agent_dispatch.queue import Status, TaskError
 from agent_dispatch.verification import evaluate_submitted_task
+from agent_dispatch.verification_drain import drain_verification_requests
 from tests._helpers import TEST_REPO
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
@@ -39,7 +44,13 @@ def _submitted_task(
     return task.id
 
 
-def _register_script(queue: TaskQueue, script_path: str, *, repo: str = TEST_REPO, env: str = "default") -> None:
+def _register_script(
+    queue: TaskQueue,
+    script_path: str,
+    *,
+    repo: str = TEST_REPO,
+    env: str = "default",
+) -> None:
     queue.register_registration(
         "evaluator",
         {
@@ -168,3 +179,123 @@ def test_evaluate_submitted_rejects_emit_decisions(tmp_path):
     assert report["eligible"] is True
     assert "complete/abandon/noop" in report["reason"]
     assert queue.get(task_id).status == Status.SUBMITTED
+
+
+@pytest.mark.parametrize(
+    ("title", "expected_status"),
+    [
+        ("target merged", Status.COMPLETED),
+        ("target closed", Status.ABANDONED),
+    ],
+)
+def test_evaluate_submitted_releases_handoff_claims(tmp_path, monkeypatch, title, expected_status):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    script = tmp_path / "eval.py"
+    script.write_text(
+        "import json, sys\n"
+        "title = json.load(sys.stdin)['task']['title']\n"
+        "decision = {'decision': 'confirm'} if 'merged' in title else "
+        "{'decision': 'abandon', 'reason': 'closed-unmerged'}\n"
+        "json.dump(decision, sys.stdout)\n",
+        encoding="utf-8",
+    )
+    _register_script(queue, str(script))
+    task = queue.create(
+        title,
+        require_verification=True,
+        evaluator_ref="review-loop",
+        labels=["handoff"],
+        target_worktree="wt-9",
+    )
+    queue.claim_one("m/wt-9", task_id=task.id, machine="m", worktree="wt-9")
+    queue.start(task.id, "m/wt-9")
+    queue.complete(task.id, "m/wt-9")
+
+    released = []
+    monkeypatch.setattr(
+        handoff_claim_release,
+        "release_if_handoff",
+        lambda payload, task_id=None: released.append(
+            (
+                payload.get("id"),
+                payload.get("target_worktree"),
+                payload.get("status"),
+            )
+        ),
+    )
+
+    evaluate_submitted_task(queue, task.id, trigger="submitted")
+
+    assert queue.get(task.id).status == expected_status
+    assert released == [(task.id, "wt-9", expected_status)]
+
+
+def test_verification_drain_retries_retryable_task_error(tmp_path, monkeypatch):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    task_id = _submitted_task(
+        queue,
+        "retry me",
+        require_verification=True,
+        evaluator_ref="review-loop",
+    )
+
+    class _DrainBus:
+        def publish(self, event: dict) -> None:
+            pass
+
+    calls = 0
+
+    def fake_evaluate(queue_arg, task_id_arg, *, bus=None, trigger, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            with queue_arg._connect() as conn:
+                conn.execute(
+                    "UPDATE tasks SET updated_at = updated_at + 1 WHERE id = ?",
+                    (task_id_arg,),
+                )
+            raise TaskError("task changed while the transition was in flight")
+        queue_arg.confirm(task_id_arg, actor="evaluator")
+        return {
+            "task_id": task_id_arg,
+            "trigger": trigger,
+            "eligible": True,
+            "reason": "submitted verification evaluated",
+            "applied": [{"decision": "complete"}],
+        }
+
+    from agent_dispatch import verification_drain as verification_drain_module
+    monkeypatch.setattr(verification_drain_module, "evaluate_submitted_task", fake_evaluate)
+
+    async def scenario():
+        loop = asyncio.create_task(
+            drain_verification_requests(
+                queue,
+                _DrainBus(),
+                interval=0.01,
+                retry_base=0.01,
+                max_attempts=3,
+            )
+        )
+        try:
+            for _ in range(200):
+                status = queue.list_verification_requests(task_id)[0].status
+                if (
+                    status in {"stale", "delivered", "failed"}
+                    and queue.get(task_id).status == Status.COMPLETED
+                ):
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                raise AssertionError("verification request did not drain")
+        finally:
+            loop.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await loop
+
+    asyncio.run(scenario())
+    [request] = queue.list_verification_requests(task_id)
+    assert calls == 2
+    assert request.status == "stale"
+    assert request.attempts == 2
+    assert queue.get(task_id).status == Status.COMPLETED

@@ -179,9 +179,6 @@ class ScheduleRegistrationMixin:
             )
         env = env or "default"
         rid = reg_id or derive_registration_id(kind, spec, machine, env)
-        if kind == RegistrationKind.EVALUATOR and not spec.get("evaluator_ref"):
-            spec = dict(spec)
-            spec["evaluator_ref"] = rid
         try:
             validate_registration(kind, spec)
         except RegistrationError as exc:

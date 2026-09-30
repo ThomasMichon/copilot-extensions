@@ -19,12 +19,7 @@ class QueueRunWaiterTransitionCleanupMixin:
                 conn.execute("COMMIT")
                 return False
             wake = RunWaiterWakeOperation._from_row(row)
-            task = self._fetch(conn, wake.task_id)
-            ok = (
-                wake.status == "delivering"
-                and wake.delivery_token == delivery_token
-                and self._run_waiter_wake_is_current(conn, task, wake)
-            )
+            ok = wake.status == "delivering" and wake.delivery_token == delivery_token
             conn.execute("COMMIT")
         return bool(ok)
 
