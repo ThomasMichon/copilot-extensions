@@ -24,6 +24,19 @@ jobs:
   widen:
     name: widen grown ceilings (main only)
     runs-on: ubuntu-latest
+    # `APERTURE_RELEASE_TOKEN` (used below by the "Open a PR" step) is an
+    # ENVIRONMENT secret scoped to `main-promotion`, not a repository
+    # secret -- confirmed live (repo-level `gh secret list` no longer shows
+    # it; only `repos/.../environments/main-promotion/secrets` does). A job
+    # that doesn't declare this environment simply can't see it, which is
+    # exactly what broke every run of this workflow since the migration:
+    # `peter-evans/create-pull-request@v7` received an empty token and
+    # failed with "Input 'token' not supplied." `main-promotion`'s
+    # deployment_branch_policy (protected branches only: `dev`/`main`, no
+    # required reviewer) is already satisfied by this job's own trigger
+    # (`push: branches: [main]`) and its `workflow_dispatch` ref guard
+    # below, so declaring it here adds no new gate.
+    environment: main-promotion
     # `workflow_dispatch` can be launched against an arbitrary ref -- guard
     # explicitly so a manual dispatch can never run --allow-widen against a
     # PR branch's own (unreviewed) growth. `push` is already scoped to main
