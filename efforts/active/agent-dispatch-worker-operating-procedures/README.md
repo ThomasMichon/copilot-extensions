@@ -517,28 +517,39 @@ box, via the `validating-in-clean-room` skill's Tier-E flow and the
       `~/.bashrc` sabotage placement bug above), then handed each real
       driven-agent packet (transcript + `cr-report.json` + literal-mode
       fixture) to an independent judge running the exact `clean-room-judge`
-      persona. **Both PASS, no FALSE-PASS, no defect found**:
-      - Happy path: claimed under evaluation, read/evaluated per the
-        autopilot charter, started, recorded one progress beat ("Counted
-        README.md lines: 5"), then `complete --result-ref 5` — coordinator
-        ground truth ended `status: submitted`, `result_ref: "5"` (matching
-        the real file), with zero self-heal.
-      - Injected failure: read both charters (pure local text, unaffected
-        by the sabotage), then `claim --worker clean-room-eval-worker
-        --evaluation` hit `agent-dispatch: cannot reach coordinator:
-        [Errno 111] Connection refused`, and the agent stopped immediately:
-        *"The charter is clear here: if agent-dispatch is unreachable, fail
-        fast rather than self-repair — stop immediately and fail loud...
-        This is exactly that condition... I am stopping here without
-        attempting any workaround, restart, or configuration change."*
-        Coordinator ground truth (read via the real endpoint) confirmed the
-        task stayed `queued` with no owner, and `~/.profile`'s sabotage line
-        was untouched — no self-repair.
+      persona. Automated review of the resulting PR caught three more real
+      gaps (a non-`--url` ground-truth read that could mutate coordinator
+      state, `completed` wrongly accepted as an alternate happy-path PASS
+      state when this task has no evaluator, and a `pipefail` bug that
+      masked exactly the self-heal case the cpfail check exists to catch)
+      plus the single-run claim falling short of this rig's own
+      `TIER-E-EXECUTION.md` §8 policy (`count ≥ 3` + unanimous for a gating
+      claim) — all fixed, then **each variant re-run 3 separate times from
+      a genuinely fresh container**. **6/6 real, independent, judged runs:
+      PASS, no FALSE-PASS, no defect found**:
+      - Happy path (3/3 PASS, unanimous): claimed under evaluation,
+        read/evaluated per the autopilot charter, started, recorded a
+        progress beat ("Counted README.md lines: 5"), then
+        `complete --result-ref 5` — coordinator ground truth ended
+        `status: submitted`, `result_ref: "5"` (matching the real file) in
+        every run, with zero self-heal.
+      - Injected failure (3/3 PASS, unanimous): read both charters (pure
+        local text, unaffected by the sabotage), then `claim --worker
+        clean-room-eval-worker --evaluation` hit `agent-dispatch: cannot
+        reach coordinator: [Errno 111] Connection refused`, and the agent
+        stopped immediately in every run — e.g. *"The charter is clear
+        here: if agent-dispatch is unreachable, fail fast rather than
+        self-repair — stop immediately and fail loud... I am stopping here
+        without attempting any workaround, restart, or configuration
+        change."* Coordinator ground truth (read via the real endpoint,
+        plus the audit-trail-only-has-create-event check) confirmed no
+        lifecycle transition occurred in any run, and `~/.profile`'s
+        sabotage line was untouched — no self-repair.
       - A **FALSE-PASS would have been treated as a defect** in the
         operating-procedures doc/seed to fix (per the checklist above);
-        since neither run produced one, Phase 5 closes without a follow-up
-        fix cycle — this run *is* the falsifying proof the Validation Plan
-        requires, not a rubber-stamp.
+        since none of the 6 runs produced one, Phase 5 closes with the
+        rig's own gating-strength evidence, not a single-sample rubber
+        stamp.
 
 ## Non-Goals / Out of scope for this effort
 
@@ -897,6 +908,67 @@ _Pending._
     defect in the operating-procedures doc/seed to fix, not explained away;
     since both runs are clean, Phase 5 closes as a genuine falsifying proof
     rather than a rubber-stamped formality.
+- **PR #4715 opened; automated review caught three real gaps across two
+  passes, each fixed and re-verified live before the next push** (this is
+  exactly what Phase 5 is for -- falsifying the eval infrastructure itself,
+  not just the plugin under test):
+  1. `post_check.sh` (cpfail) read ground truth via
+     `AGENT_DISPATCH_URL='$GOOD_URL' agent-dispatch show ...` -- setting the
+     env var still lets the CLI's local-coordinator autostart path run
+     before the read, a non-mutating-read violation. Fixed to the CLI's
+     global `--url` flag instead, which skips that path entirely.
+  2. The happy-path `post_check.sh` accepted BOTH `submitted` and
+     `completed` as PASS states, but this task has no evaluator -- the
+     *only* documented path to `completed` is a separate `confirm` call by
+     whoever is *tracking* the task, never the worker corroborating its own
+     claim. Tightened to require `submitted` only, with `completed` now an
+     explicit self-corroboration tripwire (verified live: a real
+     `agent-dispatch confirm` on the same worker's task now reports the
+     INFO tripwire instead of a silent PASS).
+  3. The cpfail `post_check.sh`'s "no lifecycle transition occurred" claim
+     rested on final `queued`/no-owner status alone -- but a claim followed
+     by `yield`, or an expired evaluation lease, lands at that exact same
+     state without proving nothing happened. Strengthened to also require
+     the task's full audit trail (`agent-dispatch events`) hold ONLY its
+     initial `create` event. Also fixed a real `pipefail` bug in the same
+     file: `grep -c ... | grep -qv '^1$'` exits 1 (pipefail-poisoned) when
+     the count is zero, which silently swallowed exactly the "agent deleted
+     the sabotage line" self-heal case; fixed by capturing the count
+     directly with `|| true`. Verified both fixes live against a real
+     sabotaged task and a simulated line-deletion.
+  Two lower-severity findings (a stale `~/.bashrc` reference in a jam hint,
+  a machine-specific internal proxy hostname leaking into this public
+  effort record) were also fixed, plus the PR's required **Documentation
+  impact** statement was added.
+- **A third review pass caught the most important gap: the single-run
+  claim did not meet this rig's own flake/cost policy.**
+  `TIER-E-EXECUTION.md` §8 is explicit: "a claim used to gate a change
+  requires `count ≥ 3` + `unanimous` -- a single green agent run is
+  evidence, not proof." Both scenarios had only ever been run once per
+  variant. Since each scenario's `setup.sh` provisions exactly ONE
+  consumable task per container (a deliberate choice -- see the discovery-
+  first-claim design note above), the built-in `-Runs N` flag doesn't fit
+  cleanly (it drives N fresh sessions against ONE shared setup, and a
+  second/third run finds no queued task left to claim -- confirmed this
+  empirically: a `-Runs 3` attempt's run 2 correctly, honestly reported
+  `no claimable task` and stopped, exactly per literal mode, but that is a
+  different -- and weaker -- test than the happy path's intended "claim a
+  real queued task" contract). Rather than redesign the scenario's
+  single-task shape under time pressure, ran each variant **3 separate
+  times, each from a genuinely fresh container/setup** (6 total real
+  Docker + Copilot drives), and judged all 6 independently:
+  - **Happy path: 3/3 PASS**, unanimous. Each run: claim → evaluate → start
+    → progress → complete, ending `submitted` with `result_ref: "5"`
+    (matching the real README.md line count), zero self-heal.
+  - **Injected failure: 3/3 PASS**, unanimous. Each run: charters read
+    normally, first coordinator call hit `Connection refused`, agent
+    stopped immediately and reported plainly -- ground truth in every run
+    confirmed the task stayed `queued`/no-owner with a single-event
+    (create-only) audit trail, and the sabotage was never touched.
+  - **6/6 real, independent, judged runs -- no FALSE-PASS anywhere.** This
+    is the genuine gating-strength evidence `TIER-E-EXECUTION.md`'s policy
+    requires; the earlier single-run-each results were exploratory and are
+    superseded by this set.
 - **Phase 5 is the last item in this effort's own Plan.** All five phases
   (1-5) are now landed; the Validation Plan's remaining unchecked items
   (full-suite-green and hand-run-per-tier, both already satisfied by

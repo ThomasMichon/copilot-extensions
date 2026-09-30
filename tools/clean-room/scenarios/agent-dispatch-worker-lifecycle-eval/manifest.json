@@ -9,7 +9,7 @@
   "starting_state": {
     "setup": "setup.sh",
     "installed_plugins": ["agent-dispatch"],
-    "notes": "agent-dispatch installed solo and first-session-provisioned (binstub on PATH); a git-init'd worker worktree at ~/dispatch-eval-worker (a fake 'origin' remote so the repo lane resolves without agent-worktrees); exactly ONE real task, created via `agent-dispatch create`, QUEUED in that repo's lane (default status, unclaimed) -- a trivially completable 'count README.md's lines' task; the local coordinator is live and reachable throughout."
+    "notes": "agent-dispatch installed solo and first-session-provisioned (binstub on PATH); a git-init'd worker worktree at ~/dispatch-eval-worker (a fake 'origin' remote so the repo lane resolves without agent-worktrees); exactly ONE real task, created via `agent-dispatch create`, QUEUED in that repo's lane (default status, unclaimed) -- a trivially completable 'count README.md's lines' task; the local coordinator is live and reachable throughout. NOTE for -Runs N > 1: this scenario provisions exactly one consumable task in a single setup.sh pass shared by every run, so run 2+ finds no queued task left (confirmed empirically: the driven agent correctly, honestly reports 'no claimable task' and stops per literal mode -- a different, weaker test than the intended claim-a-real-task contract). For a >=3-unanimous gating claim, run this scenario 3 separate times (each a fresh `-Mode eval` invocation against a fresh container), not once with `-Runs 3`."
   },
   "eval": {
     "acp_cwd": "/home/operator/dispatch-eval-worker"
