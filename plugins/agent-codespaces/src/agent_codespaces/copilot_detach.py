@@ -579,7 +579,8 @@ def cmd_detach(
             **({"ref_files": refs_note_text.splitlines()[1:], "refs_delivered": refs_delivered}
                if refs_note_text else {}),
             "resumed": not created, "seeded": bool(created and seed),
-            **({"recalled": recalled} if recalled else {}),
+            # A rejoin of a running session applied none of them: nothing was recalled.
+            **({"recalled": recalled} if recalled and created else {}),
             "plugin_dirs": captured.get("plugin_dirs", []),
             **({"reverse_forwards": reverse_forwards,
                 "reverse_forwards_ready": forwards_ready} if reverse_forwards else {}),

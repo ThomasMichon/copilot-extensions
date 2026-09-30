@@ -96,6 +96,10 @@ def _owned_unwritable_by_others(path: Path) -> bool:
     if getattr(st, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
         return False
     if os.name == "nt":
+        # Like this repo's other owner-private state (lease.py, agent-containers
+        # private_state), Windows relies on the runtime root's ACL -- the user
+        # profile's owner/SYSTEM/Administrators ACL by default -- and verifies
+        # no DACL itself; symlinks and reparse points are still refused.
         return True
     if st.st_uid != os.getuid():
         return False

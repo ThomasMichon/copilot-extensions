@@ -752,6 +752,16 @@ def test_a_rejoin_of_a_running_session_leaves_the_record_alone(seams, capsys):
     assert launch_memory._path("cs-1", tenant).read_text() == before
 
 
+def test_a_bare_rejoin_of_a_running_session_reports_nothing_recalled(seams, capsys):
+    from agent_codespaces import launch_memory
+
+    launch_memory.remember("cs-1", "cli:anchor-example-web@cs-1", ["--no-ask-user"], "orchestrator", "sid-42")
+    rejoined = json.dumps({"ok": True, "created": False, "resumed": True})
+    bare = _args(copilot_args=["--resume=sid-42"], driver=None, seed=None)
+    assert detach.cmd_detach(bare, ssh_session=_ssh(seams, stdout=rejoined)) == 0
+    assert "recalled" not in json.loads(capsys.readouterr().out)  # the running session applied none of it
+
+
 def test_the_record_keeps_the_model_the_session_actually_ran_with(seams, monkeypatch, capsys):
     # The launch filled the model from this host's settings; a later wake keeps
     # that model even after the host's own setting changed.
