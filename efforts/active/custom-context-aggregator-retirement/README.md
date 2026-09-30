@@ -325,7 +325,7 @@ There is no third, custom composition authority between plugins and the host.
   isolates the unexplained cost to the Windows-to-WSL relay/dispatch path
   itself (SSH tunnel, credential relay, or cross-machine `session_host`
   attach) — a distinct failure mode from the local-launch timing just fixed
-  and validated. Tracked as a new issue in the private private-downstream-repo tracker
+  and validated. Tracked as a new issue in the private-downstream-repo tracker
   (cross-repo infra, not this repo's own code) since the reproduction so far
   is specific to this facility's SSH mesh topology.
 - Given four consecutive failures across two sessions and the now-isolated

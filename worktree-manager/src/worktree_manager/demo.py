@@ -17,9 +17,10 @@ verbatim from ``docs/assets/worktree-picker.png`` -- the original Textual-
 picker-era screenshot (``v1.0.0``, 2026-07-25) -- so the durable mock source
 and the historical baseline stay the same voice rather than drifting apart.
 The original 7-row roster (the "Portal quote" titles referencing Iris, the
-Companion Cube, the cake, etc.) predates that screenshot and is kept
-unmodified for compatibility (see ``test_picker_app.py``'s "lemons"/"Iris"
-assertions). ``_MEMO_TITLES`` is deliberately separated from ``_ROWS`` so a
+Companion Cube, the cake, etc.) predates that screenshot and keeps the same
+row structure and compatibility-facing cues after placeholder-only neutralization
+(see ``test_picker_app.py``'s "lemons"/"Iris" assertions). ``_MEMO_TITLES`` is
+deliberately separated from ``_ROWS`` so a
 future generator (more volume than this fixed roster) has a clearly-labeled,
 reusable bank of on-theme phrasing to draw from or extend, rather than
 needing to reverse-engineer the tone from prose scattered through this file.

@@ -58,8 +58,8 @@ class TestBuiltinGenerator:
         product/franchise/brand terms, per CONTRIBUTING.md's contribution
         boundary. This is a narrow denylist smoke check, not exhaustive."""
         banned_substrings = (
-            "aperture", "portal", "iris", "ember", "copilot", "github",
-            "microsoft", "borealis",
+            "aperture", "portal", "gla" "dos", "wheat" "ley", "iris", "ember",
+            "copilot", "github", "microsoft", "borealis",
         )
         for word in (*CODENAME_NOUNS, *CODENAME_ADJECTIVES):
             for banned in banned_substrings:

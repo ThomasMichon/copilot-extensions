@@ -1967,7 +1967,7 @@ efforts' own PRs).
   validates.
 
 ### 2026-09-29 — Promotion pipeline starved by unfiltered CI-completion volume; fixed with a separate, cheap outer filter workflow (two flawed attempts first caught by review)
-- Diagnosed live while chasing why an private-downstream-repo PR's merged
+- Diagnosed live while chasing why a private-downstream-repo PR's merged
   `context-handoff` fix (#4489) hadn't reached `main` yet. `validate-and-
   promote.yml`'s `workflow_run: workflows: ["CI"]` trigger has no branch
   filter -- deliberately, per this same effort's earlier finding that
@@ -2181,5 +2181,4 @@ known failure modes can surface at all -- and when one does, it
 self-repairs on the very next scheduled run rather than needing manual
 intervention, since the purge set is always recomputed fresh against
 whatever `main` currently records, never a stale run-scoped list.
-
 

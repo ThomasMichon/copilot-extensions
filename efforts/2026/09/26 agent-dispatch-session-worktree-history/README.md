@@ -77,7 +77,7 @@ Concepts & Components):
   (`queue.py`) — the existing (single-slot) ownership bookkeeping this effort
   extends to a full history, and the existing state-transition audit log that
   may already carry enough raw material to backfill from.
-- `private-downstream-repo`' `session-worktree-archive-linkout` effort — the consumer
+- `private-downstream-repo`'s `session-worktree-archive-linkout` effort — the consumer
   -side effort whose Phase 4 (Dampener's "View reviewer" link) is blocked on
   this landing; see its 2026-09-19 course-correction journal entry for the
   reverted bespoke attempt.

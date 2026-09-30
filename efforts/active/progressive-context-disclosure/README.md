@@ -828,7 +828,7 @@ enforcement before migrating the complete contributor stack.
 
 ### 2026-09-12 - Ad-hoc dynamic-capture landed, outside the clean-room lane
 
-An private-downstream-repo facility dedup sweep needed a way to see the *real* per-session
+A private-downstream-repo facility dedup sweep needed a way to see the *real* per-session
 dynamic guidance a plugin's `sessionStart` hook writes, for a static
 redundancy-review snapshot -- not a clean-room experiment. Landed in
 `reviewing-customizations`' `scan-customizations.py` (PR #2511): an opt-in

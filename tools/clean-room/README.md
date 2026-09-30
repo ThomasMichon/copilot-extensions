@@ -86,7 +86,7 @@ uninstall in addition to install, explicit update, rollback, and isolation.
 > the container network layer (Docker `--add-host`), regardless of what the
 > HOST machine can actually reach. This lets a fully-connected dev box exercise
 > the same "public feed genuinely unreachable" condition a governed machine
-> (e.g. private-downstream-repo' `owner_user-book2`) already produces naturally, catching a
+> (e.g. private-downstream-repo's `owner_user-book2`) already produces naturally, catching a
 > hardcoded public-feed straggler before it ever reaches that machine. Combine
 > with `-UvIndex`/`--uv-index` (a real substitute feed) to prove installs still
 > succeed under the block; omit it to confirm the existing `toolchain-uv` jam

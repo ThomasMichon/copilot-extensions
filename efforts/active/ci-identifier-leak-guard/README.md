@@ -158,7 +158,7 @@ _(Revised 2026-09-27: the operator will not personally type these secrets --
 see the Journal entry below. Both are agent-assembled/pushed instead of
 "operator only.")_
 
-- [x] An **private-downstream-repo agent** assembles the `FORBIDDEN_IDS_FACILITY` list
+- [x] A **private-downstream-repo agent** assembles the `FORBIDDEN_IDS_FACILITY` list
   (facility-context identifiers -- machine names, internal hosts, personal
   names, etc.; not secret from within private-downstream-repo, only from the public
   repo) and pushes it to the `ThomasMichon/copilot-extensions` repository
