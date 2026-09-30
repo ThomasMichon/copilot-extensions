@@ -49,6 +49,10 @@ class _SchemaMixin:
                     "ALTER TABLE live_messages ADD COLUMN idempotency_key TEXT"
                 )
                 live_columns.add("idempotency_key")
+            for col in ("claimed_at REAL", "outcome TEXT"):
+                if col.split()[0] not in live_columns:
+                    conn.execute(f"ALTER TABLE live_messages ADD COLUMN {col}")
+                    live_columns.add(col.split()[0])
             conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS "
                 "idx_live_messages_idempotency ON live_messages(idempotency_key)"
@@ -539,3 +543,21 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (22,))
             conn.commit()
             log.info("Schema migrated to version 22: live_messages.delivery")
+
+        if from_version < 23:
+            # v22 -> v23: session-control handshake. A control (e.g. a mode
+            # change) is claimed by the session's extension before it applies
+            # it, and its outcome is recorded, so the requester's timeout and
+            # the application are ordered (a claimed control is never withdrawn).
+            cols = [
+                r[1]
+                for r in conn.execute(
+                    "PRAGMA table_info(live_messages)"
+                ).fetchall()
+            ]
+            for col in ("claimed_at REAL", "outcome TEXT"):
+                if col.split()[0] not in cols:
+                    conn.execute(f"ALTER TABLE live_messages ADD COLUMN {col}")
+            conn.execute("UPDATE schema_version SET version=?", (23,))
+            conn.commit()
+            log.info("Schema migrated to version 23: live_messages.claimed_at/outcome")

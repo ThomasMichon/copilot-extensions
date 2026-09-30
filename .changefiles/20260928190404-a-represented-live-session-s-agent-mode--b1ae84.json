@@ -1,0 +1,9 @@
+{
+  "comment": "A represented live session's agent mode can be switched from outside (POST /api/v1/live-sessions/{id}/mode: interactive, plan, autopilot), applied by its extension through the CLI's session.rpc.mode.set; the extension claims each control and reports it applied or rejected, so a timeout never races the change (unclaimed controls are withdrawn; claimed ones report in_flight). Controls are polled and acked apart from messages, so older extensions never deliver them as prompts. HTTP protocol version 19.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    }
+  ]
+}

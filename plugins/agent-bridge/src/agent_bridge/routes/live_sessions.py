@@ -10,6 +10,7 @@ is reaped by staleness rather than relying on a clean deregister.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from dataclasses import dataclass
@@ -37,6 +38,14 @@ from ..models import (
     SendMessageResult,
 )
 from ..events import EventLog
+from ..live_controls import (
+    CLAIMED_CONTROL_GRACE_SECONDS,
+    CONTROL_MAX_AGE_SECONDS,
+    SET_MODE_CONTROL,
+    ControlAckRequest,
+    SetModeRequest,
+    SetModeResult,
+)
 from ..live_representation import (
     progress_from_events,
     await_turn_reply,
@@ -603,6 +612,11 @@ async def post_live_message(
     head is captured **before** enqueue so the reply window starts at the moment
     of sending.
     """
+    if body.kind.startswith("control:"):
+        raise HTTPException(
+            status_code=400,
+            detail="control kinds are reserved; use the session's control routes (e.g. /mode)",
+        )
     db = _db(request)
     now = time.time()
 
@@ -689,6 +703,119 @@ async def post_live_message(
         reply=reply["reply"],
         stop_reason=reply["stop_reason"],
     )
+
+
+#: How often ``POST /mode`` checks whether the extension applied the change.
+MODE_POLL_SECONDS = 0.25
+
+
+@router.post("/{session_id}/mode", response_model=SetModeResult)
+async def set_live_mode(
+    session_id: str, body: SetModeRequest, request: Request
+) -> SetModeResult:
+    """Switch a live session's agent mode, as ``/autopilot on`` or ``/plan``
+    would from its own terminal (ACP's ``session/set_mode``).
+
+    The change is queued as a session control that the session's extension
+    claims from ``/controls`` (never from ``/messages``, so an extension that
+    predates controls can't deliver it as a prompt), applies through the CLI's
+    own ``session.rpc.mode.set``, and reports through ``/controls/ack``. The
+    claim orders the two sides: at ``wait_timeout`` an unclaimed control is
+    withdrawn (``withdrawn``: it never applies later); a claimed one is waited
+    on briefly for its outcome, else reported ``in_flight`` (it may still apply).
+    """
+    db = _db(request)
+    control_id, reason = db.enqueue_live_message_if_fresh(
+        session_id,
+        sender=body.sender,
+        body=body.mode,
+        now=time.time(),
+        kind=SET_MODE_CONTROL,
+        delivery="queue",
+        expected_session_id=body.expected_session_id,
+    )
+    if reason == "not_found":
+        raise HTTPException(status_code=404, detail="live session not found")
+    if reason is not None or control_id is None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"live session {session_id} can't take a mode change now ({reason})",
+        )
+    def settled() -> SetModeResult | None:
+        outcome = (db.live_control_state(session_id, control_id) or {}).get("outcome")
+        if outcome == "applied":
+            return SetModeResult(session_id=session_id, mode=body.mode, applied=True, state="applied")
+        if outcome is not None:
+            return SetModeResult(
+                session_id=session_id, mode=body.mode, applied=False, state="rejected",
+                detail="the session couldn't apply it",
+            )
+        return None
+
+    deadline = time.monotonic() + body.wait_timeout
+    while time.monotonic() < deadline:
+        if (result := settled()) is not None:
+            return result
+        await asyncio.sleep(MODE_POLL_SECONDS)
+    if db.withdraw_live_control(session_id, control_id, time.time()):
+        return SetModeResult(
+            session_id=session_id, mode=body.mode, applied=False, state="withdrawn",
+            detail=(
+                "the session didn't take it in time: its agent-bridge extension may "
+                "predate mode changes, or the session isn't responding"
+            ),
+        )
+    # Claimed: the session is applying it; wait briefly for its outcome.
+    grace = time.monotonic() + CLAIMED_CONTROL_GRACE_SECONDS
+    while True:
+        if (result := settled()) is not None:
+            return result
+        if time.monotonic() >= grace:
+            break
+        await asyncio.sleep(MODE_POLL_SECONDS)
+    return SetModeResult(
+        session_id=session_id, mode=body.mode, applied=None, state="in_flight",
+        detail="the session took the change but hasn't reported it applied; it may still apply",
+    )
+
+
+@router.get("/{session_id}/controls", response_model=LiveMessageListResponse)
+async def list_live_controls(
+    session_id: str, request: Request
+) -> LiveMessageListResponse:
+    """Claim pending session controls (a mode change), oldest-first: the
+    extension's control poll. Each is returned once; the extension applies it
+    and reports the outcome through ``/controls/ack``."""
+    db = _db(request)
+    if db.get_live_session(session_id) is None:
+        raise HTTPException(status_code=404, detail="live session not found")
+    rows = db.claim_live_controls(session_id, time.time(), CONTROL_MAX_AGE_SECONDS)
+    return LiveMessageListResponse(
+        messages=[
+            LiveMessage(
+                id=r["id"], sender=r["sender"], body=r["body"],
+                kind=r.get("kind") or SET_MODE_CONTROL, created_at=r["created_at"],
+            )
+            for r in rows
+        ]
+    )
+
+
+@router.post("/{session_id}/controls/ack", response_model=AckMessagesResult)
+async def ack_live_controls(
+    session_id: str, body: ControlAckRequest, request: Request
+) -> AckMessagesResult:
+    """Record the outcome of claimed controls (``applied``, else ``rejected``).
+    Only controls are settled here, and only once claimed; unlike a message
+    ack, it doesn't mark the session busy: a mode change starts no turn."""
+    db = _db(request)
+    if db.get_live_session(session_id) is None:
+        raise HTTPException(status_code=404, detail="live session not found")
+    acked = db.ack_live_messages(
+        session_id, body.ids, now=time.time(), controls=True,
+        outcome="applied" if body.applied else "rejected",
+    )
+    return AckMessagesResult(acked=acked)
 
 
 @router.get("/{session_id}/messages", response_model=LiveMessageListResponse)

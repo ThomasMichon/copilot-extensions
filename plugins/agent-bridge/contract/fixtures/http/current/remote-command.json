@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "a1612599f20a0342c6ab15830207316f90beeb80",
-    "plugin_version": "0.4.0-dev549",
-    "protocol_generation": 18,
+    "commit": "4313805d12a1c70f379321bae6af51be7b4a3696",
+    "plugin_version": "0.4.1-dev3",
+    "protocol_generation": 19,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
-    "source_git_blob": "c3511f0824dbfb0ec099c9518f6ee22c37a0ca18",
-    "source_sha256": "b1e64eb95157f166274e6242ef72ed6171d4be910d57e61c13e2829ec4d58138"
+    "source_git_blob": "4d52912f627bb286e74c9852cfac3a312a7a07c0",
+    "source_sha256": "0e402bba48d8fa4e76802354375b226dcab26db8281d563a912d309db478facf"
   },
   "request": {
     "method": "POST",

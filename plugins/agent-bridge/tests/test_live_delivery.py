@@ -199,6 +199,34 @@ def test_migration_v21_to_v22_adds_delivery(tmp_path: Path) -> None:
         db.close()
 
 
+def test_migration_v22_to_v23_adds_the_control_handshake(tmp_path: Path) -> None:
+    """A v22 database bumps to v23 with live_messages.claimed_at/outcome."""
+    db_path = tmp_path / "old.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        "CREATE TABLE schema_version (version INTEGER NOT NULL);"
+        "INSERT INTO schema_version (version) VALUES (22);"
+        "CREATE TABLE live_messages ("
+        " id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,"
+        " sender TEXT NOT NULL, body TEXT NOT NULL, reply_to TEXT,"
+        " kind TEXT NOT NULL DEFAULT 'prompt', delivery TEXT NOT NULL DEFAULT 'queue',"
+        " idempotency_key TEXT, created_at REAL NOT NULL, delivered_at REAL);"
+        "INSERT INTO live_messages (session_id, sender, body, kind, created_at)"
+        " VALUES ('s', 'op', 'plan', 'control:set-mode', 1.0);"
+    )
+    conn.commit()
+    conn.close()
+
+    db = Database(db_path)
+    try:
+        ver = db.execute_read("SELECT version FROM schema_version")[0]["version"]
+        assert ver == SCHEMA_VERSION
+        assert db.live_control_state("s", 1) == {"claimed_at": None, "outcome": None}
+        assert [r["id"] for r in db.claim_live_controls("s", time.time(), 1e12)] == [1]
+    finally:
+        db.close()
+
+
 # -- Route layer ------------------------------------------------------------
 
 
@@ -526,3 +554,117 @@ def test_post_fresh_registration_still_delivers(client: TestClient) -> None:
     )
     assert r.status_code == 200
     assert r.json()["message_id"] > 0
+
+
+# -- Session controls (mode changes) ---------------------------------------
+
+
+def _control(db: Database, mode: str = "autopilot", *, now: float | None = None) -> int:
+    cid, reason = db.enqueue_live_message_if_fresh(
+        "cli-1", sender="op", body=mode, now=now or time.time(), kind="control:set-mode")
+    assert reason is None and cid is not None
+    return cid
+
+
+def _outcome(db: Database, cid: int) -> str | None:
+    return (db.live_control_state("cli-1", cid) or {}).get("outcome")
+
+
+def test_an_untaken_mode_change_is_withdrawn_and_never_applies(client: TestClient, monkeypatch) -> None:
+    _register(client)
+    monkeypatch.setattr(live_sessions, "MODE_POLL_SECONDS", 0.01)
+    r = client.post("/api/v1/live-sessions/cli-1/mode", json={"mode": "autopilot", "wait_timeout": 1})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert (out["applied"], out["state"], out["mode"]) == (False, "withdrawn", "autopilot")
+    assert "predate" in out["detail"]
+    # Withdrawn: a later poll never hands it out, and it's never a message.
+    assert client.get("/api/v1/live-sessions/cli-1/controls").json()["messages"] == []
+    assert client.get("/api/v1/live-sessions/cli-1/messages").json()["messages"] == []
+
+
+def test_controls_are_claimed_once_and_apart_from_messages(tmp_db: Database, client: TestClient) -> None:
+    _register(client)
+    client.post("/api/v1/live-sessions/cli-1/messages", json={"sender": "a", "body": "hi"})
+    cid = _control(tmp_db)
+    msgs = client.get("/api/v1/live-sessions/cli-1/messages").json()["messages"]
+    ctrls = client.get("/api/v1/live-sessions/cli-1/controls").json()["messages"]
+    assert [m["body"] for m in msgs] == ["hi"]  # an older extension never sees a control
+    assert [(c["id"], c["kind"], c["body"]) for c in ctrls] == [(cid, "control:set-mode", "autopilot")]
+    assert client.get("/api/v1/live-sessions/cli-1/controls").json()["messages"] == []  # claimed
+    # Claimed: its requester's timeout can no longer withdraw it.
+    assert not tmp_db.withdraw_live_control("cli-1", cid, time.time())
+    acked = client.post("/api/v1/live-sessions/cli-1/controls/ack", json={"ids": [cid]}).json()
+    assert acked["acked"] == 1 and _outcome(tmp_db, cid) == "applied"
+    # A control ack doesn't mark the session busy (a mode change starts no turn).
+    assert (tmp_db.get_live_session("cli-1") or {}).get("turn_state") != "running"
+
+
+def test_message_and_control_acks_never_cross(tmp_db: Database, client: TestClient) -> None:
+    _register(client)
+    mid = client.post("/api/v1/live-sessions/cli-1/messages",
+                      json={"sender": "a", "body": "hi"}).json()["message_id"]
+    cid = _control(tmp_db)
+    client.get("/api/v1/live-sessions/cli-1/controls")
+    assert client.post("/api/v1/live-sessions/cli-1/messages/ack", json={"ids": [cid]}).json()["acked"] == 0
+    assert _outcome(tmp_db, cid) is None
+    assert client.post("/api/v1/live-sessions/cli-1/controls/ack", json={"ids": [mid]}).json()["acked"] == 0
+    assert [m["id"] for m in client.get("/api/v1/live-sessions/cli-1/messages").json()["messages"]] == [mid]
+
+
+def test_an_unclaimed_control_cant_be_acked(tmp_db: Database, client: TestClient) -> None:
+    _register(client)
+    cid = _control(tmp_db)
+    assert client.post("/api/v1/live-sessions/cli-1/controls/ack", json={"ids": [cid]}).json()["acked"] == 0
+    assert tmp_db.withdraw_live_control("cli-1", cid, time.time())
+
+
+def test_a_control_whose_requester_is_gone_expires_unapplied(tmp_db: Database, client: TestClient) -> None:
+    _register(client)
+    old = _control(tmp_db, now=time.time() - live_sessions.CONTROL_MAX_AGE_SECONDS - 5)
+    fresh = _control(tmp_db, "plan")
+    ctrls = client.get("/api/v1/live-sessions/cli-1/controls").json()["messages"]
+    assert [c["id"] for c in ctrls] == [fresh]
+    assert _outcome(tmp_db, old) == "expired"
+
+
+def _claim_then(tmp_db: Database, applied: bool | None):
+    """Stand in for an extension that claims the control, then reports."""
+    real = tmp_db.withdraw_live_control
+
+    def withdraw(sid, cid, now):
+        tmp_db.claim_live_controls(sid, now, 3600)
+        if applied is not None:
+            tmp_db.ack_live_messages(sid, [cid], now, controls=True,
+                                     outcome="applied" if applied else "rejected")
+        return real(sid, cid, now)
+    return withdraw
+
+
+@pytest.mark.parametrize("applied, state", [(True, "applied"), (False, "rejected"), (None, "in_flight")])
+def test_a_claimed_control_reports_its_real_outcome(
+    client: TestClient, tmp_db: Database, monkeypatch, applied, state
+) -> None:
+    _register(client)
+    monkeypatch.setattr(live_sessions, "MODE_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(live_sessions, "CLAIMED_CONTROL_GRACE_SECONDS", 0.05)
+    # The extension claims it right as the requester's wait ends.
+    monkeypatch.setattr(tmp_db, "withdraw_live_control", _claim_then(tmp_db, applied))
+    out = client.post("/api/v1/live-sessions/cli-1/mode", json={"mode": "plan", "wait_timeout": 1}).json()
+    assert (out["applied"], out["state"]) == (applied, state)
+
+
+def test_an_applied_mode_change_reports_applied(client: TestClient, tmp_db: Database, monkeypatch) -> None:
+    _register(client)
+    monkeypatch.setattr(tmp_db, "live_control_state", lambda sid, cid: {"outcome": "applied"})
+    r = client.post("/api/v1/live-sessions/cli-1/mode", json={"mode": "interactive"})
+    assert (r.json()["applied"], r.json()["state"]) == (True, "applied")
+
+
+def test_mode_changes_are_validated_and_controls_reserved(client: TestClient) -> None:
+    _register(client)
+    assert client.post("/api/v1/live-sessions/cli-1/mode", json={"mode": "yolo"}).status_code == 422
+    assert client.post("/api/v1/live-sessions/ghost/mode", json={"mode": "plan"}).status_code == 404
+    r = client.post("/api/v1/live-sessions/cli-1/messages",
+                    json={"sender": "a", "body": "autopilot", "kind": "control:set-mode"})
+    assert r.status_code == 400

@@ -182,6 +182,9 @@ DELETE /api/v1/sessions/{id}             # End (full cleanup)
 GET    /api/v1/live-sessions             # Registered live interactive CLI sessions
 GET    /api/v1/live-sessions/resolve     # Resolve a session id OR worktree handle -> its live session
 GET    /api/v1/live-sessions/{id}        # Fetch one registered live session
+POST   /api/v1/live-sessions/{id}/mode   # Switch its agent mode (interactive/plan/autopilot); waits for the outcome
+GET    /api/v1/live-sessions/{id}/controls # Extension: claim pending session controls (each returned once)
+POST   /api/v1/live-sessions/{id}/controls/ack # Extension: report claimed controls applied or rejected
 GET    /api/v1/dispatch-tasks/{id}/session # Resolve an agent-dispatch task -> the session that worked it (live-then-cold-store, durable attachment history)
 
 GET    /api/v1/remote/{host}/sessions/{id}/status
@@ -190,6 +193,18 @@ GET    /api/v1/remote/{host}/sessions/{id}/events
 POST   /api/v1/remote/events             # Multiplex several remote subscriptions
 POST   /api/v1/remote/{host}/sessions/{id}/cursor
 ```
+
+**Session controls.** A mode change (`POST .../mode`, protocol version 19,
+`LIVE_SESSION_MODE_PROTOCOL_VERSION`) is queued as a `control:*` row in the
+live-message table, but it is never delivered as a prompt: the session's
+extension claims it from `/controls` and reports its outcome through
+`/controls/ack`, and message and control acks never settle each other's rows.
+The claim orders the requester's timeout against the application: at
+`wait_timeout` an unclaimed control is withdrawn (`state: withdrawn`, it never
+applies later); a claimed one is waited on briefly for its outcome, otherwise
+reported `state: in_flight` with `applied: null` (it may still apply). A
+control whose requester is gone (older than the longest wait plus that grace)
+expires unapplied at the next poll.
 
 **Session identity: `session_id` vs `durable_session_id`.** Every session
 response also carries `acp_session_id` (the durable Copilot session id) and

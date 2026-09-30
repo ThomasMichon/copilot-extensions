@@ -267,7 +267,7 @@ rather than deciding it unreviewed mid-Phase-1.
       confirm no test currently pins the *old* verbose text as if it were
       the contract (a smell the sweep should also flag if found).
 
-### Phase 3 — Reachability-tiered delivery for no-CLI-access workers
+### Phase 3 — Reachability-tiered delivery for no-CLI-access workers ✅ landed
 _Exploration first, per the operator's framing — the concrete mechanisms
 per environment are genuinely undecided, not just unwritten._
 - [x] Enumerate the environments this actually needs to cover (a Codespace,
@@ -321,7 +321,7 @@ per environment are genuinely undecided, not just unwritten._
         charter (a no-CLI worker cannot fetch either charter by name), and
         ships a zero-extra-dependency `dispatch_http.py` helper that drives
         the coordinator's HTTP routes with an explicit worker id.
-- [ ] Tests + a hand-run scenario: spawn a worker in at least one genuinely
+- [x] Tests + a hand-run scenario: spawn a worker in at least one genuinely
       no-CLI-access environment and confirm it can complete a task using
       only the tier-appropriate inline guidance.
       - Unit coverage landed in `tests/test_no_cli_prompts.py` plus the
@@ -370,6 +370,64 @@ per environment are genuinely undecided, not just unwritten._
         `agent-worktrees embody` reproduction. Cleanup after the failed
         launches left no live `wt-anchor-<workspace-project>` tmux session,
         no active container lease, and the container still running/unleased.
+      - **Follow-up (2026-09-29, later same day): both remaining blockers
+        diagnosed and fixed for real; the hand-run genuinely succeeded.**
+        Direct live investigation (not guessing) found TWO distinct, unrelated
+        bugs layered on top of each other, both now fixed and merged:
+        1. **A real Copilot CLI bug**, confirmed live: on startup, Copilot can
+           show a one-time "Install it now? Yes, install / No, thanks"
+           desktop-app nudge that waits for an arrow-key/Enter selection a
+           detached launch can never provide -- it can resurface even when
+           `~/.copilot/config.json`'s `appTipShown` was already `true`
+           (presumably reset by an unrelated CLI auto-update's config
+           migration). A plain `Escape` cleanly dismisses it. Fixed in
+           `agent-worktrees` (`mux_seed_pane` now detects this exact, narrowly-
+           scoped dialog and dismisses it once before continuing to poll for
+           genuine readiness) -- merged
+           `ThomasMichon/copilot-extensions#4645`.
+        2. **The actual root cause of the `not-ready-timeout` symptom**:
+           `ensure_agent_worktrees()` provisioned agent-worktrees via the
+           LEAN `install.sh provision` mode ("tools only, no launcher/
+           hooks"), which deliberately skips deploying
+           `scripts/launch-command.sh` / `scripts/default-setup.sh` --
+           exactly what `embody`'s own detached-launch command names
+           directly. Every detached launch was failing INSTANTLY (`bash:
+           .../launch-command.sh: No such file or directory`, exit 127)
+           before Copilot ever started; tmux's pane exited before the
+           readiness poll could see anything, surfacing only as the same
+           opaque `not-ready-timeout`. Fixed by switching to the full
+           `install.sh install` mode (which does deploy the launcher
+           scripts) and strengthening the readiness check to require
+           `scripts/launch-command.sh` to actually exist -- merged
+           `ThomasMichon/copilot-extensions#4651`.
+        3. **Full genuine end-to-end validation** against the same real
+           trusted container: a fresh scratch task
+           (`095bb4eb593748c8a8dbe654cc525a8d`, "count README.md's lines")
+           was created via the host CLI, seeded into a detached
+           `agent-worktrees embody` session with the inline no-CLI seed and
+           the live `AGENT_DISPATCH_URL`, and the embodied Copilot -- using
+           **only** the seed's stated `dispatch_http.py` HTTP commands, no
+           local `agent-dispatch` CLI -- read the task, judged it feasible,
+           started it, reported progress, and completed it. Verified from
+           the HOST coordinator (not the transcript): `status: "submitted"`,
+           `completed_by: "phase3-handrun-worker"`, `result_ref: "17"`
+           (the correct line count), a real `progress_log` entry. The
+           worker ALSO demonstrated the operating-procedures'
+           fail-fast-on-control-plane-failure contract live and unprompted:
+           an earlier seed baked in a coordinator URL that went stale
+           mid-session (a local coordinator port cutover); the worker
+           checked connectivity, found it unreachable, and stopped
+           immediately with a plain report -- "I have not claimed, started,
+           or otherwise acted on task ..., since I could not even read it
+           ... I am not attempting to fix networking or the control plane
+           myself, per the 'fail fast, don't self-repair' directive" --
+           rather than improvising a workaround.
+        4. Cleanup: the completed scratch task is a genuine, terminal
+           record (left as-is, not deleted, matching how every other
+           scratch validation task in this effort's history has been
+           handled); the detached tmux session and container lease were
+           torn down; `peaceful_wright` (the `odsp-web` fleet's trusted
+           container) ended healthy, running, and unleased.
 
 ### Phase 4 — agent-bridge companion-agent heads-up ✅ landed
 - [x] Confirm (or add, if missing) a minimal heads-up in agent-bridge's own
@@ -673,3 +731,39 @@ _Pending._
   `--session-id` in that container image (compare CLI versions, check for
   an upstream CAR issue, or try a different mux/detach strategy) before
   reattempting the hand-run.
+
+### 2026-09-29 — Phase 3's hand-run genuinely succeeds; effort's Phases 1-4 all complete
+- Investigated the "Copilot CLI exiting immediately" symptom directly
+  rather than accepting it as an unexplained venue quirk, and found it was
+  actually TWO separate, unrelated bugs, both real and both fixed:
+  1. Copilot's first-run desktop-app nudge dialog (confirmed live, a plain
+     `Escape` dismisses it) -- fixed in `agent-worktrees`'
+     `mux_seed_pane`, merged `ThomasMichon/copilot-extensions#4645`.
+  2. The actual root cause of the `not-ready-timeout`: `agent-containers`'
+     `ensure_agent_worktrees()` was provisioning via the lean `install.sh
+     provision` mode, which never deploys the `scripts/launch-command.sh`
+     `embody`'s own detached-launch command names directly -- every
+     detached launch was failing instantly and silently before Copilot
+     ever started. Fixed by switching to full `install.sh install` and
+     strengthening the readiness check accordingly, merged
+     `ThomasMichon/copilot-extensions#4651`.
+- With both fixed, re-ran the exact Phase 3 hand-run end-to-end against
+  the same real trusted container and it genuinely succeeded: a fresh
+  scratch task was claimed, evaluated, worked, and completed entirely via
+  the no-CLI seed's stated HTTP commands, verified from the host
+  coordinator's own records (not the transcript). The worker also
+  demonstrated the fail-fast-on-control-plane-failure contract live and
+  unprompted when an earlier seed's baked-in coordinator URL went stale
+  mid-session. See the Phase 3 checklist's own final entry above for the
+  full detail.
+- While landing PR #4615's review fixes (previous entry), also found and
+  filed a genuine, separate, pre-existing flake unrelated to this effort
+  (`agent-worktrees`' `push_timeout._kill_tree` can miss a fast-forking
+  grandchild under host load on Windows) as its own tracked issue,
+  `ThomasMichon/copilot-extensions#4644`, rather than rushing an untested
+  process-management fix into an unrelated PR.
+- **All four executed phases of this effort (1-4) are now fully landed and
+  merged.** Phase 5 (the clean-room Tier-E eval proving the mechanical-
+  completion contract behaviorally) has not been started; it remains the
+  one open item before this effort itself can be marked Done per the
+  `planning-efforts` completion gate.
