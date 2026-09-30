@@ -452,6 +452,9 @@ class SupervisorDaemon:
             if replacement:
                 desired.pop(replacement, None)
         for rid, registration in list(desired.items()):
+            if registration.get("kind") == RegistrationKind.EVALUATOR:
+                desired.pop(rid, None)
+                continue
             if registration_override_ids(registration) & overridden:
                 desired.pop(rid, None)
         self._resolve_companion_desired(desired)

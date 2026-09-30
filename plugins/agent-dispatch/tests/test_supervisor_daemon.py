@@ -1062,6 +1062,28 @@ def test_desired_filters_coordinator_owned_evaluators():
     assert "eval" not in desired
 
 
+def test_desired_filters_declared_evaluators(monkeypatch):
+    client = FakeClient([_reg("lane")])
+    launcher = FakeLauncher()
+    d = _daemon(client, launcher)
+    monkeypatch.setattr(
+        d,
+        "_declared",
+        lambda: [
+            _reg(
+                "declared-eval",
+                kind="evaluator",
+                spec={"repo": TEST_REPO, "evaluator": "eval.json"},
+            )
+        ],
+    )
+
+    desired = d._desired()
+
+    assert "lane" in desired
+    assert "declared-eval" not in desired
+
+
 # -- serve / single-instance -------------------------------------------------
 
 

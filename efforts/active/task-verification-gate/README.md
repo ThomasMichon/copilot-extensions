@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-09-29
-- **Status:** Draft
+- **Status:** In review
 - **Vision:** agent-dispatch vision's *verify-the-completion-claim* (this
   effort's Phase 1 also revises that vision section's own wording -- see
   Plan)

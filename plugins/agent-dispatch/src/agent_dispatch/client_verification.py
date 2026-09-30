@@ -12,12 +12,12 @@ class VerificationClientMixin:
         return self._unwrap(self._http.post(f"/tasks/{task_id}/verify-submitted"))
 
     def append_event_note(self, task_id: str, *, sender: str, note: str) -> dict:
-        headers = None
+        headers = dict(self._control_headers())
         if self._control_token:
-            headers = {
-                "Authorization": "Bearer "
-                + scoped_control_token(self._control_token, f"event-note:{sender}")
-            }
+            headers["X-Agent-Dispatch-Sender-Proof"] = scoped_control_token(
+                self._control_token,
+                f"event-note:{sender}",
+            )
         return self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/event-note",

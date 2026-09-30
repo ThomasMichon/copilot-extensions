@@ -45,8 +45,10 @@ def _registration_machine() -> str:
 
 def _control_headers(sender: str) -> dict[str, str]:
     return {
-        "Authorization": "Bearer "
-        + scoped_control_token(CONTROL_TOKEN, f"event-note:{sender}")
+        "Authorization": f"Bearer {CONTROL_TOKEN}",
+        "X-Agent-Dispatch-Sender-Proof": scoped_control_token(
+            CONTROL_TOKEN, f"event-note:{sender}"
+        ),
     }
 
 

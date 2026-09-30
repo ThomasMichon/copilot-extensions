@@ -5,12 +5,11 @@ from __future__ import annotations
 import os
 import secrets
 
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field, StrictInt
 
 from . import remote_dispatch
-from .coordinator_auth import scoped_control_token
+from .coordinator_auth import _make_control_auth, scoped_control_token
 from .events import EventBus
 from .queue import RegistrationKind, Status, Task, TaskError, TaskQueue
 from .verification import evaluate_submitted_task
@@ -64,7 +63,6 @@ def register_verification_routes(
 
     current_machine = remote_dispatch.local_machine()
     current_env = os.environ.get("AGENT_DISPATCH_ENV") or "default"
-    emitter_bearer = HTTPBearer(auto_error=False)
 
     def _require_trusted_emitter(task: Task, sender: str) -> None:
         record = queue.get_registration(sender)
@@ -91,24 +89,12 @@ def register_verification_routes(
     def append_event_note(
         task_id: str,
         body: EventNoteBody,
-        creds: HTTPAuthorizationCredentials | None = Depends(emitter_bearer),  # noqa: B008
+        _auth: None = Depends(_make_control_auth(control_token, _emit_producer_event)),  # noqa: B008
+        sender_proof: str | None = Header(default=None, alias="X-Agent-Dispatch-Sender-Proof"),
     ) -> dict:
-        if control_token is None:
-            _emit_producer_event(
-                "producer_scope.transition_rejected",
-                {
-                    "code": "producer_control_unavailable",
-                    "operation": "event_note",
-                    "reason": "control_authority_not_configured",
-                    "retryable": False,
-                },
-            )
-            raise HTTPException(
-                status_code=503,
-                detail="managed producer transitions require a configured control token",
-            )
+        assert control_token is not None  # enforced by _make_control_auth
         expected = scoped_control_token(control_token, f"event-note:{body.sender}")
-        if creds is None or not secrets.compare_digest(creds.credentials, expected):
+        if sender_proof is None or not secrets.compare_digest(sender_proof, expected):
             _emit_producer_event(
                 "producer_scope.transition_rejected",
                 {

@@ -372,7 +372,12 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
     its decisions (the *evaluator* half of emitters-and-evaluators). The event
     JSON is read from ``--event-file`` or stdin; the coordinator shape is
     ``{"type": "task.submitted", "task": {...}}``."""
-    from .producers.evaluator import EvaluatorError, load_evaluator, load_spec, evaluate_and_apply
+    from .producers.evaluator import (
+        EvaluatorError,
+        evaluate_and_apply,
+        load_evaluator,
+        load_spec,
+    )
 
     try:
         spec = load_spec(args.spec)
@@ -390,7 +395,7 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
         print(f"agent-dispatch: event is not valid JSON: {exc}", file=sys.stderr)
         return 2
     try:
-        evaluator = load_evaluator(spec)
+        evaluator = load_evaluator(spec, evaluator_ref=args.evaluator_ref)
     except EvaluatorError as exc:
         print(f"agent-dispatch: {exc}", file=sys.stderr)
         return 2

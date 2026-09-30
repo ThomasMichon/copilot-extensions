@@ -343,6 +343,11 @@ def test_cli_parses_evaluate():
     assert a.func is _cmd_evaluate
 
 
+def test_cli_parses_evaluate_ref():
+    a = _args(["evaluate", "--spec", "s.json", "--evaluator-ref", "review-loop"])
+    assert a.evaluator_ref == "review-loop"
+
+
 def test_cli_parses_verify_submitted():
     a = _args(["verify-submitted", "task-1", "task-2"])
     assert a.func is _cmd_verify_submitted
@@ -379,3 +384,38 @@ def test_cmd_evaluate_bad_event_json_errors(tmp_path, capsys):
     )
     assert rc == 2
     assert "not valid JSON" in capsys.readouterr().err
+
+
+def test_cmd_evaluate_loads_script_evaluator_by_ref(tmp_path, capsys):
+    spec = tmp_path / "spec.json"
+    script = tmp_path / "eval.py"
+    script.write_text(
+        "import json, sys\n"
+        "json.dump({'decision': 'noop', 'reason': 'script'}, sys.stdout)\n",
+        encoding="utf-8",
+    )
+    spec.write_text(
+        json.dumps({"scripts": {"review-loop": [sys.executable, str(script)]}}),
+        encoding="utf-8",
+    )
+    ev_file = tmp_path / "event.json"
+    ev_file.write_text(json.dumps(_completed_event()), encoding="utf-8")
+
+    rc = _cmd_evaluate(
+        _args(
+            [
+                "evaluate",
+                "--spec",
+                str(spec),
+                "--event-file",
+                str(ev_file),
+                "--dry-run",
+                "--evaluator-ref",
+                "review-loop",
+            ]
+        )
+    )
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["decisions"][0]["decision"] == "noop"

@@ -52,6 +52,10 @@ def register_execution_commands(sub) -> None:
         help="feed one task lifecycle event through a declarative evaluator and apply its decisions (emit a follow-up task, or nothing)",
     )
     evp.add_argument("--spec", required=True, metavar="FILE", help="evaluator spec (JSON)")
+    evp.add_argument(
+        "--evaluator-ref",
+        help="opaque selector for a script-based evaluator within the loaded spec",
+    )
     evp.add_argument("--event-file", metavar="FILE", help="lifecycle event JSON (default: read from stdin)")
     evp.add_argument("--repo", help="lane for any emitted follow-up task (a local name or remote URL)")
     evp.add_argument("--dry-run", action="store_true", help="print the decisions without creating any follow-up task")
