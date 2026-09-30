@@ -5,78 +5,85 @@
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-09-29
 - **Status:** Draft
-- **Vision:** agent-dispatch vision's *verify-the-completion-claim*
+- **Vision:** agent-dispatch vision's *verify-the-completion-claim* (this
+  effort's Phase 1 also revises that vision section's own wording -- see
+  Plan)
 - **Umbrella issue:** #4666
 - **Sub-issues:** _TBD, one per Plan phase once filed_
 
 ## Guiding Intent
 
-The 2026-09-25/2026-09-29 `SUBMITTED`/`COMPLETED` rename (see
-`plugins/agent-dispatch/docs/status-rename-migration-2026-09-29.md`)
-established that a worker's own completion claim (`SUBMITTED`) is provisional
-until something corroborates it (`COMPLETED`, via `confirm()`). But today
-**nothing automatically drives that corroboration for most producers** --
-Intelligence Dampener's own `dispatch_review.py` hand-rolls its own
-poll-and-confirm loop, and any other producer's tasks just pile up at
-`SUBMITTED` forever with no evaluator ever looking at them (confirmed live:
-1,414 of 1,623 `SUBMITTED` rows on the `lambda-core` coordinator are
-`pr-review`/`intelligence-dampener-review` tasks up to ~32 days old with zero
-active process left to revisit them). This effort makes verification a
-first-class, opt-in, generic mechanism instead of a bespoke per-producer
-poll loop, and drives a real evaluator for Intelligence Dampener's own
-backlog through it.
+*verify-the-completion-claim* already establishes that a worker's completion
+is "a claim to verify, not a fact to trust on faith," and that for a
+**self-tracked** task (no evaluator) "the caller tracking the task *is* the
+verifier." But today that verifier role has no first-class way to say *I
+require independent corroboration, not just my own self-attestation* at
+task-creation time, and no generic mechanism exists for a consumer to plug in
+its own corroboration logic beyond the existing purely-declarative
+`SpecEvaluator` (which can only match on the task's own labels/status and
+either emit a follow-up or unconditionally confirm -- it cannot consult any
+external state to actually judge whether a goal was met). A consumer that
+needs real external corroboration (e.g. a **reviewer**-recipe loop checking
+whether its target change actually merged, closed unmerged, or went stale)
+has no choice but to hand-roll its own poll-and-confirm loop outside the
+queue entirely. This effort makes verification a first-class, opt-in,
+generic mechanism instead.
 
 ## Participants
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | copilot-extensions (this repo) | `require_verification` flag, state-machine gating, generalized evaluator invocation (script/command evaluator kind + new `Abandon` decision), agent-worktrees Tasks pivot manual override | worktree PRs against `dev` |
-| aperture-labs (Intelligence Dampener) | Registers a real pr-review evaluator (checks live Gitea PR state: merged -> confirm, closed-without-merge -> abandon, open+stale 30d -> abandon), sets `require_verification=true` on every task it creates, retroactive backfill sweep of the existing 1,414-task backlog | linked effort in aperture-labs, tracked separately; see `Coordination` |
+| A downstream consumer's own reviewer-recipe loop | Registers a real evaluator against the new mechanism for its own goal-verification needs (e.g. checking whether a target change merged, closed unmerged, or went stale), and runs any historical-backlog reconciliation it needs | the consumer's own private effort, linked back here (not tracked in this repo) |
 
 ## Coordination
 
-- **Topology:** independent per-repo PRs; this repo's Plan phases land first
-  (the mechanism), aperture-labs' linked effort consumes them once merged +
-  promoted + deployed.
+- **Topology:** independent per-repo PRs; this repo's Plan phases are the
+  reusable mechanism. A consumer's own evaluator registration and any
+  backlog reconciliation is entirely its own concern, tracked in its own
+  (private) effort once this repo's Phase 1-2 land, promote to `main`, and
+  are adopted.
 - **Host (owns this repo's PRs):** copilot-extensions worktree sessions.
-- **Delegates:** aperture-labs' own linked effort owns the ID-side evaluator,
-  the deploy, and the backfill sweep -- it depends on this effort's Phase 1-2
-  landing (and promoting to `main`, then deploying to the live `lambda-core`
-  coordinator) before it can register a real evaluator against a live task.
 - **Handoff:** this effort's Journal records when Phase 1-2 are merged +
-  promoted + deployed; the aperture-labs effort links back here and starts
-  once that's confirmed live.
+  promoted; a consumer's linked private effort starts once it has adopted
+  that release.
 
 ## Context
 
-- Background/timeline: `plugins/agent-dispatch/docs/status-rename-migration-2026-09-29.md`.
+- Background/timeline on the preceding `SUBMITTED`/`COMPLETED` naming:
+  `plugins/agent-dispatch/docs/status-rename-migration-2026-09-29.md`.
 - Current evaluator framework (`producers/evaluator.py`): a purely
   *declarative* `SpecEvaluator` -- rules match on `labels_any`/`labels_all`/
   `status`/`source` and either emit a follow-up task or blindly `Confirm`
   (the rule's own `when` clause is asserted to already BE the corroboration
-  judgment; the framework performs no independent verification). There is
-  **no `Abandon` decision** today, and no way for an evaluator to consult
-  external state (a live Gitea PR) -- exactly what Intelligence Dampener's
-  pr-review verification needs, and exactly why ID hand-rolled its own
-  `dispatch_review.py` poll loop instead of using this framework.
-- Live data snapshot (2026-09-29, `lambda-core` coordinator,
-  `~/.agent-dispatch/tasks.db`): 1,623 `SUBMITTED` rows --
-  1,414 `pr-review`/`intelligence-dampener-review` (orphaned, oldest ~32
-  days, zero active `cleanup`-type task left tracking them in ID's own
-  queue), 176 `["handoff"]` (correctly resting at `SUBMITTED` forever --
-  no corroboratable fact exists for a consumed handoff), ~30 misc
-  (log-writer, neuron-forge, test fixtures -- same story as `handoff`).
-  This confirms the gate must be **opt-in** (`require_verification`), never a
-  blanket sweep -- `handoff`/log-writer/etc. tasks must NOT be pulled into
-  verification; they have no evaluator and none is being added for them.
+  judgment; the framework performs no independent verification of its own).
+  There is **no `Abandon` decision** today, and no way for an evaluator to
+  consult external state (e.g. whether a target change actually merged) --
+  exactly the gap a **reviewer**-recipe consumer (see
+  `visions/plugins/agent-dispatch/README.md`'s recipe archetypes) hits, and
+  why such a consumer would otherwise hand-roll its own poll-and-confirm
+  loop entirely outside the queue.
+- This effort was motivated by a live operational finding on a facility
+  deployment: a large backlog of `SUBMITTED` reviewer-recipe tasks
+  accumulated with no evaluator ever revisiting them, because nothing in
+  agent-dispatch itself drives that corroboration generically -- only a
+  bespoke external poll loop could. The facility-specific counts, host
+  names, and remediation steps for that incident belong to that facility's
+  own private effort (linked from there back to this one), not here; this
+  repo's effort captures only the general-purpose mechanism the incident
+  exposed as missing.
+- This confirms the gate must be **opt-in** (`require_verification`), never
+  a blanket sweep -- a task with no evaluator and no verification
+  requirement must be left entirely alone by any new sweep/interval
+  mechanism this effort adds.
 
 ## Request
 
-Operator request, captured verbatim across the exchange that produced this
-effort (full exchange: `inception-transcript.md`):
+Operator request (captured close to verbatim, generalized to remove
+facility-specific detail per this repo's own public/organization-neutral
+contribution boundary -- see `REVIEW.md`):
 
-> Regarding SUBMITTED vs COMPLETED: we should provide the following
-> behaviors:
+> We should provide the following behaviors:
 >
 > 1. A task, when defined, should have a flag for "require verification". If
 >    specified, agents may not, on their own, mark a task COMPLETED, only
@@ -86,21 +93,29 @@ effort (full exchange: `inception-transcript.md`):
 >    or free-form tasks where the agent may self-report COMPLETED. We may
 >    also offer a future where the evaluator can be another agent, just as we
 >    permit a task itself to be assigned to a script and not an agent.
-
-> [Separately, re: the giant pile of `submitted` PR reviews:] Add an
-> evaluator for ID which verifies that a SUBMITTED pr-review task produced a
-> merged PR, or the PR was abandoned or went stale. As agent-dispatch runs
-> the not-yet-COMPLETED-or-ABANDONED tasks through the evaluator, said
-> evaluator should see the PR's final state, and update the task.
+>
+> 2. [Separately, motivating the above:] a consumer's reviewer-recipe loop
+>    needs an evaluator which verifies that a SUBMITTED task produced a
+>    merged change, or the change was abandoned or went stale. As
+>    agent-dispatch runs its outstanding `SUBMITTED` (not yet
+>    `COMPLETED`/`ABANDONED`) tasks through the evaluator, that evaluator
+>    should see the change's final state and update the task accordingly.
 
 Design decisions locked via follow-up (2026-09-29):
 1. **Flag placement:** create-time field + recipe/producer default
-   inheritance (ID's own producer sets it on every pr-review task it
-   creates; callers don't need to remember the flag per-call).
-2. **Staleness handling:** auto-abandon an open-but-stale PR after **30
-   days**.
-3. **Retroactive backfill:** the new evaluator sweeps the existing
-   1,414-task backlog too, not just new tasks going forward.
+   inheritance (a producer can set it on every task it creates, so a caller
+   doesn't need to remember the flag per-call).
+2. **Staleness handling:** a consumer's own evaluator may auto-abandon an
+   open-but-inactive target after a consumer-chosen threshold (a facility
+   deployment locked 30 days for its own reviewer-recipe evaluator; this
+   repo's mechanism does not hardcode any threshold -- that judgment belongs
+   entirely to the registered evaluator).
+3. **Historical backlog:** a consumer that already has an orphaned backlog
+   of legacy `SUBMITTED` tasks with no `require_verification` flag needs an
+   **explicit, scoped backfill operation** (see Phase 2's "necessary
+   distinction from the recurring interval" below) to opt them in -- the
+   recurring interval mechanism itself must never silently reach into tasks
+   that were never flagged for verification.
 4. **Manual override surface:** the agent-worktrees Worktree Manager's
    **Tasks pivot** (which already provides steering support) is the intended
    home for a human "open this task, look at final state, mark it" action --
@@ -113,22 +128,38 @@ Design decisions locked via follow-up (2026-09-29):
 
 ### Phase 1 -- `require_verification` flag + state-machine gating
 - [ ] Add `require_verification BOOLEAN NOT NULL DEFAULT 0` to `tasks`
-      (schema migration, default preserves today's self-report behavior).
+      (schema migration). **Every existing row defaults to `false`** --
+      this migration alone does *not* opt any historical task into
+      verification; see Phase 2's explicit backfill note.
 - [ ] `create`/`propose` CLI + API accept `--require-verification` /
       `require_verification` kwarg.
-- [ ] `complete()`: when `require_verification` is false (default), the
-      existing `SUBMITTED` landing immediately auto-confirms in the same
-      call (single request reaches `COMPLETED`, preserving legacy
-      self-report semantics exactly as they behave today for producers that
-      never call `confirm()`). When true, `complete()` lands at `SUBMITTED`
-      only -- an explicit `confirm()`/`abandon()` (evaluator or manual) is
-      required to leave that state.
+- [ ] `complete()` behavior, reconciled with *verify-the-completion-claim*'s
+      existing self-tracked-task language rather than contradicting it:
+      today `complete()` always lands a task at `SUBMITTED`
+      (`plugins/agent-dispatch/tests/test_queue.py`) and requires a
+      separate `confirm()` to reach `COMPLETED`, for every task
+      unconditionally. When `require_verification` is **false** (the
+      default), `complete()` performs the assertion *and* the self-attested
+      corroboration in one call -- the caller **is** the verifier, exactly
+      as the vision's self-tracked-task path already describes, just made
+      an explicit, single-call path instead of requiring a second manual
+      `confirm()`. When `require_verification` is **true**, `complete()`
+      lands at `SUBMITTED` only; an explicit `confirm()`/`abandon()`
+      (evaluator or manual) is required to leave that state, and no
+      auto-attestation ever happens.
+- [ ] **Revise `visions/plugins/agent-dispatch/README.md`'s
+      *verify-the-completion-claim* section** to name this explicit
+      `require_verification` flag and its two paths, rather than leaving
+      the self-tracked-task path implicit prose only -- this is a
+      vision-extending change (new stated intent), not a silent
+      reinterpretation.
 - [ ] Recipe/producer-level default inheritance: a producer (e.g. a
       `repository-issue-loop`/`reviewer-loop` recipe declaration) may set a
       default `require_verification` for every task it creates, so a caller
       doesn't need to pass the flag on every dispatch.
 - [ ] Tests: state-machine transition tests for both flag values; schema
-      migration test; CLI flag tests.
+      migration test (confirms the default is `false` and no existing
+      behavior for unflagged tasks changes); CLI flag tests.
 
 ### Phase 2 -- Generalized evaluator invocation
 - [ ] _(agent-recommended, necessary to satisfy the request)_ Add an
@@ -136,21 +167,37 @@ Design decisions locked via follow-up (2026-09-29):
       the existing `Confirm`), and wire it through `apply_decisions`
       (`abandoner` callable, `client.abandon`-shaped).
 - [ ] _(agent-recommended)_ Add a **command/script evaluator kind**
-      alongside the existing declarative `SpecEvaluator`: `evaluator_ref`
-      may name an external command; the coordinator invokes it per
-      `require_verification` task lifecycle event (event JSON on stdin,
-      a `Decision` JSON on stdout), matching the existing "a task itself may
-      be assigned to a script, not an agent" precedent the operator cited.
-      Design the interface so a *future* agent-backed evaluator is a drop-in
-      third kind, without over-building that future today.
-- [ ] The coordinator runs **every** non-terminal `require_verification`
-      task with a registered evaluator through it on a bounded interval
-      (not just at the `task.submitted` transition) -- this is what lets a
-      backlog/retroactive sweep (aperture-labs' Phase, once this lands)
-      re-evaluate old rows without a fresh event ever firing for them again.
+      alongside the existing declarative `SpecEvaluator`, matching the
+      operator's own "a task itself may be assigned to a script, not an
+      agent" precedent -- with an explicit safety boundary: `evaluator_ref`
+      on a task remains an **opaque selector**, never a literal command
+      string accepted from a task-creation caller. A script evaluator is a
+      **separately, trustedly registered** entry (fixed `argv`, executed
+      without a shell, no caller-supplied arguments) that a task's
+      `evaluator_ref` merely *names*; the coordinator resolves the name
+      against that trusted registry, never against caller input. Validate
+      the registration shape and the child process's stdout against a
+      strict schema before applying any decision. Design the interface so a
+      *future* agent-backed evaluator is a drop-in third kind, without
+      over-building that future today.
+- [ ] The coordinator runs every **`SUBMITTED` task that has both
+      `require_verification=true` and a registered `evaluator_ref`**
+      through that evaluator on a bounded interval (not just at the
+      `task.submitted` transition) -- scoped strictly to `SUBMITTED`
+      (`confirm()`/`abandon()` are illegal from `queued`/`claimed`/
+      `started`, so the interval must never touch those). This recurring
+      interval is what lets a **legacy backlog** be reconciled once a
+      consumer explicitly opts specific historical rows in -- but the
+      interval itself never opts anything in; that is always a separate,
+      explicit, scoped action (a one-time `UPDATE`/CLI call flipping
+      `require_verification=true` and setting `evaluator_ref` on the
+      specific rows a consumer wants reconciled -- a consumer's own
+      concern, not something this repo's mechanism performs automatically
+      on any task that was never flagged).
 - [ ] Tests: script-evaluator invocation (stdin/stdout contract, timeout,
-      malformed-output handling), sweep-interval coverage, `Abandon` decision
-      end-to-end.
+      malformed-output handling, no-shell/fixed-argv enforcement), interval
+      scoping (never touches non-`SUBMITTED` or unflagged tasks), `Abandon`
+      decision end-to-end.
 
 ### Phase 3 -- agent-worktrees Tasks pivot manual override
 - [ ] Add a `confirm`/`abandon` action to the existing Tasks pivot (which
@@ -164,25 +211,31 @@ Design decisions locked via follow-up (2026-09-29):
       evaluator kinds, and the manual-override path in the State model
       section (alongside the existing rename footnote).
 - [ ] Cross-link this effort's outcome from
-      `docs/status-rename-migration-2026-09-29.md`.
+      `plugins/agent-dispatch/docs/status-rename-migration-2026-09-29.md`.
 
 ## Validation Plan
 
 - [ ] Full `agent-dispatch` plugin suite green
       (`test-supervisor -- python3 tools/run-plugin-tests.py agent-dispatch`).
 - [ ] A `require_verification=false` task's `complete()` still reaches
-      `COMPLETED` in one call, unchanged from today.
-- [ ] A `require_verification=true` task's `complete()` lands at `SUBMITTED`
-      only, and stays there until an evaluator or manual action resolves it.
-- [ ] A registered script evaluator is invoked for a `require_verification`
-      task and its `Confirm`/`Abandon`/`NoOp` decision is applied correctly.
+      `COMPLETED` in one call, unchanged from today's *external* behavior
+      (internally it now also performs the self-attested corroboration
+      step explicitly, per Phase 1's vision reconciliation).
+- [ ] A `require_verification=true` task's `complete()` lands at
+      `SUBMITTED` only, and stays there until an evaluator or manual action
+      resolves it.
+- [ ] A registered script evaluator is invoked, via its trusted
+      registration (never via caller-supplied `evaluator_ref` content), for
+      a `require_verification` `SUBMITTED` task, and its
+      `Confirm`/`Abandon`/`NoOp` decision is applied correctly.
+- [ ] The recurring interval never touches a `queued`/`claimed`/`started`
+      task, and never touches a task with `require_verification=false` or
+      no registered evaluator -- confirmed by a fixture covering all four
+      cases (fresh-open target left alone; a target that merged ->
+      `COMPLETED`; a target closed unmerged -> `ABANDONED`; an unflagged
+      legacy task untouched).
 - [ ] agent-worktrees Tasks pivot manual override tested against a stuck
       `require_verification` task.
-- [ ] (Downstream, tracked in the linked aperture-labs effort, not this
-      repo's own gate): the ID evaluator correctly resolves a sample of the
-      live 1,414-task backlog (merged -> `COMPLETED`, closed-without-merge
-      -> `ABANDONED`, still-open -> left alone) without touching the
-      176 `handoff` / ~30 misc `SUBMITTED` rows that have no evaluator.
 
 ## Proposal
 
@@ -191,9 +244,28 @@ _Pending review._
 ## Journal
 
 ### 2026-09-29 -- Kickoff
-- Effort created from a live operational finding (the 1,414-task orphaned
-  `SUBMITTED` backlog surfaced while investigating the 2026-09-25/09-29
-  rename) plus the operator's explicit design request for a generic
-  verification gate. Captured verbatim above; demarcated agent-recommended
-  additions (the `Abandon` decision type and the script-evaluator kind,
-  both necessary to satisfy the request but not independently specified).
+- Effort created from a live operational finding (a facility deployment's
+  own orphaned `SUBMITTED` backlog, tracked in that facility's private
+  effort, not here) plus the operator's explicit design request for a
+  generic verification gate. Captured close to verbatim above, generalized
+  to remove facility-specific identifiers/counts per this repo's
+  public/organization-neutral contribution boundary; demarcated
+  agent-recommended additions (the `Abandon` decision type and the
+  script-evaluator kind, both necessary to satisfy the request but not
+  independently specified).
+- Automated review (PR #4667) flagged: private facility identifiers in the
+  original draft (fixed by generalizing per the above), an under-specified
+  command-execution boundary for the script evaluator (fixed: opaque
+  selector + trusted registration, no shell, no caller-supplied argv), a
+  contradiction between "auto-confirm on `require_verification=false`" and
+  the vision's existing self-tracked-task language (fixed: reconciled as an
+  explicit single-call self-attestation path, plus a Plan item to revise
+  the vision's own wording to name it), an unsafe backlog-sweep framing
+  that would have run `confirm()`/`abandon()` against non-`SUBMITTED`
+  states and silently never selected unflagged legacy rows (fixed: the
+  interval is scoped strictly to `SUBMITTED` + flagged + evaluator-bound
+  tasks; opting a historical row in is always a separate, explicit action),
+  a validation gap conflating "still open" with "stale" outcomes (fixed:
+  split into distinct fixture cases), a broken sidecar reference (removed;
+  the verbatim Request above is short enough to keep inline), and a wrong
+  doc path in Phase 4 (fixed).
