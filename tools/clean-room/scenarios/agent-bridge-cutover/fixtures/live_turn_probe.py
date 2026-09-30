@@ -110,9 +110,21 @@ class Result:
         return self.ok
 
 
-def _run(python: str, *args, timeout=120):
+def _run(python: str, *args, timeout=120, json_out=False):
+    """Invoke ``python -m agent_bridge <args>``.
+
+    ``--json`` is a GLOBAL option (``build_parser()``'s top-level parser),
+    not accepted after every subcommand -- some subparsers (``deploy``,
+    ``wait``) additionally define their own local ``--json`` for
+    convenience, but ``sessions`` does not, so passing it as a trailing arg
+    there is silently rejected by argparse (a real bug an earlier revision
+    of this fixture had). Always place it first, before the subcommand,
+    which argparse accepts unconditionally regardless of which subparser
+    also happens to re-declare it locally.
+    """
+    prefix = ["--json"] if json_out else []
     return subprocess.run(
-        [python, "-m", "agent_bridge", *args],
+        [python, "-m", "agent_bridge", *prefix, *args],
         capture_output=True, text=True, timeout=timeout,
     )
 
@@ -179,7 +191,7 @@ def _host_record(python: str, config_dir: str, session_id: str):
 
 
 def _get_session(python: str, session_id: str) -> dict | None:
-    out = _run(python, "sessions", "--json")
+    out = _run(python, "sessions", json_out=True)
     if out.returncode != 0:
         return None
     try:
@@ -306,7 +318,7 @@ def run(python: str, repo: str, project_name: str, turn_timeout: float) -> Resul
 
         # Fire the cutover from OUTSIDE the driven session -- the harness
         # racing the turn, exactly as a real operator update would.
-        deploy = _run(python, "deploy", "--json", "--health-timeout", "60", "--drain-timeout", "5", timeout=180)
+        deploy = _run(python, "deploy", "--health-timeout", "60", "--drain-timeout", "5", timeout=180, json_out=True)
         r.check(deploy.returncode == 0, f"deploy rc==0 (rc={deploy.returncode}; {deploy.stderr.strip()[:200]})")
 
         a2 = _active(cfg_dir)
@@ -339,7 +351,7 @@ def run(python: str, repo: str, project_name: str, turn_timeout: float) -> Resul
 
         # The caller-facing continuity proof: the SAME channel a real caller
         # uses to wait for a reply must settle cleanly across the boundary.
-        waited = _run(python, "wait", session_id, "--attention", "turn_complete", "--json", timeout=turn_timeout)
+        waited = _run(python, "wait", session_id, "--attention", "turn_complete", timeout=turn_timeout, json_out=True)
         r.check(waited.returncode == 0,
                 f"'wait --attention turn_complete' settled cleanly across the cutover (rc={waited.returncode}; {waited.stderr.strip()[:200]})")
 

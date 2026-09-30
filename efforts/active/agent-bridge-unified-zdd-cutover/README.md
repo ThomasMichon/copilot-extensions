@@ -270,7 +270,7 @@ layer — is the operator's own, captured verbatim in Request.)_
   new `agent-bridge-cutover` companion) that exercises this on a real fresh
   machine.
 
-### Phase 6 — Tier-E live-turn-survival harness (implemented; PR open) ✅
+### Phase 6 — Tier-E live-turn-survival harness (implemented; live run pending)
 
 Closes Phase 5's Plan item 1 for real: prove, with a genuinely live
 Copilot/ACP turn in flight, that `agent-bridge deploy` does not disrupt it
@@ -291,7 +291,7 @@ deliberately runs against the box's own real, already-provisioned install
 instead of a throwaway sandbox (see the fixture's own module docstring for
 the full reasoning).
 
-- [x] A real live cutover drill shows a real Copilot turn completes with
+- [ ] A real live cutover drill shows a real Copilot turn completes with
   zero observed disruption while the daemon's generation actually changes
   underneath it (same session id, no dropped/duplicated event, confirmed
   generation change -- not a trivial/no-op cutover). Implemented in
@@ -317,7 +317,7 @@ the full reasoning).
 - [ ] `agent-bridge service restart` (or its replacement) and `agent-bridge
   deploy` are provably the same code path (a shared test, or the removal of
   one verb).
-- [x] A live cutover drill (Phase 5/6) shows zero session disruption across
+- [ ] A live cutover drill (Phase 5/6) shows zero session disruption across
   a real generation change. Implemented as Phase 6's opt-in
   `CR_LIVE_TURN_DRILL=1` drill; **not yet executed for real** this round
   (needs Docker + real Copilot auth + real credits -- see Phase 6's Journal

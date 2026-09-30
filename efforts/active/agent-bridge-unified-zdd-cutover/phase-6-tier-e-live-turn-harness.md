@@ -123,7 +123,7 @@ correct, budget comparable iteration here.
 
 **Acceptance criteria (also tracked in the effort README's Validation
 Plan).**
-- [x] A real live cutover drill shows a real Copilot turn completes with
+- [ ] A real live cutover drill shows a real Copilot turn completes with
   zero observed disruption while the daemon's generation actually changes
   underneath it (same session id, no dropped/duplicated event, confirmed
   generation change -- not a trivial/no-op cutover). Implemented as
