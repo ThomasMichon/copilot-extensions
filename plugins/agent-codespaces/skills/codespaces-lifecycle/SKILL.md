@@ -231,7 +231,10 @@ check it mirrors the running session's transcript to this host (whole lines, onl
 what was appended) and pushes it into the agent-logger hub under
 `.codespaces-live/<name>` (its own namespace: the close-out capture below uses
 `.codespaces/<name>`), so the session's history is still readable here after a host
-or bridge restart (`AGENT_CODESPACES_TRANSCRIPT_MIRROR=0` turns this off). Observe and steer it through agent-bridge
+or bridge restart. A push that fails is retried until it lands, across Owner
+restarts and even after the session ends or the box stops (it never contacts
+the box for that), and `delete` removes a CodeSpace's local mirror once its
+hub copy is current (`AGENT_CODESPACES_TRANSCRIPT_MIRROR=0` turns this off). Observe and steer it through agent-bridge
 (`live-sessions resolve`, `result`, `send`, `ui`). A detached launch keeps the
 CodeSpace claim active; `--stop` settles it like any finished connection and
 deregisters the stopped session from the host bridge at once. When close-out

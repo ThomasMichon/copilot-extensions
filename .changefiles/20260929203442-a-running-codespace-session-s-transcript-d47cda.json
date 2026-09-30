@@ -1,5 +1,5 @@
 {
-  "comment": "A running CodeSpace session's transcript survives a host restart: the Connection Owner mirrors each running session's events.jsonl (whole lines, by byte offset, only while a session provably runs) and pushes it into the agent-logger hub under its own .codespaces-live/<name> label (never over the close-out capture's .codespaces/<name>), and agent-logger's session-fetch finds sessions under both, preferring the complete close-out copy. AGENT_CODESPACES_TRANSCRIPT_MIRROR=0 turns the mirror off.",
+  "comment": "A running CodeSpace session's transcript survives a host restart: while a session provably runs, the Connection Owner mirrors its events.jsonl (whole lines, by byte offset) to the host and pushes it into the agent-logger hub under its own .codespaces-live/<name> label (never over the close-out capture's .codespaces/<name>); a failed push is retried until it lands, across restarts and after the session ends, without contacting the box; deleting a CodeSpace removes its local mirror once the hub copy is current. agent-logger's session-fetch finds sessions under both labels, preferring the close-out copy. AGENT_CODESPACES_TRANSCRIPT_MIRROR=0 turns the mirror off.",
   "changes": [
     {
       "plugin": "agent-codespaces",

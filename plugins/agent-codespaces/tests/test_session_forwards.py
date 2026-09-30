@@ -397,6 +397,42 @@ async def test_owed_transcript_push_skips_when_the_codespace_lock_is_held(store,
     assert (mirror._root / "cs-1.dirty").exists()
 
 
+async def test_a_running_session_keeps_its_full_passes_while_a_push_is_owed(store, tmp_path):
+    """A dirty CodeSpace whose session runs must still be read: owed-only pushes
+    stay out of its way (its full passes push what's owed), even when the hub
+    keeps failing and every tick runs reconcile() then probe()."""
+    root = tmp_path / "mirror"
+    root.mkdir()
+    (root / "cs-1.dirty").touch()
+    ran = []
+
+    class Mirror:
+        _root = root
+
+        def owed_codespaces(self):
+            return ["cs-1"] if (root / "cs-1.dirty").exists() else []
+
+        async def push_owed(self, codespace):
+            ran.append("owed")
+
+        async def __call__(self, codespace):
+            ran.append("full")  # a hub that keeps failing: the marker stays
+
+    clock = [0.0]
+    owner.hold("cs-1", "cli:a", mux_session="wt-a", confirmed=True)
+    forwards = sf.SessionForwards(
+        _daemon_factory({}), _probe({"wt-a": True}, []), transcript_mirror=Mirror(),
+        clock=lambda: clock[0],
+    )
+    for _ in range(40):  # 10 minutes of 15-second ticks
+        holds = owner.list_holds()
+        await forwards.reconcile({h.codespace: h for h in holds})
+        await forwards.probe(holds)
+        await _await_mirror_tasks(forwards)
+        clock[0] += 15.0
+    assert ran.count("full") >= 5 and "owed" not in ran[1:]
+
+
 # -- SessionForwards: a bridge forward that is up but not serving ------------------
 
 def _bridge_probe(answer, calls):
