@@ -76,7 +76,7 @@ jobs:
       github.event.pull_request.draft == false &&
       (github.event.action != 'edited' || github.event.changes.base != null)
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 12
     steps:
       - name: Determine collaborator / Maintainer status
         id: status
@@ -258,10 +258,12 @@ jobs:
 
             // Observed real-world latency between a successful request and
             // Copilot actually appearing as a requested reviewer or a
-            // completed review ranges from seconds to a few minutes.
-            // 18 x 10s = 3 minutes, comfortably inside this job's 5-minute
-            // timeout, without treating normal latency as a false failure.
-            const attempts = 18;
+            // completed review ranges from seconds to several minutes under
+            // heavy review-queue load (confirmed: real reviews landing at
+            // 3-4+ minutes during a high-PR-volume window produced false
+            // failures here at the previous, tighter bound). 60 x 10s = 10
+            // minutes, inside this job's 12-minute timeout.
+            const attempts = 60;
             const delayMs = 10_000;
             for (let attempt = 1; attempt <= attempts; attempt += 1) {
               if (await copilotIsRequested(preexistingReviewIds, headSha)) {
