@@ -1,0 +1,29 @@
+{
+  "comment": "zdd: CutoverOrchestrator takes an optional refuse_old hook, checked inside the serialized cutover before it reaps a stale active entry and before it snapshots the old endpoint (a caller can refuse to cut over from a route it doesn't own). No behavior change for callers that don't pass it.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
