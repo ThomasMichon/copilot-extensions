@@ -10,14 +10,15 @@
 #      only when the deployed version drifts. Reconciles the TOOL, never state.
 #
 # NO OPT-IN GATE (agent-bridge-unified-zdd-cutover Phase 0): background
-# reconcile used to require a checked-in, PER-PLUGIN
-# a per-project opt-in flag in
+# reconcile used to require a checked-in, per-project opt-in flag in
 # <project>/.copilot-extensions/config.yaml, because a raw reconcile could
 # race a live daemon/session. Now that every reconcile-capable plugin's
 # update path is always-ZDD (safe to run unattended), that justification is
 # gone; the gate was removed rather than kept as a redundant consent
 # checkbox. Frequency/trigger stays deliberately bounded -- still only once
-# per session start, only on a real version drift.
+# per session start, only on a real version drift. What DOES still bound
+# concurrency is the single-flight + stale-reap guard below (a lock file,
+# not the removed opt-in) -- see its own comment.
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PluginDir="$(cd "$ScriptDir/.." && pwd)"
 session_start_json_emitted=0
@@ -88,6 +89,30 @@ elif [ -f "$PluginDir/scripts/install.sh" ]; then
 else
   exit 0
 fi
+
+# --- Good boot-citizen guard: single-flight + stale-reap ---
+# This hook fires on EVERY new session now that the opt-in gate is gone
+# (agent-bridge-unified-zdd-cutover Phase 0 review finding): without this,
+# a slow or wedged reconcile gets re-spawned every session, stacking
+# orphaned background installers. If a prior reconcile is still running:
+#   YOUNG (<10m) -> already in flight; do nothing (never stack).
+#   STALE (>=10m) -> wedged; reap it, then relaunch (self-heals a one-off
+#                    wedge instead of poisoning every future session).
+lockFile="$InstallDir/reconcile.lock"
+staleSeconds=600
+if [ -f "$lockFile" ]; then
+  lockPid="$(tr -d '[:space:]' < "$lockFile" 2>/dev/null)"
+  if [ -n "$lockPid" ] && kill -0 "$lockPid" 2>/dev/null; then
+    lockMtime="$(stat -c %Y "$lockFile" 2>/dev/null || stat -f %m "$lockFile" 2>/dev/null || echo 0)"
+    nowSecs="$(date -u +%s)"
+    if [ "$lockMtime" -gt 0 ] && [ $((nowSecs - lockMtime)) -lt "$staleSeconds" ]; then
+      exit 0
+    fi
+    kill "$lockPid" 2>/dev/null || true
+  fi
+fi
+
 echo "[$name] runtime $deployed -> $current; reconciling in background..." >&2
 nohup bash "${target[@]}" >/dev/null 2>&1 &
+echo $! > "$lockFile" 2>/dev/null || true
 exit 0

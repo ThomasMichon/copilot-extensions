@@ -149,6 +149,44 @@ def test_sh_reconciles_without_any_opt_in_config(tmp_path):
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not available")
+def test_sh_reconcile_status_records_completion_not_just_launch(tmp_path):
+    """Phase 0 review finding: the status file must be overwritten with
+    completion info (completed_at/exit_code/success) once the installer
+    actually finishes -- reporting only the launch timestamp would make a
+    failed or wedged reconcile look falsely healthy."""
+    home = tmp_path / "home"
+    home.mkdir()
+    project = tmp_path / "project"
+    project.mkdir()
+    plugin_dir = _make_fake_plugin(tmp_path)
+    _make_fake_install(home)
+
+    env = _clean_env({"HOME": str(home), "COPILOT_PROJECT_DIR": str(project)})
+
+    subprocess.run(
+        [_BASH, str(plugin_dir / "scripts" / "bootstrap-check.sh")],
+        cwd=str(project),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    status_file = home / ".agent-bridge" / "reconcile-status.json"
+    status = None
+    for _ in range(100):
+        if status_file.exists():
+            status = json.loads(status_file.read_text(encoding="utf-8"))
+            if "completed_at" in status:
+                break
+        time.sleep(0.1)
+    assert status is not None, "reconcile-status.json was never written"
+    assert "completed_at" in status, "completion was never recorded: " + json.dumps(status)
+    assert status.get("success") is True, status
+    assert status.get("exit_code") == 0, status
+    assert status.get("from") == "1.0.0" and status.get("to") == "1.0.1", status
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash not available")
 def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path):
     """A leftover `background_reconcile_agent-bridge: false` from before this
     gate's removal must not resurrect the old skip behavior -- the key is

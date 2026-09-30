@@ -49,6 +49,12 @@ def _print_reconcile_status() -> None:
     worth surfacing is *staleness*: how long since the last recorded
     reconcile attempt, so an operator never has to reconstruct that from a
     raw log file.
+
+    The status file is written twice per attempt (see bootstrap-check.sh/
+    .ps1): once immediately on launch (``at`` only), then overwritten with
+    ``completed_at``/``exit_code``/``success`` once the reconcile actually
+    finishes. Reporting must distinguish these -- a launch timestamp alone
+    would make a failed or still-wedged reconcile look falsely healthy.
     """
     core = _core()
     print("  Background reconcile: enabled (always-on; no per-project opt-in required)")
@@ -63,11 +69,20 @@ def _print_reconcile_status() -> None:
     frm = st.get("from", "?")
     to = st.get("to", "?")
     log = st.get("log", os.path.join(core._INSTALL_DIR, "reconcile.log"))
-    age_str = _format_reconcile_age(at)
-    if age_str:
-        print(f"  Last auto-reconcile: {age_str} ({at})  {frm} -> {to}")
+    completed_at = st.get("completed_at")
+    success = st.get("success")
+    if completed_at is None:
+        # The launch record hasn't been overwritten with completion info yet
+        # -- either still running, or the hook/session exited before the
+        # background process could report back.
+        age_str = _format_reconcile_age(at)
+        started = f"{age_str} ({at})" if age_str else at
+        print(f"  Last auto-reconcile: started {started}, still in progress or unreported  {frm} -> {to}")
     else:
-        print(f"  Last auto-reconcile: {at}  {frm} -> {to}")
+        age_str = _format_reconcile_age(completed_at)
+        finished = f"{age_str} ({completed_at})" if age_str else completed_at
+        outcome = "succeeded" if success else "FAILED"
+        print(f"  Last auto-reconcile: {outcome} {finished}  {frm} -> {to}")
     print(f"    log: {log}")
 
 

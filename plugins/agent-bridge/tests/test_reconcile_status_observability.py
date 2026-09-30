@@ -43,7 +43,10 @@ def test_print_reconcile_status_always_enabled(tmp_path, monkeypatch, capsys):
     assert "none recorded yet" in out
 
 
-def test_print_reconcile_status_reports_staleness(tmp_path, monkeypatch, capsys):
+def test_print_reconcile_status_reports_in_progress_when_no_completion(tmp_path, monkeypatch, capsys):
+    """No `completed_at` yet -- either still running or the session ended
+    before the background process could report back. Must not be reported
+    as a clean success."""
     core = spc._core()
     monkeypatch.setattr(core, "_INSTALL_DIR", str(tmp_path))
     status_path = tmp_path / "reconcile-status.json"
@@ -62,8 +65,59 @@ def test_print_reconcile_status_reports_staleness(tmp_path, monkeypatch, capsys)
     spc._print_reconcile_status()
     out = capsys.readouterr().out
     assert "Background reconcile: enabled" in out
+    assert "still in progress or unreported" in out
+    assert "1.0.0 -> 1.0.1" in out
+
+
+def test_print_reconcile_status_reports_successful_completion(tmp_path, monkeypatch, capsys):
+    core = spc._core()
+    monkeypatch.setattr(core, "_INSTALL_DIR", str(tmp_path))
+    status_path = tmp_path / "reconcile-status.json"
+    status_path.write_text(
+        json.dumps(
+            {
+                "at": "2020-01-01T00:00:00Z",
+                "from": "1.0.0",
+                "to": "1.0.1",
+                "launched_pid": 123,
+                "log": str(tmp_path / "reconcile.log"),
+                "completed_at": "2020-01-01T00:00:05Z",
+                "exit_code": 0,
+                "success": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    spc._print_reconcile_status()
+    out = capsys.readouterr().out
+    assert "Background reconcile: enabled" in out
+    assert "succeeded" in out
     assert "days ago" in out
     assert "1.0.0 -> 1.0.1" in out
+
+
+def test_print_reconcile_status_reports_failed_completion(tmp_path, monkeypatch, capsys):
+    core = spc._core()
+    monkeypatch.setattr(core, "_INSTALL_DIR", str(tmp_path))
+    status_path = tmp_path / "reconcile-status.json"
+    status_path.write_text(
+        json.dumps(
+            {
+                "at": "2020-01-01T00:00:00Z",
+                "from": "1.0.0",
+                "to": "1.0.1",
+                "launched_pid": 123,
+                "log": str(tmp_path / "reconcile.log"),
+                "completed_at": "2020-01-01T00:00:05Z",
+                "exit_code": 1,
+                "success": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    spc._print_reconcile_status()
+    out = capsys.readouterr().out
+    assert "FAILED" in out
 
 
 if __name__ == "__main__":

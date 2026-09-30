@@ -182,11 +182,45 @@ try {
     # self-redirects all streams to reconcile.log via `*>`. The command is
     # base64-encoded to avoid arg-quoting under conhost; children (uv/python
     # building the venv) inherit the headless console and stay hidden too.
-    $reCmd = "& { $reInner } *> `"$reconcileLog`""
+    $now = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+    # Observability (#167 + agent-bridge-unified-zdd-cutover Phase 0 review):
+    # the initial status write below (right after Start-Process) records the
+    # ATTEMPT so the single-flight/staleness check above always sees it; this
+    # tail, appended to the SAME headless pwsh that runs the reconcile itself,
+    # overwrites that same file with completion info once it actually exits --
+    # otherwise "Last auto-reconcile" would report a launch timestamp even for
+    # a reconcile that failed or is still wedged, making staleness look
+    # falsely healthy. Re-reads launched_pid back from the status file rather
+    # than re-deriving it, since only the PARENT knows conhost's PID (this
+    # child can't reference $proc.Id -- it hasn't been created yet at the
+    # point this string is built).
+    $compTail = @'
+$__rc = if ($?) { 0 } else { 1 }
+$__completedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+$__prevPid = 0
+try {
+    $__prevJson = Get-Content '__STATUSFILE__' -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+    if ($__prevJson) { [void][int]::TryParse("" + $__prevJson.launched_pid, [ref]$__prevPid) }
+} catch { }
+$__status = [ordered]@{
+    at           = '__NOW__'
+    from         = '__DEPLOYED__'
+    to           = '__CURRENT__'
+    launched_pid = $__prevPid
+    log          = '__RECONCILELOG__'
+    completed_at = $__completedAt
+    exit_code    = $__rc
+    success      = ($__rc -eq 0)
+} | ConvertTo-Json -Compress
+$__utf8 = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText('__STATUSFILE__', $__status, $__utf8)
+'@
+    $compTail = $compTail.Replace('__STATUSFILE__', $statusFile).Replace('__NOW__', $now).`
+        Replace('__DEPLOYED__', $deployed).Replace('__CURRENT__', $current).Replace('__RECONCILELOG__', $reconcileLog)
+    $reCmd = "& { $reInner } *> `"$reconcileLog`"`n$compTail"
     $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($reCmd))
     $proc = Start-Process -FilePath 'conhost.exe' -PassThru -WindowStyle Hidden `
         -ArgumentList @('--headless', "`"$exe`"", '-NoProfile', '-ExecutionPolicy', 'Bypass', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', $enc)
-    $now = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
     $launchedPid = if ($proc) { $proc.Id } else { 0 }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     $status = [ordered]@{
