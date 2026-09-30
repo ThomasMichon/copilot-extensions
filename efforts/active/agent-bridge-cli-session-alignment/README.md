@@ -176,14 +176,18 @@ items plus one open design question, each naming what it preserves and
 whether it's a pure addition/bugfix or a behavior change needing
 compatibility handling:
 
-1. **Add an `"ssh"` entry to `agent-bridge`'s `_CLI_MODE_VENUE_BINSTUBS`
-   and document it in `--cli`'s help text**, so `agent-bridge create --cli`
-   can route to an `agent-ssh`-reachable machine the same way it already
-   routes to `codespace:<name>`/`container:<name>` — `agent-ssh` itself
-   already implements the full CLI-mode launch shape
-   (`agent-ssh/copilot_detach.py`), only the central dispatcher doesn't
-   know about it yet. *Pure addition* — no existing routing changes,
-   this only adds a missing case.
+1. **Give `agent-ssh` a symmetric, anchor-mode `copilot <name>` verb** (no
+   required `--workspace`/mode flags, matching `agent-codespaces copilot
+   <name>` / `agent-containers copilot <name>`), **then add `"ssh"` to
+   `agent-bridge`'s `_CLI_MODE_VENUE_BINSTUBS`** and document it in
+   `--cli`'s help text. This is larger than a routing-table entry: today's
+   only `agent-ssh copilot` entry point requires `--workspace` and a
+   mandatory `--detach`/`--stop` mode, a different contract from the other
+   two venues', so the central dispatcher's existing anchor-mode call
+   shape can't reach it as-is. *Mostly addition* (a new verb alongside the
+   existing detached one, plus one new routing-table entry) — needs a
+   short design pass on how `agent-ssh` resolves an implicit
+   workspace/anchor for the symmetric verb, not just wiring.
 
 2. **Align the CLI extension's WSL port-fallback with the Python client's
    already-retired special case** (`extension.mjs:resolveBaseUrl` still
@@ -242,6 +246,18 @@ note — none proposes silently removing functionality the reviewed PRs
 added.
 
 ## Journal
+
+### 2026-09-30 — Fourth correction round, after the effort's own review (PR #4696)
+- A fourth Copilot review pass caught that the prior round's SSH-routing
+  fix was itself underspecified: `agent-ssh`'s only `copilot` entry point
+  requires `--workspace` and a mandatory `--detach`/`--stop` mode
+  (`copilot_detach.py:425, 437-439`) — a materially different contract
+  from `agent-codespaces`/`agent-containers`' simpler anchor-mode
+  `copilot <name>` verb. Adding an `"ssh"` map entry alone would make both
+  the default and `--detach` central-dispatch calls fail against today's
+  `agent-ssh` CLI. Revised the finding and Proposal item #1 to call for a
+  symmetric anchor-mode verb in `agent-ssh` first, with the routing-table
+  entry as a follow-on, not a substitute.
 
 ### 2026-09-30 — Third correction round, after the effort's own review (PR #4696)
 - A third Copilot review pass caught the most substantive gap of all three
