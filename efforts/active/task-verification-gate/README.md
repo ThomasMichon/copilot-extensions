@@ -99,15 +99,19 @@ as a placeholder: #4691.
   `visions/plugins/agent-dispatch/README.md`'s recipe archetypes) hits, and
   why such a consumer would otherwise hand-roll its own poll-and-confirm
   loop entirely outside the queue.
-- Existing, directly relevant machinery this effort reuses rather than
-  reinventing: `agent-dispatch run` (hibernate-the-wait -- a detached,
-  cheap OS-level waiter that tears down the expensive agent session and
-  wakes it only when the wait resolves, delivering the buffered result as
-  the resume prompt) and `agent-dispatch doctor` (already audits whether a
-  hibernating task's wait is genuinely still pending vs. the waiter having
-  died with no way to self-resume). Phase 2b generalizes `doctor`'s existing
-  liveness-only audit to also cover an agent-dispatch-side outage
-  specifically for outstanding `run` calls.
+- Existing, directly relevant machinery this effort builds on: `agent-dispatch
+  run` (hibernate-the-wait -- a detached, cheap OS-level waiter that tears
+  down the expensive agent session and wakes it only when the wait
+  resolves, delivering the buffered result as the resume prompt). **Note,
+  corrected after review:** `agent-dispatch doctor` today classifies
+  hibernation from worktree/session evidence only (`doctor.py`) -- it does
+  not probe the detached waiter process itself, and `execution_cli.py`
+  returns the waiter's PID/argv only to the spawning caller, not to any
+  durable coordinator-side record. `doctor` cannot today distinguish "waiter
+  still legitimately running" from "waiter died, PID reused by something
+  else" for a `run` call specifically. Phase 2b must add its own durable
+  waiter registration (not assume `doctor` already provides one) -- see
+  Phase 2b below.
 - This effort was motivated by a live operational finding on a facility
   deployment: a large backlog of `SUBMITTED` reviewer-recipe tasks
   accumulated with no evaluator ever revisiting them, because nothing in
@@ -260,32 +264,57 @@ briefly executed against and then paused -- see Journal):
       applying any decision. Design the interface so a *future*
       agent-backed evaluator is a drop-in third kind, without over-building
       that future today.
-- [ ] The coordinator runs every **`SUBMITTED` task that has both
-      `require_verification=true` and a registered `evaluator_ref`**
-      through that evaluator (event-triggered at the `task.submitted`
-      lifecycle event is sufficient -- this is a one-shot whole-goal check,
-      not a recurring audit, so no interval/backoff design is needed here
-      beyond simple retry-on-transient-evaluator-failure). Scoped strictly
-      to `SUBMITTED` -- `confirm()`/`abandon()` are illegal from
-      `queued`/`claimed`/`started`. This is also the mechanism a **legacy
-      backlog** reconciles through, once a consumer explicitly opts specific
-      historical rows in (a one-time `UPDATE`/CLI call flipping
-      `require_verification=true` and setting `evaluator_ref` on the
-      specific rows a consumer wants reconciled -- a consumer's own
-      concern, not something this repo's mechanism performs automatically
-      on any task that was never flagged).
+- [ ] The evaluator has **three trigger paths**, corrected after review (a
+      bare `task.submitted` event alone cannot cover backfill or a
+      re-check when external state later changes):
+      1. **Event-triggered** at the `task.submitted` lifecycle event -- the
+         normal first-check path for a fresh submission.
+      2. **Explicit backfill invocation** -- a one-time, scoped CLI/API
+         call that directly re-runs the evaluator against specific,
+         named historical rows a consumer opts in (never an automatic
+         sweep of every `SUBMITTED` row -- see the legacy-backlog note
+         below).
+      3. **Re-triggered by a Phase 2c event note** -- when a subscribed
+         emitter posts an event note against a task that is *already*
+         `SUBMITTED` with `require_verification=true` and a registered
+         `evaluator_ref` (the "still-in-flight, `NoOp`'d once already"
+         case: nothing else would ever re-check it when the external state
+         later resolves), the note also re-invokes the evaluator, not just
+         wakes a running/hibernating agent.
+      In all three cases: scoped strictly to `SUBMITTED` --
+      `confirm()`/`abandon()` are illegal from `queued`/`claimed`/`started`.
+      This is **not** a recurring interval/polling audit -- each of the
+      three paths is triggered by a specific, real event (a submission, an
+      explicit opt-in call, or an external-state event note), never a
+      periodic sweep of every flagged row.
 - [ ] Tests: script-evaluator invocation (stdin/stdout contract, timeout,
       malformed-output handling, no-shell/fixed-argv enforcement), scoping
       (never touches non-`SUBMITTED` or unflagged tasks), `Abandon`/
-      `Complete` decisions end-to-end.
+      `Complete` decisions end-to-end, and each of the three trigger paths
+      independently (including: a `NoOp`'d still-in-flight task later gets
+      re-evaluated and resolved correctly via a Phase 2c event note, not
+      left permanently unchecked).
 
 ### Phase 2b -- `run`-outage recovery sweep
+- [ ] **Durable waiter registration is a prerequisite this phase must add**
+      (corrected after review -- `doctor` does not already provide this):
+      when a `run --detach` waiter spawns, persist its PID, host identity,
+      and a process-start/identity fence (matching the same
+      PID-reuse-safe pattern `doctor --check-live-sessions` already uses
+      for shadowed embody sessions) in a durable coordinator-side record,
+      not just returned to the spawning caller as `execution_cli.py` does
+      today.
 - [ ] On coordinator startup (or a bounded post-recovery check), sweep
-      tasks with an outstanding `run` call whose detached waiter process is
-      confirmed dead due to the coordinator itself having been down
-      (distinguish from "genuinely still running" -- reuse `doctor`'s
-      existing liveness-check approach rather than inventing a second one).
-- [ ] Wake each affected task's owner with an explicit
+      tasks with a durably-registered outstanding `run` waiter and probe
+      each one host-aware, by PID *and* the recorded start-identity fence
+      (never bare PID alone, which risks a false "dead" on PID reuse).
+      Classify: confirmed-dead (the recorded identity no longer matches any
+      live process) -> eligible for recovery below; genuinely still running
+      -> left alone; indeterminate/unknown (can't confirm either way, e.g.
+      a cross-host waiter this coordinator can't probe) -> **left alone,
+      never treated as dead** (same fail-safe posture `doctor`'s existing
+      verdicts already use).
+- [ ] Wake each **confirmed-dead** task's owner with an explicit
       "infrastructure failure, try again" result -- the same delivery shape
       `run` already uses for a normal wake (buffered stdio + exit code),
       just carrying a synthetic failure payload instead of a real one.
@@ -309,14 +338,27 @@ briefly executed against and then paused -- see Journal):
 - [ ] Posting an event note wakes the task's current agent: if actively
       running, deliver the note as part of its next turn's context; if
       hibernating via `run`, resume it early (before the wrapped wait
-      command naturally resolves) with the note delivered as the resume
-      context, alongside (or instead of, if the wait is superseded) the
-      wait's own eventual result.
+      command naturally resolves). **Race, identified on review, that must
+      be closed:** the original detached waiter keeps running after an
+      early resume and can later finish on its own, sending a *second*,
+      stale wake -- which could also release the hibernation claim out from
+      under the task's now-newly-resumed attempt. Require a durable
+      generation/supersession fence (bump a generation counter or
+      equivalent stamped identity at early-resume time, same fencing
+      pattern the state machine already uses for `owner_session_id`/
+      `generation` elsewhere) so a late wake from the *superseded* waiter is
+      detected and dropped rather than acted on -- an identity-safe
+      cancellation of the old waiter (if one exists) is a valid alternative
+      but the fence must exist either way; an early resume must never leave
+      it ambiguous which attempt owns completion.
 - [ ] Tests: an event note posted while the task is actively running
       surfaces on the next turn; a note posted while hibernating via `run`
       triggers an early wake with the note in the resume context; a
       goal-rewrite attempt through this path is rejected (only an
-      append-only note field is writable here, never the goal).
+      append-only note field is writable here, never the goal); **the
+      stale-waiter race above** -- a late wake from a superseded (early-
+      resumed-past) waiter is confirmed dropped, never double-processed and
+      never able to mutate or release the newer attempt's claim.
 
 ### Phase 3 -- agent-worktrees Tasks pivot manual override
 - [ ] Add a `complete`/`abandon` action to the existing Tasks pivot (which
@@ -353,12 +395,20 @@ briefly executed against and then paused -- see Journal):
       never touches a task with `require_verification=false` or no
       registered evaluator -- confirmed by a fixture covering: a target
       that merged -> `COMPLETED`; a target closed unmerged -> `ABANDONED`;
-      a still-in-flight target -> left alone; an unflagged legacy task ->
-      untouched.
+      a still-in-flight target -> left alone (`NoOp`) on first check, then
+      correctly resolved on a later Phase 2c event-note re-trigger once it
+      merges; an unflagged legacy task -> untouched; an explicit backfill
+      invocation resolves a named historical row without touching any
+      other unflagged row.
 - [ ] A simulated coordinator outage with an outstanding `run` call
-      resolves to an explicit failure wake, not a silent stall.
+      resolves to an explicit failure wake for a confirmed-dead waiter
+      (matched by durable PID + host + start-identity, never bare PID);
+      a genuinely-still-running or indeterminate waiter is left alone, not
+      falsely recovered.
 - [ ] A subscribed emitter's event note wakes a running or `run`-hibernating
-      task's agent early, without ever mutating the task's own goal field.
+      task's agent early, without ever mutating the task's own goal field;
+      a late wake from the original (superseded) waiter after an early
+      resume is confirmed dropped, never double-processed.
 - [ ] agent-worktrees Tasks pivot manual override tested against a stuck
       `require_verification` task.
 
@@ -447,3 +497,34 @@ _Pending review._
   text never rewritten; only an append-only event-note field, and only from
   a genuinely subscribed emitter) is preserved -- this does not reopen the
   rejected "emitter rewrites the goal each round" design.
+
+### 2026-09-30 (effort-revision PR #4692 review) -- four real gaps closed
+Automated review on the effort-revision PR itself (before any code landed)
+caught four genuine design gaps in the settled plan above, all fixed in
+place:
+- **Phase 2a's single `task.submitted` trigger couldn't cover the cases the
+  Validation Plan promised** -- a backfilled legacy row and a `NoOp`'d
+  still-in-flight task have no later event to re-check them. Fixed: the
+  evaluator now has three explicit trigger paths (submission event,
+  explicit scoped backfill invocation, and a Phase 2c event note
+  re-triggering re-evaluation on an already-`SUBMITTED` row) -- still never
+  a periodic/polling sweep.
+- **Phase 2b overstated what `doctor` already provides** -- it classifies
+  hibernation from worktree/session evidence only and does not durably
+  track a `run` waiter's PID; `execution_cli.py` only returns that PID to
+  the spawning caller. Fixed: Phase 2b now explicitly adds durable waiter
+  registration (PID + host + a process-start identity fence) as its own
+  prerequisite, with a fail-safe "indeterminate -> leave alone" verdict
+  matching `doctor`'s own existing posture, rather than assuming a
+  liveness-check mechanism doctor doesn't yet have.
+- **Phase 2c's early-resume path had an unresolved race**: the original
+  detached waiter keeps running after an early resume and can send a
+  second, stale wake later, potentially releasing the newer attempt's
+  claim. Fixed: requires a durable generation/supersession fence (or
+  equivalent identity-safe cancellation) so a late wake from a superseded
+  waiter is dropped, never double-processed.
+- **`inception-transcript.md`'s opening claimed a full verbatim
+  transcript** while several rounds were explicitly narrated/gisted.
+  Fixed: reworded to accurately describe the operator's own messages as
+  verbatim and this agent's responses as curated gists, not a raw session
+  log.

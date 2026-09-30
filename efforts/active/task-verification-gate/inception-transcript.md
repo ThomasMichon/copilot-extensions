@@ -1,9 +1,11 @@
 # Inception transcript: task-verification-gate's producer/evaluator redesign
 
-This sidecar captures the full design-hardening exchange that shaped this
-effort's Plan beyond its original request. It's long and is kept verbatim
-(the operator explicitly asked for it to be preserved) rather than folded
-into the README's own Request section, which stays a navigable summary.
+This sidecar preserves the operator's own design-hardening messages
+verbatim -- the durable value here is the operator's reasoning, which the
+README's own Request section otherwise summarizes away. This agent's own
+responses are recorded as brief gists, not full verbatim transcript, except
+where a specific finalized decision is quoted directly; this file is a
+curated design record, not a raw session log.
 
 Facility-specific identifiers (host names, live counts) are generalized here
 exactly as they are in the README itself -- this file is public.
