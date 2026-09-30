@@ -121,6 +121,7 @@ class QueueLifecycleMixin:
                 raise TaskError(f"cannot expect {expected_status!r} when completing a task")
             allowed = {expected_status}
         ts = self._now(now)
+        wake_enqueued = False
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             task = self._fetch(conn, task_id)
@@ -209,6 +210,15 @@ class QueueLifecycleMixin:
             ):
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} ownership incarnation changed")
+            retire_waiters = getattr(self, "_retire_waiters_for_transition", None)
+            if callable(retire_waiters):
+                wake_enqueued = retire_waiters(
+                    conn,
+                    task,
+                    to_status=Status.SUBMITTED if task.require_verification else Status.COMPLETED,
+                    worker=worker_id,
+                    ts=ts,
+                ) or wake_enqueued
 
             conn.execute(
                 "UPDATE tasks SET status = ?, updated_at = ?, activity = NULL,"
@@ -264,6 +274,8 @@ class QueueLifecycleMixin:
             conn.execute("COMMIT")
         if event_type == "task.submitted" and task.evaluator_ref:
             self._notify_verification()
+        if wake_enqueued:
+            self._notify_wake()
         return CompletionOutcome(completed, event_type)
 
     @staticmethod
@@ -855,6 +867,15 @@ class QueueLifecycleMixin:
             if expected_updated_at is not None and task.updated_at != expected_updated_at:
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} changed while the transition was in flight")
+            retire_waiters = getattr(self, "_retire_waiters_for_transition", None)
+            if callable(retire_waiters):
+                wake_enqueued = retire_waiters(
+                    conn,
+                    task,
+                    to_status=to,
+                    worker=worker_id,
+                    ts=ts,
+                ) or wake_enqueued
             if (
                 reembody_headless_on_wake
                 and task.owner_session_id is None

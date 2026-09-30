@@ -326,7 +326,11 @@ def test_build_command_evaluator_inline_spec():
 
 
 def test_build_command_evaluator_path_ref():
-    reg = _reg("e", kind="evaluator", spec={"evaluator": "eval.json", "repo": TEST_REPO})
+    reg = _reg(
+        "e",
+        kind="evaluator",
+        spec={"evaluator": "eval.json", "repo": TEST_REPO, "evaluator_ref": "review-loop"},
+    )
     with pytest.raises(UnsupportedKind, match="coordinator-owned"):
         build_command(reg, python="PY")
 
@@ -1050,7 +1054,11 @@ def test_reconcile_keeps_evaluator_desired_but_never_launches_it():
     client = FakeClient(
         [
             _reg("lane"),
-            _reg("eval", kind="evaluator", spec={"repo": TEST_REPO, "evaluator": "eval.json"}),
+            _reg(
+                "eval",
+                kind="evaluator",
+                spec={"repo": TEST_REPO, "evaluator": "eval.json", "evaluator_ref": "review-loop"},
+            ),
         ]
     )
     launcher = FakeLauncher()
@@ -1076,7 +1084,7 @@ def test_reconcile_keeps_declared_evaluator_desired_but_never_launches_it(monkey
             _reg(
                 "declared-eval",
                 kind="evaluator",
-                spec={"repo": TEST_REPO, "evaluator": "eval.json"},
+                spec={"repo": TEST_REPO, "evaluator": "eval.json", "evaluator_ref": "review-loop"},
             )
         ],
     )

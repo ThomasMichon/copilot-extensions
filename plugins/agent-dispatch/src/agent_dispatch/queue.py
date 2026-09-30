@@ -80,6 +80,7 @@ from .queue_handoff_fallback import HandoffFallbackMixin
 from .queue_lifecycle import QueueLifecycleMixin
 from .queue_liveness import LivenessMixin
 from .queue_notifications import QueueNotificationMixin
+from .queue_run_waiter_transition_cleanup import QueueRunWaiterTransitionCleanupMixin
 from .queue_run_waiters import QueueRunWaitersMixin
 from .queue_producer_fences import (  # noqa: F401 -- re-exported for existing call sites/tests
     ProducerFenceError,
@@ -141,6 +142,7 @@ class TaskQueue(
     QueueCompletionReviewMixin,
     LivenessMixin,
     HandoffFallbackMixin,
+    QueueRunWaiterTransitionCleanupMixin,
     QueueRunWaitersMixin,
     QueueSteeringMixin,
     QueueNotificationMixin,

@@ -7,6 +7,7 @@ import logging
 from collections.abc import Callable
 
 from .queue import TaskError, TaskQueue
+from .queue_run_waiter_transition_cleanup import CLAIM_RELEASE_SENDER
 
 DeliverWake = Callable[[str, str, str, str, str, str | None], bool]
 ReleaseClaim = Callable[[str, str | None, str, str | None], object | None]
@@ -77,15 +78,18 @@ async def drain_run_waiter_wakes(
             await asyncio.sleep(interval if has_pending else max(interval, 5.0))
             continue
         try:
-            delivered = await asyncio.to_thread(
-                deliver,
-                wake.owner,
-                wake.task_id,
-                wake.message,
-                wake.id,
-                wake.sender,
-                wake.owner_session_id,
-            )
+            if wake.sender == CLAIM_RELEASE_SENDER:
+                delivered = True
+            else:
+                delivered = await asyncio.to_thread(
+                    deliver,
+                    wake.owner,
+                    wake.task_id,
+                    wake.message,
+                    wake.id,
+                    wake.sender,
+                    wake.owner_session_id,
+                )
             delivery_error = None if delivered else "bridge delivery unavailable"
         except Exception as exc:
             log.warning("run-waiter wake delivery raised for %s", wake.id, exc_info=True)

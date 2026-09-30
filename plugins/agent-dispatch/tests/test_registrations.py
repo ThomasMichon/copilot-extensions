@@ -68,10 +68,12 @@ def test_validate_accepts_each_kind():
          "interval_seconds": 3600},
     )
     validate_registration(
-        RegistrationKind.EVALUATOR, {"evaluator_spec": {}, "all_repos": True}
+        RegistrationKind.EVALUATOR,
+        {"evaluator_spec": {}, "all_repos": True, "evaluator_ref": "review-loop"},
     )
     validate_registration(
-        RegistrationKind.EVALUATOR, {"evaluator": "eval.json", "repo": TEST_REPO}
+        RegistrationKind.EVALUATOR,
+        {"evaluator": "eval.json", "repo": TEST_REPO, "evaluator_ref": "review-loop"},
     )
     validate_registration(
         RegistrationKind.PLUGIN_COMPANION,
@@ -121,6 +123,7 @@ def test_validate_accepts_each_kind():
         (RegistrationKind.EVALUATOR, {"evaluator": "e.json"}, "needs a 'repo'"),
         (RegistrationKind.EVALUATOR, {"evaluator_spec": "not-a-dict", "all_repos": True},
          "must be a JSON object"),
+        (RegistrationKind.EVALUATOR, {"evaluator_spec": {}, "all_repos": True}, "evaluator_ref"),
         (
             RegistrationKind.PLUGIN_COMPANION,
             {"stop_command": ["bin/stop"], "health_probe": ["bin/health"]},

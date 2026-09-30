@@ -9,6 +9,7 @@ from typing import Any
 
 from .queue_common import PROGRESS_SUMMARY_MAX, RunWaiterWakeOperation, Task, _clip
 from .queue_records import Status, TaskError
+from .queue_run_waiter_transition_cleanup import CLAIM_RELEASE_SENDER
 
 
 class QueueRunWaitersMixin:
@@ -765,23 +766,6 @@ class QueueRunWaitersMixin:
             conn.execute("COMMIT")
         return RunWaiterWakeOperation._from_row(result)
 
-    def run_waiter_wake_current(self, wake_id: str, delivery_token: str) -> bool:
-        with self._connect() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute("SELECT * FROM run_waiter_wakes WHERE id = ?", (wake_id,)).fetchone()
-            if row is None:
-                conn.execute("COMMIT")
-                return False
-            wake = RunWaiterWakeOperation._from_row(row)
-            task = self._fetch(conn, wake.task_id)
-            ok = (
-                wake.status == "delivering"
-                and wake.delivery_token == delivery_token
-                and self._run_waiter_wake_is_current(conn, task, wake)
-            )
-            conn.execute("COMMIT")
-        return bool(ok)
-
     def append_event_note(
         self,
         task_id: str,
@@ -899,11 +883,18 @@ class QueueRunWaitersMixin:
         wake: RunWaiterWakeOperation,
     ) -> bool:
         if not (
-            task is not None
-            and task.status == Status.SUSPENDED
-            and task.owner == wake.owner
-            and task.generation == wake.task_generation
-            and task.owner_session_id == wake.owner_session_id
+            (
+                wake.sender == CLAIM_RELEASE_SENDER
+                and task is not None
+                and task.generation == wake.task_generation
+            )
+            or (
+                task is not None
+                and task.status == Status.SUSPENDED
+                and task.owner == wake.owner
+                and task.generation == wake.task_generation
+                and task.owner_session_id == wake.owner_session_id
+            )
         ):
             return False
         row = conn.execute("SELECT MAX(generation) AS generation FROM run_waiters WHERE task_id = ?", (wake.task_id,)).fetchone()

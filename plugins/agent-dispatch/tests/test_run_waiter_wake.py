@@ -197,3 +197,48 @@ def test_run_waiter_wake_skips_claim_release_after_newer_waiter_prepares(q):
     asyncio.run(scenario())
     assert releases == []
     assert prepared and prepared[0]["generation"] == 2
+
+
+def test_task_leaving_suspended_state_retires_waiter_and_releases_claim(q):
+    task_id, owner = _suspended(q)
+    waiter = q.register_run_waiter(
+        task_id,
+        pid=101,
+        host=TEST_HOST,
+        start_token="token-101",
+        resume_worktree="m/wt-1",
+        command=["sleep", "1"],
+        now=1000.0,
+    )
+    q.complete(task_id, owner, result_ref="done")
+    wakes = q.list_run_waiter_wakes(task_id)
+    assert len(wakes) == 1
+    assert wakes[0].sender == "agent-dispatch-run-waiter-claim-release"
+
+    releases = []
+
+    async def scenario():
+        loop = asyncio.create_task(
+            drain_run_waiter_wakes(
+                q,
+                interval=0.01,
+                deliver=lambda *_args: (_ for _ in ()).throw(AssertionError("claim-release wake must not resume owner")),
+                release_claim=lambda claim_key, host, worktree, repo: releases.append((claim_key, host, worktree, repo)) or {"released": True},
+                retry_base=0.01,
+            )
+        )
+        try:
+            for _ in range(200):
+                if q.list_run_waiter_wakes(task_id)[0].status == "delivered":
+                    break
+                await asyncio.sleep(0.01)
+            else:
+                raise AssertionError("claim-release wake did not drain")
+        finally:
+            loop.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await loop
+
+    asyncio.run(scenario())
+    assert waiter["generation"] == 1
+    assert releases == [(f"{task_id}:1", TEST_HOST, "wt-1", "example.com/acme/widget")]
