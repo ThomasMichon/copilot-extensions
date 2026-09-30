@@ -154,13 +154,20 @@ def registration_credentials_script(token: str, port: int) -> str:
     ``"forwarded": true`` (so that CLI never starts a daemon over it, and a
     daemon that did start retires).
     """
+    active = json.dumps(
+        {"active": {"bind": "127.0.0.1", "port": int(port), "forwarded": True}},
+        separators=(",", ": "),
+    )
     return (
-        "mkdir -p ~/.agent-bridge && "
-        f"printf 'token: %s\\n' {shlex.quote(token)} "
-        "> ~/.agent-bridge/auth.yaml && "  # marketplace-isolation: allow agent-bridge-management
-        "printf '{\"active\": {\"bind\": \"127.0.0.1\", "
-        f"\"port\": {int(port)}, \"forwarded\": true}}}}' "
-        "> ~/.agent-bridge/active.json"  # marketplace-isolation: allow agent-bridge-management
+        "set -e; d=\"$HOME/.agent-bridge\"; mkdir -p \"$d\"; "
+        "umask 077; "
+        f"auth_tmp=$(mktemp \"$d/auth.yaml.XXXXXX\"); printf 'token: %s\\n' {shlex.quote(token)} > \"$auth_tmp\"; "
+        f"active_tmp=$(mktemp \"$d/active.json.XXXXXX\"); printf %s {shlex.quote(active)} > \"$active_tmp\"; "
+        "commit_forward_route() { mv \"$auth_tmp\" \"$d/auth.yaml\" && mv \"$active_tmp\" \"$d/active.json\"; }; "
+        "if command -v flock >/dev/null 2>&1; then "
+        "touch \"$d/active.lock\"; flock \"$d/active.lock\" sh -c 'mv \"$1\" \"$2\" && mv \"$3\" \"$4\"' sh "
+        "\"$auth_tmp\" \"$d/auth.yaml\" \"$active_tmp\" \"$d/active.json\"; "
+        "else commit_forward_route; fi"  # marketplace-isolation: allow agent-bridge-management
     )
 
 

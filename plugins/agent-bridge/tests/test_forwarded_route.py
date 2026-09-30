@@ -12,6 +12,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -258,6 +259,36 @@ def test_deploy_rechecks_forward_inside_cutover(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "refused:" in out
     assert "no local daemon to deploy" in out
+
+
+def test_direct_start_skips_instead_of_publishing_over_a_forward(tmp_path, monkeypatch, capsys):
+    _route(tmp_path, monkeypatch, FORWARD)
+
+    from agent_bridge import config as bridge_config
+    from agent_bridge import service_start_cli
+    from agent_bridge import winjob
+
+    cfg = SimpleNamespace(
+        port=0,
+        bind="127.0.0.1",
+        enable_credential_relay=True,
+        idle_shutdown_seconds=0,
+    )
+    monkeypatch.setattr(bridge_config, "config_dir", lambda: tmp_path)
+    monkeypatch.setattr(bridge_config, "load_config", lambda: cfg)
+    monkeypatch.setattr(bridge_config, "migrate_config", lambda loaded: loaded)
+    monkeypatch.setattr(bridge_config, "write_default_config", lambda _cfg: None)
+    monkeypatch.setattr(bridge_config, "load_or_create_auth_token", lambda: "tok")
+    monkeypatch.setattr(winjob, "setup_kill_on_close_job", lambda: None)
+    monkeypatch.setattr(
+        service_start_cli,
+        "_bind_listen_socket",
+        lambda *_a, **_k: pytest.fail("must not bind a local daemon socket"),
+    )
+
+    args = SimpleNamespace(port=None, bind=None, idle_shutdown=None, passive=False)
+    service_start_cli._cmd_start(args)
+    assert "not publishing or starting a local daemon" in capsys.readouterr().out
 
 
 _INSTALL_SH = Path(__file__).resolve().parents[1] / "scripts" / "install.sh"

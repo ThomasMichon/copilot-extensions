@@ -25,7 +25,8 @@ from single_instance_lease import is_superseded as _lib_is_superseded
 from zdd import routing
 
 __all__ = [
-    "_is_listening", "initial_self_retire_status", "is_superseded",
+    "_is_listening", "initial_self_retire_status", "is_replaced_by_forward",
+    "is_superseded",
     "slot_descriptor",
 ]
 
@@ -52,6 +53,16 @@ def is_superseded(
     return _lib_is_superseded(
         table, my_pid, my_generation, is_listening=is_listening
     )
+
+
+def is_replaced_by_forward(
+    config_dir,
+    *,
+    read_table=routing.read_table,
+    is_listening=_is_listening,
+) -> bool:
+    """Has a live explicit forwarded host bridge replaced this daemon's route?"""
+    return _replaced_by_forward(read_table(config_dir), is_listening)
 
 
 def _replaced_by_forward(table, is_listening) -> bool:

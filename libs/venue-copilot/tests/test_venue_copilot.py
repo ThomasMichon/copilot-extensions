@@ -763,3 +763,6 @@ def test_registration_credentials_write_a_complete_forwarded_route(tmp_path):
     # it fell back to its default port and started a local daemon over it).
     assert route == {"active": {"bind": "127.0.0.1", "port": 62254, "forwarded": True}}
     assert (tmp_path / ".agent-bridge" / "auth.yaml").read_text() == "token: tok-1\n"
+    assert not list((tmp_path / ".agent-bridge").glob("*.XXXXXX"))
+    if subprocess.run([_bash(), "-c", "command -v flock >/dev/null 2>&1"]).returncode == 0:
+        assert (tmp_path / ".agent-bridge" / "active.lock").exists()

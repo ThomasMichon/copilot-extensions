@@ -349,11 +349,29 @@ class CutoverOrchestrator:
             # Flip the route: new active, old demoted to previous. From here a
             # new CLI resolution lands on the new daemon; long-lived sockets stay
             # on the old one until their turn completes (migrate at a breakpoint).
-            self.routing.publish_active(
-                self.config_dir, bind=self.bind, port=new_port,
-                pid=getattr(handle, "pid", None), version=self.version,
-                demote_existing=True,
-            )
+            try:
+                self.routing.publish_active_with_previous_guarded(
+                    self.config_dir, bind=self.bind, port=new_port,
+                    pid=getattr(handle, "pid", None), version=self.version,
+                    demote_existing=True, expected_active=old,
+                    refuse_current=self.refuse_old,
+                )
+            except self.routing.ActivePublicationRefused as exc:
+                result.error = str(exc)
+                result.steps.append(f"refused: {exc}")
+                try:
+                    handle.terminate()
+                    result.steps.append("refusal: terminated new daemon")
+                except Exception as term_exc:  # noqa: BLE001
+                    result.steps.append(
+                        f"refusal: new daemon termination failed: {term_exc}"
+                    )
+                    log.error(
+                        "Cutover refusal could not terminate passive daemon: %s",
+                        term_exc,
+                    )
+                breadcrumb.clear_breadcrumb(self.config_dir)
+                return result
             flipped = True
             result.steps.append("routing table flipped -> new active")
             breadcrumb.write_breadcrumb(
