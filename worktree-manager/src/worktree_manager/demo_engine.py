@@ -1,4 +1,4 @@
-"""A fake ``agent-worktrees`` engine that emits the Aperture Labs demo fixture.
+"""A fake ``agent-worktrees`` engine that emits the Example Labs demo fixture.
 
 Run as ``python -m worktree_manager.demo_engine <args>``. It accepts the same
 argument surface the Manager sends the real engine (``[--project P] list --json

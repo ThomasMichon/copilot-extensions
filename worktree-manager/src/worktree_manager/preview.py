@@ -8,7 +8,7 @@ mock branch:
 1. **Worktree data** -- ``engine_client.set_engine_command`` (the same
    mechanism ``picker_app``'s older demo mode used) is pointed at
    ``demo_engine``, the existing fake-engine subprocess that emits the
-   Aperture Labs fixture (``demo.py``) in the real ``list --json`` contract
+   Example Labs fixture (``demo.py``) in the real ``list --json`` contract
    shape. Every consumer that shells out through ``engine_client`` --
    including ``production_picker``'s own ``data_local``/``data_ssh`` --
    transparently receives mock rows instead of running the real engine.

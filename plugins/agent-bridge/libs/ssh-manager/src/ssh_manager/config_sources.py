@@ -105,7 +105,7 @@ class SSHProfileSource:
     """ConfigSource that reads from the local SSH config.
 
     For static machines defined in ~/.ssh/config. The host_alias is
-    the SSH config Host entry (e.g., "borealis", "lambda-core-wsl").
+    the SSH config Host entry (e.g., "borealis", "atlas-core-wsl").
     All connection details (hostname, user, port, key, proxy) are
     resolved by OpenSSH from the config file.
     """

@@ -6,7 +6,7 @@ timeout on one address family before ever trying the next. When a host's
 route for one family is black-holed -- a dropped SYN, not a refused
 connection -- that means every single request eats the whole timeout before
 falling back, if it falls back within the timeout at all. Confirmed live
-(aperture-labs#7553): a stale WSL2-mirrored IPv6 lease left ``eth0``'s global
+(private-downstream-repo#7553): a stale WSL2-mirrored IPv6 lease left ``eth0``'s global
 addresses "deprecated preferred_lft 0sec" but still present, so DNS kept
 returning an unreachable AAAA record and every ``agent-mcp`` HTTP-bridge call
 hung for the full ~30s ``cfg.timeout`` before failing, stalling three

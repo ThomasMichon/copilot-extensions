@@ -183,8 +183,8 @@ def _sanitize_head_ref(name: str) -> str:
 def _resolve_username(cwd: str | None) -> str:
     """Resolve the ``{username}`` token from the repo's git identity.
 
-    Prefers the local-part of ``user.email`` (e.g. ``cjohnson@...`` ->
-    ``cjohnson``), then ``user.name``, slugified; falls back to ``user``.
+    Prefers the local-part of ``user.email`` (e.g. ``contributor_user@...`` ->
+    ``contributor_user``), then ``user.name``, slugified; falls back to ``user``.
     """
     if not cwd:
         return "user"

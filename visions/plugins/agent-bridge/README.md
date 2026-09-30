@@ -753,7 +753,7 @@ machine may deliberately gate outbound reach until policy allows it.
   worktree/session listing surface excludes an agent-worktrees-archived
   worktree by default, mirroring agent-worktrees' own new
   *registered-by-default-listing* (see that plugin's vision, same date).
-  Mined from the same operator directive during `aperture-labs`
+  Mined from the same operator directive during `private-downstream-repo`
   `session-worktree-archive-linkout` Phase 2b: agent-bridge should not
   invent its own archival reconstruction for a worktree agent-worktrees has
   already tombstoned — it should simply respect that tombstone's default

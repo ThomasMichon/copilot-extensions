@@ -75,7 +75,7 @@ def test_setup_refuses_worktree_checkout_path(tmp_path, monkeypatch):
     declaration = (
         tmp_path
         / "dotfiles.worktrees"
-        / "tmichon-cloud1-win-20260910-171507-5474"
+        / "owner_user-cloud1-win-20260910-171507-5474"
         / ".agent-dispatch"
         / "registrar"
         / "issues.json"

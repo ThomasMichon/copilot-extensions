@@ -19,7 +19,7 @@ contributors who do not have the private denylist configured on their machine.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | effort host | Owns the reviewed plan PR and follow-on implementation slices | isolated worktree |
-| aperture-labs agent | Assembles the facility-context denylist (`FORBIDDEN_IDS_FACILITY`) -- not secret from within aperture-labs, only from the public repo -- and pushes it to the repository secret via `gh secret set` | aperture-labs facility session |
+| private-downstream-repo agent | Assembles the facility-context denylist (`FORBIDDEN_IDS_FACILITY`) -- not secret from within private-downstream-repo, only from the public repo -- and pushes it to the repository secret via `gh secret set` | private-downstream-repo facility session |
 | operator's work-context harness agent | Assembles the separate work-context denylist (`FORBIDDEN_IDS_WORK`) from a list the operator keeps on their work OneDrive, and pushes it to the repository secret via `gh secret set` | cross-repo/cross-harness collaboration (private-context harness; not named here) |
 | repository operator | Confirmed (2026-09-27) the denylists are not secret *from* either agent -- only from the public repo -- so both are agent-assembled/pushed rather than operator-typed; keeps the source lists in personal OneDrive locations (facility list does not need Vault, no credential material) | — |
 
@@ -158,9 +158,9 @@ _(Revised 2026-09-27: the operator will not personally type these secrets --
 see the Journal entry below. Both are agent-assembled/pushed instead of
 "operator only.")_
 
-- [x] An **aperture-labs agent** assembles the `FORBIDDEN_IDS_FACILITY` list
+- [x] A **private-downstream-repo agent** assembles the `FORBIDDEN_IDS_FACILITY` list
   (facility-context identifiers -- machine names, internal hosts, personal
-  names, etc.; not secret from within aperture-labs, only from the public
+  names, etc.; not secret from within private-downstream-repo, only from the public
   repo) and pushes it to the `ThomasMichon/copilot-extensions` repository
   secret via `gh secret set`.
 - [ ] Collaborate with the operator's **private-context work harness agent** to
@@ -292,7 +292,7 @@ _Pending._
   not personally type these secrets. Both are **agent-assembled and
   agent-pushed** instead, because the content is not secret from within either
   source context -- only from the public repo:
-  - `FORBIDDEN_IDS_FACILITY` -- an aperture-labs agent assembles this list and
+  - `FORBIDDEN_IDS_FACILITY` -- an private-downstream-repo agent assembles this list and
     pushes it via `gh secret set`. Storage doesn't need Vault (no credential
     material, just names/identifiers), and can live in the operator's
     personal OneDrive.

@@ -1,7 +1,7 @@
 """Tests for the demo (fake engine) + the Textual Picker (Phase 6b slice 2).
 
 The Picker reaches data only across the process boundary, so these drive the
-bundled fake engine (Aperture Labs) end-to-end -- subprocess spawn, JSON parse,
+bundled fake engine (Example Labs) end-to-end -- subprocess spawn, JSON parse,
 dataclass mapping, and a headless render/screenshot -- with no live engine.
 """
 
@@ -70,7 +70,7 @@ def test_demo_source_parses_across_the_boundary():
     assert all(isinstance(w, Worktree) for w in worktrees)
     assert len(worktrees) == len(demo.aperture_worktrees())
     titles = " ".join(w.title or "" for w in worktrees)
-    assert "lemons" in titles and "GLaDOS" in titles
+    assert "lemons" in titles and "Iris" in titles
 
 
 def test_rows_to_text_renders_state_and_sync():
@@ -660,12 +660,12 @@ def test_run_launch_honors_no_mux(monkeypatch):
 def test_demo_engine_resolve_emits_plan():
     rc, out = _run_demo_engine(
         ["--project", demo.DEMO_PROJECT, "resolve", "--json",
-         "--worktree-id", "aperture-labs-testchamber-18c4"])
+         "--worktree-id", "private-downstream-repo-testchamber-18c4"])
     assert rc == 0
     plan = json.loads(out)
     assert plan["action"] == "exec"
-    assert plan["worktree_id"] == "aperture-labs-testchamber-18c4"
-    assert "Aperture" in " ".join(plan["cmd"])
+    assert plan["worktree_id"] == "private-downstream-repo-testchamber-18c4"
+    assert "Example Labs" in " ".join(plan["cmd"])
 
 
 def test_demo_engine_resolve_new():

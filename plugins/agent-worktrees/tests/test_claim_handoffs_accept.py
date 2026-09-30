@@ -101,7 +101,7 @@ def _setup_bundle(
         claims.append(
             tracking.ResourceClaim(
                 kind="ssh",
-                ref="lambda-core",
+                ref="atlas-core",
                 created_at="2026-08-25T12:03:00",
                 state="active",
                 note="unsupported",
@@ -325,7 +325,7 @@ def test_accepted_bundle_rejects_decline_and_cancel(handoff_world):
 def test_accept_cross_machine_runs_remote_source_leg_then_finishes_locally(
     handoff_world, monkeypatch
 ):
-    remote_machine = "wheatley"
+    remote_machine = "ember"
     world = _setup_bundle(
         handoff_world,
         source_machine=remote_machine,
@@ -340,7 +340,7 @@ def test_accept_cross_machine_runs_remote_source_leg_then_finishes_locally(
     monkeypatch.setattr(
         claim_handoff_accept_support.claimant,
         "resolve_machine_ssh",
-        lambda key: ("wheatley-wsl", "bash") if key == remote_machine else None,
+        lambda key: ("ember-wsl", "bash") if key == remote_machine else None,
     )
     real_run = subprocess.run
 
@@ -369,7 +369,7 @@ def test_accept_cross_machine_runs_remote_source_leg_then_finishes_locally(
     assert seen["argv"][:4] == [
         "ssh", "-o", "BatchMode=yes", "-o",
     ]
-    assert "wheatley-wsl" in seen["argv"]
+    assert "ember-wsl" in seen["argv"]
     assert "accept-source" in seen["argv"][-1]
     assert " --actor " in seen["argv"][-1]
     assert claim_handoffs.show(bundle.bundle_id).state == "accepted"
@@ -385,13 +385,13 @@ def test_accept_cross_machine_runs_remote_source_leg_then_finishes_locally(
 def test_accept_cross_machine_remote_failure_leaves_state_unchanged_and_no_live_fence(
     handoff_world, monkeypatch
 ):
-    world = _setup_bundle(handoff_world, source_machine="wheatley")
+    world = _setup_bundle(handoff_world, source_machine="ember")
     store = _init_lease_store(handoff_world["tmp_path"], monkeypatch)
     bundle = _offer_cross_machine(world, [claim.ref for claim in world["claims"]])
     monkeypatch.setattr(
         claim_handoff_accept_support.claimant,
         "resolve_machine_ssh",
-        lambda key: ("wheatley-wsl", "bash"),
+        lambda key: ("ember-wsl", "bash"),
     )
     real_run = subprocess.run
     monkeypatch.setattr(
@@ -423,7 +423,7 @@ def test_accept_cross_machine_remote_failure_leaves_state_unchanged_and_no_live_
 
 
 def test_accept_cross_machine_rejects_live_fence_conflict(handoff_world, monkeypatch):
-    world = _setup_bundle(handoff_world, source_machine="wheatley")
+    world = _setup_bundle(handoff_world, source_machine="ember")
     store = _init_lease_store(handoff_world["tmp_path"], monkeypatch)
     bundle = _offer_cross_machine(world, [world["claims"][0].ref])
     store.acquire("claim-handoff", bundle.bundle_id, "other/project/wt-other")
@@ -449,7 +449,7 @@ def test_accept_cross_machine_rejects_live_fence_conflict(handoff_world, monkeyp
 
 
 def test_accept_source_is_atomic_and_idempotent(handoff_world):
-    world = _setup_bundle(handoff_world, source_machine="wheatley")
+    world = _setup_bundle(handoff_world, source_machine="ember")
     bundle = _offer_cross_machine(world, [claim.ref for claim in world["claims"]])
 
     first = claim_handoffs.accept_source(bundle.bundle_id, actor=world["consumer"])
@@ -464,9 +464,9 @@ def test_accept_source_is_atomic_and_idempotent(handoff_world):
 def test_cli_accept_source_returns_json_without_logging_main_accept(
     handoff_world, monkeypatch, capfd
 ):
-    world = _setup_bundle(handoff_world, source_machine="wheatley")
+    world = _setup_bundle(handoff_world, source_machine="ember")
     bundle = _offer_cross_machine(world, [world["claims"][1].ref])
-    config = types.SimpleNamespace(machine="wheatley", repo_name="source-project")
+    config = types.SimpleNamespace(machine="ember", repo_name="source-project")
     monkeypatch.setattr(m.cfg, "load_config", lambda: config)
     monkeypatch.setattr(m, "_infer_worktree_id", lambda explicit, config: "wt-source")
 

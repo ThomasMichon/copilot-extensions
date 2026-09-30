@@ -129,7 +129,7 @@ def test_satellite_attempts_work_intake_when_shared_url_configured(
     monkeypatch.setattr(config, "shared_url", lambda: "https://gw.example/dispatch")
     monkeypatch.setattr(config, "shared_token", lambda: "tok")
     monkeypatch.setattr(config, "satellite_max_concurrent", lambda: 3)
-    monkeypatch.setattr(config, "satellite_project", lambda: "aperture-labs")
+    monkeypatch.setattr(config, "satellite_project", lambda: "private-downstream-repo")
 
     built_clients = []
     monkeypatch.setattr(
@@ -154,7 +154,7 @@ def test_satellite_attempts_work_intake_when_shared_url_configured(
     assert built_clients == [("https://gw.example/dispatch", {"token": "tok"})]
     assert len(tick_calls) == 1
     assert tick_calls[0]["machine"] == "book2"
-    assert tick_calls[0]["project"] == "aperture-labs"
+    assert tick_calls[0]["project"] == "private-downstream-repo"
     assert tick_calls[0]["max_concurrent"] == 3
 
     # Reuses the same work-intake instance on the next tick rather than

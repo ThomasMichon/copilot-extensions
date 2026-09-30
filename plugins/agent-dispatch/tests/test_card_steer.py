@@ -355,10 +355,10 @@ def test_set_card_request_input_blocked_regardless_of_registration_machine(q):
         "supervised-lane",
         {"all_repos": True, "labels": ["intelligence-dampener-review"],
          "steering_disallowed_labels": ["intelligence-dampener-review"]},
-        machine="wheatley",
+        machine="ember",
     )
     pinned = _held_with_label(
-        q, label="intelligence-dampener-review", target_machine="lambda-core"
+        q, label="intelligence-dampener-review", target_machine="atlas-core"
     )
     unpinned = _held_with_label(
         q, label="intelligence-dampener-review", worker="w2", target_machine=None

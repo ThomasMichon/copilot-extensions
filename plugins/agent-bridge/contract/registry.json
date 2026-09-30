@@ -77,9 +77,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
-          "sha256": "79e82a170d622cfee1ea52d1aee4c43da39dd7581433fb7a802d616d4c47e099",
-          "semantic": true,
-          "non_semantic_reason": null
+          "sha256": "df5f2392d27d20be304fc978c86a16a6f6f7fd8d47062e2f95f4770d921c9727",
+          "semantic": false,
+          "non_semantic_reason": "Comment-only placeholder cleanup; the health response wire shape is unchanged."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/sessions.py",
@@ -221,7 +221,7 @@
           "generation": 15,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
           "source_git_blob": "597419228aa8d66fc18d954aa8e889c303ecec86",
-          "capture_method": "Re-attested after process-slot-ownership Phase 5 added the \"slot\" descriptor (aperture-labs); invoke the health route with a controlled empty runtime state, zeroed carrier diagnostics, and an empty routing table."
+          "capture_method": "Re-attested after process-slot-ownership Phase 5 added the \"slot\" descriptor (private-downstream-repo); invoke the health route with a controlled empty runtime state, zeroed carrier diagnostics, and an empty routing table."
         },
         {
           "commit": "3019a6aa86295f44e452fb5634dafec084ec1669",

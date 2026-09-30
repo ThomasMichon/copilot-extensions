@@ -186,8 +186,8 @@ def test_resolves_owner_session_from_live_registration_registry(app, client):
     db = app.state.db
     db.register_live_session(
         "11111111-1111-1111-1111-111111111111",
-        machine="lambda-core", cwd="/wt", worktree_id="wt-embody",
-        repo="aperture-labs", branch="main", pid=123, role=None,
+        machine="atlas-core", cwd="/wt", worktree_id="wt-embody",
+        repo="private-downstream-repo", branch="main", pid=123, role=None,
         now=1000.0,
     )
     _register_dispatch(
@@ -210,8 +210,8 @@ def test_falls_back_to_worktree_latest_live_registration(app, client):
     db = app.state.db
     db.register_live_session(
         "22222222-2222-2222-2222-222222222222",
-        machine="lambda-core", cwd="/wt", worktree_id="wt-embody-2",
-        repo="aperture-labs", branch="main", pid=456, role=None,
+        machine="atlas-core", cwd="/wt", worktree_id="wt-embody-2",
+        repo="private-downstream-repo", branch="main", pid=456, role=None,
         now=time.time(),
     )
     _register_dispatch(

@@ -6,8 +6,8 @@
 > `uniform-runtime-resolution` (which interpreter gets resolved), and
 > `windows-background-process-launch` (how a spawn stays invisible).
 > **Origin:** the Windows-only extension-host `ready-timeout` investigation
-> (aperture-labs#7326) and the follow-on hygiene effort
-> (`efforts/active/cold-spawn-hygiene/`, aperture-labs#7382).
+> (private-downstream-repo#7326) and the follow-on hygiene effort
+> (`efforts/active/cold-spawn-hygiene/`, private-downstream-repo#7382).
 
 ## The problem
 
@@ -114,7 +114,7 @@ IPC call.**
   Python" — the language choice is a rounding error next to the warm-vs-cold
   difference (~30-140x). Chase warmth first; language second.
 - ❌ Treating this pattern as a fix for the Windows extension-host
-  `ready-timeout` race itself (aperture-labs#7326) — that race is inside the
+  `ready-timeout` race itself (private-downstream-repo#7326) — that race is inside the
   CLI host's own process, outside plugin code. This pattern reduces the
   facility's own contribution to concurrent process-creation load at the
   same moment, which is a plausible (unconfirmed) mitigation, not a direct

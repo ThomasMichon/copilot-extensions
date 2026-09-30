@@ -571,7 +571,7 @@ def test_cmd_send_resolves_worktree_handle_and_delivers(monkeypatch, capsys):
     # `send <worktree-handle>` resolves to the live session and delivers there.
     client = _LiveFakeClient(resolved={"session_id": "live-sess-1"})
     monkeypatch.setattr(m, "_get_client", lambda: client)
-    monkeypatch.setattr(m, "_live_sender_label", lambda args: "cjohnson@peer")
+    monkeypatch.setattr(m, "_live_sender_label", lambda args: "contributor_user@peer")
     monkeypatch.setattr(m, "_live_reply_to", lambda args: "wt-caller")
     args = argparse.Namespace(
         target="wt-target", prompt="please rebase", new=False, json=False,
@@ -579,7 +579,7 @@ def test_cmd_send_resolves_worktree_handle_and_delivers(monkeypatch, capsys):
     )
     m._cmd_send(args)
     assert client.delivered == [
-        {"session_id": "live-sess-1", "sender": "cjohnson@peer",
+        {"session_id": "live-sess-1", "sender": "contributor_user@peer",
          "body": "please rebase", "reply_to": "wt-caller",
          "kind": "prompt", "wait": False, "delivery": "queue"}
     ]
@@ -917,13 +917,13 @@ def _wsess(sid, *, worktree_id, agent="log-writer-loop-worker",
 def test_resolve_target_resolves_worktree_handle_with_different_session_id(
     fixed_caller,
 ):
-    # The handle ("lambda-core-wsl-...-8510") is neither the session id nor a
+    # The handle ("atlas-core-wsl-...-8510") is neither the session id nor a
     # registered agent name -- only `list_sessions()` filtered by
     # `worktree_id` reveals the real, idle session behind it.
     client = FakeClient(sessions=[
-        _wsess("real-sid-1", worktree_id="lambda-core-wsl-20260928-141002-8510"),
+        _wsess("real-sid-1", worktree_id="atlas-core-wsl-20260928-141002-8510"),
     ])
-    sid = m._resolve_target(client, "lambda-core-wsl-20260928-141002-8510")
+    sid = m._resolve_target(client, "atlas-core-wsl-20260928-141002-8510")
     assert sid == "real-sid-1"
     assert client.started == []  # never treated as an agent name to spawn
 

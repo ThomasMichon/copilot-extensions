@@ -50,13 +50,13 @@ def test_resolve_copilot_account_explicit_override(home: Path):
     _write_registry(
         home,
         "repos:\n"
-        "  aperture-labs:\n"
+        "  private-downstream-repo:\n"
         "    class: worktree\n"
         "    copilot_account: ThomasMichon\n",
     )
-    entry = repos.find_repo("aperture-labs")
+    entry = repos.find_repo("private-downstream-repo")
     assert repos.resolve_copilot_account(entry) == "ThomasMichon"
-    assert repos.copilot_account_for("aperture-labs") == "ThomasMichon"
+    assert repos.copilot_account_for("private-downstream-repo") == "ThomasMichon"
 
 
 def test_copilot_account_for_falls_back_to_machine_default(home: Path, monkeypatch):
@@ -71,10 +71,10 @@ def test_copilot_account_for_falls_back_to_machine_default(home: Path, monkeypat
         cfg, "load_config",
         lambda *a, **k: cfg.Config(
             srcroot=str(home), machine="test", platform="windows",
-            default_copilot_account="tmichon_microsoft",
+            default_copilot_account="owner_user_microsoft",
         ),
     )
-    assert repos.copilot_account_for("odsp-web-harness") == "tmichon_microsoft"
+    assert repos.copilot_account_for("odsp-web-harness") == "owner_user_microsoft"
 
 
 def test_copilot_account_for_none_when_nothing_set(home: Path, monkeypatch):
@@ -106,8 +106,8 @@ def test_set_and_unset_copilot_account(home: Path):
 # ---------------------------------------------------------------------------
 
 def test_current_login_reads_last_logged_in_user(home: Path):
-    _write_copilot_config(home, "tmichon_microsoft")
-    assert copilot_identity.current_login() == "tmichon_microsoft"
+    _write_copilot_config(home, "owner_user_microsoft")
+    assert copilot_identity.current_login() == "owner_user_microsoft"
 
 
 def test_current_login_none_when_missing(home: Path):
@@ -119,13 +119,13 @@ def test_current_login_none_when_missing(home: Path):
 # ---------------------------------------------------------------------------
 
 def test_ensure_login_already_correct_skips_subprocess(home: Path, monkeypatch):
-    _write_copilot_config(home, "tmichon_microsoft")
+    _write_copilot_config(home, "owner_user_microsoft")
 
     def _boom(*_a, **_k):
         raise AssertionError("must not shell out when already correct")
 
     monkeypatch.setattr(copilot_identity.subprocess, "run", _boom)
-    result = copilot_identity.ensure_login("tmichon_microsoft")
+    result = copilot_identity.ensure_login("owner_user_microsoft")
     assert result.status == "already-correct"
     assert result.ok
 
@@ -155,15 +155,15 @@ def test_ensure_login_switches_via_gh_token(home: Path, monkeypatch):
             return _Proc(0, stdout="fake-token-value\n")
         if cmd[:2] == ["copilot", "login"]:
             assert kwargs.get("input") == "fake-token-value"
-            return _Proc(0, stdout="Signed in successfully as tmichon_microsoft.\n")
+            return _Proc(0, stdout="Signed in successfully as owner_user_microsoft.\n")
         raise AssertionError(f"unexpected command: {cmd}")
 
     monkeypatch.setattr(copilot_identity.subprocess, "run", _run)
-    result = copilot_identity.ensure_login("tmichon_microsoft")
+    result = copilot_identity.ensure_login("owner_user_microsoft")
     assert result.status == "switched"
     assert result.ok
     assert result.previous == "ThomasMichon"
-    assert result.target == "tmichon_microsoft"
+    assert result.target == "owner_user_microsoft"
     # The token must never be logged/returned anywhere in the result.
     assert "fake-token-value" not in (result.detail or "")
 
@@ -179,7 +179,7 @@ def test_ensure_login_no_cached_token(home: Path, monkeypatch):
         stderr = "not logged in as that user"
 
     monkeypatch.setattr(copilot_identity.subprocess, "run", lambda *a, **k: _Proc())
-    result = copilot_identity.ensure_login("tmichon_microsoft")
+    result = copilot_identity.ensure_login("owner_user_microsoft")
     assert result.status == "no-cached-token"
     assert not result.ok
 
@@ -191,7 +191,7 @@ def test_ensure_login_dry_run_never_shells_out(home: Path, monkeypatch):
         raise AssertionError("dry-run must not shell out")
 
     monkeypatch.setattr(copilot_identity.subprocess, "run", _boom)
-    result = copilot_identity.ensure_login("tmichon_microsoft", dry_run=True)
+    result = copilot_identity.ensure_login("owner_user_microsoft", dry_run=True)
     assert result.status == "switched"
     assert "dry-run" in result.detail
 
@@ -205,7 +205,7 @@ def test_ensure_login_dry_run_bypasses_other_sessions_gate(home: Path, monkeypat
         raise AssertionError("dry-run must not check for other sessions")
 
     monkeypatch.setattr(copilot_identity, "other_copilot_sessions_running", _boom)
-    result = copilot_identity.ensure_login("tmichon_microsoft", dry_run=True)
+    result = copilot_identity.ensure_login("owner_user_microsoft", dry_run=True)
     assert result.status == "switched"
 
 
@@ -226,7 +226,7 @@ def test_ensure_login_refuses_switch_when_other_sessions_running(home: Path, mon
         raise AssertionError("must not shell out when the safety gate refuses")
 
     monkeypatch.setattr(copilot_identity.subprocess, "run", _boom)
-    result = copilot_identity.ensure_login("tmichon_microsoft")
+    result = copilot_identity.ensure_login("owner_user_microsoft")
     assert result.status == "other-sessions-active"
     assert not result.ok
     assert "3 other" in result.detail
@@ -251,7 +251,7 @@ def test_ensure_login_force_overrides_other_sessions_gate(home: Path, monkeypatc
         raise AssertionError(f"unexpected command: {cmd}")
 
     monkeypatch.setattr(copilot_identity.subprocess, "run", _run)
-    result = copilot_identity.ensure_login("tmichon_microsoft", force=True)
+    result = copilot_identity.ensure_login("owner_user_microsoft", force=True)
     assert result.status == "switched"
     assert result.ok
 
@@ -259,13 +259,13 @@ def test_ensure_login_force_overrides_other_sessions_gate(home: Path, monkeypatc
 def test_ensure_login_no_gate_when_already_correct(home: Path, monkeypatch):
     """The gate only matters when an actual switch would happen -- it must
     not even be consulted on the already-correct fast path."""
-    _write_copilot_config(home, "tmichon_microsoft")
+    _write_copilot_config(home, "owner_user_microsoft")
 
     def _boom():
         raise AssertionError("must not check for other sessions when already correct")
 
     monkeypatch.setattr(copilot_identity, "other_copilot_sessions_running", _boom)
-    result = copilot_identity.ensure_login("tmichon_microsoft")
+    result = copilot_identity.ensure_login("owner_user_microsoft")
     assert result.status == "already-correct"
 
 
@@ -350,9 +350,9 @@ def test_intended_account_resolves_without_an_active_project(home: Path, monkeyp
     global_dir = home / ".agent-worktrees"
     global_dir.mkdir(parents=True, exist_ok=True)
     (global_dir / "config.yaml").write_text(
-        "default_copilot_account: tmichon_microsoft\n", encoding="utf-8"
+        "default_copilot_account: owner_user_microsoft\n", encoding="utf-8"
     )
-    assert copilot_identity.intended_account(None) == "tmichon_microsoft"
+    assert copilot_identity.intended_account(None) == "owner_user_microsoft"
 
 
 def test_switch_enabled_machine_local_resolves_with_explicit_repo(home: Path, monkeypatch):
@@ -430,7 +430,7 @@ def test_cli_ensure_is_noop_when_disabled(home: Path, monkeypatch):
         cfg, "load_config",
         lambda *a, **k: cfg.Config(
             srcroot=str(home), machine="test", platform="windows",
-            default_copilot_account="tmichon_microsoft",
+            default_copilot_account="owner_user_microsoft",
         ),
     )
 
@@ -443,7 +443,7 @@ def test_cli_ensure_is_noop_when_disabled(home: Path, monkeypatch):
     assert rc == 0
     out = json.loads(buf.getvalue())
     assert out["status"] == "disabled"
-    assert out["target"] == "tmichon_microsoft"
+    assert out["target"] == "owner_user_microsoft"
     assert out["previous"] is None
 
 
@@ -453,7 +453,7 @@ def test_cli_ensure_switches_when_enabled(home: Path, monkeypatch):
         cfg, "load_config",
         lambda *a, **k: cfg.Config(
             srcroot=str(home), machine="test", platform="windows",
-            default_copilot_account="tmichon_microsoft",
+            default_copilot_account="owner_user_microsoft",
             copilot_identity_switch_enabled=True,
         ),
     )
@@ -479,6 +479,6 @@ def test_cli_ensure_switches_when_enabled(home: Path, monkeypatch):
     assert rc == 0
     out = json.loads(buf.getvalue())
     assert out["status"] == "switched"
-    assert out["target"] == "tmichon_microsoft"
+    assert out["target"] == "owner_user_microsoft"
 
 

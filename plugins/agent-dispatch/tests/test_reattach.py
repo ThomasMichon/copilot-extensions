@@ -336,7 +336,7 @@ def test_reattach_happy_path_local():
             dedup_key="dk-9",
             requires=["cap-a"],
             excludes=["cap-b"],
-            affinity={"machine": "lambda-core"},
+            affinity={"machine": "atlas-core"},
             payload_ref="ref-1",
             payload_inline="inline-payload",
             source="issue-loop",
@@ -368,7 +368,7 @@ def test_reattach_happy_path_local():
     assert "claim_as" not in create_kwargs  # created unclaimed -- claimed via reserve+claim
     assert create_kwargs["requires"] == ["cap-a"]
     assert create_kwargs["excludes"] == ["cap-b"]
-    assert create_kwargs["affinity"] == {"machine": "lambda-core"}
+    assert create_kwargs["affinity"] == {"machine": "atlas-core"}
     assert create_kwargs["payload_ref"] == "ref-1"
     assert create_kwargs["payload_inline"] == "inline-payload"
     assert create_kwargs["exclusive_key"] == "ex-1"

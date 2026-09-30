@@ -144,7 +144,7 @@ def test_singleton_repo_target_falls_back_to_anchor_key(monkeypatch, capsys):
             if worktree_id != "llama.cpp@anchor"
             else {"status": "idle", "session_id": "owned-anchor-1"}
         ),
-        agents=[{"name": "llama.cpp@Lambda-Core", "project": "llama.cpp"}],
+        agents=[{"name": "llama.cpp@Atlas-Core", "project": "llama.cpp"}],
     )
     _patch_client(monkeypatch, client)
     monkeypatch.setattr(
@@ -156,10 +156,10 @@ def test_singleton_repo_target_falls_back_to_anchor_key(monkeypatch, capsys):
         ),
     )
 
-    m._cmd_resume(_args("llama.cpp@Lambda-Core"))
+    m._cmd_resume(_args("llama.cpp@Atlas-Core"))
 
     assert client.worktree_calls == [
-        ("llama.cpp@Lambda-Core", False),
+        ("llama.cpp@Atlas-Core", False),
         ("llama.cpp@anchor", False),
     ]
     assert "Repo llama.cpp loaded as owned session owned-anchor-1" in (

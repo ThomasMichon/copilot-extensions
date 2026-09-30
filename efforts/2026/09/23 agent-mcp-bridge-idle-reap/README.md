@@ -2,16 +2,16 @@
 
 - **Slug:** `agent-mcp-bridge-idle-reap`
 - **Repo:** copilot-extensions
-- **Branch(es):** `worktree/lambda-core-win-20260923-030014-3867` (this worktree); may split to a fresh worktree per phase
+- **Branch(es):** `worktree/atlas-core-win-20260923-030014-3867` (this worktree); may split to a fresh worktree per phase
 - **Created:** 2026-09-23
 - **Status:** Done <!-- Draft | Active | Blocked | Done -->
 - **Vision:** `visions/plugin-services` §`work-coalescing-singleton`, §`process-count-scales-with-services-not-sessions` — reality has one `agent-mcp bridge` process (+ its stdio-heavy upstream child, e.g. `bunx gitea-mcp`) per **sub-agent delegation**, unbounded and never reclaimed for the life of the top-level session, directly violating "process count scales with services, not sessions/invocations." **Vision-closing.**
-- **Umbrella issue:** [tmichon/aperture-labs#3876](https://gitea.michon.ski/tmichon/aperture-labs/issues/3876) (bug — the reap gap itself; 3 field-evidence comments, WSL 2026-07-31/08-18/08-22 + Windows 2026-09-23)
+- **Umbrella issue:** [owner_user/private-downstream-repo#3876](https://your-git-host/owner_user/private-downstream-repo/issues/3876) (bug — the reap gap itself; 3 field-evidence comments, WSL 2026-07-31/08-18/08-22 + Windows 2026-09-23)
 - **Related:**
-  [tmichon/aperture-labs#3877](https://gitea.michon.ski/tmichon/aperture-labs/issues/3877)
+  [owner_user/private-downstream-repo#3877](https://your-git-host/owner_user/private-downstream-repo/issues/3877)
   (proposed warmth-daemon attach — complementary, reduces per-instance heaviness
   but doesn't bound instance *count* on its own) ·
-  `efforts/active/mcp-to-cli-migration` (aperture-labs — the longer-horizon fix:
+  `efforts/active/mcp-to-cli-migration` (private-downstream-repo — the longer-horizon fix:
   migrating sub-agents off MCP frontmatter entirely removes the bridge, but is a
   large multi-phase migration not yet complete for `gitea`/`home-assistant`,
   the two agents actually observed leaking tonight) ·
@@ -41,13 +41,13 @@ per-instance cost (the #3877 warmth daemon) without bounding instance count.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| lambda-core (Windows) | Author + validate the fix; primary reproduction host (tonight's evidence) | this worktree |
-| lambda-core (WSL) | Cross-platform validation (the original #3876 reproduction host) | `wsl -d Ubuntu` from lambda-core |
+| atlas-core (Windows) | Author + validate the fix; primary reproduction host (tonight's evidence) | this worktree |
+| atlas-core (WSL) | Cross-platform validation (the original #3876 reproduction host) | `wsl -d Ubuntu` from atlas-core |
 
 ## Coordination
 
 - **Topology:** single-phase, single worktree/branch (small, bounded fix).
-- **Host (owns the PR):** lambda-core (Windows).
+- **Host (owns the PR):** atlas-core (Windows).
 - **Delegates:** none expected; escalate to a split worktree only if Phase 2's
   design needs its own reviewed sub-PR before the fix lands.
 - **Handoff:** a fresh session resuming this effort reads this README's Plan
@@ -55,7 +55,7 @@ per-instance cost (the #3877 warmth daemon) without bounding instance count.
 
 ## Context
 
-**Evidence trail (full detail lives in tmichon/aperture-labs#3876, not
+**Evidence trail (full detail lives in owner_user/private-downstream-repo#3876, not
 duplicated here — read it before touching code):**
 - 2026-07-31 (WSL): 14 bridges (7 `gitea.mcp.yaml` + 7 `vei.mcp.yaml`) in one
   65-min session, one pair per sub-agent delegation, all idle/0% CPU, no live
@@ -166,7 +166,7 @@ issue)."*
 
 ### Phase 3 — Validate against tonight's exact reproduction
 - [x] Windows: reproduced the `Get-CimInstance Win32_Process` evidence style
-  from tmichon/aperture-labs#3876's 2026-09-23 comment against the *fixed*
+  from owner_user/private-downstream-repo#3876's 2026-09-23 comment against the *fixed*
   code. Spawned a real `agent-mcp bridge` subprocess (`AGENT_MCP_NO_MULTIPLEX`,
   the classic in-process bridge path #3876 evidence targeted) over a stdio
   upstream that itself spawns a live descendant child (mirroring the
@@ -187,15 +187,15 @@ issue)."*
 - [x] PR through copilot-extensions' normal review/version-bump flow: PR
   #3406, squash-merged as `c7e8fd7a5` (agent-mcp `0.2.0-dev137`). Blocked
   twice on unrelated pre-existing main-red guard failures along the way
-  (tmichon/aperture-labs#7491, then #7495); both diagnosed as out-of-scope
+  (owner_user/private-downstream-repo#7491, then #7495); both diagnosed as out-of-scope
   drift on `main` rather than this effort's own content, and picked up as
   trivial one-line fixes only where genuinely blocking (see Journal).
-- [x] Comment on tmichon/aperture-labs#3876 with the fix version, close it:
+- [x] Comment on owner_user/private-downstream-repo#3876 with the fix version, close it:
   commented (id 125682) and closed.
 - [x] Cross-reference from #3877 (still open — the idle self-reap bounds
   instance *count*; #3877's warmth daemon is the separate, still-valid fix
   for per-instance upstream duplication): commented (id 125684), left open
-  as intended. `efforts/active/mcp-to-cli-migration` (aperture-labs) is the
+  as intended. `efforts/active/mcp-to-cli-migration` (private-downstream-repo) is the
   longer-horizon alternative; not touched by this effort, noted for context
   only.
 
@@ -209,7 +209,7 @@ issue)."*
 - [x] Live reproduction (Phase 3) on both Windows and WSL shows bridges
   self-reaping within the configured idle window with zero operator
   intervention, matching the exact evidence commands already used in
-  tmichon/aperture-labs#3876 (`Get-CimInstance Win32_Process` on Windows;
+  owner_user/private-downstream-repo#3876 (`Get-CimInstance Win32_Process` on Windows;
   `ps` process-tree inspection on WSL) -- see Phase 3 above for the
   specific evidence.
 - [x] No regression: a bridge actively relaying traffic (a live, in-progress
@@ -227,12 +227,12 @@ tasks), landed as PR ThomasMichon/copilot-extensions#3406.
 
 ### 2026-09-23 — Kickoff
 - Effort created directly following a live "what's eating our RAM" facility
-  investigation (unrelated CPU/memory/disk-I/O telemetry sweep, tmichon/
-  aperture-labs#7467/#7479/#7483) that surfaced this as the actual top
+  investigation (unrelated CPU/memory/disk-I/O telemetry sweep, owner_user/
+  private-downstream-repo#7467/#7479/#7483) that surfaced this as the actual top
   Windows-host process/RAM consumer tonight — 136 conhost/cmd + 140 python.exe
   processes traced via `CommandLine` inspection to `agent-mcp bridge`
   invocations, not (as first assumed) a Copilot CLI defect. Confirmed the
-  aperture-labs-tracked bug (#3876) already existed with WSL-side evidence
+  private-downstream-repo-tracked bug (#3876) already existed with WSL-side evidence
   from three prior sessions (07-31, 08-18, 08-22); added the fresh
   Windows-side reproduction as comment #125604 on that issue before starting
   this effort.
@@ -261,7 +261,7 @@ tasks), landed as PR ThomasMichon/copilot-extensions#3406.
   `libs/peer-launch/tests/test_packaging.py::test_converted_codespaces_paths_have_no_unexplained_sibling_launches`
   fails on `main` itself (an `agent_codespaces/__main__.py` ambient-PATH
   resolution the peer-launch packaging test flags), failing CI on every PR
-  regardless of content. Filed as tmichon/aperture-labs#7491 (not fixed here
+  regardless of content. Filed as owner_user/private-downstream-repo#7491 (not fixed here
   -- needs agent-codespaces-specific judgment on the correct fix shape).
 - **Next session:** check #7491/CI status first -- if `main`'s CI is green
   again (someone else fixed it, or it was itself fixed upstream), rebase/
@@ -299,13 +299,13 @@ tasks), landed as PR ThomasMichon/copilot-extensions#3406.
   misdirected push+cleanup). Hit a **second**, fresh unrelated main-red state
   (worktree-manager version-consistency drift dev73/dev74 + two new
   module-size overruns from other merged PRs) -- filed
-  tmichon/aperture-labs#7495, fixed only the trivial one-line version bump
+  owner_user/private-downstream-repo#7495, fixed only the trivial one-line version bump
   inline (blocking, mechanical, zero risk), deliberately left the two
   module-size overruns (especially a +274 line jump on
   `worktree-manager/__main__.py`) for their own owner's judgment rather than
   rubber-stamping a widen from an unrelated PR.
 - CI went green; merged PR #3406 (squash, `c7e8fd7a5`, this repo's
-  `pr-self-merge` profile). Commented + closed tmichon/aperture-labs#3876
+  `pr-self-merge` profile). Commented + closed owner_user/private-downstream-repo#3876
   with the fix version; commented (cross-reference only, left open)
-  tmichon/aperture-labs#3877.
+  owner_user/private-downstream-repo#3877.
 - Status: Done. Archiving this effort folder now.

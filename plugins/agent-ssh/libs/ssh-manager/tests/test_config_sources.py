@@ -71,10 +71,10 @@ class TestSSHProfileSource:
         assert isinstance(source, ConfigSource)
 
     def test_get_ssh_config(self):
-        source = SSHProfileSource(host_alias="borealis", user="cjohnson", port=2222)
+        source = SSHProfileSource(host_alias="borealis", user="contributor_user", port=2222)
         config = source.get_ssh_config()
         assert config.host_alias == "borealis"
-        assert config.user == "cjohnson"
+        assert config.user == "contributor_user"
         assert config.port == 2222
 
     def test_refresh_returns_same_config(self):

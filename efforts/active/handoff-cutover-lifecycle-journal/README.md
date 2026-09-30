@@ -575,7 +575,7 @@ renumbering from the "acknowledges handoff" step onward.)
       agents"). Fixed with a lock-independent, identity-verified OS pid
       check as a fallback. See Journal for full evidence and the fix.
 - [ ] **New item (2026-09-20), tracked as
-      `aperture-labs#7246`:**
+      `private-downstream-repo#7246`:**
       a fifth root cause -- `_monitor_claim_handoff_cutover` /
       `_monitor_handoff_claim_staleness` reclaim a handoff-cutover claim
       purely on age (`AGENT_WORKTREES_STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS`,
@@ -1360,9 +1360,9 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
 
 ### 2026-09-20 — Fifth root cause: claim reclaimed on age alone, no successor-liveness check
 
-- **New live recurrence, tracked as aperture-labs issue `#7246`.**
-  Worktree `lambda-core-win-20260826-223842-c332` (a different machine/repo
-  from this effort's home, aperture-labs) got stuck in a repeat cutover
+- **New live recurrence, tracked as private-downstream-repo issue `#7246`.**
+  Worktree `atlas-core-win-20260826-223842-c332` (a different machine/repo
+  from this effort's home, private-downstream-repo) got stuck in a repeat cutover
   loop: `handoff_requested` fired, but the successor never reached stage 9
   (`handoff_successor_session_start_bound`). Every ~180s -- the resident
   monitor's `AGENT_WORKTREES_STATUS_MONITOR_HANDOFF_CLAIM_STALE_SECONDS`
@@ -1394,7 +1394,7 @@ instrument stage 7 (host ack)/8 (spawn-started) distinctly from stage
   returned 0 stranded handoffs afterward. The underlying claim-reclaim gap
   in `_monitor_claim_handoff_cutover` / `_monitor_handoff_claim_staleness`
   (`plugins/agent-worktrees/src/agent_worktrees/__main__.py`) is unfixed --
-  filed as issue #7246 (aperture-labs, per this repo's Gitea-only filing
+  filed as issue #7246 (private-downstream-repo, per this repo's Gitea-only filing
   convention for cross-repo bugs) rather than fixed in this pass, since no
   operator go-ahead for remediation-in-code was sought this session. Two
   fixes are needed together: (1) gate reclaim on the previous successor

@@ -20,7 +20,7 @@ Windows). Before this effort, replacing that daemon with a new version meant
 stopping the old one and starting the new one — a window, however brief, where
 the fixed handle resolves to nothing and any call/attach in that window has no
 live instance to reach. (Concretely: `agent-mcp materialize`'s own hardening
-against a *different* hang — aperture-labs #6601 / copilot-extensions#2184 —
+against a *different* hang — private-downstream-repo #6601 / copilot-extensions#2184 —
 established that a fresh materialize can be slow; a version cutover happening
 at the same moment used to make that window a real "no instance answers"
 outage, not just a slow one.)
@@ -29,6 +29,18 @@ Make replacing the daemon a **cutover** instead, per the already-adopted shape
 in `docs/patterns/graceful-daemon-cutover.md`: stand the new version up beside
 the old one, health-gate it, flip the fixed handle to it, drain the old one,
 retire it — so the fixed handle always resolves to a live daemon.
+
+## Context
+
+Before this effort, a runtime update could only stop an existing `agent-mcp
+serve` daemon and start a replacement after the old process exited. The fixed
+handle contract made that restart window observable to callers, especially when
+serve startup or materialization was already slow.
+
+## Request
+
+Adopt the shared graceful-daemon-cutover pattern for `agent-mcp serve` so
+runtime updates preserve a live fixed handle throughout replacement.
 
 ## Design
 
@@ -146,6 +158,14 @@ handoff first".
   agent-mcp's installer is ever renamed to converge with that naming
   convention.
 
+## Validation Plan
+
+- Exercise the cutover-specific unit and subprocess suites for `agent-mcp`,
+  including passive spawn, handle flip, drain, and installer-triggered cutover
+  coverage.
+- Re-run the install-contract and vendored-lib synchronization guards so the
+  new cutover wiring remains deployment-safe across platforms.
+
 ### Phase 3 — Generation self-retire backstop (follow-up)
 The pattern doc's "generation self-retire" watchdog (a demoted daemon notices
 on its own that a confirmed live successor has superseded it and exits, for
@@ -163,3 +183,8 @@ no control channel to dial — `agent-mcp cutover` detects this and reports a
 clear error rather than attempting a doomed drain. That one daemon needs a
 plain stop/start once; every cutover after that (both sides now control-
 capable) works gracefully. Inherent to any such migration.
+
+## Journal
+
+- 2026-09-07: Effort created to land the already-adopted graceful cutover
+  pattern for `agent-mcp serve`.

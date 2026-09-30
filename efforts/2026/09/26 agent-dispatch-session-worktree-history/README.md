@@ -36,11 +36,11 @@ mesh — no new coordination topology needed.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Lambda-Core WSL | Primary dev seat for agent-dispatch + agent-bridge phases | local |
+| Atlas-Core WSL | Primary dev seat for agent-dispatch + agent-bridge phases | local |
 
 ## Context
 
-Surfaced from `aperture-labs` (the facility's private consumer monorepo)
+Surfaced from `private-downstream-repo` (the facility's private consumer monorepo)
 during a session investigating a stuck Intelligence Dampener PR review. Two
 distinct but related gaps were found:
 
@@ -56,7 +56,7 @@ distinct but related gaps were found:
    now."
 2. **No shared, origin-agnostic resolver.** A first attempt to fix
    Intelligence Dampener's own "View reviewer" link
-   (`aperture-labs` PR #7200, since reverted) hardcoded Dampener's own
+   (`private-downstream-repo` PR #7200, since reverted) hardcoded Dampener's own
    `dampener-pr<N>` worktree-naming convention directly into the link
    builder — solving Dampener's problem while leaving every *other* consumer
    (an Adjudication Board run, Permanent Record's journal, a plain
@@ -77,7 +77,7 @@ Concepts & Components):
   (`queue.py`) — the existing (single-slot) ownership bookkeeping this effort
   extends to a full history, and the existing state-transition audit log that
   may already carry enough raw material to backfill from.
-- `aperture-labs`' `session-worktree-archive-linkout` effort — the consumer
+- `private-downstream-repo`'s `session-worktree-archive-linkout` effort — the consumer
   -side effort whose Phase 4 (Dampener's "View reviewer" link) is blocked on
   this landing; see its 2026-09-19 course-correction journal entry for the
   reverted bespoke attempt.
@@ -91,7 +91,7 @@ Concepts & Components):
 > agent-dispatch tasks. A task should have a history of attached agent
 > worktrees and sessions.
 
-(verbatim, from the aperture-labs session that surfaced this; "ID" =
+(verbatim, from the private-downstream-repo session that surfaced this; "ID" =
 Intelligence Dampener)
 
 ## Plan
@@ -203,7 +203,7 @@ Intelligence Dampener)
       unknown-task 404, and unconfigured-coordinator 503.
 
 ### Phase 3 — consumers: adopt the shared resolver
-- [x] `aperture-labs` Intelligence Dampener: re-attempt the "View reviewer"
+- [x] `private-downstream-repo` Intelligence Dampener: re-attempt the "View reviewer"
       link (`session-worktree-archive-linkout` Phase 4, previously reverted
       as PR #7200) using the new dispatch-task-reference resolution instead
       of the `dampener-pr<N>` naming convention. **Delivered and merged
@@ -300,7 +300,7 @@ Archived.
   notes) deferred — history starts from this landing forward.
 
 ### 2026-09-19 — Kickoff
-- Effort created from an aperture-labs session's operator request (verbatim
+- Effort created from a private-downstream-repo session's operator request (verbatim
   above), surfaced while diagnosing an Intelligence Dampener stuck-review
   incident and a first (reverted) bespoke attempt at Dampener's "View
   reviewer" link.

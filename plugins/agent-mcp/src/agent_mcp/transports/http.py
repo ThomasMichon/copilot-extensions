@@ -21,7 +21,7 @@ via :func:`asyncio.to_thread` is sufficient. Connections race dual-stack
 address families (:mod:`.happy_eyeballs`) rather than using ``urlopen``'s
 default opener directly -- a black-holed IPv6 route would otherwise block
 every request for the full ``cfg.timeout`` before (maybe) falling back to
-IPv4 (confirmed live, aperture-labs#7553).
+IPv4 (confirmed live, private-downstream-repo#7553).
 """
 
 from __future__ import annotations

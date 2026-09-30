@@ -204,7 +204,7 @@ else
         # staleness verdict above was read a moment ago, and destroying
         # "whatever is at $_lock_link now" can hit a FRESH, live lock a
         # different racer already recreated in the interim -- confirmed via
-        # direct reproduction, twice (aperture-labs#7715): first with a
+        # direct reproduction, twice (private-downstream-repo#7715): first with a
         # blind `rm -f`, then again after switching to an atomic `mv`
         # claim, which only moved the same gap one step later. The fix is
         # to serialize the *decision-and-destroy* itself, not just the

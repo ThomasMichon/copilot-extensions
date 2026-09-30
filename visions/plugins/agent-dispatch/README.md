@@ -1085,7 +1085,7 @@ does **not** quietly undo it.
 - **2026-09-19** — Added *durable-attachment-history*: a task's queryable
   history of every session/worktree that has ever attached to it, distinct
   from its mutable current-owner fields. Prompted by a stuck-review incident
-  (aperture-labs, Intelligence Dampener) where releasing a task for a fresh
+  (private-downstream-repo, Intelligence Dampener) where releasing a task for a fresh
   embodiment twice discarded the prior sessions' identities entirely, and by
   a would-be consumer (a Dampener UI link) reaching for a bespoke,
   per-consumer naming convention instead of a shared resolution primitive

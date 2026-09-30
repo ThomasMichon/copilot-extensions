@@ -1145,7 +1145,7 @@ class TestAgentRoutes:
             {
                 "task-worker": AgentConfig(
                     name="task-worker",
-                    project="aperture-labs",
+                    project="private-downstream-repo",
                     worktree_discovery=False,
                     spawnable_as_target=False,
                 )
@@ -3212,11 +3212,11 @@ def test_resolve_local_binstub_uses_pathext_aware_resolution(tmp_path, monkeypat
 
     bin_dir = tmp_path / ".local" / "bin"
     bin_dir.mkdir(parents=True)
-    shim = bin_dir / "aperture-labs.cmd"
+    shim = bin_dir / "private-downstream-repo.cmd"
     shim.write_text("@echo off\n")
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    resolved = _resolve_local_binstub("aperture-labs")
+    resolved = _resolve_local_binstub("private-downstream-repo")
     assert os.path.normcase(resolved) == os.path.normcase(str(shim))
 
 
@@ -3232,9 +3232,9 @@ def test_resolve_local_binstub_falls_back_to_path_when_no_local_shim(
     from agent_bridge.routes.worktrees import _resolve_local_binstub
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "empty-home")
-    monkeypatch.setattr(shutil, "which", lambda name: f"/resolved/{name}" if name == "aperture-labs" else None)
-    resolved = _resolve_local_binstub("aperture-labs")
-    assert resolved == "/resolved/aperture-labs"
+    monkeypatch.setattr(shutil, "which", lambda name: f"/resolved/{name}" if name == "private-downstream-repo" else None)
+    resolved = _resolve_local_binstub("private-downstream-repo")
+    assert resolved == "/resolved/private-downstream-repo"
 
 
 def test_apply_bound_charter_layers_charter_spawn_shape() -> None:
@@ -3247,7 +3247,7 @@ def test_apply_bound_charter_layers_charter_spawn_shape() -> None:
     from agent_bridge.transport import SpawnTarget
 
     venue_target = SpawnTarget(
-        type="local", cwd="/wt/path", project="aperture-labs",
+        type="local", cwd="/wt/path", project="private-downstream-repo",
         copilot_args=["--plugin-dir", "/staged/plugin"],
         env={"BASE": "1"},
     )
@@ -3261,7 +3261,7 @@ def test_apply_bound_charter_layers_charter_spawn_shape() -> None:
     resolver.canonical_agent_name.return_value = "board-sweep-worker"
     resolver.agents = {"board-sweep-worker": charter_config}
     entry = _WorktreeEntry(
-        id="wt1", agent_name="lambda-core-wsl", machine="lambda-core",
+        id="wt1", agent_name="atlas-core-wsl", machine="atlas-core",
         path="/wt/path", branch="b", status="active",
         bound_agent="board-sweep-worker",
     )
@@ -3275,7 +3275,7 @@ def test_apply_bound_charter_layers_charter_spawn_shape() -> None:
     assert result.mcp_servers == [{"name": "gitea"}]
     assert result.env == {"BASE": "1", "CHARTER": "1"}
     assert result.cwd == "/wt/path"
-    assert result.project == "aperture-labs"
+    assert result.project == "private-downstream-repo"
 
 
 def test_apply_bound_charter_unresolvable_charter_degrades_to_venue_default() -> None:
@@ -3289,13 +3289,13 @@ def test_apply_bound_charter_unresolvable_charter_degrades_to_venue_default() ->
     resolver.canonical_agent_name.return_value = None
 
     unbound = _WorktreeEntry(
-        id="wt1", agent_name="lambda-core-wsl", machine="lambda-core",
+        id="wt1", agent_name="atlas-core-wsl", machine="atlas-core",
         path="/wt/path", branch="b", status="active",
     )
     assert _apply_bound_charter(venue_target, resolver, unbound, "wt1") is venue_target
 
     stale = _WorktreeEntry(
-        id="wt2", agent_name="lambda-core-wsl", machine="lambda-core",
+        id="wt2", agent_name="atlas-core-wsl", machine="atlas-core",
         path="/wt/path", branch="b", status="active",
         bound_agent="retired-charter",
     )
@@ -3323,7 +3323,7 @@ def test_apply_bound_charter_managed_charter_degrades_to_venue_default(
     resolver.canonical_agent_name.return_value = "intelligence-dampener-reviewer"
     resolver.agents = {"intelligence-dampener-reviewer": managed_charter}
     entry = _WorktreeEntry(
-        id="wt3", agent_name="lambda-core-wsl", machine="lambda-core",
+        id="wt3", agent_name="atlas-core-wsl", machine="atlas-core",
         path="/wt/path", branch="b", status="active",
         bound_agent="intelligence-dampener-reviewer",
     )

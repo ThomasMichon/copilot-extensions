@@ -487,10 +487,10 @@ def test_spawn_timeout_expiry_releases_the_slot():
 
 def test_satellite_repo_scopes_the_discovery_queries():
     client = FakeClient(queued=[])
-    loop, _ = _loop(client, repo="aperture-labs")
+    loop, _ = _loop(client, repo="private-downstream-repo")
     loop.tick()
-    assert client.calls[0]["repo"] == "aperture-labs"
-    assert client.calls[1]["repo"] == "aperture-labs"
+    assert client.calls[0]["repo"] == "private-downstream-repo"
+    assert client.calls[1]["repo"] == "private-downstream-repo"
 
 
 def test_spawn_uses_the_discovered_tasks_own_repo_when_unscoped():

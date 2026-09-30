@@ -416,7 +416,7 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
         # Fail-loud companion to the fail-closed reconcile: an unidentified host
         # will SKIP every machine-pinned declaration (it cannot confirm membership),
         # so a discovered machine-scoped pool would silently never run. Surface it
-        # so the operator can pass --machine (or fix host identity) -- aperture-labs
+        # so the operator can pass --machine (or fix host identity) -- private-downstream-repo
         # #5001.
         print(
             "agent-dispatch supervise serve: WARNING -- could not resolve this "

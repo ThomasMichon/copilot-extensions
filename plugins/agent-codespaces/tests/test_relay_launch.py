@@ -102,19 +102,19 @@ def test_build_feed_token_exports_skips_invalid_env_names():
 
 
 def test_build_identity_env_exports_emits_host_identity(monkeypatch):
-    monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: "tmichon")
+    monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: "owner_user")
     snippet = build_identity_env_exports(["GITHUB_USER"])
-    assert snippet == "export GITHUB_USER=tmichon; "
+    assert snippet == "export GITHUB_USER=owner_user; "
 
 
 def test_build_identity_env_exports_multiple_and_empty(monkeypatch):
-    monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: "tmichon")
+    monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: "owner_user")
     assert build_identity_env_exports(None) == ""
     assert build_identity_env_exports([]) == ""
     assert build_identity_env_exports(["", None]) == ""
     snippet = build_identity_env_exports(["GITHUB_USER", "UPLOAD_USER"])
-    assert "export GITHUB_USER=tmichon; " in snippet
-    assert "export UPLOAD_USER=tmichon; " in snippet
+    assert "export GITHUB_USER=owner_user; " in snippet
+    assert "export UPLOAD_USER=owner_user; " in snippet
 
 
 def test_build_identity_env_exports_skips_when_identity_unavailable(monkeypatch):
@@ -131,19 +131,19 @@ def test_build_identity_env_exports_skips_invalid_env_names(monkeypatch):
 
 
 def test_build_relay_env_exports_identity_without_relay(monkeypatch):
-    monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: "tmichon")
+    monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: "owner_user")
     env = build_relay_env(
         9857,
         "tok",
         use_relay=False,
         identity_env=["GITHUB_USER"],
     )
-    assert "export GITHUB_USER=tmichon;" in env
+    assert "export GITHUB_USER=owner_user;" in env
     assert "LC_GIT_CREDENTIAL_RELAY" not in env
 
 
 def test_build_relay_env_exports_identity_before_relay(monkeypatch):
-    monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: "tmichon")
+    monkeypatch.setattr("agent_codespaces.relay_launch.current_identity", lambda: "owner_user")
     env = build_relay_env(
         9857,
         "tok123",
@@ -151,10 +151,10 @@ def test_build_relay_env_exports_identity_before_relay(monkeypatch):
         identity_env=["GITHUB_USER"],
         feed_token_env=["EXAMPLE_NPM_AUTH_TOKEN"],
     )
-    assert env.index("export GITHUB_USER=tmichon;") < env.index(
+    assert env.index("export GITHUB_USER=owner_user;") < env.index(
         "LC_GIT_CREDENTIAL_RELAY="
     )
-    assert env.index("export GITHUB_USER=tmichon;") < env.index(
+    assert env.index("export GITHUB_USER=owner_user;") < env.index(
         "export EXAMPLE_NPM_AUTH_TOKEN="
     )
 

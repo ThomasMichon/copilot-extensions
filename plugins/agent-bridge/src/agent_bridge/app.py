@@ -869,7 +869,7 @@ async def lifespan(app: FastAPI):
             from .self_retire import initial_self_retire_status, is_superseded
 
             my_pid = _os.getpid()
-            # Phase 5 observability (aperture-labs): status /health renders as "slot".
+            # Phase 5 observability (private-downstream-repo): status /health renders as "slot".
             status = app.state.self_retire_status = initial_self_retire_status()
             # Observe our own publish landing first, capturing our generation.
             # A passive instance never promoted simply never arms the watch.

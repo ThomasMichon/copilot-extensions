@@ -140,7 +140,7 @@ def test_backend_satisfies_the_protocol(rv):
 
 
 def test_tunnel_id_is_deterministic_and_safe():
-    assert _tunnel_id("lambda-core") == _tunnel_id("lambda-core")
+    assert _tunnel_id("atlas-core") == _tunnel_id("atlas-core")
     assert _tunnel_id("wt/sweep").startswith("adf-")
     assert " " not in _tunnel_id("a b/c")
 

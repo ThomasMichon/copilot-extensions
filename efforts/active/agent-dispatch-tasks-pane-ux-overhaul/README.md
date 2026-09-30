@@ -94,7 +94,7 @@ session never has to re-derive "what's already done" from the Journal alone.
   ready, no blockers) or Phase 6 (smallest scope, needs its own design
   pass on what "unscoped" repo-filter UX should look like — read that
   Phase's Plan bullet first). This worktree
-  (`tmichon-cloud1-win-20260929-011101-363e`) was created fresh for the
+  (`owner_user-cloud1-win-20260929-011101-363e`) was created fresh for the
   Phase 7 closure and has not yet been submitted as a PR as of this
   writing — check `agent-worktrees pr-status` before starting further work
   in it, and land/finalize Phase 7's own PR before mixing in a new phase's

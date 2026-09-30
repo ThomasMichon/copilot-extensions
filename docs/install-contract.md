@@ -1237,7 +1237,7 @@ configured, from that repo via the repos registry. Both knobs are **pluggable**
 via environment variables — `WORKTREE_GATE_MANIFEST` (the filename) and
 `WORKTREE_GATE_ANCHOR` (the anchor repo name) — so any control harness can point
 the gate at its own manifest; the defaults (`external-repos.yaml`, anchor
-`aperture-labs`) match this repo's reference facility. With no gate info
+`test-chamber`) match this repo's reference facility. With no gate info
 available, a `machine-gated` runtime is **skipped** (safe default — never
 auto-install a machine-specific runtime where the policy is unknown).
 Reconciliation is local and version-keyed, so a re-launch with no version change

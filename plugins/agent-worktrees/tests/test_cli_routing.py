@@ -1686,12 +1686,12 @@ class TestResolveCodenameAnywhere:
         def _raise(name, **k):
             raise crl.AmbiguousCodenameError(name, [
                 crl.RemoteCodenameMatch(machine="borealis", worktree_id="wt-1"),
-                crl.RemoteCodenameMatch(machine="wheatley", worktree_id="wt-2"),
+                crl.RemoteCodenameMatch(machine="ember", worktree_id="wt-2"),
             ])
         monkeypatch.setattr(crl, "resolve_codename_cross_machine_unique", _raise)
         wt_id, error = m._resolve_codename_anywhere("sturdy-crate")
         assert wt_id is None
-        assert "borealis" in error and "wheatley" in error
+        assert "borealis" in error and "ember" in error
 
 
 def test_embody_codename_remote_fails_closed(monkeypatch, capfd):

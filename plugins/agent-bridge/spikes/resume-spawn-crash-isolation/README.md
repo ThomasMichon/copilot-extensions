@@ -1,7 +1,7 @@
 # Resume-spawn crash-isolation repro (#1612)
 
 Reproduction / validation harness for the **core** half of
-[dotfiles#1612](https://github.com/tmichon_microsoft/dotfiles/issues/1612): a
+[dotfiles#1612](https://github.com/owner_user_microsoft/dotfiles/issues/1612): a
 stopped **local `command`** session whose persisted target executable has since
 **moved / been cleaned** (a venv / worktree / version-slot path), so the resume
 `CreateProcess` raises `FileNotFoundError: [WinError 2]`.

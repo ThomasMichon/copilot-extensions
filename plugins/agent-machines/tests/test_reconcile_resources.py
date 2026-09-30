@@ -227,7 +227,7 @@ def test_runtime_command_runner_resolves_pathext_shim(monkeypatch):
     captured: dict[str, list[str]] = {}
 
     def fake_which(name):
-        return f"C:\\Users\\tmichon\\.local\\bin\\{name}.cmd" if name == "agent-machines" else None
+        return f"C:\\Users\\owner_user\\.local\\bin\\{name}.cmd" if name == "agent-machines" else None
 
     def fake_run(argv, **kwargs):
         captured["argv"] = argv
@@ -242,5 +242,5 @@ def test_runtime_command_runner_resolves_pathext_shim(monkeypatch):
     monkeypatch.setattr(reconcile_module.shutil, "which", fake_which)
     monkeypatch.setattr(reconcile_module.subprocess, "run", fake_run)
     reconcile_module._runtime_command_runner(["agent-machines", "installer-readiness"], timeout=60)
-    assert captured["argv"][0] == "C:\\Users\\tmichon\\.local\\bin\\agent-machines.cmd"
+    assert captured["argv"][0] == "C:\\Users\\owner_user\\.local\\bin\\agent-machines.cmd"
 

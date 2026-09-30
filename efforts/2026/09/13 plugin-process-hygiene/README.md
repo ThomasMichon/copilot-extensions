@@ -91,6 +91,12 @@ cross-checked against a live host running ~7 concurrent sessions) found:
     marker-absent window mid-swap (#742).
   - agent-vault restarts (not drains) on update, forcing a **re-unlock** (#743).
 
+## Request
+
+Implement the tracked hygiene fixes and supporting primitives needed to keep the
+runtime plugin suite concurrency-safe, update-safe, and launch-safe under
+routine multi-session use.
+
 ## Plan
 
 ### Phase 1 — Intent (vision + this effort) — *this PR*
@@ -806,7 +812,7 @@ passes. Grepped the rest of `agent_dispatch` for other
 outside the two guarded declaration helpers.
 
 **Live daemon-status re-check:** `agent-dispatch supervise daemon-status`
-still shows the original 6 `declared:repo:tmichon-cloud1-win-20260910-171507-5474:*`
+still shows the original 6 `declared:repo:owner_user-cloud1-win-20260910-171507-5474:*`
 / `logical:repo:...` override entries from the #2417 incident, but all are
 `disabled: true` with `at` timestamps (~2026-09-11T00:31Z) that **predate**
 #2421's merge (2026-09-11T02:57Z) -- confirming these are the original
@@ -1628,7 +1634,7 @@ note (read-only/lower-risk before the high-blast-radius live wiring) rather
 than the handoff summary's numbered order, and picked up #2301 first.
 
 Ran the read-only diagnostics #2301 itself calls for, on this live host
-(`tmichon-cloud1`, ~10 concurrent worktree sessions): `agent-dispatch health`
+(`owner_user-cloud1`, ~10 concurrent worktree sessions): `agent-dispatch health`
 (coordinator `status: ok`, both reconcile loops completing cleanly),
 `agent-dispatch supervise daemon-status` (a healthy, empty `default`-scope
 coordinator — the live supervised-repo processes on this host run under a
@@ -1906,4 +1912,3 @@ plugin-process-hygiene/` (this repo's archived-effort convention) and set
 **Status: Done**.
 
 **plugin-process-hygiene is now complete.**
-

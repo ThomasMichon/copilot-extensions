@@ -168,12 +168,12 @@ def test_spawn_worker_charter_appends_to_direct_create(monkeypatch):
     monkeypatch.setattr(bridge.subprocess, "run", fake_run)
 
     result = bridge.spawn_worker(
-        "task42", agent="Lambda-Core-wsl", charter="cab-sweep-reconciler",
+        "task42", agent="Atlas-Core-wsl", charter="cab-sweep-reconciler",
         worker_id="w1", wait=False,
     )
     assert result.returncode == 0
     cmd = calls["cmd"]
-    assert cmd[:3] == ["/usr/bin/agent-bridge", "create", "Lambda-Core-wsl"]
+    assert cmd[:3] == ["/usr/bin/agent-bridge", "create", "Atlas-Core-wsl"]
     assert "--charter" in cmd
     assert cmd[cmd.index("--charter") + 1] == "cab-sweep-reconciler"
 

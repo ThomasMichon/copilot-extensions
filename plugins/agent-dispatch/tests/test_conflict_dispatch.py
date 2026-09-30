@@ -147,10 +147,10 @@ def test_build_dispatch_includes_target_machine_when_given():
         branch="reflect/shelly",
         base="master",
         reconciler_agent="config-reconciler",
-        target_machine="wheatley",
+        target_machine="ember",
     )
 
-    assert dispatch.argv[-2:] == ("--target-machine", "wheatley")
+    assert dispatch.argv[-2:] == ("--target-machine", "ember")
 
 
 def test_build_dispatch_omits_target_machine_by_default():

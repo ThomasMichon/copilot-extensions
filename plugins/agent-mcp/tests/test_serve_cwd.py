@@ -1,6 +1,6 @@
 """Regression tests for the resident `serve` daemon's pinned CWD.
 
-Confirmed live (aperture-labs): a long-running `agent-mcp serve` daemon
+Confirmed live (private-downstream-repo): a long-running `agent-mcp serve` daemon
 inherited whatever directory happened to be current when it was launched (a
 worktree, an install-time backup dir, ...). Once that directory was later
 removed, every relative-path subprocess the daemon spawned on a caller's

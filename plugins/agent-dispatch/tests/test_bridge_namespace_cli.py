@@ -67,7 +67,7 @@ def test_namespace_resolve_claimed_task_returns_worktree_spec(monkeypatch, capsy
     monkeypatch.setattr(
         m, "_client",
         lambda _args, **_kw: _FakeClient(
-            {"status": "started", "owner": "lambda-core/wt-42"},
+            {"status": "started", "owner": "atlas-core/wt-42"},
             attachments=[{"session_id": "s-old"}],
         ),
     )
@@ -165,7 +165,7 @@ def test_namespace_resolve_headless_task_cross_machine_exits_bad_state(
 ):
     monkeypatch.setattr(
         "agent_dispatch.bridge_namespace_cli._local_machine_name",
-        lambda: "lambda-core",
+        lambda: "atlas-core",
     )
     monkeypatch.setattr(
         m, "_client",
@@ -174,7 +174,7 @@ def test_namespace_resolve_headless_task_cross_machine_exits_bad_state(
                 "status": "submitted",
                 "owner": None,
                 "owner_session_id": "s-1",
-                "target_machine": "wheatley",
+                "target_machine": "ember",
             },
         ),
     )
@@ -186,12 +186,12 @@ def test_namespace_resolve_headless_task_cross_machine_exits_bad_state(
 def test_namespace_resolve_cross_machine_task_exits_bad_state(monkeypatch, capsys):
     monkeypatch.setattr(
         "agent_dispatch.bridge_namespace_cli._local_machine_name",
-        lambda: "lambda-core",
+        lambda: "atlas-core",
     )
     monkeypatch.setattr(
         m, "_client",
         lambda _args, **_kw: _FakeClient(
-            {"status": "started", "owner": "wheatley/wt-99"},
+            {"status": "started", "owner": "ember/wt-99"},
         ),
     )
     rc = m.main(["namespace-resolve", "task-4"])
@@ -202,15 +202,15 @@ def test_namespace_resolve_cross_machine_task_exits_bad_state(monkeypatch, capsy
 def test_namespace_resolve_venue_suffix_mismatch_exits_bad_state(monkeypatch, capsys):
     monkeypatch.setattr(
         "agent_dispatch.bridge_namespace_cli._local_machine_name",
-        lambda: "lambda-core",
+        lambda: "atlas-core",
     )
     monkeypatch.setattr(
         m, "_client",
         lambda _args, **_kw: _FakeClient(
-            {"status": "started", "owner": "lambda-core/wt-1"},
+            {"status": "started", "owner": "atlas-core/wt-1"},
         ),
     )
-    rc = m.main(["namespace-resolve", "task-5@wheatley"])
+    rc = m.main(["namespace-resolve", "task-5@ember"])
     assert rc == 4
 
 

@@ -56,7 +56,7 @@ def test_terminal_fragment_json_default(monkeypatch, tmp_path, capsys):
     out = capsys.readouterr().out
     fragment = json.loads(out)
     assert any(p["name"] == "Myproj" for p in fragment["profiles"])
-    assert fragment["schemes"][0]["name"] == "Aperture Science"
+    assert fragment["schemes"][0]["name"] == "Example Research"
 
 
 def test_terminal_fragment_explain(monkeypatch, tmp_path, capsys):

@@ -741,7 +741,7 @@ This effort remains **Active**, not yet ready to archive.
   with the same ids, relative ages, live/session indicators, follow-up
   markers, and PR states the original screenshot showed. Kept the existing
   7 rows byte-identical (nothing removed) so `test_picker_app.py`'s
-  "lemons"/"GLaDOS" assertions and row-count checks stay valid untouched.
+  "lemons"/"Iris" assertions and row-count checks stay valid untouched.
 - `_MEMO_TITLES` is intentionally separated from the row-construction code
   so a future combinatorial title generator (more volume than this fixed
   25-row roster) has a clearly-labeled, reusable bank of on-theme phrasing

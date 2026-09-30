@@ -158,7 +158,7 @@ class TestTranslateSdkEvent:
         ]
 
     def test_compaction_events(self) -> None:
-        # Aperture Labs #7587: compaction was dropped before this whitelist
+        # Example Labs #7587: compaction was dropped before this whitelist
         # entry existed, so a downstream ctx% reset showed with no
         # confirmation a compaction actually happened.
         assert translate_sdk_event(

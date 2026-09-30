@@ -1654,7 +1654,7 @@ if Path(machines_path).exists():
             if upsert_profile(launcher_profile):
                 changed = True
 
-# Set global color scheme to Aperture Science
+# Set global color scheme to Example Research
 terminal = config.setdefault('terminal', {})
 current_scheme = terminal.get('colorScheme', {})
 if current_scheme.get('name') != scheme['name'] or current_scheme.get('foreground') != scheme['foreground']:
@@ -1689,7 +1689,7 @@ ids = {p.get('id', '') for p in profiles}
 has_local = local_id in ids
 has_ssh = any(pid.startswith('ssh:') for pid in ids)
 scheme_name = config.get('terminal', {}).get('colorScheme', {}).get('name', '')
-if has_local and scheme_name == 'Aperture Science':
+if has_local and scheme_name == 'Example Research':
     if has_ssh:
         print('ok_with_ssh')
     else:
@@ -1782,7 +1782,7 @@ ssh_count = sum(1 for pid in ids if pid.startswith('ssh:'))
 launcher_count = sum(1 for pid in ids if pid.startswith(launcher_prefix))
 scheme_name = config.get('terminal', {}).get('colorScheme', {}).get('name', '')
 
-if has_local and scheme_name == 'Aperture Science':
+if has_local and scheme_name == 'Example Research':
     if has_ssh and has_launchers:
         print(f'ok:{ssh_count}:{launcher_count}')
     elif has_ssh:
