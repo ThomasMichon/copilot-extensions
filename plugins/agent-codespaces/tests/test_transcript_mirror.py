@@ -30,8 +30,8 @@ def _events(mirror, cs=None, sid=SID):
 
 
 def test_the_script_carries_known_offsets_and_drops_invalid_ids():
-    script = tm.remote_script({SID: 120, "../etc": 5, "x": 1})
-    assert f"{SID}:120" in script
+    script = tm.remote_script({SID: 120, "../etc": 5, "x": 1}, limits={SID: 8})
+    assert f"{SID}:120:8" in script
     assert "../etc" not in script and " x:1" not in script
     assert tm._DONE in script
 
@@ -52,25 +52,25 @@ def test_parse_reads_chunks_and_workspaces_and_skips_garbage():
 
 def test_only_whole_lines_are_mirrored_and_the_next_pass_resumes(tmp_path):
     mirror = tm.TranscriptMirror(root=tmp_path)
-    assert mirror.apply("cs-1", _chunk(SID, 0, b'{"a":1}\n{"b":')) == 1
+    assert mirror.apply("cs-1", _chunk(SID, 0, b'{"a":1}\n{"b":')) == {SID: ["events.jsonl"]}
     assert _events(mirror) == b'{"a":1}\n'
     assert mirror.offsets("cs-1") == {SID: 8}  # the torn line is pulled again
-    assert mirror.apply("cs-1", _chunk(SID, 8, b'{"b":2}\n')) == 1
+    assert mirror.apply("cs-1", _chunk(SID, 8, b'{"b":2}\n')) == {SID: ["events.jsonl"]}
     assert _events(mirror) == b'{"a":1}\n{"b":2}\n'
 
 
 def test_a_chunk_without_a_whole_line_or_at_a_stale_offset_changes_nothing(tmp_path):
     mirror = tm.TranscriptMirror(root=tmp_path)
     mirror.apply("cs-1", _chunk(SID, 0, b'{"a":1}\n'))
-    assert mirror.apply("cs-1", _chunk(SID, 8, b'{"partial')) == 0
-    assert mirror.apply("cs-1", _chunk(SID, 3, b'{"c":3}\n')) == 0
+    assert mirror.apply("cs-1", _chunk(SID, 8, b'{"partial')) == {}
+    assert mirror.apply("cs-1", _chunk(SID, 3, b'{"c":3}\n')) == {}
     assert _events(mirror) == b'{"a":1}\n'
 
 
 def test_a_replaced_transcript_is_mirrored_again_from_its_start(tmp_path):
     mirror = tm.TranscriptMirror(root=tmp_path)
     mirror.apply("cs-1", _chunk(SID, 0, b'{"old":1}\n{"old":2}\n'))
-    assert mirror.apply("cs-1", _chunk(SID, 0, b'{"new":1}\n', reset=True)) == 1
+    assert mirror.apply("cs-1", _chunk(SID, 0, b'{"new":1}\n', reset=True)) == {SID: ["events.jsonl"]}
     assert _events(mirror) == b'{"new":1}\n'
 
 
@@ -100,15 +100,40 @@ def test_the_script_round_trips_a_real_session_state_tree(tmp_path):
         return subprocess.run([_git_bash(), "-c", script], capture_output=True, text=True,
                               env=env, check=True).stdout
 
-    assert mirror.apply("cs-1", run()) == 1
+    assert mirror.apply("cs-1", run()) == {SID: ["events.jsonl", "workspace.yaml"]}
     assert _events(mirror) == b'{"n":1}\n{"n":2}\n'
     ws = mirror._root / "cs-1" / "session-state" / SID / "workspace.yaml"
     assert ws.read_bytes() == b"cwd: /workspaces/x\n"
     assert tm.parse_output(run())[0] == []  # nothing new: nothing pulled
     with open(state / SID / "events.jsonl", "ab") as fh:
         fh.write(b'{"n":3}\n')
-    assert mirror.apply("cs-1", run()) == 1
+    old = (state / SID / "events.jsonl")
+    os.utime(old, (1, 1))  # written long ago: a known transcript still catches up
+    assert mirror.apply("cs-1", run()) == {SID: ["events.jsonl"]}
     assert _events(mirror) == b'{"n":1}\n{"n":2}\n{"n":3}\n'
+
+
+@pytest.mark.skipif(_git_bash() is None, reason="needs a GNU bash")
+def test_a_line_longer_than_the_read_is_mirrored_by_reading_more(tmp_path):
+    home = tmp_path / "home"
+    (home / ".copilot" / "session-state" / SID).mkdir(parents=True)
+    big = b'{"blob":"' + b"x" * 300 + b'"}\n'
+    (home / ".copilot" / "session-state" / SID / "events.jsonl").write_bytes(b'{"n":1}\n' + big)
+    env = {**os.environ, "HOME": str(home)}
+    mirror = tm.TranscriptMirror(root=tmp_path / "mirror", chunk=64)
+
+    def run() -> str:
+        script = tm.remote_script(mirror.offsets("cs-1"), limits=mirror.limits("cs-1"), chunk=64)
+        return subprocess.run([_git_bash(), "-c", script], capture_output=True, text=True,
+                              env=env, check=True).stdout
+
+    mirror.apply("cs-1", run())
+    passes = 0
+    while _events(mirror) != b'{"n":1}\n' + big and passes < 10:
+        mirror.apply("cs-1", run())
+        passes += 1
+    assert _events(mirror) == b'{"n":1}\n' + big
+    assert mirror.limits("cs-1") == {}  # back to the normal read once it moved
 
 
 class _Manager:
@@ -128,7 +153,8 @@ def _mirror_with(tmp_path, manager, pushes):
         return manager
 
     def push(source, label):
-        pushes.append((source, label))
+        files = {p.relative_to(source).as_posix() for p in source.rglob("*") if p.is_file()}
+        pushes.append((files, label))
         return True, "pushed"
 
     return tm.TranscriptMirror(open_manager=opener, push=push, root=tmp_path)
@@ -142,17 +168,22 @@ def direct_exec(monkeypatch):
     monkeypatch.setattr(tm, "exec_with_retry", run)
 
 
-async def test_a_pass_pushes_the_mirror_only_when_something_changed(tmp_path, direct_exec):
+async def test_a_pass_pushes_only_what_it_changed(tmp_path, direct_exec):
     pushes = []
-    manager = _Manager(_chunk(SID, 0, b'{"a":1}\n') + tm._DONE + "\n")
+    manager = _Manager(_chunk(SID, 0, b'{"a":1}\n') + _chunk(SID2, 0, b'{"b":1}\n') + tm._DONE + "\n")
     mirror = _mirror_with(tmp_path, manager, pushes)
     result = await mirror("cs-1")
-    assert result["ok"] and result["changed"] == 1
-    assert pushes == [(tmp_path / "cs-1", ".codespaces/cs-1")]
+    assert result["ok"] and result["changed"] == 2
+    assert pushes[-1][1] == ".codespaces/cs-1"
+    assert pushes[-1][0] == {f"session-state/{SID}/events.jsonl", f"session-state/{SID2}/events.jsonl"}
     assert manager.disconnected == 1
+    # Only SID2 grew: SID (maybe since captured in full on close-out) is not pushed again.
+    manager.stdout = _chunk(SID2, 8, b'{"b":2}\n') + tm._DONE + "\n"
+    assert (await mirror("cs-1"))["changed"] == 1
+    assert pushes[-1][0] == {f"session-state/{SID2}/events.jsonl"}
     manager.stdout = tm._DONE + "\n"
     assert (await mirror("cs-1"))["changed"] == 0
-    assert len(pushes) == 1
+    assert len(pushes) == 2
 
 
 async def test_a_failed_read_or_a_bad_name_pushes_nothing(tmp_path, direct_exec):

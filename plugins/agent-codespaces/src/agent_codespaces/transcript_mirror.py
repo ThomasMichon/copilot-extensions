@@ -5,13 +5,16 @@ A live session's history lives in its CodeSpace
 in-memory tail, so after a host restart nothing on this machine could show what
 came before. The Connection Owner already probes each running session every
 couple of minutes. On that probe it also pulls the bytes appended since last
-time to each recently written transcript (one short exec, by byte offset), and
-hands its mirror to agent-logger's ``session-sync push`` under
+time to each transcript it mirrors (one short exec, by byte offset), and hands
+the files that changed to agent-logger's ``session-sync push`` under
 ``.codespaces/<name>`` -- the same storage and label the close-out capture uses,
 where the bridge's cold-store lookup (agent-logger ``session-fetch``) finds it.
+Only changed files are pushed, so an older copy here never replaces a complete
+close-out capture of a session that has since ended.
 
-Only whole lines are mirrored, so a reader never sees a torn event. A remote
-transcript that shrank (replaced) is mirrored again from its start.
+Only whole lines are mirrored, so a reader never sees a torn event; a line
+longer than one read makes the next read larger. A remote transcript that
+shrank (replaced) is mirrored again from its start.
 """
 
 from __future__ import annotations
@@ -21,6 +24,8 @@ import base64
 import logging
 import re
 import shlex
+import shutil
+import tempfile
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -32,10 +37,13 @@ log = logging.getLogger("agent-codespaces")
 
 #: Where the host keeps each CodeSpace's mirror: ``<root>/<codespace>/session-state/<id>/``.
 MIRROR_ROOT = RUNTIME_DIR / "transcripts"
-#: Transcripts written within this many minutes are mirrored (a running session's is).
+#: New transcripts written within this many minutes are mirrored (a running
+#: session's is); one already mirrored keeps catching up regardless.
 ACTIVE_MINUTES = 30
 #: Bytes pulled per transcript per probe; a longer backlog catches up over later probes.
 CHUNK_BYTES = 4 * 1024 * 1024
+#: A chunk with no whole line doubles that transcript's read, up to this.
+MAX_CHUNK_BYTES = 64 * 1024 * 1024
 
 _SID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{7,63}$")
 _CODESPACE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,127}$")
@@ -48,23 +56,33 @@ Pusher = Callable[[Path, str], "tuple[bool, str]"]
 
 
 def remote_script(
-    offsets: dict[str, int], *, active_minutes: int = ACTIVE_MINUTES, chunk: int = CHUNK_BYTES,
+    offsets: dict[str, int], *, limits: dict[str, int] | None = None,
+    active_minutes: int = ACTIVE_MINUTES, chunk: int = CHUNK_BYTES,
 ) -> str:
-    """Bash that prints, for each recently written transcript, ``<head> sid off size reset``
-    then the base64 of its bytes from ``off`` (and its workspace.yaml on first sight)."""
+    """Bash that prints, for each transcript to mirror, ``<head> sid off size reset``
+    then the base64 of its bytes from ``off`` (and its workspace.yaml on first sight).
+
+    A transcript the host already mirrors (in ``offsets``) is read up to its
+    ``limits`` entry, however long ago it was written; a new one only when
+    written within ``active_minutes``."""
+    limits = limits or {}
     known = " ".join(
-        f"{sid}:{int(off)}" for sid, off in sorted(offsets.items()) if _SID.match(sid)
+        f"{sid}:{int(off)}:{int(limits.get(sid, chunk))}"
+        for sid, off in sorted(offsets.items()) if _SID.match(sid)
     )
     return (
         "cd ~/.copilot/session-state 2>/dev/null || { echo " + shlex.quote(_DONE) + "; exit 0; }; "
         f"known={shlex.quote(' ' + known + ' ')}; "
         "for d in */; do sid=${d%/}; f=\"$sid/events.jsonl\"; [ -f \"$f\" ] || continue; "
-        f"[ -n \"$(find \"$f\" -mmin -{int(active_minutes)} 2>/dev/null)\" ] || continue; "
-        "off=$(printf '%s' \"$known\" | tr ' ' '\\n' | sed -n \"s/^$sid:\\([0-9]*\\)$/\\1/p\"); "
-        "off=${off:-0}; size=$(stat -c %s \"$f\" 2>/dev/null) || continue; reset=0; "
+        "ent=$(printf '%s' \"$known\" | tr ' ' '\\n' "
+        "| awk -F: -v s=\"$sid\" '$1==s {print $2\" \"$3; exit}'); "
+        "if [ -n \"$ent\" ]; then off=${ent%% *}; lim=${ent#* }; else off=0; "
+        f"lim={int(chunk)}; "
+        f"[ -n \"$(find \"$f\" -mmin -{int(active_minutes)} 2>/dev/null)\" ] || continue; fi; "
+        "size=$(stat -c %s \"$f\" 2>/dev/null) || continue; reset=0; "
         "[ \"$size\" -lt \"$off\" ] && { off=0; reset=1; }; [ \"$size\" -gt \"$off\" ] || continue; "
         f"echo \"{_HEAD}$sid $off $size $reset\"; "
-        f"tail -c +$((off+1)) \"$f\" | head -c {int(chunk)} | base64 -w0; echo; "
+        "tail -c +$((off+1)) \"$f\" | head -c \"$lim\" | base64 -w0; echo; "
         "if [ \"$off\" = 0 ] && [ -f \"$sid/workspace.yaml\" ]; then "
         f"echo \"{_WORKSPACE}$sid\"; base64 -w0 \"$sid/workspace.yaml\"; echo; fi; "
         f"done; echo {shlex.quote(_DONE)}"
@@ -125,6 +143,7 @@ class TranscriptMirror:
         self._root = root or MIRROR_ROOT
         self._active = active_minutes
         self._chunk = chunk
+        self._limits: dict[tuple[str, str], int] = {}
 
     def _session_dir(self, codespace: str, sid: str) -> Path:
         return self._root / codespace / "session-state" / sid
@@ -139,10 +158,17 @@ class TranscriptMirror:
             if _SID.match(d.name) and (d / "events.jsonl").is_file()
         }
 
-    def apply(self, codespace: str, text: str) -> int:
-        """Append the whole lines of each chunk; returns how many transcripts changed."""
+    def limits(self, codespace: str) -> dict[str, int]:
+        return {sid: n for (cs, sid), n in self._limits.items() if cs == codespace}
+
+    def apply(self, codespace: str, text: str) -> dict[str, list[str]]:
+        """Append the whole lines of each chunk.
+
+        Returns the files written, per session (``events.jsonl`` and, on first
+        sight, ``workspace.yaml``): only those are pushed, so an older copy
+        here never replaces what a close-out capture already landed."""
         chunks, workspaces, _complete = parse_output(text)
-        changed = 0
+        changed: dict[str, list[str]] = {}
         for sid, off, _size, reset, data in chunks:
             path = self._session_dir(codespace, sid) / "events.jsonl"
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -150,16 +176,33 @@ class TranscriptMirror:
             if not reset and off != have:
                 continue  # stale offset (a concurrent pass moved it): the next probe resumes
             end = data.rfind(b"\n")
+            key = (codespace, sid)
             if end < 0:
-                continue  # no whole line yet
+                # No whole line yet. A full read with none means one line is
+                # longer than the read: read more next time, or it never moves.
+                limit = self._limits.get(key, self._chunk)
+                if len(data) >= limit and limit < MAX_CHUNK_BYTES:
+                    self._limits[key] = min(limit * 2, MAX_CHUNK_BYTES)
+                continue
             with open(path, "wb" if reset or off == 0 else "ab") as fh:
                 fh.write(data[:end + 1])
-            changed += 1
+            self._limits.pop(key, None)
+            changed.setdefault(sid, []).append("events.jsonl")
         for sid, content in workspaces.items():
             ws = self._session_dir(codespace, sid) / "workspace.yaml"
             if ws.parent.is_dir():
                 ws.write_bytes(content)
+                changed.setdefault(sid, []).append("workspace.yaml")
         return changed
+
+    def stage(self, codespace: str, changed: dict[str, list[str]], into: Path) -> Path:
+        """Copy just ``changed`` into ``into/session-state/<id>/`` for the push."""
+        for sid, names in changed.items():
+            dest = into / "session-state" / sid
+            dest.mkdir(parents=True, exist_ok=True)
+            for name in names:
+                shutil.copy2(self._session_dir(codespace, sid) / name, dest / name)
+        return into
 
     async def __call__(self, codespace: str) -> dict[str, Any]:
         if not _CODESPACE.match(codespace or ""):
@@ -173,7 +216,8 @@ class TranscriptMirror:
         try:
             manager = await opener(codespace)
             script = remote_script(
-                self.offsets(codespace), active_minutes=self._active, chunk=self._chunk,
+                self.offsets(codespace), limits=self.limits(codespace),
+                active_minutes=self._active, chunk=self._chunk,
             )
             result = await exec_with_retry(
                 manager, codespace, "bash -lc " + shlex.quote(script), timeout=60.0, attempts=2,
@@ -181,7 +225,9 @@ class TranscriptMirror:
             code = getattr(result, "exit_code", None)
             if code != 0:
                 return {"ok": False, "detail": f"read failed (exit {code})"}
-            changed = self.apply(codespace, getattr(result, "stdout", "") or "")
+            changed = await asyncio.to_thread(
+                self.apply, codespace, getattr(result, "stdout", "") or "",
+            )
         finally:
             if manager is not None:
                 try:
@@ -197,7 +243,12 @@ class TranscriptMirror:
             def push(source: Path, label: str) -> tuple[bool, str]:
                 return _push_via_session_sync(source, label, verbose=False)
         label = f".codespaces/{codespace}"
-        ok, detail = await asyncio.to_thread(push, self._root / codespace, label)
+
+        def stage_and_push() -> tuple[bool, str]:
+            with tempfile.TemporaryDirectory(prefix="acs-mirror-") as tmp:
+                return push(self.stage(codespace, changed, Path(tmp)), label)
+
+        ok, detail = await asyncio.to_thread(stage_and_push)
         if not ok:
             log.warning("transcript mirror for %s: push failed: %s", codespace, detail)
-        return {"ok": ok, "changed": changed, "detail": detail}
+        return {"ok": ok, "changed": len(changed), "detail": detail}
