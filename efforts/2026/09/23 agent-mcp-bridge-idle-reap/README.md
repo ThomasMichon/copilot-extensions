@@ -55,8 +55,8 @@ per-instance cost (the companion warmth-daemon work) without bounding instance c
 
 ## Context
 
-**Evidence trail (full detail lives in the downstream tracker, not
-duplicated here — read it before touching code):**
+**Evidence trail (the summary below is the public source of truth for this
+effort's diagnosis):**
 - 2026-07-31 (WSL): 14 bridges (7 `gitea.mcp.yaml` + 7 `vei.mcp.yaml`) in one
   65-min session, one pair per sub-agent delegation, all idle/0% CPU, no live
   sub-agent process remaining. Manual `TERM` reaped them cleanly (confirmed

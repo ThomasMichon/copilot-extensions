@@ -231,8 +231,8 @@ Worktree Manager seam or the install trigger instead of any fallback to dead cod
 - This repo now uses **`pr-self-merge`**, not direct push (confirmed 2026-09-15 via
   `copilot-extensions get pr-profile`) — land each step as its own reviewed, self-merged PR,
   not a direct push to `main`.
-- Re-check the downstream hook-contract follow-up for any updates before starting — that
-  design may have implications for exactly when it's safe to delete the bundled
+- Re-check whether anything still depends on the old bundled Picker binstub
+  seam before starting — that design question may have implications for exactly when it's safe to delete the bundled
   Picker (e.g. if anything still depends on the old binstub-seam behavior during a
   transition window).
 - Per the parent effort's Coordination section: **re-confirm no one else has claimed this
