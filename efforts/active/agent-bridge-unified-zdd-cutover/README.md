@@ -170,18 +170,31 @@ layer — is the operator's own, captured verbatim in Request.)_
 - [x] Confirmed via source review: `deploy` and `service restart` are
   genuinely different code paths (`venue_cli.py` vs. `service_process_cli.py`
   + `service_start_cli.py`), not a documentation-only distinction.
-- [ ] Decide, with the operator, whether the opt-in reconcile gate itself
+- [x] Decide, with the operator, whether the opt-in reconcile gate itself
   survives this redesign — the design below makes an update **safe** to run
   automatically (always ZDD), which may remove the original justification
   for making it *opt-in* (avoiding unwanted background work) as long as the
   *frequency*/*trigger* is still deliberately bounded. This is a genuine
   design fork the vision doesn't resolve on its own — flag findings, don't
-  silently pick one side.
-- [ ] Make the current staleness **observable** regardless of the outcome
+  silently pick one side. **Resolved:** operator chose to remove the
+  opt-in gate entirely (see Journal). Implemented across all 10
+  reconcile-capable plugins (`agent-bridge`, `agent-ssh`, `agent-vault`,
+  `budget-guidance`, `agent-dispatch`, `agent-containers`, `agent-mcp`,
+  `agent-logger`, `agent-codespaces`, `agent-pull-requests`) — a version
+  drift now reconciles unconditionally, with no per-project
+  `.copilot-extensions/config.yaml` opt-in required. Frequency/trigger
+  stays bounded exactly as before (once per session start, only on real
+  drift; agent-bridge additionally keeps its single-flight/stale-reap
+  guard).
+- [x] Make the current staleness **observable** regardless of the outcome
   above: `service status` (or an equivalent) should be able to say plainly
   "N days since last successful reconcile, background reconcile is
   {enabled,disabled} for this project" rather than requiring an operator to
-  reconstruct that from a raw log file.
+  reconstruct that from a raw log file. **Done:** `agent-bridge service
+  status` now prints `Background reconcile: enabled (always-on; no
+  per-project opt-in required)` plus a human "N day(s)/hour(s)/minute(s)
+  ago" staleness line (`_print_reconcile_status`/`_format_reconcile_age` in
+  `service_process_cli.py`).
 
 ### Phase 1 — Retire the second deploy behavior
 - [x] `agent-bridge service restart` (and any other reachable stop+start
@@ -339,8 +352,10 @@ the full reasoning).
   next generation without manual intervention. **Partially covered** -- the
   claim is stamped with a test-chosen label, not the daemon's own real
   generation identity (see Journal).
-- [ ] Reconcile staleness is observable via a status command, independent of
+- [x] Reconcile staleness is observable via a status command, independent of
   whether Phase 0's opt-in-gate question is resolved to keep or remove it.
+  Resolved: the gate was removed; `agent-bridge service status` reports
+  staleness (see Phase 0 Journal entry).
 - [ ] Full plugin test suite (`python tools/run-plugin-tests.py agent-bridge`)
   and `libs/zdd`'s own suite stay green throughout.
 
@@ -399,6 +414,62 @@ entry below for what was inspected, what was already covered, and the one new
 test that closes the gap.
 
 ## Journal
+
+### 2026-09-30 — Phase 0's design fork resolved: the opt-in reconcile gate removed
+
+- Resumed via a context handoff after Phase 6 merged ([#4672](https://github.com/ThomasMichon/copilot-extensions/pull/4672)),
+  leaving Phase 0's one open item: whether the per-project
+  `background_reconcile_<plugin>` opt-in gate survives the ZDD redesign.
+  Asked the operator directly (this was a genuine design fork the vision
+  doesn't resolve on its own, not something to silently pick a side on) --
+  **decision: remove the opt-in gate.** Now that every reconcile-capable
+  plugin's update path is always-ZDD, the gate's original justification
+  (avoiding unsafe background work) no longer applies; keeping it would
+  only be a redundant consent checkbox, and it was the actual root cause
+  of the 18+ day staleness incident that started this effort.
+- Removed the gate from all 10 reconcile-capable plugins' session-start
+  hooks (`scripts/bootstrap-check.sh` + `.ps1`): `agent-bridge` (the
+  reference implementation, `versioned-venv/agent-bridge-reference`),
+  `agent-ssh` (`manifest-path/agent-ssh`), the shared
+  `versioned-venv/psscriptroot` family (`agent-codespaces`,
+  `agent-containers`, `agent-dispatch`, `agent-logger`,
+  `agent-pull-requests`, `agent-vault`), `budget-guidance`
+  (`versioned-venv/pythonless-budget-guidance`), and `agent-mcp`
+  (`versioned-venv/context-selected-agent-mcp`). A version drift now
+  reconciles unconditionally at session start -- frequency/trigger stays
+  exactly as bounded as before (still only once per session start, only on
+  a real version drift; agent-bridge additionally keeps its pre-existing
+  single-flight/stale-reap guard, which is what actually prevents a
+  shared/active-dev machine from stacking background installers, not the
+  removed opt-in). `tools/check-bootstrap-sync.py` still passes (family
+  byte-identity intact).
+- Rewrote every plugin's `test_bootstrap_check_reconcile_opt_in.py` (9
+  files) into `test_bootstrap_check_reconcile_always_on.py`: proves neither
+  hook script retains opt-in-gate machinery (`optInKey`/`optedIn`/the
+  `SKIPPED` message), that a version drift reconciles with **no**
+  `.copilot-extensions/config.yaml` at all, and that a stale leftover
+  `background_reconcile_<plugin>: false` from before this change is now
+  inert rather than resurrecting the old skip behavior. `budget-guidance`'s
+  separate `test_hooks.py` POSIX-no-python reconcile test no longer needs
+  (or writes) an opt-in config file either.
+- Closed Phase 0's second item -- staleness observability, independent of
+  which side the design fork landed on: `agent-bridge service status` now
+  prints `Background reconcile: enabled (always-on; no per-project opt-in
+  required)` plus a human staleness line (`N day(s)/hour(s)/minute(s) ago`,
+  computed from the existing `reconcile-status.json`'s `at` timestamp via a
+  new `_format_reconcile_age` helper in `service_process_cli.py`), instead
+  of requiring an operator to reconstruct that from `reconcile.log`. New
+  `test_reconcile_status_observability.py` covers the age formatter (day/
+  hour/minute/plural boundaries, unparseable input) and the printer's two
+  branches (never-reconciled vs. a recorded attempt).
+- Verified: `python3 tools/run-plugin-tests.py agent-bridge` (full suite,
+  410 passed/10 skipped) and `python3 tools/run-plugin-tests.py agent-ssh
+  agent-vault budget-guidance agent-dispatch agent-containers agent-mcp
+  agent-logger agent-codespaces agent-pull-requests` (each plugin's own
+  suite) all green; `python3 tools/check-bootstrap-sync.py` OK.
+- This closes Phase 0 entirely. The only remaining open item in the whole
+  effort is the Validation Plan's shared-code-path proof for
+  `agent-bridge service restart`/`deploy` -- tracked, not part of this PR.
 
 ### 2026-09-29 — Phase 6 verified by a real live Docker clean-room run (operator-triggered)
 - Operator had a local Docker host available and asked for the drill to

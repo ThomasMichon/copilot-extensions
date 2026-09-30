@@ -14,13 +14,15 @@
 #
 # Deployed to ~/.agent-ssh/bin/ by scripts/install.sh. Only reconciles staleness.
 #
-# OPT-IN GATE (fanned out from the agent-bridge reference implementation, see
-# tools/check-bootstrap-sync.py FAMILIES): the background reconcile spawn
-# below requires an explicit, checked-in opt-in --
-# <project>/.copilot-extensions/config.yaml carrying a top-level
-# `background_reconcile_agent-ssh: true` line (plain regex match, no yaml
-# parser -- this hook has no python/venv yet). No opt-in -> no background
-# spawn; deliberate behavior change from silent auto-heal.
+# NO OPT-IN GATE (agent-bridge-unified-zdd-cutover Phase 0): background
+# reconcile used to require a checked-in
+# <project>/.copilot-extensions/config.yaml with a top-level
+# a per-project opt-in flag, because a raw reconcile could
+# race a live session. Now that every reconcile-capable plugin's update
+# path is always-ZDD (safe to run unattended), that justification is gone;
+# the gate was removed rather than kept as a redundant consent checkbox.
+# Frequency/trigger stays deliberately bounded -- still only once per
+# session start, only on a real version drift.
 
 session_start_json_emitted=0
 emit_session_start_json() {
@@ -82,22 +84,6 @@ if [ "$provisioned" = 0 ] && [ -f "$InstallDir/current-version" ]; then
   if [ -n "$cv" ] && [ "$cv" = "$current" ] && { [ -x "$InstallDir/versions/$cv/bin/python" ] || [ -f "$InstallDir/versions/$cv/Scripts/python.exe" ]; }; then provisioned=1; fi
 fi
 if [ "$provisioned" = 1 ] && [ "$deployed" = "$current" ]; then exit 0; fi
-
-# OPT-IN GATE: drift exists, so we'd normally reconcile -- but only when this
-# project has explicitly opted THIS plugin in. COPILOT_PROJECT_DIR is the
-# session's project checkout, injected by the CLI at session start; fall back
-# to cwd if unset.
-ProjectDir="${COPILOT_PROJECT_DIR:-$(pwd)}"
-optInFile="$ProjectDir/.copilot-extensions/config.yaml"
-optInKey="background_reconcile_agent-ssh"
-optedIn=0
-if [ -f "$optInFile" ] && grep -qE "^[[:space:]]*${optInKey}:[[:space:]]*true[[:space:]]*\$" "$optInFile" 2>/dev/null; then
-  optedIn=1
-fi
-if [ "$optedIn" -ne 1 ]; then
-  echo "[agent-ssh] runtime $deployed -> $current; background reconcile SKIPPED (no opt-in -- add '${optInKey}: true' to $optInFile to enable)" >&2
-  exit 0
-fi
 
 init="$pluginDir/scripts/init.sh"
 [ -f "$init" ] || exit 0

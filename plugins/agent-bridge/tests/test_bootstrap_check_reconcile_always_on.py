@@ -1,25 +1,18 @@
-"""Guard: bootstrap-check's background reconcile spawn requires an explicit,
-checked-in, per-plugin opt-in (priority hardening: copilot-extensions
-daemons/hooks were observed flooding a shared machine's process table --
-every session start, in every checked-out project, independently
-version-checking and potentially spawning a background installer process
-tree).
-
-Fanned out from the agent-bridge reference implementation/pilot
+"""Guard: bootstrap-check's background reconcile no longer gates on a
+per-plugin opt-in (agent-bridge-unified-zdd-cutover Phase 0). The opt-in
+existed because a raw reconcile could race a live daemon/session; now that
+agent-bridge's own update path is always-ZDD (spawn passive -> health-gate ->
+flip -> drain -> retire, safe to run unattended), that justification is
+gone -- the gate was removed rather than kept as a redundant consent
+checkbox. This is the reference implementation
 (tools/check-bootstrap-sync.py's ``versioned-venv/agent-bridge-reference``
-family). This plugin's bootstrap-check is byte-identical across its
-``versioned-venv/psscriptroot`` family (or, for agent-mcp, coincidentally
-identical text despite being classified separately) -- so is this test file,
-verbatim, across every member; only the plugin under test differs, resolved
-from this file's own location.
+singleton family) -- sibling plugins made the same change separately.
 
 These are file-shape assertions over the hook scripts (matching this repo's
-existing convention, e.g. test_install_ps1_supervisor_cwd.py) plus two real
-executions of the bash counterpart against an isolated fake plugin/install
-dir, proving the spawn is suppressed without the opt-in and proceeds with it.
-Unlike agent-bridge, this family has no reconcile-status.json observability,
-so "proceeded" is verified via the synchronous pre-spawn stderr message
-rather than a status file.
+existing convention, e.g. test_install_ps1_supervisor_cwd.py) plus real
+executions of the bash counterpart (available on the Linux CI runner)
+proving a version drift now reconciles unconditionally, with the existing
+reconcile-status.json observability still recording the attempt.
 """
 
 from __future__ import annotations
@@ -28,19 +21,14 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
 
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
-_PLUGIN_NAME = _PLUGIN_ROOT.name
 _PS1 = _PLUGIN_ROOT / "scripts" / "bootstrap-check.ps1"
 _SH = _PLUGIN_ROOT / "scripts" / "bootstrap-check.sh"
-# The shared template embeds the DYNAMIC $name variable in its opt-in key
-# (resolved from plugin.json at runtime), not this plugin's literal name --
-# so the static file-shape check looks for the variable form, while the
-# runtime behavior tests below use the resolved literal key.
-_OPT_IN_KEY = f"background_reconcile_{_PLUGIN_NAME}"
 # A bare shutil.which("bash") can resolve to a Windows App Execution Alias
 # stub or the classic `C:\Windows\System32\bash.exe` WSL launcher (both
 # invoke an actual WSL distro rather than running this script in the
@@ -68,64 +56,33 @@ def test_hook_scripts_exist():
     assert _SH.is_file()
 
 
-def test_ps1_gates_before_spawn():
+def test_ps1_has_no_opt_in_gate():
     text = _PS1.read_text(encoding="utf-8")
-    gate_at = text.index("OPT-IN GATE")
-    spawn_candidates = [
-        i
-        for i in (
-            text.find("Start-Process -FilePath 'conhost.exe'"),
-        )
-        if i != -1
-    ]
-    assert spawn_candidates, "no reconcile spawn site found in " + str(_PS1)
-    assert gate_at < min(spawn_candidates), "the opt-in check must precede the reconcile spawn"
-    assert "background_reconcile_$name" in text
-    assert ".copilot-extensions\\config.yaml" in text
+    assert "optInKey" not in text
+    assert "optedIn" not in text
+    assert "background reconcile SKIPPED" not in text
 
 
-def test_sh_gates_before_spawn():
+def test_sh_has_no_opt_in_gate():
     text = _SH.read_text(encoding="utf-8")
-    gate_at = text.index("OPT-IN GATE")
-    spawn_candidates = [
-        i
-        for i in (
-            text.find('nohup bash "${target[@]}"'),
-            text.find('nohup bash "$init"'),
-        )
-        if i != -1
-    ]
-    assert spawn_candidates, "no reconcile spawn site found in " + str(_SH)
-    assert gate_at < min(spawn_candidates), "the opt-in check must precede the reconcile spawn"
-    assert "background_reconcile_${name}" in text
-    assert ".copilot-extensions/config.yaml" in text
+    assert "optInKey" not in text
+    assert "optedIn" not in text
+    assert "background reconcile SKIPPED" not in text
 
 
-def _make_fake_install(home: Path, name: str) -> Path:
-    """A minimally 'drifted' install dir: deployed=1.0.0, payload=1.0.1.
-
-    Multi-line, indented JSON: budget-guidance's bootstrap-check (the
-    'pythonless' family member) parses the manifest with a line-oriented awk
-    script, not a real JSON parser, so it needs 'source'/'version' on their
-    own lines the way a real ``ConvertTo-Json``/``json.dump(indent=...)``
-    deploy would produce -- a compact single-line dump silently fails to
-    match its patterns.
-    """
+def _make_fake_install(home: Path, name: str = "agent-bridge") -> Path:
+    """A minimally 'drifted' install dir: deployed=1.0.0, payload=1.0.1."""
     install_dir = home / f".{name}"
     install_dir.mkdir(parents=True, exist_ok=True)
     (install_dir / "deploy-manifest.json").write_text(
-        json.dumps(
-            {"source": {"version": "1.0.0", "path": str(install_dir / "src")}},
-            indent=2,
-        ),
-        encoding="utf-8",
+        json.dumps({"source": {"version": "1.0.0"}}), encoding="utf-8"
     )
-    # No .venv/venv/current-version -- provisioned stays False, so the drift
-    # branch is reached regardless of the version comparison.
+    # No .venv/venv/current-version -- runtimeHealthy stays False, so the
+    # drift branch is reached regardless of the version comparison.
     return install_dir
 
 
-def _make_fake_plugin(root: Path, name: str) -> Path:
+def _make_fake_plugin(root: Path, name: str = "agent-bridge") -> Path:
     """An isolated copy of the plugin dir shape bootstrap-check.sh expects,
     with a harmless stub installer so a spawned reconcile does no real work
     (never invoke the REAL install.sh from a test -- it does a live install)."""
@@ -148,48 +105,28 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
     no-op unless Python is installed via the Store) removed from PATH -- it
     can shadow the real interpreter ahead of it, which would make bash's
     ``command -v python3`` resolve to a dud and silently short-circuit this
-    hook before it ever reaches the gate under test."""
+    hook before it ever reaches the code under test."""
     env = dict(os.environ)
     if "PATH" in env:
         parts = env["PATH"].split(os.pathsep)
-        env["PATH"] = os.pathsep.join(p for p in parts if "WindowsApps" not in p)
+        env["PATH"] = os.pathsep.join(
+            p for p in parts if "WindowsApps" not in p
+        )
     env.update(overrides)
     return env
 
 
 @pytest.mark.skipif(_BASH is None, reason="bash not available")
-def test_sh_skips_spawn_without_opt_in(tmp_path):
+def test_sh_reconciles_without_any_opt_in_config(tmp_path):
+    """No .copilot-extensions/config.yaml at all -- reconcile must still
+    proceed unconditionally, and the existing reconcile-status.json
+    observability must still record the attempt."""
     home = tmp_path / "home"
     home.mkdir()
     project = tmp_path / "project"
     project.mkdir()
-    plugin_dir = _make_fake_plugin(tmp_path, _PLUGIN_NAME)
-    _make_fake_install(home, _PLUGIN_NAME)
-
-    env = _clean_env({"HOME": str(home), "COPILOT_PROJECT_DIR": str(project)})
-
-    result = subprocess.run(
-        [_BASH, str(plugin_dir / "scripts" / "bootstrap-check.sh")],
-        cwd=str(project),
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    assert "SKIPPED" in result.stderr, result.stderr
-
-
-@pytest.mark.skipif(_BASH is None, reason="bash not available")
-def test_sh_proceeds_with_opt_in(tmp_path):
-    home = tmp_path / "home"
-    home.mkdir()
-    project = tmp_path / "project"
-    (project / ".copilot-extensions").mkdir(parents=True)
-    (project / ".copilot-extensions" / "config.yaml").write_text(
-        f"{_OPT_IN_KEY}: true\n", encoding="utf-8"
-    )
-    plugin_dir = _make_fake_plugin(tmp_path, _PLUGIN_NAME)
-    _make_fake_install(home, _PLUGIN_NAME)
+    plugin_dir = _make_fake_plugin(tmp_path)
+    _make_fake_install(home)
 
     env = _clean_env({"HOME": str(home), "COPILOT_PROJECT_DIR": str(project)})
 
@@ -202,7 +139,47 @@ def test_sh_proceeds_with_opt_in(tmp_path):
         timeout=30,
     )
     assert "SKIPPED" not in result.stderr, result.stderr
-    assert "reconciling in background" in result.stderr, result.stderr
+    status_file = home / ".agent-bridge" / "reconcile-status.json"
+    # The background reconcile is async (nohup ... &); give it a moment.
+    for _ in range(50):
+        if status_file.exists():
+            break
+        time.sleep(0.1)
+    assert status_file.exists(), "a reconcile attempt should be recorded unconditionally"
+
+
+@pytest.mark.skipif(_BASH is None, reason="bash not available")
+def test_sh_reconciles_even_with_stale_opt_in_key_present(tmp_path):
+    """A leftover `background_reconcile_agent-bridge: false` from before this
+    gate's removal must not resurrect the old skip behavior -- the key is
+    now inert."""
+    home = tmp_path / "home"
+    home.mkdir()
+    project = tmp_path / "project"
+    (project / ".copilot-extensions").mkdir(parents=True)
+    (project / ".copilot-extensions" / "config.yaml").write_text(
+        "background_reconcile_agent-bridge: false\n", encoding="utf-8"
+    )
+    plugin_dir = _make_fake_plugin(tmp_path)
+    _make_fake_install(home)
+
+    env = _clean_env({"HOME": str(home), "COPILOT_PROJECT_DIR": str(project)})
+
+    result = subprocess.run(
+        [_BASH, str(plugin_dir / "scripts" / "bootstrap-check.sh")],
+        cwd=str(project),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert "SKIPPED" not in result.stderr, result.stderr
+    status_file = home / ".agent-bridge" / "reconcile-status.json"
+    for _ in range(50):
+        if status_file.exists():
+            break
+        time.sleep(0.1)
+    assert status_file.exists(), "a reconcile attempt should be recorded unconditionally"
 
 
 if __name__ == "__main__":

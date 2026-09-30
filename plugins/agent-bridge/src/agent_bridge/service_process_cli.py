@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import shutil
@@ -39,20 +40,60 @@ def _powershell_host() -> str:
 
 
 def _print_reconcile_status() -> None:
-    """Surface the last session-start auto-reconcile attempt, if recorded."""
+    """Surface background-reconcile staleness/observability.
+
+    Background reconcile is unconditional now (no per-project opt-in --
+    agent-bridge-unified-zdd-cutover Phase 0: the opt-in existed only because
+    a raw reconcile could race a live daemon/session, and the daemon's own
+    update path is always-ZDD, so that justification is gone). What remains
+    worth surfacing is *staleness*: how long since the last recorded
+    reconcile attempt, so an operator never has to reconstruct that from a
+    raw log file.
+    """
     core = _core()
+    print("  Background reconcile: enabled (always-on; no per-project opt-in required)")
     status_path = os.path.join(core._INSTALL_DIR, "reconcile-status.json")
     try:
         with open(status_path, encoding="utf-8") as fh:
             st = json.load(fh)
     except (OSError, ValueError):
+        print("  Last auto-reconcile: none recorded yet")
         return
     at = st.get("at", "?")
     frm = st.get("from", "?")
     to = st.get("to", "?")
     log = st.get("log", os.path.join(core._INSTALL_DIR, "reconcile.log"))
-    print(f"  Last auto-reconcile: {at}  {frm} -> {to}")
+    age_str = _format_reconcile_age(at)
+    if age_str:
+        print(f"  Last auto-reconcile: {age_str} ({at})  {frm} -> {to}")
+    else:
+        print(f"  Last auto-reconcile: {at}  {frm} -> {to}")
     print(f"    log: {log}")
+
+
+def _format_reconcile_age(at: str) -> str | None:
+    """Render an ISO-8601 UTC timestamp (``YYYY-MM-DDTHH:MM:SSZ``) as a
+    human "N days/hours ago" string, or ``None`` if it can't be parsed."""
+    try:
+        recorded = datetime.datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=datetime.timezone.utc
+        )
+    except (ValueError, TypeError):
+        return None
+    delta = datetime.datetime.now(datetime.timezone.utc) - recorded
+    total_seconds = delta.total_seconds()
+    if total_seconds < 0:
+        return "just now"
+    days = int(total_seconds // 86400)
+    if days >= 1:
+        return f"{days} day{'s' if days != 1 else ''} ago"
+    hours = int(total_seconds // 3600)
+    if hours >= 1:
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    minutes = int(total_seconds // 60)
+    if minutes >= 1:
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    return "just now"
 
 
 def _reconcile_service_marker(pid: int, version: str | None) -> None:

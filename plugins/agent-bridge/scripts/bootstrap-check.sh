@@ -14,15 +14,18 @@
 # installer's output to ~/.<name>/reconcile.log so a failed auto-update is
 # diagnosable.
 #
-# OPT-IN GATE (reference implementation -- fanned out to sibling plugins, see
-# tools/check-bootstrap-sync.py FAMILIES): gated the same way as the .ps1
-# counterpart -- requires a checked-in
-# <project>/.copilot-extensions/config.yaml with a top-level
-# `background_reconcile_<plugin-name>: true` line, e.g.
-# `background_reconcile_agent-bridge: true` (per-plugin, not a single blanket
-# flag; plain regex match, no yaml parser -- this hook has no python/venv
-# yet). No opt-in -> no background spawn. Deliberate behavior change:
-# previously every session silently self-healed drift.
+# NO OPT-IN GATE (agent-bridge-unified-zdd-cutover Phase 0): background
+# reconcile used to require a checked-in
+# <project>/.copilot-extensions/config.yaml with a top-level, per-project
+# opt-in flag, because a raw reconcile
+# could race a live daemon/session. Now that agent-bridge's own update path
+# is always-ZDD (spawn passive -> health-gate -> flip -> drain -> retire,
+# safe to run unattended), that justification is gone; the gate was removed
+# rather than kept as a redundant consent checkbox. Frequency/trigger stays
+# deliberately bounded -- still only once per session start, only on a real
+# version drift. Staleness stays observable via `agent-bridge service
+# status`, which now reports days-since-last-reconcile (see
+# _print_reconcile_status in service_process_cli.py).
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PluginDir="$(cd "$ScriptDir/.." && pwd)"
 session_start_json_emitted=0
@@ -63,22 +66,6 @@ fi
 # few (agent-bridge); accept EITHER so this early-exit actually fires instead of
 # re-launching the installer on every session start.
 if { [ -e "$InstallDir/.venv" ] || [ -e "$InstallDir/venv" ]; } && [ "$deployed" = "$current" ]; then exit 0; fi
-
-# OPT-IN GATE: drift exists, so we'd normally reconcile -- but only when the
-# current project has explicitly opted THIS plugin in (per-plugin, not a
-# single blanket flag). COPILOT_PROJECT_DIR is the session's project
-# checkout, injected by the CLI at session start; fall back to cwd if unset.
-ProjectDir="${COPILOT_PROJECT_DIR:-$(pwd)}"
-optInFile="$ProjectDir/.copilot-extensions/config.yaml"
-optInKey="background_reconcile_${name}"
-optedIn=0
-if [ -f "$optInFile" ] && grep -qE "^[[:space:]]*${optInKey}:[[:space:]]*true[[:space:]]*\$" "$optInFile" 2>/dev/null; then
-  optedIn=1
-fi
-if [ "$optedIn" -ne 1 ]; then
-  echo "[$name] runtime $deployed -> $current; background reconcile SKIPPED (no opt-in -- add '${optInKey}: true' to $optInFile to enable)" >&2
-  exit 0
-fi
 
 if [ -f "$PluginDir/scripts/init.sh" ]; then
   target=("$PluginDir/scripts/init.sh")
