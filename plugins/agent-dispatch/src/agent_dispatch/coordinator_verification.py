@@ -95,12 +95,13 @@ def register_verification_routes(
     def verify_submitted(task_id: str, body: VerifySubmittedBody | None = None) -> dict:
         try:
             if body is not None and body.evaluator_ref is not None:
-                queue.opt_in_submitted_verification(
+                _task, request = queue.opt_in_submitted_verification(
                     task_id,
                     evaluator_ref=body.evaluator_ref,
                     actor="backfill",
                 )
-            request = queue.request_submitted_verification(task_id, trigger="backfill")
+            else:
+                request = queue.request_submitted_verification(task_id, trigger="backfill")
             return {"task_id": task_id, "queued": True, "request_id": request.id}
         except TaskError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc

@@ -18,6 +18,9 @@ def _core():
     return _resolve_cli_module()
 
 
+_DETACHED_CLI_ARGS: argparse.Namespace | None = None
+
+
 def _run_resolution_step(step: Any, *, cwd: str | None = None) -> dict:
     """Execute one non-advisory :class:`ResolutionStep` in the caller's worktree.
 
@@ -100,6 +103,24 @@ def _spawn_detached_waiter(spec: Any) -> dict:
         python=windowless_python(python),
     )
     env = dict(os.environ)
+    cli_args = _DETACHED_CLI_ARGS
+    if cli_args is not None:
+        if getattr(cli_args, "shared", False):
+            shared_url = os.environ.get("AGENT_DISPATCH_SHARED_URL")
+            if shared_url:
+                env["AGENT_DISPATCH_URL"] = shared_url
+            if os.environ.get("AGENT_DISPATCH_SHARED_TOKEN"):
+                env["AGENT_DISPATCH_TOKEN"] = os.environ["AGENT_DISPATCH_SHARED_TOKEN"]
+            if os.environ.get("AGENT_DISPATCH_SHARED_CONTROL_TOKEN"):
+                env["AGENT_DISPATCH_CONTROL_TOKEN"] = os.environ[
+                    "AGENT_DISPATCH_SHARED_CONTROL_TOKEN"
+                ]
+        elif getattr(cli_args, "url", None):
+            env["AGENT_DISPATCH_URL"] = str(cli_args.url)
+        if getattr(cli_args, "token", None):
+            env["AGENT_DISPATCH_TOKEN"] = str(cli_args.token)
+        if getattr(cli_args, "control_token", None):
+            env["AGENT_DISPATCH_CONTROL_TOKEN"] = str(cli_args.control_token)
     env.update(windowless_python_env(python))
     proc = subprocess.Popen(  # noqa: S603 -- fixed argv (interpreter + our own module)
         argv,
@@ -203,7 +224,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
             from . import hibernation_claims
 
             reason = f"hibernating: {' '.join(spec.command)}"
-            claim = hibernation_claims.add_hibernation_claim(spec.task_id, note=reason)
             worker_id = None
             try:
                 with _core()._client(args) as c:
@@ -217,9 +237,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     {
                         "detached": False,
                         "error": "could not resolve the owning worker for suspend",
-                        "claim": claim,
+                        "claim": None,
                     }
                 )
+            claim = hibernation_claims.add_hibernation_claim(spec.task_id, note=reason)
             try:
                 with _core()._client(args) as c:
                     prepared = c.prepare_run_waiter(
@@ -230,7 +251,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
                         command=list(spec.command),
                     )
             except Exception as exc:  # noqa: BLE001
-                rollback = {"error": str(exc)}
+                rollback = (
+                    _rollback_detached_wait(args, spec, suspended)
+                    if suspended and "status" in suspended
+                    else {"error": str(exc), "claim_released": hibernation_claims.release_hibernation_claim(spec.task_id)}
+                )
             else:
                 suspended = {
                     "status": "suspended",
@@ -257,7 +282,27 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     "error": "could not prepare the detached waiter transactionally",
                 }
             )
-        handle = _core()._spawn_detached_waiter(spec)
+        try:
+            globals()["_DETACHED_CLI_ARGS"] = args
+            handle = _core()._spawn_detached_waiter(spec)
+        except Exception as exc:  # noqa: BLE001
+            if suspended and suspended.get("claim") is not None:
+                rollback = _rollback_detached_wait(args, spec, suspended)
+            else:
+                rollback = {"error": str(exc)}
+            return _core()._emit(
+                {
+                    "detached": False,
+                    "resume_worktree": spec.resume_worktree,
+                    "command": list(spec.command),
+                    "suspended": suspended,
+                    "waiter": waiter,
+                    "rollback": rollback,
+                    "error": f"could not spawn detached waiter: {exc}",
+                }
+            )
+        finally:
+            globals()["_DETACHED_CLI_ARGS"] = None
         return _core()._emit(
             {
                 "detached": True,

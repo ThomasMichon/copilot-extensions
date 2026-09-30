@@ -8,6 +8,7 @@ from collections.abc import Callable
 
 from .events import EventBus
 from .queue import TaskError, TaskQueue
+from .producers.evaluator import MAX_SCRIPT_EVALUATOR_TIMEOUT
 from .verification import evaluate_submitted_task
 
 log = logging.getLogger(__name__)
@@ -22,7 +23,7 @@ async def drain_verification_requests(
     interval: float = 0.25,
     max_attempts: int = 8,
     retry_base: float = 1.0,
-    delivery_lease: float = 60.0,
+    delivery_lease: float = MAX_SCRIPT_EVALUATOR_TIMEOUT + 60.0,
     is_active: WakeActive | None = None,
     signal: asyncio.Queue[None] | None = None,
 ) -> None:
@@ -60,15 +61,20 @@ async def drain_verification_requests(
             await _wait(interval if has_pending else interval)
             continue
         try:
-            await asyncio.to_thread(
+            report = await asyncio.to_thread(
                 evaluate_submitted_task,
                 queue,
                 request.task_id,
                 bus=bus,
                 trigger=request.trigger,
             )
-            delivered = True
-            error = None
+            reason = str(report.get("reason") or "")
+            delivered = bool(
+                report.get("applied") is not None
+                or reason == "submitted verification evaluated"
+                or reason == "task changed while verification was in flight; retry required"
+            )
+            error = None if delivered else reason or "verification did not reach a terminal report"
         except TaskError as exc:
             log.info("verification request %s became stale: %s", request.id, exc)
             delivered = True

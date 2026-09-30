@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 
-from .queue_common import Task, _check_expected_status, _task_transition_spec
+from .queue_common import Task, VerificationRequest, _check_expected_status, _task_transition_spec
 from .queue_records import TaskError
 
 
@@ -29,7 +29,7 @@ class QueueCompletionReviewMixin:
         expected_status: str | None = None,
         expected_generation: int | None = None,
         now: float | None = None,
-    ) -> Task:
+    ) -> tuple[Task, VerificationRequest]:
         """Corroborate a completion claim and close the task for good.
 
         The true lifecycle terminal beyond a provisional ``submitted`` --
@@ -77,14 +77,17 @@ class QueueCompletionReviewMixin:
                     f"submitted verification backfill only applies to 'submitted' tasks, not {task.status!r}"
                 )
             if task.require_verification and task.evaluator_ref == evaluator_ref:
+                row = self._insert_verification_request(conn, task_id, task.generation, trigger, ts)
+                result = self._fetch(conn, task_id)
                 conn.execute("COMMIT")
-                return task
+                self._notify_verification()
+                return result, VerificationRequest._from_row(row)  # type: ignore[return-value]
             conn.execute(
                 "UPDATE tasks SET require_verification = 1, evaluator_ref = ?, updated_at = ?"
                 " WHERE id = ?",
                 (evaluator_ref, ts, task_id),
             )
-            self._insert_verification_request(conn, task_id, task.generation, trigger, ts)
+            row = self._insert_verification_request(conn, task_id, task.generation, trigger, ts)
             self._audit(
                 conn,
                 task_id,
@@ -101,7 +104,7 @@ class QueueCompletionReviewMixin:
             result = self._fetch(conn, task_id)
             conn.execute("COMMIT")
         self._notify_verification()
-        return result  # type: ignore[return-value]
+        return result, VerificationRequest._from_row(row)  # type: ignore[return-value]
 
     def reopen_completed(
         self,
