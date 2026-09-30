@@ -80,10 +80,89 @@ def _path(codespace: str, tenant: str) -> Path | None:
     return LAUNCHES_DIR / codespace / f"{label}-{digest}.json"
 
 
+def _owned_unwritable_by_others(path: Path) -> bool:
+    """The runtime dir holding ``launches/``: a real directory of this user's
+    that nobody else can write (else another user could swap ``launches/``
+    between the checks and the open). Its group/other write bits are dropped
+    if set; it's never recreated or loosened."""
+    import stat
+
+    try:
+        st = path.lstat()
+    except OSError:
+        return False
+    if not stat.S_ISDIR(st.st_mode) or path.is_symlink():
+        return False
+    if getattr(st, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
+        return False
+    if os.name == "nt":
+        return True
+    if st.st_uid != os.getuid():
+        return False
+    if st.st_mode & 0o022:
+        try:
+            path.chmod(stat.S_IMODE(st.st_mode) & ~0o022)
+        except OSError:
+            return False
+    return True
+
+
+def _private(path: Path, *, create: bool) -> bool:
+    """Whether ``path`` is a real directory only this user controls (made so
+    first when ``create``): never a symlink or reparse point; on POSIX owned
+    by this user and not writable by anyone else. Another local user who could
+    write here could plant a record that injects flags into a later resume."""
+    if create:
+        try:
+            path.mkdir(mode=0o700, exist_ok=True)
+        except OSError:
+            return False
+    try:
+        st = path.lstat()
+    except OSError:
+        return False
+    import stat
+
+    if not stat.S_ISDIR(st.st_mode) or path.is_symlink():
+        return False
+    if getattr(st, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
+        return False
+    if os.name == "nt":
+        return True
+    if st.st_uid != os.getuid():
+        return False
+    if st.st_mode & 0o077:
+        try:
+            path.chmod(0o700)
+        except OSError:
+            return False
+    return True
+
+
+def _record_dir(path: Path, *, create: bool) -> bool:
+    """The runtime dir safe, then ``launches/`` and ``launches/<codespace>/``
+    private: every ancestor another user could otherwise change under us."""
+    return (
+        _owned_unwritable_by_others(path.parent.parent.parent)
+        and _private(path.parent.parent, create=create)
+        and _private(path.parent, create=create)
+    )
+
+
 def _load(path: Path | None) -> dict:
-    """The record, only if its whole payload is well-formed (else ``{}``)."""
-    if path is None:
+    """The record, only if its whole payload is well-formed and its directories
+    are private (else ``{}``)."""
+    if path is None or not path.parent.is_dir() or not _record_dir(path, create=False):
         return {}
+    if path.is_symlink():
+        return {}
+    if os.name != "nt":
+        try:
+            st = path.lstat()
+        except OSError:
+            return {}
+        if st.st_uid != os.getuid() or st.st_mode & 0o022:
+            return {}  # not written by this user's own remember()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -135,7 +214,9 @@ def remember(
     # permission flags included, into a later resume), atomic, like lease.py.
     tmp = path.with_name(f".{path.name}.tmp-{uuid.uuid4().hex}")
     try:
-        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path.parent.parent.parent.mkdir(parents=True, exist_ok=True)  # the runtime dir
+        if not _record_dir(path, create=True):
+            return
         fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         with os.fdopen(fd, "wb") as fh:
             fh.write(json.dumps(data, indent=2).encode("utf-8"))

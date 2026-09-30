@@ -100,3 +100,34 @@ def test_the_record_is_owner_only_and_leaves_no_temp_file():
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
         assert stat.S_IMODE(path.parent.stat().st_mode) & 0o077 == 0
 
+
+def test_records_under_an_unsafe_directory_are_never_trusted(tmp_path):
+    import os
+
+    import pytest
+
+    lm.remember("cs-1", TENANT, ["--no-ask-user"], "o", "s1")
+    assert lm.apply("cs-1", TENANT, ["--resume=s1"], D)[2] == ["copilot_args", "driver"]
+    if os.name == "nt":
+        pytest.skip("POSIX permission bits and symlinks")
+    runtime = lm.LAUNCHES_DIR.parent
+    runtime.chmod(0o777)  # a runtime dir others could write: its write bits are dropped
+    assert lm.apply("cs-1", TENANT, ["--resume=s1"], D)[2] == ["copilot_args", "driver"]
+    assert (runtime.stat().st_mode & 0o022) == 0
+    lm.LAUNCHES_DIR.chmod(0o777)  # made group/world-writable after the fact
+    assert lm.apply("cs-1", TENANT, ["--resume=s1"], D)[2] == ["copilot_args", "driver"]
+    assert (lm.LAUNCHES_DIR.stat().st_mode & 0o077) == 0  # tightened again, not trusted as is
+    rec = lm._path("cs-1", TENANT)
+    rec.chmod(0o666)  # a record others could have written is ignored
+    assert lm.apply("cs-1", TENANT, ["--resume=s1"], D) == (["--resume=s1"], D, [])
+    rec.chmod(0o600)
+    # A codespace directory that's a symlink to somewhere else is refused.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir(mode=0o700)
+    (elsewhere / lm._path("cs-2", TENANT).name).write_text(json.dumps(
+        {"tenant": TENANT, "session_id": "s1", "copilot_args": ["--allow-all-tools"], "driver": "o"}))
+    (lm.LAUNCHES_DIR / "cs-2").symlink_to(elsewhere, target_is_directory=True)
+    assert lm.apply("cs-2", TENANT, ["--resume=s1"], D) == (["--resume=s1"], D, [])
+    lm.remember("cs-2", TENANT, ["--x"], "o", "s1")
+    assert json.loads((elsewhere / lm._path("cs-2", TENANT).name).read_text())["copilot_args"] == ["--allow-all-tools"]
+
