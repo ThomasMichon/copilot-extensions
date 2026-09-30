@@ -46,16 +46,9 @@ class QueueRunWaitersMixin:
             if task.owner_session_id is None:
                 conn.execute("COMMIT")
                 raise TaskError("run waiter preparation requires an owner_session_id")
-            previous = conn.execute(
-                "SELECT MAX(generation) AS generation FROM run_waiters WHERE task_id = ?",
-                (task_id,),
-            ).fetchone()
+            previous = conn.execute("SELECT MAX(generation) AS generation FROM run_waiters WHERE task_id = ?", (task_id,)).fetchone()
             generation = int(previous["generation"] or 0) + 1
-            prior_row = self._select_waiter_row(
-                conn,
-                task_id,
-                states=("preparing", "active"),
-            )
+            prior_row = self._select_waiter_row(conn, task_id, states=("preparing", "active"))
             conn.execute(
                 "UPDATE run_waiters SET state = 'superseded', updated_at = ?,"
                 " retired_reason = COALESCE(retired_reason, 'superseded by a new waiter')"
@@ -65,13 +58,7 @@ class QueueRunWaitersMixin:
             if prior_row is not None:
                 prior = self._run_waiter_from_row(prior_row)
                 if self._run_waiter_matches_task(prior, task):
-                    self._enqueue_run_waiter_wake(
-                        conn,
-                        prior,
-                        message="",
-                        sender=CLAIM_RELEASE_SENDER,
-                        ts=ts,
-                    )
+                    self._enqueue_run_waiter_wake(conn, prior, message="", sender=CLAIM_RELEASE_SENDER, ts=ts)
                     release_enqueued = True
             if task.status == Status.STARTED:
                 conn.execute(
