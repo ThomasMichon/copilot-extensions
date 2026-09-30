@@ -338,6 +338,79 @@ async def test_probe_failure_neither_renews_nor_releases(store):
     assert "cli:a" in owner.get_hold("cs-1").tenants
 
 
+# -- SessionForwards: a bridge forward that is up but not serving ------------------
+
+def _bridge_probe(answer, calls):
+    async def probe(codespace, port):
+        calls.append((codespace, port))
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    return probe
+
+
+async def _forward_with(store, *, mux_verdict, bridge_answer):
+    daemons, calls = {}, []
+    forwards = sf.SessionForwards(
+        _daemon_factory(daemons), _probe({"wt-a": mux_verdict}, []),
+        bridge_probe=_bridge_probe(bridge_answer, calls),
+    )
+    owner.hold("cs-1", "cli:a", daemon_port=41234, mux_session="wt-a", confirmed=True)
+    await forwards.reconcile({h.codespace: h for h in owner.list_holds()})
+    first = daemons[("cs-1", 41234)]
+    await forwards.probe(owner.list_holds())
+    await forwards.reconcile({h.codespace: h for h in owner.list_holds()})
+    return forwards, daemons, first, calls
+
+
+async def test_a_bridge_forward_that_stopped_serving_is_rebuilt(store):
+    forwards, daemons, first, calls = await _forward_with(store, mux_verdict=True, bridge_answer=False)
+    assert calls == [("cs-1", 41234)]
+    assert first.stops == 1  # its ssh was alive but forwarded nothing
+    rebuilt = daemons[("cs-1", 41234)]
+    assert rebuilt is not first and rebuilt.is_alive
+    assert forwards.active() == {"cs-1": 41234}
+
+
+async def test_a_serving_or_unknown_bridge_forward_is_left_alone(store):
+    for answer in (True, None, RuntimeError("transport")):
+        owner.release("cs-1", "cli:a")
+        _forwards, daemons, first, _calls = await _forward_with(store, mux_verdict=True, bridge_answer=answer)
+        assert first.stops == 0 and daemons[("cs-1", 41234)] is first
+
+
+async def test_the_bridge_is_only_probed_while_a_session_provably_runs(store):
+    # Stopped CodeSpace or unknown session: never connect (it would wake the box).
+    for verdict in (False, None):
+        owner.release("cs-1", "cli:a")
+        _forwards, _daemons, first, calls = await _forward_with(store, mux_verdict=verdict, bridge_answer=False)
+        assert calls == []
+        # (A gone session releases its tenant, which stops its forward: that's
+        # the existing release path, not a rebuild.)
+        assert first.stops == (1 if verdict is False else 0)
+
+
+async def test_remote_bridge_probe_maps_curl_exits(monkeypatch):
+    results = iter([0, 7, 28, 22, 99])
+
+    class Manager:
+        async def disconnect(self, codespace):
+            pass
+
+    async def opener(codespace):
+        return Manager()
+
+    async def fake_exec(manager, codespace, cmd, **kw):
+        assert "127.0.0.1:41234/api/v1/live-sessions" in cmd
+        return types.SimpleNamespace(exit_code=next(results))
+
+    monkeypatch.setattr(sf, "exec_with_retry", fake_exec)
+    probe = sf.make_remote_bridge_probe(open_manager=opener)
+    got = [await probe("cs-1", 41234) for _ in range(5)]
+    # 0 serves; 7/28 don't connect/answer (rebuild); 22 = HTTP refusal (forwarding fine); other = unknown.
+    assert got == [True, False, False, None, None]
+
+
 async def test_owner_reconcile_releases_gone_session_and_its_forward(store):
     daemons = {}
     forwards = sf.SessionForwards(_daemon_factory(daemons), _probe({"wt-a": False}, []))

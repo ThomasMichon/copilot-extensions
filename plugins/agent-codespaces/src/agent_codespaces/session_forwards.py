@@ -16,13 +16,17 @@ needs two reverse forwards to outlive the launcher: the credential relay
 * it renews or releases **session tenants** from the Owner's own venue probe
   (does the recorded mux session still exist? is the CodeSpace still
   Available?) instead of any bridge/session state -- the Owner stays
-  transport-only, and never wakes a CodeSpace that was stopped.
+  transport-only, and never wakes a CodeSpace that was stopped; and
+* on that same probe, while the session is running, it checks the bridge
+  forward actually serves (an authenticated round trip from the CodeSpace) and
+  rebuilds one whose ssh process is alive but no longer forwards.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -59,6 +63,11 @@ LocalForwardFactory = Callable[[str, int, int], RelayChannel]
 # (neither renew nor release; the tenant TTL is the backstop).
 SessionProbe = Callable[[str, list[str]], Awaitable[dict[str, bool | None]]]
 
+# Check a CodeSpace's host-bridge forward end to end:
+# ``(codespace, codespace_listen_port) -> True`` (it serves), ``False`` (it
+# doesn't connect or answer: rebuild it), or ``None`` (unknown: leave it).
+BridgeProbe = Callable[[str, int], Awaitable["bool | None"]]
+
 # How often (seconds) the Owner probes a CodeSpace's session tenants.
 DEFAULT_SESSION_PROBE_INTERVAL = 120.0
 
@@ -75,8 +84,10 @@ class SessionForwards:
         probe_interval: float = DEFAULT_SESSION_PROBE_INTERVAL,
         clock: Callable[[], float] = time.monotonic,
         local_factory: LocalForwardFactory | None = None,
+        bridge_probe: BridgeProbe | None = None,
     ) -> None:
         self._daemon_factory = daemon_factory
+        self._bridge_probe = bridge_probe
         self._local_factory = local_factory
         self._probe = session_probe
         self._ttl = ttl
@@ -202,6 +213,10 @@ class SessionForwards:
             except Exception as exc:
                 log.warning("Connection Owner: session probe for %s failed: %s", hold.codespace, exc)
                 continue
+            if any(v is True for v in verdicts.values()):
+                # Only while a session provably runs there: the CodeSpace is
+                # Available, so this never wakes a stopped box.
+                await self._check_bridge(hold.codespace)
             for mux, tenants in by_mux.items():
                 verdict = verdicts.get(mux)
                 for tenant, confirmed, generation in tenants:
@@ -214,6 +229,30 @@ class SessionForwards:
                             mux, hold.codespace, tenant,
                         )
                         release(hold.codespace, tenant, ttl=self._ttl, generation=generation)
+
+    async def _check_bridge(self, codespace: str) -> None:
+        """Rebuild ``codespace``'s bridge forward when it no longer serves.
+
+        Its ssh process can outlive the forward (a transport reset that leaves
+        the connection up): the channel still reads alive, so nothing restarts
+        it, and every session there loses the bridge. Dropping it here lets the
+        next reconcile build a fresh one."""
+        entry = self._channels.get(codespace)
+        if self._bridge_probe is None or entry is None or not entry[1].is_alive:
+            return
+        port, channel = entry
+        try:
+            serving = await self._bridge_probe(codespace, port)
+        except Exception as exc:
+            log.debug("bridge probe on %s failed: %s", codespace, exc)
+            return
+        if serving is False and self._channels.get(codespace) is entry:
+            log.warning(
+                "Connection Owner: the bridge forward for %s is up but not serving; rebuilding it",
+                codespace,
+            )
+            self._channels.pop(codespace, None)
+            await channel.stop()
 
     async def shutdown(self) -> None:
         """Stop every daemon and extra forward (Owner shutdown). The registry is untouched."""
@@ -334,6 +373,61 @@ def make_local_forward_factory(
     return factory
 
 
+async def _open_codespace(codespace: str) -> Any:
+    """A connected ``ssh_manager.ConnectionManager`` for one short probe."""
+    from ssh_manager import ConnectionManager
+
+    from .codespace_config import CodespaceSource
+    from .lifecycle import account_for_codespace
+
+    manager = ConnectionManager()
+    source = CodespaceSource(codespace, account=account_for_codespace(codespace))
+    await manager.ensure_connected(codespace, source, [])
+    return manager
+
+
+#: ``curl`` exits meaning the forward didn't connect or answer (7 couldn't
+#: connect, 28 timed out, 52 empty reply, 56 receive failure). An HTTP error
+#: (22, e.g. a refused token) means it forwards fine: rebuilding won't help.
+_FORWARD_BROKEN_EXITS = frozenset({7, 28, 52, 56})
+
+
+def make_remote_bridge_probe(
+    *, open_manager: Callable[[str], Awaitable[Any]] | None = None,
+) -> BridgeProbe:
+    """Build the Owner's default :data:`BridgeProbe`: the launch's own
+    authenticated probe (``venue_copilot.bridge_probe_script``), run from the
+    CodeSpace over a short-lived exec channel. Called only for a CodeSpace
+    whose session the mux probe just saw running, so it never wakes one."""
+    opener = open_manager or _open_codespace
+
+    async def probe(codespace: str, port: int) -> bool | None:
+        from venue_copilot import bridge_probe_script
+
+        manager = None
+        try:
+            manager = await opener(codespace)
+            result = await exec_with_retry(
+                manager, codespace, "bash -lc " + shlex.quote(bridge_probe_script(port)),
+                timeout=30.0, attempts=2,
+            )
+            code = getattr(result, "exit_code", None)
+            if code == 0:
+                return True
+            return False if code in _FORWARD_BROKEN_EXITS else None
+        except Exception as exc:
+            log.debug("bridge probe on %s failed: %s", codespace, exc)
+            return None
+        finally:
+            if manager is not None:
+                try:
+                    await manager.disconnect(codespace)
+                except Exception:
+                    pass
+
+    return probe
+
+
 def make_remote_mux_probe(
     *,
     list_codespaces: Callable[[], Any] | None = None,
@@ -355,18 +449,7 @@ def make_remote_mux_probe(
 
         list_codespaces = _list
 
-    async def _default_open(codespace: str) -> Any:
-        from ssh_manager import ConnectionManager
-
-        from .codespace_config import CodespaceSource
-        from .lifecycle import account_for_codespace
-
-        manager = ConnectionManager()
-        source = CodespaceSource(codespace, account=account_for_codespace(codespace))
-        await manager.ensure_connected(codespace, source, [])
-        return manager
-
-    opener = open_manager or _default_open
+    opener = open_manager or _open_codespace
 
     async def probe(codespace: str, mux_sessions: list[str]) -> dict[str, bool | None]:
         import shlex

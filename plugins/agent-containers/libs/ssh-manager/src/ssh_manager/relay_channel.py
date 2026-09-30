@@ -61,11 +61,16 @@ class SupervisedRelayForward:
     ``host_port_resolver`` is supplied the host-side target is re-resolved live
     on each (re-)establish so it follows a relay that rebinds after a daemon
     restart, while the CodeSpace-listen ``relay_port`` stays stable (#855).
-    ``ExitOnForwardFailure`` is
-    deliberately omitted so a transient remote bind collision does not make ssh
-    exit. Because OpenSSH can then leave the process alive after a failed
-    remote ``-R`` bind, ``establish()`` watches stderr during the readiness
-    window and retries if that failure is observed.
+    ``ExitOnForwardFailure=yes`` is set: the channel carries only this ``-R``,
+    so a failed remote bind leaves nothing worth keeping. Without it OpenSSH
+    stays connected with no forward -- silently, since a CodeSpace's
+    ``LogLevel=quiet`` hides the warning and the bind reply often arrives after
+    the readiness window -- and the far side has no relay until something
+    kills the process. With it, ssh exits and the monitor re-establishes the
+    forward with backoff, including once a stale far-side listener (a previous
+    connection the CodeSpace hasn't reaped yet) lets go of the port.
+    ``establish()`` still watches stderr during the readiness window and
+    retries a bind failure it sees there.
     """
 
     def __init__(
@@ -165,6 +170,7 @@ class SupervisedRelayForward:
                 None,
                 None,
                 reverse_forwards=[spec],
+                exit_on_forward_failure=True,
             )
             log.debug(
                 "Establishing credential relay reverse-forward "
@@ -202,12 +208,17 @@ class SupervisedRelayForward:
                 return
 
             stderr = settled.stderr or await self._drain_stderr(proc)
-            last_err = stderr or "ssh exited"
+            last_err = stderr or last_err or "ssh exited"
+            exited_early = proc.returncode is not None
             await self._kill(proc)
             if self._proc is proc:
                 self._proc = None
 
-            if settled.remote_forward_failed and attempt < _ESTABLISH_ATTEMPTS:
+            # This channel runs with ExitOnForwardFailure, so an early exit is
+            # almost always the remote bind failing -- and under a CodeSpace's
+            # LogLevel=quiet ssh may exit without saying so. Retry either way.
+            if (settled.remote_forward_failed or exited_early) \
+                    and attempt < _ESTABLISH_ATTEMPTS:
                 delay = min(
                     self._backoff_max,
                     max(2.0, self._backoff_base * (2 ** (attempt - 1))),

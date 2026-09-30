@@ -490,6 +490,52 @@ which turn a bounded review loop into an unbounded one:
   neither this repo's contribution flow nor the automated reviewer's own
   directives actually require.
 
+### Give the reviewer your context, not just your diff
+
+Self-reviewing against REVIEW.md (above) closes the gap where both roles
+apply the *same* rubric. It does not close a different, asymmetric gap: you
+approach your own PR with whatever subject-matter context you built up while
+authoring it — prior attempts, constraints that ruled out an obvious-looking
+alternative, limitations accepted on purpose; Copilot's review approaches
+every PR **fresh**, with no access to the session or conversation that
+produced it. The PR description and whatever docs it links are the *entire*
+context-transfer channel — not a formality, and not something the reviewer
+can query you about mid-review the way a human reviewer might in a comment
+thread.
+
+When your diff makes a deliberate choice a reviewer might reasonably
+question — you tried the more obvious approach and rejected it, a known
+constraint (a platform limitation, an existing invariant, a prior incident)
+shaped the design, or you're accepting a limitation on purpose rather than by
+oversight — **say so explicitly in the PR description**, and cite the
+doc/effort/vision/issue that grounds it. An unstated rationale is
+indistinguishable, from the reviewer's side, from a gap nobody considered —
+and costs a review round to resolve either way, the same round a single
+sentence in the PR body would have pre-empted.
+
+**This context transfer is bounded by the same public-repo rules as
+everything else you publish here.** This repo is public, and "Contribution
+boundary" above already requires proprietary organization/person-specific
+context to stay in a private control repo. If the actual motivating
+constraint (an incident, a private downstream system, an internal process)
+isn't itself public, cite a **public, identifier-neutral** grounding artifact
+instead — a public doc/effort/vision/issue in *this* repo describing the
+constraint in general terms — rather than describing the private specifics
+in the PR body to satisfy this section. When no such public grounding exists,
+state the constraint generically (what class of limitation, not which private
+incident or system) rather than omit it or leak it.
+
+**This is context supply, not a request for deference.** Explaining a
+decision does not pre-empt the reviewer's right to disagree with it, and
+should not shrink the scrutiny applied to it — particularly for
+vision-conformance and security-relevant choices, where the reviewer's
+outside, fresh-eyes perspective is exactly the check this repo relies on
+Copilot review to provide, precisely because proximity to one's own
+implementation is a common source of blind spots the author cannot
+self-review away. State your reasoning so the reviewer is evaluating your
+*actual* tradeoff instead of a guessed-at one; expect it to still be
+challenged on the merits.
+
 ### Parent trackers stay open across partial slices
 
 Use `Refs` or `Part of` for an issue that a PR only advances. Do not put a

@@ -8,6 +8,7 @@ semantics, TTL-based tenant reclamation, pin stickiness, and persistence.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 import types
@@ -371,6 +372,52 @@ async def test_run_owner_daemon_survives_a_failing_cycle(store):
     assert fake.shutdowns == 1
 
 
+async def test_an_owner_that_finds_another_owners_beacon_stands_down(store, monkeypatch):
+    """Two Owners (a beacon that lapsed during a slow cycle let a second one
+    start) must not both keep forwards into every CodeSpace: the one that finds
+    the other's fresh beacon yields, and leaves that beacon in place."""
+    fake = _FakeOwner(stop_after=1000)
+    other = {"pid": 424242, "host": "h", "interval": 15.0, "active": [], "bridge_forwards": []}
+
+    async def reconcile():
+        fake.reconciles += 1
+        if fake.reconciles == 2:  # another Owner took the machine over meanwhile
+            owner.LIVE_FILE.write_text(json.dumps({**other, "heartbeat_at": time.time()}), "utf-8")
+
+    fake.reconcile = reconcile
+    monkeypatch.setattr(owner, "_pid_alive", lambda pid: None)  # as on Windows: freshness only
+    await asyncio.wait_for(owner.run_owner_daemon(fake, interval=0), timeout=5)
+    assert fake.reconciles == 2 and fake.shutdowns == 1
+    assert json.loads(owner.LIVE_FILE.read_text("utf-8"))["pid"] == 424242  # not erased
+
+
+async def test_a_cycle_that_blocks_the_loop_keeps_the_beacon_fresh(store):
+    """A cycle can block the event loop for minutes (SSH probes, synchronous
+    gh calls). The beacon must not age meanwhile, or the next tenant spawns a
+    second Owner."""
+    fake = _FakeOwner(stop_after=1000)
+    seen = {}
+
+    async def reconcile():
+        fake.reconciles += 1
+        if fake.reconciles == 1:
+            before = json.loads(owner.LIVE_FILE.read_text("utf-8"))["heartbeat_at"]
+            time.sleep(2.5)  # blocks the loop, as a synchronous gh call would
+            seen["advanced"] = json.loads(owner.LIVE_FILE.read_text("utf-8"))["heartbeat_at"] - before
+            fake.stop_event.set()
+
+    fake.reconcile = reconcile
+    await asyncio.wait_for(owner.run_owner_daemon(fake, interval=0, stop_event=fake.stop_event), timeout=10)
+    assert seen["advanced"] >= 1.0  # refreshed by the keeper thread while the loop was blocked
+    assert not owner.LIVE_FILE.exists()
+
+
+def test_clear_liveness_leaves_another_owners_beacon(store):
+    owner.LIVE_FILE.write_text(json.dumps({"pid": 424242, "heartbeat_at": time.time()}), "utf-8")
+    owner._clear_liveness()
+    assert owner.LIVE_FILE.exists()
+
+
 async def test_run_owner_daemon_idle_shutdown_exits_with_no_holds(store):
     """No holds at all -> the loop exits itself once idle past the threshold,
     without anything setting stop_event externally (agent-bridge-cli-mode-
@@ -731,3 +778,9 @@ async def test_await_owner_relay_becomes_served(store):
     result = await owner.await_owner_relay("cs-a", timeout=1.0, poll=0.01)
     await task
     assert result is True
+
+
+def test_the_beacon_says_what_this_owner_heals(store):
+    """Consumers (a board deciding whether to wait before relaunching) read it."""
+    owner._write_liveness(15.0)
+    assert set(json.loads(owner.LIVE_FILE.read_text("utf-8"))["heals"]) >= {"bridge-serving", "single-owner"}

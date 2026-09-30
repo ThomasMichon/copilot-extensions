@@ -97,7 +97,9 @@ async def test_argv_shape_reverse_only(monkeypatch) -> None:
     assert "-R" in argv
     assert "51234:127.0.0.1:51234" in argv
     assert "-L" not in argv
-    assert "ExitOnForwardFailure=yes" not in argv
+    # The channel carries only the relay, so a failed remote bind ends ssh and
+    # the monitor re-establishes it (a quiet CodeSpace hides the warning).
+    assert "ExitOnForwardFailure=yes" in argv
     assert "ServerAliveInterval=30" in argv
     joined = " ".join(argv)
     assert "ControlMaster" not in joined
@@ -282,9 +284,44 @@ async def test_establish_failure_raises_with_stderr(monkeypatch) -> None:
         fake_create,
     )
     relay = SupervisedRelayForward(_config(), 51234, ready_timeout=0.01)
+    sleeps: list[float] = []
+
+    async def sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(relay, "_sleep", sleep)
 
     with pytest.raises(ConnectionError, match="remote bind denied"):
         await relay.establish()
+    # An early exit is retried (it is almost always the bind), within the bound.
+    assert len(sleeps) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_quiet_early_exit_is_retried_then_succeeds(monkeypatch) -> None:
+    # Under LogLevel=quiet, ExitOnForwardFailure can end ssh with no marker at all.
+    procs = [_FakeProcess(returncode=255), _FakeProcess()]
+    calls: list[tuple[str, ...]] = []
+    sleeps: list[float] = []
+
+    async def fake_create(*args, **_kwargs):
+        calls.append(args)
+        return procs[len(calls) - 1]
+
+    async def sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(
+        "ssh_manager.relay_channel.asyncio.create_subprocess_exec",
+        fake_create,
+    )
+    relay = SupervisedRelayForward(_config(), 51234, ready_timeout=0.01, backoff_base=0.1)
+    monkeypatch.setattr(relay, "_sleep", sleep)
+
+    await relay.establish()
+    await relay.stop()
+
+    assert len(calls) == 2 and sleeps == [2.0]
 
 
 @pytest.mark.asyncio

@@ -57,6 +57,37 @@ class TestBuildForwardArgs:
         # ExitOnForwardFailure is dropped when a -R relay is present so a relay
         # bind collision cannot tear down the -L endpoint.
         assert "ExitOnForwardFailure=yes" not in " ".join(args)
+        # ...and says so explicitly, so a generated -F config file can't turn it back on.
+        assert "ExitOnForwardFailure=no" in " ".join(args)
+
+    def test_a_reverse_only_relay_channel_can_exit_on_a_failed_bind(self) -> None:
+        # A channel that carries only the relay has nothing to protect: a
+        # failed remote bind must end ssh so its supervisor re-establishes it,
+        # whatever the host's own ssh options say.
+        cfg = SSHConfig(host_alias="box", extra_options={"ExitOnForwardFailure": "no", "LogLevel": "quiet"})
+        args = build_forward_ssh_args(
+            cfg, None, None, reverse_forwards=["51234:127.0.0.1:51234"],
+            exit_on_forward_failure=True,
+        )
+        joined = " ".join(args)
+        assert "ExitOnForwardFailure=yes" in joined
+        assert "ExitOnForwardFailure=no" not in joined
+        assert args.index("-R") < args.index("box")
+        # The default for a reverse-only argv is unchanged.
+        assert "ExitOnForwardFailure=yes" not in " ".join(
+            build_forward_ssh_args(cfg, None, None, reverse_forwards=["51234:127.0.0.1:51234"])
+        )
+
+    def test_no_option_map_can_override_the_per_shape_choice(self) -> None:
+        cfg = SSHConfig(host_alias="box", config_file="/tmp/generated_config",
+                        extra_options={"ExitOnForwardFailure": "yes"})
+        args = build_forward_ssh_args(
+            cfg, 5, 6, reverse_forwards=["51234:127.0.0.1:51234"],
+            extra_options={"exitonforwardfailure": "yes"},
+        )
+        values = [a for a in args if a.lower().startswith("exitonforwardfailure=")]
+        assert values == ["ExitOnForwardFailure=no"]  # exactly one, explicit, before the target
+        assert args.index("ExitOnForwardFailure=no") < args.index("box")
 
 
 class TestPickFreePort:

@@ -509,6 +509,7 @@ def _write_liveness(
             "interval": float(interval),
             "active": sorted(active or ()),
             "bridge_forwards": sorted(bridge_forwards or ()),
+            "heals": ["bridge-serving", "single-owner"],  # what this Owner repairs itself
         }
         tmp = LIVE_FILE.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload), encoding="utf-8")
@@ -518,9 +519,10 @@ def _write_liveness(
 
 
 def _clear_liveness() -> None:
-    """Remove the daemon liveness beacon (best-effort; never raises)."""
+    """Remove this daemon's own liveness beacon (never another Owner's; never raises)."""
     try:
-        LIVE_FILE.unlink(missing_ok=True)
+        if (current := read_liveness()) is None or current.pid == os.getpid():
+            LIVE_FILE.unlink(missing_ok=True)
     except Exception as exc:
         log.debug("Connection Owner liveness beacon clear failed: %s", exc)
 
@@ -637,6 +639,7 @@ def claim_owner_singleton(interval: float) -> bool:
             return False
         _write_liveness(interval)
         return True
+
 
 
 def should_defer_to_owner(
@@ -918,24 +921,20 @@ async def run_owner_daemon(
         return
     stop = stop_event if stop_event is not None else asyncio.Event()
     idle_since: float | None = None
+    from .owner_beacon import BeaconKeeper  # it builds on this module
+    loop = asyncio.get_running_loop()
+    (keeper := BeaconKeeper(owner, interval, lambda: loop.call_soon_threadsafe(stop.set))).start()
     try:
-        _write_liveness(
-            interval,
-            active=owner.active_codespaces(),
-            bridge_forwards=_bridge_forwards_of(owner),
-        )
+        keeper.beat()
         while not stop.is_set():
             try:
                 await owner.reconcile()
             except Exception as exc:  # a bad cycle must not kill the daemon
                 log.warning("Connection Owner reconcile cycle failed: %s", exc)
-            # Refresh the beacon each cycle, publishing which CodeSpaces now have
-            # a live relay channel so tenants can defer to them.
-            _write_liveness(
-                interval,
-                active=owner.active_codespaces(),
-                bridge_forwards=_bridge_forwards_of(owner),
-            )
+            # Refresh the beacon (live channels, so tenants can defer to them), or
+            # stand down if another Owner took the machine over (BeaconKeeper).
+            if keeper.yielded or not keeper.beat():
+                break
             if idle_shutdown_after is not None:
                 if list_holds():
                     idle_since = None
@@ -955,6 +954,7 @@ async def run_owner_daemon(
             except (TimeoutError, asyncio.TimeoutError):
                 pass
     finally:
+        keeper.stop()
         _clear_liveness()
         await owner.shutdown()
 

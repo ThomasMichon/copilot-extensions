@@ -13,7 +13,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
@@ -214,7 +214,9 @@ CREATE TABLE IF NOT EXISTS live_messages (
     delivery TEXT NOT NULL DEFAULT 'queue',
     idempotency_key TEXT,
     created_at REAL NOT NULL,
-    delivered_at REAL
+    delivered_at REAL,
+    claimed_at REAL,
+    outcome TEXT
 );
 
 CREATE TABLE IF NOT EXISTS worktree_ownership (

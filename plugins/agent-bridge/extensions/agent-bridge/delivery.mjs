@@ -131,3 +131,22 @@ export function deliveryPlan(msg) {
   }
   return { abortFirst: false, options };
 }
+
+// Session controls (polled from /controls, never delivered as a prompt).
+export const SESSION_MODES = ["interactive", "plan", "autopilot"];
+
+// What to do for one control row: {action: "set-mode", mode} for a mode change
+// the CLI knows, else {action: "skip", reason} (acked so it doesn't loop).
+export function controlPlan(msg) {
+  if (msg?.kind !== "control:set-mode") {
+    return { action: "skip", reason: `unknown control ${msg?.kind}` };
+  }
+  const mode = String(msg.body ?? "").trim();
+  if (!SESSION_MODES.includes(mode)) return { action: "skip", reason: `unknown mode ${mode}` };
+  return { action: "set-mode", mode };
+}
+
+// Whether session.rpc.mode.set's result means the mode took effect.
+export function modeApplied(result) {
+  return !!result && result.modeApplied !== false;
+}
