@@ -25,10 +25,12 @@ from agent_dispatch.worktree_status_relay import WorktreeStatusRelayStore
 from tests._helpers import TEST_REPO
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
+CONTROL_TOKEN = "control-token"
+
 
 @pytest.fixture
 def app(tmp_path):
-    return create_app(TaskQueue(tmp_path / "tasks.db"))
+    return create_app(TaskQueue(tmp_path / "tasks.db"), control_token=CONTROL_TOKEN)
 
 
 @pytest.fixture
@@ -38,6 +40,25 @@ def api(app):
 
 def _registration_machine() -> str:
     return remote_dispatch.local_machine() or "test-host"
+
+
+def _control_headers() -> dict[str, str]:
+    return {"Authorization": f"Bearer {CONTROL_TOKEN}"}
+
+
+def _register_event_emitter(api, *, reg_id: str = "emitter-review") -> str:
+    api.app.state.queue.register_registration(
+        "emitter",
+        {
+            "id": "review-emitter",
+            "repo": TEST_REPO,
+            "command": ["echo", "tick"],
+            "interval_seconds": 60,
+        },
+        reg_id=reg_id,
+        machine=_registration_machine(),
+    )
+    return reg_id
 
 
 def test_resource_reservation_api_elects_binds_and_owner_releases(api):
@@ -674,9 +695,11 @@ def test_complete_over_http_retriggers_whole_goal_verification(api, tmp_path):
     backfill = api.post(f"/tasks/{tid}/verify-submitted")
     assert backfill.status_code == 200
     assert backfill.json()["applied"][0]["decision"] == "noop"
+    sender = _register_event_emitter(api)
     noted = api.post(
         f"/tasks/{tid}/event-note",
-        json={"sender": "review-emitter", "note": "merged"},
+        json={"sender": sender, "note": "merged"},
+        headers=_control_headers(),
     )
     assert noted.status_code == 200
     assert api.get(f"/tasks/{tid}").json()["status"] == Status.COMPLETED
@@ -712,8 +735,6 @@ def test_complete_over_http_triggers_immediate_whole_goal_verification(api, tmp_
 
 
 def test_event_note_wakes_and_supersedes_active_run_waiter(api, monkeypatch):
-    from agent_dispatch import bridge, hibernation_claims
-
     tid = api.post("/tasks", json={"title": "x", "repo": TEST_REPO}).json()["id"]
     api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
     api.post(
@@ -735,28 +756,19 @@ def test_event_note_wakes_and_supersedes_active_run_waiter(api, monkeypatch):
         },
     )
     assert registered.status_code == 200
-    wakes = []
-    releases = []
-    monkeypatch.setattr(
-        bridge,
-        "send_nudge",
-        lambda worktree, message, **_k: wakes.append((worktree, message)) or True,
-    )
-    monkeypatch.setattr(
-        hibernation_claims,
-        "release_hibernation_claim_for_worktree",
-        lambda task_id, worktree_id, **_k: releases.append((task_id, worktree_id)) or {"released": True},
-    )
-
+    sender = _register_event_emitter(api)
     r = api.post(
         f"/tasks/{tid}/event-note",
-        json={"sender": "review-emitter", "note": "merged upstream"},
+        json={"sender": sender, "note": "merged upstream"},
+        headers=_control_headers(),
     )
 
     assert r.status_code == 200
     assert api.app.state.queue.get_active_run_waiter(tid) is None
-    assert wakes and wakes[0][0] == "m/wt-1"
-    assert releases == [(tid, "m/wt-1")]
+    wakes = api.app.state.queue.list_run_waiter_wakes(tid)
+    assert len(wakes) == 1
+    assert wakes[0].resume_worktree == "m/wt-1"
+    assert wakes[0].status == "pending"
 
 
 def test_event_note_nudges_running_owner(api, monkeypatch):
@@ -775,13 +787,32 @@ def test_event_note_nudges_running_owner(api, monkeypatch):
         lambda owner, task_id, message, **_k: nudges.append((owner, task_id, message)) or True,
     )
 
+    sender = _register_event_emitter(api)
     r = api.post(
         f"/tasks/{tid}/event-note",
-        json={"sender": "review-emitter", "note": "new review comment"},
+        json={"sender": sender, "note": "new review comment"},
+        headers=_control_headers(),
     )
 
     assert r.status_code == 200
     assert nudges and nudges[0][0] == "w1"
+
+
+def test_event_note_rejects_untrusted_sender(api):
+    tid = api.post("/tasks", json={"title": "x", "repo": TEST_REPO}).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(
+        f"/tasks/{tid}/start",
+        json={"worker_id": "w1", "owner_session_id": "session-1"},
+    )
+
+    r = api.post(
+        f"/tasks/{tid}/event-note",
+        json={"sender": "review-emitter", "note": "forged"},
+        headers=_control_headers(),
+    )
+
+    assert r.status_code == 403
 
 
 def test_complete_over_http_releases_handoff_claim(api, monkeypatch):

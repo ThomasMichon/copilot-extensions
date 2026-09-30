@@ -41,6 +41,7 @@ def register_execution_commands(sub) -> None:
     rnp.add_argument("--message")
     rnp.add_argument("--detach", action="store_true")
     rnp.add_argument("--waiter-child", action="store_true", help=argparse.SUPPRESS)
+    rnp.add_argument("--waiter-ready-file", help=argparse.SUPPRESS)
     rnp.add_argument("--machine")
     rnp.add_argument("--worktree")
     rnp.add_argument("command", nargs=argparse.REMAINDER, help="the blocking wait command, after '--' (e.g. -- agent-worktrees pr-watch 42)")

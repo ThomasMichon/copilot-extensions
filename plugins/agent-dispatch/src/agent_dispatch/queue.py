@@ -50,6 +50,7 @@ from .queue_common import (  # noqa: F401 -- re-exported for existing call sites
     ClaimOutcome,
     CompletionOutcome,
     CreationOutcome,
+    RunWaiterWakeOperation,
     ResultTooLargeError,
     ResultValidationError,
     StructuredResult,
@@ -437,6 +438,8 @@ class TaskQueue(
             "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
             "  task_id TEXT NOT NULL,"
             "  generation INTEGER NOT NULL,"
+            "  task_generation INTEGER NOT NULL DEFAULT 0,"
+            "  owner_session_id TEXT,"
             "  pid INTEGER NOT NULL,"
             "  host TEXT,"
             "  start_token TEXT,"
@@ -448,6 +451,13 @@ class TaskQueue(
             "  updated_at REAL NOT NULL"
             ")"
             )
+            run_waiter_columns = {r["name"] for r in conn.execute("PRAGMA table_info(run_waiters)")}
+            if "task_generation" not in run_waiter_columns:
+                conn.execute(
+                    "ALTER TABLE run_waiters ADD COLUMN task_generation INTEGER NOT NULL DEFAULT 0"
+                )
+            if "owner_session_id" not in run_waiter_columns:
+                conn.execute("ALTER TABLE run_waiters ADD COLUMN owner_session_id TEXT")
             conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_run_waiters_task "
             "ON run_waiters(task_id, generation)"
@@ -455,6 +465,35 @@ class TaskQueue(
             conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_run_waiters_state "
             "ON run_waiters(state, created_at)")
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS run_waiter_wakes ("
+                "  id TEXT PRIMARY KEY,"
+                "  task_id TEXT NOT NULL,"
+                "  waiter_generation INTEGER NOT NULL,"
+                "  task_generation INTEGER NOT NULL,"
+                "  owner_session_id TEXT,"
+                "  resume_worktree TEXT NOT NULL,"
+                "  sender TEXT NOT NULL,"
+                "  message TEXT NOT NULL,"
+                "  status TEXT NOT NULL DEFAULT 'pending',"
+                "  attempts INTEGER NOT NULL DEFAULT 0,"
+                "  not_before REAL NOT NULL DEFAULT 0,"
+                "  created_at REAL NOT NULL,"
+                "  updated_at REAL NOT NULL,"
+                "  delivered_at REAL,"
+                "  last_error TEXT,"
+                "  delivery_token TEXT,"
+                "  delivery_expires_at REAL"
+                ")"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_run_waiter_wakes_due "
+                "ON run_waiter_wakes(status, not_before, created_at)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_run_waiter_wakes_task "
+                "ON run_waiter_wakes(task_id, waiter_generation)"
+            )
             # Durable wake outbox. A steer/resume transaction inserts the wake
             # row before commit; the coordinator loop claims and delivers it
             # later. The row id is also the downstream idempotency key, so a

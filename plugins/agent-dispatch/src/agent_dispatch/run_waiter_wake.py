@@ -1,0 +1,94 @@
+"""Durable delivery loop for detached-waiter worktree wakes."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+from collections.abc import Callable
+
+from .queue import TaskError, TaskQueue
+
+DeliverWake = Callable[[str, str, str], bool]
+ReleaseClaim = Callable[[str, str], object | None]
+WakeActive = Callable[[], bool]
+log = logging.getLogger(__name__)
+
+
+def _default_deliver(worktree: str, message: str, sender: str) -> bool:
+    from . import bridge
+
+    return bridge.send_nudge(worktree, message, sender=sender)
+
+
+async def drain_run_waiter_wakes(
+    queue: TaskQueue,
+    *,
+    interval: float = 0.25,
+    deliver: DeliverWake = _default_deliver,
+    release_claim: ReleaseClaim | None = None,
+    max_attempts: int = 8,
+    retry_base: float = 1.0,
+    is_active: WakeActive | None = None,
+    delivery_lease: float = 60.0,
+) -> None:
+    """Drain pending detached-waiter wake deliveries until cancelled."""
+    while True:
+        if is_active is not None:
+            try:
+                active = await asyncio.to_thread(is_active)
+            except Exception:
+                log.warning("run-waiter wake active-route check failed", exc_info=True)
+                active = False
+            if not active:
+                await asyncio.sleep(interval)
+                continue
+        await asyncio.to_thread(
+            queue.recover_inflight_run_waiter_wakes,
+            lease_seconds=delivery_lease,
+        )
+        wake = await asyncio.to_thread(
+            queue.claim_due_run_waiter_wake,
+            lease_seconds=delivery_lease,
+        )
+        if wake is None:
+            has_pending = await asyncio.to_thread(queue.has_pending_run_waiter_wakes)
+            await asyncio.sleep(interval if has_pending else max(interval, 5.0))
+            continue
+        try:
+            delivered = await asyncio.to_thread(
+                deliver,
+                wake.resume_worktree,
+                wake.message,
+                wake.sender,
+            )
+            delivery_error = None if delivered else "bridge delivery unavailable"
+        except Exception as exc:
+            log.warning("run-waiter wake delivery raised for %s", wake.id, exc_info=True)
+            delivered = False
+            delivery_error = f"wake delivery error: {type(exc).__name__}"
+        try:
+            result = await asyncio.to_thread(
+                queue.finish_run_waiter_wake,
+                wake.id,
+                wake.delivery_token or "",
+                delivered=delivered,
+                error=delivery_error,
+                max_attempts=max_attempts,
+                retry_base=retry_base,
+            )
+        except TaskError:
+            log.info("run-waiter wake delivery ownership changed for %s", wake.id)
+            continue
+        if delivered and result.status == "delivered" and release_claim is not None:
+            try:
+                await asyncio.to_thread(
+                    release_claim,
+                    wake.task_id,
+                    wake.resume_worktree,
+                )
+            except Exception:
+                log.warning(
+                    "run-waiter wake claim release failed for %s",
+                    wake.id,
+                    exc_info=True,
+                )

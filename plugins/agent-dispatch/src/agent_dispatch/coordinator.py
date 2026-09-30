@@ -204,7 +204,9 @@ def create_app(
     async def lifespan(_app: FastAPI):
         loop = asyncio.get_running_loop()
         bus.bind_loop(loop)
+        from . import hibernation_claims
         from .wake import drain_wake_outbox
+        from .run_waiter_wake import drain_run_waiter_wakes
 
         governance = LoopGovernance()
         wake_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
@@ -242,16 +244,26 @@ def create_app(
             if wake_interval > 0
             else None
         )
+        run_waiter_wake_task = (
+            asyncio.create_task(
+                drain_run_waiter_wakes(
+                    queue,
+                    interval=wake_interval,
+                    is_active=wake_is_active,
+                    release_claim=hibernation_claims.release_hibernation_claim_for_worktree,
+                )
+            )
+            if wake_interval > 0
+            else None
+        )
         async def _recover_run_waiters_once() -> None:
-            from . import bridge, companion, hibernation_claims
+            from . import companion
 
             counts = await asyncio.to_thread(
                 recover_run_waiters,
                 queue,
                 process_exists=companion._process_exists,
                 start_token_for_pid=companion.process_start_token,
-                wake_worktree=bridge.send_nudge,
-                release_claim=hibernation_claims.release_hibernation_claim_for_worktree,
             )
             if counts.get("recovered"):
                 log.warning(
@@ -675,6 +687,12 @@ def create_app(
                     wake_task.cancel()
                     try:
                         await wake_task
+                    except asyncio.CancelledError:
+                        pass
+                if run_waiter_wake_task is not None:
+                    run_waiter_wake_task.cancel()
+                    try:
+                        await run_waiter_wake_task
                     except asyncio.CancelledError:
                         pass
                 if self_retire_task is not None:

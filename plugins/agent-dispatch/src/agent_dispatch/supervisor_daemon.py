@@ -423,6 +423,11 @@ class SupervisorDaemon:
         regs = self.client.list_registrations(
             machine=self.machine, env=self.env, include_paused=False
         )
+        regs = [
+            r
+            for r in regs
+            if r.get("kind") != RegistrationKind.EVALUATOR
+        ]
         regs = [r for r in regs if r.get("id") not in self._published_declared_ids]
         merged = merge_registration_sources(regs, declared)
         diagnostics = (tuple(merged.deduplicated), tuple(merged.conflicts))

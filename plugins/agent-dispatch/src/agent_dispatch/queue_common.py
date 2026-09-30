@@ -344,6 +344,33 @@ class WakeOperation:
 
 
 @dataclass(frozen=True)
+class RunWaiterWakeOperation:
+    """A durable worktree wake queued by detached-waiter transitions."""
+
+    id: str
+    task_id: str
+    waiter_generation: int
+    task_generation: int
+    owner_session_id: str | None
+    resume_worktree: str
+    sender: str
+    message: str
+    status: str
+    attempts: int
+    not_before: float
+    created_at: float
+    updated_at: float
+    delivered_at: float | None = None
+    last_error: str | None = None
+    delivery_token: str | None = None
+    delivery_expires_at: float | None = None
+
+    @classmethod
+    def _from_row(cls, row: sqlite3.Row) -> RunWaiterWakeOperation:
+        return cls(**{field.name: row[field.name] for field in dataclasses.fields(cls)})
+
+
+@dataclass(frozen=True)
 class CompletionOutcome:
     """A submitted task plus the observable event caused by this invocation."""
 

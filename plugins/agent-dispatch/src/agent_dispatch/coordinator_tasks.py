@@ -901,6 +901,7 @@ def register_task_routes(
         app,
         queue,
         bus,
+        control_token=control_token,
         task_dict=_task_dict,
         event_task_dict=_event_task_dict,
     )

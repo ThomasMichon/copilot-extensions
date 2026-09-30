@@ -8,6 +8,8 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -96,7 +98,13 @@ def _spawn_detached_waiter(spec: Any) -> dict:
     from .procutil import detached_kwargs, windowless_python, windowless_python_env
 
     python = sys.executable
-    argv = hibernation.detached_run_argv(spec, python=windowless_python(python))
+    fd, ready_path = tempfile.mkstemp(prefix="agent-dispatch-run-waiter-", suffix=".json")
+    os.close(fd)
+    os.unlink(ready_path)
+    argv = hibernation.detached_run_argv(
+        dataclasses.replace(spec, waiter_ready_file=ready_path),
+        python=windowless_python(python),
+    )
     env = dict(os.environ)
     env.update(windowless_python_env(python))
     proc = subprocess.Popen(  # noqa: S603 -- fixed argv (interpreter + our own module)
@@ -107,7 +115,7 @@ def _spawn_detached_waiter(spec: Any) -> dict:
         stderr=subprocess.DEVNULL,
         **detached_kwargs(),
     )
-    return {"pid": proc.pid, "argv": argv}
+    return {"pid": proc.pid, "argv": argv, "ready_file": ready_path}
 
 
 def _register_run_waiter(args: argparse.Namespace, spec: Any, handle: dict, suspended: dict | None) -> dict | None:
@@ -130,6 +138,65 @@ def _register_run_waiter(args: argparse.Namespace, spec: Any, handle: dict, susp
             )
     except Exception as exc:  # noqa: BLE001 -- degraded, not fatal to the detach
         return {"error": str(exc), "pid": pid}
+
+
+def _arm_detached_waiter(ready_file: str | None, waiter: dict | None) -> None:
+    if not ready_file or not waiter or "generation" not in waiter:
+        return
+    Path(ready_file).write_text(
+        json.dumps({"generation": int(waiter["generation"])}),
+        encoding="utf-8",
+    )
+
+
+def _rollback_detached_wait(
+    args: argparse.Namespace,
+    spec: Any,
+    suspended: dict | None,
+) -> dict | None:
+    if not spec.task_id or not suspended or "status" not in suspended:
+        return None
+    worker_id = suspended.get("worker_id")
+    if not worker_id:
+        return None
+    from . import hibernation_claims
+
+    try:
+        with _core()._client(args) as c:
+            resumed = c.resume(
+                spec.task_id,
+                worker_id,
+                wake=False,
+                reuse_session=True,
+                expected_generation=suspended.get("generation"),
+                expected_owner_session_id=suspended.get("owner_session_id"),
+            )
+    except Exception as exc:  # noqa: BLE001 -- degraded rollback
+        return {"error": str(exc)}
+    claim = hibernation_claims.release_hibernation_claim(spec.task_id)
+    return {"status": resumed.get("status"), "claim_released": claim}
+
+
+def _consume_waiter_ready_file(path: str | None, *, timeout_seconds: float = 60.0) -> int | None:
+    if not path:
+        return None
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        file = Path(path)
+        if file.exists():
+            try:
+                payload = json.loads(file.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError):
+                return None
+            finally:
+                try:
+                    file.unlink()
+                except OSError:
+                    pass
+            generation = payload.get("generation")
+            return int(generation) if isinstance(generation, int) else None
+        time.sleep(0.1)
+    return None
 
 def _suspend_for_detached_wait(args: argparse.Namespace, spec: Any) -> dict | None:
     """Atomically suspend ``spec.task_id`` once its detached waiter is live, and
@@ -187,7 +254,13 @@ def _suspend_for_detached_wait(args: argparse.Namespace, spec: Any) -> dict | No
             task = c.suspend(spec.task_id, worker_id, reason=reason)
     except DispatchError as exc:
         return {"error": str(exc), "worker_id": worker_id, "claim": claim}
-    return {"status": task.get("status"), "worker_id": worker_id, "claim": claim}
+    return {
+        "status": task.get("status"),
+        "worker_id": worker_id,
+        "claim": claim,
+        "generation": task.get("generation"),
+        "owner_session_id": task.get("owner_session_id"),
+    }
 
 def _cmd_run(args: argparse.Namespace) -> int:
     """Hand a blocking wait to the layer (*hibernate-the-wait*): run ``-- <cmd>``
@@ -228,6 +301,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
         )
         suspended = _core()._suspend_for_detached_wait(args, spec)
         waiter = _core()._register_run_waiter(args, spec, handle, suspended)
+        rollback = None
+        if waiter and "generation" in waiter:
+            _arm_detached_waiter(handle.get("ready_file"), waiter)
+        elif spec.task_id and suspended and "status" in suspended:
+            rollback = _rollback_detached_wait(args, spec, suspended)
         return _core()._emit(
             {
                 "detached": True,
@@ -235,6 +313,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 "command": list(spec.command),
                 "suspended": suspended,
                 "waiter": waiter,
+                "rollback": rollback,
                 **handle,
             }
         )
@@ -248,33 +327,37 @@ def _cmd_run(args: argparse.Namespace) -> int:
             return 127
     if getattr(args, "waiter_child", False) and spec.task_id:
         from . import companion, hibernation_claims, remote_dispatch
-        from .hibernation import resume_message
-
-        returncode = runner(spec.command)
-        report = {
-            "command": list(spec.command),
-            "returncode": returncode,
-            "resume_worktree": spec.resume_worktree,
-            "message": resume_message(spec, returncode),
-            "resumed": None,
-        }
+        ready_generation = _consume_waiter_ready_file(getattr(args, "waiter_ready_file", None))
+        if ready_generation is None:
+            return _core()._emit(
+                {
+                    "command": list(spec.command),
+                    "returncode": 125,
+                    "resume_worktree": spec.resume_worktree,
+                    "message": "Detached waiter never received its durable registration fence.",
+                    "resumed": None,
+                    "waiter": {"accepted": False, "waiter": None},
+                    "claim_released": None,
+                }
+            )
+        report = run_and_resume(
+            dataclasses.replace(spec, resume_worktree=None),
+            runner=runner,
+            resumer=lambda *_a: True,
+        )
+        report["resume_worktree"] = spec.resume_worktree
         with _core()._client(args) as c:
             waiter = c.finish_run_waiter(
                 spec.task_id,
+                generation=ready_generation,
                 pid=os.getpid(),
                 host=remote_dispatch.local_machine(),
                 start_token=companion.process_start_token(os.getpid()),
+                message=str(report["message"]),
             )
         report["waiter"] = waiter
-        if waiter.get("accepted") and spec.resume_worktree:
-            report["resumed"] = bridge.send_nudge(
-                spec.resume_worktree,
-                report["message"],
-                sender="agent-dispatch-hibernate",
-            )
-            report["claim_released"] = hibernation_claims.release_hibernation_claim(spec.task_id)
-        else:
-            report["claim_released"] = None
+        report["resumed"] = None
+        report["claim_released"] = None
         return _core()._emit(report)
 
     report = run_and_resume(spec, runner=runner, resumer=bridge.send_nudge)

@@ -1046,6 +1046,22 @@ def test_reconcile_skips_unsupported_kind():
     assert launcher.launched == []
 
 
+def test_desired_filters_coordinator_owned_evaluators():
+    client = FakeClient(
+        [
+            _reg("lane"),
+            _reg("eval", kind="evaluator", spec={"repo": TEST_REPO, "evaluator": "eval.json"}),
+        ]
+    )
+    launcher = FakeLauncher()
+    d = _daemon(client, launcher)
+
+    desired = d._desired()
+
+    assert "lane" in desired
+    assert "eval" not in desired
+
+
 # -- serve / single-instance -------------------------------------------------
 
 

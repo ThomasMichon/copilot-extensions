@@ -14,6 +14,7 @@ class VerificationClientMixin:
             self._http.post(
                 f"/tasks/{task_id}/event-note",
                 json={"sender": sender, "note": note},
+                headers=self._control_headers(),
             )
         )
 
@@ -44,17 +45,21 @@ class VerificationClientMixin:
         self,
         task_id: str,
         *,
+        generation: int,
         pid: int,
         host: str | None,
         start_token: str | None,
+        message: str,
     ) -> dict:
         return self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/run-waiter/finish",
                 json={
+                    "generation": generation,
                     "pid": pid,
                     "host": host,
                     "start_token": start_token,
+                    "message": message,
                 },
             )
         )

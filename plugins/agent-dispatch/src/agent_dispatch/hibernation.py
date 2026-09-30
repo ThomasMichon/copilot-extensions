@@ -46,6 +46,7 @@ class RunSpec:
     message: str | None = None
     sender: str = "agent-dispatch-hibernate"
     waiter_child: bool = False
+    waiter_ready_file: str | None = None
 
 
 def resume_message(spec: RunSpec, returncode: int) -> str:
@@ -141,6 +142,8 @@ def detached_run_argv(
         argv += ["--task", spec.task_id]
     if spec.waiter_child:
         argv += ["--waiter-child"]
+    if spec.waiter_ready_file:
+        argv += ["--waiter-ready-file", spec.waiter_ready_file]
     if spec.message:
         argv += ["--message", spec.message]
     argv.append("--")
