@@ -226,7 +226,17 @@ The **Connection Owner** keeps the
 credential relay and the host-bridge forward alive while its mux session exists
 (checked from the host every couple of minutes, only after the
 launch confirmed the session; never by waking a stopped CodeSpace), up to a 24h
-cap, and both forwards follow a host bridge restart onto its new port. Observe and steer it through agent-bridge
+cap, and both forwards follow a host bridge restart onto its new port. On the same
+check it mirrors the running session's transcript to this host (whole lines, only
+what was appended) and pushes it into the agent-logger hub under
+`.codespaces-live/<name>` (its own namespace: the close-out capture below uses
+`.codespaces/<name>`), so the session's history is still readable here after a host
+or bridge restart. A push that fails, or lands only partly, is retried until
+it lands whole, across Owner restarts and even after the session ends or the
+box stops (it never contacts the box for that); an Owner with nothing else to
+hold stays up to an hour to retry it, and the next Owner start resumes it after
+that. `delete` removes a CodeSpace's local mirror once its hub copy is current,
+then or on a later retry (`AGENT_CODESPACES_TRANSCRIPT_MIRROR=0` turns this off). Observe and steer it through agent-bridge
 (`live-sessions resolve`, `result`, `send`, `ui`). A detached launch keeps the
 CodeSpace claim active; `--stop` settles it like any finished connection and
 deregisters the stopped session from the host bridge at once. When close-out

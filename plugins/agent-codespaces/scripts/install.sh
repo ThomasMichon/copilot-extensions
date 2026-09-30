@@ -285,6 +285,13 @@ SESSION_LIVENESS_PROBE_DIR="$PLUGIN_DIR/libs/session-liveness-probe"
 if [[ ! -f "$SESSION_LIVENESS_PROBE_DIR/pyproject.toml" ]]; then
     SESSION_LIVENESS_PROBE_DIR="$REPO_ROOT/libs/session-liveness-probe"
 fi
+# single-instance-lease dir (uv-editable canonical reference in a dev
+# checkout, real copy in a materialized release payload): plugin-vendored or
+# repo-root.
+SINGLE_INSTANCE_LEASE_DIR="$PLUGIN_DIR/libs/single-instance-lease"
+if [[ ! -f "$SINGLE_INSTANCE_LEASE_DIR/pyproject.toml" ]]; then
+    SINGLE_INSTANCE_LEASE_DIR="$REPO_ROOT/libs/single-instance-lease"
+fi
 
 DEPLOY_SOURCE_PATHS=("plugins/agent-codespaces/")
 INSTALLER_REL_PATH="plugins/agent-codespaces/scripts/install.sh"
@@ -440,7 +447,7 @@ PY
 }
 
 # uv pip install the vendored libs (ssh-manager, credential-relay, zdd,
-# venue-copilot, session-liveness-probe) then agent-codespaces into the given
+# venue-copilot, session-liveness-probe, single-instance-lease) then agent-codespaces into the given
 # venv python. Non-editable by default; deps
 # resolved from pyproject.toml. The vendored libs are force-reinstalled so a
 # local code change propagates even without a version bump (uv otherwise skips
@@ -478,6 +485,10 @@ _install_package_into() {
         _fail "session-liveness-probe source not found at $SESSION_LIVENESS_PROBE_DIR"
         return 1
     fi
+    if [[ ! -f "$SINGLE_INSTANCE_LEASE_DIR/pyproject.toml" ]]; then
+        _fail "single-instance-lease source not found at $SINGLE_INSTANCE_LEASE_DIR"
+        return 1
+    fi
     if [[ "$mode" == "--editable" ]]; then
         uv pip install --python "$py" --editable "$SSH_MGR_DIR" --quiet || {
             _fail "ssh-manager install failed"; return 1; }
@@ -491,6 +502,8 @@ _install_package_into() {
             _fail "venue-copilot install failed"; return 1; }
         uv pip install --python "$py" --editable "$SESSION_LIVENESS_PROBE_DIR" --quiet || {
             _fail "session-liveness-probe install failed"; return 1; }
+        uv pip install --python "$py" --editable "$SINGLE_INSTANCE_LEASE_DIR" --quiet || {
+            _fail "single-instance-lease install failed"; return 1; }
         uv pip install --python "$py" --editable "$PLUGIN_DIR" --quiet || {
             _fail "agent-codespaces install failed"; return 1; }
         return 0
@@ -507,6 +520,8 @@ _install_package_into() {
         _fail "venue-copilot install failed"; return 1; }
     uv pip install --python "$py" --reinstall-package agent-session-liveness-probe "$SESSION_LIVENESS_PROBE_DIR" --quiet || {
         _fail "session-liveness-probe install failed"; return 1; }
+    uv pip install --python "$py" --reinstall-package agent-single-instance-lease "$SINGLE_INSTANCE_LEASE_DIR" --quiet || {
+        _fail "single-instance-lease install failed"; return 1; }
     uv pip install --python "$py" --reinstall-package agent-codespaces "$PLUGIN_DIR" --quiet || {
         _fail "agent-codespaces install failed"; return 1; }
 }

@@ -25,6 +25,18 @@ def _account_source(codespace: str, gh_env: dict | None = None):
     return CodespaceSource(codespace, account=account)
 
 
+def _transcript_mirror():
+    """The Owner's transcript mirror, unless ``AGENT_CODESPACES_TRANSCRIPT_MIRROR=0``."""
+    import os
+
+    flag = os.environ.get("AGENT_CODESPACES_TRANSCRIPT_MIRROR", "").strip().lower()
+    if flag in {"0", "false", "no", "off"}:
+        return None
+    from .transcript_mirror import TranscriptMirror
+
+    return TranscriptMirror()
+
+
 def cmd_owner(args: argparse.Namespace) -> int:
     """Run the Connection Owner relay reconcile daemon (config-gated; default on).
 
@@ -121,6 +133,7 @@ def cmd_owner(args: argparse.Namespace) -> int:
             make_remote_mux_probe(),
             local_factory=make_local_forward_factory(config_source_cls=_account_source),
             bridge_probe=make_remote_bridge_probe(),
+            transcript_mirror=_transcript_mirror(),
         ),
     )
 

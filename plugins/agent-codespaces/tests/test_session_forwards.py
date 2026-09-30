@@ -12,6 +12,7 @@ import types
 import pytest
 from agent_codespaces import connection_owner as owner
 from agent_codespaces import session_forwards as sf
+from agent_codespaces import transcript_mirror as tm
 
 
 @pytest.fixture
@@ -336,6 +337,144 @@ async def test_probe_failure_neither_renews_nor_releases(store):
     forwards = sf.SessionForwards(_daemon_factory({}), boom)
     await forwards.probe(owner.list_holds())
     assert "cli:a" in owner.get_hold("cs-1").tenants
+
+
+async def _await_mirror_tasks(forwards: sf.SessionForwards) -> None:
+    for task in list(forwards._mirroring.values()):
+        await task
+
+
+def _dirty_mirror(tmp_path):
+    pushes = []
+    root = tmp_path / "mirror"
+    (root / "cs-1" / "session-state" / "0123abcd").mkdir(parents=True)
+    (root / "cs-1" / "session-state" / "0123abcd" / "events.jsonl").write_text(
+        "{}\n", encoding="utf-8",
+    )
+    (root / "cs-1.dirty").touch()
+
+    def push(source, label):
+        pushes.append((source, label))
+        return True, "pushed"
+
+    return tm.TranscriptMirror(root=root, push=push), pushes
+
+
+async def test_probe_retries_owed_transcript_push_on_unknown_verdict(store, tmp_path):
+    mirror, pushes = _dirty_mirror(tmp_path)
+    owner.hold("cs-1", "cli:a", mux_session="wt-a", confirmed=True)
+    forwards = sf.SessionForwards(
+        _daemon_factory({}), _probe({"wt-a": None}, []), transcript_mirror=mirror,
+    )
+    await forwards.probe(owner.list_holds())
+    await _await_mirror_tasks(forwards)
+    assert pushes == [(mirror._root / "cs-1", ".codespaces-live/cs-1")]
+    assert not (mirror._root / "cs-1.dirty").exists()
+
+
+async def test_probe_retries_owed_transcript_push_with_no_holds(store, tmp_path):
+    mirror, pushes = _dirty_mirror(tmp_path)
+    forwards = sf.SessionForwards(_daemon_factory({}), transcript_mirror=mirror)
+    await forwards.probe([])
+    await _await_mirror_tasks(forwards)
+    assert pushes == [(mirror._root / "cs-1", ".codespaces-live/cs-1")]
+    assert not (mirror._root / "cs-1.dirty").exists()
+
+
+def test_an_owed_push_extends_the_idle_owners_stay_only_while_owed(store, tmp_path):
+    mirror, _ = _dirty_mirror(tmp_path)
+    forwards = sf.SessionForwards(_daemon_factory({}), transcript_mirror=mirror)
+    assert forwards.owed_grace() == sf.OWED_PUSH_GRACE_SECONDS
+    (mirror._root / "cs-1.dirty").unlink()
+    assert forwards.owed_grace() == 0.0
+    assert sf.SessionForwards(_daemon_factory({})).owed_grace() == 0.0
+
+
+async def test_owed_transcript_push_skips_when_the_codespace_lock_is_held(store, tmp_path):
+    from single_instance_lease import SingleInstance
+
+    mirror, pushes = _dirty_mirror(tmp_path)
+    other = SingleInstance(mirror._root, service="transcript-mirror", lock_name="cs-1.lock")
+    other.acquire()
+    try:
+        forwards = sf.SessionForwards(_daemon_factory({}), transcript_mirror=mirror)
+        await forwards.probe([])
+        await _await_mirror_tasks(forwards)
+    finally:
+        other.release()
+    assert pushes == []
+    assert (mirror._root / "cs-1.dirty").exists()
+
+
+async def test_a_running_session_keeps_its_full_passes_while_a_push_is_owed(store, tmp_path):
+    """A dirty CodeSpace whose session runs must still be read: owed-only pushes
+    stay out of its way (its full passes push what's owed), even when the hub
+    keeps failing and every tick runs reconcile() then probe()."""
+    root = tmp_path / "mirror"
+    root.mkdir()
+    (root / "cs-1.dirty").touch()
+    ran = []
+
+    class Mirror:
+        _root = root
+
+        def owed_codespaces(self):
+            return ["cs-1"] if (root / "cs-1.dirty").exists() else []
+
+        async def push_owed(self, codespace):
+            ran.append("owed")
+
+        async def __call__(self, codespace):
+            ran.append("full")  # a hub that keeps failing: the marker stays
+
+    clock = [0.0]
+    owner.hold("cs-1", "cli:a", mux_session="wt-a", confirmed=True)
+    forwards = sf.SessionForwards(
+        _daemon_factory({}), _probe({"wt-a": True}, []), transcript_mirror=Mirror(),
+        clock=lambda: clock[0],
+    )
+    for _ in range(40):  # 10 minutes of 15-second ticks
+        holds = owner.list_holds()
+        await forwards.reconcile({h.codespace: h for h in holds})
+        await forwards.probe(holds)
+        await _await_mirror_tasks(forwards)
+        clock[0] += 15.0
+    assert ran.count("full") >= 5 and "owed" not in ran[1:]
+
+
+async def test_a_pass_that_found_its_slot_busy_needs_a_fresh_running_verdict(store, tmp_path):
+    """A full pass that couldn't start (slot busy) is not replayed later on the
+    old verdict: the next tick probes again, and a session that has stopped by
+    then gets no remote read (which could wake the box)."""
+    import asyncio as _asyncio
+
+    full = []
+
+    async def mirror(codespace):
+        full.append(codespace)
+
+    verdict = {"wt-a": True}
+
+    async def session_probe(codespace, muxes):
+        return {m: verdict.get(m) for m in muxes}
+
+    owner.hold("cs-1", "cli:a", mux_session="wt-a", confirmed=True)
+    forwards = sf.SessionForwards(_daemon_factory({}), session_probe, transcript_mirror=mirror)
+    busy = _asyncio.get_running_loop().create_future()
+    forwards._mirroring["cs-1"] = busy  # another task holds the slot
+    await forwards.probe(owner.list_holds())
+    assert full == []
+    busy.set_result(None)
+    verdict["wt-a"] = False  # the session stopped meanwhile
+    await forwards.probe(owner.list_holds())
+    await _await_mirror_tasks(forwards)
+    assert full == []
+    owner.hold("cs-1", "cli:a", mux_session="wt-a", confirmed=True)
+    verdict["wt-a"] = True  # still running at the next probe: now it runs
+    forwards._last_probe.clear()
+    await forwards.probe(owner.list_holds())
+    await _await_mirror_tasks(forwards)
+    assert full == ["cs-1"]
 
 
 # -- SessionForwards: a bridge forward that is up but not serving ------------------
