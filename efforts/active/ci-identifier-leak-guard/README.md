@@ -158,7 +158,7 @@ _(Revised 2026-09-27: the operator will not personally type these secrets --
 see the Journal entry below. Both are agent-assembled/pushed instead of
 "operator only.")_
 
-- [ ] An **aperture-labs agent** assembles the `FORBIDDEN_IDS_FACILITY` list
+- [x] An **aperture-labs agent** assembles the `FORBIDDEN_IDS_FACILITY` list
   (facility-context identifiers -- machine names, internal hosts, personal
   names, etc.; not secret from within aperture-labs, only from the public
   repo) and pushes it to the `ThomasMichon/copilot-extensions` repository
@@ -303,3 +303,50 @@ _Pending._
   OneDrive paths, and which agent actually runs `gh secret set` are not yet
   settled -- this entry captures the operator's stated approach, not a
   completed plan.
+
+### 2026-09-29 - `FORBIDDEN_IDS_FACILITY` provisioned
+
+- Storage location changed again from the 2026-09-27 entry's OneDrive plan: the
+  source list now lives as a plain, versioned asset in the private downstream
+  private downstream repository, rather than a personal OneDrive path -- that
+  repo already documents every one of these identifiers openly on its own
+  side; they're secret only *from this public repo*, not from that one -- so
+  keeping the source alongside the facility docs it's derived from (rather
+  than an unversioned OneDrive file) makes the denylist reviewable, diffable,
+  and easy to keep in sync as that roster changes.
+- The downstream agent assembled the `token|reason` list and pushed it to the
+  `FORBIDDEN_IDS_FACILITY` repository secret via `gh secret set` (account-
+  routed through `agent-worktrees repos gh`, never a bare `gh`).
+  `gh secret list --repo ThomasMichon/copilot-extensions` confirms the secret
+  is present.
+- Deliberately excluded from the list: generic English/mythological words used
+  as individual device codenames on the downstream side, and single-word
+  machine names that also double as this repo's own generic example persona/
+  voice-kernel content, as opposed to the compound `<name>.facility.<domain>`
+  hostname form, which is unambiguous. Both classes would produce
+  disproportionate false-positive risk against ordinary public content for a
+  denylist whose whole purpose is precision, not maximal recall.
+- **Real bug found and fixed the same day this list was assembled:** the
+  first push accidentally included the source asset's own header comment
+  lines as literal denylist entries, because the CI-mode loader
+  (`_load_ci_identifiers`) skips blank entries but -- unlike the local
+  single-identifier loader -- has no equivalent skip for `#`-prefixed
+  comment lines. A stray bare `#` line (used for paragraph spacing) became a
+  one-character forbidden token that matched almost any Markdown heading,
+  and the loaded prose comments became giant literal substrings. This
+  surfaced immediately as 37 false-positive matches on this very PR's own
+  diff. Re-pushed a corrected, comment-free secret within ~19 minutes;
+  confirmed no other open PR's `identifier leak guard` check ran during that
+  window. The downstream source asset's header now states this constraint
+  explicitly and its push instructions filter comments/blank lines before
+  piping to `gh secret set`.
+- Left for `FORBIDDEN_IDS_WORK`: unchanged, still the operator's separate
+  work-context harness agent's task, sourced from their work OneDrive.
+- Discovered while assembling this list: a handful of these same personal/
+  facility identifiers (distinct from the ones the 2026-09-26 sweep in #3910
+  already cleaned up) have re-leaked into this repo's own tracked docs post-
+  cleanup (mostly under recent `efforts/active/*` READMEs and one plugin
+  skill doc). That is a real, separate cleanup item -- filed as
+  [#4675](https://github.com/ThomasMichon/copilot-extensions/issues/4675)
+  rather than folded into this effort's scope, and not enumerated here per
+  this same repo's own leak-guard purpose.
