@@ -20,6 +20,7 @@ from agent_dispatch.client import (
 from agent_dispatch.coordinator_loops import _refresh_worktree_status_relay
 from agent_dispatch.coordinator import create_app
 from agent_dispatch.queue import Status
+from agent_dispatch import remote_dispatch
 from agent_dispatch.worktree_status_relay import WorktreeStatusRelayStore
 from tests._helpers import TEST_REPO
 from tests._helpers import RepoDefaultingQueue as TaskQueue
@@ -33,6 +34,10 @@ def app(tmp_path):
 @pytest.fixture
 def api(app):
     return TestClient(app)
+
+
+def _registration_machine() -> str:
+    return remote_dispatch.local_machine() or "lambda-core"
 
 
 def test_resource_reservation_api_elects_binds_and_owner_releases(api):
@@ -654,7 +659,7 @@ def test_complete_over_http_retriggers_whole_goal_verification(api, tmp_path):
             "evaluator_ref": "review-loop",
             "evaluator_spec": {"scripts": {"review-loop": [sys.executable, str(script)]}},
         },
-        machine="lambda-core",
+        machine=_registration_machine(),
     )
     tid = api.post(
         "/tasks",
@@ -691,7 +696,7 @@ def test_complete_over_http_triggers_immediate_whole_goal_verification(api, tmp_
             "evaluator_ref": "review-loop",
             "evaluator_spec": {"scripts": {"review-loop": [sys.executable, str(script)]}},
         },
-        machine="lambda-core",
+        machine=_registration_machine(),
     )
     tid = api.post(
         "/tasks",
