@@ -103,10 +103,13 @@ specifically when reviewing a pull request, not a replacement for them.
   on its merits, and challenge it if you disagree, the same as you would an
   unexplained one. Treat an unexplained deliberate-looking choice (an
   obvious-looking alternative visibly not taken, a limitation visibly
-  accepted) as an open question to raise, not as evidence it was already
-  vetted -- silence is not proof of due diligence. This scrutiny matters
-  most exactly where the author's proximity to their own implementation is
-  a likely source of blind spots: new privilege/trust boundaries, credential
+  accepted) as a cue to **investigate**, not as evidence it was already
+  vetted — silence is not proof of due diligence. Consistent with "Concrete
+  over cosmetic" below: only actually comment once that investigation
+  surfaces a concrete concern, not as a speculative open question raised
+  from the absence of an explanation alone. This scrutiny matters most
+  exactly where the author's proximity to their own implementation is a
+  likely source of blind spots: new privilege/trust boundaries, credential
   or token handling, authentication/authorization assumptions, and any
   divergence from a documented vision or invariant.
 - **Documentation impact.** Confirm the PR description's required
