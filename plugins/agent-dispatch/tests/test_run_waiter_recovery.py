@@ -164,6 +164,7 @@ def test_recover_run_waiters_recovers_stale_preparing_waiter(tmp_path):
     queue.prepare_run_waiter(
         task_id,
         worker_id="worker-1",
+        host=TEST_HOST,
         resume_worktree="m/wt-1",
         command=["sleep", "1"],
         reason="hibernating: sleep 1",

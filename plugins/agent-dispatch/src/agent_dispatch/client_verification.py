@@ -32,6 +32,7 @@ class VerificationClientMixin:
         task_id: str,
         *,
         worker_id: str,
+        host: str,
         reason: str,
         resume_worktree: str,
         command: list[str],
@@ -41,6 +42,7 @@ class VerificationClientMixin:
                 f"/tasks/{task_id}/run-waiter/register",
                 json={
                     "worker_id": worker_id,
+                    "host": host,
                     "reason": reason,
                     "resume_worktree": resume_worktree,
                     "command": command,

@@ -33,6 +33,7 @@ class RunWaiterRegisterBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     worker_id: NonEmptyText
     reason: NonEmptyText
+    host: NonEmptyText
     resume_worktree: NonEmptyText
     command: list[str] = Field(default_factory=list)
 
@@ -161,6 +162,7 @@ def register_verification_routes(
             return queue.prepare_run_waiter(
                 task_id,
                 worker_id=body.worker_id,
+                host=body.host,
                 reason=body.reason,
                 resume_worktree=body.resume_worktree,
                 command=body.command,

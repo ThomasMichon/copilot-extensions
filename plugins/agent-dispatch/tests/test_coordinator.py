@@ -828,6 +828,7 @@ def test_event_note_wakes_and_supersedes_active_run_waiter(api, monkeypatch):
         f"/tasks/{tid}/run-waiter/register",
         json={
             "worker_id": "w1",
+            "host": "test-host",
             "reason": "hibernating: sleep 1",
             "resume_worktree": "m/wt-1",
             "command": ["sleep", "1"],
@@ -877,6 +878,7 @@ def test_event_note_wakes_and_supersedes_preparing_run_waiter(api):
         f"/tasks/{tid}/run-waiter/register",
         json={
             "worker_id": "w1",
+            "host": "test-host",
             "reason": "hibernating: sleep 1",
             "resume_worktree": "m/wt-1",
             "command": ["sleep", "1"],
@@ -924,6 +926,7 @@ def test_event_note_after_waiter_finish_does_not_queue_duplicate_wake(api):
         f"/tasks/{tid}/run-waiter/register",
         json={
             "worker_id": "w1",
+            "host": "test-host",
             "reason": "hibernating: sleep 1",
             "resume_worktree": "m/wt-1",
             "command": ["sleep", "1"],
@@ -1037,6 +1040,7 @@ def test_run_waiter_arm_rejects_empty_identity_fields(api):
         f"/tasks/{tid}/run-waiter/register",
         json={
             "worker_id": "w1",
+            "host": "test-host",
             "reason": "hibernating: sleep 1",
             "resume_worktree": "m/wt-1",
             "command": ["sleep", "1"],

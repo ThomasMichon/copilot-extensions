@@ -270,7 +270,7 @@ class _FakeSuspendClient:
     def get(self, task_id):
         return {"owner": self._owner} if self._owner else {}
 
-    def prepare_run_waiter(self, task_id, *, worker_id, reason, resume_worktree, command):
+    def prepare_run_waiter(self, task_id, *, worker_id, host, reason, resume_worktree, command):
         self.calls.append((task_id, worker_id, reason))
         if self._raises:
             raise self._raises

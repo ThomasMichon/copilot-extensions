@@ -753,6 +753,7 @@ def create_app(
             finally:
                 queue.set_wake_notifier(None)
                 queue.set_owned_transition_notifier(None)
+                queue.set_verification_notifier(None)
                 queue.set_run_waiter_prepare_notifier(None)
                 if wake_task is not None:
                     wake_task.cancel()

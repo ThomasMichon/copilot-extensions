@@ -21,6 +21,7 @@ class QueueRunWaitersMixin:
         worker_id: str,
         resume_worktree: str,
         command: list[str],
+        host: str | None = None,
         reason: str,
         now: float | None = None,
     ) -> dict[str, Any]:
@@ -75,13 +76,14 @@ class QueueRunWaitersMixin:
                 " task_id, generation, task_generation, owner, owner_session_id,"
                 " pid, host, start_token, resume_worktree,"
                 " command_json, state, created_at, updated_at"
-                ") VALUES (?, ?, ?, ?, ?, 0, '', '', ?, ?, 'preparing', ?, ?)",
+                ") VALUES (?, ?, ?, ?, ?, 0, ?, '', ?, ?, 'preparing', ?, ?)",
                 (
                     task_id,
                     generation,
                     task.generation,
                     task.owner or "",
                     task.owner_session_id,
+                    host,
                     resume_worktree,
                     json.dumps(command, separators=(",", ":")),
                     ts,

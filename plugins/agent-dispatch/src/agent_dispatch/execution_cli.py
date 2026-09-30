@@ -258,11 +258,27 @@ def _cmd_run(args: argparse.Namespace) -> int:
                         "claim": None,
                     }
                 )
+            from . import remote_dispatch
+
+            caller_host = remote_dispatch.local_machine()
+            if not caller_host:
+                caller_host = worker_id.partition("/")[0] or None
+            if not caller_host and spec.resume_worktree:
+                caller_host = spec.resume_worktree.partition("/")[0] or None
+            if not caller_host:
+                return _core()._emit(
+                    {
+                        "detached": False,
+                        "error": "could not resolve the caller host for detached wait recovery",
+                        "claim": None,
+                    }
+                )
             try:
                 with _core()._client(args) as c:
                     prepared = c.prepare_run_waiter(
                         spec.task_id,
                         worker_id=worker_id,
+                        host=caller_host,
                         reason=reason,
                         resume_worktree=spec.resume_worktree or "",
                         command=list(spec.command),
