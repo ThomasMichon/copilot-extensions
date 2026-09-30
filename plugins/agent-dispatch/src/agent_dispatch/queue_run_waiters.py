@@ -27,6 +27,7 @@ class QueueRunWaitersMixin:
         now: float | None = None,
     ) -> dict[str, Any]:
         ts = self._now(now)
+        release_enqueued = False
         meaningful = _clip(reason, PROGRESS_SUMMARY_MAX) or "hibernating"
         if not resume_worktree:
             raise TaskError("run waiter preparation requires a resume_worktree")
@@ -50,12 +51,28 @@ class QueueRunWaitersMixin:
                 (task_id,),
             ).fetchone()
             generation = int(previous["generation"] or 0) + 1
+            prior_row = self._select_waiter_row(
+                conn,
+                task_id,
+                states=("preparing", "active"),
+            )
             conn.execute(
                 "UPDATE run_waiters SET state = 'superseded', updated_at = ?,"
                 " retired_reason = COALESCE(retired_reason, 'superseded by a new waiter')"
                 " WHERE task_id = ? AND state IN ('preparing', 'active')",
                 (ts, task_id),
             )
+            if prior_row is not None:
+                prior = self._run_waiter_from_row(prior_row)
+                if self._run_waiter_matches_task(prior, task):
+                    self._enqueue_run_waiter_wake(
+                        conn,
+                        prior,
+                        message="",
+                        sender=CLAIM_RELEASE_SENDER,
+                        ts=ts,
+                    )
+                    release_enqueued = True
             if task.status == Status.STARTED:
                 conn.execute(
                     "UPDATE tasks SET status = ?, updated_at = ?, activity = NULL,"
@@ -103,6 +120,8 @@ class QueueRunWaitersMixin:
             )
             conn.execute("COMMIT")
         self._notify_run_waiter_prepare()
+        if release_enqueued:
+            self._notify_wake()
         return {
             "task_id": task_id,
             "generation": generation,

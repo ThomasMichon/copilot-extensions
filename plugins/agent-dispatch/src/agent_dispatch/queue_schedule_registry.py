@@ -177,12 +177,15 @@ class ScheduleRegistrationMixin:
             raise TaskError(
                 f"registration kind {kind!r} is not available through direct registration"
             )
+        env = env or "default"
+        rid = reg_id or derive_registration_id(kind, spec, machine, env)
+        if kind == RegistrationKind.EVALUATOR and not spec.get("evaluator_ref"):
+            spec = dict(spec)
+            spec["evaluator_ref"] = rid
         try:
             validate_registration(kind, spec)
         except RegistrationError as exc:
             raise TaskError(str(exc)) from exc
-        env = env or "default"
-        rid = reg_id or derive_registration_id(kind, spec, machine, env)
         ts = self._now(now)
         try:
             spec_json = json.dumps(spec)

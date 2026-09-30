@@ -667,7 +667,9 @@ def validate_registration(kind: str, spec: dict) -> None:
                 "'all_repos': true"
             )
         evaluator_ref = spec.get("evaluator_ref")
-        if not isinstance(evaluator_ref, str) or not evaluator_ref:
+        if evaluator_ref is not None and (
+            not isinstance(evaluator_ref, str) or not evaluator_ref
+        ):
             raise RegistrationError(
                 "evaluator 'evaluator_ref' must be a non-empty string"
             )

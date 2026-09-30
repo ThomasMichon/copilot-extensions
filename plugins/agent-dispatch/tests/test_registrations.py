@@ -68,12 +68,10 @@ def test_validate_accepts_each_kind():
          "interval_seconds": 3600},
     )
     validate_registration(
-        RegistrationKind.EVALUATOR,
-        {"evaluator_spec": {}, "all_repos": True, "evaluator_ref": "review-loop"},
+        RegistrationKind.EVALUATOR, {"evaluator_spec": {}, "all_repos": True}
     )
     validate_registration(
-        RegistrationKind.EVALUATOR,
-        {"evaluator": "eval.json", "repo": TEST_REPO, "evaluator_ref": "review-loop"},
+        RegistrationKind.EVALUATOR, {"evaluator": "eval.json", "repo": TEST_REPO}
     )
     validate_registration(
         RegistrationKind.PLUGIN_COMPANION,
@@ -103,6 +101,15 @@ def test_validate_accepts_each_kind():
     )
 
 
+def test_register_evaluator_defaults_missing_ref_to_registration_id(tmp_path):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    record = queue.register_registration(
+        RegistrationKind.EVALUATOR,
+        {"evaluator_spec": {}, "repo": TEST_REPO},
+    )
+    assert record.spec["evaluator_ref"] == record.id
+
+
 @pytest.mark.parametrize(
     "kind, spec, needle",
     [
@@ -123,7 +130,6 @@ def test_validate_accepts_each_kind():
         (RegistrationKind.EVALUATOR, {"evaluator": "e.json"}, "needs a 'repo'"),
         (RegistrationKind.EVALUATOR, {"evaluator_spec": "not-a-dict", "all_repos": True},
          "must be a JSON object"),
-        (RegistrationKind.EVALUATOR, {"evaluator_spec": {}, "all_repos": True}, "evaluator_ref"),
         (
             RegistrationKind.PLUGIN_COMPANION,
             {"stop_command": ["bin/stop"], "health_probe": ["bin/health"]},
