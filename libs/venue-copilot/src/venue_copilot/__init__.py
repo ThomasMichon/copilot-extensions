@@ -146,12 +146,20 @@ def trust_folder_command(folder: str) -> str:
 
 
 def registration_credentials_script(token: str, port: int) -> str:
-    """Shell snippet provisioning agent-bridge registration credentials."""
+    """Shell snippet provisioning agent-bridge registration credentials.
+
+    The route names the host bridge's forwarded port with a ``bind`` (so the
+    venue's agent-bridge CLI parses it, rather than falling back to its default
+    port and starting a local daemon that takes the route over) and
+    ``"forwarded": true`` (so that CLI never starts a daemon over it, and a
+    daemon that did start retires).
+    """
     return (
         "mkdir -p ~/.agent-bridge && "
         f"printf 'token: %s\\n' {shlex.quote(token)} "
         "> ~/.agent-bridge/auth.yaml && "  # marketplace-isolation: allow agent-bridge-management
-        f"printf '{{\"active\": {{\"port\": {int(port)}}}}}' "
+        "printf '{\"active\": {\"bind\": \"127.0.0.1\", "
+        f"\"port\": {int(port)}, \"forwarded\": true}}}}' "
         "> ~/.agent-bridge/active.json"  # marketplace-isolation: allow agent-bridge-management
     )
 

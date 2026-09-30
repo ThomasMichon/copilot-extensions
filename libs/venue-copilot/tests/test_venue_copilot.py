@@ -18,6 +18,7 @@ from venue_copilot import (
     observe_commands,
     release_cli_mode,
     reserve_cli_mode,
+    registration_credentials_script,
     reserve_with_retry,
     resolve_daemon_port,
     run_venue_copilot,
@@ -735,3 +736,30 @@ class TestDetachedRunner:
         assert rc == 1
         assert "could not verify" in payload["error"]
         assert released == []
+
+
+def _bash() -> str | None:
+    import shutil
+    import sys
+
+    if sys.platform != "win32":
+        return shutil.which("bash")
+    for base in (os.environ.get("ProgramFiles", ""), os.environ.get("ProgramW6432", "")):
+        candidate = Path(base) / "Git" / "bin" / "bash.exe"
+        if base and candidate.is_file():
+            return str(candidate)
+    return None
+
+
+@pytest.mark.skipif(_bash() is None, reason="needs bash")
+def test_registration_credentials_write_a_complete_forwarded_route(tmp_path):
+    import subprocess
+
+    env = {**os.environ, "HOME": str(tmp_path)}
+    subprocess.run([_bash(), "-c", registration_credentials_script("tok-1", 62254)],
+                   env=env, check=True)
+    route = json.loads((tmp_path / ".agent-bridge" / "active.json").read_text())
+    # A "bind" lets the venue's agent-bridge CLI parse the route (without it,
+    # it fell back to its default port and started a local daemon over it).
+    assert route == {"active": {"bind": "127.0.0.1", "port": 62254, "forwarded": True}}
+    assert (tmp_path / ".agent-bridge" / "auth.yaml").read_text() == "token: tok-1\n"

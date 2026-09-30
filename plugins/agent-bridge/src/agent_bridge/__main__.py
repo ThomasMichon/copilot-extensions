@@ -334,7 +334,9 @@ from .service_process_cli import (  # noqa: F401
 )
 from .service_process_state import (  # noqa: F401
     _active_endpoint,
+    _active_endpoint_is_forward,
     _active_endpoint_port,
+    _active_route,
     _listening_ports_for_pid,
     _matching_routed_version,
     _read_pid_file,

@@ -47,9 +47,30 @@ def is_superseded(
     caller (the daemon's guarded loop treats a raised check as "stay alive").
     """
     table = read_table(config_dir)
+    if _replaced_by_forward(table, is_listening):
+        return True
     return _lib_is_superseded(
         table, my_pid, my_generation, is_listening=is_listening
     )
+
+
+def _replaced_by_forward(table, is_listening) -> bool:
+    """A venue launcher re-pointed the route at the host bridge's live forward.
+
+    Only an explicit ``"forwarded": true`` entry with no ``pid`` counts (no
+    daemon publishes one), and only while the forward accepts connections.
+    """
+    active = table.get("active") if isinstance(table, dict) else None
+    if not isinstance(active, dict) or active.get("forwarded") is not True:
+        return False
+    if active.get("pid") is not None:
+        return False
+    try:
+        port = int(active.get("port") or 0)
+    except (TypeError, ValueError):
+        return False
+    bind = active.get("bind") or "127.0.0.1"
+    return port > 0 and isinstance(bind, str) and bool(is_listening(bind, port))
 
 
 _DEFAULT_SELF_RETIRE_STATUS = {

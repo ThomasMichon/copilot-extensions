@@ -484,6 +484,27 @@ def _wait_for_ensure_owner() -> bool:
     return core._service_is_running()
 
 
+#: Waits (seconds) before re-probing a forwarded bridge that did not answer.
+_FORWARD_RETRY_DELAYS_S = (1.0, 2.0, 4.0)
+
+
+def _await_forwarded_bridge(core) -> bool:
+    """Re-probe a forwarded bridge with backoff; never start a daemon over it."""
+    import time
+
+    for delay in _FORWARD_RETRY_DELAYS_S:
+        time.sleep(delay)
+        if core._service_is_running():
+            return True
+    print(
+        "[WARN] agent-bridge: the forwarded bridge in active.json is not "
+        "answering; not starting a local daemon over it (that would take the "
+        "route over from the host).",
+        file=sys.stderr,
+    )
+    return False
+
+
 def _ensure_daemon() -> bool:
     """Boot the daemon if it is down, so a daemon-touching command self-heals."""
     import time
@@ -493,6 +514,8 @@ def _ensure_daemon() -> bool:
         return core._service_is_running()
     if core._service_is_running():
         return True
+    if core._active_endpoint_is_forward():
+        return _await_forwarded_bridge(core)
     if core._reconcile_live_dynamic_daemon():
         return True
     if core._service_process_is_live() and core._wait_for_service_start():

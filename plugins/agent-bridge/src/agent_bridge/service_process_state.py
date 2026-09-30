@@ -25,12 +25,50 @@ def _active_endpoint():
         return None
 
 
+def _active_route() -> dict | None:
+    """The raw ``active`` entry of ``active.json``, or ``None``."""
+    core = _core()
+    try:
+        from zdd.routing import read_table
+
+        table = read_table(core._INSTALL_DIR)
+    except Exception:
+        return None
+    active = table.get("active") if isinstance(table, dict) else None
+    return active if isinstance(active, dict) else None
+
+
 def _active_endpoint_port() -> int | None:
     """The routed daemon port, or ``None`` when no route has been published."""
     endpoint = _active_endpoint()
     if endpoint is not None and endpoint.port:
         return int(endpoint.port)
+    # A venue launcher's forwarded route may predate ``bind`` in its entry.
+    if _active_endpoint_is_forward():
+        return int(_active_route()["port"])
     return None
+
+
+def _active_endpoint_is_forward() -> bool:
+    """Whether ``active.json`` routes to a bridge this machine only forwards to.
+
+    A venue launcher (CodeSpace, container, SSH) records the host bridge's
+    forwarded port there, marked ``"forwarded": true`` (older launchers wrote
+    just ``{"port": N}``); a daemon always publishes its own ``pid`` and
+    ``generation``. A local daemon started over that route takes it over: the
+    sessions here then report to it, and the host loses them.
+    """
+    active = _active_route()
+    if active is None:
+        return False
+    try:
+        if int(active.get("port") or 0) <= 0:
+            return False
+    except (TypeError, ValueError):
+        return False
+    if active.get("forwarded") is True:
+        return True
+    return active.get("pid") is None and "generation" not in active
 
 
 def _service_port() -> int:
