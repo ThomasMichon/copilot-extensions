@@ -84,8 +84,12 @@ jobs:
           # tightened that gate, e.g. #2994-#3914). Use the same
           # APERTURE_RELEASE_TOKEN PAT validate-and-promote.yml's own
           # main-targeting PR already relies on for exactly this reason, so
-          # this PR is authored as the repo's configured MAINTAINER_LOGIN
-          # and triggers CI normally.
+          # this PR is authored as whichever account owns that PAT --
+          # triggering CI normally requires that account to equal this
+          # repo's owner (`github.repository_owner`), which is exactly what
+          # `ci.yml`'s main-gate job checks the PR author against. If the
+          # PAT is ever rotated under a different account, that invariant
+          # breaks and this PR starts failing the main gate.
           token: ${{ secrets.APERTURE_RELEASE_TOKEN }}
           commit-message: "tools: widen-safe module-size baseline refresh (automated)"
           title: "tools: widen-safe module-size baseline refresh (automated)"

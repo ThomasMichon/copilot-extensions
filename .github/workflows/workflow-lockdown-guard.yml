@@ -1,10 +1,15 @@
-# Enforces the "only the configured maintainer login modifies
-# workflows/actions/CODEOWNERS" policy (governance: maintainer-tier access
-# model). The login is a non-secret repository variable
-# (`vars.MAINTAINER_LOGIN`, e.g. `ThomasMichon` on this repo's own copy) --
-# a fork sets its own value rather than editing this file, so this guard
-# protects the fork's own owner instead of silently still gating on the
-# upstream owner's login. Branch rulesets alone can't express this on a
+# Enforces the "only the repo owner modifies workflows/actions/CODEOWNERS"
+# policy (governance: maintainer-tier access model). The allowed login is
+# derived from `github.repository_owner` -- an immutable, platform-
+# controlled context value (the account that literally owns this
+# repo/fork) -- never a repository secret/variable. Repository
+# *variables* are writable via the API/CLI by anyone with ordinary Write
+# access, the same Maintainer tier this guard exists to restrict, so using
+# one here would let a Maintainer defeat the guard by simply re-pointing
+# it at their own login, with no protected-path change for this very check
+# to ever catch. Deriving from repo ownership instead means a fork
+# protects its own owner automatically, with zero configuration. Branch
+# rulesets alone can't express this on a
 # personal (non-Enterprise) account: the
 # `file_path_restriction` rule type that would do it natively returns
 # `Validation Failed` here (Enterprise-only), and CODEOWNERS review
@@ -14,7 +19,7 @@
 # So this is enforced as a required status check instead: a check with no
 # bypass actors at all (see the "workflow/CODEOWNERS lockdown" ruleset)
 # fails whenever a protected path is touched by a PR whose registered
-# author (`pull_request.user.login`) does not match `MAINTAINER_LOGIN`.
+# author (`pull_request.user.login`) does not match the repo owner.
 #
 # This deliberately validates the PR's SUBMITTER, not individual commit
 # authorship. Per-commit `author.login`/`committer.login` are just GitHub's
@@ -116,16 +121,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Check protected-path changes are submitted by the maintainer
+      - name: Check protected-path changes are submitted by the repo owner
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
-          # A non-secret repository *variable* (Settings > Actions >
-          # Variables), not a hardcoded login -- so a fork only needs to set
-          # its own MAINTAINER_LOGIN to reuse this guard for its own owner,
-          # without editing this file or exposing anything secret. Empty/
-          # unset fails closed (no PR can ever match an empty string), which
-          # is the correct default until a fork's own owner configures it.
-          ALLOWED_LOGIN: ${{ vars.MAINTAINER_LOGIN }}
+          # `github.repository_owner` -- immutable, platform-controlled,
+          # never a repository secret/variable (see the file header for
+          # why a repo variable would be writable by the very Maintainer
+          # tier this guard restricts). Automatically correct for a fork.
+          ALLOWED_LOGIN: ${{ github.repository_owner }}
         with:
           script: |
             const protectedPrefixes = [
