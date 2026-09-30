@@ -1,10 +1,4 @@
-"""Durable `run --detach` waiter registrations and event-note journaling.
-
-This mixin owns the narrow Phase 2b/2c state that `run` needs beyond the task
-row itself: a durable record of the outstanding detached waiter process, and a
-small append-only event-note write path emitters can use without rewriting the
-task goal.
-"""
+"""Durable `run --detach` waiter registrations and event-note journaling."""
 
 from __future__ import annotations
 
@@ -129,12 +123,7 @@ class QueueRunWaitersMixin:
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            row = self._select_waiter_row(
-                conn,
-                task_id,
-                states=("preparing",),
-                generation=generation,
-            )
+            row = self._select_waiter_row(conn, task_id, states=("preparing",), generation=generation)
             if row is None:
                 conn.execute("COMMIT")
                 return None
@@ -244,8 +233,7 @@ class QueueRunWaitersMixin:
     def get_active_run_waiter(self, task_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT * FROM run_waiters WHERE task_id = ? AND state = 'active'"
-                " ORDER BY generation DESC LIMIT 1",
+                "SELECT * FROM run_waiters WHERE task_id = ? AND state = 'active' ORDER BY generation DESC LIMIT 1",
                 (task_id,),
             ).fetchone()
         return self._run_waiter_from_row(row) if row else None
@@ -253,16 +241,14 @@ class QueueRunWaitersMixin:
     def list_active_run_waiters(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM run_waiters WHERE state = 'active'"
-                " ORDER BY created_at ASC, id ASC"
+                "SELECT * FROM run_waiters WHERE state = 'active' ORDER BY created_at ASC, id ASC"
             ).fetchall()
         return [self._run_waiter_from_row(row) for row in rows]
 
     def list_pending_run_waiters(self) -> list[dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM run_waiters WHERE state = 'preparing'"
-                " ORDER BY created_at ASC, id ASC"
+                "SELECT * FROM run_waiters WHERE state = 'preparing' ORDER BY created_at ASC, id ASC"
             ).fetchall()
         return [self._run_waiter_from_row(row) for row in rows]
 
@@ -612,14 +598,7 @@ class QueueRunWaitersMixin:
         sender: str,
         now: float | None = None,
     ) -> dict[str, Any] | None:
-        return self.recover_preparing_run_waiter(
-            task_id,
-            generation=generation,
-            reason=reason,
-            message=message,
-            sender=sender,
-            now=now,
-        )
+        return self.recover_preparing_run_waiter(task_id, generation=generation, reason=reason, message=message, sender=sender, now=now)
 
     def cancel_preparing_run_waiter(
         self,
@@ -632,12 +611,7 @@ class QueueRunWaitersMixin:
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            row = self._select_waiter_row(
-                conn,
-                task_id,
-                states=("preparing",),
-                generation=generation,
-            )
+            row = self._select_waiter_row(conn, task_id, states=("preparing",), generation=generation)
             if row is None:
                 conn.execute("COMMIT")
                 return None
@@ -663,9 +637,7 @@ class QueueRunWaitersMixin:
 
     def has_pending_run_waiter_wakes(self) -> bool:
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM run_waiter_wakes WHERE status = 'pending' LIMIT 1"
-            ).fetchone()
+            row = conn.execute("SELECT 1 FROM run_waiter_wakes WHERE status = 'pending' LIMIT 1").fetchone()
         return row is not None
 
     def recover_inflight_run_waiter_wakes(
@@ -927,10 +899,7 @@ class QueueRunWaitersMixin:
             and task.owner_session_id == wake.owner_session_id
         ):
             return False
-        row = conn.execute(
-            "SELECT MAX(generation) AS generation FROM run_waiters WHERE task_id = ?",
-            (wake.task_id,),
-        ).fetchone()
+        row = conn.execute("SELECT MAX(generation) AS generation FROM run_waiters WHERE task_id = ?", (wake.task_id,)).fetchone()
         latest_generation = int((row["generation"] if row is not None else 0) or 0)
         return latest_generation == int(wake.waiter_generation)
 
