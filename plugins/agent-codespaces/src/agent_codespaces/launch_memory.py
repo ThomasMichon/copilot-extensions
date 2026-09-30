@@ -7,14 +7,18 @@ Harness Board's wake after a CodeSpace stop, or a hand recovery -- came back on
 this host's default model and without them. And the Owner releases a stopped
 CodeSpace's session tenants, so its hold can't carry them across a stop.
 
-So each launch records what it was asked for, per CodeSpace and session tenant,
-under ``~/.agent-codespaces/launches/``; a later launch that asks for nothing
-but a session selector (``--resume``/``--session-id``/``--continue``) reuses it.
-Anything passed explicitly replaces the record.
+So each successful launch records what it was asked for, one file per
+CodeSpace and session tenant under ``~/.agent-codespaces/launches/`` (so two
+tenants' launches never overwrite each other's record); a later launch that
+resumes the session and asks for nothing else -- a session selector
+(``--resume``/``--session-id``/``--continue``), no other ``--copilot-arg``, the
+default ``--driver`` -- reuses it. A new session starts from the current
+defaults, and anything passed explicitly replaces the record.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -35,8 +39,13 @@ def _is_selector(arg: str) -> bool:
     return str(arg).split("=", 1)[0] in SESSION_SELECTORS
 
 
-def _path(codespace: str) -> Path | None:
-    return LAUNCHES_DIR / f"{codespace}.json" if _CODESPACE.match(codespace or "") else None
+def _path(codespace: str, tenant: str) -> Path | None:
+    """One file per CodeSpace and tenant: a readable prefix plus a digest of the tenant."""
+    if not _CODESPACE.match(codespace or "") or not tenant:
+        return None
+    digest = hashlib.sha256(tenant.encode("utf-8")).hexdigest()[:16]
+    label = re.sub(r"[^A-Za-z0-9._-]+", "-", tenant)[:48]
+    return LAUNCHES_DIR / codespace / f"{label}-{digest}.json"
 
 
 def _load(path: Path | None) -> dict:
@@ -56,11 +65,16 @@ def apply(
     what came from the record (``copilot_args``, ``driver``)."""
     own = [a for a in requested if not _is_selector(a)]
     selectors = [a for a in requested if _is_selector(a)]
-    record = _load(_path(codespace)).get(tenant)
-    record = record if isinstance(record, dict) else {}
+    # Only a resume that names nothing but the session: a new session (no
+    # selector) starts from the current defaults, and explicit flags win.
+    if not selectors or own:
+        return own + selectors, driver, []
+    record = _load(_path(codespace, tenant))
+    if record.get("tenant") != tenant:
+        record = {}
     recalled: list[str] = []
     saved = record.get("copilot_args")
-    if not own and isinstance(saved, list) and saved:
+    if isinstance(saved, list) and saved:
         own = [str(a) for a in saved if not _is_selector(str(a))]
         recalled.append("copilot_args")
     saved_driver = record.get("driver")
@@ -72,11 +86,11 @@ def apply(
 
 def remember(codespace: str, tenant: str, copilot_args: list[str], driver: str) -> None:
     """Record a launch's flags (never its session selector) for the next launch."""
-    path = _path(codespace)
+    path = _path(codespace, tenant)
     if path is None:
         return
-    data = _load(path)
-    data[tenant] = {"copilot_args": [a for a in copilot_args if not _is_selector(a)], "driver": driver}
+    data = {"tenant": tenant, "copilot_args": [a for a in copilot_args if not _is_selector(a)],
+            "driver": driver}
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(f".{os.getpid()}.tmp")
