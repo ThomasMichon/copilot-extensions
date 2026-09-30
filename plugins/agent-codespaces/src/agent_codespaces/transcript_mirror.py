@@ -262,8 +262,15 @@ class TranscriptMirror:
                     log.debug("transcript mirror: disconnect from %s failed: %s", codespace, exc)
 
     def _append_and_push(self, codespace: str, stdout: str) -> dict[str, Any]:
+        # Marked before anything is appended, cleared only once a push succeeds:
+        # the appended bytes won't be read again, so a failed or interrupted
+        # push is retried by the next pass (after a restart too) until it lands.
+        dirty = self._root / f"{codespace}.dirty"
+        if _HEAD in stdout:
+            dirty.parent.mkdir(parents=True, exist_ok=True)
+            dirty.touch()
         changed = self.apply(codespace, stdout)
-        if not changed:
+        if not changed and not dirty.exists():
             return {"ok": True, "changed": 0}
         push = self._push
         if push is None:
@@ -272,6 +279,8 @@ class TranscriptMirror:
             def push(source: Path, label: str) -> tuple[bool, str]:
                 return _push_via_session_sync(source, label, verbose=False)
         ok, detail = push(self._root / codespace, f"{LIVE_LABEL_GROUP}/{codespace}")
-        if not ok:
-            log.warning("transcript mirror for %s: push failed: %s", codespace, detail)
+        if ok:
+            dirty.unlink(missing_ok=True)
+        else:
+            log.warning("transcript mirror for %s: push failed (retried next pass): %s", codespace, detail)
         return {"ok": ok, "changed": len(changed), "detail": detail}

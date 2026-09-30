@@ -196,6 +196,30 @@ async def test_a_failed_read_or_a_bad_name_pushes_nothing(tmp_path, direct_exec)
     assert pushes == []
 
 
+async def test_a_failed_push_is_retried_until_it_lands_even_after_a_restart(tmp_path, direct_exec):
+    results = [(False, "hub unreachable"), (False, "still down"), (True, "pushed")]
+    pushes = []
+
+    def push(source, label):
+        pushes.append(label)
+        return results[len(pushes) - 1]
+
+    manager = _Manager(_chunk(SID, 0, b'{"a":1}\n') + tm._DONE + "\n")
+
+    async def opener(codespace):
+        return manager
+
+    mirror = tm.TranscriptMirror(open_manager=opener, push=push, root=tmp_path)
+    assert (await mirror("cs-1"))["ok"] is False
+    manager.stdout = tm._DONE + "\n"  # nothing new on the box: the push is still owed
+    assert (await mirror("cs-1"))["ok"] is False
+    restarted = tm.TranscriptMirror(open_manager=opener, push=push, root=tmp_path)
+    assert (await restarted("cs-1"))["ok"] is True
+    assert len(pushes) == 3 and not (tmp_path / "cs-1.dirty").exists()
+    assert (await restarted("cs-1")) == {"ok": True, "changed": 0}  # settled: no more pushes
+    assert len(pushes) == 3
+
+
 async def test_a_pass_skips_a_codespace_another_owner_is_mirroring(tmp_path, direct_exec):
     from single_instance_lease import SingleInstance
 
