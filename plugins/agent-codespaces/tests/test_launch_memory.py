@@ -23,6 +23,8 @@ def test_a_new_session_or_explicit_flags_never_inherit_the_record():
     # A new session (no selector) starts from the current defaults.
     assert lm.apply("cs-1", TENANT, [], lm.DEFAULT_DRIVER) == ([], lm.DEFAULT_DRIVER, [])
     assert lm.apply("cs-1", TENANT, ["--no-ask-user"], lm.DEFAULT_DRIVER) == (["--no-ask-user"], lm.DEFAULT_DRIVER, [])
+    # A resume that names its own driver keeps it, and the recorded flags don't come back.
+    assert lm.apply("cs-1", TENANT, ["--resume=s"], "odsp") == (["--resume=s"], "odsp", [])
     # A resume with its own flags keeps exactly those (and its driver).
     args, driver, recalled = lm.apply("cs-1", TENANT, ["--model=m2", "--resume=s"], lm.DEFAULT_DRIVER)
     assert (args, driver, recalled) == (["--model=m2", "--resume=s"], lm.DEFAULT_DRIVER, [])

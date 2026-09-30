@@ -66,8 +66,9 @@ def apply(
     own = [a for a in requested if not _is_selector(a)]
     selectors = [a for a in requested if _is_selector(a)]
     # Only a resume that names nothing but the session: a new session (no
-    # selector) starts from the current defaults, and explicit flags win.
-    if not selectors or own:
+    # selector) starts from the current defaults, and any explicit setting --
+    # a --copilot-arg or a non-default --driver -- wins over the whole record.
+    if not selectors or own or driver != DEFAULT_DRIVER:
         return own + selectors, driver, []
     record = _load(_path(codespace, tenant))
     if record.get("tenant") != tenant:
@@ -78,7 +79,7 @@ def apply(
         own = [str(a) for a in saved if not _is_selector(str(a))]
         recalled.append("copilot_args")
     saved_driver = record.get("driver")
-    if driver == DEFAULT_DRIVER and isinstance(saved_driver, str) and saved_driver != DEFAULT_DRIVER:
+    if isinstance(saved_driver, str) and saved_driver != DEFAULT_DRIVER:
         driver = saved_driver
         recalled.append("driver")
     return own + selectors, driver, recalled
