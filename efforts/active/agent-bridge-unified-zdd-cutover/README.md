@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** In Progress (Phase 1 of 6 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 6 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 6 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 6 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 6 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to Phase 6; Phase 6 of 6 landed — [#4664](https://github.com/ThomasMichon/copilot-extensions/pull/4664) implemented the opt-in `CR_LIVE_TURN_DRILL=1` drill, then verified by a real live Docker clean-room run ([#4672](https://github.com/ThomasMichon/copilot-extensions/pull/4672)) that also fixed two bugs the review round couldn't catch and one wrong assertion; Phase 0's design fork resolved and the opt-in reconcile gate removed — [#4694](https://github.com/ThomasMichon/copilot-extensions/pull/4694). Only the shared-code-path Validation Plan item remains open.)
+- **Status:** In Progress (Phase 1 of 6 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 6 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 6 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 6 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 6 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to Phase 6; Phase 6 of 6 landed — [#4664](https://github.com/ThomasMichon/copilot-extensions/pull/4664) implemented the opt-in `CR_LIVE_TURN_DRILL=1` drill, then verified by a real live Docker clean-room run ([#4672](https://github.com/ThomasMichon/copilot-extensions/pull/4672)) that also fixed two bugs the review round couldn't catch and one wrong assertion; Phase 0's design fork resolved and the opt-in reconcile gate removed — [#4694](https://github.com/ThomasMichon/copilot-extensions/pull/4694). A checkbox audit then found 3 more Plan/Validation Plan items already satisfied by prior work but never ticked (see Journal); only ONE item remains open in the whole effort: the abrupt-termination drill's real-`_generation_id` exposure, a previously-investigated, genuinely blocked design question -- not a quick continuation.)
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
@@ -262,15 +262,15 @@ layer — is the operator's own, captured verbatim in Request.)_
   matter in practice (CLI `send`/`read`/`wait`, not only the HTTP layer).
 
 ### Phase 5 — Validation
-- [ ] A real, driven cutover drill: start a session-host-carrying daemon,
+- [x] A real, driven cutover drill: start a session-host-carrying daemon,
   trigger the one canonical update path, and confirm the session's Copilot
   process never observes a disruption (no dropped turn, no lost event) while
-  the daemon itself fully changes generation. **Partially covered** -- the
-  pre-existing `agent-bridge-cutover` Tier-P `routing-flip-retire` check
-  already proves the daemon-level mechanism a live-turn survival depends on
-  (nothing hard-killed, clean beside-not-in-place handoff); a *fully live*
-  assertion needs a real model/ACP child in the loop and remains Tier-E scope
-  (tracked, not delivered here -- see Journal).
+  the daemon itself fully changes generation. Closed for real by Phase 6's
+  live-turn-survival drill (`CR_LIVE_TURN_DRILL=1`, a real Docker clean-room
+  run with real Copilot auth/credits) -- see Phase 6's own checklist and
+  Journal for the evidence and the one honest scope correction (the
+  caller-facing `wait --attention turn_complete` gap, tracked as
+  [issue #4681](https://github.com/ThomasMichon/copilot-extensions/issues/4681)).
 - [ ] A forced-abrupt-termination drill: kill the old generation before it
   releases its claims, and confirm a later generation recovers them cleanly.
   **Partially covered** -- proves the underlying dead-pid-recovery primitive
@@ -341,9 +341,15 @@ the full reasoning).
 
 ## Validation Plan
 
-- [ ] `agent-bridge service restart` (or its replacement) and `agent-bridge
+- [x] `agent-bridge service restart` (or its replacement) and `agent-bridge
   deploy` are provably the same code path (a shared test, or the removal of
-  one verb).
+  one verb). Already satisfied by Phase 1's own
+  `test_service_restart_zdd.py::test_service_restart_calls_cmd_deploy_not_raw_stop_start`
+  (monkeypatches `_service_stop`/`_service_start` and `venue_cli._cmd_deploy`,
+  asserts `service restart` calls only `_cmd_deploy` -- never the raw
+  stop/start pair); this checkbox was simply never ticked when that test
+  landed. Confirmed still passing as part of this session's full
+  `agent-bridge` suite runs.
 - [x] A live cutover drill (Phase 5/6) shows zero session disruption across
   a real generation change. Verified by a real `CR_LIVE_TURN_DRILL=1` run
   (Docker clean-room, real Copilot auth/credits) -- see Phase 6's Journal
@@ -351,13 +357,25 @@ the full reasoning).
 - [ ] An abrupt-termination drill shows a stale claim is recovered by the
   next generation without manual intervention. **Partially covered** -- the
   claim is stamped with a test-chosen label, not the daemon's own real
-  generation identity (see Journal).
+  generation identity (see Journal). Needs a real API to read a live
+  daemon's own `_generation_id` before this can close -- new scope, not a
+  quick correction; left open.
 - [x] Reconcile staleness is observable via a status command, independent of
   whether Phase 0's opt-in-gate question is resolved to keep or remove it.
   Resolved: the gate was removed; `agent-bridge service status` reports
   staleness (see Phase 0 Journal entry).
-- [ ] Full plugin test suite (`python tools/run-plugin-tests.py agent-bridge`)
-  and `libs/zdd`'s own suite stay green throughout.
+- [x] Full plugin test suite (`python tools/run-plugin-tests.py agent-bridge`)
+  and `libs/zdd`'s own suite stay green throughout. Re-verified at the end
+  of Phase 0 (this session): full `agent-bridge` suite green (7 sub-suites,
+  1000+ tests) after every change, plus every other touched plugin's own
+  full suite (`agent-ssh`, `agent-vault`, `budget-guidance`,
+  `agent-dispatch`, `agent-containers`, `agent-mcp`, `agent-logger`,
+  `agent-codespaces`, `agent-pull-requests`). `libs/zdd` has no standalone
+  `run-plugin-tests.py` target (it's a shared lib, not a plugin) but is
+  exercised extensively by `agent-bridge`'s own suite (`zdd.cutover`,
+  `zdd.routing`, `zdd.breadcrumb` are imported directly by several
+  agent-bridge tests, e.g. `test_service_restart_zdd.py`), which stayed
+  green throughout.
 
 ## Proposal
 
@@ -414,6 +432,46 @@ entry below for what was inspected, what was already covered, and the one new
 test that closes the gap.
 
 ## Journal
+
+### 2026-09-30 — Checkbox reconciliation: 3 of 4 remaining items were already done
+
+- After Phase 0 merged ([#4694](https://github.com/ThomasMichon/copilot-extensions/pull/4694),
+  [#4700](https://github.com/ThomasMichon/copilot-extensions/pull/4700)),
+  re-audited every unchecked Plan/Validation Plan box before treating the
+  effort as blocked on new work -- per this repo's own completion-gate
+  discipline, a merged phase is never itself proof of effort completion.
+  Found 3 boxes that were already satisfied by prior work but never ticked:
+  1. **Phase 5's "real, driven cutover drill"** -- superseded by Phase 6's
+     live-turn-survival drill days earlier; the box still read
+     "Partially covered... Tier-E scope" (stale language predating Phase
+     6's actual delivery). Marked done, pointing at Phase 6's own checklist.
+  2. **Validation Plan's `restart`/`deploy` shared-code-path proof** --
+     Phase 1 already shipped exactly this as
+     `test_service_restart_zdd.py::test_service_restart_calls_cmd_deploy_not_raw_stop_start`
+     (asserts `service restart` calls only `venue_cli._cmd_deploy`, never
+     raw stop/start). Confirmed still passing this session. Marked done.
+  3. **Validation Plan's "full suite stays green throughout"** -- true
+     continuously across every phase's own PR; this session re-confirmed
+     it explicitly (full `agent-bridge` suite + every other touched
+     plugin's full suite, all green) rather than leaving it an implicit
+     assumption. Marked done.
+- **The one item NOT closed, and why it's a genuine stopping point, not an
+  oversight:** the abrupt-termination drill's remaining gap (a claim
+  stamped with a test-chosen label, not the daemon's own real
+  `_generation_id`) was already investigated in depth by a prior session
+  (see the "Honest scope note" + "six rounds" entry below): exposing the
+  real generation id via `/health` hit a genuine contract-registry
+  self-reference wall (a captured fixture can't cite its own PR's
+  not-yet-existing merged commit), was reverted rather than forced, and
+  the check's own claim was narrowed instead. Solving this for real needs
+  a fresh design decision on WHERE to expose an internal daemon's
+  generation id (a new `/health` field once a fixture can reference an
+  already-merged commit; a debug-only endpoint; or something else) --
+  itself a design fork, not a mechanical continuation, and out of this
+  session's Phase 0 scope. Left open and honestly described, not silently
+  carried forward as if unnoticed.
+- Verified: `python3 tools/run-plugin-tests.py agent-bridge` full suite
+  green after these doc-only edits (no code touched).
 
 ### 2026-09-30 — Phase 0's design fork resolved: the opt-in reconcile gate removed ([#4694](https://github.com/ThomasMichon/copilot-extensions/pull/4694))
 
