@@ -248,10 +248,17 @@ class BridgeClient(CliModeClientMixin, WorktreeRestartMixin):
 
                 ``verify_listener=True`` skips an advertised-but-dead port
                 (healing active->previous), so a stale entry pointing at a
-                retired daemon is never handed back as 'live'."""
+                retired daemon is never handed back as 'live'. Forwarded venue
+                routes are also read from the raw table so legacy bind-less
+                routes keep dialing the host bridge instead of falling back to
+                the configured/default local port."""
                 try:
+                    from .routing_state import forwarded_route_base_url
                     from zdd.routing import read_active_endpoint
 
+                    forwarded = forwarded_route_base_url(config_dir())
+                    if forwarded is not None:
+                        return forwarded
                     ep = read_active_endpoint(config_dir(), verify_listener=True)
                 except Exception:
                     return None
@@ -259,11 +266,16 @@ class BridgeClient(CliModeClientMixin, WorktreeRestartMixin):
 
             reresolve = _reresolve_from_table
             try:
+                from .routing_state import forwarded_route_base_url
                 from zdd.routing import read_active_endpoint
 
-                ep = read_active_endpoint(config_dir())
-                if ep is not None:
-                    base_url = ep.base_url
+                forwarded = forwarded_route_base_url(config_dir())
+                if forwarded is not None:
+                    base_url = forwarded
+                else:
+                    ep = read_active_endpoint(config_dir())
+                    if ep is not None:
+                        base_url = ep.base_url
             except Exception:
                 # The routing table is an optimization, never a hard dependency.
                 pass

@@ -1152,6 +1152,9 @@ function Get-RunningProcess {
     # Last resort: find by port binding (catches orphaned processes
     # whose PID file was lost or exe path changed during update). Resolve the
     # live port from active.json so a dynamic-port daemon is found too (#856).
+    if (Test-ActiveIsForward) {
+        return $null
+    }
     $conn = Get-NetTCPConnection -LocalPort (Get-ActiveEndpoint).Port -ErrorAction SilentlyContinue |
         Where-Object { $_.State -eq 'Listen' } |
         Select-Object -First 1
@@ -1188,6 +1191,22 @@ function Get-ActiveEndpoint {
         } catch { }
     }
     return @{ Bind = $bind; Port = $resolved }
+}
+
+function Test-ActiveIsForward {
+    $activeJson = Join-Path $InstallDir 'active.json'
+    if (-not (Test-Path $activeJson)) { return $false }
+    try {
+        $aj = Get-Content $activeJson -Raw -ErrorAction Stop | ConvertFrom-Json
+        $active = $aj.active
+        $p = [int]($active.port)
+        if ($p -le 0) { return $false }
+        if ($active.forwarded -eq $true) { return $true }
+        $names = @($active.PSObject.Properties.Name)
+        return (($names -notcontains 'pid') -and ($names -notcontains 'generation'))
+    } catch {
+        return $false
+    }
 }
 
 function Test-HealthOnce {
@@ -2268,6 +2287,11 @@ function Invoke-Start {
     if (-not (Test-Path $LinkPython)) {
         Write-Fail 'agent-bridge not installed. Run: install.ps1 install'
         exit 1
+    }
+
+    if (Test-ActiveIsForward) {
+        Write-Skip 'agent-bridge: this machine reaches a host bridge through a forward (active.json); not starting a local daemon over it'
+        return
     }
 
     # Decide what to do about anything already serving.

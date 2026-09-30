@@ -114,6 +114,7 @@ class CutoverOrchestrator:
         health_check: Callable[[str, int], bool],
         make_client: Callable[[str], _Client],
         pick_free_port: Callable[[], int],
+        refuse_old: Callable[[dict[str, Any] | None], str | None] | None = None,
         service: str | None = None,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
@@ -126,6 +127,7 @@ class CutoverOrchestrator:
         self.health_check = health_check
         self.make_client = make_client
         self.pick_free_port = pick_free_port
+        self.refuse_old = refuse_old
         self.sleep = sleep
         self.clock = clock
         self.routing = routing_mod
@@ -194,6 +196,20 @@ class CutoverOrchestrator:
         except Exception:
             return False
 
+    def _refuse_current_old(self, result: CutoverResult) -> bool:
+        if self.refuse_old is None:
+            return False
+        table = self.routing.read_table(self.config_dir)
+        active_raw = table.get("active") if isinstance(table, dict) else None
+        if not isinstance(active_raw, dict):
+            active_raw = None
+        refusal = self.refuse_old(active_raw)
+        if not refusal:
+            return False
+        result.error = refusal
+        result.steps.append(f"refused: {refusal}")
+        return True
+
     # -- main ----------------------------------------------------------------
 
     def run(
@@ -259,6 +275,8 @@ class CutoverOrchestrator:
         from zdd import lifecycle
 
         result = CutoverResult(ok=False)
+        if self._refuse_current_old(result):
+            return result
         # Dead-port watchdog: before standing up the new daemon, retire any
         # advertised-but-dead endpoint a previously-aborted cutover may have left
         # behind (the state that wedged the pipeline). Best-effort -- it only acts
@@ -268,6 +286,8 @@ class CutoverOrchestrator:
             self.routing.reap_stale_active(self.config_dir, service=self.service)
         except Exception:  # noqa: BLE001 -- watchdog is best-effort, never fatal
             pass
+        if self._refuse_current_old(result):
+            return result
         old = self.routing.read_active_endpoint(self.config_dir)
         result.old_endpoint = old
 

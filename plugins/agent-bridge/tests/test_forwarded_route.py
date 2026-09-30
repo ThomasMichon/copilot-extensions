@@ -86,6 +86,26 @@ def test_ensure_still_boots_a_local_daemon_without_a_forward(tmp_path, monkeypat
     assert spawned == [1]
 
 
+def test_ensure_rechecks_forward_after_lock_before_spawning(tmp_path, monkeypatch):
+    _route(tmp_path, monkeypatch, DAEMON)
+    spawned = _ensure_setup(monkeypatch, tmp_path, answers=[False] * 10)
+    released = []
+    monkeypatch.setattr(m, "_reconcile_live_dynamic_daemon", lambda: False)
+    monkeypatch.setattr(m, "_service_process_is_live", lambda: False)
+
+    def acquire():
+        (tmp_path / "active.json").write_text(
+            json.dumps({"active": FORWARD}), encoding="utf-8"
+        )
+        return 7
+
+    monkeypatch.setattr(m, "_acquire_ensure_lock", acquire)
+    monkeypatch.setattr(m, "_release_ensure_lock", released.append)
+    assert m._ensure_daemon() is False
+    assert spawned == []
+    assert released == [7]
+
+
 def test_the_retry_waits_back_off():
     assert list(service_process_cli._FORWARD_RETRY_DELAYS_S) == sorted(
         service_process_cli._FORWARD_RETRY_DELAYS_S
@@ -172,6 +192,74 @@ def test_deploy_never_cuts_over_the_host_bridge(tmp_path, monkeypatch, capsys):
     assert "no local daemon to deploy" in capsys.readouterr().out
 
 
+def test_deploy_rechecks_forward_inside_cutover(tmp_path, monkeypatch, capsys):
+    _route(tmp_path, monkeypatch, DAEMON)
+    monkeypatch.setattr(m, "_service_is_running", lambda: False)
+    monkeypatch.setattr(m, "_reap_abandoned_passive", lambda *_a, **_k: {})
+    monkeypatch.setattr(m, "_json_out", lambda data: print(json.dumps(data)))
+
+    from agent_bridge import venue_cli
+    from agent_bridge import config as bridge_config
+
+    monkeypatch.setattr(bridge_config, "config_dir", lambda: tmp_path)
+    monkeypatch.setattr(bridge_config, "load_or_create_auth_token", lambda: "tok")
+
+    class _Cfg:
+        bind = "127.0.0.1"
+
+    monkeypatch.setattr(bridge_config, "load_config", lambda: _Cfg())
+
+    import zdd.breadcrumb
+    import zdd.cutover
+
+    monkeypatch.setattr(zdd.breadcrumb, "read_breadcrumb", lambda _d: None)
+    monkeypatch.setattr(
+        zdd.breadcrumb,
+        "recover_stale_cutover",
+        lambda *_a, **_k: {"recovered": False, "reason": "clean"},
+    )
+
+    class FakeCutoverOrchestrator:
+        def __init__(self, *_a, refuse_old=None, **_k):
+            self._refuse_old = refuse_old
+
+        def run(self, **_k):
+            (tmp_path / "active.json").write_text(
+                json.dumps({"active": FORWARD}), encoding="utf-8"
+            )
+            reason = self._refuse_old(FORWARD) if self._refuse_old else None
+            assert reason
+
+            class Result:
+                ok = False
+                error = reason
+                steps = [f"refused: {reason}"]
+
+                def to_dict(self):
+                    return {"ok": self.ok, "error": self.error, "steps": self.steps}
+
+            return Result()
+
+    monkeypatch.setattr(zdd.cutover, "CutoverOrchestrator", FakeCutoverOrchestrator)
+    args = type(
+        "Args",
+        (),
+        {
+            "health_timeout": 1,
+            "drain_timeout": 1,
+            "force": False,
+            "json": False,
+            "recover": False,
+        },
+    )()
+    with pytest.raises(SystemExit) as exc:
+        venue_cli._cmd_deploy(args)
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert "refused:" in out
+    assert "no local daemon to deploy" in out
+
+
 _INSTALL_SH = Path(__file__).resolve().parents[1] / "scripts" / "install.sh"
 
 
@@ -190,4 +278,3 @@ def test_install_sh_start_does_not_start_a_daemon_over_a_forward(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "not starting a local daemon" in result.stdout
     assert not (home / ".agent-bridge" / "agent-bridge.pid").exists()
-

@@ -540,6 +540,10 @@ def _ensure_daemon() -> bool:
     try:
         if core._service_is_running():
             return True
+        if core._active_endpoint_is_forward():
+            core._release_ensure_lock(fd)
+            lock_held = False
+            return _await_forwarded_bridge(core)
         if core._service_process_is_live():
             core._release_ensure_lock(fd)
             lock_held = False
@@ -549,6 +553,10 @@ def _ensure_daemon() -> bool:
                 fh.write(str(now))
         except OSError:
             pass
+        if core._active_endpoint_is_forward():
+            core._release_ensure_lock(fd)
+            lock_held = False
+            return _await_forwarded_bridge(core)
         core._spawn_detached_daemon()
         for _ in range(20):
             time.sleep(1)

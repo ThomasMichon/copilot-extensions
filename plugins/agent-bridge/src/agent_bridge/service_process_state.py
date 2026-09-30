@@ -28,14 +28,9 @@ def _active_endpoint():
 def _active_route() -> dict | None:
     """The raw ``active`` entry of ``active.json``, or ``None``."""
     core = _core()
-    try:
-        from zdd.routing import read_table
+    from .routing_state import active_route
 
-        table = read_table(core._INSTALL_DIR)
-    except Exception:
-        return None
-    active = table.get("active") if isinstance(table, dict) else None
-    return active if isinstance(active, dict) else None
+    return active_route(core._INSTALL_DIR)
 
 
 def _active_endpoint_port() -> int | None:
@@ -58,17 +53,9 @@ def _active_endpoint_is_forward() -> bool:
     ``generation``. A local daemon started over that route takes it over: the
     sessions here then report to it, and the host loses them.
     """
-    active = _active_route()
-    if active is None:
-        return False
-    try:
-        if int(active.get("port") or 0) <= 0:
-            return False
-    except (TypeError, ValueError):
-        return False
-    if active.get("forwarded") is True:
-        return True
-    return active.get("pid") is None and "generation" not in active
+    from .routing_state import active_route_is_forward
+
+    return active_route_is_forward(_active_route())
 
 
 def _service_port() -> int:
