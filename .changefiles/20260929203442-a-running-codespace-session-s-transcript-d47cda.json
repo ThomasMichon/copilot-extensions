@@ -1,0 +1,13 @@
+{
+  "comment": "A running CodeSpace session's transcript survives a host restart: the Connection Owner mirrors each running session's events.jsonl (whole lines, by byte offset, only while a session provably runs) and pushes it into the agent-logger hub under .codespaces/<name>, and agent-logger's session-fetch finds sessions synced from a CodeSpace there. AGENT_CODESPACES_TRANSCRIPT_MIRROR=0 turns the mirror off.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

@@ -68,6 +68,9 @@ SessionProbe = Callable[[str, list[str]], Awaitable[dict[str, bool | None]]]
 # doesn't connect or answer: rebuild it), or ``None`` (unknown: leave it).
 BridgeProbe = Callable[[str, int], Awaitable["bool | None"]]
 
+# Mirror a CodeSpace's running transcripts to this host (``transcript_mirror``).
+TranscriptMirrorFn = Callable[[str], Awaitable[Any]]
+
 # How often (seconds) the Owner probes a CodeSpace's session tenants.
 DEFAULT_SESSION_PROBE_INTERVAL = 120.0
 
@@ -85,9 +88,12 @@ class SessionForwards:
         clock: Callable[[], float] = time.monotonic,
         local_factory: LocalForwardFactory | None = None,
         bridge_probe: BridgeProbe | None = None,
+        transcript_mirror: TranscriptMirrorFn | None = None,
     ) -> None:
         self._daemon_factory = daemon_factory
         self._bridge_probe = bridge_probe
+        self._mirror = transcript_mirror
+        self._mirroring: dict[str, asyncio.Task[Any]] = {}
         self._local_factory = local_factory
         self._probe = session_probe
         self._ttl = ttl
@@ -217,6 +223,7 @@ class SessionForwards:
                 # Only while a session provably runs there: the CodeSpace is
                 # Available, so this never wakes a stopped box.
                 await self._check_bridge(hold.codespace)
+                self._start_mirror(hold.codespace)
             for mux, tenants in by_mux.items():
                 verdict = verdicts.get(mux)
                 for tenant, confirmed, generation in tenants:
@@ -229,6 +236,22 @@ class SessionForwards:
                             mux, hold.codespace, tenant,
                         )
                         release(hold.codespace, tenant, ttl=self._ttl, generation=generation)
+
+    def _start_mirror(self, codespace: str) -> None:
+        """Mirror ``codespace``'s transcripts in the background (one pass at a time)."""
+        if self._mirror is None:
+            return
+        running = self._mirroring.get(codespace)
+        if running is not None and not running.done():
+            return
+
+        async def run() -> None:
+            try:
+                await self._mirror(codespace)
+            except Exception as exc:
+                log.debug("transcript mirror on %s failed: %s", codespace, exc)
+
+        self._mirroring[codespace] = asyncio.get_running_loop().create_task(run())
 
     async def _check_bridge(self, codespace: str) -> None:
         """Rebuild ``codespace``'s bridge forward when it no longer serves.
@@ -256,6 +279,9 @@ class SessionForwards:
 
     async def shutdown(self) -> None:
         """Stop every daemon and extra forward (Owner shutdown). The registry is untouched."""
+        for task in self._mirroring.values():
+            task.cancel()
+        self._mirroring.clear()
         for codespace, (_port, channel) in list(self._channels.items()):
             self._channels.pop(codespace, None)
             await channel.stop()
