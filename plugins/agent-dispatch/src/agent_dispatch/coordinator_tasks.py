@@ -302,7 +302,7 @@ def register_task_routes(
         bus.publish({"type": event_type, "producer_fence": detail})
         telemetry.emit(telemetry.producer_fence_event(event_type, detail))
 
-    def _schedule_submitted_verification(task_id: str) -> None:
+    def _nudge_submitted_verification(task_id: str) -> None:
         def _runner() -> None:
             try:
                 evaluate_submitted_task(queue, task_id, bus=bus, trigger="submitted")
@@ -359,7 +359,7 @@ def register_task_routes(
                 and result.get("require_verification")
                 and result.get("evaluator_ref")
             ):
-                _schedule_submitted_verification(result["id"])
+                _nudge_submitted_verification(result["id"])
         return result
 
     @app.get("/producer-scopes/status")

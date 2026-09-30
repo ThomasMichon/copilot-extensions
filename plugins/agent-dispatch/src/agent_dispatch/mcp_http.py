@@ -22,10 +22,10 @@ importable (otherwise the REST API still serves).
 # can't see ``Context`` imported locally inside ``build_coordinator_mcp``. Real
 # (non-stringized) annotations resolve at def-time via the enclosing scope.
 
-import logging
-import threading
 import json
+import logging
 import secrets
+import threading
 from dataclasses import asdict
 from typing import Annotated, Any
 
@@ -150,6 +150,23 @@ def build_coordinator_mcp(
 
     def _mutate(op, event_type: str | None) -> dict:
         """Run a queue mutation; map TaskError to an error dict; emit on success."""
+        def _nudge_submitted_verification(task_id: str) -> None:
+            def _runner() -> None:
+                try:
+                    evaluate_submitted_task(queue, task_id, bus=bus, trigger="submitted")
+                except TaskError:
+                    log.debug(
+                        "submitted verification skipped after task %s changed before async evaluation",
+                        task_id,
+                        exc_info=True,
+                    )
+
+            threading.Thread(
+                target=_runner,
+                name=f"agent-dispatch-mcp-verify-{task_id[:8]}",
+                daemon=True,
+            ).start()
+
         try:
             mutation = op()
             if isinstance(mutation, CompletionOutcome):
@@ -174,21 +191,7 @@ def build_coordinator_mcp(
                 and result.get("require_verification")
                 and result.get("evaluator_ref")
             ):
-                def _runner() -> None:
-                    try:
-                        evaluate_submitted_task(queue, result["id"], bus=bus, trigger="submitted")
-                    except TaskError:
-                        log.debug(
-                            "submitted verification skipped after task %s changed before async evaluation",
-                            result["id"],
-                            exc_info=True,
-                        )
-
-                threading.Thread(
-                    target=_runner,
-                    name=f"agent-dispatch-mcp-verify-{result['id'][:8]}",
-                    daemon=True,
-                ).start()
+                _nudge_submitted_verification(result["id"])
         return result
 
     def _identity(

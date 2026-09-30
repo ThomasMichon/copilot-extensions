@@ -36,7 +36,8 @@ def app(tmp_path):
 
 @pytest.fixture
 def api(app):
-    return TestClient(app)
+    with TestClient(app) as client:
+        yield client
 
 
 def _registration_machine() -> str:
@@ -367,9 +368,16 @@ def test_create_app_registers_representative_extracted_route_groups(app):
 
 
 def test_health_loops_empty_when_sweep_disabled(api):
-    # The `api` fixture's create_app has no sweep_interval -> no GC/reap loops,
-    # but the field must still be present (an empty dict, never a KeyError).
-    assert api.get("/health").json()["loops"] == {}
+    # The loop-health map is always present once lifespan starts; disabled
+    # loops report zero intervals instead of disappearing.
+    with TestClient(
+        create_app(TaskQueue(api.app.state.queue.db_path), control_token=CONTROL_TOKEN, verification_interval=0.0)
+    ) as client:
+        loops = client.get("/health").json()["loops"]
+        assert loops["liveness_gc"]["base_interval"] == 0.0
+        assert loops["orphan_reap"]["base_interval"] == 0.0
+        assert loops["handoff_fallback"]["base_interval"] == 0.0
+        assert loops["worktree_status_relay"]["base_interval"] == 0.0
 
 
 def test_health_includes_slot_descriptor_shape(api):
@@ -714,7 +722,12 @@ def test_complete_over_http_retriggers_whole_goal_verification(api, tmp_path):
         headers=_control_headers(sender),
     )
     assert noted.status_code == 200
-    assert api.get(f"/tasks/{tid}").json()["status"] == Status.COMPLETED
+    for _ in range(100):
+        if api.get(f"/tasks/{tid}").json()["status"] == Status.COMPLETED:
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("event-note verification did not complete asynchronously")
 
 
 def test_verify_submitted_can_opt_in_legacy_row_and_assign_evaluator(api, tmp_path):

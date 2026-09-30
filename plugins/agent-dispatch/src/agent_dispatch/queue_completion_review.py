@@ -59,6 +59,7 @@ class QueueCompletionReviewMixin:
         evaluator_ref: str,
         actor: str | None = None,
         now: float | None = None,
+        trigger: str = "backfill",
     ) -> Task:
         """Atomically opt one submitted task into verification/backfill."""
         if not evaluator_ref:
@@ -83,6 +84,7 @@ class QueueCompletionReviewMixin:
                 " WHERE id = ?",
                 (evaluator_ref, ts, task_id),
             )
+            self._insert_verification_request(conn, task_id, task.generation, trigger, ts)
             self._audit(
                 conn,
                 task_id,
@@ -98,6 +100,7 @@ class QueueCompletionReviewMixin:
             )
             result = self._fetch(conn, task_id)
             conn.execute("COMMIT")
+        self._notify_verification()
         return result  # type: ignore[return-value]
 
     def reopen_completed(

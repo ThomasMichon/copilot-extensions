@@ -372,6 +372,29 @@ class RunWaiterWakeOperation:
 
 
 @dataclass(frozen=True)
+class VerificationRequest:
+    """A durable submitted-verification trigger queued for background drain."""
+
+    id: str
+    task_id: str
+    generation: int
+    trigger: str
+    status: str
+    attempts: int
+    not_before: float
+    created_at: float
+    updated_at: float
+    delivered_at: float | None = None
+    last_error: str | None = None
+    delivery_token: str | None = None
+    delivery_expires_at: float | None = None
+
+    @classmethod
+    def _from_row(cls, row: sqlite3.Row) -> VerificationRequest:
+        return cls(**{field.name: row[field.name] for field in dataclasses.fields(cls)})
+
+
+@dataclass(frozen=True)
 class CompletionOutcome:
     """A submitted task plus the observable event caused by this invocation."""
 

@@ -251,9 +251,19 @@ class QueueLifecycleMixin:
                     note="confirmed by self-attestation",
                 )
                 event_type = "task.completed"
+            elif task.evaluator_ref:
+                self._insert_verification_request(
+                    conn,
+                    task_id,
+                    task.generation,
+                    "submitted",
+                    ts,
+                )
             completed = self._fetch(conn, task_id)
             assert completed is not None
             conn.execute("COMMIT")
+        if event_type == "task.submitted" and task.evaluator_ref:
+            self._notify_verification()
         return CompletionOutcome(completed, event_type)
 
     @staticmethod

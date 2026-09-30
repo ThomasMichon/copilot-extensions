@@ -533,6 +533,7 @@ class QueueRunWaitersMixin:
         *,
         sender: str,
         note: str,
+        enqueue_verification: bool = False,
         now: float | None = None,
     ) -> tuple[Task, int]:
         ts = self._now(now)
@@ -557,8 +558,22 @@ class QueueRunWaitersMixin:
                 " VALUES (?, ?, ?, ?, ?, ?)",
                 (task_id, ts, task.status, task.status, sender, f"event note: {meaningful}"),
             )
+            if (
+                enqueue_verification
+                and task.status == Status.SUBMITTED
+                and task.require_verification
+                and task.evaluator_ref
+            ):
+                self._insert_verification_request(conn, task_id, task.generation, "event-note", ts)
             result = self._fetch(conn, task_id)
             conn.execute("COMMIT")
+        if (
+            enqueue_verification
+            and task.status == Status.SUBMITTED
+            and task.require_verification
+            and task.evaluator_ref
+        ):
+            self._notify_verification()
         return result, int(cur.lastrowid)  # type: ignore[return-value]
 
     @staticmethod

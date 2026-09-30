@@ -142,6 +142,7 @@ def create_app(
     handoff_fallback_grace: float = DEFAULT_HANDOFF_FALLBACK_GRACE,
     enable_mcp: bool = True,
     wake_interval: float = 0.0,
+    verification_interval: float = 0.25,
     wake_deliver: Callable[[str, str, str, str | None, str], bool] | None = None,
     wake_is_active: Callable[[], bool] | None = None,
     wake_max_attempts: int = 8,
@@ -205,20 +206,31 @@ def create_app(
         loop = asyncio.get_running_loop()
         bus.bind_loop(loop)
         from . import hibernation_claims
+        from .verification_drain import drain_verification_requests
         from .wake import drain_wake_outbox
         from .run_waiter_wake import drain_run_waiter_wakes
 
         governance = LoopGovernance()
         wake_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
+        verification_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         worktree_status_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
-        if wake_interval > 0:
+        if wake_interval > 0 or verification_interval > 0:
             def _signal_wake() -> None:
                 if wake_signal.empty():
                     wake_signal.put_nowait(None)
 
-            queue.set_wake_notifier(
-                lambda: loop.call_soon_threadsafe(_signal_wake)
-            )
+            if wake_interval > 0:
+                queue.set_wake_notifier(
+                    lambda: loop.call_soon_threadsafe(_signal_wake)
+                )
+            def _signal_verification() -> None:
+                if verification_signal.empty():
+                    verification_signal.put_nowait(None)
+
+            if verification_interval > 0:
+                queue.set_verification_notifier(
+                    lambda: loop.call_soon_threadsafe(_signal_verification)
+                )
         def _signal_worktree_status() -> None:
             if worktree_status_signal.empty():
                 worktree_status_signal.put_nowait(None)
@@ -240,6 +252,20 @@ def create_app(
         wake_task = (
             asyncio.create_task(
                 drain_wake_outbox(queue, bus, **wake_options)
+            )
+            if verification_interval > 0
+            else None
+        )
+        verification_task = (
+            asyncio.create_task(
+                drain_verification_requests(
+                    queue,
+                    bus,
+                    interval=verification_interval,
+                    max_attempts=wake_max_attempts,
+                    retry_base=wake_retry_base,
+                    signal=verification_signal,
+                )
             )
             if wake_interval > 0
             else None
@@ -687,6 +713,12 @@ def create_app(
                     wake_task.cancel()
                     try:
                         await wake_task
+                    except asyncio.CancelledError:
+                        pass
+                if verification_task is not None:
+                    verification_task.cancel()
+                    try:
+                        await verification_task
                     except asyncio.CancelledError:
                         pass
                 if run_waiter_wake_task is not None:

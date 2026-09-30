@@ -56,6 +56,7 @@ from .queue_common import (  # noqa: F401 -- re-exported for existing call sites
     StructuredResult,
     Task,
     TaskAttachmentEntry,
+    VerificationRequest,
     WakeOperation,
     _BUSY_TIMEOUT_MS,
     _CLAIM_REJECTION_EVENT_LIMIT,
@@ -105,6 +106,7 @@ from .queue_spawn_reservations import (  # noqa: F401 -- re-exported for existin
 from .queue_storage import QueueStorageMixin
 from .queue_steering import QueueSteeringMixin
 from .queue_suspend import QueueSuspendMixin
+from .queue_verification_requests import QueueVerificationRequestsMixin
 from .registrations import (  # noqa: F401 -- re-exported for existing call sites/tests
     RegistrationError,
     RegistrationKind,
@@ -135,6 +137,7 @@ class TaskQueue(
     QueueClaimQueriesMixin,
     QueueLifecycleMixin,
     QueueSuspendMixin,
+    QueueVerificationRequestsMixin,
     QueueCompletionReviewMixin,
     LivenessMixin,
     HandoffFallbackMixin,
@@ -497,6 +500,31 @@ class TaskQueue(
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_run_waiter_wakes_task "
                 "ON run_waiter_wakes(task_id, waiter_generation)"
+            )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS verification_requests ("
+                "  id TEXT PRIMARY KEY,"
+                "  task_id TEXT NOT NULL,"
+                "  generation INTEGER NOT NULL,"
+                "  trigger TEXT NOT NULL,"
+                "  status TEXT NOT NULL DEFAULT 'pending',"
+                "  attempts INTEGER NOT NULL DEFAULT 0,"
+                "  not_before REAL NOT NULL DEFAULT 0,"
+                "  created_at REAL NOT NULL,"
+                "  updated_at REAL NOT NULL,"
+                "  delivered_at REAL,"
+                "  last_error TEXT,"
+                "  delivery_token TEXT,"
+                "  delivery_expires_at REAL"
+                ")"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_verification_requests_due "
+                "ON verification_requests(status, not_before, created_at)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_verification_requests_task "
+                "ON verification_requests(task_id, generation)"
             )
             # Durable wake outbox. A steer/resume transaction inserts the wake
             # row before commit; the coordinator loop claims and delivers it
