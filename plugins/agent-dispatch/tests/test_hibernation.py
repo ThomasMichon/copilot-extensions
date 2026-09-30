@@ -638,3 +638,124 @@ def test_waiter_child_aborts_preparing_waiter_when_identity_missing(capsys, monk
     assert out["returncode"] == 125
     assert fake.calls[0][0] == "t-1"
     assert fake.calls[0][1]["abort"]["generation"] == 3
+
+
+def test_release_hibernation_claim_for_host_worktree_mirrors_with_project(monkeypatch):
+    from agent_dispatch import hibernation_claims, identity, remote_dispatch
+
+    calls = []
+
+    class _Proc:
+        returncode = 0
+        stdout = '{"worktree_id":"wt-1","ref":"t-1","action":"released"}'
+        stderr = ""
+
+    def fake_run(argv, **_kwargs):
+        calls.append(argv)
+        return _Proc()
+
+    monkeypatch.setattr(hibernation_claims, "agent_worktrees_launch_prefix", lambda: ["aw"])
+    monkeypatch.setattr(hibernation_claims.subprocess, "run", fake_run)
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "host-a")
+    monkeypatch.setattr(identity, "name_for_repo", lambda repo: "project-alpha")
+
+    result = hibernation_claims.release_hibernation_claim_for_host_worktree(
+        "t-1",
+        "host-a",
+        "wt-1",
+        "example.com/acme/widget",
+    )
+
+    assert result == {"worktree_id": "wt-1", "ref": "t-1", "action": "released"}
+    assert calls == [
+        [
+            "aw",
+            "--project",
+            "project-alpha",
+            "claims",
+            "release",
+            "t-1",
+            "--worktree",
+            "wt-1",
+            "--json",
+        ],
+        [
+            "aw",
+            "--project",
+            "project-alpha",
+            "claims",
+            "mirror-status",
+            "task",
+            "t-1",
+            "--status",
+            "released",
+            "--holder",
+            "agent-dispatch",
+            "--json",
+        ],
+    ]
+
+
+def test_remote_release_hibernation_claim_for_host_worktree_mirrors_with_project(monkeypatch):
+    from types import SimpleNamespace
+
+    from agent_dispatch import bridge_remote, hibernation_claims, identity, remote_dispatch
+
+    mirror_calls = []
+    ssh_calls = []
+
+    def fake_run(argv, **_kwargs):
+        mirror_calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(hibernation_claims, "agent_worktrees_launch_prefix", lambda: ["aw"])
+    monkeypatch.setattr(hibernation_claims.subprocess, "run", fake_run)
+    monkeypatch.setattr(hibernation_claims.shutil, "which", lambda exe: "/usr/bin/ssh" if exe == "ssh" else None)
+    monkeypatch.setattr(
+        hibernation_claims,
+        "run_ssh_capture",
+        lambda argv, timeout=None: ssh_calls.append((argv, timeout))
+        or SimpleNamespace(returncode=0, stdout="{}", stderr=""),
+    )
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "host-a")
+    monkeypatch.setattr(identity, "name_for_repo", lambda repo: "project-alpha")
+    monkeypatch.setattr(bridge_remote, "normalize_host", lambda host: f"ssh-{host}")
+
+    result = hibernation_claims.release_hibernation_claim_for_host_worktree(
+        "t-1",
+        "host-b",
+        "wt-1",
+        "example.com/acme/widget",
+    )
+
+    assert result == {}
+    assert ssh_calls == [
+        (
+            [
+                "/usr/bin/ssh",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=3",
+                "ssh-host-b",
+                "agent-worktrees --project project-alpha claims release t-1 --worktree wt-1 --json",
+            ],
+            15.0,
+        )
+    ]
+    assert mirror_calls == [
+        [
+            "aw",
+            "--project",
+            "project-alpha",
+            "claims",
+            "mirror-status",
+            "task",
+            "t-1",
+            "--status",
+            "released",
+            "--holder",
+            "agent-dispatch",
+            "--json",
+        ]
+    ]

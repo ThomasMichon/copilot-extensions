@@ -41,7 +41,11 @@ def waiter_claim_key(task_id: str, generation: int) -> str:
 
 
 def _mirror_task_claim_status(
-    task_id: str, status: str, *, timeout: float = 15.0
+    task_id: str,
+    status: str,
+    *,
+    project: str | None = None,
+    timeout: float = 15.0,
 ) -> None:
     """Best-effort mirror of this task claim's disposition onto agent-worktrees'
     cross-machine ``task_claim_registry`` (ThomasMichon/copilot-extensions#2584).
@@ -58,10 +62,23 @@ def _mirror_task_claim_status(
     prefix = agent_worktrees_launch_prefix()
     if prefix is None:
         return
+    argv = [*prefix]
+    if project:
+        argv += ["--project", project]
+    argv += [
+        "claims",
+        "mirror-status",
+        "task",
+        task_id,
+        "--status",
+        status,
+        "--holder",
+        "agent-dispatch",
+        "--json",
+    ]
     try:
         subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
-            [*prefix, "claims", "mirror-status", "task", task_id,
-             "--status", status, "--holder", "agent-dispatch", "--json"],
+            argv,
             check=False,
             capture_output=True,
             text=True,
@@ -210,7 +227,7 @@ def release_hibernation_claim_for_host_worktree(
             return None
         if result.returncode != 0 or not isinstance(payload, dict):
             return None
-        _mirror_task_claim_status(task_id, "released", timeout=timeout)
+        _mirror_task_claim_status(task_id, "released", project=project, timeout=timeout)
         return payload
     ssh = shutil.which("ssh")
     if ssh is None:
@@ -248,5 +265,5 @@ def release_hibernation_claim_for_host_worktree(
         return None
     if result.returncode != 0 or not isinstance(payload, dict):
         return None
-    _mirror_task_claim_status(task_id, "released", timeout=timeout)
+    _mirror_task_claim_status(task_id, "released", project=project, timeout=timeout)
     return payload

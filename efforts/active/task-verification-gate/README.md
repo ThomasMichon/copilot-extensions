@@ -616,6 +616,9 @@ place:
   submitted verification generation remains current, preventing a same-task
   CAS race from dropping the sole verification trigger and stranding a task at
   `submitted`.
+- Cross-machine hibernation-claim status mirroring now preserves the resolved
+  `--project` context on release, so the follow-up claim registry update lands
+  in the same per-project state store as the actual claim-release call.
 - Added focused direct tests for these durability boundaries and kept
   `queue_run_waiters.py` shrink-only: no module-size baseline widen was needed
   or retained.
