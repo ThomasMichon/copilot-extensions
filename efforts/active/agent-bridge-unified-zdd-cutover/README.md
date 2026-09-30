@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** In Progress (Phase 1 of 6 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 6 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 6 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 6 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 6 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to Phase 6; Phase 6 of 6 landed — [#4664](https://github.com/ThomasMichon/copilot-extensions/pull/4664) implemented the opt-in `CR_LIVE_TURN_DRILL=1` drill, then verified by a real live Docker clean-room run (this PR) that also fixed two bugs the review round couldn't catch and one wrong assertion)
+- **Status:** In Progress (Phase 1 of 6 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 6 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 6 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 6 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 6 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to Phase 6; Phase 6 of 6 landed — [#4664](https://github.com/ThomasMichon/copilot-extensions/pull/4664) implemented the opt-in `CR_LIVE_TURN_DRILL=1` drill, then verified by a real live Docker clean-room run ([#4672](https://github.com/ThomasMichon/copilot-extensions/pull/4672)) that also fixed two bugs the review round couldn't catch and one wrong assertion; Phase 0's design fork resolved and the opt-in reconcile gate removed — [#4694](https://github.com/ThomasMichon/copilot-extensions/pull/4694). Only the shared-code-path Validation Plan item remains open.)
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
@@ -415,7 +415,7 @@ test that closes the gap.
 
 ## Journal
 
-### 2026-09-30 — Phase 0's design fork resolved: the opt-in reconcile gate removed
+### 2026-09-30 — Phase 0's design fork resolved: the opt-in reconcile gate removed ([#4694](https://github.com/ThomasMichon/copilot-extensions/pull/4694))
 
 - Resumed via a context handoff after Phase 6 merged ([#4672](https://github.com/ThomasMichon/copilot-extensions/pull/4672)),
   leaving Phase 0's one open item: whether the per-project
@@ -467,6 +467,35 @@ test that closes the gap.
   agent-vault budget-guidance agent-dispatch agent-containers agent-mcp
   agent-logger agent-codespaces agent-pull-requests` (each plugin's own
   suite) all green; `python3 tools/check-bootstrap-sync.py` OK.
+- **Review round 1** (COMMENTED, non-blocking per this repo's own policy,
+  but every finding was real and got fixed): (1) "once per session start"
+  doesn't bound *concurrent* sessions -- added the single-flight +
+  stale-reap `reconcile.lock` guard agent-bridge's own `.ps1` already
+  carried to every hook that lacked it (agent-bridge's `.sh` sibling, and
+  both `.sh`/`.ps1` for `agent-ssh`, the psscriptroot family,
+  `budget-guidance`, `agent-mcp`); (2) `reconcile-status.json` recorded
+  launch, not completion -- a failed/wedged reconcile looked falsely
+  fresh; both agent-bridge hooks now overwrite the same file with
+  `completed_at`/`exit_code`/`success` once the reconcile actually exits
+  (the `.sh` side runs the install + completion write as one flat
+  nohup'd `bash -c` so it stays nohup-protected end to end), and
+  `_print_reconcile_status` now distinguishes in-progress/unreported from
+  a reported success/failure; (3) `agent-pull-requests` was the one
+  psscriptroot sibling with no dedicated reconcile test -- given the same
+  `test_bootstrap_check_reconcile_always_on.py` its five siblings have;
+  (4) added the required Documentation impact + Graceful cutover impact
+  PR-description statements (the latter documents, rather than silently
+  carries forward, the one honest residual: the stale-reap kill is a
+  plain PID check, not an identity-bound `zdd.diagnostics.
+  terminate_pid_if_identity` check -- a pre-existing pattern already
+  shipped in agent-bridge's own `.ps1`, now merely propagated at the same
+  scope, a short-lived reconcile helper rather than a live daemon). Full
+  suites re-verified green after the fix; automatic re-review on the
+  follow-up push never fired (a pre-existing, unrelated CI infra issue --
+  the `request-review-if-maintainer` workflow failed on a missing
+  `github-token` input, not anything this PR touched); merged via
+  `pr-self-merge` once `guards + lint` and every plugin suite passed,
+  consistent with this repo's own non-blocking `COMMENTED`-review policy.
 - This closes Phase 0 entirely. The only remaining open item in the whole
   effort is the Validation Plan's shared-code-path proof for
   `agent-bridge service restart`/`deploy` -- tracked, not part of this PR.
