@@ -279,6 +279,7 @@ def test_reconcile_refuses_legacy_forward_written_under_lock(monkeypatch):
 
 def test_service_start_recovers_before_platform_manager(monkeypatch, capsys):
     monkeypatch.setattr(m, "_service_is_running", lambda: False)
+    monkeypatch.setattr(m, "_active_endpoint_is_forward", lambda: False)
     monkeypatch.setattr(m, "_reconcile_live_dynamic_daemon", lambda: True)
     monkeypatch.setattr(m, "_service_port", lambda: 55231)
     monkeypatch.setattr(
@@ -304,6 +305,7 @@ def test_service_start_recovers_before_platform_manager(monkeypatch, capsys):
 def test_ensure_daemon_recovers_before_wait_or_spawn(monkeypatch):
     monkeypatch.delenv("AGENT_BRIDGE_NO_ENSURE", raising=False)
     monkeypatch.setattr(m, "_service_is_running", lambda: False)
+    monkeypatch.setattr(m, "_active_endpoint_is_forward", lambda: False)
     monkeypatch.setattr(m, "_reconcile_live_dynamic_daemon", lambda: True)
     monkeypatch.setattr(
         m,

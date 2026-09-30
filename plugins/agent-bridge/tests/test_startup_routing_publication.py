@@ -192,6 +192,7 @@ def test_cmd_start_refuses_forward_published_during_publication(
     monkeypatch.setattr(bridge_config, "migrate_config", lambda cfg: cfg)
     monkeypatch.setattr(bridge_config, "write_default_config", lambda _cfg: None)
     monkeypatch.setattr(bridge_config, "load_or_create_auth_token", lambda: "test-token")
+    monkeypatch.setattr(service_start_cli._core(), "_INSTALL_DIR", str(tmp_path))
     monkeypatch.setattr(winjob, "setup_kill_on_close_job", lambda: None)
     monkeypatch.setattr(watchdog, "arm_serving_watchdog", lambda *a, **k: None)
 
