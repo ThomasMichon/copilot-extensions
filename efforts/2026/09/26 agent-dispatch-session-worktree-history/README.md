@@ -300,7 +300,7 @@ Archived.
   notes) deferred — history starts from this landing forward.
 
 ### 2026-09-19 — Kickoff
-- Effort created from an private-downstream-repo session's operator request (verbatim
+- Effort created from a private-downstream-repo session's operator request (verbatim
   above), surfaced while diagnosing an Intelligence Dampener stuck-review
   incident and a first (reverted) bespoke attempt at Dampener's "View
   reviewer" link.
