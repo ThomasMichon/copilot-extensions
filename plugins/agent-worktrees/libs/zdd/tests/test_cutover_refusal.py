@@ -115,6 +115,69 @@ def test_cutover_refuses_forward_published_during_health_wait(tmp_path: Path, mo
     }
 
 
+def test_cutover_refusal_keeps_breadcrumb_when_passive_termination_fails(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from zdd import breadcrumb
+
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(
+        tmp_path,
+        bind="127.0.0.1",
+        port=61001,
+        pid=101,
+        version="old",
+    )
+
+    class Handle:
+        pid = 202
+
+        def terminate(self):
+            raise RuntimeError("still running")
+
+    def health_check(_host, port):
+        if port == 61002:
+            (tmp_path / "active.json").write_text(
+                json.dumps(
+                    {
+                        "active": {
+                            "bind": "127.0.0.1",
+                            "port": 62254,
+                            "forwarded": True,
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+        return True
+
+    orch = CutoverOrchestrator(
+        tmp_path,
+        bind="127.0.0.1",
+        version="new",
+        spawn_passive=lambda _port: Handle(),
+        health_check=health_check,
+        make_client=lambda _base: None,
+        pick_free_port=lambda: 61002,
+        refuse_old=lambda active: (
+            "forwarded route replaced active"
+            if isinstance(active, dict) and active.get("forwarded") is True
+            else None
+        ),
+        sleep=lambda _s: None,
+    )
+
+    res = orch.run(health_timeout=1, drain_timeout=1)
+
+    assert not res.ok
+    assert "refusal: new daemon termination failed: still running" in res.steps
+    crumb = breadcrumb.read_breadcrumb(tmp_path)
+    assert breadcrumb.is_stale(crumb)
+    assert crumb["state"] == "started"
+    assert crumb["new_port"] == 61002
+    assert crumb["new_pid"] == 202
+
+
 def _passive(pid: int = 202):
     return type("Handle", (), {"pid": pid, "terminated": False,
                                "terminate": lambda self: setattr(self, "terminated", True)})()
@@ -190,4 +253,3 @@ def test_refuse_old_with_a_routing_module_that_cant_guard_refuses(tmp_path: Path
     assert not res.ok and "can't publish guarded" in res.error
     assert handle.terminated is True
     assert routing.read_table(tmp_path)["active"]["port"] == 61001
-

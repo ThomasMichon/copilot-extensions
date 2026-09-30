@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from types import SimpleNamespace
 
@@ -162,6 +163,40 @@ def test_startup_failure_restores_previous_route(tmp_path, monkeypatch):
     table = routing.read_table(tmp_path)
     assert table["active"]["port"] == 43001
     assert table["active"]["pid"] == os.getpid()
+
+
+def test_startup_refuses_forward_published_during_publication(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv(
+        "AGENT_WORKTREES_PROJECTS_YAML",
+        str(tmp_path / "nonexistent-projects.yaml"),
+    )
+
+    def publish_forward(_config_dir):
+        (tmp_path / "active.json").write_text(
+            '{"active":{"bind":"127.0.0.1","port":62254,"forwarded":true}}',
+            encoding="utf-8",
+        )
+
+    import agent_bridge.lifecycle_hooks as lifecycle_hooks
+
+    monkeypatch.setattr(lifecycle_hooks, "startup_sweep", publish_forward)
+
+    app = create_app(config=_config(tmp_path), token="test-token")
+    app.state.bound_port = 43012
+    app.state.publish_on_ready = True
+
+    async def enter_lifespan():
+        async with app.router.lifespan_context(app):
+            pass
+
+    with pytest.raises(SystemExit) as exc:
+        asyncio.run(enter_lifespan())
+
+    assert exc.value.code == 0
+    assert routing.read_table(tmp_path) == {
+        "active": {"bind": "127.0.0.1", "port": 62254, "forwarded": True}
+    }
 
 
 def test_startup_failure_does_not_overwrite_newer_successor(

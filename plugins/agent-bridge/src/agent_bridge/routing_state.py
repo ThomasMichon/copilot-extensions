@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import socket
 from pathlib import Path
 from typing import Any
+
+
+class ForwardedRouteRefused(RuntimeError):
+    """Raised when local daemon publication would overwrite a venue forward."""
 
 
 def active_route(config_dir: str | Path) -> dict[str, Any] | None:
@@ -73,3 +78,51 @@ def forwarded_route_base_url(
     from zdd.routing import format_authority
 
     return f"http://{format_authority(host, port)}"
+
+
+def publish_daemon_route_unless_forwarded(
+    config_dir: str | Path,
+    *,
+    bind: str,
+    port: int,
+    pid: int,
+    version: str | None,
+):
+    """Publish a local daemon route unless active.json is a venue forward.
+
+    The forwarded-route refusal runs under zdd's routing lock immediately before
+    publication, closing the race between a direct service start's early
+    snapshot guard and its actual startup publication.
+    """
+    from zdd import routing
+
+    def refuse_forward(active: dict | None) -> str | None:
+        if active_route_is_forward(active):
+            return "active route is a venue-forwarded host bridge"
+        return None
+
+    try:
+        return routing.publish_active_with_previous_guarded(
+            config_dir,
+            bind=bind,
+            port=port,
+            pid=pid,
+            version=version,
+            demote_existing=True,
+            expected_active=None,
+            refuse_current=refuse_forward,
+            require_expected_active=False,
+        )
+    except routing.ActivePublicationRefused as exc:
+        raise ForwardedRouteRefused(str(exc)) from exc
+
+
+def skip_forwarded_daemon_start(exc: Exception) -> None:
+    """Log and exit cleanly when startup races a venue-forwarded route."""
+    message = (
+        "agent-bridge startup skipped: active.json points at a "
+        f"venue-forwarded host bridge ({exc})"
+    )
+    logging.getLogger("agent-bridge").info(message)
+    print(f"[agent-bridge] SKIP: {message}")
+    raise SystemExit(0) from exc

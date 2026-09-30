@@ -393,8 +393,10 @@ class CutoverOrchestrator:
             except (refused, _UnguardedRouting) as exc:
                 result.error = str(exc)
                 result.steps.append(f"refused: {exc}")
+                terminated = False
                 try:
                     handle.terminate()
+                    terminated = True
                     result.steps.append("refusal: terminated new daemon")
                 except Exception as term_exc:  # noqa: BLE001
                     result.steps.append(
@@ -404,7 +406,14 @@ class CutoverOrchestrator:
                         "Cutover refusal could not terminate passive daemon: %s",
                         term_exc,
                     )
-                breadcrumb.clear_breadcrumb(self.config_dir)
+                if terminated:
+                    breadcrumb.clear_breadcrumb(self.config_dir)
+                else:
+                    breadcrumb.write_breadcrumb(
+                        self.config_dir, state="started", old=old_dict,
+                        new_port=new_port, new_pid=new_pid,
+                        error=result.error, started_at=started_at,
+                    )
                 return result
             flipped = True
             result.steps.append("routing table flipped -> new active")

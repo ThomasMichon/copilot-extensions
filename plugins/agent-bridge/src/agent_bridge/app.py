@@ -392,20 +392,19 @@ async def lifespan(app: FastAPI):
         from . import __version__ as _ver
         from . import lifecycle_hooks
         from .config import config_dir
+        from .routing_state import ForwardedRouteRefused, publish_daemon_route_unless_forwarded, skip_forwarded_daemon_start
         from zdd import routing
 
         _bound_port = getattr(app.state, "bound_port", cfg.port)
         await asyncio.to_thread(lifecycle_hooks.startup_sweep, config_dir())
         try:
             published_endpoint, previous_endpoint = await asyncio.to_thread(
-                routing.publish_active_with_previous,
-                config_dir(),
-                bind=cfg.bind,
-                port=_bound_port,
-                pid=_os.getpid(),
-                version=_ver,
-                demote_existing=True,
+                publish_daemon_route_unless_forwarded, config_dir(), bind=cfg.bind,
+                port=_bound_port, pid=_os.getpid(), version=_ver,
             )
+        except ForwardedRouteRefused as exc:
+            await asyncio.to_thread(db.close)
+            skip_forwarded_daemon_start(exc)
         except Exception as exc:
             await asyncio.to_thread(db.close)
             log.exception("Failed to publish the bound daemon endpoint")
