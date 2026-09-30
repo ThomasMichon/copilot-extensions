@@ -19,7 +19,8 @@ visions:
 - **Sub-issues:** [Phase 1 -- #3071](https://github.com/ThomasMichon/copilot-extensions/issues/3071),
   [Phase 2 -- #3082](https://github.com/ThomasMichon/copilot-extensions/issues/3082),
   [Phase 3 -- #3120](https://github.com/ThomasMichon/copilot-extensions/issues/3120),
-  [Phase 2 immutable-pin resolver follow-up -- #3132](https://github.com/ThomasMichon/copilot-extensions/issues/3132).
+  [Phase 2 immutable-pin resolver follow-up -- #3132](https://github.com/ThomasMichon/copilot-extensions/issues/3132),
+  [Phase 7 -- #4674](https://github.com/ThomasMichon/copilot-extensions/issues/4674).
 
 ## Guiding Intent
 
@@ -411,6 +412,51 @@ conflict-dispatch label there.
       item**, not this repo's -- this repo cannot verify a private repo's
       runtime behavior, and this Plan does not gate on it.
 
+### Phase 7 -- Worktree-scoped dynamic guidance for projected instructions
+Closes a gap found while a downstream consumer repo (aperture-labs) drove
+Phase 5 to a live deployment and proof (its own tracked issue #7741): the
+checked-in projection alone leaves an ordinary contributor without push
+rights unable to self-correct sync-lag, and a fully hookless/headless launch
+path never gets fresher content than that same checked-in floor even when a
+hooked path could. See
+[ThomasMichon/copilot-extensions#4674](https://github.com/ThomasMichon/copilot-extensions/issues/4674)
+and the new sibling pattern doc,
+`docs/patterns/worktree-scoped-dynamic-guidance.md`, for the full design.
+
+- [ ] `.gitignore` convention: `.github/instructions/**/*.local.instructions.md`
+      -- document as part of the `setting-up-instruction-sync-worker` skill's
+      scaffolding output (every adopting repo needs this rule, not just this
+      one).
+- [ ] Extend the projection template (`customizing-copilot:reviewing-
+      customizations`) with the per-file "prefer the local sibling if
+      present" preamble, prepended ahead of the existing rendered body.
+- [ ] Add a render-only entry point to `projection_sync_worker.py` (or a
+      sibling script) that performs `sync`'s render step against currently
+      installed payloads **without** the git/PR half -- no branch, no commit,
+      no push, purely a local file write to each destination's
+      `.local.instructions.md` sibling. This is the shared function both
+      `agent-worktrees` (Phase 7a below) and any adopting repo's own
+      `sessionStart` hook call into.
+- [ ] A single repo-wide catch-all static projection (its own
+      `instruction-projections.json` entry, applying to every repo that
+      adopts this pattern) directing the agent to scan for and read any
+      `**/*.local.instructions.md` files present, per the pattern doc's §3.
+- [ ] `agent-worktrees`: wire the render-only entry point into worktree
+      **create and resume**, and repeat it from the plugin's own
+      `sessionStart` hook as a backup for drift accrued since. Requires the
+      target repo to already be a trusted folder (same prerequisite
+      `session-scoped-dynamic-guidance.md` §3 already documents for
+      repository-level hooks).
+- [ ] Guard test: a synthetic plugin with a stale checked-in projection and a
+      fresher installed payload produces a `.local.instructions.md` sibling
+      whose content byte-matches a fresh `sync` render of that payload, and
+      the checked-in file's own content is left untouched (no git write from
+      this path, ever).
+- [ ] Negative-proof test: a write-incapable target directory (simulated
+      read-only) leaves the checked-in floor as the only available content,
+      with no error raised to the caller and no partial/corrupt
+      `.local.instructions.md` file left behind.
+
 ## Validation Plan
 
 - [x] Phase 1's guard test fails on a synthetic plugin with a declared-but-
@@ -462,6 +508,15 @@ conflict-dispatch label there.
 - [x] `tools/run-plugin-tests.py customizing-copilot` and any touched
       plugin's own suite pass; `check-version-bump` / `check-version-
       consistency` / `check-docs-consistency` clean on every PR.
+- [ ] Phase 7's render-only entry point never performs a network fetch,
+      git write, commit, or push under any code path -- proven by a test
+      that runs it against a repo with no configured git remote/credentials
+      at all and confirms it still succeeds.
+- [ ] Phase 7's guard and negative-proof tests (see Plan) pass; the per-file
+      preamble and the repo-wide catch-all are each independently provable
+      to drive an agent to the fresher content in a clean-room-style test
+      matching the methodology `session-scoped-dynamic-guidance.md`'s own
+      evidence section used.
 
 ## Proposal
 
@@ -975,6 +1030,39 @@ honestly rather than guessing at the full answer.
   `test_projection_reflect_consent.py`); and three CLI-level tests proving
   the wiring (default ignores the requirement, `true` blocks an unpinned
   source, `true` permits a pinned one, in `test_projection_sync_worker.py`).
+
+### 2026-09-29 -- Carved Phase 7 from a downstream deployment's live findings
+
+- Prompted by aperture-labs driving Phase 5 (`projection-reflect`
+  instantiation) to a real live deployment and forced-drift proof, tracked
+  in that repo's own issue #7741: an ordinary contributor without push
+  rights hit an error from a session-start mechanism attempting the sync
+  on their behalf, and a separate architectural discussion (this repo has
+  no visibility into that private conversation; only the resulting design
+  is carried here) concluded that headless/cloud/sandboxed launch paths
+  with no hook and no session-state folder need the checked-in floor to
+  remain authoritative regardless, while every other launch path could
+  reasonably do better.
+- Re-read `docs/patterns/session-scoped-dynamic-guidance.md` before
+  proposing anything new, per this repo's own root `AGENTS.md` orientation
+  discipline -- confirmed its §2a rule already excludes large/stable
+  projected content from the session-scoped file by design, so the right
+  move is a sibling pattern at worktree granularity, not a literal reuse or
+  a modification of the existing one.
+- Filed [#4674](https://github.com/ThomasMichon/copilot-extensions/issues/4674)
+  and added Phase 7 to this effort's Plan/Validation Plan (above): the
+  `.gitignore`/`*.local.instructions.md` convention, the per-file "prefer
+  local" preamble, the repo-wide catch-all for not-yet-synced sources, the
+  shared render-only entry point (no git/PR side effects, ever), and the
+  `agent-worktrees` create/resume + `sessionStart` wiring. Authored the new
+  sibling pattern doc, `docs/patterns/worktree-scoped-dynamic-guidance.md`,
+  and cross-linked it from `session-scoped-dynamic-guidance.md`, the
+  `docs/patterns/README.md` index, and this vision's Reality docs.
+- Not yet built: this entry records the design and its tracking issue only.
+  The actual render-only entry point, the projection-template preamble
+  change, the catch-all projection, and the `agent-worktrees` wiring remain
+  open Plan items above, each its own worktree/PR per this repo's phase
+  convention.
   Updated `reviewing-customizations/SKILL.md` and
   `setting-up-instruction-sync-worker/SKILL.md` (including its consent-
   schema example and scheduler-config description, which still described
