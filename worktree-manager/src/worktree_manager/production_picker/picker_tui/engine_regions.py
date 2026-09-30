@@ -12,6 +12,7 @@ from textual.widgets.option_list import Option
 from .engine_helpers import (
     _NO_FLEX_COLUMN,
     fit,
+    row_sess_pulses,
 )
 
 if TYPE_CHECKING:
@@ -415,6 +416,19 @@ class _PickerNativeData(OptionList):
             self._sync_from_sel()
             self._update_sticky()
             return
+        # Pulse-only fast path (render-perf follow-up, #3307 2026-09-30): the
+        # 10fps idle tick flips ``pulse`` roughly twice a second purely to
+        # animate a live-session glyph's color -- with no other state change,
+        # that used to force this ENTIRE list (every row, every pivot) to
+        # clear and rebuild from scratch on every flip, even though at most a
+        # handful of rows (the genuinely live ones, see ``row_sess_pulses``)
+        # actually render any differently. Repaint just those rows in place,
+        # same as the selection fast path above.
+        if self._try_pulse_repaint(new_sig):
+            self._sig = new_sig
+            self._sync_from_sel()
+            self._update_sticky()
+            return
         self._rebuild()
 
     def _try_selection_repaint(self, new_sig) -> bool:
@@ -455,6 +469,48 @@ class _PickerNativeData(OptionList):
             if row is None:
                 return False   # unknown row -> safe fallback to a full rebuild
             idx, rec, li = row
+            if not (0 <= idx < count):
+                return False
+            text = view._row_text(rec, li, self._SENTINEL_SEL, W, lcols,
+                                  None, None)
+            self.replace_option_prompt_at_index(idx, text)
+        return True
+
+    def _try_pulse_repaint(self, new_sig) -> bool:
+        """Repaint only the worktree rows whose LIVE glyph actually pulses, in
+        place (render-perf follow-up, #3307 2026-09-30). Returns True if it
+        fully handled the update; False to fall back to :meth:`_rebuild`.
+
+        Applies only when the signature delta is *pulse-only*: the pivot is
+        Worktrees and ``new_sig`` differs from the last signature in nothing
+        but the ``pulse`` field (index 5 of :meth:`_signature`) -- i.e. the
+        ~10fps idle tick's cosmetic frame flip, with no real reload/nav/scope
+        change alongside it. Most rows never call ``row_sess_pulses`` true (a
+        finalized/unattached/non-live worktree's glyph never changes color),
+        so this is typically a no-op scan rather than a full O(rows)
+        clear+rebuild -- the exact over-painting the operator flagged."""
+        old = self._sig
+        if old is None or len(old) != len(new_sig):
+            return False
+        if old[0] != "worktrees" or new_sig[0] != "worktrees":
+            return False
+        # Differ ONLY in the pulse field -- index 5 of _signature().
+        if any(old[i] != new_sig[i] for i in range(len(old)) if i != 5):
+            return False
+        if old[5] == new_sig[5]:
+            return False
+        scr = self._screen
+        W = scr.size.width or 100
+        try:
+            cols, _sections = scr.current_list()
+            lcols = fit(cols, W - 2, _NO_FLEX_COLUMN, 0)
+        except Exception:
+            return False
+        view = scr.worktrees_view
+        count = self.option_count
+        for idx, rec, li in self._l_rows.values():
+            if not row_sess_pulses(rec.get("sess", "")):
+                continue
             if not (0 <= idx < count):
                 return False
             text = view._row_text(rec, li, self._SENTINEL_SEL, W, lcols,

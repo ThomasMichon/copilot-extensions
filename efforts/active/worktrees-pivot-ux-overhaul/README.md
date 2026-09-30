@@ -492,8 +492,14 @@ parallelizable across worktrees.
         journal), `LOCK`, `-`. **Not implemented**: an `ACP(n)` client count
         — no producer emits a connected-client count for an ACP/bridge-hosted
         session today (unlike `mux_clients`); fabricating one was rejected.
-      - [ ] **Render performance / over-painting investigation** — not
-        started.
+      - [x] **Render performance / over-painting investigation** (2026-09-30):
+        profiled the Picker's idle (non-busy, no-nav) render-tick path with
+        cProfile over a headless `PickerApp.run_test()` at 150/300/500 rows.
+        Found -- and fixed the safe, low-risk layer of -- a real
+        over-painting bug; documented two deeper, higher-risk root causes as
+        an explicit follow-up rather than rushing them in this slice. See the
+        dedicated 2026-09-30 journal entry below for the full profiling
+        evidence and root-cause breakdown.
 - [x] CLAIMS/activity mock-data enrichment + a real, distinct "Activity"
       disposition field (`agent-worktrees status --activity`) replacing the
       second line's old STATE-reuse fallback (2026-09-26).
@@ -1394,3 +1400,88 @@ Operator feedback on the rendered pivot, addressed as a bundled follow-up
   entry; `test_mux_daemon.py` and one `test_registered_pivot_*` failure
   both confirmed to pass in isolation, i.e. full-suite-load flakes, not
   regressions from this change).
+
+### 2026-09-30 — Render-perf/over-painting investigation: one safe fix landed, two deeper root causes deferred
+
+Operator confirmed both 2026-09-29 judgment calls as shipped (`ACP` bare, no
+fabricated count; `PROC` kept as a distinct 5th `LIVE` value). Picked up the
+last unstarted item from that batch: the render-performance/over-painting
+investigation, profiled before assuming any fix, per this effort's own
+discipline.
+
+- **Method**: a headless `PickerApp.run_test()` harness (150/300/500
+  synthetic worktree rows), profiled with `cProfile` around the idle
+  (non-busy, no-nav) render tick — the ~2fps cosmetic-pulse cadence
+  `PickerScreen._tick()` runs even when nothing else is happening — plus a
+  real-timer-driven (not synthetic-loop) run to see Textual's own compositor
+  cost, not just this repo's Python-side cost.
+- **Root cause #1 (fixed this slice)**: `_PickerNativeData.refresh_data()`'s
+  data-signature includes `pulse` (needed: a genuinely live MUX/ACP/PROC row
+  legitimately pulses its `LIVE` glyph's color, per `row_text`'s `sess`
+  branch). But ANY pulse flip — including on a Picker with zero live rows —
+  used to fall through to a full `_rebuild()`: `clear_options()` +
+  `add_options()` reconstructing every row's `Text`, at 150/300/500 rows,
+  roughly twice a second, purely to recolor at most a handful of glyphs.
+  **Fixed** by extracting `row_sess_pulses()` (`engine_helpers.py`) and
+  adding `_try_pulse_repaint()` (`engine_regions.py`), mirroring the
+  existing `_try_selection_repaint()` fast path (#171): when the only
+  signature delta is `pulse`, repaint in place (`replace_option_prompt_at_
+  index`) just the rows `row_sess_pulses()` actually flags, skipping
+  `_rebuild()` entirely for every other row. Verified against the REAL
+  10fps `_tick()`/`set_interval` path (not a synthetic loop, which turned
+  out to never toggle `pulse` and silently validate nothing): over ~12s of
+  idle real-timer ticks, 18 of 19 genuine pulse-only signature changes took
+  the new fast path; only 1 (the first, post-setup) fell through to a full
+  rebuild.
+- **Root cause #2 (deeper, deferred, NOT fixed this slice)**: `_signature()`
+  itself — needed on every `refresh_data()` call just to decide whether
+  anything changed at all — unconditionally recomputes `list_records()` →
+  `current_list()` → `src.bucket()` → a full per-row `(id, title, state,
+  age_secs)` fingerprint tuple, over the ENTIRE row set, with NO caching.
+  Profiling showed this is **the same order of cost as a full rebuild would
+  have been** (e.g. ~0.1-0.15s of Python time per 40 idle ticks at 500 rows)
+  — so root cause #1's fix only pays off proportionally to how often
+  `pulse` is the ONLY thing that changed; the `_signature()` computation
+  itself is paid on literally every tick regardless, busy or idle, whether
+  or not anything downstream reuses the result. A safe fix needs
+  `current_list()`/`list_records()` memoized behind a cheap invalidation
+  key — but `self.data` is mutated in place at at least 2 call sites
+  (`engine_maintenance_actions.py` lines ~206/208 `self.data[i] = row` /
+  `self.data.append(row)`) alongside ~6 wholesale-reassignment sites
+  (`engine_input.py`, `engine_loading.py`, `engine_runtime.py`) — an
+  `id(self.data)`-keyed cache would silently go stale after an in-place
+  mutation, which is a correctness bug far worse than the perf issue it
+  would fix. Doing this safely needs an explicit `self._data_version`
+  counter bumped at every one of those ~8 sites (mechanical, but easy to
+  miss one and reintroduce silent staleness) — scoped as its own follow-up
+  slice with dedicated stale-data regression coverage, not rushed here.
+- **Root cause #3 (deeper still, also deferred)**: the same real-timer
+  profiling run showed Textual's own compositor spending the bulk of
+  wall-clock time in `_compositor_refresh` → `render_full_update` (a full,
+  non-incremental terminal repaint) rather than its normal incremental
+  diff-based `render_update` — strongly suggesting `PickerScreen.refresh()`'s
+  `_refresh_nf_segments()` calling `.refresh()`/`.refresh_data()`
+  unconditionally on ALL 7 segment widgets (title/pivots/chrome/machine/
+  buttons/footer/body-data) on every screen refresh — including a pure
+  cosmetic pulse tick, which only the chrome segment's `status_text()`
+  actually needs — is what marks the whole screen dirty enough that Textual
+  chooses a full repaint over an incremental one. This is the closest match
+  to the operator's literal "redrawing more than the changed region"
+  framing, but narrowing `_refresh_nf_segments()`'s scope per refresh-cause
+  (cosmetic-only vs. a real nav/reload/pivot-switch) needs to be verified
+  against the comment at its call site ("any state change that refreshes
+  the screen must re-render the child segments too, they read off this
+  screen") and the existing segment-sync test coverage before being
+  trusted — also scoped as its own follow-up, not attempted this slice.
+- **Validation**: `test_picker_tui.py` full file (270 tests) green. Full
+  `worktree-manager` suite: 1484 passed / 1 skipped / 4 failed — all 4
+  reconfirmed pre-existing environment flakes in isolation (`test_mux_
+  daemon.py`'s backstop-cadence timing test,
+  `test_trusted_materializer_parity.py`'s two Windows-symlink-path tests,
+  `test_update.py`'s symlinked-extraction-root test) — none touch the
+  claims/picker rendering code this slice changed, all already documented
+  in this effort's 2026-09-27/2026-09-29 journal entries as flaky under
+  full-suite load on this machine.
+- **Interactive claims navigation (stretch goal)** remains unstarted — not
+  picked up this slice; still tracked above.
+
