@@ -25,7 +25,7 @@ Use one of **two** dev-time forms, chosen by whether the consumer must stay
 | Kind | Use when | `dev` form | Promotion-time action | Shipped `main` form |
 |---|---|---|---|---|
 | **File pointer** | A mirrored file is read by humans/agents, not executed as code on `dev` | A short physical stub file whose first line is `<!-- VENDOR_POINTER: source=<repo-relative-path> kind=file -->` | Copy canonical file bytes over the stub in place | A normal full file |
-| **Canonical reference** | The consumer must still run/tests/install from `dev` | A live relative-path reference back to canonical, with **no local vendored copy at all** | Copy canonical content into the consumer and rewrite the reference to the local shipped form | A normal full local copy |
+| **Canonical reference** | The consumer must still run, test, and install from `dev` | A live relative-path reference back to canonical, with **no local vendored copy at all** | Copy canonical content into the consumer and rewrite the reference to the local shipped form | A normal full local copy |
 
 Both kinds share one lifecycle:
 
@@ -144,9 +144,12 @@ Reference example: `agent-worktrees`'s `agent-lazy-cli-dispatch` entry in
 1. Delete the adopter's local `scripts/installer-engine.{sh,ps1}` copies.
 2. Rewrite `scripts/install.sh` and `scripts/install.ps1` to source canonical
    `libs/installer-engine/installer-engine.{sh,ps1}` directly.
-3. Verify both language variants with `python3 tools/sync-installer-engine.py --check`
+3. Register the plugin in `tools/installer_engine_ref.py`'s `ADOPTERS` list so
+   the guard and the promotion materializer both know this plugin is expected to
+   use the canonical-reference form.
+4. Verify both language variants with `python3 tools/sync-installer-engine.py --check`
    and `python3 tools/check-install-contract.py`.
-4. Confirm promotion/preview rewrite the adopter back to the local shipped form.
+5. Confirm promotion/preview rewrite the adopter back to the local shipped form.
 
 Reference example: `plugins/agent-pull-requests/scripts/install.{sh,ps1}`.
 
