@@ -98,8 +98,6 @@ class SessionForwards:
         # CodeSpaces a probe last saw running (when): their full passes push
         # anything owed, so owed-only pushes leave them alone.
         self._live_seen: dict[str, float] = {}
-        # Full passes that found the CodeSpace's task slot busy: started next tick.
-        self._mirror_pending: set[str] = set()
         self._local_factory = local_factory
         self._probe = session_probe
         self._ttl = ttl
@@ -205,8 +203,6 @@ class SessionForwards:
 
     async def probe(self, holds: list[OwnerHold]) -> None:
         """Renew/release session tenants from the venue probe (rate-limited per CodeSpace)."""
-        for codespace in list(self._mirror_pending):
-            self._start_mirror(codespace)
         if self._probe is None:
             self._start_owed_pushes()
             return
@@ -234,7 +230,11 @@ class SessionForwards:
                 # Available, so this never wakes a stopped box.
                 await self._check_bridge(hold.codespace)
                 self._live_seen[hold.codespace] = now
-                self._start_mirror(hold.codespace)
+                if not self._start_mirror(hold.codespace):
+                    # Its slot was busy: probe again next tick, so the pass only
+                    # ever starts on a fresh proof that the session runs (a
+                    # remote read must never wake a box that has since stopped).
+                    self._last_probe.pop(hold.codespace, None)
             for mux, tenants in by_mux.items():
                 verdict = verdicts.get(mux)
                 for tenant, confirmed, generation in tenants:
@@ -249,15 +249,12 @@ class SessionForwards:
                         release(hold.codespace, tenant, ttl=self._ttl, generation=generation)
         self._start_owed_pushes()
 
-    def _start_mirror(self, codespace: str) -> None:
+    def _start_mirror(self, codespace: str) -> bool:
         """Mirror ``codespace``'s transcripts in the background (one pass at a
-        time); if another task holds its slot, start it on the next tick."""
+        time). False when another task holds its slot (nothing started)."""
         if self._mirror is None:
-            return
-        if self._start_mirror_task(codespace, self._mirror, "transcript mirror"):
-            self._mirror_pending.discard(codespace)
-        else:
-            self._mirror_pending.add(codespace)
+            return True
+        return self._start_mirror_task(codespace, self._mirror, "transcript mirror")
 
     def _start_owed_pushes(self) -> None:
         """Retry dirty host-side transcript pushes without probing any CodeSpace."""
@@ -274,9 +271,7 @@ class SessionForwards:
         now = self._clock()
         for codespace in codespaces:
             seen = self._live_seen.get(codespace)
-            if codespace in self._mirror_pending or (
-                seen is not None and now - seen < 2 * self._probe_interval
-            ):
+            if seen is not None and now - seen < 2 * self._probe_interval:
                 continue  # its full passes push what's owed (even when a read fails)
             last = self._last_owed_push.get(codespace)
             if last is not None and now - last < self._probe_interval:

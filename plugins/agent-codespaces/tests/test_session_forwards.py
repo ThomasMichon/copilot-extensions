@@ -433,6 +433,41 @@ async def test_a_running_session_keeps_its_full_passes_while_a_push_is_owed(stor
     assert ran.count("full") >= 5 and "owed" not in ran[1:]
 
 
+async def test_a_pass_that_found_its_slot_busy_needs_a_fresh_running_verdict(store, tmp_path):
+    """A full pass that couldn't start (slot busy) is not replayed later on the
+    old verdict: the next tick probes again, and a session that has stopped by
+    then gets no remote read (which could wake the box)."""
+    import asyncio as _asyncio
+
+    full = []
+
+    async def mirror(codespace):
+        full.append(codespace)
+
+    verdict = {"wt-a": True}
+
+    async def session_probe(codespace, muxes):
+        return {m: verdict.get(m) for m in muxes}
+
+    owner.hold("cs-1", "cli:a", mux_session="wt-a", confirmed=True)
+    forwards = sf.SessionForwards(_daemon_factory({}), session_probe, transcript_mirror=mirror)
+    busy = _asyncio.get_running_loop().create_future()
+    forwards._mirroring["cs-1"] = busy  # another task holds the slot
+    await forwards.probe(owner.list_holds())
+    assert full == []
+    busy.set_result(None)
+    verdict["wt-a"] = False  # the session stopped meanwhile
+    await forwards.probe(owner.list_holds())
+    await _await_mirror_tasks(forwards)
+    assert full == []
+    owner.hold("cs-1", "cli:a", mux_session="wt-a", confirmed=True)
+    verdict["wt-a"] = True  # still running at the next probe: now it runs
+    forwards._last_probe.clear()
+    await forwards.probe(owner.list_holds())
+    await _await_mirror_tasks(forwards)
+    assert full == ["cs-1"]
+
+
 # -- SessionForwards: a bridge forward that is up but not serving ------------------
 
 def _bridge_probe(answer, calls):
