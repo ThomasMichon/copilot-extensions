@@ -151,6 +151,16 @@ specifically when reviewing a pull request, not a replacement for them.
 - **ruff signal, not noise.** Hold changed Python to at least the `F`/`E9`
   groups; do not block on pre-existing style debt in code the PR did not
   touch.
+- **Timeless code and docs — flag review-artifact language baked into the
+  diff itself.** Code, comments, docstrings, and non-Journal documentation
+  should read as the system's current state, not a trace of the review that
+  produced it. Flag a code comment, docstring, or doc-prose edit that
+  references the review process ("per review feedback," "reviewer
+  requested," "(review round N)") or a prior, possibly-never-committed
+  version of itself ("previously X, now Y") — that response belongs on the
+  review comment thread, not in the artifact (`CONTRIBUTING.md`, "Code
+  Style"). The one exception is a project's own dated `## Journal` section,
+  which is a decision log by design.
 - **Render `Approve` when ready — on a contributor's PR.** Copilot code
   review can only ever submit `Approve` or `Comment` (there is no
   `Request changes` capability in Copilot code review at all — see
