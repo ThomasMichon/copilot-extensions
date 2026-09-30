@@ -117,12 +117,15 @@ def publish_daemon_route_unless_forwarded(
         raise ForwardedRouteRefused(str(exc)) from exc
 
 
-def skip_forwarded_daemon_start(exc: Exception) -> None:
-    """Log and exit cleanly when startup races a venue-forwarded route."""
+def skip_forwarded_daemon_start(app: Any, exc: Exception) -> None:
+    """Mark startup as a clean no-op when it races a venue-forwarded route."""
     message = (
         "agent-bridge startup skipped: active.json points at a "
         f"venue-forwarded host bridge ({exc})"
     )
+    app.state.forwarded_skip = message
     logging.getLogger("agent-bridge").info(message)
     print(f"[agent-bridge] SKIP: {message}")
-    raise SystemExit(0) from exc
+    server = getattr(app.state, "uvicorn_server", None)
+    if server is not None:
+        server.should_exit = True

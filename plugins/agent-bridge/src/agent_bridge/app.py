@@ -404,7 +404,9 @@ async def lifespan(app: FastAPI):
             )
         except ForwardedRouteRefused as exc:
             await asyncio.to_thread(db.close)
-            skip_forwarded_daemon_start(exc)
+            skip_forwarded_daemon_start(app, exc)
+            yield
+            return
         except Exception as exc:
             await asyncio.to_thread(db.close)
             log.exception("Failed to publish the bound daemon endpoint")

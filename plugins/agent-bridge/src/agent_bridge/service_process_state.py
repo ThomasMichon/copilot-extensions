@@ -248,6 +248,10 @@ def _reconcile_live_dynamic_daemon() -> bool:
     with routing._routing_lock(core._INSTALL_DIR):
         table = routing.read_table(core._INSTALL_DIR) or {}
         active_raw = table.get("active")
+        from .routing_state import active_route_is_forward
+
+        if active_route_is_forward(active_raw):
+            return False
         current = (
             routing.Endpoint.from_dict(active_raw)
             if isinstance(active_raw, dict)

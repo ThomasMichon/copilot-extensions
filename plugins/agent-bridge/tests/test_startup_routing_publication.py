@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+import argparse
 import os
 from types import SimpleNamespace
 
@@ -165,7 +165,9 @@ def test_startup_failure_restores_previous_route(tmp_path, monkeypatch):
     assert table["active"]["pid"] == os.getpid()
 
 
-def test_startup_refuses_forward_published_during_publication(tmp_path, monkeypatch):
+def test_cmd_start_refuses_forward_published_during_publication(
+    tmp_path, monkeypatch, capsys,
+):
     monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
     monkeypatch.setenv(
         "AGENT_WORKTREES_PROJECTS_YAML",
@@ -178,22 +180,26 @@ def test_startup_refuses_forward_published_during_publication(tmp_path, monkeypa
             encoding="utf-8",
         )
 
+    import agent_bridge.config as bridge_config
     import agent_bridge.lifecycle_hooks as lifecycle_hooks
+    import agent_bridge.watchdog as watchdog
+    import agent_bridge.winjob as winjob
+    from agent_bridge import service_start_cli
 
     monkeypatch.setattr(lifecycle_hooks, "startup_sweep", publish_forward)
+    monkeypatch.setattr(bridge_config, "config_dir", lambda: tmp_path)
+    monkeypatch.setattr(bridge_config, "load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr(bridge_config, "migrate_config", lambda cfg: cfg)
+    monkeypatch.setattr(bridge_config, "write_default_config", lambda _cfg: None)
+    monkeypatch.setattr(bridge_config, "load_or_create_auth_token", lambda: "test-token")
+    monkeypatch.setattr(winjob, "setup_kill_on_close_job", lambda: None)
+    monkeypatch.setattr(watchdog, "arm_serving_watchdog", lambda *a, **k: None)
 
-    app = create_app(config=_config(tmp_path), token="test-token")
-    app.state.bound_port = 43012
-    app.state.publish_on_ready = True
+    service_start_cli._cmd_start(
+        argparse.Namespace(port=0, bind=None, idle_shutdown=None, passive=False)
+    )
 
-    async def enter_lifespan():
-        async with app.router.lifespan_context(app):
-            pass
-
-    with pytest.raises(SystemExit) as exc:
-        asyncio.run(enter_lifespan())
-
-    assert exc.value.code == 0
+    assert "SKIP:" in capsys.readouterr().out
     assert routing.read_table(tmp_path) == {
         "active": {"bind": "127.0.0.1", "port": 62254, "forwarded": True}
     }

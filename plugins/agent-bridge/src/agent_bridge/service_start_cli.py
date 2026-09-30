@@ -229,6 +229,10 @@ def _cmd_start(args: argparse.Namespace) -> None:
     )
     try:
         server.run(sockets=[listen_sock])
+    except SystemExit:
+        if getattr(app.state, "forwarded_skip", None):
+            return
+        raise
     finally:
         server_stopped.set()
         singleton.release()
