@@ -1060,6 +1060,28 @@ def test_run_waiter_arm_rejects_empty_identity_fields(api):
     assert r.status_code == 422
 
 
+def test_run_waiter_register_requires_owner_session(api):
+    tid = api.post(
+        "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
+    ).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+
+    r = api.post(
+        f"/tasks/{tid}/run-waiter/register",
+        json={
+            "worker_id": "w1",
+            "host": "test-host",
+            "reason": "hibernating: sleep 1",
+            "resume_worktree": "m/wt-1",
+            "command": ["sleep", "1"],
+        },
+    )
+
+    assert r.status_code == 409
+    assert "owner_session_id" in r.json()["detail"]
+
+
 def test_complete_over_http_releases_handoff_claim(api, monkeypatch):
     """The `/tasks/{id}/complete` route's shared _guard hook releases a
     handoff task's target-worktree claim on a genuine (non-retry)

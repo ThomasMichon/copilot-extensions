@@ -40,9 +40,10 @@ class QueueRunWaitersMixin:
                 raise TaskError(f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}")
             if task.status not in (Status.STARTED, Status.SUSPENDED):
                 conn.execute("COMMIT")
-                raise TaskError(
-                    f"cannot prepare a run waiter on a {task.status!r} task"
-                )
+                raise TaskError(f"cannot prepare a run waiter on a {task.status!r} task")
+            if task.owner_session_id is None:
+                conn.execute("COMMIT")
+                raise TaskError("run waiter preparation requires an owner_session_id")
             previous = conn.execute(
                 "SELECT MAX(generation) AS generation FROM run_waiters WHERE task_id = ?",
                 (task_id,),
