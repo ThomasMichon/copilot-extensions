@@ -639,7 +639,7 @@ place:
   (process identity vs. task generation).
 - Follow-on, not part of this effort: #4691 (the broader producer/registrar
   unification -- `kind` -> `extends`, global emitter templates) remains an
-  open, unscoped placeholder. The linked private aperture-labs effort
+  open, unscoped placeholder. The linked private downstream-repository effort
   (`dampener-reviewer-verification-adoption`) can now proceed -- the public
   mechanism it depends on is live on `dev`.
 - Status set to Done; archiving to the dated path.
