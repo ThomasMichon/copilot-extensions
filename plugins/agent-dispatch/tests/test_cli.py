@@ -1335,13 +1335,23 @@ def test_override_disable_enable_roundtrip_via_cli(monkeypatch, tmp_path, capsys
 
 def test_parser_create_flags():
     args = build_parser().parse_args(
-        ["create", "do it", "--require", "logger", "--affinity", "agent=w1", "--proposed"]
+        [
+            "create",
+            "do it",
+            "--require",
+            "logger",
+            "--affinity",
+            "agent=w1",
+            "--proposed",
+            "--require-verification",
+        ]
     )
     assert args.command == "create"
     assert args.title == "do it"
     assert args.require == ["logger"]
     assert args.affinity == ["agent=w1"]
     assert args.proposed is True
+    assert args.require_verification is True
 
 
 def test_parser_create_goal_flags():

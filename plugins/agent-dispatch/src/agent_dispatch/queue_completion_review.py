@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 
-from .queue_common import Task, _check_expected_status, _task_transition_spec
+from .queue_common import Task, VerificationRequest, _check_expected_status, _task_transition_spec
 from .queue_records import TaskError
 
 
@@ -28,6 +28,8 @@ class QueueCompletionReviewMixin:
         actor: str | None = None,
         expected_status: str | None = None,
         expected_generation: int | None = None,
+        expected_owner_session_id: str | None = None,
+        expected_updated_at: float | None = None,
         now: float | None = None,
     ) -> Task:
         """Corroborate a completion claim and close the task for good.
@@ -49,8 +51,64 @@ class QueueCompletionReviewMixin:
             note=f"confirmed by {actor}" if actor else "confirmed",
             expected_status=expected_status,
             expected_generation=expected_generation,
+            expected_owner_session_id=expected_owner_session_id,
+            expected_updated_at=expected_updated_at,
             idempotent_replay=True,
         )
+
+    def opt_in_submitted_verification(
+        self,
+        task_id: str,
+        *,
+        evaluator_ref: str,
+        actor: str | None = None,
+        now: float | None = None,
+        trigger: str = "backfill",
+    ) -> tuple[Task, VerificationRequest]:
+        """Atomically opt one submitted task into verification/backfill."""
+        if not evaluator_ref:
+            raise TaskError("submitted verification backfill requires a non-empty evaluator_ref")
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            if task is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such task {task_id!r}")
+            if task.status != "submitted":
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"submitted verification backfill only applies to 'submitted' tasks, not {task.status!r}"
+                )
+            if task.require_verification and task.evaluator_ref == evaluator_ref:
+                row = self._insert_verification_request(conn, task_id, task.generation, trigger, ts)
+                result = self._fetch(conn, task_id)
+                conn.execute("COMMIT")
+                self._notify_verification()
+                return result, VerificationRequest._from_row(row)  # type: ignore[return-value]
+            conn.execute(
+                "UPDATE tasks SET require_verification = 1, evaluator_ref = ?, updated_at = ?"
+                " WHERE id = ?",
+                (evaluator_ref, ts, task_id),
+            )
+            row = self._insert_verification_request(conn, task_id, task.generation, trigger, ts)
+            self._audit(
+                conn,
+                task_id,
+                ts=ts,
+                from_status=task.status,
+                to_status=task.status,
+                worker=actor,
+                note=(
+                    f"verification opt-in by {actor}: {evaluator_ref}"
+                    if actor
+                    else f"verification opt-in: {evaluator_ref}"
+                ),
+            )
+            result = self._fetch(conn, task_id)
+            conn.execute("COMMIT")
+        self._notify_verification()
+        return result, VerificationRequest._from_row(row)  # type: ignore[return-value]
 
     def reopen_completed(
         self,

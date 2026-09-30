@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import secrets
 from collections.abc import Callable
 
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+
+def scoped_control_token(control_token: str, scope: str) -> str:
+    """Derive a bearer scoped to one producer-owned operation."""
+    return hmac.new(
+        control_token.encode("utf-8"),
+        scope.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def _make_auth(token: str | None, control_token: str | None):

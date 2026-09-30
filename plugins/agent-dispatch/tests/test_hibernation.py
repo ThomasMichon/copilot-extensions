@@ -254,7 +254,7 @@ def test_run_detach_spawns_waiter_without_executing_the_wait(capsys, monkeypatch
 
 
 class _FakeSuspendClient:
-    """A minimal fake standing in for DispatchClient's context-manager + suspend."""
+    """A minimal fake standing in for DispatchClient's context-manager + prepare."""
 
     def __init__(self, *, raises: Exception | None = None, owner: str | None = "headless-abc123"):
         self.calls = []
@@ -270,11 +270,42 @@ class _FakeSuspendClient:
     def get(self, task_id):
         return {"owner": self._owner} if self._owner else {}
 
-    def suspend(self, task_id, worker_id, *, reason):
+    def prepare_run_waiter(self, task_id, *, worker_id, host, reason, resume_worktree, command):
         self.calls.append((task_id, worker_id, reason))
         if self._raises:
             raise self._raises
-        return {"status": "suspended"}
+        return {
+            "task_id": task_id,
+            "generation": 7,
+            "task_generation": 7,
+            "owner_session_id": "session-1",
+            "resume_worktree": resume_worktree,
+            "command": command,
+            "state": "preparing",
+        }
+
+
+class _FakeWaiterFinishClient:
+    def __init__(self):
+        self.calls = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def finish_run_waiter(self, task_id, **payload):
+        self.calls.append((task_id, payload))
+        return {"accepted": True, "waiter": {"generation": payload["generation"]}}
+
+    def arm_run_waiter(self, task_id, **payload):
+        self.calls.append((task_id, payload))
+        return {"accepted": True, "waiter": {"generation": payload["generation"]}}
+
+    def abort_run_waiter(self, task_id, **payload):
+        self.calls.append((task_id, {"abort": payload}))
+        return {"accepted": True, "waiter": {"generation": payload["generation"]}}
 
 
 def test_run_detach_with_task_suspends_atomically(capsys, monkeypatch):
@@ -317,16 +348,16 @@ def test_run_detach_with_task_suspends_atomically(capsys, monkeypatch):
     # the suspend uses the TASK's own recorded owner (a headless worker id
     # here), not CWD/machine-worktree identity -- see the next test for the
     # regression this protects against (#2576's remaining scope).
-    assert out["suspended"] == {
-        "status": "suspended",
-        "worker_id": "headless-abc123",
-        "claim": {"state": "active"},
-    }
+    assert out["suspended"]["status"] == "suspended"
+    assert out["suspended"]["worker_id"] == "headless-abc123"
+    assert out["suspended"]["claim"] == {"state": "active"}
+    assert out["suspended"]["generation"] == 7
+    assert out["suspended"]["owner_session_id"] == "session-1"
     assert fake.calls == [
         ("t-1", "headless-abc123", "hibernating: agent-worktrees pr-watch 42")
     ]
     # the claim is journaled for the task, independent of who resolves as owner
-    assert claimed["call"][0] == "t-1"
+    assert claimed["call"][0] == "t-1:7"
     assert claimed["call"][1]["note"] == "hibernating: agent-worktrees pr-watch 42"
 
 
@@ -502,10 +533,10 @@ def test_run_detach_suspend_failure_does_not_fail_the_detach(capsys, monkeypatch
     rc = _cmd_run(
         _args(["run", "--detach", "--resume", "m/wt-1", "--task", "t-1", "--", "sleep", "1"])
     )
-    assert rc == 0  # the wait is already safely handed off -- this must still succeed
+    assert rc == 0
     out = json.loads(capsys.readouterr().out)
-    assert out["detached"] is True
-    assert "coordinator unreachable" in out["suspended"]["error"]
+    assert out["detached"] is False
+    assert "coordinator unreachable" in out["rollback"]["error"]
 
 
 def test_run_detach_with_task_but_no_resolvable_owner_reports_error(capsys, monkeypatch):
@@ -527,5 +558,204 @@ def test_run_detach_with_task_but_no_resolvable_owner_reports_error(capsys, monk
     )
     assert rc == 0
     out = json.loads(capsys.readouterr().out)
-    assert out["detached"] is True
-    assert "could not resolve" in out["suspended"]["error"]
+    assert out["detached"] is False
+    assert "could not resolve" in out["error"]
+
+
+def test_waiter_child_reattempts_timeout_and_queues_finish(capsys, monkeypatch, tmp_path):
+    from agent_dispatch import companion, remote_dispatch
+
+    calls = []
+
+    def fake_run(argv, check=False):
+        calls.append(argv)
+        class _Proc:
+            returncode = 124 if len(calls) < 3 else 0
+        return _Proc()
+
+    monkeypatch.setattr("agent_dispatch.__main__.subprocess.run", fake_run)
+    monkeypatch.setattr(companion, "process_start_token", lambda _pid: "token-123")
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "test-host")
+    fake = _FakeWaiterFinishClient()
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda args: fake)
+
+    rc = _cmd_run(
+        _args(
+            [
+                "run",
+                "--waiter-child",
+                "--waiter-generation",
+                "3",
+                "--resume",
+                "m/wt-1",
+                "--task",
+                "t-1",
+                "--",
+                "sleep",
+                "1",
+            ]
+        )
+    )
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert len(calls) == 3
+    assert out["returncode"] == 0
+    assert out["reattempts_on_timeout"] == 2
+    assert fake.calls[0][0] == "t-1"
+    assert fake.calls[0][1]["generation"] == 3
+    assert out["resumed"] is None
+
+
+def test_waiter_child_aborts_preparing_waiter_when_identity_missing(capsys, monkeypatch):
+    from agent_dispatch import companion, remote_dispatch
+
+    monkeypatch.setattr(companion, "process_start_token", lambda _pid: None)
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "test-host")
+    fake = _FakeWaiterFinishClient()
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda args: fake)
+
+    rc = _cmd_run(
+        _args(
+            [
+                "run",
+                "--waiter-child",
+                "--waiter-generation",
+                "3",
+                "--resume",
+                "m/wt-1",
+                "--task",
+                "t-1",
+                "--",
+                "sleep",
+                "1",
+            ]
+        )
+    )
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["returncode"] == 125
+    assert fake.calls[0][0] == "t-1"
+    assert fake.calls[0][1]["abort"]["generation"] == 3
+
+
+def test_release_hibernation_claim_for_host_worktree_mirrors_with_project(monkeypatch):
+    from agent_dispatch import hibernation_claims, identity, remote_dispatch
+
+    calls = []
+
+    class _Proc:
+        returncode = 0
+        stdout = '{"worktree_id":"wt-1","ref":"t-1","action":"released"}'
+        stderr = ""
+
+    def fake_run(argv, **_kwargs):
+        calls.append(argv)
+        return _Proc()
+
+    monkeypatch.setattr(hibernation_claims, "agent_worktrees_launch_prefix", lambda: ["aw"])
+    monkeypatch.setattr(hibernation_claims.subprocess, "run", fake_run)
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "host-a")
+    monkeypatch.setattr(identity, "name_for_repo", lambda repo: "project-alpha")
+
+    result = hibernation_claims.release_hibernation_claim_for_host_worktree(
+        "t-1",
+        "host-a",
+        "wt-1",
+        "example.com/acme/widget",
+    )
+
+    assert result == {"worktree_id": "wt-1", "ref": "t-1", "action": "released"}
+    assert calls == [
+        [
+            "aw",
+            "--project",
+            "project-alpha",
+            "claims",
+            "release",
+            "t-1",
+            "--worktree",
+            "wt-1",
+            "--json",
+        ],
+        [
+            "aw",
+            "--project",
+            "project-alpha",
+            "claims",
+            "mirror-status",
+            "task",
+            "t-1",
+            "--status",
+            "released",
+            "--holder",
+            "agent-dispatch",
+            "--json",
+        ],
+    ]
+
+
+def test_remote_release_hibernation_claim_for_host_worktree_mirrors_with_project(monkeypatch):
+    from types import SimpleNamespace
+
+    from agent_dispatch import bridge_remote, hibernation_claims, identity, remote_dispatch
+
+    mirror_calls = []
+    ssh_calls = []
+
+    def fake_run(argv, **_kwargs):
+        mirror_calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(hibernation_claims, "agent_worktrees_launch_prefix", lambda: ["aw"])
+    monkeypatch.setattr(hibernation_claims.subprocess, "run", fake_run)
+    monkeypatch.setattr(hibernation_claims.shutil, "which", lambda exe: "/usr/bin/ssh" if exe == "ssh" else None)
+    monkeypatch.setattr(
+        hibernation_claims,
+        "run_ssh_capture",
+        lambda argv, timeout=None: ssh_calls.append((argv, timeout))
+        or SimpleNamespace(returncode=0, stdout="{}", stderr=""),
+    )
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "host-a")
+    monkeypatch.setattr(identity, "name_for_repo", lambda repo: "project-alpha")
+    monkeypatch.setattr(bridge_remote, "normalize_host", lambda host: f"ssh-{host}")
+
+    result = hibernation_claims.release_hibernation_claim_for_host_worktree(
+        "t-1",
+        "host-b",
+        "wt-1",
+        "example.com/acme/widget",
+    )
+
+    assert result == {}
+    assert ssh_calls == [
+        (
+            [
+                "/usr/bin/ssh",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "ConnectTimeout=3",
+                "ssh-host-b",
+                "agent-worktrees --project project-alpha claims release t-1 --worktree wt-1 --json",
+            ],
+            15.0,
+        )
+    ]
+    assert mirror_calls == [
+        [
+            "aw",
+            "--project",
+            "project-alpha",
+            "claims",
+            "mirror-status",
+            "task",
+            "t-1",
+            "--status",
+            "released",
+            "--holder",
+            "agent-dispatch",
+            "--json",
+        ]
+    ]

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from dataclasses import asdict
+from collections.abc import Callable
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -21,6 +21,7 @@ from pydantic_core import PydanticCustomError
 from . import telemetry
 from .coordinator_auth import _make_control_auth
 from .coordinator_loops import DrainGate, DrainRequest
+from .coordinator_verification import register_verification_routes
 from .events import EventBus
 from .queue import (
     CompletionOutcome,
@@ -82,6 +83,7 @@ class CreateBody(BaseModel):
     source: str | None = None
     origin_ref: str | None = None
     evaluator_ref: str | None = None
+    require_verification: bool = False
     dedup_key: str | None = None
     producer_scope: ProducerScopeBody | None = None
     producer_id: str | None = None
@@ -315,7 +317,7 @@ def register_task_routes(
             msg = str(exc)
             status = 404 if msg.startswith("no such task") else 409
             raise HTTPException(status_code=status, detail=msg) from exc
-        if event_type in ("task.submitted", "task.abandoned"):
+        if event_type in ("task.submitted", "task.completed", "task.abandoned"):
             # A shared terminal-transition hook: every caller that reaches a
             # genuine (not idempotent-retry) completion or an abandon funnels
             # through this same _guard, whether over HTTP (the CLI's own
@@ -887,3 +889,12 @@ def register_task_routes(
     def recover() -> dict:
         counts = queue.reconcile_liveness()
         return {"recovered": counts["requeued"], **counts}
+
+    register_verification_routes(
+        app,
+        queue,
+        bus,
+        control_token=control_token,
+        task_dict=_task_dict,
+        event_task_dict=_event_task_dict,
+    )

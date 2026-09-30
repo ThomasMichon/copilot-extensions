@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import types
+from pathlib import Path
 
 from agent_dispatch import board_cli, worktree_status_relay
 
@@ -237,8 +238,23 @@ def test_build_populates_subtitle_and_drops_title_repo_from_columns(monkeypatch)
     assert "title" in row  # still present on the row (for `{title}` action templating)
     assert "repo_name" in row  # still present (used to compose the subtitle)
 
-    import json
-    from pathlib import Path
+
+def test_tasks_pivot_manifest_exposes_submitted_complete_and_abandon_actions():
+    manifest = json.loads(
+        (
+            Path(__file__).resolve().parents[1]
+            / "pivots"
+            / "agent-dispatch.json"
+        ).read_text(encoding="utf-8")
+    )
+    actions = {action["key"]: action for action in manifest["actions"]}
+
+    assert actions["complete-submitted"]["run"][:2] == ["agent-dispatch", "confirm"]
+    assert actions["complete-submitted"]["when"] == {
+        "group": "Submitted",
+        "require_verification": "True",
+    }
+    assert "Submitted" in actions["abandon"]["when"]["group"]
 
     manifest = json.loads(
         (Path(__file__).parents[1] / "pivots" / "agent-dispatch.json")

@@ -22,11 +22,22 @@ def test_create_still_parses_after_parent_refactor():
 
 
 def test_propose_shares_create_surface_and_routes_to_cmd_propose():
-    ns = _args(["propose", "plan a thing", "--goal", "ship it", "--require", "checkout"])
+    ns = _args(
+        [
+            "propose",
+            "plan a thing",
+            "--goal",
+            "ship it",
+            "--require",
+            "checkout",
+            "--require-verification",
+        ]
+    )
     assert ns.func is _cmd_propose
     assert ns.title == "plan a thing"
     assert ns.goal == "ship it"
     assert ns.require == ["checkout"]
+    assert ns.require_verification is True
 
 
 def test_queue_is_alias_of_approve():

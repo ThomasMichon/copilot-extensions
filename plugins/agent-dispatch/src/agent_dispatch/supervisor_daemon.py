@@ -97,29 +97,19 @@ from .supervisor_registration import (  # noqa: F401 -- re-exported below
 
 log = logging.getLogger("agent-dispatch.supervisor-daemon")
 _GOVERNANCE_BACKOFF_SECONDS = 10.0
-#: Bounded grace window for shutdown() to wait out an in-flight managed-
-#: runtime task (materialize()/cleanup()) before a self-update hands off to
-#: its successor. Long enough for the common case (a nearly-finished
-#: install); never so long that a genuinely slow build (up to the lock's own
-#: multi-minute budget) blocks the handoff and starves reconciles/
-#: heartbeats -- unlike acquiring an actual lock, this is deliberately
-#: best-effort, not a correctness guarantee.
+#: Bounded grace window for shutdown() to wait out an in-flight managed-runtime
+#: task (materialize()/cleanup()) before a self-update hands off to its
+#: successor. Best-effort only; never a correctness guarantee.
 _SHUTDOWN_GRACE_SECONDS = 15.0
-
 
 def _remaining(deadline: float) -> float:
     """Seconds left until a ``time.monotonic()``-based deadline, never negative.
 
-    Used to share one reconcile-call budget across every companion a single
-    loop processes (see ``_poll_managed_health``/``_poll_managed_validate``/
-    ``_poll_unmanaged_health``): the first slow companion consumes part of
-    the shared window, so a later one only ever waits whatever is left of it
-    -- never the full budget again -- keeping the loop's *total* added delay
-    bounded by the budget once, not multiplied by however many companions
-    are being reconciled.
+    Shares one reconcile-call budget across every companion a loop processes:
+    the first slow one consumes part of the window, so later ones only ever
+    wait whatever remains.
     """
     return max(0.0, deadline - time.monotonic())
-
 
 class SupervisorDaemon:
     """The one-per-host master that reconciles the registry into subprocesses.
@@ -1561,6 +1551,9 @@ class SupervisorDaemon:
                 return
             proc = launched.process
         else:
+            if reg.get("kind") == RegistrationKind.EVALUATOR:
+                summary.skipped.append(rid)
+                return
             try:
                 cmd = build_command(
                     reg, python=self._own_python(), materialize=self._materializer(reg),

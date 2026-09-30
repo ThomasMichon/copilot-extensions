@@ -19,6 +19,16 @@ class QueueNotificationMixin:
     ) -> None:
         self._owned_transition_notifier = notifier
 
+    def set_verification_notifier(
+        self, notifier: Callable[[], None] | None
+    ) -> None:
+        self._verification_notifier = notifier
+
+    def set_run_waiter_prepare_notifier(
+        self, notifier: Callable[[], None] | None
+    ) -> None:
+        self._run_waiter_prepare_notifier = notifier
+
     def _notify_wake(self) -> None:
         notifier = self._wake_notifier
         if notifier is None:
@@ -37,5 +47,29 @@ class QueueNotificationMixin:
         except Exception:
             log.warning(
                 "owned-transition notifier failed after durable commit",
+                exc_info=True,
+            )
+
+    def _notify_verification(self) -> None:
+        notifier = getattr(self, "_verification_notifier", None)
+        if notifier is None:
+            return
+        try:
+            notifier()
+        except Exception:
+            log.warning(
+                "verification notifier failed after durable commit",
+                exc_info=True,
+            )
+
+    def _notify_run_waiter_prepare(self) -> None:
+        notifier = getattr(self, "_run_waiter_prepare_notifier", None)
+        if notifier is None:
+            return
+        try:
+            notifier()
+        except Exception:
+            log.warning(
+                "run-waiter prepare notifier failed after durable commit",
                 exc_info=True,
             )

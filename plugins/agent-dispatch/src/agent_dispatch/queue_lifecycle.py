@@ -121,6 +121,7 @@ class QueueLifecycleMixin:
                 raise TaskError(f"cannot expect {expected_status!r} when completing a task")
             allowed = {expected_status}
         ts = self._now(now)
+        wake_enqueued = False
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             task = self._fetch(conn, task_id)
@@ -128,7 +129,7 @@ class QueueLifecycleMixin:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
 
-            if task.status == Status.SUBMITTED and encoded_result is not None:
+            if task.status in {Status.SUBMITTED, Status.COMPLETED} and encoded_result is not None:
                 completing_owner = task.completed_by
                 if completing_owner is None:
                     completion_workers = self._completion_event_workers(conn, task_id)
@@ -185,8 +186,8 @@ class QueueLifecycleMixin:
                     conn,
                     task_id,
                     ts=ts,
-                    from_status=Status.SUBMITTED,
-                    to_status=Status.SUBMITTED,
+                    from_status=task.status,
+                    to_status=task.status,
                     worker=worker_id,
                     note="complete retry: result recorded",
                 )
@@ -209,6 +210,15 @@ class QueueLifecycleMixin:
             ):
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} ownership incarnation changed")
+            retire_waiters = getattr(self, "_retire_waiters_for_transition", None)
+            if callable(retire_waiters):
+                wake_enqueued = retire_waiters(
+                    conn,
+                    task,
+                    to_status=Status.SUBMITTED if task.require_verification else Status.COMPLETED,
+                    worker=worker_id,
+                    ts=ts,
+                ) or wake_enqueued
 
             conn.execute(
                 "UPDATE tasks SET status = ?, updated_at = ?, activity = NULL,"
@@ -235,10 +245,38 @@ class QueueLifecycleMixin:
                 worker=worker_id,
                 note="complete",
             )
+            event_type = "task.submitted"
+            if not task.require_verification:
+                conn.execute(
+                    "UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?",
+                    (Status.COMPLETED, ts, task_id),
+                )
+                self._audit(
+                    conn,
+                    task_id,
+                    ts=ts,
+                    from_status=Status.SUBMITTED,
+                    to_status=Status.COMPLETED,
+                    worker=worker_id,
+                    note="confirmed by self-attestation",
+                )
+                event_type = "task.completed"
+            elif task.evaluator_ref:
+                self._insert_verification_request(
+                    conn,
+                    task_id,
+                    task.generation,
+                    "submitted",
+                    ts,
+                )
             completed = self._fetch(conn, task_id)
             assert completed is not None
             conn.execute("COMMIT")
-        return CompletionOutcome(completed, "task.submitted")
+        if event_type == "task.submitted" and task.evaluator_ref:
+            self._notify_verification()
+        if wake_enqueued:
+            self._notify_wake()
+        return CompletionOutcome(completed, event_type)
 
     @staticmethod
     def _completion_event_workers(conn: sqlite3.Connection, task_id: str) -> list[str]:
@@ -433,6 +471,7 @@ class QueueLifecycleMixin:
         expected_status: str | None = None,
         expected_generation: int | None = None,
         expected_owner_session_id: str | None = None,
+        expected_updated_at: float | None = None,
         now: float | None = None,
     ) -> Task:
         """Move a task to terminal ``abandoned`` -- requires ``permitted=True``.
@@ -441,7 +480,9 @@ class QueueLifecycleMixin:
         return self.abandon_with_outcome(
             task_id, worker_id=worker_id, permitted=permitted, reason=reason,
             expected_status=expected_status, expected_generation=expected_generation,
-            expected_owner_session_id=expected_owner_session_id, now=now,
+            expected_owner_session_id=expected_owner_session_id,
+            expected_updated_at=expected_updated_at,
+            now=now,
         ).task
 
     def abandon_with_outcome(
@@ -454,6 +495,7 @@ class QueueLifecycleMixin:
         expected_status: str | None = None,
         expected_generation: int | None = None,
         expected_owner_session_id: str | None = None,
+        expected_updated_at: float | None = None,
         now: float | None = None,
     ) -> CompletionOutcome:
         """Like :meth:`abandon`, but returns a :class:`CompletionOutcome`
@@ -471,6 +513,7 @@ class QueueLifecycleMixin:
             extra={"owner": None, "lease_expires_at": None},
             expected_generation=expected_generation,
             expected_owner_session_id=expected_owner_session_id,
+            expected_updated_at=expected_updated_at,
             expected_status=expected_status,
             idempotent_replay=True, report_replay=True,
         )
@@ -739,6 +782,7 @@ class QueueLifecycleMixin:
         bump_generation: bool = False,
         expected_owner_session_id: str | None = None,
         expected_generation: int | None = None,
+        expected_updated_at: float | None = None,
         expected_status: str | None = None,
         reembody_headless_on_wake: bool = False,
         reject_pending_steer: bool = False,
@@ -820,6 +864,18 @@ class QueueLifecycleMixin:
             ):
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} ownership incarnation changed")
+            if expected_updated_at is not None and task.updated_at != expected_updated_at:
+                conn.execute("COMMIT")
+                raise TaskError(f"task {task_id!r} changed while the transition was in flight")
+            retire_waiters = getattr(self, "_retire_waiters_for_transition", None)
+            if callable(retire_waiters):
+                wake_enqueued = retire_waiters(
+                    conn,
+                    task,
+                    to_status=to,
+                    worker=worker_id,
+                    ts=ts,
+                ) or wake_enqueued
             if (
                 reembody_headless_on_wake
                 and task.owner_session_id is None

@@ -459,7 +459,7 @@ def test_suspend_rejects_steer_that_arrived_after_card(q):
 def test_submit_steer_rejects_terminal_task(q):
     t = _held(q)
     q.complete(t.id, "w1")
-    with pytest.raises(TaskError, match="reopen_completed"):
+    with pytest.raises(TaskError, match="completed"):
         q.submit_steer(t.id, fields={"x": "y"})
 
 
@@ -570,7 +570,10 @@ def api(tmp_path):
 
 
 def _held_over_http(api, worker="w1"):
-    tid = api.post("/tasks", json={"title": "review PR 42"}).json()["id"]
+    tid = api.post(
+        "/tasks",
+        json={"title": "review PR 42", "require_verification": True},
+    ).json()["id"]
     api.post("/claim", json={"worker_id": worker, "repo": TEST_REPO})
     api.post(
         f"/tasks/{tid}/start",

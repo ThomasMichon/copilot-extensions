@@ -123,6 +123,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
             source=args.source,
             origin_ref=args.origin_ref,
             evaluator_ref=args.evaluator_ref,
+            require_verification=args.require_verification,
             dedup_key=args.dedup_key,
             producer_scope=(
                 {"repo": repo, "source": args.source} if producer_fence_requested else None
@@ -652,6 +653,11 @@ def _create_args_parent() -> argparse.ArgumentParser:
     cp.add_argument("--source")
     cp.add_argument("--origin-ref")
     cp.add_argument("--evaluator-ref")
+    cp.add_argument(
+        "--require-verification",
+        action="store_true",
+        help="hold completion at submitted until an evaluator or explicit review confirms it",
+    )
     cp.add_argument("--dedup-key")
     cp.add_argument(
         "--producer-id",

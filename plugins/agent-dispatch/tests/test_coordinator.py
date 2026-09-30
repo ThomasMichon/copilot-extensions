@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import socket
+import sys
 import threading
 import time
 
@@ -16,22 +17,55 @@ from agent_dispatch.client import (
     DispatchError,
     DispatchUpgradeRequired,
 )
+from agent_dispatch.coordinator_auth import scoped_control_token
 from agent_dispatch.coordinator_loops import _refresh_worktree_status_relay
 from agent_dispatch.coordinator import create_app
 from agent_dispatch.queue import Status
+from agent_dispatch import remote_dispatch
 from agent_dispatch.worktree_status_relay import WorktreeStatusRelayStore
 from tests._helpers import TEST_REPO
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
+CONTROL_TOKEN = "control-token"
+
 
 @pytest.fixture
 def app(tmp_path):
-    return create_app(TaskQueue(tmp_path / "tasks.db"))
+    return create_app(TaskQueue(tmp_path / "tasks.db"), control_token=CONTROL_TOKEN)
 
 
 @pytest.fixture
 def api(app):
-    return TestClient(app)
+    with TestClient(app) as client:
+        yield client
+
+
+def _registration_machine() -> str:
+    return remote_dispatch.local_machine() or "test-host"
+
+
+def _control_headers(sender: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {CONTROL_TOKEN}",
+        "X-Agent-Dispatch-Sender-Proof": scoped_control_token(
+            CONTROL_TOKEN, f"event-note:{sender}"
+        ),
+    }
+
+
+def _register_event_emitter(api, *, reg_id: str = "emitter-review") -> str:
+    api.app.state.queue.register_registration(
+        "emitter",
+        {
+            "id": "review-emitter",
+            "repo": TEST_REPO,
+            "command": ["echo", "tick"],
+            "interval_seconds": 60,
+        },
+        reg_id=reg_id,
+        machine=_registration_machine(),
+    )
+    return reg_id
 
 
 def test_resource_reservation_api_elects_binds_and_owner_releases(api):
@@ -257,7 +291,7 @@ def test_client_completes_suspended_task_without_wake(client, monkeypatch):
         task["id"], owner, result_ref="condition:satisfied"
     )
 
-    assert done["status"] == Status.SUBMITTED
+    assert done["status"] == Status.COMPLETED
     assert done["result_ref"] == "condition:satisfied"
     assert done["owner"] is None
 
@@ -334,9 +368,16 @@ def test_create_app_registers_representative_extracted_route_groups(app):
 
 
 def test_health_loops_empty_when_sweep_disabled(api):
-    # The `api` fixture's create_app has no sweep_interval -> no GC/reap loops,
-    # but the field must still be present (an empty dict, never a KeyError).
-    assert api.get("/health").json()["loops"] == {}
+    # The loop-health map is always present once lifespan starts; disabled
+    # loops report zero intervals instead of disappearing.
+    with TestClient(
+        create_app(TaskQueue(api.app.state.queue.db_path), control_token=CONTROL_TOKEN, verification_interval=0.0)
+    ) as client:
+        loops = client.get("/health").json()["loops"]
+        assert loops["liveness_gc"]["base_interval"] == 0.0
+        assert loops["orphan_reap"]["base_interval"] == 0.0
+        assert loops["handoff_fallback"]["base_interval"] == 0.0
+        assert loops["worktree_status_relay"]["base_interval"] == 0.0
 
 
 def test_health_includes_slot_descriptor_shape(api):
@@ -634,7 +675,411 @@ def test_full_lifecycle_over_http(api):
     done = api.post(
         f"/tasks/{tid}/complete", json={"worker_id": "w1", "result_ref": "pr/1"}
     ).json()
-    assert done["status"] == Status.SUBMITTED
+    assert done["status"] == Status.COMPLETED
+
+
+def test_complete_over_http_retriggers_whole_goal_verification(api, tmp_path):
+    script = tmp_path / "eval.py"
+    script.write_text(
+        "import json, sys\n"
+        "notes = json.load(sys.stdin)['task'].get('event_notes', [])\n"
+        "decision = {'decision': 'confirm'} if notes and notes[-1]['note'] == 'merged' else {'decision': 'noop'}\n"
+        "json.dump(decision, sys.stdout)\n",
+        encoding="utf-8",
+    )
+    api.app.state.queue.register_registration(
+        "evaluator",
+        {
+            "repo": TEST_REPO,
+            "evaluator_ref": "review-loop",
+            "evaluator_spec": {"scripts": {"review-loop": [sys.executable, str(script)]}},
+        },
+        machine=_registration_machine(),
+    )
+    tid = api.post(
+        "/tasks",
+        json={
+            "title": "x",
+            "repo": TEST_REPO,
+            "require_verification": True,
+            "evaluator_ref": "review-loop",
+            "origin_ref": "review-emitter",
+        },
+    ).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+    submitted = api.post(f"/tasks/{tid}/complete", json={"worker_id": "w1"}).json()
+    assert submitted["status"] == Status.SUBMITTED
+    assert api.get(f"/tasks/{tid}").json()["status"] == Status.SUBMITTED
+
+    backfill = api.post(f"/tasks/{tid}/verify-submitted")
+    assert backfill.status_code == 200
+    assert backfill.json()["queued"] is True
+    assert api.app.state.queue.list_verification_requests(tid)
+    sender = _register_event_emitter(api)
+    noted = api.post(
+        f"/tasks/{tid}/event-note",
+        json={"sender": sender, "note": "merged"},
+        headers=_control_headers(sender),
+    )
+    assert noted.status_code == 200
+    for _ in range(100):
+        if api.get(f"/tasks/{tid}").json()["status"] == Status.COMPLETED:
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("event-note verification did not complete asynchronously")
+
+
+def test_verify_submitted_can_opt_in_legacy_row_and_assign_evaluator(api, tmp_path):
+    script = tmp_path / "eval.py"
+    script.write_text(
+        "import json, sys\n"
+        "json.dump({'decision': 'confirm'}, sys.stdout)\n",
+        encoding="utf-8",
+    )
+    api.app.state.queue.register_registration(
+        "evaluator",
+        {
+            "repo": TEST_REPO,
+            "evaluator_ref": "review-loop",
+            "evaluator_spec": {"scripts": {"review-loop": [sys.executable, str(script)]}},
+        },
+        machine=_registration_machine(),
+    )
+    tid = api.post(
+        "/tasks",
+        json={"title": "x", "repo": TEST_REPO},
+    ).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+    submitted = api.post(f"/tasks/{tid}/complete", json={"worker_id": "w1"}).json()
+
+    assert submitted["status"] == Status.COMPLETED
+    # Reopen to submitted to model a historical legacy row.
+    with api.app.state.queue._connect() as conn:
+        conn.execute(
+            "UPDATE tasks SET status = ?, require_verification = 0, evaluator_ref = NULL WHERE id = ?",
+            (Status.SUBMITTED, tid),
+        )
+    backfill = api.post(
+        f"/tasks/{tid}/verify-submitted",
+        json={"evaluator_ref": "review-loop"},
+    )
+
+    assert backfill.status_code == 200
+    assert backfill.json()["queued"] is True
+    for _ in range(100):
+        if api.get(f"/tasks/{tid}").json()["status"] == Status.COMPLETED:
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("backfill verification did not complete asynchronously")
+
+
+def test_complete_over_http_triggers_immediate_whole_goal_verification(api, tmp_path):
+    script = tmp_path / "eval.py"
+    script.write_text(
+        "import json, sys\n"
+        "json.dump({'decision': 'confirm'}, sys.stdout)\n",
+        encoding="utf-8",
+    )
+    api.app.state.queue.register_registration(
+        "evaluator",
+        {
+            "repo": TEST_REPO,
+            "evaluator_ref": "review-loop",
+            "evaluator_spec": {"scripts": {"review-loop": [sys.executable, str(script)]}},
+        },
+        machine=_registration_machine(),
+    )
+    tid = api.post(
+        "/tasks",
+        json={"title": "x", "repo": TEST_REPO, "require_verification": True, "evaluator_ref": "review-loop"},
+    ).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+
+    submitted = api.post(f"/tasks/{tid}/complete", json={"worker_id": "w1"}).json()
+
+    assert submitted["status"] == Status.SUBMITTED
+    for _ in range(100):
+        if api.get(f"/tasks/{tid}").json()["status"] == Status.COMPLETED:
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("submitted verification did not complete asynchronously")
+
+
+def test_event_note_wakes_and_supersedes_active_run_waiter(api, monkeypatch):
+    tid = api.post(
+        "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
+    ).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(
+        f"/tasks/{tid}/start",
+        json={"worker_id": "w1", "owner_session_id": "session-1"},
+    )
+    api.post(
+        f"/tasks/{tid}/suspend",
+        json={"worker_id": "w1", "reason": "waiting on external state"},
+    )
+    prepared = api.post(
+        f"/tasks/{tid}/run-waiter/register",
+        json={
+            "worker_id": "w1",
+            "host": "test-host",
+            "reason": "hibernating: sleep 1",
+            "resume_worktree": "m/wt-1",
+            "command": ["sleep", "1"],
+        },
+    )
+    assert prepared.status_code == 200
+    generation = prepared.json()["generation"]
+    armed = api.post(
+        f"/tasks/{tid}/run-waiter/arm",
+        json={
+            "generation": generation,
+            "pid": 101,
+            "host": "test-host",
+            "start_token": "token-101",
+        },
+    )
+    assert armed.status_code == 200
+    sender = _register_event_emitter(api)
+    r = api.post(
+        f"/tasks/{tid}/event-note",
+        json={"sender": sender, "note": "merged upstream"},
+        headers=_control_headers(sender),
+    )
+
+    assert r.status_code == 200
+    assert api.app.state.queue.get_active_run_waiter(tid) is None
+    wakes = api.app.state.queue.list_run_waiter_wakes(tid)
+    assert len(wakes) == 1
+    assert wakes[0].resume_worktree == "m/wt-1"
+    assert wakes[0].status == "pending"
+
+
+def test_event_note_wakes_and_supersedes_preparing_run_waiter(api):
+    tid = api.post(
+        "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
+    ).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(
+        f"/tasks/{tid}/start",
+        json={"worker_id": "w1", "owner_session_id": "session-1"},
+    )
+    api.post(
+        f"/tasks/{tid}/suspend",
+        json={"worker_id": "w1", "reason": "waiting on external state"},
+    )
+    prepared = api.post(
+        f"/tasks/{tid}/run-waiter/register",
+        json={
+            "worker_id": "w1",
+            "host": "test-host",
+            "reason": "hibernating: sleep 1",
+            "resume_worktree": "m/wt-1",
+            "command": ["sleep", "1"],
+        },
+    )
+    assert prepared.status_code == 200
+
+    sender = _register_event_emitter(api)
+    r = api.post(
+        f"/tasks/{tid}/event-note",
+        json={"sender": sender, "note": "merged upstream"},
+        headers=_control_headers(sender),
+    )
+
+    assert r.status_code == 200
+    wakes = api.app.state.queue.list_run_waiter_wakes(tid)
+    assert len(wakes) == 1
+    assert wakes[0].status == "pending"
+    assert (
+        api.app.state.queue.arm_run_waiter(
+            tid,
+            generation=prepared.json()["generation"],
+            pid=101,
+            host="test-host",
+            start_token="token-101",
+        )
+        is None
+    )
+
+
+def test_event_note_after_waiter_finish_does_not_queue_duplicate_wake(api):
+    tid = api.post(
+        "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
+    ).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(
+        f"/tasks/{tid}/start",
+        json={"worker_id": "w1", "owner_session_id": "session-1"},
+    )
+    api.post(
+        f"/tasks/{tid}/suspend",
+        json={"worker_id": "w1", "reason": "waiting on external state"},
+    )
+    prepared = api.post(
+        f"/tasks/{tid}/run-waiter/register",
+        json={
+            "worker_id": "w1",
+            "host": "test-host",
+            "reason": "hibernating: sleep 1",
+            "resume_worktree": "m/wt-1",
+            "command": ["sleep", "1"],
+        },
+    )
+    generation = prepared.json()["generation"]
+    api.post(
+        f"/tasks/{tid}/run-waiter/arm",
+        json={
+            "generation": generation,
+            "pid": 101,
+            "host": "test-host",
+            "start_token": "token-101",
+        },
+    )
+    api.post(
+        f"/tasks/{tid}/run-waiter/finish",
+        json={
+            "generation": generation,
+            "pid": 101,
+            "host": "test-host",
+            "start_token": "token-101",
+            "message": "wait completed",
+        },
+    )
+    sender = _register_event_emitter(api)
+    r = api.post(
+        f"/tasks/{tid}/event-note",
+        json={"sender": sender, "note": "merged upstream"},
+        headers=_control_headers(sender),
+    )
+
+    assert r.status_code == 200
+    wakes = api.app.state.queue.list_run_waiter_wakes(tid)
+    assert len(wakes) == 1
+    assert wakes[0].message == "wait completed"
+
+
+def test_event_note_queues_running_owner_wake(api):
+    tid = api.post(
+        "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
+    ).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(
+        f"/tasks/{tid}/start",
+        json={"worker_id": "w1", "owner_session_id": "session-1"},
+    )
+
+    sender = _register_event_emitter(api)
+    r = api.post(
+        f"/tasks/{tid}/event-note",
+        json={"sender": sender, "note": "new review comment"},
+        headers=_control_headers(sender),
+    )
+
+    assert r.status_code == 200
+    wakes = api.app.state.queue.list_wakes(tid)
+    assert len(wakes) == 1
+    assert wakes[0].status == "pending"
+    assert wakes[0].owner == "w1"
+
+
+def test_event_note_rejects_untrusted_sender(api):
+    tid = api.post(
+        "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
+    ).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(
+        f"/tasks/{tid}/start",
+        json={"worker_id": "w1", "owner_session_id": "session-1"},
+    )
+
+    r = api.post(
+        f"/tasks/{tid}/event-note",
+        json={"sender": "review-emitter", "note": "forged"},
+        headers=_control_headers("review-emitter"),
+    )
+
+    assert r.status_code == 403
+
+
+def test_event_note_rejects_goal_rewrite_fields(api):
+    tid = api.post(
+        "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
+    ).json()["id"]
+    sender = _register_event_emitter(api)
+
+    r = api.post(
+        f"/tasks/{tid}/event-note",
+        json={"sender": sender, "note": "merged", "goal": "replacement"},
+        headers=_control_headers(sender),
+    )
+
+    assert r.status_code == 422
+
+
+def test_run_waiter_arm_rejects_empty_identity_fields(api):
+    tid = api.post(
+        "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
+    ).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(
+        f"/tasks/{tid}/start",
+        json={"worker_id": "w1", "owner_session_id": "session-1"},
+    )
+    api.post(
+        f"/tasks/{tid}/suspend",
+        json={"worker_id": "w1", "reason": "waiting on external state"},
+    )
+    prepared = api.post(
+        f"/tasks/{tid}/run-waiter/register",
+        json={
+            "worker_id": "w1",
+            "host": "test-host",
+            "reason": "hibernating: sleep 1",
+            "resume_worktree": "m/wt-1",
+            "command": ["sleep", "1"],
+        },
+    )
+
+    r = api.post(
+        f"/tasks/{tid}/run-waiter/arm",
+        json={
+            "generation": prepared.json()["generation"],
+            "pid": 0,
+            "host": "",
+            "start_token": "",
+        },
+    )
+
+    assert r.status_code == 422
+
+
+def test_run_waiter_register_requires_owner_session(api):
+    tid = api.post(
+        "/tasks", json={"title": "x", "repo": TEST_REPO, "origin_ref": "review-emitter"}
+    ).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+
+    r = api.post(
+        f"/tasks/{tid}/run-waiter/register",
+        json={
+            "worker_id": "w1",
+            "host": "test-host",
+            "reason": "hibernating: sleep 1",
+            "resume_worktree": "m/wt-1",
+            "command": ["sleep", "1"],
+        },
+    )
+
+    assert r.status_code == 409
+    assert "owner_session_id" in r.json()["detail"]
 
 
 def test_complete_over_http_releases_handoff_claim(api, monkeypatch):
@@ -664,7 +1109,7 @@ def test_complete_over_http_releases_handoff_claim(api, monkeypatch):
     done = api.post(
         f"/tasks/{tid}/complete", json={"worker_id": "m/wt-9", "result_ref": "pr/1"}
     ).json()
-    assert done["status"] == Status.SUBMITTED
+    assert done["status"] == Status.COMPLETED
     assert released == [(tid, "wt-9")]
 
 
@@ -1287,9 +1732,15 @@ def test_client_round_trip(client):
     assert claimed["id"] == t["id"]
     client.start(t["id"], "w1")
     done = client.complete(t["id"], "w1", result_ref="pr/9")
-    assert done["status"] == Status.SUBMITTED
+    assert done["status"] == Status.COMPLETED
     trail = [e["to_status"] for e in client.events(t["id"])]
-    assert trail == [Status.QUEUED, Status.CLAIMED, Status.STARTED, Status.SUBMITTED]
+    assert trail == [
+        Status.QUEUED,
+        Status.CLAIMED,
+        Status.STARTED,
+        Status.SUBMITTED,
+        Status.COMPLETED,
+    ]
 
 
 def test_client_tasks_for_session_round_trip(client):
@@ -1387,14 +1838,12 @@ def test_sse_stream_distinguishes_retry_recorded_result(server_url):
     types = [e["type"] for e in received]
     assert "task.created" in types
     assert "task.claimed" in types
-    assert "task.submitted" in types
     assert "task.completed" in types
     assert "task.result_recorded" in types
-    assert types.count("task.submitted") == 1
     assert types.count("task.completed") == 1
     created = next(e for e in received if e["type"] == "task.created")
     assert created["task"]["id"] == tid
-    completed = next(e for e in received if e["type"] == "task.submitted")
+    completed = next(e for e in received if e["type"] == "task.completed")
     assert completed["task"]["has_result"] is False
     assert "result" not in completed["task"]
     recorded = next(
@@ -1816,7 +2265,7 @@ def test_cli_consume_completes_and_prints_payload(server_url, client, monkeypatc
     assert __main__._cmd_consume(args) == 0
     assert "BRIEF-BODY" in capsys.readouterr().out
     done = client.get(tid)
-    assert done["status"] == Status.SUBMITTED
+    assert done["status"] == Status.COMPLETED
     # owner is cleared on completion (the lease is released); the result_ref
     # proves the successor's identity owned it through the complete transition.
     assert done["result_ref"] == "consumed:wt-1"
@@ -1827,7 +2276,7 @@ def test_cli_consume_completes_and_prints_payload(server_url, client, monkeypatc
     out = capsys.readouterr().out
     assert "already spent" in out
     assert "BRIEF-BODY" not in out
-    assert client.get(tid)["status"] == Status.SUBMITTED
+    assert client.get(tid)["status"] == Status.COMPLETED
 
 
 # -- satellite presence registry ---------------------------------------------

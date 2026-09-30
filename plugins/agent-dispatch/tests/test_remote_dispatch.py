@@ -17,6 +17,7 @@ def _args(**kw) -> argparse.Namespace:
         spawn_backend="embody", target_machine="emancipation-cube",
         label=None, require=None, affinity=None, target_repo=None,
         target_worktree=None, source=None, origin_ref=None, evaluator_ref=None,
+        require_verification=False,
         dedup_key=None, producer_id=None, producer_generation=None,
         producer_capability=None, producer_request_id=None, verify_timeout=0,
     )
@@ -108,12 +109,14 @@ def test_build_remote_argv_preserves_producer_association():
             source="emitter",
             origin_ref="review-source",
             evaluator_ref="review-loop",
+            require_verification=True,
         ),
         repo="r",
         has_payload=False,
     )
     assert argv[argv.index("--origin-ref") + 1] == "review-source"
     assert argv[argv.index("--evaluator-ref") + 1] == "review-loop"
+    assert "--require-verification" in argv
 
 
 def test_build_remote_argv_preserves_producer_fence():

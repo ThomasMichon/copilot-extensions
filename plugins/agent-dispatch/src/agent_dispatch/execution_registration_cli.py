@@ -40,6 +40,8 @@ def register_execution_commands(sub) -> None:
     rnp.add_argument("--task", metavar="ID")
     rnp.add_argument("--message")
     rnp.add_argument("--detach", action="store_true")
+    rnp.add_argument("--waiter-child", action="store_true", help=argparse.SUPPRESS)
+    rnp.add_argument("--waiter-generation", type=int, help=argparse.SUPPRESS)
     rnp.add_argument("--machine")
     rnp.add_argument("--worktree")
     rnp.add_argument("command", nargs=argparse.REMAINDER, help="the blocking wait command, after '--' (e.g. -- agent-worktrees pr-watch 42)")
@@ -50,7 +52,22 @@ def register_execution_commands(sub) -> None:
         help="feed one task lifecycle event through a declarative evaluator and apply its decisions (emit a follow-up task, or nothing)",
     )
     evp.add_argument("--spec", required=True, metavar="FILE", help="evaluator spec (JSON)")
+    evp.add_argument(
+        "--evaluator-ref",
+        help="opaque selector for a script-based evaluator within the loaded spec",
+    )
     evp.add_argument("--event-file", metavar="FILE", help="lifecycle event JSON (default: read from stdin)")
     evp.add_argument("--repo", help="lane for any emitted follow-up task (a local name or remote URL)")
     evp.add_argument("--dry-run", action="store_true", help="print the decisions without creating any follow-up task")
     evp.set_defaults(func=_core()._cmd_evaluate)
+
+    vsp = sub.add_parser(
+        "verify-submitted",
+        help="explicitly re-run whole-goal verification for specific submitted task ids",
+    )
+    vsp.add_argument(
+        "--evaluator-ref",
+        help="atomically opt the named submitted task(s) into verification using this evaluator before re-checking",
+    )
+    vsp.add_argument("task_id", nargs="+")
+    vsp.set_defaults(func=_core()._cmd_verify_submitted)

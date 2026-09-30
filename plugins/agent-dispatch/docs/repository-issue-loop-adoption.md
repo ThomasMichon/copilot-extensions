@@ -31,6 +31,8 @@ at `discover`/`setup` time; an unknown key or wrong type is a clean
 | `task_label` | string | yes | The dispatch task's `task_label`. |
 | `owner` | string | no | Free-form owner attribution. |
 | `description` | string | no | Free-form declaration description. |
+| `require_verification` | boolean | no (default `false`) | Opt new tasks into the submitted-verification gate; workers stop at `submitted`, and a matching evaluator/manual review must close the claim. Pair it with `evaluator_ref` when enabled. |
+| `evaluator_ref` | string | no | Opaque selector naming the trusted evaluator registration that verifies submitted tasks created by this declaration. |
 | `allow_self_config_changes` | boolean | no (default `false`) | Relaxes the default charter restriction against the loop editing its own declaration. |
 | `worker_identity` | string | no | A named identity (see §2). Mutually exclusive with `worker_guidance`. |
 | `worker_guidance` | string | no | Inline behavioral prose. Prefer a named identity for anything beyond a one-off. |

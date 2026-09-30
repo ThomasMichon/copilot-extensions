@@ -706,6 +706,17 @@ to queued, progress and any newly given steering carried forward), or
 indefinitely is a legitimate resting state — see *self-tracked-review-is-not-a-lane*
 — not a silent default that quietly counts as done.
 
+The explicit switch for which path a task takes is `require_verification`.
+When it is **false** (the default), the worker's `complete()` call performs
+the assertion and the caller-self-attested corroboration together: the task
+lands at `submitted` internally and is immediately confirmed in the same
+atomic transition, because in this path the caller tracking the task really
+*is* the verifier. When `require_verification` is **true**, `complete()`
+stops at `submitted` only and the task stays there until an evaluator or a
+manual reviewer explicitly **confirm**/**re-queue**/**abandon**s it. The
+existing prose above still governs *who* the verifier is; the flag makes the
+two routes first-class instead of leaving the self-attested one implicit.
+
 ### self-tracked-review-is-not-a-lane
 A **completed-but-unconfirmed** task holds no lane and blocks no pool slot —
 the worker that completed it has already finished and released its claim; only

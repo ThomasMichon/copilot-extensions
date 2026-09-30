@@ -841,11 +841,15 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         evaluator = None
         spec_path = getattr(args, "evaluator", None)
         if spec_path:
-            from .producers.evaluator import EvaluatorError, SpecEvaluator
+            from .producers.evaluator import EvaluatorError, load_registration_evaluator
 
             try:
-                spec = json.loads(Path(spec_path).expanduser().read_text(encoding="utf-8"))
-                evaluator = SpecEvaluator(spec)
+                evaluator = load_registration_evaluator(
+                    {
+                        "evaluator": spec_path,
+                        "evaluator_ref": getattr(args, "evaluator_ref", None),
+                    }
+                )
             except (OSError, ValueError, EvaluatorError) as exc:
                 print(f"agent-dispatch supervise: bad --evaluator spec: {exc}", file=sys.stderr)
                 return 2

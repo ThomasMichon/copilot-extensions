@@ -177,7 +177,7 @@ TRANSITIONS: tuple[Transition, ...] = (
         from_states=frozenset({Status.STARTED, Status.SUSPENDED}),
         to_state=Status.SUBMITTED,
         recovery_mode=RecoveryMode.SAFE_RETRY,
-        implemented_by="TaskQueue.complete_with_outcome",
+        implemented_by="TaskQueue.complete_with_outcome (auto-confirms unflagged tasks)",
     ),
     Transition(
         name="confirm",

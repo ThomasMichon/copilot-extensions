@@ -195,6 +195,8 @@ from .execution_cli import (  # noqa: F401 -- re-exported for existing call site
     _cmd_evaluate,
     _cmd_resolve,
     _cmd_run,
+    _cmd_verify_submitted,
+    _register_run_waiter,
     _run_resolution_step,
     _spawn_detached_waiter,
     _suspend_for_detached_wait,

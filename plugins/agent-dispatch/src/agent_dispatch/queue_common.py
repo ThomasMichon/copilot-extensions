@@ -216,6 +216,7 @@ class Task:
     latest_progress: str | None = None
     goal: str | None = None
     done_criteria: str | None = None
+    require_verification: bool = False
     owner_session_id: str | None = None
     generation: int = 0
     last_seen_at: float | None = None
@@ -278,6 +279,7 @@ class Task:
             latest_progress=row["latest_progress"],
             goal=row["goal"],
             done_criteria=row["done_criteria"],
+            require_verification=bool(row["require_verification"]),
             owner_session_id=row["owner_session_id"],
             generation=row["generation"],
             last_seen_at=row["last_seen_at"],
@@ -338,6 +340,58 @@ class WakeOperation:
 
     @classmethod
     def _from_row(cls, row: sqlite3.Row) -> WakeOperation:
+        return cls(**{field.name: row[field.name] for field in dataclasses.fields(cls)})
+
+
+@dataclass(frozen=True)
+class RunWaiterWakeOperation:
+    """A durable worktree wake queued by detached-waiter transitions."""
+
+    id: str
+    task_id: str
+    waiter_generation: int
+    task_generation: int
+    owner: str
+    owner_session_id: str | None
+    waiter_host: str | None
+    resume_worktree: str
+    sender: str
+    message: str
+    status: str
+    attempts: int
+    not_before: float
+    created_at: float
+    updated_at: float
+    delivered_at: float | None = None
+    last_error: str | None = None
+    delivery_token: str | None = None
+    delivery_expires_at: float | None = None
+
+    @classmethod
+    def _from_row(cls, row: sqlite3.Row) -> RunWaiterWakeOperation:
+        return cls(**{field.name: row[field.name] for field in dataclasses.fields(cls)})
+
+
+@dataclass(frozen=True)
+class VerificationRequest:
+    """A durable submitted-verification trigger queued for background drain."""
+
+    id: str
+    task_id: str
+    generation: int
+    trigger: str
+    status: str
+    attempts: int
+    not_before: float
+    created_at: float
+    updated_at: float
+    delivered_at: float | None = None
+    last_error: str | None = None
+    delivery_token: str | None = None
+    delivery_expires_at: float | None = None
+
+    @classmethod
+    def _from_row(cls, row: sqlite3.Row) -> VerificationRequest:
         return cls(**{field.name: row[field.name] for field in dataclasses.fields(cls)})
 
 
@@ -427,6 +481,7 @@ _COLUMNS: dict[str, str] = {
     "goal": "TEXT",
     "done_criteria": "TEXT",
     "evaluator_ref": "TEXT",
+    "require_verification": "INTEGER NOT NULL DEFAULT 0",
     "owner_session_id": "TEXT",
     "generation": "INTEGER NOT NULL DEFAULT 0",
     "last_seen_at": "REAL",

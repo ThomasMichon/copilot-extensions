@@ -68,10 +68,12 @@ def test_validate_accepts_each_kind():
          "interval_seconds": 3600},
     )
     validate_registration(
-        RegistrationKind.EVALUATOR, {"evaluator_spec": {}, "all_repos": True}
+        RegistrationKind.EVALUATOR,
+        {"evaluator_spec": {}, "all_repos": True, "evaluator_ref": "review-loop"},
     )
     validate_registration(
-        RegistrationKind.EVALUATOR, {"evaluator": "eval.json", "repo": TEST_REPO}
+        RegistrationKind.EVALUATOR,
+        {"evaluator": "eval.json", "repo": TEST_REPO, "evaluator_ref": "review-loop"},
     )
     validate_registration(
         RegistrationKind.PLUGIN_COMPANION,
@@ -99,6 +101,15 @@ def test_validate_accepts_each_kind():
             },
         },
     )
+
+
+def test_register_evaluator_requires_explicit_ref(tmp_path):
+    queue = TaskQueue(tmp_path / "tasks.db")
+    with pytest.raises(TaskError, match="non-empty 'evaluator_ref'"):
+        queue.register_registration(
+            RegistrationKind.EVALUATOR,
+            {"evaluator_spec": {}, "repo": TEST_REPO},
+        )
 
 
 @pytest.mark.parametrize(

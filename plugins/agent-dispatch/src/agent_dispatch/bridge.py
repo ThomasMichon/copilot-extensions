@@ -656,6 +656,7 @@ def send_nudge(
     message: str,
     *,
     sender: str = "agent-dispatch-supervisor",
+    idempotency_key: str | None = None,
     timeout: float | None = 20.0,
 ) -> bool:
     """Send a non-blocking **nudge** to a live embodied session via agent-bridge.
@@ -673,6 +674,11 @@ def send_nudge(
         return False
     cmd = [
         *exe, "send", "--no-wait", "--kind", "notify", "--sender", sender,
+        *(
+            ["--idempotency-key", idempotency_key]
+            if idempotency_key
+            else []
+        ),
         worktree, message,
     ]
     try:

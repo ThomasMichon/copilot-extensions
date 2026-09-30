@@ -50,11 +50,13 @@ from .queue_common import (  # noqa: F401 -- re-exported for existing call sites
     ClaimOutcome,
     CompletionOutcome,
     CreationOutcome,
+    RunWaiterWakeOperation,
     ResultTooLargeError,
     ResultValidationError,
     StructuredResult,
     Task,
     TaskAttachmentEntry,
+    VerificationRequest,
     WakeOperation,
     _BUSY_TIMEOUT_MS,
     _CLAIM_REJECTION_EVENT_LIMIT,
@@ -78,6 +80,8 @@ from .queue_handoff_fallback import HandoffFallbackMixin
 from .queue_lifecycle import QueueLifecycleMixin
 from .queue_liveness import LivenessMixin
 from .queue_notifications import QueueNotificationMixin
+from .queue_run_waiter_transition_cleanup import QueueRunWaiterTransitionCleanupMixin
+from .queue_run_waiters import QueueRunWaitersMixin
 from .queue_producer_fences import (  # noqa: F401 -- re-exported for existing call sites/tests
     ProducerFenceError,
     ProducerFenceMixin,
@@ -103,6 +107,7 @@ from .queue_spawn_reservations import (  # noqa: F401 -- re-exported for existin
 from .queue_storage import QueueStorageMixin
 from .queue_steering import QueueSteeringMixin
 from .queue_suspend import QueueSuspendMixin
+from .queue_verification_requests import QueueVerificationRequestsMixin
 from .registrations import (  # noqa: F401 -- re-exported for existing call sites/tests
     RegistrationError,
     RegistrationKind,
@@ -133,9 +138,12 @@ class TaskQueue(
     QueueClaimQueriesMixin,
     QueueLifecycleMixin,
     QueueSuspendMixin,
+    QueueVerificationRequestsMixin,
     QueueCompletionReviewMixin,
     LivenessMixin,
     HandoffFallbackMixin,
+    QueueRunWaiterTransitionCleanupMixin,
+    QueueRunWaitersMixin,
     QueueSteeringMixin,
     QueueNotificationMixin,
 ):
@@ -183,6 +191,7 @@ class TaskQueue(
         self.result_max_bytes = result_max_bytes
         self._wake_notifier: Callable[[], None] | None = None
         self._owned_transition_notifier: Callable[[], None] | None = None
+        self._run_waiter_prepare_notifier: Callable[[], None] | None = None
         # Blobs live in a ``payloads/`` directory beside the queue DB unless the
         # caller overrides it (e.g. a shared blob volume).
         if payload_dir is None:
@@ -317,6 +326,30 @@ class TaskQueue(
             except Exception:
                 conn.execute("ROLLBACK")
                 raise
+            verification_flag = "2026-09-29-require-verification-flag"
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                migrated = conn.execute(
+                    "SELECT 1 FROM queue_migrations WHERE name = ?",
+                    (verification_flag,),
+                ).fetchone()
+                if migrated is None:
+                    try:
+                        conn.execute(
+                            "ALTER TABLE tasks ADD COLUMN require_verification "
+                            "INTEGER NOT NULL DEFAULT 0"
+                        )
+                    except sqlite3.OperationalError as exc:
+                        if "duplicate column name" not in str(exc).lower():
+                            raise
+                    conn.execute(
+                        "INSERT INTO queue_migrations(name, applied_at) VALUES (?, ?)",
+                        (verification_flag, self._now(None)),
+                    )
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
             # Rows completed before ``completed_by`` existed retain their
             # original completing identity when the durable audit trail proves
             # exactly one owner.  A completion retry is a completed->completed
@@ -404,7 +437,104 @@ class TaskQueue(
                 "  taken_at REAL"
                 ")"
             )
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_steer_task ON task_steer(task_id)")
+            conn.execute(            "CREATE INDEX IF NOT EXISTS idx_task_steer_task ON task_steer(task_id)"
+            )
+            conn.execute(
+            "CREATE TABLE IF NOT EXISTS run_waiters ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  task_id TEXT NOT NULL,"
+            "  generation INTEGER NOT NULL,"
+            "  task_generation INTEGER NOT NULL DEFAULT 0,"
+            "  owner TEXT NOT NULL DEFAULT '',"
+            "  owner_session_id TEXT,"
+            "  pid INTEGER NOT NULL,"
+            "  host TEXT,"
+            "  start_token TEXT,"
+            "  resume_worktree TEXT NOT NULL,"
+            "  command_json TEXT NOT NULL DEFAULT '[]',"
+            "  state TEXT NOT NULL,"
+            "  retired_reason TEXT,"
+            "  created_at REAL NOT NULL,"
+            "  updated_at REAL NOT NULL"
+            ")"
+            )
+            run_waiter_columns = {r["name"] for r in conn.execute("PRAGMA table_info(run_waiters)")}
+            if "task_generation" not in run_waiter_columns:
+                conn.execute(
+                    "ALTER TABLE run_waiters ADD COLUMN task_generation INTEGER NOT NULL DEFAULT 0"
+                )
+            if "owner" not in run_waiter_columns:
+                conn.execute("ALTER TABLE run_waiters ADD COLUMN owner TEXT NOT NULL DEFAULT ''")
+            if "owner_session_id" not in run_waiter_columns:
+                conn.execute("ALTER TABLE run_waiters ADD COLUMN owner_session_id TEXT")
+            conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_run_waiters_task "
+            "ON run_waiters(task_id, generation)"
+            )
+            conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_run_waiters_state "
+            "ON run_waiters(state, created_at)")
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS run_waiter_wakes ("
+                "  id TEXT PRIMARY KEY,"
+                "  task_id TEXT NOT NULL,"
+                "  waiter_generation INTEGER NOT NULL,"
+                "  task_generation INTEGER NOT NULL,"
+                "  owner TEXT NOT NULL,"
+                "  owner_session_id TEXT,"
+                "  waiter_host TEXT,"
+                "  resume_worktree TEXT NOT NULL,"
+                "  sender TEXT NOT NULL,"
+                "  message TEXT NOT NULL,"
+                "  status TEXT NOT NULL DEFAULT 'pending',"
+                "  attempts INTEGER NOT NULL DEFAULT 0,"
+                "  not_before REAL NOT NULL DEFAULT 0,"
+                "  created_at REAL NOT NULL,"
+                "  updated_at REAL NOT NULL,"
+                "  delivered_at REAL,"
+                "  last_error TEXT,"
+                "  delivery_token TEXT,"
+                "  delivery_expires_at REAL"
+                ")"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_run_waiter_wakes_due "
+                "ON run_waiter_wakes(status, not_before, created_at)"
+            )
+            run_waiter_wake_columns = {
+                r["name"] for r in conn.execute("PRAGMA table_info(run_waiter_wakes)")
+            }
+            if "waiter_host" not in run_waiter_wake_columns:
+                conn.execute("ALTER TABLE run_waiter_wakes ADD COLUMN waiter_host TEXT")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_run_waiter_wakes_task "
+                "ON run_waiter_wakes(task_id, waiter_generation)"
+            )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS verification_requests ("
+                "  id TEXT PRIMARY KEY,"
+                "  task_id TEXT NOT NULL,"
+                "  generation INTEGER NOT NULL,"
+                "  trigger TEXT NOT NULL,"
+                "  status TEXT NOT NULL DEFAULT 'pending',"
+                "  attempts INTEGER NOT NULL DEFAULT 0,"
+                "  not_before REAL NOT NULL DEFAULT 0,"
+                "  created_at REAL NOT NULL,"
+                "  updated_at REAL NOT NULL,"
+                "  delivered_at REAL,"
+                "  last_error TEXT,"
+                "  delivery_token TEXT,"
+                "  delivery_expires_at REAL"
+                ")"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_verification_requests_due "
+                "ON verification_requests(status, not_before, created_at)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_verification_requests_task "
+                "ON verification_requests(task_id, generation)"
+            )
             # Durable wake outbox. A steer/resume transaction inserts the wake
             # row before commit; the coordinator loop claims and delivers it
             # later. The row id is also the downstream idempotency key, so a

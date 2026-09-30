@@ -57,6 +57,10 @@ from .coordinator_worktree_status import register_worktree_status_routes
 from .events import EventBus
 from .loop_governance import LoopGovernance
 from .queue import TaskQueue
+from .run_waiter_recovery import (
+    DEFAULT_RUN_WAITER_ARM_GRACE_SECONDS,
+    recover_run_waiters,
+)
 from .satellites import FleetDirectory
 from .worktree_status_relay import WorktreeStatusRelayStore
 
@@ -141,6 +145,7 @@ def create_app(
     handoff_fallback_grace: float = DEFAULT_HANDOFF_FALLBACK_GRACE,
     enable_mcp: bool = True,
     wake_interval: float = 0.0,
+    verification_interval: float = 0.25,
     wake_deliver: Callable[[str, str, str, str | None, str], bool] | None = None,
     wake_is_active: Callable[[], bool] | None = None,
     wake_max_attempts: int = 8,
@@ -203,19 +208,40 @@ def create_app(
     async def lifespan(_app: FastAPI):
         loop = asyncio.get_running_loop()
         bus.bind_loop(loop)
+        from . import hibernation_claims
+        from .verification_drain import drain_verification_requests
         from .wake import drain_wake_outbox
+        from .run_waiter_wake import drain_run_waiter_wakes
 
         governance = LoopGovernance()
         wake_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
+        verification_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
         worktree_status_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
-        if wake_interval > 0:
+        run_waiter_prepare_signal: asyncio.Queue[None] = asyncio.Queue(maxsize=1)
+        if wake_interval > 0 or verification_interval > 0:
             def _signal_wake() -> None:
                 if wake_signal.empty():
                     wake_signal.put_nowait(None)
 
-            queue.set_wake_notifier(
-                lambda: loop.call_soon_threadsafe(_signal_wake)
-            )
+            if wake_interval > 0:
+                queue.set_wake_notifier(
+                    lambda: loop.call_soon_threadsafe(_signal_wake)
+                )
+            def _signal_verification() -> None:
+                if verification_signal.empty():
+                    verification_signal.put_nowait(None)
+
+            if verification_interval > 0:
+                queue.set_verification_notifier(
+                    lambda: loop.call_soon_threadsafe(_signal_verification)
+                )
+        def _signal_run_waiter_prepare() -> None:
+            if run_waiter_prepare_signal.empty():
+                run_waiter_prepare_signal.put_nowait(None)
+
+        queue.set_run_waiter_prepare_notifier(
+            lambda: loop.call_soon_threadsafe(_signal_run_waiter_prepare)
+        )
         def _signal_worktree_status() -> None:
             if worktree_status_signal.empty():
                 worktree_status_signal.put_nowait(None)
@@ -238,6 +264,82 @@ def create_app(
             asyncio.create_task(
                 drain_wake_outbox(queue, bus, **wake_options)
             )
+            if wake_interval > 0
+            else None
+        )
+        verification_task = (
+            asyncio.create_task(
+                drain_verification_requests(
+                    queue,
+                    bus,
+                    interval=verification_interval,
+                    max_attempts=wake_max_attempts,
+                    retry_base=wake_retry_base,
+                    is_active=wake_is_active,
+                    signal=verification_signal,
+                    idle_interval=max(verification_interval, 5.0),
+                )
+            )
+            if verification_interval > 0
+            else None
+        )
+        run_waiter_wake_task = (
+            asyncio.create_task(
+                drain_run_waiter_wakes(
+                    queue,
+                    interval=wake_interval,
+                    is_active=wake_is_active,
+                    release_claim=hibernation_claims.release_hibernation_claim_for_host_worktree,
+                )
+            )
+            if wake_interval > 0
+            else None
+        )
+        async def _wake_route_active() -> bool:
+            if wake_is_active is None:
+                return True
+            try:
+                return bool(await asyncio.to_thread(wake_is_active))
+            except Exception:
+                log.warning("run waiter recovery active-route check failed", exc_info=True)
+                return False
+
+        async def _recover_run_waiters_pass() -> None:
+            from . import companion
+
+            if not await _wake_route_active():
+                return
+            counts = await asyncio.to_thread(
+                recover_run_waiters,
+                queue,
+                process_exists=companion._process_exists,
+                start_token_for_pid=companion.process_start_token,
+            )
+            if counts.get("recovered"):
+                log.warning(
+                    "recovered %d task(s) from dead detached run waiters",
+                    counts["recovered"],
+                )
+                bus.publish({"type": "task.run_waiter_recovered", **counts})
+
+        async def _recover_run_waiters_startup() -> None:
+            await _recover_run_waiters_pass()
+            await asyncio.sleep(DEFAULT_RUN_WAITER_ARM_GRACE_SECONDS)
+            await _recover_run_waiters_pass()
+
+        async def _recover_run_waiters_after_prepare() -> None:
+            while True:
+                await run_waiter_prepare_signal.get()
+                await asyncio.sleep(DEFAULT_RUN_WAITER_ARM_GRACE_SECONDS)
+                await _recover_run_waiters_pass()
+
+        run_waiter_recovery_task = (
+            asyncio.create_task(_recover_run_waiters_startup())
+            if wake_interval > 0
+            else None
+        )
+        run_waiter_prepare_recovery_task = (
+            asyncio.create_task(_recover_run_waiters_after_prepare())
             if wake_interval > 0
             else None
         )
@@ -651,10 +753,24 @@ def create_app(
             finally:
                 queue.set_wake_notifier(None)
                 queue.set_owned_transition_notifier(None)
+                queue.set_verification_notifier(None)
+                queue.set_run_waiter_prepare_notifier(None)
                 if wake_task is not None:
                     wake_task.cancel()
                     try:
                         await wake_task
+                    except asyncio.CancelledError:
+                        pass
+                if verification_task is not None:
+                    verification_task.cancel()
+                    try:
+                        await verification_task
+                    except asyncio.CancelledError:
+                        pass
+                if run_waiter_wake_task is not None:
+                    run_waiter_wake_task.cancel()
+                    try:
+                        await run_waiter_wake_task
                     except asyncio.CancelledError:
                         pass
                 if self_retire_task is not None:
@@ -687,6 +803,17 @@ def create_app(
                         await orphan_reaper
                     except asyncio.CancelledError:
                         pass
+                if run_waiter_recovery_task is not None and not run_waiter_recovery_task.done():
+                    run_waiter_recovery_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await run_waiter_recovery_task
+                if (
+                    run_waiter_prepare_recovery_task is not None
+                    and not run_waiter_prepare_recovery_task.done()
+                ):
+                    run_waiter_prepare_recovery_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await run_waiter_prepare_recovery_task
                 if handoff_fallback_reconciler is not None:
                     handoff_fallback_reconciler.cancel()
                     try:
@@ -708,6 +835,7 @@ def create_app(
     )
     app.state.bus = bus
     app.state.directory = directory
+    app.state.queue = queue
     # Back-compat alias for the pre-generalization attribute name.
     app.state.satellites = directory
     app.state.worktree_status_relay = relay
@@ -755,7 +883,7 @@ def create_app(
         resolve_owner_session_id=lambda worker_id: _resolve_owner_session_id(worker_id),
     )
     register_spawn_routes(app, queue, bus)
-    register_registry_routes(app, queue)
+    register_registry_routes(app, queue, control_token=control_token)
     register_worktree_status_routes(app, relay)
 
     if mcp_app is not None:
