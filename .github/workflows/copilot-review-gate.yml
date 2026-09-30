@@ -9,30 +9,27 @@
 # workflow replaces that automatic trigger -- see CONTRIBUTING.md for the
 # ruleset-side change removing the native `copilot_code_review` rule.
 #
-# Why Maintainer-only, not "any invited collaborator" (this workflow's
-# original scope): empirically confirmed (2026-09-30) that GitHub's
+# Why Maintainer-only, not "any invited collaborator": GitHub's
 # `requestReviewers` API call for `copilot-pull-request-reviewer[bot]`
 # returns success with NO exception, and even NO timeline event at all,
 # when made by `github-actions[bot]` (the default `GITHUB_TOKEN`) for a PR
-# authored by anyone other than this repo's owner -- confirmed against
-# repeated real PRs from two different Maintainers (JakeSchieber,
-# namankanakiya), zero exceptions across ~40 historical PRs. The same call,
-# authenticated as a real licensed human account (ThomasMichon) instead of
-# the bot identity, reliably works regardless of PR author -- Copilot code
+# whose author is any account other than this repo's owner. The same call,
+# authenticated as a real licensed human account (the owner) instead of the
+# bot identity, reliably works regardless of PR author -- Copilot code
 # review appears to require the review to be attributable to a licensed
 # account (author OR requester), and this repo (a personal, non-org
 # account) has no equivalent of the org-only "members without a Copilot
 # license" policy to cover an unlicensed author. `MAINTAINER_REVIEW_PAT`
-# (a fine-grained PAT for ThomasMichon, scoped to ONLY this repo, with
-# ONLY `Pull requests: write` + `Metadata: read` -- no other scopes) exists
-# to make the request as that licensed account instead of the bot. A
+# (a fine-grained PAT for the owner, scoped to ONLY this repo, with ONLY
+# `Pull requests: write` + `Metadata: read` -- no other scopes) exists to
+# make the request as that licensed account instead of the bot. A
 # Maintainer already holds ruleset self-merge bypass (see CONTRIBUTING.md),
 # so requesting on their behalf extends no new trust. A Contributor's PR
 # still requires a Maintainer's own approving review before merge regardless
-# of Copilot's verdict, so leaving Contributors on the manual-only path (as
-# before) doesn't weaken the review gate -- it only means the automatic
-# leg, which never actually worked for a non-owner author anyway, is no
-# longer attempted (and no longer silently pretends to succeed) for them.
+# of Copilot's verdict, so leaving Contributors on the manual-only path
+# doesn't weaken the review gate -- the automatic leg was never reliable for
+# a non-owner author, so this workflow no longer attempts (or silently
+# pretends to succeed at) it for them.
 #
 # A maintainer can still manually request Copilot's review on any PR
 # (including a Contributor's or an outsider's) via the normal "Reviewers"
@@ -122,10 +119,14 @@ jobs:
                 ref: context.payload.pull_request.base.ref,
               });
               const text = Buffer.from(data.content, "base64").toString("utf8");
+              // Match the root pattern's first token EXACTLY to `*` -- not
+              // merely a line that starts with `*`, which would also match
+              // an unrelated pattern like `*.md` if one were ever placed
+              // above the root entry.
               const rootLine = text
                 .split("\n")
                 .map((line) => line.trim())
-                .find((line) => line.startsWith("*"));
+                .find((line) => line.split(/\s+/)[0] === "*");
               if (!rootLine) {
                 throw new Error("CODEOWNERS has no root (`*`) pattern; cannot resolve Maintainer roster.");
               }

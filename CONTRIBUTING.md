@@ -83,20 +83,21 @@ explicit admin escalation).** This is enforced on four layers that agree:
    any invited collaborator. A Contributor's PR gets no automatic request
    (a Maintainer can still request one manually via the "Reviewers"
    sidebar), and an uninvited outsider's PR gets no automatic review at all.
-   This is narrower than it used to be, for an empirically confirmed reason:
-   GitHub's `requestReviewers` call for `copilot-pull-request-reviewer[bot]`
-   silently no-ops — no exception, no timeline event — when made by the
-   default `GITHUB_TOKEN` (`github-actions[bot]`) for a PR whose author
-   isn't this repo's owner (a personal, non-org account has no equivalent of
-   the org-only "members without a Copilot license" carve-out). The fix is
-   `MAINTAINER_REVIEW_PAT`, a fine-grained PAT for the owner scoped to only
-   this repo (`Pull requests: write` + `Metadata: read`), used only for
-   Maintainer-authored PRs — Maintainers already hold ruleset self-merge
-   bypass, so this extends no new trust, and a Contributor's PR still needs
-   a Maintainer's own approving review regardless of Copilot's verdict. (The
-   ruleset-native `copilot_code_review` auto-review rule has no such
-   condition — it would fire for literally anyone — so this repo has
-   removed that rule; see "Everyone else" below for why that matters.) Like
+   This scoping exists because GitHub's `requestReviewers` call for
+   `copilot-pull-request-reviewer[bot]` silently no-ops — no exception, no
+   timeline event — when made by the default `GITHUB_TOKEN`
+   (`github-actions[bot]`) for a PR whose author isn't this repo's owner (a
+   personal, non-org account has no equivalent of the org-only "members
+   without a Copilot license" carve-out). `MAINTAINER_REVIEW_PAT`, a
+   fine-grained PAT for the owner scoped to only this repo (`Pull requests:
+   write` + `Metadata: read`), makes the request instead, as a licensed
+   account rather than the bot — used only for Maintainer-authored PRs,
+   since Maintainers already hold ruleset self-merge bypass (this extends
+   no new trust), and a Contributor's PR still needs a Maintainer's own
+   approving review regardless of Copilot's verdict. (The ruleset-native
+   `copilot_code_review` auto-review rule has no such condition — it would
+   fire for literally anyone — so this repo has removed that rule; see
+   "Everyone else" below for why that matters.) Like
    `workflow-lockdown-guard.yml` above, this workflow runs on
    `pull_request_target`, so it can't fire until its own file has reached
    `main` via a promotion — request a review manually for any PR opened
@@ -326,24 +327,22 @@ that is merely "waited out." Do not spend further review rounds chasing an
 `Approve` that literally cannot land there.
 
 > **This never-`Approve` quirk is specific to the literal GitHub repository
-> *owner* account (ThomasMichon), not the wider Maintainer group.** The other
-> three Maintainers (JakeSchieber, anarmawala, namankanakiya) are ordinary
-> (non-owner) accounts from Copilot's perspective — their own PRs should be
-> treated like a Contributor's for verdict *shape* (wait for a genuine
-> `Approve`, not a clean-`Comment` substitute) even though they don't need
-> anyone else's approving review to merge (the ruleset bypass above).
+> *owner* account, not the wider Maintainer group.** The other Maintainers
+> are ordinary (non-owner) accounts from Copilot's perspective — their own
+> PRs should be treated like a Contributor's for verdict *shape* (wait for a
+> genuine `Approve`, not a clean-`Comment` substitute) even though they
+> don't need anyone else's approving review to merge (the ruleset bypass
+> above).
 >
-> This has now been empirically confirmed (2026-09-30), and turned out to be
-> a bigger gap than verdict *shape*: before `MAINTAINER_REVIEW_PAT` existed
-> (see "Review" above), the automatic request never actually reached Copilot
-> at all for a non-owner Maintainer's PR — `requestReviewers` silently
-> no-op'd under the default `GITHUB_TOKEN`, with no exception and no
-> timeline event, across dozens of historical PRs from JakeSchieber and
-> namankanakiya. A verdict never arrived to have a shape. The fix routes the
+> This is a bigger gap than verdict *shape* alone: without
+> `MAINTAINER_REVIEW_PAT` (see "Review" above), the automatic request never
+> reaches Copilot at all for a non-owner Maintainer's PR — `requestReviewers`
+> silently no-ops under the default `GITHUB_TOKEN`, with no exception and no
+> timeline event, so no verdict ever arrives to have a shape. Routing the
 > automatic request through a licensed human account instead of the bot
-> identity; the "wait for a genuine `Approve`, not a `Comment`" guidance
-> above still holds for whatever verdict *does* land once the request
-> actually succeeds.
+> identity is what makes a verdict arrive at all; the "wait for a genuine
+> `Approve`, not a `Comment`" guidance above still holds for whatever verdict
+> lands once the request succeeds.
 
 **Everyone — Contributor and Maintainer alike — waits for a verdict before
 merging**, and no one merges past an open Medium/High-severity finding.
