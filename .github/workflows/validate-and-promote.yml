@@ -658,9 +658,4 @@ jobs:
       # changefile that existed at the last recorded promotion's
       # `dev_head` in `.github/release-pipeline-state.json` on `main`,
       # regardless of whether it's still physically present on `dev`, so
-      # decoupling deletion cadence from promotion cadence is safe and
-      # removes the majority of this pipeline's operational churn (this
-      # step used to run -- and could fail on a transient API error or a
-      # required-check race -- on every promotion, sometimes every ~15-30
-      # min under load; the daily purge is comparatively low-frequency and
-      # self-repairing on its next run if one attempt hiccups).
+      # decoupling deletion cadence from promotion cadence is safe.

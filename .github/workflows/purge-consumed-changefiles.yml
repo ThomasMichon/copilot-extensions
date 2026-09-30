@@ -2,36 +2,34 @@ name: Purge consumed changefiles
 
 # Standalone daily companion to `validate-and-promote.yml` (Phase 3 of the
 # dev-branch-release-pipeline effort, ThomasMichon/copilot-extensions#3336).
-# Split out of that workflow's own "Clear consumed changefiles on dev" step
-# (2026-09-30) once it was confirmed safe to decouple: `tools/
-# promote_release.py`'s `consume_pending_changes()` filters pending
-# changefiles via `_changefile_existed_at(last_dev_head, name)` -- a pure
-# historical git check against the `last_promotion.dev_head` commit
-# recorded in `.github/release-pipeline-state.json` on `main` -- so a
-# changefile already present at that commit is EXCLUDED from bump
-# computation regardless of whether it still physically exists on `dev`.
-# Deleting it promptly is pure housekeeping (keeping `.changefiles/` free
-# of clutter and the per-promotion ancestry sweep bounded), never a
-# correctness requirement. Running this purge once a day instead of once
-# per promotion (previously every ~15-30 min under real load) trades a
-# small amount of housekeeping lag for a large reduction in how often this
-# mechanical PR's own known failure modes (a transient GitHub API error
-# opening/merging it, a required-check race) can actually surface -- and
-# when one does, it self-repairs on the next day's run rather than needing
-# manual intervention, since the purge set is always recomputed fresh
-# against whatever `main` has currently recorded, never a stale run-scoped
-# list.
+# Deletes any `.changefiles/*.json` on `dev` that already existed at
+# `main`'s persisted `last_promotion.dev_head`
+# (`.github/release-pipeline-state.json`) -- `tools/promote_release.py`'s
+# own bump computation already excludes any such changefile regardless of
+# whether it still physically exists on `dev` (a pure historical git
+# check against that same commit), so this purge is pure housekeeping,
+# never load-bearing for promotion correctness. See the
+# dev-branch-release-pipeline effort's Journal (2026-09-30 entry) for why
+# this runs as its own daily workflow instead of a per-promotion step.
 #
-# Uses the same `main` "state of truth" + narrow path-scoped admin-bypass
-# pattern `validate-and-promote.yml`'s own changefile cleanup step used
-# (see its history for the two real incidents -- a required-check race and
-# a tightened review rule -- that shaped this exact design; this file
-# keeps both mitigations).
+# Trigger: `schedule` plus a `repository_dispatch` custom event for
+# on-demand runs (`gh api repos/<owner>/<repo>/dispatches -f
+# event_type=purge-changefiles-requested`) -- deliberately NOT
+# `workflow_dispatch`. This job's `main-promotion` environment grants it
+# `APERTURE_RELEASE_TOKEN`; `workflow_dispatch` resolves a workflow's own
+# YAML from whichever ref is dispatched (not the default branch), so
+# adding it here would let a `dev`-branch (zero-review-required) copy of
+# this file execute with that same privileged token -- the identical
+# untrusted-YAML risk `module-size-baseline-widen.yml` and
+# `validate-and-promote.yml`'s own design notes already document.
+# `repository_dispatch` shares `workflow_run`'s default-branch-only YAML
+# resolution instead (confirmed against GitHub's own docs, not assumed).
 
 on:
   schedule:
     - cron: "0 9 * * *" # once daily; time is not load-bearing
-  workflow_dispatch:
+  repository_dispatch:
+    types: [purge-changefiles-requested]
 
 concurrency:
   group: purge-consumed-changefiles
@@ -97,9 +95,10 @@ jobs:
           # Safety assertion: this step only ever stages `git rm` calls
           # against .changefiles/ above -- assert that explicitly before
           # the narrow admin-bypass merge below is allowed to rely on it.
-          if git diff --cached --name-only | grep -qv '^\.changefiles/'; then
+          staged_paths=$(git diff --cached --name-only)
+          if echo "$staged_paths" | grep -qv '^\.changefiles/'; then
             echo "::error::Purge diff touches paths outside .changefiles/ -- refusing to admin-merge; leaving for manual review." >&2
-            git diff --cached --name-only >&2
+            echo "$staged_paths" >&2
             exit 1
           fi
           git commit -m "chore: purge changefiles consumed by promotions through ${dev_head:0:8}"
@@ -112,23 +111,30 @@ jobs:
           # (defense against something unexpected landing on the branch
           # between push and merge) before exercising this repo owner's
           # own named bypass-actor entry on dev's ruleset (see
-          # `.github/CODEOWNERS`'s top-of-file comment) -- the same
-          # narrow, path-verified exemption `validate-and-promote.yml`'s
-          # own changefile-cleanup step already relied on.
-          if gh pr diff "$pr_number" --name-only | grep -qv '^\.changefiles/'; then
+          # `.github/CODEOWNERS`'s top-of-file comment). Capture the
+          # command's own exit status explicitly rather than piping
+          # straight into `grep` -- without that, an API failure (`gh pr
+          # diff` erroring, e.g. a transient GitHub-side fault) would
+          # produce empty output, `grep -v` would then report "no
+          # violating paths" (a false negative), and this safety
+          # assertion would fail OPEN, letting the admin-bypass merge
+          # below proceed unchecked.
+          if ! diff_paths=$(gh pr diff "$pr_number" --name-only); then
+            echo "::error::gh pr diff failed for PR #$pr_number -- refusing to admin-merge without a verified diff." >&2
+            exit 1
+          fi
+          if echo "$diff_paths" | grep -qv '^\.changefiles/'; then
             echo "::error::PR #$pr_number diff touches paths outside .changefiles/ -- refusing to admin-merge." >&2
             exit 1
           fi
           # `dev`'s separate "workflow/CODEOWNERS lockdown" ruleset
-          # (workflow-lockdown-guard.yml, #4503) enforces its
+          # (workflow-lockdown-guard.yml) enforces its
           # required_status_checks rule with NO bypass actors at all, by
           # design -- `--admin` cannot skip a required check that simply
           # hasn't reported yet; it has to actually complete. That guard
-          # triggers async on PR creation and takes a few seconds to tens
-          # of seconds to report, so merging immediately after `gh pr
-          # create` above would race it (confirmed live on
-          # validate-and-promote.yml's own changefile-cleanup step, which
-          # hit this exact race twice). Wait for it to physically report
+          # triggers async on PR creation and can take a few seconds to
+          # tens of seconds to report, so merging immediately after `gh pr
+          # create` above would race it. Wait for it to physically report
           # rather than skip waiting; bounded to 6 minutes total (the
           # guard's own job timeout is 5) so a genuinely broken/hung check
           # fails this step instead of hanging the job.
