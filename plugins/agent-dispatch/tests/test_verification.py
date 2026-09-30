@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 
 from agent_dispatch.queue import Status
+from agent_dispatch import remote_dispatch
 from agent_dispatch.verification import evaluate_submitted_task
 from tests._helpers import TEST_REPO
 from tests._helpers import RepoDefaultingQueue as TaskQueue
@@ -14,6 +15,10 @@ class _Bus:
 
     def publish(self, event: dict) -> None:
         self.events.append(event)
+
+
+def _registration_machine() -> str:
+    return remote_dispatch.local_machine() or "lambda-core"
 
 
 def _submitted_task(
@@ -44,7 +49,7 @@ def _register_script(queue: TaskQueue, script_path: str, *, repo: str = TEST_REP
                 "scripts": {"review-loop": [sys.executable, script_path]}
             },
         },
-        machine="lambda-core",
+        machine=_registration_machine(),
         env=env,
     )
 
@@ -130,10 +135,10 @@ def test_evaluate_submitted_respects_repo_scope_and_environment_fallback(tmp_pat
 
     monkeypatch.setenv("AGENT_DISPATCH_ENV", "staging")
     matched = evaluate_submitted_task(
-        queue, task_id, trigger="submitted", current_machine="lambda-core"
+        queue, task_id, trigger="submitted", current_machine=_registration_machine()
     )
     skipped = evaluate_submitted_task(
-        queue, untouched.id, trigger="backfill", current_machine="lambda-core"
+        queue, untouched.id, trigger="backfill", current_machine=_registration_machine()
     )
 
     assert matched["eligible"] is True
