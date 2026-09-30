@@ -737,3 +737,16 @@ def test_a_failed_launch_records_nothing(seams, capsys):
     assert detach.cmd_detach(dry, ssh_session=_ssh(seams)) == 0
     out = json.loads(capsys.readouterr().out)
     assert "recalled" not in out and out["copilot_args"] == ["--resume=sid-42"]
+
+
+def test_a_rejoin_of_a_running_session_leaves_the_record_alone(seams, capsys):
+    from agent_codespaces import launch_memory
+
+    tenant = "cli:anchor-example-web@cs-1"
+    launch_memory.remember("cs-1", tenant, ["--no-ask-user", "--reasoning-effort=max"], "orchestrator", "sid-42")
+    before = launch_memory._path("cs-1", tenant).read_text()
+    # A rejoin (say, to add a forward) of the running session: embody applies none of its flags.
+    rejoined = json.dumps({"ok": True, "created": False, "resumed": True})
+    rejoin = _args(copilot_args=["--model=other"], driver="cli-mode", seed=None)
+    assert detach.cmd_detach(rejoin, ssh_session=_ssh(seams, stdout=rejoined)) == 0
+    assert launch_memory._path("cs-1", tenant).read_text() == before

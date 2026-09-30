@@ -568,7 +568,8 @@ def cmd_detach(
                 "message" if deliver_note(session_id, refs_note_text) else "failed"
             )
         ok = True
-        launch_memory.remember(args.name, plan["tenant"], requested, args.driver)
+        if created:  # a rejoin of a running session applied none of its flags
+            launch_memory.remember(args.name, plan["tenant"], requested, args.driver, session_id)
         forwards_ready = (
             _venue_ports_listening(args.name, sorted(reverse_forwards)) if reverse_forwards else {}
         )

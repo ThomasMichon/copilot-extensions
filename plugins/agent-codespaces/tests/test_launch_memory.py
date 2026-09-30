@@ -8,57 +8,66 @@ import threading
 from agent_codespaces import launch_memory as lm
 
 TENANT = "cli:anchor-example-web@cs-1"
+D = lm.DEFAULT_DRIVER
 
 
-def test_a_bare_resume_gets_the_recorded_flags_and_driver_back():
-    lm.remember("cs-1", TENANT, ["--no-ask-user", "--reasoning-effort=max", "--resume=old"], "orchestrator")
-    args, driver, recalled = lm.apply("cs-1", TENANT, ["--resume=sid-42"], lm.DEFAULT_DRIVER)
-    assert args == ["--no-ask-user", "--reasoning-effort=max", "--resume=sid-42"]
-    assert driver == "orchestrator"
-    assert recalled == ["copilot_args", "driver"]
+def test_a_bare_resume_of_the_recorded_session_gets_its_flags_and_driver_back():
+    lm.remember("cs-1", TENANT, ["--no-ask-user", "--reasoning-effort=max", "--session-id=s1"], "orchestrator", "s1")
+    for sel in (["--resume=s1"], ["--resume", "s1"], ["-r", "s1"], ["--session-id=s1"]):
+        args, driver, recalled = lm.apply("cs-1", TENANT, sel, D)
+        assert args == ["--no-ask-user", "--reasoning-effort=max", *sel], sel
+        assert (driver, recalled) == ("orchestrator", ["copilot_args", "driver"])
 
 
-def test_a_new_session_or_explicit_flags_never_inherit_the_record():
-    lm.remember("cs-1", TENANT, ["--reasoning-effort=max"], "orchestrator")
-    # A new session (no selector) starts from the current defaults.
-    assert lm.apply("cs-1", TENANT, [], lm.DEFAULT_DRIVER) == ([], lm.DEFAULT_DRIVER, [])
-    assert lm.apply("cs-1", TENANT, ["--no-ask-user"], lm.DEFAULT_DRIVER) == (["--no-ask-user"], lm.DEFAULT_DRIVER, [])
-    # A resume that names its own driver keeps it, and the recorded flags don't come back.
-    assert lm.apply("cs-1", TENANT, ["--resume=s"], "odsp") == (["--resume=s"], "odsp", [])
-    # A resume with its own flags keeps exactly those (and its driver).
-    args, driver, recalled = lm.apply("cs-1", TENANT, ["--model=m2", "--resume=s"], lm.DEFAULT_DRIVER)
-    assert (args, driver, recalled) == (["--model=m2", "--resume=s"], lm.DEFAULT_DRIVER, [])
-    lm.remember("cs-1", TENANT, args, "odsp")
-    assert lm.apply("cs-1", TENANT, ["--resume=s"], lm.DEFAULT_DRIVER)[:2] == (["--model=m2", "--resume=s"], "odsp")
+def test_another_session_or_continue_never_borrows_the_record():
+    lm.remember("cs-1", TENANT, ["--allow-all-tools"], "orchestrator", "s-b")
+    # Resuming a different (earlier) session: it must not gain session B's permissions.
+    assert lm.apply("cs-1", TENANT, ["--resume=s-a"], D) == (["--resume=s-a"], D, [])
+    # --continue names no session: nothing to match, nothing recalled.
+    assert lm.apply("cs-1", TENANT, ["--continue"], D) == (["--continue"], D, [])
+
+
+def test_a_new_session_or_explicit_settings_never_inherit_the_record():
+    lm.remember("cs-1", TENANT, ["--reasoning-effort=max"], "orchestrator", "s1")
+    assert lm.apply("cs-1", TENANT, [], D) == ([], D, [])
+    assert lm.apply("cs-1", TENANT, ["--no-ask-user"], D) == (["--no-ask-user"], D, [])
+    assert lm.apply("cs-1", TENANT, ["--model=m2", "--resume=s1"], D) == (["--model=m2", "--resume=s1"], D, [])
+    assert lm.apply("cs-1", TENANT, ["--resume=s1"], "odsp") == (["--resume=s1"], "odsp", [])
+
+
+def test_a_split_selector_is_one_selector_not_a_flag():
+    assert lm.split_selectors(["-r", "s1", "--no-ask-user"]) == (["--no-ask-user"], ["-r", "s1"], "s1")
+    assert lm.split_selectors(["--continue", "--x"]) == (["--x"], ["--continue"], None)
+    lm.remember("cs-1", TENANT, ["-r", "old-id", "--no-ask-user"], D, "s1")
+    assert json.loads(lm._path("cs-1", TENANT).read_text())["copilot_args"] == ["--no-ask-user"]
 
 
 def test_records_are_per_codespace_and_tenant_and_names_are_checked():
-    lm.remember("cs-1", TENANT, ["--no-ask-user"], "orchestrator")
-    assert lm.apply("cs-2", TENANT, ["--resume=s"], lm.DEFAULT_DRIVER) == (["--resume=s"], lm.DEFAULT_DRIVER, [])
-    assert lm.apply("cs-1", "cli:other", ["--resume=s"], lm.DEFAULT_DRIVER) == (["--resume=s"], lm.DEFAULT_DRIVER, [])
-    lm.remember("../evil", TENANT, ["--x"], "d")
+    lm.remember("cs-1", TENANT, ["--no-ask-user"], "orchestrator", "s1")
+    assert lm.apply("cs-2", TENANT, ["--resume=s1"], D) == (["--resume=s1"], D, [])
+    assert lm.apply("cs-1", "cli:other", ["--resume=s1"], D) == (["--resume=s1"], D, [])
+    lm.remember("../evil", TENANT, ["--x"], "d", "s1")
     assert not list(lm.LAUNCHES_DIR.parent.glob("evil*"))
-    assert lm.apply("../evil", TENANT, ["--resume=s"], lm.DEFAULT_DRIVER) == (["--resume=s"], lm.DEFAULT_DRIVER, [])
+    lm.remember("cs-1", TENANT, ["--x"], "d", "")  # no session id: nothing to bind it to
+    assert lm.apply("cs-1", TENANT, ["--resume=s1"], D)[0] == ["--no-ask-user", "--resume=s1"]
 
 
 def test_two_tenants_recording_at_once_keep_both_records():
     tenants = [f"cli:anchor-example-web-{i}@cs-1" for i in range(8)]
-    threads = [threading.Thread(target=lm.remember, args=("cs-1", t, [f"--model=m{i}"], "o"))
+    threads = [threading.Thread(target=lm.remember, args=("cs-1", t, [f"--model=m{i}"], "o", f"s{i}"))
                for i, t in enumerate(tenants)]
     for th in threads:
         th.start()
     for th in threads:
         th.join()
     for i, t in enumerate(tenants):
-        assert lm.apply("cs-1", t, ["--resume=s"], lm.DEFAULT_DRIVER)[0] == [f"--model=m{i}", "--resume=s"]
+        assert lm.apply("cs-1", t, [f"--resume=s{i}"], D)[0] == [f"--model=m{i}", f"--resume=s{i}"]
 
 
 def test_a_corrupt_or_foreign_record_is_ignored():
     path = lm._path("cs-1", TENANT)
     path.parent.mkdir(parents=True)
     path.write_text("{nope", encoding="utf-8")
-    assert lm.apply("cs-1", TENANT, ["--resume=s"], lm.DEFAULT_DRIVER) == (["--resume=s"], lm.DEFAULT_DRIVER, [])
-    path.write_text(json.dumps({"tenant": "cli:someone-else", "copilot_args": ["--x"]}), encoding="utf-8")
-    assert lm.apply("cs-1", TENANT, ["--resume=s"], lm.DEFAULT_DRIVER)[2] == []
-    lm.remember("cs-1", TENANT, ["--no-ask-user"], "o")
-    assert json.loads(path.read_text())["copilot_args"] == ["--no-ask-user"]
+    assert lm.apply("cs-1", TENANT, ["--resume=s1"], D) == (["--resume=s1"], D, [])
+    path.write_text(json.dumps({"tenant": "cli:else", "session_id": "s1", "copilot_args": ["--x"]}), encoding="utf-8")
+    assert lm.apply("cs-1", TENANT, ["--resume=s1"], D)[2] == []

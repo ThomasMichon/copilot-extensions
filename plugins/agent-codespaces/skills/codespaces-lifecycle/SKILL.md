@@ -193,11 +193,15 @@ A new detached session starts on **the caller's own model**: the launch adds
 resolution the ACP dispatch path uses. `AGENT_CODESPACES_ACP_MODEL` /
 `_EFFORT` / `_CONTEXT` override it, `AGENT_CODESPACES_MODEL_PROPAGATE=0` turns
 it off, and a flag passed explicitly with `--copilot-arg` always wins.
-A launch that names only the session (`--copilot-arg=--resume=<id>`, as a
-supervisor's automatic wake after a CodeSpace stop does) keeps the `--copilot-arg`s and
-`--driver` that session was last launched with (recorded per CodeSpace and
-session under `~/.agent-codespaces/launches/`; its JSON lists them under
-`recalled`); anything passed explicitly replaces the record.
+A resume that names only the session (`--copilot-arg=--resume=<id>`, as a
+supervisor's automatic wake after a CodeSpace stop does) keeps the
+`--copilot-arg`s and `--driver` that session was started with: a launch that
+starts a session records them, with the session's id, under
+`~/.agent-codespaces/launches/<codespace>/` (its JSON lists what was reused
+under `recalled`). Only a resume of that same session id with no other flags
+and the default `--driver` reuses them -- never a new session, another
+session, `--continue`, or a launch with explicit flags -- and a rejoin of an
+already running session leaves the record alone.
 `--ref-file` (repeatable; a file or a folder, up to 256 MiB per call) copies
 reference material into `~/.agent-bridge/refs/<batch>/` on the venue -- outside <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 the product checkout, so it is never committed -- over the same egress-free
