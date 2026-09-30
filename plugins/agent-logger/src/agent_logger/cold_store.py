@@ -103,15 +103,37 @@ def _is_safe_ref(ref: SessionRef) -> bool:
     return True
 
 
+#: agent-codespaces lands each CodeSpace's sessions one level down, under
+#: ``<corpus>/.codespaces/<codespace>/`` (a capture at close-out, or the
+#: Connection Owner's live transcript mirror).
+_NESTED_MACHINE_GROUPS = (".codespaces",)
+
+
+def _machine_dirs(corpus_root: Path) -> list[Path]:
+    """Every ``<machine>/`` directory of the corpus, including the nested
+    per-CodeSpace ones; symlinked or reparse entries are skipped."""
+    found: list[Path] = []
+    for raw in sorted(p for p in corpus_root.iterdir() if p.is_dir()):
+        machine_dir = existing_real_directory(raw)
+        if machine_dir is None:
+            continue
+        if raw.name in _NESTED_MACHINE_GROUPS:
+            for child in sorted(p for p in machine_dir.iterdir() if p.is_dir()):
+                nested = existing_real_directory(child)
+                if nested is not None:
+                    found.append(nested)
+            continue
+        found.append(machine_dir)
+    return found
+
+
 def _resolve_from_synced_corpus(session_id: str, corpus_root: Path) -> SessionRef | None:
-    """Search every ``<machine>/`` subtree of the local sync target."""
+    """Search every ``<machine>/`` subtree of the local sync target, including
+    the per-CodeSpace ones under ``.codespaces/``."""
     real_corpus_root = existing_real_directory(corpus_root)
     if real_corpus_root is None:
         return None
-    for raw_machine_dir in sorted(p for p in real_corpus_root.iterdir() if p.is_dir()):
-        machine_dir = existing_real_directory(raw_machine_dir)
-        if machine_dir is None:
-            continue
+    for machine_dir in _machine_dirs(real_corpus_root):
         ref = sessions.resolve_ref(
             session_id, machine_dir / "session-state", machine_dir / "archived"
         )
