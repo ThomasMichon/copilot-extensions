@@ -63,7 +63,11 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
+  # The default `GITHUB_TOKEN` only ever reads (collaborator status,
+  # CODEOWNERS) in this workflow -- the one write call (requesting a
+  # review) always uses `MAINTAINER_REVIEW_PAT` instead, supplied
+  # explicitly to that step; this permissions block doesn't affect it.
+  pull-requests: read
 
 jobs:
   request-review:
@@ -169,14 +173,36 @@ jobs:
           github-token: ${{ secrets.MAINTAINER_REVIEW_PAT }}
           script: |
             const author = context.payload.pull_request.user.login;
+            const pull_number = context.payload.pull_request.number;
+
+            function sleep(ms) {
+              return new Promise((resolve) => setTimeout(resolve, ms));
+            }
+
+            // A successful `requestReviewers` call does NOT reliably show
+            // Copilot in its own response's `requested_reviewers` -- GitHub
+            // adds the bot reviewer as a short-lived async follow-up, not
+            // synchronously in the same request/response cycle. That's
+            // exactly why the original failure mode was invisible: an API
+            // call that returns 2xx is not proof the reviewer was actually
+            // added. Poll the PR's live requested-reviewer list afterward
+            // instead of trusting the call's own response.
+            async function copilotIsRequested() {
+              const { data } = await github.rest.pulls.listRequestedReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number,
+              });
+              return data.users.some((user) => user.login.toLowerCase().includes("copilot"));
+            }
+
             try {
               await github.rest.pulls.requestReviewers({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                pull_number: context.payload.pull_request.number,
+                pull_number,
                 reviewers: ["copilot-pull-request-reviewer[bot]"],
               });
-              core.info(`Requested Copilot review for ${author}'s PR.`);
             } catch (error) {
               // Fail the job (this workflow is non-required/non-blocking,
               // so this never gates the PR) rather than warn: with the PAT
@@ -185,4 +211,25 @@ jobs:
               // permission) would silently reopen the exact failure mode
               // this workflow exists to close, with no visible signal.
               core.setFailed(`Could not request Copilot review: ${error.message}`);
+              return;
             }
+
+            const attempts = 6;
+            const delayMs = 10_000;
+            for (let attempt = 1; attempt <= attempts; attempt += 1) {
+              if (await copilotIsRequested()) {
+                core.info(`Confirmed Copilot review requested for ${author}'s PR.`);
+                return;
+              }
+              if (attempt < attempts) {
+                await sleep(delayMs);
+              }
+            }
+
+            // The API call itself reported success, but Copilot never
+            // actually showed up as a requested reviewer -- this is the
+            // exact silent-no-op this workflow exists to close. Fail loudly
+            // instead of trusting the call's own response.
+            core.setFailed(
+              `requestReviewers reported success, but Copilot never appeared as a requested reviewer on ${author}'s PR after ${attempts} checks.`,
+            );
