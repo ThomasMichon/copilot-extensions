@@ -721,7 +721,7 @@ def test_a_bare_resume_keeps_the_flags_the_session_was_launched_with(seams, caps
     assert detach.cmd_detach(first, ssh_session=_ssh(seams, stdout=_CREATED)) == 0
     assert "--driver orchestrator" in seams.ssh[-1]["remote"]
     capsys.readouterr()
-    wake = _args(copilot_args=["--resume=sid-42"], driver="cli-mode", seed=None, dry_run=True)
+    wake = _args(copilot_args=["--resume=sid-42"], driver=None, seed=None, dry_run=True)
     assert detach.cmd_detach(wake, ssh_session=_ssh(seams)) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["recalled"] == ["copilot_args", "driver"] and out["driver"] == "orchestrator"
@@ -747,6 +747,23 @@ def test_a_rejoin_of_a_running_session_leaves_the_record_alone(seams, capsys):
     before = launch_memory._path("cs-1", tenant).read_text()
     # A rejoin (say, to add a forward) of the running session: embody applies none of its flags.
     rejoined = json.dumps({"ok": True, "created": False, "resumed": True})
-    rejoin = _args(copilot_args=["--model=other"], driver="cli-mode", seed=None)
+    rejoin = _args(copilot_args=["--model=other"], driver=None, seed=None)
     assert detach.cmd_detach(rejoin, ssh_session=_ssh(seams, stdout=rejoined)) == 0
     assert launch_memory._path("cs-1", tenant).read_text() == before
+
+
+def test_the_record_keeps_the_model_the_session_actually_ran_with(seams, monkeypatch, capsys):
+    # The launch filled the model from this host's settings; a later wake keeps
+    # that model even after the host's own setting changed.
+    host = ["first-model"]
+    monkeypatch.setattr(detach, "model_copilot_args",
+                        lambda existing: [] if any(a.startswith("--model") for a in existing)
+                        else [f"--model={host[0]}"])
+    first = _args(copilot_args=["--no-ask-user"], driver="orchestrator")
+    assert detach.cmd_detach(first, ssh_session=_ssh(seams, stdout=_CREATED)) == 0
+    host[0] = "changed-model"
+    capsys.readouterr()
+    wake = _args(copilot_args=["--resume=sid-42"], driver=None, seed=None, dry_run=True)
+    assert detach.cmd_detach(wake, ssh_session=_ssh(seams)) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["copilot_args"] == ["--no-ask-user", "--model=first-model", "--resume=sid-42"]

@@ -11,7 +11,7 @@ So a launch that actually starts a session records what it was started with,
 and which session that is, one file per CodeSpace and session tenant under
 ``~/.agent-codespaces/launches/``. A later launch that resumes *that* session
 by id and asks for nothing else -- a session selector naming it, no other
-``--copilot-arg``, the default ``--driver`` -- reuses the record. Anything else
+``--copilot-arg``, no ``--driver`` -- reuses the record. Anything else
 starts from what it was given: a new session, a resume of a different session
 (it never borrows another session's flags), ``--continue`` (no id to match),
 or explicit flags. A rejoin of a session that's already running changes
@@ -32,7 +32,7 @@ from venue_copilot import SESSION_SELECTORS
 from .config import RUNTIME_DIR
 
 LAUNCHES_DIR = RUNTIME_DIR / "launches"
-#: ``copilot --driver``'s default: a launch still at it named no driver.
+#: The driver used when none is given or recalled (``copilot --driver`` defaults to None).
 DEFAULT_DRIVER = "cli-mode"
 
 _CODESPACE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,127}$")
@@ -180,18 +180,20 @@ def _load(path: Path | None) -> dict:
 
 
 def apply(
-    codespace: str, tenant: str, requested: list[str], driver: str,
+    codespace: str, tenant: str, requested: list[str], driver: str | None,
 ) -> tuple[list[str], str, list[str]]:
     """``(copilot_args, driver, recalled)`` to launch with; ``recalled`` names
-    what came from the record (``copilot_args``, ``driver``)."""
+    what came from the record (``copilot_args``, ``driver``). ``driver`` is
+    ``None`` when the caller didn't pass one (an explicit ``cli-mode`` counts)."""
     own, selectors, session_id = split_selectors(requested)
     # Only a resume of the recorded session that names nothing else.
-    if not session_id or own or driver != DEFAULT_DRIVER:
-        return own + selectors, driver, []
+    if not session_id or own or driver is not None:
+        return own + selectors, driver or DEFAULT_DRIVER, []
     record = _load(_path(codespace, tenant))
     if record.get("tenant") != tenant or record.get("session_id") != session_id:
-        return own + selectors, driver, []
+        return own + selectors, DEFAULT_DRIVER, []
     recalled: list[str] = []
+    driver = DEFAULT_DRIVER
     if record["copilot_args"]:
         own = split_selectors(record["copilot_args"])[0]
         recalled.append("copilot_args")
@@ -204,7 +206,9 @@ def apply(
 def remember(
     codespace: str, tenant: str, copilot_args: list[str], driver: str, session_id: str,
 ) -> None:
-    """Record the flags (never a session selector) a session was started with."""
+    """Record the flags a session was actually started with -- the final
+    ``--copilot-arg`` list, host-propagated model flags included -- never a
+    session selector (a generated ``--session-id`` too)."""
     path = _path(codespace, tenant)
     if path is None or not session_id:
         return

@@ -569,7 +569,7 @@ def cmd_detach(
             )
         ok = True
         if created:  # a rejoin of a running session applied none of its flags
-            launch_memory.remember(args.name, plan["tenant"], requested, args.driver, session_id)
+            launch_memory.remember(args.name, plan["tenant"], copilot_args, args.driver, session_id)
         forwards_ready = (
             _venue_ports_listening(args.name, sorted(reverse_forwards)) if reverse_forwards else {}
         )

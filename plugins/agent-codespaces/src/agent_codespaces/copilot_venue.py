@@ -50,7 +50,7 @@ def add_copilot_subparser(sub) -> None:
              "behavior of running straight in the venue's workspace_folder.",
     )
     copilot_parser.add_argument(
-        "--driver", default=_DEFAULT_DRIVER,
+        "--driver", default=None,
         help="Forwarded to the remote `agent-worktrees copilot --driver` "
              "(stamps the 'driven by' banner; default 'cli-mode')",
     )
@@ -524,7 +524,7 @@ def _cmd_copilot_connect(
             connect=connect,
             anchor=anchor_mode,
             ttl_seconds=args.ttl_seconds,
-            driver=args.driver,
+            driver=args.driver or _DEFAULT_DRIVER,
             seed=seed,
             ensure_mux=args.ensure_mux,
         )

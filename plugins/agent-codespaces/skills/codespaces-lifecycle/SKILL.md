@@ -195,11 +195,12 @@ resolution the ACP dispatch path uses. `AGENT_CODESPACES_ACP_MODEL` /
 it off, and a flag passed explicitly with `--copilot-arg` always wins.
 A resume that names only the session (`--copilot-arg=--resume=<id>`, as a
 supervisor's automatic wake after a CodeSpace stop does) keeps the
-`--copilot-arg`s and `--driver` that session was started with: a launch that
-starts a session records them, with the session's id, under
+`--copilot-arg`s (host-propagated model flags included) and `--driver` that
+session actually ran with: a launch that starts a session records them, with
+the session's id, under
 `~/.agent-codespaces/launches/<codespace>/` (its JSON lists what was reused
 under `recalled`). Only a resume of that same session id with no other flags
-and the default `--driver` reuses them -- never a new session, another
+and no `--driver` reuses them -- never a new session, another
 session, `--continue`, or a launch with explicit flags -- and a rejoin of an
 already running session leaves the record alone.
 `--ref-file` (repeatable; a file or a folder, up to 256 MiB per call) copies
