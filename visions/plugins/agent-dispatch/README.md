@@ -1050,10 +1050,13 @@ does **not** quietly undo it.
   *every-turn-ends-terminal-steered-or-waited*,
   *fail-fast-on-control-plane-failure*,
   *declared-safety-exceptions-not-improvised*, and
-  *reachability-tiered-charter-delivery* — the operating-procedures charter,
-  the shrunk event-descriptor seeds across every worker tier (CLI-capable,
-  no-CLI, interactive), and a clean-room Tier-E behavioral proof
-  (`agent-dispatch-worker-lifecycle-eval` / `-cpfail`) that a fresh agent
+  *reachability-tiered-charter-delivery* — the operating-procedures charter;
+  the shrunk event-descriptor seeds for the CLI-capable and interactive
+  tiers, each pointing at the charter rather than inlining it; the no-CLI
+  tier's full operating procedure and task charter inlined directly instead
+  (it cannot pull what it has no reach to fetch — the tiered-delivery
+  contract itself, not a shrunk seed); and a clean-room Tier-E behavioral
+  proof (`agent-dispatch-worker-lifecycle-eval` / `-cpfail`) that a fresh agent
   actually honors the mechanical, tool-call-only completion contract and the
   fail-fast-on-control-plane-failure posture under literal mode.
 
