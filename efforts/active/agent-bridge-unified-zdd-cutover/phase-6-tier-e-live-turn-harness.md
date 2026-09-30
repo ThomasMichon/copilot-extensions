@@ -105,6 +105,20 @@ the Tier-P scenario -- resolve this before writing a manifest.
    clean uninterrupted completion, and explicitly fails (rather than
    silently passing) if the timing race missed the window.
 
+**Resolved scope on step 5's "reply reaches the client" clause.** The
+shipped implementation asserts turn completion via the session's own
+status (`sessions --json` reaching `idle`) and the transcript
+(`events.jsonl`, turnId-correlated), which are proven reliable. The
+literal `agent-bridge wait --attention turn_complete` channel this
+clause names -- the mechanism a real caller uses to learn a turn is
+done -- is invoked only as a non-blocking advisory check: it can hang
+indefinitely after a Session-Host reattach even when the session is
+genuinely idle, tracked as
+[issue #4681](https://github.com/ThomasMichon/copilot-extensions/issues/4681).
+The drill's own PASS/FAIL verdict does not depend on that channel; "a
+reply reaches the client" via `wait` specifically remains unproven until
+#4681 is resolved.
+
 **Feasibility / cost notes.** Consumes real AI credits per run (a genuine
 Copilot turn) -- treat this as a manually-triggered/opt-in scenario, not a
 routine CI pass. Tier E is local-only, never a blocking CI gate today

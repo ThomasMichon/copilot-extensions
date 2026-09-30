@@ -99,9 +99,16 @@ import time
 from datetime import datetime
 
 DEFAULT_PROMPT = (
-    "Run the shell command `sleep 25` (wait for it to finish), then reply "
+    "Run the shell command `sleep 60` (wait for it to finish), then reply "
     "with exactly the single word: DONE."
 )
+# `deploy` itself is bounded by --health-timeout/--drain-timeout below (60s/5s)
+# and the reattach-confirmation poll is bounded at 60s, so a slow box's
+# absolute worst case could in principle exceed a short sleep. Every real run
+# observed deploy+reattach completing in 1-5s; 60s leaves a wide safety
+# margin over that OBSERVED behavior without paying for the rarely-hit
+# worst case in real credits every run (the design doc's own feasibility
+# note calls this exact tradeoff "the hardest part" to tune).
 
 
 class Result:
@@ -319,6 +326,26 @@ def _count_type(lines: list[str], type_name: str) -> int:
         except Exception:
             continue
     return n
+
+
+def _malformed_line_count(lines: list[str]) -> int:
+    """Count lines that are not valid JSON objects.
+
+    A malformed or partially-written line (e.g. a torn last line from a
+    concurrent write) would otherwise be silently skipped by
+    ``_count_type``/``_turn_balance_and_boundary_crossing``, letting a
+    damaged transcript still report a balanced result if the surviving
+    lines happen to balance. Blank trailing lines are not malformed.
+    """
+    bad = 0
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            json.loads(line)
+        except Exception:
+            bad += 1
+    return bad
 
 
 def _parse_event_ts(raw: object) -> float | None:
@@ -605,6 +632,17 @@ def run(python: str, repo: str, project_name: str, turn_timeout: float) -> Resul
         # README's Journal), not something this drill should block a PASS
         # on when the authoritative status already proves the turn safely
         # survived the cutover.
+        #
+        # The session-status flip to "idle" is NOT by itself sufficient:
+        # a real run showed the frontend's own status can report "idle"
+        # while the transcript still shows the boundary turn's own tool
+        # call approved but never executed/closed (the session-status
+        # bookkeeping and the actual Session-Host child's progress are not
+        # perfectly synchronized immediately after a reattach). Require
+        # BOTH: status == "idle" AND the transcript's own boundary turn
+        # has actually closed, continuing to poll otherwise -- the
+        # transcript, not the coarse status flag, is the authority on
+        # whether real work finished.
         settled_via_status = False
         identity_drift = None
         deadline = time.monotonic() + turn_timeout
@@ -616,29 +654,18 @@ def run(python: str, repo: str, project_name: str, turn_timeout: float) -> Resul
                     identity_drift = current_acp
                     break
                 if session_after.get("status") == "idle":
-                    settled_via_status = True
-                    break
+                    probe_lines = _read_events(events_path)
+                    probe_analysis = _turn_balance_and_boundary_crossing(probe_lines, boundary_ts, boundary_turn_id)
+                    if probe_analysis["balanced"] and _malformed_line_count(probe_lines) == 0:
+                        settled_via_status = True
+                        break
             time.sleep(1.0)
         r.check(identity_drift is None,
                 f"acp_session_id never changed while polling for completion ({acp_session_id!r} -> {identity_drift!r} "
                 "would mean reattach silently replaced the child, not merely resumed it)")
         r.check(settled_via_status,
-                f"session status reached 'idle' (the turn completed) within {turn_timeout:.0f}s of the cutover")
-
-        # The session-status flip to "idle" can trail the LAST turn_end's
-        # own write to events.jsonl by a short beat -- a snapshot read
-        # immediately on "idle" can still show a still-open turn. Poll
-        # the file itself, briefly, until it agrees before treating any
-        # snapshot as final -- never trust a single immediate read right
-        # after the status flip.
-        if settled_via_status:
-            settle_deadline = time.monotonic() + 15.0
-            while time.monotonic() < settle_deadline:
-                probe_lines = _read_events(events_path)
-                probe_analysis = _turn_balance_and_boundary_crossing(probe_lines, boundary_ts, boundary_turn_id)
-                if probe_analysis["balanced"]:
-                    break
-                time.sleep(0.5)
+                f"session status reached 'idle' AND the transcript's own boundary turn actually closed within "
+                f"{turn_timeout:.0f}s of the cutover")
 
         # Session-identity check: "idle" alone doesn't prove the reattach
         # preserved the SAME child -- if reattach ever replaced the child
@@ -688,6 +715,8 @@ def run(python: str, repo: str, project_name: str, turn_timeout: float) -> Resul
         )
 
         after_snapshot = _read_events(events_path)
+        malformed = _malformed_line_count(after_snapshot)
+        r.check(malformed == 0, f"final events.jsonl has zero malformed/unparseable lines (found {malformed})")
         r.check(len(after_snapshot) >= len(before_snapshot), "events.jsonl only grew across the boundary (never shrank)")
         prefix_intact = after_snapshot[: len(before_snapshot)] == before_snapshot
         r.check(prefix_intact, "every event already written before the cutover is byte-identical afterward (no truncation/mutation)")

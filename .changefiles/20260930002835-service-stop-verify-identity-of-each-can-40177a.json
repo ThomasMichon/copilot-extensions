@@ -1,0 +1,9 @@
+{
+  "comment": "service stop: verify identity of each candidate victim pid before signaling it, closing a stale-pid-file/port/lock TOCTOU hazard",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

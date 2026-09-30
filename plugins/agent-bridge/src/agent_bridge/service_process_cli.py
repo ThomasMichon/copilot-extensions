@@ -600,6 +600,13 @@ def _service_stop() -> None:
     }
     victims.discard(None)
     for victim in victims:
+        # Identity-verify at the point of termination, not only afterward
+        # (afterward only confirms no agent-bridge process remains -- it
+        # never proves THIS victim pid was one before it was signaled). A
+        # stale pid-file/port/lock entry whose pid has since been reused by
+        # an unrelated process must never be killed.
+        if not core._pid_is_agent_bridge(victim):
+            continue
         core._kill_pid(victim)
         stopped_any = True
     if victims:

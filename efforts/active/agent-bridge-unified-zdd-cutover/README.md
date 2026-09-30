@@ -314,9 +314,12 @@ the full reasoning).
   aggregate-count assertions that don't prove non-duplication or timing,
   and this wait-channel gap).
 - [x] The drill's verdict is programmatic/evidence-based (a dedicated
-  comparator over `HostIndex` records, `sessions --json` status, `wait
-  --attention turn_complete`, and an `events.jsonl` before/after diff) --
-  no LLM judge involved, per the design doc's own conclusion.
+  comparator over `HostIndex` records, `sessions --json` status, and a
+  turnId-correlated ordered walk of `events.jsonl` -- no LLM judge
+  involved, per the design doc's own conclusion. `wait --attention
+  turn_complete` is invoked only as a non-blocking advisory secondary
+  signal and is explicitly excluded from the verdict itself, per the
+  scope correction above.
 - [x] The scenario is documented in the clean-room catalog
   (`tools/clean-room/README.md`) and in this scenario's own `manifest.json`/
   `scenario.sh` header comments; no new reusable Tier-E pattern was
@@ -480,6 +483,71 @@ test that closes the gap.
   temp-dir state, cleaned up by `run.sh down`/container removal). Noted as
   a minor, pre-existing (Phase 5) cleanup nit, not fixed here -- out of
   this PR's scope.
+
+### 2026-09-29 — Phase 6: production identity gate, transcript-authoritative completion, and a real completion-detection race caught live
+- Continued automated review (round 4) on the same follow-up PR, each
+  fix confirmed by a live re-run:
+  - `agent-bridge service stop` gathers pid-file/port-holder/lock-holder
+    candidates and kills each BEFORE checking identity (only verifies
+    afterward that no bridge process remains). Rather than only hardening
+    this drill's own wrapper, patched the small identity gate directly
+    into `_service_stop()`'s kill loop itself
+    (`plugins/agent-bridge/src/agent_bridge/service_process_cli.py`) --
+    skip any candidate that doesn't identify as an agent-bridge process
+    before ever calling `_kill_pid` on it. Verified the full agent-bridge
+    plugin test suite (`tools/run-plugin-tests.py agent-bridge`) still
+    passes. Added a focused regression test
+    (`tools/clean-room/tests/test_live_turn_probe_identity_stop.py`) for
+    the drill's own wrapper decision logic (accepts a recognized live
+    daemon, rejects an unrelated live pid, WITHOUT ever calling `service
+    stop` on the reject path) using a scripted fake `python` binary --
+    this does not, and cannot from outside, close the residual
+    precheck-to-kill TOCTOU window; that's now documented honestly rather
+    than claimed away.
+  - A depth-only open/close turn counter missed a REPEATED start of the
+    same turn_id (`start(A), start(A), end(A)` still nets to one
+    open/close pair). Now tracks distinct started-turn-ids separately and
+    flags any turn_id starting more than once as its own imbalance.
+  - A malformed/unparseable line in the final `events.jsonl` was silently
+    skipped by both `_count_type` and the turn-balance walk -- a damaged
+    transcript could still report "balanced" if the surviving lines
+    happened to line up. Added an explicit zero-malformed-lines check on
+    the final snapshot.
+  - `proc1`'s cleanup on the generation-1-publish-timeout path now
+    escalates to `kill()` if `terminate()` doesn't exit it within the
+    grace period, instead of silently suppressing a failed cleanup.
+  - Bumped the drill's prompt from `sleep 25` to `sleep 60` for a wider
+    safety margin against deploy/reattach's own worst-case timeout
+    budget (review flagged the original margin as theoretically tight on
+    a slow box, even though every observed real run completed the
+    handoff in 1-5s).
+  - Removed a machine-identifier mention that had crept back into this
+    doc as a literal citation of the string being removed; reworded a
+    Phase 6 checklist item and the design doc's own step 5 that still
+    listed `wait --attention turn_complete` as part of the drill's
+    verdict, contradicting the scope correction above it.
+- **A real completion-detection race, caught by a live re-run of the
+  bumped-timeout prompt, not by review:** one run's transcript froze
+  right after a real `permission.completed` (approved) for the `sleep 60`
+  tool call -- the tool's own `tool.execution_start` never reached a
+  matching completion event -- yet the session's coarse `sessions --json`
+  status still flipped to `idle` and the drill's completion-polling
+  accepted that at face value, producing a FAIL with `still_open=1`
+  (a real gap in the CHECK, not necessarily proof of a stuck child: status
+  and the actual Session-Host child's transcript are not perfectly
+  synchronized immediately after a reattach). Fixed by requiring BOTH
+  `status == "idle"` AND the transcript's own boundary turn actually
+  closed before accepting completion -- continuing to poll otherwise
+  (bounded by the same `turn_timeout`) rather than trusting the coarse
+  status flag alone. A follow-up live re-run with the same 60s-sleep
+  prompt then passed cleanly (`PROBE-SUMMARY: 1/1 passed`), confirming
+  this was exactly the race the fix targets, not a reproducible stuck-child
+  defect -- but if this pattern recurs on a future run, it is now a
+  genuine candidate for its own tracked upstream finding (a Session-Host
+  reattach interaction with an approved-but-not-yet-executing tool call),
+  not silently dismissed as a fluke twice.
+- Re-verified end-to-end from a fresh box via the real `run.sh` entrypoint
+  after every fix in this round: 8 passed, 0 failed.
 
 ### 2026-09-29 — Phase 6 hardened after automated review + a real upstream bug found ([issue #4681](https://github.com/ThomasMichon/copilot-extensions/issues/4681))
 - Automated review of the follow-up PR caught real gaps a passing run alone
