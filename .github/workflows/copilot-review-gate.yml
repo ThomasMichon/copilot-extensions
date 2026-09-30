@@ -193,7 +193,7 @@ jobs:
                 repo: context.repo.repo,
                 pull_number,
               });
-              return data.users.some((user) => user.login.toLowerCase().includes("copilot"));
+              return data.users.some((user) => user.login === "copilot-pull-request-reviewer[bot]");
             }
 
             try {
