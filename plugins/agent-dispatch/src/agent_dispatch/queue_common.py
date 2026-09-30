@@ -351,6 +351,7 @@ class RunWaiterWakeOperation:
     task_id: str
     waiter_generation: int
     task_generation: int
+    owner: str
     owner_session_id: str | None
     resume_worktree: str
     sender: str

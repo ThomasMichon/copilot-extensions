@@ -65,5 +65,9 @@ def register_execution_commands(sub) -> None:
         "verify-submitted",
         help="explicitly re-run whole-goal verification for specific submitted task ids",
     )
+    vsp.add_argument(
+        "--evaluator-ref",
+        help="atomically opt the named submitted task(s) into verification using this evaluator before re-checking",
+    )
     vsp.add_argument("task_id", nargs="+")
     vsp.set_defaults(func=_core()._cmd_verify_submitted)

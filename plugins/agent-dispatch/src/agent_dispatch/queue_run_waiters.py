@@ -56,14 +56,15 @@ class QueueRunWaitersMixin:
             )
             conn.execute(
                 "INSERT INTO run_waiters ("
-                " task_id, generation, task_generation, owner_session_id,"
+                " task_id, generation, task_generation, owner, owner_session_id,"
                 " pid, host, start_token, resume_worktree,"
                 " command_json, state, created_at, updated_at"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)",
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)",
                 (
                     task_id,
                     generation,
                     task.generation,
+                    task.owner or "",
                     task.owner_session_id,
                     int(pid),
                     host,
@@ -88,6 +89,7 @@ class QueueRunWaitersMixin:
             "task_id": task_id,
             "generation": generation,
             "task_generation": task.generation,
+            "owner": task.owner or "",
             "owner_session_id": task.owner_session_id,
             "pid": int(pid),
             "host": host,
@@ -166,10 +168,10 @@ class QueueRunWaitersMixin:
         self,
         task_id: str,
         *,
-        generation: int | None = None,
+        generation: int,
         pid: int,
-        host: str | None,
-        start_token: str | None,
+        host: str,
+        start_token: str,
         reason: str,
         now: float | None = None,
     ) -> dict[str, Any] | None:
@@ -564,6 +566,7 @@ class QueueRunWaitersMixin:
         return bool(
             task is not None
             and task.status == Status.SUSPENDED
+            and task.owner == waiter["owner"]
             and task.generation == int(waiter["task_generation"])
             and task.owner_session_id == waiter.get("owner_session_id")
         )
@@ -573,6 +576,7 @@ class QueueRunWaitersMixin:
         return bool(
             task is not None
             and task.status == Status.SUSPENDED
+            and task.owner == wake.owner
             and task.generation == wake.task_generation
             and task.owner_session_id == wake.owner_session_id
         )
@@ -589,14 +593,15 @@ class QueueRunWaitersMixin:
         wake_id = f"run-wake:{waiter['task_id']}:{waiter['generation']}:{uuid.uuid4().hex[:12]}"
         conn.execute(
             "INSERT INTO run_waiter_wakes ("
-            " id, task_id, waiter_generation, task_generation, owner_session_id,"
+            " id, task_id, waiter_generation, task_generation, owner, owner_session_id,"
             " resume_worktree, sender, message, status, attempts, not_before, created_at, updated_at"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)",
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)",
             (
                 wake_id,
                 waiter["task_id"],
                 waiter["generation"],
                 waiter["task_generation"],
+                waiter["owner"],
                 waiter.get("owner_session_id"),
                 waiter["resume_worktree"],
                 sender,
@@ -631,7 +636,7 @@ class QueueRunWaitersMixin:
             clauses.append("pid = ?")
             params.append(int(pid))
         if host is not None:
-            clauses.append("COALESCE(host, '') = COALESCE(?, '')")
+            clauses.append("host = ?")
             params.append(host)
         if start_token is not None:
             clauses.append("start_token = ?")
@@ -650,6 +655,7 @@ class QueueRunWaitersMixin:
             "task_id": row["task_id"],
             "generation": row["generation"],
             "task_generation": row["task_generation"],
+            "owner": row["owner"],
             "owner_session_id": row["owner_session_id"],
             "pid": row["pid"],
             "host": row["host"],

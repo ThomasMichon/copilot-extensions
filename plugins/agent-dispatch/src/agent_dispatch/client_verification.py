@@ -8,8 +8,9 @@ from .coordinator_auth import scoped_control_token
 class VerificationClientMixin:
     """Coordinator calls for whole-goal verification and detached run waiters."""
 
-    def verify_submitted(self, task_id: str) -> dict:
-        return self._unwrap(self._http.post(f"/tasks/{task_id}/verify-submitted"))
+    def verify_submitted(self, task_id: str, *, evaluator_ref: str | None = None) -> dict:
+        payload = None if evaluator_ref is None else {"evaluator_ref": evaluator_ref}
+        return self._unwrap(self._http.post(f"/tasks/{task_id}/verify-submitted", json=payload))
 
     def append_event_note(self, task_id: str, *, sender: str, note: str) -> dict:
         headers = dict(self._control_headers())
@@ -31,8 +32,8 @@ class VerificationClientMixin:
         task_id: str,
         *,
         pid: int,
-        host: str | None,
-        start_token: str | None,
+        host: str,
+        start_token: str,
         resume_worktree: str,
         command: list[str],
     ) -> dict:
@@ -55,8 +56,8 @@ class VerificationClientMixin:
         *,
         generation: int,
         pid: int,
-        host: str | None,
-        start_token: str | None,
+        host: str,
+        start_token: str,
         message: str,
     ) -> dict:
         return self._unwrap(

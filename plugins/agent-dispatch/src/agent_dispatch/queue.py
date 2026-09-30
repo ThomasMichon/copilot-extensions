@@ -439,6 +439,7 @@ class TaskQueue(
             "  task_id TEXT NOT NULL,"
             "  generation INTEGER NOT NULL,"
             "  task_generation INTEGER NOT NULL DEFAULT 0,"
+            "  owner TEXT NOT NULL DEFAULT '',"
             "  owner_session_id TEXT,"
             "  pid INTEGER NOT NULL,"
             "  host TEXT,"
@@ -456,6 +457,8 @@ class TaskQueue(
                 conn.execute(
                     "ALTER TABLE run_waiters ADD COLUMN task_generation INTEGER NOT NULL DEFAULT 0"
                 )
+            if "owner" not in run_waiter_columns:
+                conn.execute("ALTER TABLE run_waiters ADD COLUMN owner TEXT NOT NULL DEFAULT ''")
             if "owner_session_id" not in run_waiter_columns:
                 conn.execute("ALTER TABLE run_waiters ADD COLUMN owner_session_id TEXT")
             conn.execute(
@@ -471,6 +474,7 @@ class TaskQueue(
                 "  task_id TEXT NOT NULL,"
                 "  waiter_generation INTEGER NOT NULL,"
                 "  task_generation INTEGER NOT NULL,"
+                "  owner TEXT NOT NULL,"
                 "  owner_session_id TEXT,"
                 "  resume_worktree TEXT NOT NULL,"
                 "  sender TEXT NOT NULL,"

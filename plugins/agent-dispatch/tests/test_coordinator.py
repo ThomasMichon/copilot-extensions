@@ -717,6 +717,46 @@ def test_complete_over_http_retriggers_whole_goal_verification(api, tmp_path):
     assert api.get(f"/tasks/{tid}").json()["status"] == Status.COMPLETED
 
 
+def test_verify_submitted_can_opt_in_legacy_row_and_assign_evaluator(api, tmp_path):
+    script = tmp_path / "eval.py"
+    script.write_text(
+        "import json, sys\n"
+        "json.dump({'decision': 'confirm'}, sys.stdout)\n",
+        encoding="utf-8",
+    )
+    api.app.state.queue.register_registration(
+        "evaluator",
+        {
+            "repo": TEST_REPO,
+            "evaluator_ref": "review-loop",
+            "evaluator_spec": {"scripts": {"review-loop": [sys.executable, str(script)]}},
+        },
+        machine=_registration_machine(),
+    )
+    tid = api.post(
+        "/tasks",
+        json={"title": "x", "repo": TEST_REPO},
+    ).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+    submitted = api.post(f"/tasks/{tid}/complete", json={"worker_id": "w1"}).json()
+
+    assert submitted["status"] == Status.COMPLETED
+    # Reopen to submitted to model a historical legacy row.
+    with api.app.state.queue._connect() as conn:
+        conn.execute(
+            "UPDATE tasks SET status = ?, require_verification = 0, evaluator_ref = NULL WHERE id = ?",
+            (Status.SUBMITTED, tid),
+        )
+    backfill = api.post(
+        f"/tasks/{tid}/verify-submitted",
+        json={"evaluator_ref": "review-loop"},
+    )
+
+    assert backfill.status_code == 200
+    assert api.get(f"/tasks/{tid}").json()["status"] == Status.COMPLETED
+
+
 def test_complete_over_http_triggers_immediate_whole_goal_verification(api, tmp_path):
     script = tmp_path / "eval.py"
     script.write_text(

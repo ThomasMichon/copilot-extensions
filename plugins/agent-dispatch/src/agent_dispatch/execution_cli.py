@@ -126,13 +126,17 @@ def _register_run_waiter(args: argparse.Namespace, spec: Any, handle: dict, susp
     pid = handle.get("pid")
     if not isinstance(pid, int):
         return None
+    host = remote_dispatch.local_machine()
+    start_token = companion.process_start_token(pid)
+    if not host or not start_token:
+        return {"error": "could not resolve the detached waiter's process identity", "pid": pid}
     try:
         with _core()._client(args) as c:
             return c.register_run_waiter(
                 spec.task_id,
                 pid=pid,
-                host=remote_dispatch.local_machine(),
-                start_token=companion.process_start_token(pid),
+                host=host,
+                start_token=start_token,
                 resume_worktree=spec.resume_worktree or "",
                 command=list(spec.command),
             )
@@ -326,7 +330,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             print(f"agent-dispatch: run: could not execute the wait: {exc}", file=sys.stderr)
             return 127
     if getattr(args, "waiter_child", False) and spec.task_id:
-        from . import companion, hibernation_claims, remote_dispatch
+        from . import companion, remote_dispatch
         ready_generation = _consume_waiter_ready_file(getattr(args, "waiter_ready_file", None))
         if ready_generation is None:
             return _core()._emit(
@@ -346,13 +350,20 @@ def _cmd_run(args: argparse.Namespace) -> int:
             resumer=lambda *_a: True,
         )
         report["resume_worktree"] = spec.resume_worktree
+        host = remote_dispatch.local_machine()
+        start_token = companion.process_start_token(os.getpid())
+        if not host or not start_token:
+            report["waiter"] = {"accepted": False, "waiter": None}
+            report["resumed"] = None
+            report["claim_released"] = None
+            return _core()._emit(report)
         with _core()._client(args) as c:
             waiter = c.finish_run_waiter(
                 spec.task_id,
                 generation=ready_generation,
                 pid=os.getpid(),
-                host=remote_dispatch.local_machine(),
-                start_token=companion.process_start_token(os.getpid()),
+                host=host,
+                start_token=start_token,
                 message=str(report["message"]),
             )
         report["waiter"] = waiter
@@ -420,7 +431,10 @@ def _cmd_evaluate(args: argparse.Namespace) -> int:
 def _cmd_verify_submitted(args: argparse.Namespace) -> int:
     """Explicit, scoped re-check for already-submitted verification tasks."""
     with _core()._client(args) as c:
-        reports = [c.verify_submitted(task_id) for task_id in args.task_id]
+        reports = [
+            c.verify_submitted(task_id, evaluator_ref=args.evaluator_ref)
+            for task_id in args.task_id
+        ]
     return _core()._emit(reports if len(reports) != 1 else reports[0])
 
 def _cmd_charter_show(args: argparse.Namespace) -> int:

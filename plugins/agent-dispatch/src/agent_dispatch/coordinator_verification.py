@@ -20,10 +20,14 @@ class EventNoteBody(BaseModel):
     note: str
 
 
+class VerifySubmittedBody(BaseModel):
+    evaluator_ref: str | None = None
+
+
 class RunWaiterRegisterBody(BaseModel):
     pid: StrictInt
-    host: str | None = None
-    start_token: str | None = None
+    host: str
+    start_token: str
     resume_worktree: str
     command: list[str] = Field(default_factory=list)
 
@@ -31,8 +35,8 @@ class RunWaiterRegisterBody(BaseModel):
 class RunWaiterFinishBody(BaseModel):
     generation: StrictInt
     pid: StrictInt
-    host: str | None = None
-    start_token: str | None = None
+    host: str
+    start_token: str
     message: str
 
 
@@ -87,8 +91,14 @@ def register_verification_routes(
             )
 
     @app.post("/tasks/{task_id}/verify-submitted")
-    def verify_submitted(task_id: str) -> dict:
+    def verify_submitted(task_id: str, body: VerifySubmittedBody | None = None) -> dict:
         try:
+            if body is not None and body.evaluator_ref is not None:
+                queue.opt_in_submitted_verification(
+                    task_id,
+                    evaluator_ref=body.evaluator_ref,
+                    actor="backfill",
+                )
             return evaluate_submitted_task(queue, task_id, bus=bus, trigger="backfill")
         except TaskError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc

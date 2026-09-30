@@ -354,6 +354,11 @@ def test_cli_parses_verify_submitted():
     assert a.task_id == ["task-1", "task-2"]
 
 
+def test_cli_parses_verify_submitted_backfill_ref():
+    a = _args(["verify-submitted", "--evaluator-ref", "review-loop", "task-1"])
+    assert a.evaluator_ref == "review-loop"
+
+
 def test_cmd_evaluate_dry_run_reads_event_file(tmp_path, capsys):
     spec = tmp_path / "spec.json"
     spec.write_text(json.dumps({"rules": [{

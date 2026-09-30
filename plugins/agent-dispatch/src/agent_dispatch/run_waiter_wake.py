@@ -8,26 +8,27 @@ from collections.abc import Callable
 
 from .queue import TaskError, TaskQueue
 
-DeliverWake = Callable[[str, str, str, str, str | None], bool]
+DeliverWake = Callable[[str, str, str, str, str, str | None], bool]
 ReleaseClaim = Callable[[str, str], object | None]
 WakeActive = Callable[[], bool]
 log = logging.getLogger(__name__)
 
 
 def _default_deliver(
-    worktree: str,
+    owner: str,
+    task_id: str,
     message: str,
-    sender: str,
     wake_id: str,
+    sender: str,
     owner_session_id: str | None,
 ) -> bool:
     from . import bridge
 
-    _ = owner_session_id
-    return bridge.send_nudge(
-        worktree,
+    return bridge.resume_steered_owner(
+        owner,
+        task_id,
         message,
-        sender=sender,
+        owner_session_id=owner_session_id,
         idempotency_key=wake_id,
     )
 
@@ -69,10 +70,11 @@ async def drain_run_waiter_wakes(
         try:
             delivered = await asyncio.to_thread(
                 deliver,
-                wake.resume_worktree,
+                wake.owner,
+                wake.task_id,
                 wake.message,
-                wake.sender,
                 wake.id,
+                wake.sender,
                 wake.owner_session_id,
             )
             delivery_error = None if delivered else "bridge delivery unavailable"

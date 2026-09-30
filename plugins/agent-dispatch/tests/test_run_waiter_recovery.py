@@ -79,6 +79,7 @@ def test_superseded_waiter_drops_late_completion(tmp_path):
     assert (
         queue.retire_run_waiter(
             task_id,
+            generation=1,
             pid=101,
             host=TEST_HOST,
             start_token="token-101",
