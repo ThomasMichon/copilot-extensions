@@ -733,10 +733,29 @@ def test_a_failed_launch_records_nothing(seams, capsys):
     bad = _args(copilot_args=["--reasoning-effort=max"], driver="orchestrator")
     assert detach.cmd_detach(bad, ssh_session=_ssh(seams, stdout="", code=1)) != 0
     capsys.readouterr()
-    dry = _args(copilot_args=["--resume=sid-42"], driver="cli-mode", dry_run=True)
+    dry = _args(copilot_args=["--resume=sid-42"], driver=None, seed=None, dry_run=True)  # a bare wake
     assert detach.cmd_detach(dry, ssh_session=_ssh(seams)) == 0
     out = json.loads(capsys.readouterr().out)
     assert "recalled" not in out and out["copilot_args"] == ["--resume=sid-42"]
+
+
+def test_a_recalled_session_gains_no_host_model_it_did_not_run_with(seams, monkeypatch, capsys):
+    from agent_codespaces import launch_memory
+
+    # Launched while model propagation was off: its record has no model flags.
+    launch_memory.remember("cs-1", "cli:anchor-example-web@cs-1", [], "cli-mode", "sid-42")
+    monkeypatch.setattr(detach, "model_copilot_args",
+                        lambda existing: [] if any(a.startswith("--model") for a in existing)
+                        else ["--model=host-today", "--reasoning-effort=high"])
+    wake = _args(copilot_args=["--resume=sid-42"], driver=None, seed=None, dry_run=True)
+    assert detach.cmd_detach(wake, ssh_session=_ssh(seams)) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["recalled"] == ["copilot_args"] and out["copilot_args"] == ["--resume=sid-42"]
+    # A resume of a session with no record still gets the host's model, as before.
+    other = _args(copilot_args=["--resume=sid-99"], driver=None, seed=None, dry_run=True)
+    assert detach.cmd_detach(other, ssh_session=_ssh(seams)) == 0
+    assert json.loads(capsys.readouterr().out)["copilot_args"] == [
+        "--resume=sid-99", "--model=host-today", "--reasoning-effort=high"]
 
 
 def test_a_rejoin_of_a_running_session_leaves_the_record_alone(seams, capsys):

@@ -199,7 +199,8 @@ supervisor's automatic wake after a CodeSpace stop does) keeps the
 session actually ran with: a launch that starts a session records them, with
 the session's id, under
 `~/.agent-codespaces/launches/<codespace>/` (its JSON lists what was reused
-under `recalled`). Only a resume of that same session id with no other flags
+under `recalled`), and the resume adds no host model defaults the session didn't
+run with. Only a resume of that same session id with no other flags
 and no `--driver` reuses them -- never a new session, another
 session, `--continue`, or a launch with explicit flags -- and a rejoin of an
 already running session leaves the record alone.

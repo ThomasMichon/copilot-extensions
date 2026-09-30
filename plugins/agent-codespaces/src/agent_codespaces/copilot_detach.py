@@ -370,7 +370,8 @@ def cmd_detach(
     requested, args.driver, recalled = launch_memory.apply(
         args.name, plan["tenant"], list(getattr(args, "copilot_args", None) or []), args.driver,
     )
-    copilot_args = with_new_session(requested + model_copilot_args(requested))
+    # A recalled session runs exactly its recorded flags: no host model defaults added.
+    copilot_args = with_new_session(requested + ([] if recalled else model_copilot_args(requested)))
     try:
         reverse_forwards = parse_reverse_forwards(getattr(args, "reverse_forwards", None) or [])
         local_forwards = parse_local_forwards(getattr(args, "local_forwards", None) or [])

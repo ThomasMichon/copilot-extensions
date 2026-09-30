@@ -193,8 +193,10 @@ def _load(path: Path | None) -> dict:
 def apply(
     codespace: str, tenant: str, requested: list[str], driver: str | None,
 ) -> tuple[list[str], str, list[str]]:
-    """``(copilot_args, driver, recalled)`` to launch with; ``recalled`` names
-    what came from the record (``copilot_args``, ``driver``). ``driver`` is
+    """``(copilot_args, driver, recalled)`` to launch with. ``recalled`` is
+    non-empty exactly when the record matched: ``copilot_args`` always (the
+    recorded list, even an empty one, is what that session ran with -- nothing
+    is added to it), plus ``driver`` when it isn't the default. ``driver`` is
     ``None`` when the caller didn't pass one (an explicit ``cli-mode`` counts)."""
     own, selectors, session_id = split_selectors(requested)
     # Only a resume of the recorded session that names nothing else.
@@ -203,11 +205,9 @@ def apply(
     record = _load(_path(codespace, tenant))
     if record.get("tenant") != tenant or record.get("session_id") != session_id:
         return own + selectors, DEFAULT_DRIVER, []
-    recalled: list[str] = []
+    recalled = ["copilot_args"]
     driver = DEFAULT_DRIVER
-    if record["copilot_args"]:
-        own = split_selectors(record["copilot_args"])[0]
-        recalled.append("copilot_args")
+    own = split_selectors(record["copilot_args"])[0]
     if record["driver"] != DEFAULT_DRIVER:
         driver = record["driver"]
         recalled.append("driver")
