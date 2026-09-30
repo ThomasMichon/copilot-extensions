@@ -379,6 +379,15 @@ _Pending._
   already satisfies this mechanism's actual design requirement on its own.
   Also corrected the local scanner's own CI-mode message, which pointed
   users at "PR review comments" that may not exist.
+- A same-day review correction on the fix above: the Check Run `output.text`
+  was itself capped at 50 rendered findings ("...and N more"), with the
+  (now best-effort) PR comment as the only channel that ever carried the
+  complete list. Since the comment can no longer be relied upon, a PR
+  reintroducing more than 50 forbidden identifiers at once would have lost
+  match/reason/file/line/column detail for the rest. Replaced the fixed
+  50-item cap with a byte-budget-aware truncation against the Check Run
+  API's documented 65535-character limit, so the sole relied-upon channel
+  stays complete for any realistic finding count.
 - Closes Phase 4's last checkbox: the workflow file now documents the
   secret format and the exact provisioning/rotation command directly in
   its own header, and the scanner's docstring documents the CI-mode

@@ -237,12 +237,30 @@ jobs:
               title = `${details.length} forbidden identifier(s) found`;
               summary =
                 "Trusted scan found forbidden identifiers in the PR head's changed file contents.";
-              const rendered = details.slice(0, 50).map((item) => {
+              // Check Run `output.text` has a documented 65535-character cap.
+              // Include every finding that fits under a safe budget (rather
+              // than an arbitrary item count) so this stays the complete,
+              // sole relied-upon delivery channel -- the PR comment above is
+              // best-effort only and may not post at all.
+              const MAX_TEXT_CHARS = 60000;
+              const allLines = details.map((item) => {
                 const reason = item.reason ? ` — ${item.reason}` : "";
                 return `- ${item.file}:${item.line}:${item.col} — \`${item.identifier}\`${reason}`;
               });
-              if (details.length > rendered.length) {
-                rendered.push(`- ...and ${details.length - rendered.length} more.`);
+              const rendered = [];
+              let used = 0;
+              let shown = 0;
+              for (const line of allLines) {
+                const cost = line.length + 1;
+                if (used + cost > MAX_TEXT_CHARS) {
+                  break;
+                }
+                rendered.push(line);
+                used += cost;
+                shown += 1;
+              }
+              if (shown < details.length) {
+                rendered.push(`- ...and ${details.length - shown} more.`);
               }
               text = rendered.join("\n");
             } else if (failingSteps.length > 0 || scanOutcome !== "success") {
