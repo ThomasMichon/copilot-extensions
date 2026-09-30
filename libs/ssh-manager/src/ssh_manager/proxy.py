@@ -20,7 +20,12 @@ import shlex
 import shutil
 from typing import Any
 
-from agent_procutil import no_window_kwargs, windowless_python
+from agent_procutil import (
+    JobHandle,
+    bind_to_kill_on_close_job,
+    no_window_kwargs,
+    windowless_python,
+)
 
 from .config_sources import SSHConfig
 from .process import (
@@ -160,6 +165,7 @@ class _ProxyBroker:
         self._server: asyncio.Server | None = None
         self._clients: set[asyncio.Task] = set()
         self._cleanups: set[asyncio.Task] = set()
+        self._child_jobs: set[JobHandle] = set()
         self._used = False
         self._close_task: asyncio.Task | None = None
 
@@ -181,6 +187,7 @@ class _ProxyBroker:
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
     ) -> None:
         process = None
+        child_job = None
         tasks: list[asyncio.Task] = []
         stderr_tail = bytearray()
 
@@ -207,6 +214,11 @@ class _ProxyBroker:
                 cwd=self._cwd,
                 **(no_window_kwargs() if _is_windows() else ssh_subprocess_kwargs()),
             )
+            pid = getattr(process, "pid", None)
+            if isinstance(pid, int):
+                child_job = bind_to_kill_on_close_job(pid)
+                if child_job is not None:
+                    self._child_jobs.add(child_job)
             if process.stdin is None or process.stdout is None or process.stderr is None:
                 raise RuntimeError("SSH proxy did not receive its redirected streams")
             inbound = asyncio.create_task(_pump(reader, process.stdin))
@@ -244,19 +256,26 @@ class _ProxyBroker:
         except (OSError, ConnectionError, RuntimeError):
             log.warning("SSH proxy connection failed", exc_info=True)
         finally:
-            cleanup = asyncio.create_task(self._cleanup_connection(process, tasks, writer))
+            cleanup = asyncio.create_task(
+                self._cleanup_connection(process, tasks, writer, child_job)
+            )
             self._cleanups.add(cleanup)
             cleanup.add_done_callback(self._cleanups.discard)
             await asyncio.shield(cleanup)
 
     async def _cleanup_connection(
         self, process: asyncio.subprocess.Process | None,
-        tasks: list[asyncio.Task], writer: asyncio.StreamWriter,
+        tasks: list[asyncio.Task],
+        writer: asyncio.StreamWriter,
+        child_job: JobHandle | None,
     ) -> None:
         try:
             if process is not None:
                 await terminate_ssh_process_tree(process)
         finally:
+            if child_job is not None:
+                child_job.close()
+                self._child_jobs.discard(child_job)
             for task in tasks:
                 task.cancel()
             if tasks:

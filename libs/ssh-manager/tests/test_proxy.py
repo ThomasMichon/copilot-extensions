@@ -243,6 +243,53 @@ async def test_proxy_cancellation_reaps_hung_child(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_proxy_binds_spawned_child_to_kill_on_close_job(monkeypatch):
+    class FakeJobHandle:
+        def __init__(self):
+            self.closed = 0
+
+        def close(self):
+            self.closed += 1
+
+    handles = []
+
+    def bind(pid):
+        handle = FakeJobHandle()
+        handles.append((pid, handle))
+        return handle
+
+    spawn = asyncio.create_subprocess_exec
+    processes = []
+
+    async def record(*args, **kwargs):
+        process = await spawn(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(proxy.asyncio, "create_subprocess_exec", record)
+    monkeypatch.setattr(proxy, "bind_to_kill_on_close_job", bind)
+    script = (
+        "import sys,time; sys.stdout.buffer.write(b'ready\\n'); "
+        "sys.stdout.buffer.flush(); time.sleep(60)"
+    )
+    broker = proxy._ProxyBroker([sys.executable, "-u", "-c", script], None)
+    port = await broker.start()
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        writer.write(broker.capability.encode("ascii"))
+        await writer.drain()
+        assert await asyncio.wait_for(reader.readline(), timeout=5) == b"ready\n"
+        await asyncio.wait_for(broker.close(), timeout=5)
+        assert len(processes) == 1
+        assert handles[0][0] == processes[0].pid
+        assert handles[0][1].closed == 1
+        assert not broker._child_jobs
+    finally:
+        writer.close()
+        await broker.close()
+
+
+@pytest.mark.asyncio
 async def test_broker_close_waits_for_already_started_cleanup(monkeypatch):
     entered = asyncio.Event()
     release = asyncio.Event()
