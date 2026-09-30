@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import os
 import subprocess
@@ -222,7 +223,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
     )
 
     if args.detach:
-        handle = _core()._spawn_detached_waiter(spec)
+        handle = _core()._spawn_detached_waiter(
+            dataclasses.replace(spec, waiter_child=bool(spec.task_id))
+        )
         suspended = _core()._suspend_for_detached_wait(args, spec)
         waiter = _core()._register_run_waiter(args, spec, handle, suspended)
         return _core()._emit(

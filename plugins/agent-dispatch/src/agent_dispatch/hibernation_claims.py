@@ -131,3 +131,31 @@ def release_hibernation_claim(task_id: str, *, timeout: float = 15.0) -> dict | 
         return None
     _mirror_task_claim_status(task_id, "released", timeout=timeout)
     return payload
+
+
+def release_hibernation_claim_for_worktree(
+    task_id: str,
+    worktree_id: str,
+    *,
+    timeout: float = 15.0,
+) -> dict | None:
+    """Retire a hibernation claim targeting an explicit worktree id."""
+    prefix = agent_worktrees_launch_prefix()
+    if prefix is None:
+        return None
+    try:
+        result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
+            [*prefix, "claims", "release", task_id, "--worktree", worktree_id, "--json"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            **no_window_kwargs(),
+        )
+        payload = json.loads(result.stdout or "{}")
+    except (OSError, subprocess.SubprocessError, TypeError, ValueError):
+        return None
+    if result.returncode != 0 or not isinstance(payload, dict):
+        return None
+    _mirror_task_claim_status(task_id, "released", timeout=timeout)
+    return payload

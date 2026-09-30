@@ -53,7 +53,9 @@ def register_verification_routes(
                 message,
                 sender="agent-dispatch-event-note",
             )
-            hibernation_claims.release_hibernation_claim(task.id)
+            hibernation_claims.release_hibernation_claim_for_worktree(
+                task.id, waiter["resume_worktree"]
+            )
             return
         if task.owner and task.owner_session_id is not None:
             bridge.resume_steered_owner(

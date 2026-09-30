@@ -739,8 +739,8 @@ def test_event_note_wakes_and_supersedes_active_run_waiter(api, monkeypatch):
     )
     monkeypatch.setattr(
         hibernation_claims,
-        "release_hibernation_claim",
-        lambda task_id, **_k: releases.append(task_id) or {"released": True},
+        "release_hibernation_claim_for_worktree",
+        lambda task_id, worktree_id, **_k: releases.append((task_id, worktree_id)) or {"released": True},
     )
 
     r = api.post(
@@ -751,7 +751,7 @@ def test_event_note_wakes_and_supersedes_active_run_waiter(api, monkeypatch):
     assert r.status_code == 200
     assert api.app.state.queue.get_active_run_waiter(tid) is None
     assert wakes and wakes[0][0] == "m/wt-1"
-    assert releases == [tid]
+    assert releases == [(tid, "m/wt-1")]
 
 
 def test_event_note_nudges_running_owner(api, monkeypatch):

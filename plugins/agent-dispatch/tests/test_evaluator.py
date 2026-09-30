@@ -156,6 +156,19 @@ def test_no_matching_confirm_rule_falls_through_to_noop():
     assert isinstance(spec.evaluate(_completed_event(labels=("other",)))[0], ev.NoOp)
 
 
+def test_abandon_rule_matches():
+    spec = ev.SpecEvaluator({"rules": [{
+        "on": "task.submitted",
+        "when": {"labels_any": ["recipe:goal-driven"]},
+        "abandon": True,
+        "abandon_reason": "closed-unmerged",
+    }]})
+    decisions = spec.evaluate(_completed_event(labels=("recipe:goal-driven",)))
+    assert len(decisions) == 1
+    assert isinstance(decisions[0], ev.Abandon)
+    assert decisions[0].reason == "closed-unmerged"
+
+
 # -- apply -------------------------------------------------------------------
 
 

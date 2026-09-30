@@ -248,9 +248,10 @@ def create_app(
             counts = await asyncio.to_thread(
                 recover_run_waiters,
                 queue,
+                process_exists=companion._process_exists,
                 start_token_for_pid=companion.process_start_token,
                 wake_worktree=bridge.send_nudge,
-                release_claim=hibernation_claims.release_hibernation_claim,
+                release_claim=hibernation_claims.release_hibernation_claim_for_worktree,
             )
             if counts.get("recovered"):
                 log.warning(

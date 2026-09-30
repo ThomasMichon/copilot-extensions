@@ -218,6 +218,8 @@ class SpecEvaluator:
                 return [_emit_from_rule(rule, event)]
             if rule.get("confirm"):
                 return [Confirm(reason=rule.get("confirm_reason"))]
+            if rule.get("abandon"):
+                return [Abandon(reason=rule.get("abandon_reason"))]
         return [NoOp(reason="no matching rule")]
 
 
