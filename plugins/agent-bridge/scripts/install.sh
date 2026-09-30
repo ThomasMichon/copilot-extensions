@@ -655,6 +655,28 @@ else:
 PYEOF
 }
 
+_active_is_forward() {
+    # Whether the routing table points at a host bridge this machine only
+    # forwards to (a venue launcher wrote it): marked "forwarded", or the older
+    # launcher form with a port but no daemon pid/generation. Never start a
+    # local daemon over it -- it would take the route over from the host.
+    local aj="$INSTALL_DIR/active.json" py=""
+    [[ -f "$aj" ]] || return 1
+    py="$VENV_DIR/bin/python"
+    [[ -x "$py" ]] || py="$(command -v python3 || command -v python || true)"
+    [[ -n "$py" ]] || return 1
+    "$py" - "$aj" <<'PYEOF' 2>/dev/null
+import json, sys
+try:
+    a = json.load(open(sys.argv[1])).get("active") or {}
+    port = int(a.get("port") or 0)
+except Exception:
+    sys.exit(1)
+fwd = a.get("forwarded") is True or (a.get("pid") is None and "generation" not in a)
+sys.exit(0 if port > 0 and fwd else 1)
+PYEOF
+}
+
 _active_host() {
     # The daemon's LIVE bind address from the routing table, mirroring
     # install.ps1's endpoint resolution: default loopback, and treat a wildcard
@@ -1536,6 +1558,11 @@ do_start() {
             _ok "agent-bridge is already running and healthy (${live_host}:${live_port})"
             return 0
         fi
+    fi
+
+    if _active_is_forward; then
+        _skip "this machine reaches a host bridge through a forward (active.json); not starting a local daemon"
+        return 0
     fi
 
     local rt_py

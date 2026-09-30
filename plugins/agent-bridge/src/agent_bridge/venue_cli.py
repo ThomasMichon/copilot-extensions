@@ -200,6 +200,14 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
     from zdd.cutover import CutoverOrchestrator
 
     core = _core()
+    if core._active_endpoint_is_forward():
+        # The routed "old daemon" is the host's bridge, through the forward:
+        # a cutover would take the route over, then drain and shut it down.
+        print(
+            "[SKIP] agent-bridge deploy: this machine reaches a host bridge "
+            "through a forward (active.json); there is no local daemon to deploy",
+        )
+        return
     cfg = load_config()
     token = load_or_create_auth_token()
     host = cfg.bind if cfg.bind not in ("0.0.0.0", "") else "127.0.0.1"

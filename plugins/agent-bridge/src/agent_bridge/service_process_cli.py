@@ -567,6 +567,13 @@ def _service_start() -> None:
     if core._service_is_running():
         print(f"[OK] agent-bridge already running (port {core._service_port()})")
         return
+    if core._active_endpoint_is_forward():
+        print(
+            "[SKIP] agent-bridge: this machine reaches a host bridge through a "
+            "forward (active.json) that is not answering; not starting a local "
+            "daemon over it",
+        )
+        return
     if core._reconcile_live_dynamic_daemon():
         print(f"[OK] agent-bridge recovered dynamic route (port {core._service_port()})")
         return
@@ -615,12 +622,13 @@ def _service_stop() -> None:
         stopped_any = True
 
     port = core._service_port()
-    victims = {
-        core._read_pid_file(),
-        core._pid_on_port(port),
-        core._pid_from_lock(port),
-        core._pid_from_lock(0),
-    }
+    victims = {core._read_pid_file(), core._pid_from_lock(0)}
+    if not core._active_endpoint_is_forward():
+        # A forwarded port is held by the ssh session carrying the forward.
+        victims |= {core._pid_from_lock(port)}
+        port_pid = core._pid_on_port(port)
+        if port_pid and core._pid_is_agent_bridge(port_pid):
+            victims.add(port_pid)
     victims.discard(None)
     for victim in victims:
         core._kill_pid(victim)

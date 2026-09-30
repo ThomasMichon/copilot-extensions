@@ -310,9 +310,11 @@ def _service_pid() -> int | None:
     endpoint = core._active_endpoint()
     if endpoint is not None and endpoint.pid:
         return int(endpoint.pid)
-    port_pid = core._pid_on_port(core._service_port())
-    if port_pid:
-        return port_pid
+    if not core._active_endpoint_is_forward():
+        # (A forwarded port's listener is the ssh session, not a bridge.)
+        port_pid = core._pid_on_port(core._service_port())
+        if port_pid:
+            return port_pid
     return core._read_pid_file()
 
 
