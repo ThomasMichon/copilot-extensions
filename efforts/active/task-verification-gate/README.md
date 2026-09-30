@@ -12,8 +12,9 @@
 - **Sub-issues:** _TBD, one per Plan phase once filed_
 - **Full design exchange:** `inception-transcript.md` (the multi-round
   producer/evaluator design-hardening conversation that settled the
-  architecture below; kept verbatim per the operator's own request since it
-  carries real, hard-won reasoning worth preserving in full)
+  architecture below, preserved per the operator's own request; the
+  operator's own messages are kept verbatim, this agent's responses are
+  curated gists -- not a raw session log)
 
 ## Guiding Intent
 
