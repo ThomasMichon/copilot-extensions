@@ -1,0 +1,151 @@
+name: Purge consumed changefiles
+
+# Standalone daily companion to `validate-and-promote.yml` (Phase 3 of the
+# dev-branch-release-pipeline effort, ThomasMichon/copilot-extensions#3336).
+# Split out of that workflow's own "Clear consumed changefiles on dev" step
+# (2026-09-30) once it was confirmed safe to decouple: `tools/
+# promote_release.py`'s `consume_pending_changes()` filters pending
+# changefiles via `_changefile_existed_at(last_dev_head, name)` -- a pure
+# historical git check against the `last_promotion.dev_head` commit
+# recorded in `.github/release-pipeline-state.json` on `main` -- so a
+# changefile already present at that commit is EXCLUDED from bump
+# computation regardless of whether it still physically exists on `dev`.
+# Deleting it promptly is pure housekeeping (keeping `.changefiles/` free
+# of clutter and the per-promotion ancestry sweep bounded), never a
+# correctness requirement. Running this purge once a day instead of once
+# per promotion (previously every ~15-30 min under real load) trades a
+# small amount of housekeeping lag for a large reduction in how often this
+# mechanical PR's own known failure modes (a transient GitHub API error
+# opening/merging it, a required-check race) can actually surface -- and
+# when one does, it self-repairs on the next day's run rather than needing
+# manual intervention, since the purge set is always recomputed fresh
+# against whatever `main` has currently recorded, never a stale run-scoped
+# list.
+#
+# Uses the same `main` "state of truth" + narrow path-scoped admin-bypass
+# pattern `validate-and-promote.yml`'s own changefile cleanup step used
+# (see its history for the two real incidents -- a required-check race and
+# a tightened review rule -- that shaped this exact design; this file
+# keeps both mitigations).
+
+on:
+  schedule:
+    - cron: "0 9 * * *" # once daily; time is not load-bearing
+  workflow_dispatch:
+
+concurrency:
+  group: purge-consumed-changefiles
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  purge:
+    name: Purge changefiles already consumed by a completed promotion
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: main-promotion
+    env:
+      GH_TOKEN: ${{ secrets.APERTURE_RELEASE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: dev
+          token: ${{ secrets.APERTURE_RELEASE_TOKEN }}
+      - name: Configure git identity for the generated commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Purge changefiles that existed at main's last recorded promotion
+        run: |
+          git fetch origin main
+          state_json=$(git show origin/main:.github/release-pipeline-state.json 2>/dev/null || echo '{}')
+          dev_head=$(python3 -c "
+          import json, sys
+          try:
+              state = json.loads(sys.argv[1])
+          except json.JSONDecodeError:
+              state = {}
+          print((state.get('last_promotion') or {}).get('dev_head', ''))
+          " "$state_json")
+          if [ -z "$dev_head" ]; then
+            echo "::notice::No prior promotion recorded on main yet -- nothing to purge."
+            exit 0
+          fi
+          echo "::notice::Purging changefiles that existed at main's last_promotion.dev_head=$dev_head"
+          cleanup_branch="chore/purge-changefiles-${{ github.run_id }}"
+          git switch -c "$cleanup_branch"
+          removed=0
+          for f in .changefiles/*.json; do
+            [ -f "$f" ] || continue
+            name=$(basename "$f")
+            # A changefile present at dev_head was already excluded from
+            # bump computation by that same promotion (or an earlier one)
+            # -- see this file's top-of-file comment. Safe to delete.
+            if git cat-file -e "$dev_head:.changefiles/$name" 2>/dev/null; then
+              git rm -q -- "$f"
+              removed=$((removed + 1))
+            fi
+          done
+          if [ "$removed" -eq 0 ] || git diff --cached --quiet; then
+            echo "::notice::Nothing to purge (no consumed changefiles found, or already clean)."
+            exit 0
+          fi
+          # Safety assertion: this step only ever stages `git rm` calls
+          # against .changefiles/ above -- assert that explicitly before
+          # the narrow admin-bypass merge below is allowed to rely on it.
+          if git diff --cached --name-only | grep -qv '^\.changefiles/'; then
+            echo "::error::Purge diff touches paths outside .changefiles/ -- refusing to admin-merge; leaving for manual review." >&2
+            git diff --cached --name-only >&2
+            exit 1
+          fi
+          git commit -m "chore: purge changefiles consumed by promotions through ${dev_head:0:8}"
+          git push origin "HEAD:$cleanup_branch"
+          pr_url=$(gh pr create --base dev --head "$cleanup_branch" \
+            --title "chore: purge changefiles consumed by promotions through ${dev_head:0:8}" \
+            --body "Generated by purge-consumed-changefiles.yml. Removes changefiles already consumed by a completed dev->main promotion (each existed at main's persisted \`last_promotion.dev_head=$dev_head\` in .github/release-pipeline-state.json, which tools/promote_release.py's own bump computation already treats as fully consumed regardless of physical presence on dev). Do not edit by hand.")
+          pr_number=$(basename "$pr_url")
+          # Re-verify the merged diff is STILL confined to .changefiles/**
+          # (defense against something unexpected landing on the branch
+          # between push and merge) before exercising this repo owner's
+          # own named bypass-actor entry on dev's ruleset (see
+          # `.github/CODEOWNERS`'s top-of-file comment) -- the same
+          # narrow, path-verified exemption `validate-and-promote.yml`'s
+          # own changefile-cleanup step already relied on.
+          if gh pr diff "$pr_number" --name-only | grep -qv '^\.changefiles/'; then
+            echo "::error::PR #$pr_number diff touches paths outside .changefiles/ -- refusing to admin-merge." >&2
+            exit 1
+          fi
+          # `dev`'s separate "workflow/CODEOWNERS lockdown" ruleset
+          # (workflow-lockdown-guard.yml, #4503) enforces its
+          # required_status_checks rule with NO bypass actors at all, by
+          # design -- `--admin` cannot skip a required check that simply
+          # hasn't reported yet; it has to actually complete. That guard
+          # triggers async on PR creation and takes a few seconds to tens
+          # of seconds to report, so merging immediately after `gh pr
+          # create` above would race it (confirmed live on
+          # validate-and-promote.yml's own changefile-cleanup step, which
+          # hit this exact race twice). Wait for it to physically report
+          # rather than skip waiting; bounded to 6 minutes total (the
+          # guard's own job timeout is 5) so a genuinely broken/hung check
+          # fails this step instead of hanging the job.
+          deadline=$(( $(date +%s) + 360 ))
+          until gh pr checks "$pr_number" --json name --jq '.[] | select(.name == "workflow-lockdown-guard")' 2>/dev/null | grep -q .; do
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::workflow-lockdown-guard never appeared as a check run on PR #$pr_number within the wait window -- leaving for manual review." >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          remaining=$(( deadline - $(date +%s) ))
+          if [ "$remaining" -lt 1 ]; then
+            remaining=1
+          fi
+          if ! timeout "$remaining" gh pr checks "$pr_number" --watch --required --interval 10; then
+            echo "::error::Required checks did not report success for PR #$pr_number within the wait window -- leaving for manual review; never force past a required status check." >&2
+            exit 1
+          fi
+          gh pr merge "$pr_number" --squash --admin
