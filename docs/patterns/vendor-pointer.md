@@ -97,13 +97,15 @@ the local path.
 
 | Concern | Owner | Invariant it owns |
 |---|---|---|
-| Whole-repo promotion | `tools/materialize_main.py` | Expands file pointers, `uv`-editable lib references, and installer-engine references into a self-contained snapshot; refuses missing/escaping/symlinked canonical inputs |
+| Whole-repo materialization | `tools/materialize_main.py` | Expands file pointers, `uv`-editable lib references, and installer-engine references into a self-contained snapshot; refuses missing/escaping/symlinked canonical inputs |
+| Fail-closed release orchestration | `tools/promote_release.py` | Treats an unresolved materialization result as release-blocking instead of shipping a partial `main` snapshot |
 | Single-plugin local preview | `tools/preview_release.py` | Performs the same copy-and-rewrite into a preview copy, never the real checkout |
 | Shared-lib conversion and dev-time checks | `tools/sync-vendored-libs.py` | Converts copies to the `uv`-editable form (`--uv-editable`), restores/promotes canonicals, and validates canonical-vs-copy/reference state in `--check` |
 | Shared-lib parsing / rewrite helpers | `tools/uv_editable_ref.py` | Shared definition of "this `[tool.uv.sources]` entry escapes the consumer root and is therefore a canonical reference", plus table-span and tree-comparison helpers reused by sync + promotion |
 | Remaining real-copy shared-lib drift | `tools/check-vendored-libs-sync.py` | Keeps the still-vendored multi-copy `src/` + version surfaces in sync with each other; once a consumer has **no local copy**, that consumer naturally falls out of this guard |
 | Installer-engine adoption and drift | `tools/sync-installer-engine.py` | Verifies each adopter is in exactly one valid dev-time form: local vendored copy or canonical reference |
 | Installer-engine parsing / rewrite helpers | `tools/installer_engine_ref.py` | Shared definition of the canonical-vs-local installer-engine source-line forms reused by sync + promotion |
+| Release attribution | `tools/check-version-bump.py` + `tools/check-changefile-presence.py` | A canonical-source change must still charge the affected shipped consumers (including `uv`-editable lib consumers and registered installer-engine adopters) and carry the changefile intent that lets promotion publish it |
 | Install-contract enforcement | `tools/check-install-contract.py` | Fails if the install contract is broken and delegates installer-engine conformance to `sync-installer-engine.py`'s `verify()` |
 
 ## Adopting the pattern
