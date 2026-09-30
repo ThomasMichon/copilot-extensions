@@ -209,9 +209,14 @@ the mechanism.
 ## The settled architecture (supersedes the Phase 1-2 draft this effort
 started with)
 
-- **Emitters only create tasks.** Never rewrite an existing task's goal.
-  (The "emitter reshapes the task in place" idea from Round 1/2's Version B
-  is dropped entirely.)
+- **Emitters primarily create tasks. Correction (Round 5): a subscribed
+  emitter may also append a narrow event note to an existing task it
+  monitors** (a major external event -- merged, closed, bug
+  fixed/rejected -- never a goal rewrite), waking that task's current
+  agent to handle the ramifications before finalizing. (The "emitter
+  reshapes the task's *goal*" idea from Round 1/2's Version B is still
+  dropped entirely -- only an append-only event-note field is writable
+  through this path, never the goal itself.)
 - **A task's goal is stated in full upfront and never narrowed into a
   literal next-step instruction.** A bounded, "carefully-updated" event
   journal on the task carries nudges and prior rejection reasons -- status
@@ -242,9 +247,10 @@ started with)
      due to an agent-dispatch-side outage.
   A **future, optional refinement** (not required by this effort, noted for
   later): "blessed" `run` requests routed to a registered emitter instead of
-  an arbitrary command, and an emitter being able to prematurely wake a
-  sleeping `run` call by posting a task update -- both explicitly deferred,
-  not part of this effort's Plan.
+  an arbitrary command -- explicitly deferred, not part of this effort's
+  Plan. (An emitter prematurely waking a sleeping `run` call by posting a
+  task update was *also* floated here originally as deferred, but Round 5
+  settles it as in-scope -- see Phase 2c in the README.)
 - **Evaluators only determine whether the whole goal is met.** Not a
   per-round progress auditor (Round 3's "detect no-op submissions" idea is
   superseded -- the durable, un-narrowed goal plus the agent's own judgment

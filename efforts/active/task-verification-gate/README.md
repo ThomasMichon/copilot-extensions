@@ -103,15 +103,15 @@ as a placeholder: #4691.
 - Existing, directly relevant machinery this effort builds on: `agent-dispatch
   run` (hibernate-the-wait -- a detached, cheap OS-level waiter that tears
   down the expensive agent session and wakes it only when the wait
-  resolves, delivering the buffered result as the resume prompt). **Note,
-  corrected after review:** `agent-dispatch doctor` today classifies
-  hibernation from worktree/session evidence only (`doctor.py`) -- it does
-  not probe the detached waiter process itself, and `execution_cli.py`
-  returns the waiter's PID/argv only to the spawning caller, not to any
-  durable coordinator-side record. `doctor` cannot today distinguish "waiter
-  still legitimately running" from "waiter died, PID reused by something
-  else" for a `run` call specifically. Phase 2b must add its own durable
-  waiter registration (not assume `doctor` already provides one) -- see
+  resolves, delivering the buffered result as the resume prompt).
+  `agent-dispatch doctor` classifies hibernation from worktree/session
+  evidence only (`doctor.py`) -- it does not probe the detached waiter
+  process itself, and `execution_cli.py` returns the waiter's PID/argv only
+  to the spawning caller, not to any durable coordinator-side record.
+  `doctor` cannot distinguish "waiter still legitimately running" from
+  "waiter died, PID reused by something else" for a `run` call specifically.
+  Phase 2b adds its own durable waiter registration rather than assuming
+  `doctor` already provides one -- see
   Phase 2b below.
 - This effort was motivated by a live operational finding on a facility
   deployment: a large backlog of `SUBMITTED` reviewer-recipe tasks
@@ -265,9 +265,9 @@ briefly executed against and then paused -- see Journal):
       applying any decision. Design the interface so a *future*
       agent-backed evaluator is a drop-in third kind, without over-building
       that future today.
-- [ ] The evaluator has **three trigger paths**, corrected after review (a
-      bare `task.submitted` event alone cannot cover backfill or a
-      re-check when external state later changes):
+- [ ] The evaluator has **three trigger paths** (a bare `task.submitted`
+      event alone cannot cover backfill or a re-check when external state
+      later changes):
       1. **Event-triggered** at the `task.submitted` lifecycle event -- the
          normal first-check path for a fresh submission.
       2. **Explicit backfill invocation** -- a one-time, scoped CLI/API
@@ -298,13 +298,22 @@ briefly executed against and then paused -- see Journal):
 
 ### Phase 2b -- `run`-outage recovery sweep
 - [ ] **Durable waiter registration is a prerequisite this phase must add**
-      (corrected after review -- `doctor` does not already provide this):
-      when a `run --detach` waiter spawns, persist its PID, host identity,
-      and a process-start/identity fence (matching the same
-      PID-reuse-safe pattern `doctor --check-live-sessions` already uses
-      for shadowed embody sessions) in a durable coordinator-side record,
-      not just returned to the spawning caller as `execution_cli.py` does
-      today.
+      (`doctor` does not already provide this): when a `run --detach`
+      waiter spawns, persist its PID, host identity, and a
+      process-start/identity fence (matching the same PID-reuse-safe
+      pattern `doctor --check-live-sessions` already uses for shadowed
+      embody sessions) in a durable coordinator-side record, not just
+      returned to the spawning caller as `execution_cli.py` does today.
+      **The registration needs an atomic retirement transition, not just a
+      creation path:** when the waiter resolves normally and delivers its
+      result, it (or the coordinator, on delivery) retires the
+      registration by bumping/clearing its generation in the same
+      transaction as the delivery -- otherwise a waiter that completed
+      normally still *looks* PID-dead to a later startup sweep, and that
+      sweep would send a bogus "infrastructure failure" wake to a task that
+      already resolved correctly. The recovery sweep below must
+      compare-and-set only against a still-*active* generation, so it can
+      never race a normal, concurrent completion.
 - [ ] On coordinator startup (or a bounded post-recovery check), sweep
       tasks with a durably-registered outstanding `run` waiter and probe
       each one host-aware, by PID *and* the recorded start-identity fence
@@ -327,7 +336,11 @@ briefly executed against and then paused -- see Journal):
       in `inception-transcript.md`, not required here.
 - [ ] Tests: a simulated coordinator-restart scenario with an outstanding
       `run` call resolves to the explicit failure wake-up, not a silent
-      stall; a genuinely-still-running `run` call is left alone.
+      stall; a genuinely-still-running `run` call is left alone; **a waiter
+      that resolves normally right around the same time a startup sweep
+      runs never receives a bogus failure wake** (the retirement-vs-sweep
+      race above), confirmed via the compare-and-set-on-active-generation
+      fence.
 
 ### Phase 2c -- Subscribed-emitter event notes wake the task's agent
 - [ ] A **subscribed** emitter (one actively watching its target, e.g. a
@@ -405,7 +418,8 @@ briefly executed against and then paused -- see Journal):
       resolves to an explicit failure wake for a confirmed-dead waiter
       (matched by durable PID + host + start-identity, never bare PID);
       a genuinely-still-running or indeterminate waiter is left alone, not
-      falsely recovered.
+      falsely recovered; a waiter that resolves normally concurrently with
+      a sweep never receives a bogus failure wake (generation-fenced).
 - [ ] A subscribed emitter's event note wakes a running or `run`-hibernating
       task's agent early, without ever mutating the task's own goal field;
       a late wake from the original (superseded) waiter after an early
@@ -529,3 +543,21 @@ place:
   Fixed: reworded to accurately describe the operator's own messages as
   verbatim and this agent's responses as curated gists, not a raw session
   log.
+
+### 2026-09-30 (second review round on PR #4692) -- three more real gaps
+- **Phase 2b's durable waiter registration had no retirement path**: a
+  waiter that resolves *normally* would still look PID-dead to a later
+  startup sweep, risking a bogus "infrastructure failure" wake on an
+  already-correctly-resolved task. Fixed: registration retirement is now an
+  explicit, atomic part of normal delivery (generation
+  bumped/cleared in the same transaction), and the recovery sweep does a
+  compare-and-set against only an *active* generation so it can never race
+  a concurrent normal completion.
+- **Review-round narrative ("corrected after review") had leaked into the
+  Context/Plan sections**, which should describe the current state
+  timelessly -- that history belongs in the Journal alone. Fixed: reworded
+  those sections to plain present-tense description.
+- **The transcript's own mid-file "settled architecture" summary (Round
+  4's recap) still said "emitters only create tasks"**, not yet reflecting
+  Round 5's correction that a subscribed emitter may also append an
+  event note. Fixed in place, with a pointer to Round 5.
