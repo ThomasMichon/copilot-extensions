@@ -22,6 +22,8 @@ importable (otherwise the REST API still serves).
 # can't see ``Context`` imported locally inside ``build_coordinator_mcp``. Real
 # (non-stringized) annotations resolve at def-time via the enclosing scope.
 
+import logging
+import threading
 import json
 import secrets
 from dataclasses import asdict
@@ -43,6 +45,8 @@ from .queue import (
     worker_id_for,
 )
 from .verification import evaluate_submitted_task
+
+log = logging.getLogger("agent-dispatch.mcp-http")
 
 MACHINE_HEADER = "x-agent-machine"
 WORKTREE_HEADER = "x-agent-worktree"
@@ -170,7 +174,21 @@ def build_coordinator_mcp(
                 and result.get("require_verification")
                 and result.get("evaluator_ref")
             ):
-                evaluate_submitted_task(queue, result["id"], bus=bus, trigger="submitted")
+                def _runner() -> None:
+                    try:
+                        evaluate_submitted_task(queue, result["id"], bus=bus, trigger="submitted")
+                    except TaskError:
+                        log.debug(
+                            "submitted verification skipped after task %s changed before async evaluation",
+                            result["id"],
+                            exc_info=True,
+                        )
+
+                threading.Thread(
+                    target=_runner,
+                    name=f"agent-dispatch-mcp-verify-{result['id'][:8]}",
+                    daemon=True,
+                ).start()
         return result
 
     def _identity(

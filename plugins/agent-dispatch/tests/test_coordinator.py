@@ -783,7 +783,12 @@ def test_complete_over_http_triggers_immediate_whole_goal_verification(api, tmp_
     submitted = api.post(f"/tasks/{tid}/complete", json={"worker_id": "w1"}).json()
 
     assert submitted["status"] == Status.SUBMITTED
-    assert api.get(f"/tasks/{tid}").json()["status"] == Status.COMPLETED
+    for _ in range(100):
+        if api.get(f"/tasks/{tid}").json()["status"] == Status.COMPLETED:
+            break
+        time.sleep(0.01)
+    else:
+        raise AssertionError("submitted verification did not complete asynchronously")
 
 
 def test_event_note_wakes_and_supersedes_active_run_waiter(api, monkeypatch):
