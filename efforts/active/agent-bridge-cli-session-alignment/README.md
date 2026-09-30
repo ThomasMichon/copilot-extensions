@@ -102,25 +102,26 @@ config overlays, an older skill-review plan — and are out of scope here.)
 
 ## Request
 
-> [operator, verbatim] "Yes, let's do historical review. I don't distrust
-> Naman, but we rely on the Copilot review to sanity-check agent
-> submissions, so everything gets shaken out. He's focusing on making
-> agent-bridge CLI-based sessions shine on Codespaces, and is clearly trying
-> to iron out bugs. I want to ensure that everything is consistent: ensure
-> parameter naming is idiomatic, ensure agent-containers, normal
-> machine-to-machine, cross-machine, and elevated bridging aren't left out
-> (all should support CLI mode!), and ensure that we don't break expected
-> invariants like keeping dynamic port reservations, good process hygiene,
-> strong decoupling, minimal opinionated (i.e. themed, constrained, etc.)
-> UX, etc. We'll have to review for ourselves here, and then come up with
-> adjustments we want to make which still preserve the original
-> vision-extensions of his work. And since I don't want to just blit over
-> his contributions without his buy-in, we'll mostly want to write out our
-> findings in an effort (like 'Proposed alignment/convergence of observable
-> agent-bridge CLI sessions') that doesn't target anyone, just focuses on
-> improving the product, and I'll send it his way for review."
->
-> [operator, follow-up, verbatim] "Specifically, we're focusing on the PRs
+> [operator, verbatim, contributor's name redacted for this public
+> artifact — see Context above] "Yes, let's do historical review. I don't
+> distrust [the reviewed contributor], but we rely on the Copilot review to
+> sanity-check agent submissions, so everything gets shaken out. [They are]
+> focusing on making agent-bridge CLI-based sessions shine on Codespaces,
+> and [are] clearly trying to iron out bugs. I want to ensure that
+> everything is consistent: ensure parameter naming is idiomatic, ensure
+> agent-containers, normal machine-to-machine, cross-machine, and elevated
+> bridging aren't left out (all should support CLI mode!), and ensure that
+> we don't break expected invariants like keeping dynamic port reservations,
+> good process hygiene, strong decoupling, minimal opinionated (i.e.
+> themed, constrained, etc.) UX, etc. We'll have to review for ourselves
+> here, and then come up with adjustments we want to make which still
+> preserve the original vision-extensions of [their] work. And since I
+> don't want to just blit over [their] contributions without [their]
+> buy-in, we'll mostly want to write out our findings in an effort (like
+> 'Proposed alignment/convergence of observable agent-bridge CLI sessions')
+> that doesn't target anyone, just focuses on improving the product, and
+> I'll send it [their] way for review."
+>> [operator, follow-up, verbatim] "Specifically, we're focusing on the PRs
 > which went in without *any* review."
 
 ## Plan
@@ -164,8 +165,11 @@ config overlays, an older skill-review plan — and are out of scope here.)
 
 ## Proposal
 
-Full evidence: [`findings.md`](findings.md). Summary, ordered by invariant,
-each item naming what it preserves alongside what it adjusts:
+Full evidence: [`findings.md`](findings.md). This round of the effort was
+itself reviewed (PR #4696) and three items below were corrected or
+retracted as a result — noted inline. Summary, ordered by invariant, each
+item naming what it preserves and whether it's a pure addition or a
+behavior change needing compatibility handling:
 
 1. **Wire elevated bridging into CLI-mode sessions**, matching the parity
    the container/CodeSpace/SSH-mesh transports already have
@@ -173,56 +177,86 @@ each item naming what it preserves alongside what it adjusts:
    elevated target outright). Preserves the existing elevated-ACP-daemon
    lifecycle as-is (it's sound on its own terms) — this only extends CLI
    reservation/launch to reach it, the way the other three transports
-   already work.
+   already work. *Pure addition.*
 
-2. **Make the CLI extension's daemon-discovery fallback fail loud instead
-   of dialing a hardcoded port** (`extension.mjs:resolveBaseUrl`). Preserves
-   the existing discovery-first behavior (`active.json` lookup stays the
-   primary path) — only removes the silent fixed-port fallback that
-   contradicts the documented ephemeral-port contract.
+2. **Align the CLI extension's WSL port-fallback with the Python client's
+   already-retired special case** (`extension.mjs:resolveBaseUrl` still
+   dials 9281 for a WSL guest; `models.py` retired that distinction and
+   keeps only 9280 as the shared last-resort fallback). *Behavior change*
+   for any environment still relying on the stale 9281 branch (should be
+   none, per the Python client's own retirement, but flag as a compat
+   check before landing).
 
 3. **Give `agent-codespaces --forward` a daemon-reserved host port as the
    default**, with the current caller-supplied fixed port available as an
    explicit opt-in for the (real) case an operator wants a stable local
    port. Preserves the whole `--detach --forward`/Connection Owner design
    and its tests — this narrows one flag's default, not the mechanism.
+   *Behavior change*: existing scripts relying on the current
+   always-fixed-port default would need the explicit opt-in flag; needs a
+   migration note.
 
-4. **Have `agent-containers`' detached-session scope key off the same
-   worktree/CWD identity the local and CodeSpace cases use**, dropping the
-   container-name salt from `scope_id`, and **key the forward keeper the
-   same way** rather than by container name alone. Preserves per-container
-   session hosting entirely (a container can still host a session) — only
-   restores the "one current session per working directory" guarantee
-   across containers, matching the other two venues already reviewed clean
-   here.
+4. **Key `agent-containers`' forward keeper to the full venue-qualified
+   session scope (`<worktree identity>@<venue>`), not container name
+   alone.** Preserves the standing `<worktree identity>@<venue>` design
+   entirely (an earlier draft of this proposal incorrectly targeted that
+   qualifier itself for removal — corrected in review; see `findings.md`
+   §4) — this only fixes the keeper's own tracking key so two sessions on
+   the same container can no longer clobber each other's forwarding
+   process. *Pure addition/bugfix, no behavior change for callers.*
 
-5. **Split `agent-containers`' detached launch into a thin dispatch path
-   plus an explicit, separately-invokable provisioning step** (the
-   `ensure_agent_worktrees()`/workspace-registration/ADO-shim/credential-
-   relay work), rather than bundling both behind one launch call. Preserves
-   every one of those provisioning capabilities and their tests — this is a
-   sequencing/API-boundary change, not a capability removal, and it's the
-   one place the reviewed surface drifted from the origin effort's own
-   stated decoupling intent.
+5. **Fix the stale reservation left by a failed CLI-mode launch**
+   (`inventory_cli.py:_launch_cli_mode_session`) so a launch failure
+   releases its reservation instead of holding it until TTL expiry.
+   *Pure bugfix.*
 
-6. **Add the in-container `copilot`/`tmux`/`agent-worktrees` precondition
-   check** `installer_readiness.inspect_toolchain()` was already missing
-   before this review (an origin-effort Phase 4 finding, still open, not a
-   regression from the reviewed PRs). Bundled here because it shares a
-   failure shape with #4/#5.
-
-7. **Reconcile the two forwarding-flag grammars** in `agent-codespaces`
+6. **Reconcile the two forwarding-flag grammars** in `agent-codespaces`
    (`--reverse-forward VENUE_PORT:HOST_PORT` vs. `--forward
    PORT[:VENUE_PORT]`) to one consistent port-pair ordering, and **rename
    `agent-containers`' `--ttl-seconds` to visibly match its underlying
-   `reservation_ttl`/`register_timeout` concepts**. Cosmetic; preserves all
-   existing behavior.
+   `reservation_ttl`/`register_timeout` concepts**. *Behavior change*: a
+   flag-grammar/name change is a public-CLI compatibility break by
+   definition — needs a deprecation window (accept both grammars/names for
+   a release) rather than a hard cutover.
 
-Nothing above proposes removing or rolling back functionality the reviewed
-PRs added — every item is additive (extend a transport, add a guard, split
-an API boundary, rename a flag) rather than subtractive.
+**Retracted, not proposed** (see `findings.md` for the corrected reasoning):
+a broader "hardcoded port fallback" framing (only the WSL branch above is
+actually stale); a claim that `agent-containers`' venue-qualified scope
+itself breaks CWD-uniqueness (it doesn't — that qualifier is the standing
+design); a claim that `agent-containers`' detached launch improperly
+couples session dispatch to remote-resource provisioning (it doesn't — the
+standing vision makes that venue preparation part of the single `copilot`
+verb's own contract). The in-container precondition-check gap
+(`findings.md` §7) is real but pre-existing and out of this effort's
+zero-review-PR scope — not included here.
+
+Every item above is either a pure addition/bugfix or an explicitly-flagged
+compatibility-affecting change with its own migration note — none proposes
+silently removing functionality the reviewed PRs added.
 
 ## Journal
+
+### 2026-09-30 — Corrected after the effort's own review (PR #4696)
+- Copilot's review of this effort's own PR caught real errors in the first
+  draft: (1) a personal name in the public Request quote, now redacted;
+  (2) an in-container-precondition item that was pre-existing and out of
+  this effort's stated scope, moved out of the Proposal; (3) "purely
+  additive" was inaccurate for two items that are real behavior/compat
+  changes, now labeled and given migration notes; (4) the cross-machine SSH
+  evidence cited the wrong code path (a generic ACP-dispatch gap tracked as
+  #566, unrelated to CLI-mode sessions) — corrected to cite
+  `agent-ssh/copilot_detach.py`, which does support CLI-mode sessions; (5)
+  the port-fallback finding was reframed from "hardcoded ports" to the
+  actual, narrower bug (a stale WSL-specific fallback the Python client
+  already retired); (6) the `agent-containers` venue-qualified scope
+  (`<worktree>@<venue>`) was wrongly flagged as breaking CWD-uniqueness —
+  it's the standing, documented design; only the forward keeper's own
+  tracking key was the real bug; (7) the "decoupling violation" finding
+  against `agent-containers`' detached launch was retracted entirely — the
+  standing vision explicitly makes that venue preparation part of the
+  single `copilot` verb's contract. Findings and Proposal rewritten
+  accordingly. This is exactly the kind of catch this effort exists to
+  demonstrate is worth having — including on itself.
 
 ### 2026-09-30 — Evidence gathered, proposal drafted
 - Four bounded, parallel evidence passes (agent-bridge core + Picker UI;
@@ -240,6 +274,8 @@ an API boundary, rename a flag) rather than subtractive.
   two minor naming nits. Everything else reviewed clean. Drafted a
   7-item, purely-additive Proposal. Next: operator review, then share with
   the reviewed contributor before any implementation PR.
+  **Superseded by the next entry** — several of these findings didn't
+  survive this effort's own review pass.
 
 ### 2026-09-30 — Kickoff
 - Effort created following a routine Copilot-review-gate audit (see

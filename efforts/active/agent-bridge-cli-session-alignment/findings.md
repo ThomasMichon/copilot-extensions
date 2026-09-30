@@ -17,7 +17,7 @@ framing.
 |---|---|---|
 | `agent-containers` | Yes | Shares the Session Host dispatch primitive (`ContainerTransport` → `build_container_spawner()` → the same `CodeSpaceSpawner` class); `session-host-prepare`/`-state`/`-cleanup` verbs present (`plugins/agent-containers/src/agent_containers/__main__.py:202-224, 363-368`). |
 | `agent-codespaces` | Yes | Native `copilot --detach --forward`, Connection Owner, model-launch parity (`plugins/agent-codespaces/src/agent_codespaces/copilot_detach.py`). |
-| Cross-machine (SSH mesh) | Yes | The mesh `SshSpawner` is confirmed to be the *same* `CodeSpaceSpawner` class with an ssh-manager-backed transport, not a parallel implementation (`plugins/agent-bridge/src/agent_bridge/session_host/spawner.py:348-386`). |
+| Cross-machine (SSH mesh) | Yes | `plugins/agent-ssh/src/agent_ssh/copilot_detach.py:58-72` (`plan_for()`) implements the same detached/reserved CLI-mode launch shape as `agent-codespaces`/`agent-containers`. (Correction: an earlier pass of this review cited `session_host/spawner.py`'s `CodeSpaceSpawner`/`SshSpawner` framing — that's a *different*, generic headless/ACP agent-dispatch path, where `session_start.py:680-685` documents SSH-mesh/elevated targets as a known, separately-tracked gap (#566), unrelated to the CLI-mode session mechanism this effort reviews.) |
 | **Elevated bridging (Windows S4U/scheduled-task/WMI broker)** | **No** | `plugins/agent-bridge/src/agent_bridge/session_targeting_cli.py:732` explicitly scopes `--cli` to `codespace:<name>` and `container:<name>` targets only and rejects a bare/elevated target. `elevated.py` implements an isolated ACP-relay daemon lifecycle (`relay_spawn_command`, `relay_agent_for` at `:233-296`) with no Session Host launch, CLI reservation claim, or muxed CLI process anywhere in that path. |
 
 **Finding:** elevated bridging is the one transport genuinely left out of
@@ -27,15 +27,24 @@ elevated bridging aren't left out" concern: it was.
 
 ## 2. Dynamic port reservation
 
-- **Significant — hardcoded fallback ports in the CLI extension.**
+- **Worth fixing — the CLI extension's client-fallback logic is stale
+  relative to the canonical Python client's own already-retired WSL port.**
   `plugins/agent-bridge/extensions/agent-bridge/extension.mjs:resolveBaseUrl`
   (lines 111-130) correctly reads the daemon's discovered port from
-  `active.json` first, but falls back to **hardcoded** ports `9281`/`9280`
-  when discovery files are absent. This conflicts with the documented
-  contract that the daemon binds an OS-assigned ephemeral port and
-  publishes it for clients (`plugins/agent-bridge/docs/architecture.md:5-6,
-  448-460`). A fallback dial can hit an unrelated/stale listener or simply
-  fail once a daemon starts on a different assigned port.
+  `active.json` first, then a static `config.yaml` port, and only as a
+  last resort falls back to a platform default. That fallback tier itself
+  is legitimate and intentional — the canonical Python client keeps exactly
+  this last-resort constant (`plugins/agent-bridge/src/agent_bridge/models.py:
+  22-33`, `default_port()`), documented as surviving "only as the client's
+  last-resort fallback when no routing table exists yet." The actual
+  inconsistency: `models.py:29` explicitly says "the former WSL '+1' (9281)
+  is retired with the fixed bind," but the JS extension's fallback
+  (`extension.mjs:123-130`) still special-cases WSL to dial 9281. The two
+  clients now disagree about a retired platform special-case. (Correction:
+  an earlier pass of this review over-broadly characterized this as
+  "hardcoded fallback ports conflicting with the dynamic-port contract" —
+  the 9280 fallback itself is not a departure from that contract; only the
+  stale 9281 WSL branch is.)
 
 - **Significant — `agent-codespaces --forward` uses a caller-supplied fixed
   host port, not a daemon-reserved one.**
@@ -98,47 +107,50 @@ elevated bridging aren't left out" concern: it was.
 
 ## 4. CWD-keyed discovery / single-current-session-per-worktree
 
-- **Significant — a container-hosted CLI-mode session's identity is salted
-  with the container name, not purely CWD/worktree-keyed.**
-  `plugins/agent-containers/src/agent_containers/copilot_detach.py:43-74`
-  (`plan_for()`) builds `scope_id = f"{identity}@{args.name}"`. Two
-  container-hosted sessions against the *same* working directory but
-  different containers get different scopes — the mechanism doesn't
-  actually enforce "at most one current session per working directory"
-  across containers the way it does for the local and CodeSpace cases.
-
-- **Related, softer observation.** At the core reservation layer,
-  `plugins/agent-bridge/src/agent_bridge/inventory_cli.py:148-159` keys
-  reservations by `worktree_id`, not literally by CWD — the CWD-uniqueness
-  guarantee depends on the caller (and, per the finding above,
-  `agent-containers`) consistently passing the same `worktree_id` for the
-  same working directory. This isn't a demonstrated double-session bug on
-  its own, but it's the structural reason the container-scoping issue above
-  was possible to introduce without the reservation layer itself catching
-  it.
+- **Worth fixing — a container's local-forward keeper is tracked by
+  container name alone, not by the full venue-qualified session scope.**
+  `plugins/agent-containers/src/agent_containers/forward_keeper.py:
+  ensure_running()` keys existing keeper state only by container `name`
+  and replaces it whenever the mux/venue port differs. Two different
+  CLI-mode sessions hosted on the *same* container (e.g. two different
+  worktrees, or the same worktree reused after a prior session ended) can
+  therefore have one session's forwarding process silently replace
+  another's, because the keeper's identity doesn't include the
+  worktree/session scope the way the CLI-mode reservation itself does.
+  (Correction: an earlier pass of this review additionally flagged
+  `copilot_detach.py:plan_for()`'s `scope_id = f"{identity}@{args.name}"`
+  as breaking CWD-uniqueness across containers — that's wrong. The
+  `<worktree identity>@<venue>` qualifier is the standing, documented
+  design (`visions/remote-interactive-sessions/README.md:116-123`):
+  "One host coordination layer can see *many* venues of the same
+  repository at once... so a venue launch qualifies the identity it
+  reserves and registers under with the venue." Dropping that qualifier
+  would be the actual regression. The real, narrower bug is only in the
+  forward keeper's own tracking key, not the session scope.)
 
 ## 5. Decoupling (session-driving vs. providing local resources/tools)
 
-- **Worth fixing — `agent-containers`' detached launch bundles remote
-  resource provisioning into what should be a thin dispatch path.**
-  `plugins/agent-containers/src/agent_containers/copilot_detach.py:
-  140-178` (`_launch_env()`) unconditionally calls
-  `ensure_agent_worktrees()` and, when a workspace is present,
-  `ensure_agent_worktrees_workspace_registered()`; with relay enabled it
-  also calls `deploy_shims(args.name, ado=True)` and injects credential
-  relay/git-credential environment. Tests encode this as expected behavior
-  (`tests/test_copilot_detach.py:207-222, 285-303`), so it's deliberate, not
-  accidental — but it's materially broader than "dispatch a session through
-  the existing Session Host/reattach path," and it's exactly the kind of
-  coupling the origin effort's Guiding Intent calls out as a separate,
-  explicitly out-of-scope concern (`visions/host-resource-providers`,
-  referenced from `efforts/active/agent-bridge-cli-mode-sessions/README.md`).
-
-- **Clean elsewhere.** `agent-codespaces`' detached path adds only
-  registration/reference-file handling and connection forwarding; no code
-  there couples session driving to provisioning additional local
-  tools/resources (`copilot_detach.py:442-449`, `session_forwards.py:1-18`,
-  `connection_owner.py:1-40`).
+No violation found here on a corrected reading. An earlier pass of this
+review flagged `agent-containers`' detached launch
+(`copilot_detach.py:_launch_env()`, which calls `ensure_agent_worktrees()`,
+workspace registration, and — when relay is enabled —
+`deploy_shims(ado=True)` plus git-credential-relay environment) as coupling
+session dispatch to unrelated remote-resource provisioning. That doesn't
+hold up: the standing vision makes exactly this kind of venue preparation
+part of the single `copilot` verb's own contract —
+"`agent-codespaces copilot <name>` / `agent-containers copilot <name>`
+perform the *identical* action for a remote venue by preparing it (the
+venue-specific 'setup' step: reverse forwards, **credentials**, the
+reservation)" (`visions/remote-interactive-sessions/README.md:139-146`).
+The credential-relay/GH-token/ADO-shim mechanism this launch path uses is
+also the already-proven, standing pattern the repo's own
+`visions/host-resource-providers` explicitly builds on rather than
+supersedes — that vision generalizes *beyond* credentials to other
+resource kinds; it doesn't recharacterize the existing credential relay as
+out-of-scope. `agent-worktrees` presence on the venue is likewise a hard
+prerequisite for the same verb ("agent-worktrees is also required to
+execute that verb"), not an unrelated capability being bundled in.
+Retracted; no adjustment proposed.
 
 ## 6. Minimal opinionated UX / idiomatic parameter naming
 
@@ -161,15 +173,14 @@ throughout) — no broad drift found. Two localized nits:
   the CLI flag and its underlying concept aren't named to visibly
   correspond.
 
-## 7. Carried-forward, not new — in-container precondition check
+## 7. Adjacent, out-of-scope: an already-tracked pre-existing gap
 
 `plugins/agent-containers/src/agent_containers/installer_readiness.py:
 inspect_toolchain()` validates only host-side `docker`/`devcontainer`/`ssh`
 tooling — never in-container `copilot`/`tmux`/`agent-worktrees` presence.
 This is the same gap the origin effort's Phase 4 already identified on
-2026-09-20 ("must be an explicit precondition check, not an assumption, for
-any container-venue launch verb") and explicitly left open. It still isn't
-closed. Noting it here because it means a container missing these
-prerequisites fails only after reservation/launch preparation rather than
-at a clear precondition check — the same failure shape as finding §3's
-stale-reservation issue, from a different cause.
+2026-09-20 and explicitly left open; it predates the PRs this effort
+reviews and isn't something any of them introduced or touched. Noted here
+for continuity, but **excluded from the Proposal below** — this effort's
+scope is the zero-review PRs, and this gap is neither one of them nor a
+regression they caused. It remains the origin effort's own open item.
