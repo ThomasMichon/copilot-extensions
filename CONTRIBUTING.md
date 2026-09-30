@@ -513,6 +513,18 @@ indistinguishable, from the reviewer's side, from a gap nobody considered —
 and costs a review round to resolve either way, the same round a single
 sentence in the PR body would have pre-empted.
 
+**This context transfer is bounded by the same public-repo rules as
+everything else you publish here.** This repo is public, and "Contribution
+boundary" above already requires proprietary organization/person-specific
+context to stay in a private control repo. If the actual motivating
+constraint (an incident, a private downstream system, an internal process)
+isn't itself public, cite a **public, identifier-neutral** grounding artifact
+instead — a public doc/effort/vision/issue in *this* repo describing the
+constraint in general terms — rather than describing the private specifics
+in the PR body to satisfy this section. When no such public grounding exists,
+state the constraint generically (what class of limitation, not which private
+incident or system) rather than omit it or leak it.
+
 **This is context supply, not a request for deference.** Explaining a
 decision does not pre-empt the reviewer's right to disagree with it, and
 should not shrink the scrutiny applied to it — particularly for
