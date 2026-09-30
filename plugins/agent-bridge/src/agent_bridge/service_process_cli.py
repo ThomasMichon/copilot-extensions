@@ -600,6 +600,26 @@ def _service_stop() -> None:
     }
     victims.discard(None)
     for victim in victims:
+        # Identity-verify at the point of termination, not only afterward
+        # (afterward only confirms no agent-bridge process remains -- it
+        # never proves THIS victim pid was one before it was signaled). A
+        # stale pid-file/port/lock entry whose pid has since been reused by
+        # an unrelated process must never be killed.
+        #
+        # This narrows, but does not fully close, the identity hazard:
+        # `_pid_is_agent_bridge` is a cmdline-substring check, and a tiny
+        # window remains between it and `_kill_pid`'s own signal. Fully
+        # closing that would mean routing every victim through an
+        # OS-object-bound termination (e.g. `zdd.diagnostics.
+        # terminate_pid_if_identity`'s pidfd-based path) -- a real,
+        # available pattern, deliberately NOT adopted here: it changes
+        # this shared production function's behavior on every platform and
+        # caller (not just this clean-room drill), including its own
+        # existing test coverage's mocking seam, and is a separate,
+        # more invasive hardening this PR's scope does not extend to.
+        # Tracked as a known residual, not silently claimed closed.
+        if not core._pid_is_agent_bridge(victim):
+            continue
         core._kill_pid(victim)
         stopped_any = True
     if victims:
