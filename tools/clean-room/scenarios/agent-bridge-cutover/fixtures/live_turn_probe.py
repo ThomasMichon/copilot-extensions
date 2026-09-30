@@ -329,21 +329,28 @@ def _count_type(lines: list[str], type_name: str) -> int:
 
 
 def _malformed_line_count(lines: list[str]) -> int:
-    """Count lines that are not valid JSON objects.
+    """Count lines that are not valid JSON **objects**.
 
     A malformed or partially-written line (e.g. a torn last line from a
     concurrent write) would otherwise be silently skipped by
     ``_count_type``/``_turn_balance_and_boundary_crossing``, letting a
     damaged transcript still report a balanced result if the surviving
     lines happen to balance. Blank trailing lines are not malformed.
+    ``json.loads`` also accepts bare numbers/strings/arrays/null as valid
+    JSON -- a damaged-but-syntactically-valid line like that is not a
+    dict, so it counts as malformed here too (the event walkers below all
+    assume a dict and would otherwise raise on `.get()`).
     """
     bad = 0
     for line in lines:
         if not line.strip():
             continue
         try:
-            json.loads(line)
+            parsed = json.loads(line)
         except Exception:
+            bad += 1
+            continue
+        if not isinstance(parsed, dict):
             bad += 1
     return bad
 
@@ -407,6 +414,8 @@ def _turn_balance_and_boundary_crossing(lines: list[str], boundary_ts: float, bo
             ev = json.loads(line)
         except Exception:
             continue
+        if not isinstance(ev, dict):
+            continue  # syntactically-valid JSON that isn't an event object; _malformed_line_count already flags it
         eid = ev.get("id")
         if eid is not None:
             if eid in seen_ids:
@@ -569,6 +578,8 @@ def run(python: str, repo: str, project_name: str, turn_timeout: float) -> Resul
                     ev = json.loads(line)
                 except Exception:
                     continue
+                if not isinstance(ev, dict):
+                    continue
                 tid = str((ev.get("data") or {}).get("turnId") or "")
                 if ev.get("type") == "assistant.turn_start":
                     open_ids.append(tid)
@@ -596,13 +607,16 @@ def run(python: str, repo: str, project_name: str, turn_timeout: float) -> Resul
                 f"a new daemon generation stood up beside the old; routing flipped {old_port} -> {new_port}")
         r.check(bool(new_pid) and new_pid != old_pid,
                 f"the new daemon is a genuinely different real process (pid {old_pid} -> {new_pid})")
-        time.sleep(1.5)
-        r.check(not _listening(old_port), f"generation 1 (:{old_port}) retired")
 
         # The reattach that matters: the SAME session's HostIndex claim must
         # move to the NEW daemon's own real pid -- not merely "some record
         # exists" and not "the killed process's label", per Phase 5's own
-        # honest-scope caveat about not conflating those.
+        # honest-scope caveat about not conflating those. Poll for this
+        # FIRST (before the unrelated old-port-retirement check below) and
+        # capture the boundary timestamp the INSTANT it is confirmed --
+        # every extra step between the real reattach and this observation
+        # widens the window in which a genuinely-surviving turn could
+        # close before we notice, understating the drill's own margin.
         reattached = False
         rec2 = None
         deadline = time.monotonic() + 60.0
@@ -615,12 +629,11 @@ def run(python: str, repo: str, project_name: str, turn_timeout: float) -> Resul
                 reattached = True
                 break
             time.sleep(0.5)
+        boundary_ts = time.time()
         r.check(reattached, f"Session-Host claim reattached under the NEW generation's real pid (record now {rec2!r})")
 
-        # The real proof boundary: the VERIFIED reattach moment above, not
-        # merely "we launched deploy" -- deploy launching is not the same
-        # instant as the generation actually taking over.
-        boundary_ts = time.time()
+        time.sleep(1.5)
+        r.check(not _listening(old_port), f"generation 1 (:{old_port}) retired")
 
         # Completion detection: the session status (`sessions --json`,
         # already proven reliable above) is the authoritative signal that

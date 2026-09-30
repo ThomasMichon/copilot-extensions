@@ -484,6 +484,45 @@ test that closes the gap.
   a minor, pre-existing (Phase 5) cleanup nit, not fixed here -- out of
   this PR's scope.
 
+### 2026-09-29 — Phase 6: cheap correctness fixes, synthetic analyzer test suite, converging review iteration
+- Round 5 review repeated several already-fixed findings verbatim
+  (re-verified against the actual current code and confirmed correct --
+  e.g. the repeated-turn-start detection via `started_ids` was already
+  present and passes a dedicated synthetic test for exactly that case),
+  alongside genuinely new, cheap findings fixed this round:
+  - `json.loads` accepts bare numbers/strings/arrays/null as valid JSON;
+    a damaged-but-syntactically-valid line was silently treated as
+    "not malformed" while still being skippable by the event walkers,
+    and could raise on `.get()` if it ever reached one. Both
+    `_malformed_line_count` and every event-walk loop now require an
+    `isinstance(ev, dict)` guard.
+  - Tightened the boundary-timestamp capture: it now happens the INSTANT
+    reattach is confirmed (moved before the unrelated old-port-retirement
+    check, which used to run first with its own 1.5s sleep), shrinking
+    the window between the real reattach and this observation.
+  - Considered adopting `zdd.diagnostics.terminate_pid_if_identity`
+    (pidfd-bound termination) in `_service_stop()` per review's specific
+    suggestion; reverted after finding it would silently break existing,
+    passing coverage (`test_service_stop_wedged.py` mocks `_kill_pid`
+    directly) and changes a shared production function's behavior on
+    every platform/caller, not just this drill -- a materially more
+    invasive change than this PR's scope. Documented the residual
+    precheck-to-kill window honestly in the function's own comment
+    instead of claiming it closed.
+  - Added `tools/clean-room/tests/test_live_turn_probe_transcript_analyzer.py`:
+    8 synthetic `events.jsonl`-shaped cases (clean crossing, duplicate
+    event id, repeated turn start via two different production
+    scenarios, an orphan end, a still-open turn, an unrelated turn
+    closing after the boundary, and the boundary turn closing BEFORE
+    reattach) -- all pass, confirming the analyzer already rejects every
+    failure shape review asked about, with no live run required.
+- Per this repo's own commented-verdict review policy: address
+  genuinely valuable findings, correct or dismiss (with reasoning) the
+  rest, and land the change -- a `COMMENTED` verdict here is non-blocking
+  and does not gate merge. Re-verified end-to-end from a fresh box after
+  every fix in this round: 8 passed, 0 failed (final live confirmation);
+  full agent-bridge plugin suite + all new unit tests green throughout.
+
 ### 2026-09-29 — Phase 6: production identity gate, transcript-authoritative completion, and a real completion-detection race caught live
 - Continued automated review (round 4) on the same follow-up PR, each
   fix confirmed by a live re-run:
