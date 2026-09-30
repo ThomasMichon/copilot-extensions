@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-09-29
-- **Status:** In review
+- **Status:** Done
 - **Vision:** agent-dispatch vision's *verify-the-completion-claim* (this
   effort's Phase 1 also revises that vision section's own wording -- see
   Plan)
@@ -622,3 +622,24 @@ place:
 - Added focused direct tests for these durability boundaries and kept
   `queue_run_waiters.py` shrink-only: no module-size baseline widen was needed
   or retained.
+
+### 2026-09-30 -- Effort complete; archiving
+- PR #4709 merged to `dev` (squash), landing the full settled architecture:
+  Phase 1 (`require_verification` flag + state-machine gating), Phase 2a
+  (whole-goal evaluator via the three trigger paths), Phase 2b (the durable
+  `run`-outage recovery sweep with an atomic waiter prepare/arm handshake and
+  generation-fenced retirement), Phase 2c (subscribed-emitter event notes
+  with the supersession fence), Phase 3 (agent-worktrees Tasks pivot manual
+  override), and Phase 4 (docs). All Plan and Validation Plan items resolved.
+  Full bounded `agent-dispatch` test suite green on the final state.
+- Confirmed the shared abstraction this effort settled on in practice: both
+  `run`-waiter recovery and submission verification are the same
+  architectural family -- durable queued follow-up work with fenced
+  claim/drain/recovery semantics, differing only in what they fence on
+  (process identity vs. task generation).
+- Follow-on, not part of this effort: #4691 (the broader producer/registrar
+  unification -- `kind` -> `extends`, global emitter templates) remains an
+  open, unscoped placeholder. The linked private downstream-repository effort
+  (`dampener-reviewer-verification-adoption`) can now proceed -- the public
+  mechanism it depends on is live on `dev`.
+- Status set to Done; archiving to the dated path.
