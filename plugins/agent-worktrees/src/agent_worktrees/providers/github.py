@@ -143,7 +143,7 @@ class GitHubProvider:
             [
                 "gh", "pr", "view", str(number),
                 "--repo", repo,
-                "--json", "url,number,state",
+                "--json", "url,number,state,headRefOid",
             ],
             env=self._env(token, host=host),
         )
@@ -160,6 +160,14 @@ class GitHubProvider:
             number=int(data.get("number", number)),
             state=state,
             merged=(state == "merged"),
+            # Same single lightweight call already returns the head commit
+            # (#4699) -- reading it here costs nothing extra, unlike the
+            # far heavier observe_head/get_snapshot calls (reviews, checks,
+            # statuses) a historical-PR boundary lookup has no need for.
+            # `headRefOid` is nullable (e.g. a deleted head ref) -- `or ""`
+            # normalizes an explicit JSON null, not just a missing key, so
+            # a stringified "None" never masquerades as a real head SHA.
+            head_sha=str(data.get("headRefOid") or ""),
         )
 
     def observe_head(

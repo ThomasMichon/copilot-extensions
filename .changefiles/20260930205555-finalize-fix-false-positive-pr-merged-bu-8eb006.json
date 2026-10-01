@@ -1,0 +1,9 @@
+{
+  "comment": "finalize: fix false-positive 'PR merged but carries further commits' block from stale/reused historical PR branch refs on a long-lived worktree (#4699)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

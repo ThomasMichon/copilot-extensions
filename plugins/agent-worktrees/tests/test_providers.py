@@ -1232,13 +1232,35 @@ class TestGitHubProvider:
     def test_get_pull_merged_state_sets_flag(self, monkeypatch):
         # gh reports a merged PR as state MERGED.
         from agent_worktrees.providers import github
+        captured = {}
         body = json.dumps({"url": "https://github.com/o/r/pull/7",
-                           "number": 7, "state": "MERGED"})
-        monkeypatch.setattr(github, "run_cli",
-                            lambda args, **kw: _proc(stdout=body))
+                           "number": 7, "state": "MERGED", "headRefOid": "deadbeef"})
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: (captured.__setitem__("args", args), _proc(stdout=body))[1],
+        )
         res = github.GitHubProvider().get_pull("o/r", 7)
         assert res.merged is True
         assert res.state == "merged"
+        # #4699: finalize's historical-head recovery relies on this field
+        # coming back from the SAME single lightweight call -- a CLI-field
+        # typo/regression here must not silently restore its false
+        # positive.
+        assert res.head_sha == "deadbeef"
+        assert "headRefOid" in captured["args"][captured["args"].index("--json") + 1]
+
+    def test_get_pull_null_head_ref_oid_normalizes_to_empty_string(self, monkeypatch):
+        # headRefOid is nullable (e.g. GitHub can no longer resolve the head
+        # ref) -- str(None) would otherwise produce the truthy string
+        # "None", letting an invalid boundary silently pass as a real head
+        # SHA to callers that only check truthiness.
+        from agent_worktrees.providers import github
+        body = json.dumps({"url": "https://github.com/o/r/pull/7",
+                           "number": 7, "state": "MERGED", "headRefOid": None})
+        monkeypatch.setattr(github, "run_cli",
+                            lambda args, **kw: _proc(stdout=body))
+        res = github.GitHubProvider().get_pull("o/r", 7)
+        assert res.head_sha == ""
 
     def test_get_pull_closed_is_not_merged(self, monkeypatch):
         from agent_worktrees.providers import github
