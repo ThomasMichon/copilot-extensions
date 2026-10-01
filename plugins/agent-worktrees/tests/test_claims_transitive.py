@@ -70,10 +70,14 @@ def test_single_hop_reports_childs_unsettled_claim(_tracking_d):
     found, unresolved = claims_transitive_cli.transitive_obligations("wt-A", "proj", _config())
 
     assert unresolved == []
-    assert len(found) == 1
-    assert found[0]["path"] == ("wt-A", "wt-B")
-    assert found[0]["kind"] == "pr"
-    assert found[0]["ref"] == "o/r#2"
+    # The active `worktree`-kind edge itself is reported (B hasn't
+    # finalized yet -- the exact thing that still blocks A), in addition to
+    # B's own leaf claim one level down.
+    by_path = {(o["path"], o["kind"], o["ref"]) for o in found}
+    assert by_path == {
+        (("wt-A",), "worktree", b_ref),
+        (("wt-A", "wt-B"), "pr", "o/r#2"),
+    }
 
 
 def test_multi_hop_a_to_b_to_c(_tracking_d):
@@ -92,9 +96,12 @@ def test_multi_hop_a_to_b_to_c(_tracking_d):
     found, unresolved = claims_transitive_cli.transitive_obligations("wt-A", "proj", _config())
 
     assert unresolved == []
-    assert len(found) == 1
-    assert found[0]["path"] == ("wt-A", "wt-B", "wt-C")
-    assert found[0]["ref"] == "o/r#9"
+    by_path = {(o["path"], o["kind"], o["ref"]) for o in found}
+    assert by_path == {
+        (("wt-A",), "worktree", b_ref),
+        (("wt-A", "wt-B"), "worktree", c_ref),
+        (("wt-A", "wt-B", "wt-C"), "pr", "o/r#9"),
+    }
 
 
 def test_session_claims_are_never_reported_as_obligations(_tracking_d):
@@ -115,7 +122,9 @@ def test_session_claims_are_never_reported_as_obligations(_tracking_d):
 def test_malicious_child_ref_cannot_escape_the_worktrees_directory(_tracking_d):
     """A corrupted/malicious ref whose parsed worktree_id contains a path
     traversal component must be rejected (reported unresolved), never
-    joined into a real filesystem path."""
+    joined into a real filesystem path. The active claim itself is still
+    reported as an obligation -- rejecting the descent doesn't mean
+    pretending the claim isn't there."""
     evil_ref = tracking.format_claim_ref(MACHINE, "proj", "../../etc/passwd")
     _save(_tracking_d, "wt-A", resources=[
         tracking.ResourceClaim(kind="worktree", ref=evil_ref, state=ob.ACTIVE),
@@ -123,7 +132,8 @@ def test_malicious_child_ref_cannot_escape_the_worktrees_directory(_tracking_d):
 
     found, unresolved = claims_transitive_cli.transitive_obligations("wt-A", "proj", _config())
 
-    assert found == []
+    assert len(found) == 1
+    assert found[0]["ref"] == evil_ref
     assert len(unresolved) == 1
     assert "unsafe" in unresolved[0]["reason"]
 
@@ -152,7 +162,10 @@ def test_cross_machine_child_is_unresolved_not_raised(_tracking_d):
 
     found, unresolved = claims_transitive_cli.transitive_obligations("wt-A", "proj", _config())
 
-    assert found == []
+    # The active claim itself is reported (the subtree is genuinely not
+    # known-settled), even though this machine cannot descend further.
+    assert len(found) == 1
+    assert found[0]["ref"] == foreign_ref
     assert len(unresolved) == 1
     assert unresolved[0]["path"] == ("wt-A",)
     assert "cross-machine" in unresolved[0]["reason"]
@@ -176,7 +189,8 @@ def test_unresolvable_project_root_is_unresolved_not_raised(_tracking_d, monkeyp
 
     found, unresolved = claims_transitive_cli.transitive_obligations("wt-A", "proj", _config())
 
-    assert found == []
+    assert len(found) == 1
+    assert found[0]["ref"] == b_ref
     assert len(unresolved) == 1
     assert unresolved[0]["path"] == ("wt-A", "wt-ghost")
     assert "unreadable" in unresolved[0]["reason"]
@@ -190,7 +204,8 @@ def test_missing_child_record_is_unresolved_not_raised(_tracking_d):
 
     found, unresolved = claims_transitive_cli.transitive_obligations("wt-A", "proj", _config())
 
-    assert found == []
+    assert len(found) == 1
+    assert found[0]["ref"] == b_ref
     assert len(unresolved) == 1
     assert unresolved[0]["path"] == ("wt-A", "wt-ghost")
     assert "not found" in unresolved[0]["reason"]
@@ -210,7 +225,9 @@ def test_cyclic_ledger_terminates_instead_of_looping(_tracking_d):
 
     found, unresolved = claims_transitive_cli.transitive_obligations("wt-A", "proj", _config())
 
-    assert found == []
+    assert {(o["path"], o["ref"]) for o in found} == {
+        (("wt-A",), b_ref), (("wt-A", "wt-B"), a_ref),
+    }
     assert any(u["reason"] == "cycle detected" for u in unresolved)
 
 
@@ -227,7 +244,11 @@ def test_sibling_claims_at_the_same_level_both_surface(_tracking_d):
     found, _ = claims_transitive_cli.transitive_obligations("wt-A", "proj", _config())
 
     refs = {(o["path"], o["ref"]) for o in found}
-    assert refs == {(("wt-A",), "o/r#1"), (("wt-A", "wt-B"), "o/r#2")}
+    assert refs == {
+        (("wt-A",), "o/r#1"),
+        (("wt-A",), b_ref),
+        (("wt-A", "wt-B"), "o/r#2"),
+    }
 
 
 class TestClaimsTransitiveCli:
@@ -241,12 +262,23 @@ class TestClaimsTransitiveCli:
         # `output.err` prints to plain stdout (not stderr).
         assert "not found" in capsys.readouterr().out
 
-    def test_never_reports_settled_when_an_edge_is_unresolved(
+    def test_unsafe_root_worktree_id_is_rejected(self, _tracking_d, monkeypatch, capsys):
+        """The explicit CLI-supplied root id must get the SAME traversal
+        check as a parsed child ref -- `_infer_worktree_id` returns an
+        explicit value unchanged, so a value like '../../other' must never
+        reach the filesystem join."""
+        monkeypatch.setattr(cfg, "load_config", lambda: _config())
+        args = _ns(target=["../../etc/passwd"], json=False)
+        rc = claims_cli._claims_transitive(args, "../../etc/passwd")
+        assert rc == 1
+        assert "invalid worktree id" in capsys.readouterr().out
+
+    def test_never_reports_settled_while_an_edge_is_unresolved(
         self, _tracking_d, monkeypatch, capsys,
     ):
-        """No confirmed (found) obligation must never be rendered as
-        "the whole subtree is settled" while an edge remains genuinely
-        unresolved -- that would be a false affirmative."""
+        """An active (cross-machine, thus unresolved-below) child claim must
+        still surface as a reported obligation -- never silently rendered
+        as "the whole subtree is settled"."""
         monkeypatch.setattr(cfg, "load_config", lambda: _config())
         foreign_ref = tracking.format_claim_ref("other-machine", "proj", "wt-B")
         _save(_tracking_d, "wt-A", resources=[
@@ -257,7 +289,7 @@ class TestClaimsTransitiveCli:
         assert rc == 0
         out = capsys.readouterr().out
         assert "the whole subtree is settled" not in out
-        assert "NOT provably settled" in out
+        assert foreign_ref in out
         assert "could not check" in out
 
     def test_json_mode_serializes_paths_as_lists(self, _tracking_d, monkeypatch):
@@ -279,7 +311,8 @@ class TestClaimsTransitiveCli:
         import json as _json
         payload = _json.loads(buf.getvalue())
         assert payload["worktree_id"] == "wt-A"
-        assert payload["obligations"][0]["path"] == ["wt-A", "wt-B"]
+        paths = {tuple(o["path"]) for o in payload["obligations"]}
+        assert paths == {("wt-A",), ("wt-A", "wt-B")}
 
 
 def _ns(**kwargs):

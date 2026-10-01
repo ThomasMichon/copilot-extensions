@@ -80,26 +80,33 @@ def transitive_obligations(
     found: list[dict] = []
     unresolved: list[dict] = []
     for c in rec.resources:
-        if c.kind != "worktree":
-            # A `session` claim is advisory-only -- `finalize`'s own
-            # obligation gate explicitly never counts it as unsettled
-            # (`_assert_obligations_settled`'s `kind != "session"` filter),
-            # since a normally-running worktree always carries one for its
-            # own live session. Mirroring that exclusion here keeps a
-            # resource-clean subtree reporting as clean in real use instead
-            # of always "owing" its own invoking session.
-            if c.kind != "session" and c.is_unsettled:
-                found.append({
-                    "path": here, "kind": c.kind, "ref": c.ref,
-                    "state": c.state, "note": c.note,
-                })
+        # A `session` claim is advisory-only -- `finalize`'s own obligation
+        # gate explicitly never counts it as unsettled
+        # (`_assert_obligations_settled`'s `kind != "session"` filter),
+        # since a normally-running worktree always carries one for its own
+        # live session. Mirroring that exclusion here keeps a
+        # resource-clean subtree reporting as clean in real use instead of
+        # always "owing" its own invoking session.
+        if c.kind == "session":
             continue
-        # A `worktree`-kind claim is the structural edge to a child, not an
-        # obligation in its own right -- only descend while it's still
-        # active; an at-rest/released one means that child already settled
-        # (or never needs checking again), so there is nothing further down
-        # that branch for THIS query to surface.
-        if not c.is_unsettled:
+        if c.is_unsettled:
+            # An active `worktree`-kind claim IS itself a real, reportable
+            # obligation -- the child it names has not finalized yet, which
+            # is exactly what still blocks this worktree's own finalize
+            # (proven end-to-end by `test_transitive_finalize_integration.py`).
+            # Reporting only its DESCENDANTS' leaf claims (the old behavior)
+            # could read as "settled" even while a clean-but-unfinalized
+            # child still blocks the parent -- so it is surfaced here too,
+            # in addition to descending for whatever it itself still owes.
+            found.append({
+                "path": here, "kind": c.kind, "ref": c.ref,
+                "state": c.state, "note": c.note,
+            })
+        if c.kind != "worktree" or not c.is_unsettled:
+            # Only an ACTIVE `worktree`-kind claim is a structural edge
+            # worth descending; an at-rest/released one means that child
+            # already settled (or never needs checking again), so there is
+            # nothing further down that branch for THIS query to surface.
             continue
         parsed = tracking.parse_claim_ref(c.ref)
         if parsed is None or not parsed.is_qualified:
@@ -149,6 +156,15 @@ def cmd_claims_transitive(
     """
     config = cfg.load_config()
     wt_id = infer_worktree_id(worktree_id, config)
+    if not wt_id or not _is_safe_path_component(wt_id):
+        # `_infer_worktree_id` returns an explicit CLI value verbatim -- an
+        # empty, path-separator-bearing, or ".."/"."-containing value must
+        # never reach the filesystem join below.
+        msg = f"invalid worktree id: {wt_id!r}"
+        if args.json:
+            return json_error(msg)
+        output.err(msg)
+        return 1
     rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
     if not rec_path.exists():
         if args.json:
@@ -168,13 +184,12 @@ def cmd_claims_transitive(
 
     print(f"Transitive obligations for {wt_id} (whole subtree, recursive):")
     if not found:
-        if unresolved:
-            print(
-                "  (none confirmed -- but see the unresolved edges below; "
-                "the subtree is NOT provably settled)"
-            )
-        else:
-            print("  (none -- the whole subtree is settled)")
+        # Invariant: every `unresolved` entry is only ever produced for an
+        # ACTIVE `worktree`-kind claim that was already appended to `found`
+        # at the same level, so `found` empty implies `unresolved` empty too
+        # -- there is no path left to a false "settled" claim while
+        # something is still genuinely unresolved underneath.
+        print("  (none -- the whole subtree is settled)")
     else:
         for o in found:
             path = " -> ".join(o["path"])
