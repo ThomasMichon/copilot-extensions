@@ -198,26 +198,14 @@ reads as authoritative.
   (e.g. "Full inception exchange: `inception-transcript.md`"). This keeps the
   README a navigable map — its own stated purpose — without losing the
   authoritative record of what was actually said.
-- **Redaction is the one safety exception to verbatim capture — but a name
-  swap alone is not always enough.** If the operator's own words name a real
-  private/internal identifier this repo's own leak-guard conventions would
-  flag (see *Keep internal specifics out of a public-facing effort* below),
-  capture everything else verbatim and generalize that part: replace the
-  identifier with a generic placeholder *and*, if the surrounding sentence
-  would still describe the private system's specific internals even with the
-  name removed (its architecture, a specific mechanism it lacks, an
-  implementation detail), generalize that narrative too using the same
-  *abstract, don't omit* technique below — never drop, paraphrase, or soften
-  the surrounding *intent* to work around it, only the private specifics
-  that intent doesn't depend on. This applies equally to the sidecar
-  transcript: a verbatim exchange that necessarily contains such content is
-  captured in full in a private knowledge repo's own sidecar instead of the
-  public repo's `inception-transcript.md`. The public README notes generically
-  that a fuller private record exists elsewhere, in prose, without a
-  resolvable link — the one-way linking rule (private links to the canonical
-  public effort, never the reverse; see *Cross-repo efforts* below) still
-  applies, and even a "generic" link can expose the private repo's existence
-  or location.
+- **Redaction is the one safety exception to verbatim capture** when the
+  repo is public/externally-shareable and the operator's own words name a
+  real private/internal identifier — never drop or soften the surrounding
+  *intent* to work around it, only the private specifics it doesn't depend
+  on. See *Keep internal specifics out of a public-facing effort*
+  (`references/efforts.md`) for the full technique, including why a name
+  swap alone is sometimes not enough and why the public README never links
+  to a private sidecar.
 
 ## Plan an effort
 
@@ -302,47 +290,19 @@ The README is the shared contract — keep it **ahead of the conversation**. But
 
 ## Keep internal specifics out of a public-facing effort
 
-An effort's Journal is a natural place to record *how* a decision was reached
-— what was investigated, what broke, what the fix was. When the effort's own
-repo is **public or externally-shareable**, that narrative can't carry the
-same level of concrete detail a private knowledge repo's effort would — this
-holds regardless of any private relationship between that repo and the
-systems being discussed; what matters is that the repo itself is public. A
-real **private/internal** repo or system name, a **private** cross-organization
-issue reference, device or account naming conventions, or a blow-by-blow
-internal-investigation narrative is exactly the kind of content that leaks
-when it's committed to a public tree, even inside an effort folder that
-otherwise looks like ordinary engineering notes. This is **not** a rule
-against cross-repo references in general — a fully-qualified reference to a
-genuinely public repo (upstream, downstream, a public dependency) is
-legitimate traceability and belongs in the Journal exactly as this skill's
-own *Cross-repo efforts* and *Issues and sources* sections already expect;
-narrow the caution to references that would themselves reveal a private
-repo, system, or organization's existence or internals.
-
-- **Abstract, don't omit.** The *decision* and its *rationale* are still
-  worth capturing — generalize the specifics instead of deleting the entry.
-  "Investigated whether a dependent service could host X directly; confirmed
-  it couldn't without upstream changes, so built the control layer here
-  instead" preserves the lesson without naming the dependent service,
-  quoting its internal issue number, or walking through its source.
-- **Route the un-abstracted record to where it belongs.** If a precise,
-  unabstracted account is genuinely useful to keep somewhere, that record
-  belongs in a private knowledge repo (per that repo's own conventions), not
-  in the public effort — note generically, in prose, that a fuller private
-  record exists ("see the private incident record") rather than reproducing
-  it **or linking to it**: the one-way linking rule (private links to the
-  canonical public effort, never the reverse) applies here too, and even a
-  "generic" resolvable link can expose the private repo's existence or
-  location to a public reader.
-- **This isn't unique to Journal entries.** The same bar applies to Context,
-  Request capture, and any sub-doc the effort links out to — anywhere an
-  agent might be tempted to paste a real cross-repo reference, an internal
-  codename, or incident specifics because that's what actually happened.
-- **When in doubt, treat the repo's own leak-guard conventions as the
-  bar**, if the repo has one (an identifier denylist, a scrub tool, a
-  stated acceptance boundary) — abstract anything that convention would
-  flag, not just what you personally recognize as sensitive.
+When the effort's own repo is public/externally-shareable, its Journal,
+Context, Request, and any linked sub-doc can't carry the same concrete detail
+a private knowledge repo's effort would — a real private/internal repo or
+system name, a private cross-organization issue reference, or a blow-by-blow
+internal-investigation narrative is exactly the kind of content that leaks,
+even inside an effort folder that otherwise looks like ordinary engineering
+notes. This is not a rule against cross-repo references in general — a
+fully-qualified reference to a genuinely *public* repo remains expected
+traceability. See *Keep internal specifics out of a public-facing effort* in
+`references/efforts.md` for the full technique (abstract the specifics
+rather than omitting the lesson, route the un-abstracted record to a private
+knowledge repo without linking to it from the public side, and apply the
+same bar everywhere, not just Journal entries).
 
 ## Drive to completion, relentlessly
 
