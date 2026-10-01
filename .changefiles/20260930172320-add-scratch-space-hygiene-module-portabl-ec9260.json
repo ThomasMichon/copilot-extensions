@@ -1,0 +1,9 @@
+{
+  "comment": "Add scratch-space hygiene module: portable scratch-root resolution order, timestamped per-task subfolder convention, and paired using-scratch-space skill.",
+  "changes": [
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "dev"
+    }
+  ]
+}

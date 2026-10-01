@@ -18,6 +18,7 @@ look for "is there ambient guidance for X."
 |--------|------------------------|-------|-----------------|
 | Process-spawn hygiene | [`process-hygiene-fallback`](instructions/process-hygiene-fallback.instructions.md) | [`spawning-headless-processes`](skills/spawning-headless-processes/SKILL.md) | Spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly — especially on Windows, where a naive spawn allocates a visible, focus-stealing console window per invocation |
 | Coordinator-first delegation | [`delegation-fallback`](instructions/delegation-fallback.instructions.md) | [`delegating-work`](skills/delegating-work/SKILL.md) | Route broad separable research, comparisons, evaluations, domain-tool calls, and disjoint bulk edits into bounded sub-agent contexts while the coordinator retains synthesis, integration, cohesive implementation, and completion |
+| Scratch-space hygiene | [`scratch-space-fallback`](instructions/scratch-space-fallback.instructions.md) | [`using-scratch-space`](skills/using-scratch-space/SKILL.md) | Resolve a portable scratch root and a timestamped per-task subfolder before writing an ad hoc working file (a draft PR body, a log, a one-off dump) outside a repository, instead of littering a drive root with undated loose files |
 
 New modules are added the same way: one instruction projection entry in
 [`instruction-projections.json`](instruction-projections.json) plus one paired
@@ -37,6 +38,7 @@ skill, documented in the table above and in **What's in this plugin** below.
 | checked-in instruction projections | Every adopting repository | Loads each module's bounded owner-marked reminder without a startup output hook |
 | [`spawning-headless-processes`](skills/spawning-headless-processes/SKILL.md) skill | "run this in the background", authoring a script/service that shells out, "why does a window keep flashing", any CMD/PowerShell/Python/Node child-process spawn | Selects the correct windowless/headless mechanism for the target language and OS before the spawn happens |
 | [`delegating-work`](skills/delegating-work/SKILL.md) skill | "delegate this research", "use agents to compare", "parallelize the investigation", "split these bulk edits" | Chooses direct versus delegated work, defines bounded contracts, and preserves coordinator ownership |
+| [`using-scratch-space`](skills/using-scratch-space/SKILL.md) skill | writing a draft PR/issue body, a captured log, a one-off JSON dump, or any other ad hoc file outside a repository checkout | Resolves a portable scratch root (never hardcoded) and a timestamped per-task subfolder convention |
 
 Enable it in Copilot settings:
 
@@ -70,7 +72,16 @@ PowerShell route. Or:
 
 The coordinator should assign bounded evidence tracks, continue any
 independent coordinator-owned work, synthesize the reports, and retain the
-implementation and completion decision, per the delegation skill.
+implementation and completion decision, per the delegation skill. Or:
+
+> Fetch that issue's full comment thread and draft a reply -- save the draft
+> somewhere so I can review it before you post.
+
+The agent should resolve a scratch root (an `AGENT_SCRATCH_ROOT` override, an
+in-scope machine-local convention, or the OS temp directory as a last
+resort) and write the draft into a fresh, timestamped per-task subfolder
+there -- never as a loose file at a drive root -- per the scratch-space
+skill.
 
 ## Model-routing configuration (delegation module)
 
@@ -119,7 +130,11 @@ example model IDs are intentionally synthetic.
   delegation, duplicate investigation, and repeated review; a versioned
   purpose-to-model configuration contract and inert resolver;
   demonstrated/candidate/held/failed model eligibility guidance; deterministic
-  ordinary, fallback, explicit-trial, and no-route decisions.
+  ordinary, fallback, explicit-trial, and no-route decisions;
+- (scratch-space module) a portable scratch-root resolution order (explicit
+  override, in-scope machine-local convention, OS temp directory), a
+  timestamped per-task subfolder naming convention, and reuse/cleanup
+  guidance — with no hardcoded path for any operator or machine.
 
 **Does NOT provide**
 
@@ -146,7 +161,11 @@ example model IDs are intentionally synthetic.
   MCP tools; the coordinating agent remains responsible for integrating
   delegated work;
 - no companion runtime or MCP server is required — the plugin has zero
-  dependencies.
+  dependencies;
+- (scratch-space module) the adopting environment has an available
+  filesystem location for ad hoc working files distinct from any repository
+  checkout; the operator or machine-local config may supply the actual root
+  path, which this plugin never hardcodes.
 
 ## Dependencies & assumptions
 
@@ -163,9 +182,11 @@ agent, MCP, bridge, or dispatch plugins separately when a task needs them.
 |------|---------|
 | [`skills/spawning-headless-processes/SKILL.md`](skills/spawning-headless-processes/SKILL.md) | Per-language/per-OS headless-spawn route table and verification checklist (process-hygiene module) |
 | [`skills/delegating-work/SKILL.md`](skills/delegating-work/SKILL.md) | Detailed direct-versus-delegated routing procedure (delegation module) |
+| [`skills/using-scratch-space/SKILL.md`](skills/using-scratch-space/SKILL.md) | Scratch-root resolution order and timestamped per-task subfolder convention (scratch-space module) |
 | [`instruction-projections.json`](instruction-projections.json) | Declares every module's checked-in ambient fallback |
 | [`instructions/process-hygiene-fallback.instructions.md`](instructions/process-hygiene-fallback.instructions.md) | The projected fallback content for the process-hygiene module |
 | [`instructions/delegation-fallback.instructions.md`](instructions/delegation-fallback.instructions.md) | The projected fallback content for the delegation module |
+| [`instructions/scratch-space-fallback.instructions.md`](instructions/scratch-space-fallback.instructions.md) | The projected fallback content for the scratch-space module |
 | [`scripts/emit-guidance.ps1`](scripts/emit-guidance.ps1) / [`scripts/emit-guidance.sh`](scripts/emit-guidance.sh) | Reserved PowerShell/Bash policy producers for the delegation module (not currently wired to a `sessionStart` hook — see below) |
 | [`scripts/resolve-model-routing.py`](scripts/resolve-model-routing.py) | Strict inert repository/operator registry resolver (delegation module) |
 | [`schemas/model-routing.schema.json`](schemas/model-routing.schema.json) | Versioned purpose-to-model configuration contract |

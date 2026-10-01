@@ -17,6 +17,14 @@
       "customizationKind": "instructions",
       "applyTo": "**",
       "legacyMarkers": []
+    },
+    {
+      "id": "scratch-space-fallback",
+      "template": "instructions/scratch-space-fallback.instructions.md",
+      "destination": ".github/instructions/agent-conduct-guidance/scratch-space-fallback.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
     }
   ]
 }
