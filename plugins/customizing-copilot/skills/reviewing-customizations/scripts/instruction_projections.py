@@ -820,12 +820,23 @@ def _find_spec_conflicts(specs: list[ProjectionSpec], result: Result) -> None:
 
 
 def render_projection(spec: ProjectionSpec) -> RenderedProjection:
-    """Render one deterministic UTF-8/LF projection."""
+    """Render one deterministic UTF-8/LF projection.
+
+    Every projection gains a short preamble preferring its own gitignored
+    ``*.local.instructions.md`` sibling when present (``docs/patterns/
+    worktree-scoped-dynamic-guidance.md`` §2).
+    """
     text = spec.template_content.decode("utf-8")
     lines = text.splitlines(keepends=True)
     closing = lines.index("---\n", 1)
     header = "".join(lines[: closing + 1])
     body = "".join(lines[closing + 1 :])
+    local_cache_name = PurePosixPath(local_sibling_destination(spec.destination)).name
+    preamble = (
+        f"\n> If `{local_cache_name}` exists here, prefer it -- it reflects\n"
+        "> the currently installed payload; this file reflects the last\n"
+        "> synced-and-reviewed state.\n"
+    )
     marker: dict[str, object] = {
         "schema": PROJECTION_SCHEMA,
         "version": PROJECTION_VERSION,
@@ -853,7 +864,7 @@ def render_projection(spec: ProjectionSpec) -> RenderedProjection:
             + MARKER_SUFFIX
             + "\n"
         )
-        content = (header + marker_line + body).encode("utf-8")
+        content = (header + marker_line + preamble + body).encode("utf-8")
         if marker["renderedBytes"] == len(content):
             break
         marker["renderedBytes"] = len(content)

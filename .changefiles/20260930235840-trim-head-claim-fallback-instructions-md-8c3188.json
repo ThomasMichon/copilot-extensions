@@ -1,0 +1,9 @@
+{
+  "comment": "Trim head-claim-fallback.instructions.md's redundant trailing Rules recap to fit the new customizing-copilot prefer-local-cache preamble within MAX_PROJECTION_BYTES.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

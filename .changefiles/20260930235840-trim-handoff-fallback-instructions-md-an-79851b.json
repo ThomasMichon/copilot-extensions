@@ -1,0 +1,9 @@
+{
+  "comment": "Trim handoff-fallback.instructions.md and awareness.instructions.md to fit the new customizing-copilot prefer-local-cache preamble within MAX_PROJECTION_BYTES.",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}

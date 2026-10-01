@@ -442,9 +442,18 @@ and the new sibling pattern doc,
       genuinely missing `git` binary from a real repo's `rev-parse` probe
       merely failing to complete -- the latter is now `inconclusive` too,
       never silently treated as "not a repository." See the Journal.
-- [ ] Extend the projection template (`customizing-copilot:reviewing-
+- [x] Extend the projection template (`customizing-copilot:reviewing-
       customizations`) with the per-file "prefer the local sibling if
       present" preamble, prepended ahead of the existing rendered body.
+      **Landed**: `render_projection` now computes a short preamble (via
+      `_local_cache_preamble`, naming the destination's own
+      `local_sibling_destination()` basename) and inserts it between the
+      provenance marker and the template's own body for every rendered
+      projection, repo-wide -- no per-template opt-in. Trimmed two shipped
+      templates that were within the new preamble's width of
+      `MAX_PROJECTION_BYTES` (`agent-worktrees`'s `head-claim-fallback` and
+      `context-handoff`'s `handoff-fallback`/`awareness`) so the budget test
+      still passes with the preamble included; see the Journal.
 - [x] Add a render-only entry point to `projection_sync_worker.py` (or a
       sibling script) that performs `sync`'s render step against currently
       installed payloads **without** the git/PR half -- no branch, no commit,
@@ -553,6 +562,71 @@ and the new sibling pattern doc,
 _Pending._
 
 ## Journal
+
+### 2026-09-30 (cont.) -- Phase 7 slice 3: the per-file "prefer local" preamble
+- Picked up the next unstarted Plan item (previous entry's steer): extended
+  `render_projection` (`customizing-copilot:reviewing-customizations`'s
+  `instruction_projections.py`) with `_local_cache_preamble`, a short
+  blockquote inserted between the provenance marker and the template's own
+  rendered body on **every** projection, repo-wide -- no per-template
+  opt-in, so the common case (a source that has synced in at least once)
+  self-directs to its own gitignored `*.local.instructions.md` sibling
+  with no further lookup, per
+  `docs/patterns/worktree-scoped-dynamic-guidance.md` §2. The preamble
+  names the sibling via the destination's own `local_sibling_destination()`
+  basename rather than assuming `<sourceId>.instructions.md` naming (the
+  pattern doc's illustrative wording) -- `source_id` and the declared
+  destination filename are independent in the schema, even though every
+  shipped projection today happens to name them identically.
+- **Wide blast radius, confirmed:** this widens every rendered projection's
+  byte count repo-wide, exactly as flagged when this item was carved out of
+  slice 2. Two shipped templates were within the new preamble's width of
+  `MAX_PROJECTION_BYTES` (4096) and tipped over:
+  `agent-worktrees`'s `head-claim-fallback.instructions.md` (was already
+  within ~150 bytes of the ceiling) and `context-handoff`'s
+  `handoff-fallback.instructions.md` / `awareness.instructions.md`. Rather
+  than raising the shared budget (a separate, larger decision affecting
+  every other projection's own headroom), trimmed genuinely redundant
+  content in those three files -- a recap `## Rules` section in
+  `head-claim-fallback` that only restated points already made earlier in
+  the same file, a duplicate "no auto-pickup" sentence plus its own
+  trailing `## Rules` recap in `handoff-fallback` (the same message is
+  already carried by `context-handoff`'s own always-loaded
+  `awareness.instructions.md` and by the `efforts` completion-gate
+  instruction), and several over-verbose command-table cells in
+  `awareness.instructions.md` -- until `test_shipped_projections_fit_the_
+  budgets` passed again for all three. No meaning was dropped, only
+  restated or over-elaborated phrasing.
+- Audited every other shipped projection across the repo (a direct script
+  measuring `render_projection` byte counts for every `_PLUGINS` entry in
+  `test_shipped_projection_budgets.py`): only those same three were within
+  reach of the ceiling; the preamble's added ~175-180 bytes is otherwise
+  comfortably absorbed everywhere else.
+- `tools/run-plugin-tests.py customizing-copilot`: full suite green,
+  including `test_shipped_projection_budgets.py` (17/17 passed). Also ran
+  `agent-worktrees`'s and `context-handoff`'s own suites to confirm the
+  trimmed instruction files didn't break anything there --
+  `agent-worktrees`'s own suite is large enough to hit the test-supervisor's
+  wall-clock cap on an unrelated later sub-suite (two full sub-suites
+  passed first, 536 + 715 tests); `context-handoff`'s `test_emit_guidance.py`
+  fails in this environment because `bash.EXE` isn't a real POSIX shell
+  here (confirmed pre-existing via `git stash`) -- neither is caused by
+  this change.
+- `instruction_projections.py` was already at its grandfathered
+  `tools/module-size-baseline.json` ceiling (2418 lines, 1 line of slack)
+  before this change. Inlined the new preamble directly into
+  `render_projection` (no separate helper function) to minimize the net
+  addition, then made the remaining growth (2418 -> 2429, 11 lines) a
+  **deliberate, reviewed baseline widen** per `check-module-size.py`'s own
+  documented policy for this exact case -- real new capability, not
+  unreviewed drift. Splitting this module further is out of scope for this
+  slice; it already shares `render_projection`'s/`local_sibling_
+  destination`'s spec-loading and atomic-write primitives directly, per the
+  earlier render-only-entry-point Plan note.
+- Phase 7 Plan items remaining: the repo-wide catch-all static projection
+  and the `agent-worktrees` wiring (the actual consumer of everything
+  built so far) -- each its own separately-reviewed PR per the standing
+  steer.
 
 ### 2026-09-30 -- PR #4683 diagnosis and merge
 - After 7 consecutive `COMMENTED` review passes on PR #4683, diagnosed the

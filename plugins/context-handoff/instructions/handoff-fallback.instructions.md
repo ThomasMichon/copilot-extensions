@@ -69,9 +69,4 @@ run `node $ch <verb> ...`
 No store, no `node`? Write the brief to `handoff-<slug>.md` under state
 folder `files/` (create first, not guaranteed to exist); state absolute
 path; tell the user `/clear`, then "Read <path> and resume the
-objective." No auto-pickup, claim tracking, supersession.
-
-## Rules
-
-Never claim auto-pickup; seed is locator, not markdown; consuming
-is setup not completion, keep driving
+objective."

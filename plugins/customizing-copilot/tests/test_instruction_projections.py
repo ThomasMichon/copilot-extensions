@@ -172,6 +172,32 @@ def test_render_is_deterministic_and_marker_carries_complete_provenance(
     assert b"Keep this static fallback useful." in without_marker
 
 
+def test_render_projection_includes_prefer_local_preamble(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    result = projections.Result(operation="test")
+    specs, _unknown = projections._load_specs(repo, [source], result)
+
+    rendered = projections.render_projection(specs[0])
+    text = rendered.content.decode("utf-8")
+
+    # The preamble names this destination's own local-cache sibling, and
+    # sits ahead of the template's own body (docs/patterns/
+    # worktree-scoped-dynamic-guidance.md §2) -- never a hardcoded
+    # "<sourceId>.local.instructions.md" assumption, since source_id and the
+    # declared destination filename are independent in the schema.
+    expected_name = Path(
+        projections.local_sibling_destination(specs[0].destination)
+    ).name
+    assert expected_name == "fallback.local.instructions.md"
+    preamble_marker = f"If `{expected_name}` exists"
+    assert preamble_marker in text
+    assert text.index(preamble_marker) < text.index(
+        "Keep this static fallback useful."
+    )
+
+
 def test_local_sibling_destination_naming() -> None:
     assert (
         projections.local_sibling_destination(

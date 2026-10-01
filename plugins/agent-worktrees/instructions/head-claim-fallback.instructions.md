@@ -76,10 +76,3 @@ Merging clears it on its own; anything else needs explicit operator action
   the PR's unmerged commits, or abandoning it -- never your own judgment:
   `finalize --abandon --handoff-to <recipient>`, on explicit instruction
   only, never inferred from "stuck" or "CI's red".
-
-## Rules
-
-- Never manually kill a pane/process, or force-release a claim, on your
-  own judgment -- diagnose with `handoffs-check`/`doctor`; resolve claims
-  via `claims show`/`sweep`, `references/obligations.md`, or an
-  explicit operator `--handoff-to`/`--abandon`.

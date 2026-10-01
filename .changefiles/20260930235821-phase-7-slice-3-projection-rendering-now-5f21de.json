@@ -1,0 +1,9 @@
+{
+  "comment": "Phase 7 slice 3: projection rendering now prepends a per-file preamble (docs/patterns/worktree-scoped-dynamic-guidance.md section 2) pointing a session at the gitignored *.local.instructions.md sibling, when present, ahead of the checked-in body. Trimmed two over-budget shipped templates (agent-worktrees head-claim-fallback, context-handoff handoff-fallback/awareness) to fit MAX_PROJECTION_BYTES with the new preamble included.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "minor"
+    }
+  ]
+}

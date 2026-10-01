@@ -34,16 +34,16 @@ Bundled CLI, needs only `node`. Every command except `help` accepts `--json`.
 
 | Command | Purpose |
 |---|---|
-| `save` | Store a handoff without requesting pickup yet |
+| `save` | Store a handoff without requesting pickup |
 | `trigger` | Store + signal pickup (arms live-cutover only under `mode: auto`) |
 | `consume --locator "<kind>:<id>"` | Claim and load a stored handoff exactly once |
-| `facts` | Basic extension-free handoff facts for this worktree |
+| `facts` | Extension-free handoff facts for this worktree |
 | `check-heads` | Audit pending-handoff head alignment across worktrees |
 | `retry-cutover` | Refocus a live successor or respawn a stuck cutover |
-| `sync-worktree` | Shared lock/rebase-safe sync (same helper the force tier uses) |
+| `sync-worktree` | Shared lock/rebase-safe sync (same as the force tier) |
 | `list-sessions` | Recorded handoff chain (needs `agent-worktrees`) |
 | `get-previous-session` | Recorded predecessor (needs `agent-worktrees`) |
-| `abort --locator "<kind>:<id>"` | Cancel before consumption (needs `agent-worktrees`; a task target also needs `agent-dispatch`) |
+| `abort --locator "<kind>:<id>"` | Cancel before consumption (needs `agent-worktrees`, and `agent-dispatch` for a task) |
 
 ```bash
 CH_ROOT="${COPILOT_PLUGIN_ROOT:-$HOME/.copilot/installed-plugins/copilot-extensions/context-handoff}"
@@ -53,8 +53,7 @@ node "$CH" save --title "<t>" --prompt-file "<f.md>" --session-id "$COPILOT_AGEN
 Other verbs share that shape; add `--json` for machine output (table above).
 PowerShell: same default
 (`$HOME\.copilot\installed-plugins\copilot-extensions\context-handoff`), run
-`node $CH <verb> ...`. No global binstub exists -- resolve `$CH` by path
-first. The fallback guide below lists every verb and rung.
+`node $CH <verb> ...`.
 
 ## The handoff prompt ("seed") format
 
