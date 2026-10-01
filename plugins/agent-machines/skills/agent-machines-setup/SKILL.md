@@ -164,8 +164,15 @@ manage:
       experimental: true            # several plugins rely on experimental-gated
                                      # features (fleet mode, dynamic retrieval,
                                      # assisted-approval)
-  copilot.settings.powershell:      # list-valued -> ensure-present, not enforce
-    disposition: ensure-present
+  copilot.settings.powershell:
+    # EXCEPTION to the list-shape guidance above: powershellFlags is an
+    # ORDERED argv sequence of flag/value PAIRS, not an unordered set like
+    # enabledPlugins -- `ensure-present` unions one token at a time, so if
+    # the live list already has -WindowStyle paired with a different value,
+    # the union floor appends only the new value, separating a flag from
+    # its value and producing invalid argv. Use `enforce` (atomic replace)
+    # here instead, even though it's list-valued.
+    disposition: enforce
     values:
       # Suppresses the headed console window a naive pwsh.exe spawn otherwise
       # pops when Copilot runs a hook. Windows-only; harmless elsewhere.
@@ -186,7 +193,13 @@ create/resume/recovery launch (unconditional, upstream behavior -- see
 context preference at launch"), because Copilot CLI has been observed to
 ignore the persisted values alone at startup. Declaring these three in your
 own `copilot.settings` package is still what feeds that mechanism the
-correct values.
+correct values. That guarantee is not unconditional, though: an explicit
+`--model`/`--reasoning-effort`/`--context` already present anywhere in the
+assembled launch command always wins (never duplicated or overridden), and
+ACP sessions (`--acp`) receive none of these injected flags at all --
+Copilot ignores them in ACP mode, and `agent-bridge`'s ACP client carries
+model/effort through its own configuration path there instead (context
+tier is not yet carried through ACP -- a separate, tracked gap).
 
 To make selected installed plugins repository-only, use schema v3 desired
 absence. This removes user-global activation keys without uninstalling plugin
