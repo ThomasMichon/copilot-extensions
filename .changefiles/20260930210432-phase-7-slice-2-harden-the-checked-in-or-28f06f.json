@@ -1,0 +1,9 @@
+{
+  "comment": "Phase 7 slice 2: harden the checked-in orphan scan to confirm a *.local.instructions.md file is genuinely git-untracked before excluding it, and document the .gitignore convention in setting-up-instruction-sync-worker's scaffolding output.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

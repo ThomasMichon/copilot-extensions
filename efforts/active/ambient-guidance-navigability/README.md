@@ -424,10 +424,24 @@ could. See
 and the new sibling pattern doc,
 `docs/patterns/worktree-scoped-dynamic-guidance.md`, for the full design.
 
-- [ ] `.gitignore` convention: `.github/instructions/**/*.local.instructions.md`
+- [x] `.gitignore` convention: `.github/instructions/**/*.local.instructions.md`
       -- document as part of the `setting-up-instruction-sync-worker` skill's
       scaffolding output (every adopting repo needs this rule, not just this
-      one).
+      one). **Landed**: a scaffolding section (not gated by this skill's own
+      `projection-reflect.json` consent file, though the ignore-rule commit
+      itself still needs the adopting repo's own ownership/contribution-flow
+      authority) plus `references/templates/gitignore-rule.md` in that
+      skill, and `instruction_projections._iter_projection_files` hardened
+      so a `*.local.instructions.md` file is excluded from the checked-in
+      orphan scan unless a best-effort git check reports it tracked or
+      inconclusive (a plain directory with no `.git` at all still excludes
+      it, unchanged -- tracking is simply inapplicable there) -- a tracked
+      (or inconclusive) one in a real git working tree is still scanned and
+      reported as `projection-orphan-file` rather than silently hidden.
+      `_resolve_git_tracked_paths` itself also hardened to distinguish a
+      genuinely missing `git` binary from a real repo's `rev-parse` probe
+      merely failing to complete -- the latter is now `inconclusive` too,
+      never silently treated as "not a repository." See the Journal.
 - [ ] Extend the projection template (`customizing-copilot:reviewing-
       customizations`) with the per-file "prefer the local sibling if
       present" preamble, prepended ahead of the existing rendered body.
@@ -572,6 +586,82 @@ _Pending._
 - **Going forward:** subsequent Phase 7 slices land as separate, smaller
   PRs rather than growing `render_local_cache` further in one PR -- this
   slice's own 8-round history is the concrete case for that.
+
+### 2026-09-30 (cont.) -- Phase 7 slice 2: `.gitignore` convention + orphan-scan hardening
+- Picked up the gap PR #4683 deliberately deferred (previous entry): the
+  checked-in orphan scanner's `*.local.instructions.md` suffix exclusion
+  unconditionally trusted a repo having adopted the ignore rule, with no
+  verification. Hardened `_iter_projection_files` to batch-query git
+  tracked status (reusing `_resolve_git_tracked_paths`, the same primitive
+  `render_local_cache` already uses for its own tracked-destination guard)
+  for every `*.local.instructions.md` candidate found under
+  `.github/instructions/`: a file is excluded from the scan unless
+  `_resolve_git_tracked_paths` reports it tracked or inconclusive --
+  including the plain-directory (no-`.git`) case, where tracking is simply
+  inapplicable and the file is excluded without git confirming anything, so
+  the long-standing no-git test still passes unchanged. In a real git
+  working tree, a tracked file (or an inconclusive check -- git present but
+  the query itself failed) is now scanned exactly like any other
+  projection file and reported as `projection-orphan-file` if its
+  provenance marker doesn't match the lock -- never silently hidden on the
+  strength of a suffix alone.
+- Added three tests mirroring `render_local_cache`'s own tracked/
+  untracked/inconclusive coverage, but for the orphan-scan side:
+  `test_orphan_scan_still_excludes_local_cache_file_in_an_untracked_git_repo`,
+  `test_orphan_scan_flags_a_git_tracked_local_cache_file_instead_of_hiding_it`,
+  and `test_orphan_scan_treats_inconclusive_git_check_as_not_excludable`.
+  The existing no-git-at-all case
+  (`test_render_local_cache_files_excluded_from_checked_in_orphan_scan`)
+  still passes unchanged.
+- Documented the `.gitignore` convention itself in the
+  `setting-up-instruction-sync-worker` skill's scaffolding output (the
+  other half of this Plan item): a new section not gated by the
+  `projection-reflect.json` consent file, since `render_local_cache()`
+  itself is permissionless by design (local, gitignored, no commit) --
+  though its own `agent-worktrees` create/resume/`sessionStart` call sites
+  are still a planned, unchecked Plan item below, not yet wired -- plus a
+  `references/templates/gitignore-rule.md` template, so a repo gets the
+  ignore rule scaffolded regardless of whether it also adopts the
+  consent-gated scheduler/bypass pieces this skill otherwise scaffolds.
+- `tools/run-plugin-tests.py customizing-copilot`: 297 passed, 8 skipped.
+- Phase 7 Plan items remaining: the per-file "prefer local" preamble, the
+  repo-wide catch-all static projection, and the `agent-worktrees` wiring
+  (the actual consumer of everything built so far) -- each its own
+  separately-reviewed PR per the prior entry's steer.
+- **Review round 2 findings, addressed in the same PR (#4773) rather than
+  a follow-up, since they were still cheap to fold in:**
+  - Round 1 re-flagged 6 already-fixed findings as stale restatements
+    against an unchanged commit (the same PR #4683 pattern) -- confirmed
+    each was already addressed (manual version bump reverted + changefile
+    added; Journal/docstring/SKILL.md/template wording corrected to stop
+    implying the orphan scan's git-tracked check depends on the
+    `.gitignore` rule, when `git ls-files` already excludes untracked
+    files regardless of ignore matching; PR description given its
+    required Documentation impact statement).
+  - Round 2 found one genuine, pre-existing bug the new orphan-scan call
+    site exposed: `_resolve_git_tracked_paths`'s initial `rev-parse` probe
+    conflated "confirmed not a git repo" with "the probe itself failed to
+    complete" (both returned `inconclusive=False`), so a transient
+    probe failure inside a *real* git repo could make a tracked
+    `*.local.instructions.md` file silently excluded from the orphan scan
+    -- the exact "fail open" `render_local_cache`'s own tracked-destination
+    guard was built to avoid. Fixed by distinguishing `FileNotFoundError`
+    (genuinely no `git` binary -> still `inconclusive=False`, preserving
+    the plain-directory case) from every other probe failure (now
+    `inconclusive=True`, treated conservatively like the existing
+    tracked-files-query failure case). Added
+    `test_orphan_scan_distinguishes_a_failed_probe_from_a_confirmed_non_repo`
+    and `test_resolve_git_tracked_paths_treats_missing_git_binary_as_not_applicable`.
+  - Round 2 also found the `.gitignore` section's "permissionless" framing
+    conflated two different things: `render_local_cache()`'s local,
+    gitignored write is genuinely permissionless, but *committing* a
+    `.gitignore` rule is an ordinary repo mutation
+    (`docs/patterns/install-vs-adopt-boundary.md`) that still needs the
+    adopting repo's own ownership/contribution-flow authority -- it just
+    doesn't need *this skill's specific* `projection-reflect.json` consent
+    file. Reworded the SKILL.md section and the template accordingly.
+  - Round 2 also flagged a test docstring citing PR #4683 by number
+    instead of describing the timeless invariant under test -- reworded.
 
 ### 2026-09-20 -- Kickoff
 - Carved from an operator observation (other agents losing fidelity on
