@@ -530,20 +530,7 @@ def cmd_doctor(args) -> int:
         orphaned = health.find_orphaned_handoffs(records)
         if apply:
             for orphan in orphaned:
-                entry = orphan.record.session_entry(orphan.session_id)
-                if entry is not None and entry.state in ("handed-off", "yielded"):
-                    entry.state = "active"
-                    # Cancels the pending handoff that produced this orphaned
-                    # state (mirrors the bind-reclaim rebind path's own call)
-                    # so an active head never still reports one pending.
-                    tracking._cancel_pending_handoffs(orphan.record)
-                    tracking.set_head_session(
-                        orphan.record,
-                        orphan.session_id,
-                        save=False,
-                    )
-                    tracking.save_record(orphan.record)
-                    orphan.reactivated = True
+                if health.reactivate_orphaned_handoff(orphan):
                     orphaned_fixed += 1
 
     bare_orphans = reclaim.find_bare_orphans()

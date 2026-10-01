@@ -753,6 +753,41 @@ def find_orphaned_handoffs(
     return out
 
 
+def reactivate_orphaned_handoff(orphan: OrphanedHandoff) -> bool:
+    """The orchestrator's ``--fix`` mutate for one :func:`find_orphaned_handoffs`
+    finding: reactivates the orphaned tail (``handed-off``/``yielded`` ->
+    ``active``), cancels the stale pending handoff that produced that state,
+    sets head, and bumps ``lifecycle_revision``. Returns whether it repaired
+    anything (sets ``orphan.reactivated`` on success).
+
+    ``orphan.record`` is a possibly-stale snapshot (``find_orphaned_handoffs``
+    runs outside any lock), so this re-reads and re-validates under the
+    record's own lock before mutating -- a live session may have linked or
+    otherwise moved this handoff on in the interim. ``set_head_session`` is a
+    no-op when the ledger already names this candidate (true here, since it
+    IS the orphan candidate), so the revision bump is explicit -- otherwise a
+    stale equal-revision writer could later silently undo the repair.
+    """
+    yaml_path = orphan.record.yaml_path
+    with tracking._RecordLock(yaml_path, blocking=False) as lk:
+        if not lk.acquired:
+            return False  # contended -- a live writer owns this record now
+        fresh = tracking.load_record(yaml_path)
+        if not any(o.session_id == orphan.session_id
+                   for o in find_orphaned_handoffs([fresh])):
+            return False
+        entry = fresh.session_entry(orphan.session_id)
+        if entry is None or entry.state not in _ORPHANABLE_TAIL_STATES:
+            return False
+        entry.state = "active"
+        tracking._cancel_pending_handoffs(fresh)
+        tracking.set_head_session(fresh, orphan.session_id, save=False)
+        tracking._next_lifecycle_revision(fresh, orphan.session_id)
+        tracking.save_record(fresh)
+    orphan.reactivated = True
+    return True
+
+
 # --------------------------------------------------------------------------- #
 # Shared helpers for the orchestrator
 # --------------------------------------------------------------------------- #

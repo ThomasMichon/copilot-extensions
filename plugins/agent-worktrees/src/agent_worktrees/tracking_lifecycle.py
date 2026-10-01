@@ -445,6 +445,13 @@ def link_succession(
         pred.successor = successor_id
         pred.state = predecessor_state
         succ.predecessor = predecessor_id
+        if succ.state == "yielded":
+            # The successor's own still-pending handoff (the one that made
+            # it "yielded") must not survive becoming head here -- an active
+            # head that still reports a pending handoff blocks terminal
+            # cleanup and could let a later token consumer link a handoff
+            # this succession already supersedes.
+            _cancel_pending_handoffs(record)
         succ.state = "active"
         _ensure_head_ledger(record)
         _append_head_transition(

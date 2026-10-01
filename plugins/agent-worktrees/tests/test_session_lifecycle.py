@@ -229,6 +229,26 @@ class TestTransitions:
         assert new.predecessor == "old" and new.state == "active"
         assert r.resolved_head_session == "new"
 
+    def test_link_succession_concluded_cancels_yielded_successors_own_handoff(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        """aperture-labs#7824 regression: a successor that is itself
+        ``"yielded"`` (it opened its own handoff intent, never linked) is not
+        terminal, so it still passes the terminal-successor guard above and
+        gets activated -- but the pending handoff that made it yielded must
+        not survive becoming head here, or an active head would still
+        report one pending."""
+        rec = _rec(tmp_tracking_dir, sessions=[
+            SessionEntry("old", "t"), SessionEntry("new", "t"),
+        ])
+        tracking.open_handoff(rec, "new", "tok")
+        assert rec.session_entry("new").state == "yielded"
+        link_succession(rec, "old", "new", predecessor_state="concluded")
+        r = load_record(rec.yaml_path)
+        assert r.session_entry("new").state == "active"
+        assert r.handoffs[0].state == "cancelled"
+        assert r.resolved_head_session == "new"
+
     def test_link_succession_concluded_rejects_terminal_successor(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):
