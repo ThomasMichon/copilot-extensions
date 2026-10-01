@@ -1,0 +1,9 @@
+{
+  "comment": "planning-efforts: add guidance against journaling unabstracted internal-system specifics (repo/system names, cross-org issue numbers, incident narrative) into a public-facing effort's Journal/Context",
+  "changes": [
+    {
+      "plugin": "efforts",
+      "type": "patch"
+    }
+  ]
+}

@@ -280,6 +280,39 @@ The README is the shared contract — keep it **ahead of the conversation**. But
   commit is itself opening is a catch-22; record a PR only once it has merged.
   Remark open issues the effort spawned or still blocks on.
 
+## Keep internal specifics out of a public-facing effort
+
+An effort's Journal is a natural place to record *how* a decision was reached
+— what was investigated, what broke, what the fix was. When the effort's own
+repo is a **public or externally-shareable** one (no private, closed-circuit
+relationship to the systems being discussed), that narrative can't carry the
+same level of concrete detail a private knowledge repo's effort would: a real
+internal repo/system name, a cross-organization issue number, device or
+account naming conventions, or a blow-by-blow internal-investigation
+narrative is exactly the kind of content that leaks when it's committed to a
+public tree, even inside an effort folder that otherwise looks like ordinary
+engineering notes.
+
+- **Abstract, don't omit.** The *decision* and its *rationale* are still
+  worth capturing — generalize the specifics instead of deleting the entry.
+  "Investigated whether a dependent service could host X directly; confirmed
+  it couldn't without upstream changes, so built the control layer here
+  instead" preserves the lesson without naming the dependent service,
+  quoting its internal issue number, or walking through its source.
+- **Route the un-abstracted record to where it belongs.** If a precise,
+  unabstracted account is genuinely useful to keep somewhere, that record
+  belongs in a private knowledge repo (per that repo's own conventions), not
+  in the public effort — link to it generically ("see the private incident
+  record") rather than reproducing it.
+- **This isn't unique to Journal entries.** The same bar applies to Context,
+  Request capture, and any sub-doc the effort links out to — anywhere an
+  agent might be tempted to paste a real cross-repo reference, an internal
+  codename, or incident specifics because that's what actually happened.
+- **When in doubt, treat the repo's own leak-guard conventions as the
+  bar**, if the repo has one (an identifier denylist, a scrub tool, a
+  stated acceptance boundary) — abstract anything that convention would
+  flag, not just what you personally recognize as sensitive.
+
 ## Drive to completion, relentlessly
 
 A durably-journaled effort is what makes relentless driving safe: because the
@@ -428,6 +461,9 @@ change that realizes it.
   summarizing the gist and moving the full exchange to
   `inception-transcript.md`.
 - ❌ Letting the conversation, not the README, hold effort state.
+- ❌ Journaling a real internal repo/system name, cross-org issue number, or
+  unabstracted incident narrative into a public-facing effort — abstract the
+  specifics or route the precise record to a private knowledge repo instead.
 - ❌ Clearing `follow_up` manually while an open effort remains bound, or
   dropping the binding without verified completion or a named transfer.
 - ❌ Cross-repo issues linking this repo's effort paths.
