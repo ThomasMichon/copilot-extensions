@@ -18,6 +18,22 @@ import argparse
 from . import config as cfg, output, tracking
 
 
+def _is_safe_path_component(value: str) -> bool:
+    """True when ``value`` is safe to join as a single filesystem path
+    segment -- no path separators, no ``..``/``.`` traversal components, no
+    NUL. A parsed :class:`~agent_worktrees.tracking_claims.ClaimRef`'s
+    ``project``/``worktree_id`` fields are **not** validated by
+    ``parse_claim_ref`` itself (a three-or-more-component ref is simply
+    accepted as qualified), so a corrupted or malicious claim ref must be
+    rejected here before it is ever joined into a real path.
+    """
+    if not value or "\x00" in value:
+        return False
+    if "/" in value or "\\" in value:
+        return False
+    return value not in (".", "..")
+
+
 def transitive_obligations(
     worktree_id: str,
     project: str,
@@ -65,7 +81,14 @@ def transitive_obligations(
     unresolved: list[dict] = []
     for c in rec.resources:
         if c.kind != "worktree":
-            if c.is_unsettled:
+            # A `session` claim is advisory-only -- `finalize`'s own
+            # obligation gate explicitly never counts it as unsettled
+            # (`_assert_obligations_settled`'s `kind != "session"` filter),
+            # since a normally-running worktree always carries one for its
+            # own live session. Mirroring that exclusion here keeps a
+            # resource-clean subtree reporting as clean in real use instead
+            # of always "owing" its own invoking session.
+            if c.kind != "session" and c.is_unsettled:
                 found.append({
                     "path": here, "kind": c.kind, "ref": c.ref,
                     "state": c.state, "note": c.note,
@@ -82,6 +105,18 @@ def transitive_obligations(
         if parsed is None or not parsed.is_qualified:
             unresolved.append({
                 "path": here, "ref": c.ref, "reason": "unqualified child ref",
+            })
+            continue
+        if not _is_safe_path_component(parsed.worktree_id) or not _is_safe_path_component(
+            parsed.project or project
+        ):
+            # A corrupted/malicious ref (e.g. containing "..", a path
+            # separator, or a NUL) could otherwise escape the project's
+            # `worktrees` directory once joined into a filesystem path below
+            # -- refuse to descend rather than read/report an unrelated file.
+            unresolved.append({
+                "path": here, "ref": c.ref,
+                "reason": "unsafe child ref (rejected, not resolved)",
             })
             continue
         if parsed.machine != config.machine:

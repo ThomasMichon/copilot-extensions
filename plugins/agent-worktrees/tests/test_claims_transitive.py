@@ -97,6 +97,37 @@ def test_multi_hop_a_to_b_to_c(_tracking_d):
     assert found[0]["ref"] == "o/r#9"
 
 
+def test_session_claims_are_never_reported_as_obligations(_tracking_d):
+    """A `session`-kind claim is advisory-only -- finalize's own gate never
+    counts it as unsettled (a normally-running worktree always carries one
+    for its own live session). A resource-clean subtree must not appear to
+    "owe" its own invoking session."""
+    _save(_tracking_d, "wt-A", resources=[
+        tracking.ResourceClaim(kind="session", ref="m/proj/wt-A#sess-1", state=ob.ACTIVE),
+    ])
+
+    found, unresolved = claims_transitive_cli.transitive_obligations("wt-A", "proj", _config())
+
+    assert found == []
+    assert unresolved == []
+
+
+def test_malicious_child_ref_cannot_escape_the_worktrees_directory(_tracking_d):
+    """A corrupted/malicious ref whose parsed worktree_id contains a path
+    traversal component must be rejected (reported unresolved), never
+    joined into a real filesystem path."""
+    evil_ref = tracking.format_claim_ref(MACHINE, "proj", "../../etc/passwd")
+    _save(_tracking_d, "wt-A", resources=[
+        tracking.ResourceClaim(kind="worktree", ref=evil_ref, state=ob.ACTIVE),
+    ])
+
+    found, unresolved = claims_transitive_cli.transitive_obligations("wt-A", "proj", _config())
+
+    assert found == []
+    assert len(unresolved) == 1
+    assert "unsafe" in unresolved[0]["reason"]
+
+
 def test_settled_worktree_edge_is_not_descended(_tracking_d):
     """An at-rest/released `worktree`-kind claim means that child already
     settled -- the query must not descend into it (and, for a since-pruned
