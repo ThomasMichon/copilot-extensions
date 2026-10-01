@@ -1439,8 +1439,12 @@ def _ssh_session(
             # connect) and syncs it forward on reconnect. Needs the relay up for
             # git auth.
             if not args.no_relay:
-                await _provision_dotfiles(manager, args.name, config)
-                await _provision_harness(manager, args.name, config)
+                await _provision_dotfiles(
+                    manager, args.name, config, relay_env=relay_env,
+                )
+                await _provision_harness(
+                    manager, args.name, config, relay_env=relay_env,
+                )
 
             # Register CodeSpace-scoped plugins (the CodeSpace-scoped axis) via
             # BOTH lanes: (1) the CodeSpace user settings so they load for
@@ -1473,7 +1477,9 @@ def _ssh_session(
             from .auth_preflight import AdoRestAuthError
 
             try:
-                await _verify_remote_auth(manager, args.name, config)
+                await _verify_remote_auth(
+                    manager, args.name, config, github_account=github_account,
+                )
             except AdoRestAuthError as exc:
                 print(f"[ERROR] {exc}", file=sys.stderr)
                 await manager.disconnect(args.name)
@@ -1838,7 +1844,9 @@ async def _provision_relay_helpers(manager, name: str) -> None:
         log.warning("Relay helper provisioning on %s failed: %s", name, exc)
 
 
-async def _provision_dotfiles(manager, name: str, config) -> None:
+async def _provision_dotfiles(
+    manager, name: str, config, *, relay_env: str = "",
+) -> None:
     """Ensure the configured dotfiles repo is present + current on a CodeSpace.
 
     Universal bootstrap for every CodeSpace when ``defaults.dotfiles_repo`` is
@@ -1860,6 +1868,8 @@ async def _provision_dotfiles(manager, name: str, config) -> None:
         command = build_dotfiles_command(
             config.dotfiles_repo, effective_relay_port(config),
         )
+        if relay_env:
+            command = relay_env + command
         # Run under a LOGIN shell: the dotfiles clone authenticates to GitHub via
         # the CodeSpace's own credential helper (gitcredential_github.sh), which
         # needs the platform env (GITHUB_TOKEN, profile.d) that only a login
@@ -1880,7 +1890,9 @@ async def _provision_dotfiles(manager, name: str, config) -> None:
         log.warning("Dotfiles provisioning on %s failed: %s", name, exc)
 
 
-async def _provision_harness(manager, name: str, config) -> None:
+async def _provision_harness(
+    manager, name: str, config, *, relay_env: str = "",
+) -> None:
     """Ensure the configured control-plane *harness* checkout is present +
     current on a venue at ``/workspaces/<basename(harness_repo)>``.
 
@@ -1903,6 +1915,8 @@ async def _provision_harness(manager, name: str, config) -> None:
         command = build_harness_command(
             config.harness_repo, effective_relay_port(config),
         )
+        if relay_env:
+            command = relay_env + command
         # Login shell, same rationale as the dotfiles clone: the harness clone
         # authenticates to GitHub via the CodeSpace's own credential helper,
         # which needs the platform env only a login shell loads.
@@ -2049,7 +2063,9 @@ async def _register_codespace_plugins(
     return []
 
 
-async def _verify_remote_auth(manager, name: str, config) -> None:
+async def _verify_remote_auth(
+    manager, name: str, config, *, github_account: str | None = None,
+) -> None:
     """Verify host-side auth for the CodeSpace's git remote domains.
 
     Lists the git remotes of both the workspace/product checkout and the
@@ -2065,6 +2081,8 @@ async def _verify_remote_auth(manager, name: str, config) -> None:
     cannot mint the bearer and ``enforce_ado_rest_login`` is on -- the caller
     catches it to abort the connect cleanly.
     """
+    from credential_relay.sources.git_credential import GitCredentialSource
+
     from .auth_preflight import host_from_url, verify_remote_auth
 
     async def _run_remote(cmd: str) -> str:
@@ -2082,7 +2100,9 @@ async def _verify_remote_auth(manager, name: str, config) -> None:
 
     try:
         hosts, missing = await verify_remote_auth(
-            _run_remote, extra_hosts=extra_hosts,
+            _run_remote,
+            extra_hosts=extra_hosts,
+            source=GitCredentialSource(github_username=github_account),
         )
     except Exception as exc:
         log.debug("Remote auth verification on %s failed: %s", name, exc)

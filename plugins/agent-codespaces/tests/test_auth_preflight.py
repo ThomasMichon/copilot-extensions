@@ -274,6 +274,40 @@ class TestVerifyRemoteAuthExtraHosts:
         assert DOTFILES_DIR in REMOTE_LIST_COMMAND
         assert "${VM_REPO_PATH:-$PWD}" in REMOTE_LIST_COMMAND
 
+    @pytest.mark.asyncio
+    async def test_connect_verifier_uses_selected_github_account(self, monkeypatch):
+        from agent_codespaces import __main__ as cli
+
+        seen = {}
+
+        class _Source:
+            def __init__(self, *, github_username=None, **_kw):
+                seen["github_username"] = github_username
+
+        async def _verify(_run_remote, *, source=None, extra_hosts=None, **_kw):
+            seen["source"] = source
+            return ["github.com"], []
+
+        monkeypatch.setattr(cli, "exec_with_retry", AsyncMock(return_value=type(
+            "R", (), {"stdout": "", "exit_code": 0, "stderr": ""}
+        )()))
+        monkeypatch.setattr(
+            "agent_codespaces.auth_preflight.verify_remote_auth", _verify,
+        )
+        monkeypatch.setattr(
+            "credential_relay.sources.git_credential.GitCredentialSource", _Source,
+        )
+
+        await cli._verify_remote_auth(
+            object(),
+            "cs-1",
+            type("Cfg", (), {"dotfiles_repo": "example-org/dotfiles"})(),
+            github_account="alice",
+        )
+
+        assert seen["github_username"] == "alice"
+        assert isinstance(seen["source"], _Source)
+
 
 class TestAdoRestPreflight:
     """#77: host ADO REST bearer preflight + enforcement."""
