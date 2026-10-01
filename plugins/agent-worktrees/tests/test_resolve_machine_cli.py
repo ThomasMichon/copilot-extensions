@@ -12,8 +12,12 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from agent_worktrees import config as cfg
 from agent_worktrees import resolve_machine_cli as rmc
+
+pytestmark = pytest.mark.guard
 
 
 def _entry(key, *, hostname="", alias="", envs=()):
@@ -49,6 +53,14 @@ def test_machine_key_for_display_matches_hostname(tmp_path):
 
 
 def test_emit_remote_plan_for_env_resolves_by_hostname(tmp_path):
+    """`_emit_remote_plan_for_env` loads `entries` once itself, then calls
+    `_machine_key_for_display` which loads its *own* copy via a second
+    `load_machines_yaml` call. A naive single `return_value` mock lets that
+    inner call also resolve the hostname, so `entries.get(key)` would already
+    succeed before this function's own fallback loop ever runs. Make the
+    inner (second) `load_machines_yaml` call fail -- so `_machine_key_for_display`
+    returns the name unchanged -- forcing this function's own hostname match
+    to actually execute."""
     entries = {
         "atlas-core": _entry(
             "atlas-core",
@@ -57,7 +69,9 @@ def test_emit_remote_plan_for_env_resolves_by_hostname(tmp_path):
         ),
     }
     config = _fake_config(tmp_path)
-    with patch.object(cfg, "load_machines_yaml", return_value=entries), \
+    with patch.object(
+        cfg, "load_machines_yaml", side_effect=[entries, FileNotFoundError()]
+    ), \
          patch.object(cfg, "project_name", return_value="example-project"), \
          patch.object(rmc, "_emit_plan") as emit_plan:
         rc = rmc._emit_remote_plan_for_env(config, "CPC-FAKE-HOST1", "Win", [])
