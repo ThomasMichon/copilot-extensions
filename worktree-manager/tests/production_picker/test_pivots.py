@@ -872,6 +872,28 @@ def test_create_action_choice_field_requires_options(tmp_path):
 
 
 @pytest.mark.guard
+def test_create_action_rejects_blank_choice_options(tmp_path):
+    for bad_options in (["", "high"], ["  ", "high"], [""]):
+        with pytest.raises(pivots.ManifestError):
+            pivots.parse_manifest(
+                {"label": "M", "list": ["x"], "create_action": {
+                    "label": "New", "run": ["x"],
+                    "fields": [{"name": "priority", "type": "choice",
+                                "options": bad_options}],
+                }},
+                name="m", source_path="x")
+    # A fully valid options array still parses fine.
+    [p] = [pivots.parse_manifest(
+        {"label": "M", "list": ["x"], "create_action": {
+            "label": "New", "run": ["x"],
+            "fields": [{"name": "priority", "type": "multichoice",
+                        "options": ["low", "high"]}],
+        }},
+        name="m", source_path="x")]
+    assert p.create_action.fields[0]["options"] == ("low", "high")
+
+
+@pytest.mark.guard
 def test_create_action_field_requires_name(tmp_path):
     with pytest.raises(pivots.ManifestError):
         pivots.parse_manifest(

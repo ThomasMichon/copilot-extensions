@@ -160,6 +160,9 @@ def _rewrite_manifest_commands(
             if collection == "actions" and item.get("kind") in {"internal", "card"}:
                 continue
             rewrite(item, "run")
+    create_action = data.get("create_action")
+    if isinstance(create_action, dict) and "run" in create_action:
+        rewrite(create_action, "run")
     return data
 
 

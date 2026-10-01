@@ -671,6 +671,68 @@ def test_unattributed_action_target_is_validated(tmp_path):
     assert report.findings[0].reason == "missing-target"
 
 
+def test_unattributed_create_action_target_is_resolved(tmp_path):
+    # Mirrors test_unattributed_action_target_is_validated, but for the
+    # Phase B pivot-level `create_action.run` -- the materializer's rewriter
+    # must resolve/validate it exactly like a row-scoped action's `run`.
+    registry = tmp_path / "pivots"
+    registry.mkdir()
+    list_command = _command(tmp_path / "commands", name="list")
+    create_command = _command(tmp_path / "commands", name="create")
+    entry = registry / "operator.json"
+    entry.write_text(
+        json.dumps(
+            {
+                "label": "Operator",
+                "list": [str(list_command)],
+                "create_action": {
+                    "label": "New",
+                    "run": [str(create_command), "{field.title}"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = pivots.scan_pivot_registry(
+        registry,
+        materialize=False,
+        activation_report=ActivationReport(ScanAuthority.COMPLETE, {}),
+    )
+
+    [pivot] = report.pivots
+    assert pivot.create_action is not None
+    assert pivot.create_action.run == (str(create_command.resolve()), "{field.title}")
+
+
+def test_unattributed_create_action_missing_target_is_validated(tmp_path):
+    registry = tmp_path / "pivots"
+    registry.mkdir()
+    command = _command(tmp_path / "commands")
+    entry = registry / "operator.json"
+    entry.write_text(
+        json.dumps(
+            {
+                "label": "Operator",
+                "list": [str(command)],
+                "create_action": {
+                    "label": "New", "run": ["definitely-missing-create-command"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = pivots.scan_pivot_registry(
+        registry,
+        materialize=False,
+        activation_report=ActivationReport(ScanAuthority.COMPLETE, {}),
+    )
+
+    assert report.active_entries == {}
+    assert report.findings[0].reason == "missing-target"
+
+
 def test_superseded_v2_manifest_resolves_from_live_template(tmp_path):
     """A pre-existing on-disk file from before the pointer redesign (full
     baked content, schema_version 2) keeps working -- advisory, prunable,
