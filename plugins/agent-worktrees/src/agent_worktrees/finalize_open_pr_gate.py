@@ -181,6 +181,12 @@ def pr_merge_status(record: tracking.WorktreeRecord, repo) -> bool | None:
         if not head_sha:
             head_sha = (getattr(result, "head_sha", "") or "").strip()
             if not head_sha:
+                # Every registered provider (including Azure DevOps, whose
+                # observe_head() now delegates to its own get_pull()) can
+                # supply an authoritative live head here; get_pull() above
+                # should already have populated head_sha for providers that
+                # report it eagerly, so this is a defensive fallback rather
+                # than the only path.
                 try:
                     observed = provider.observe_head(
                         slug, int(number),

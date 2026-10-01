@@ -309,10 +309,13 @@ def _pr_claim_target(
         r"([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#([0-9]+)", (ref or "").strip(),
     )
     if short:
-        if (
-            configured_provider not in {"github", "gitea", "azure-devops"}
-            or (configured_provider != "github" and not api_base)
-        ):
+        # The authority-less `owner/repo#N` shorthand is GitHub-only (see
+        # sweep.py's _GH_PR_SHORT grammar comment) -- Gitea and Azure DevOps
+        # claims always carry a full authority-bearing URL. Recognizing the
+        # shorthand for those providers would let a legacy slug/number be
+        # re-queried against a different service if the configured provider
+        # ever changes, deleting an unrelated obligation.
+        if configured_provider != "github":
             return None
         return configured_provider, short.group(1), int(short.group(2)), api_base
 

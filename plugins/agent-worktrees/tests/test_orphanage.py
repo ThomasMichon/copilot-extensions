@@ -244,6 +244,22 @@ def test_pr_claim_target_resolves_configured_gitea_and_azure_devops():
     ) is None
 
 
+def test_pr_claim_target_rejects_shorthand_for_non_github_providers():
+    # owner/repo#N is a GitHub-only grammar (sweep.py's _GH_PR_SHORT); Gitea
+    # and Azure DevOps claims always carry a full authority-bearing URL.
+    # Recognizing the shorthand there would let a legacy slug/number be
+    # re-queried against a different service if the provider ever changes.
+    gitea = types.SimpleNamespace(
+        provider="gitea", api_base="https://forge.example/gitea",
+    )
+    assert cleanup._pr_claim_target("owner/project#12", gitea) is None
+
+    ado = types.SimpleNamespace(
+        provider="azure-devops", api_base="https://dev.azure.com/acme",
+    )
+    assert cleanup._pr_claim_target("owner/project#34", ado) is None
+
+
 @pytest.mark.parametrize(
     ("provider", "api_base", "ref"),
     [
