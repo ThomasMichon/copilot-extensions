@@ -42,9 +42,18 @@ def transitive_obligations(
     _visited: set[tuple[str, str, str]] | None = None,
     _path: tuple[str, ...] = (),
 ) -> tuple[list[dict], list[dict]]:
-    """Recursively collect every unsettled, non-``worktree``-kind resource
+    """Recursively collect every unsettled, non-``session``-kind resource
     claim anywhere in ``worktree_id``'s subtree (itself + every worktree it
     created, transitively via its ``worktree``-kind claims).
+
+    An active ``worktree``-kind claim is itself included in the result (it
+    means that child has not finalized yet, which is exactly what still
+    blocks the parent's own finalize per the obligation gate) -- descent
+    reports what the CHILD additionally owes on top of that, it never
+    REPLACES reporting the edge itself. Only ``session``-kind claims are
+    excluded, mirroring ``finalize._assert_obligations_settled``'s own
+    exclusion (advisory-only; a normally-running worktree always carries an
+    active one for its own live session).
 
     Returns ``(obligations, unresolved)``. Each ``obligations`` entry carries
     ``path`` -- the worktree-id chain from the root (inclusive) to the
@@ -55,7 +64,11 @@ def transitive_obligations(
     mirror / ``claims sweep``), a vanished/unreadable record, or a cyclic
     edge (never expected from normal creation, but the walk must still
     terminate rather than recurse forever if the ledger is ever hand-edited
-    into one).
+    into one). Every ``unresolved`` entry always has a sibling ``obligations``
+    entry for the same claim (both come from the same active, unsettled
+    ``worktree``-kind claim) -- so an empty ``obligations`` list always
+    implies an empty ``unresolved`` list too; there is no path to reporting
+    "settled" while something is genuinely still unresolved underneath.
     """
     if _visited is None:
         _visited = set()
