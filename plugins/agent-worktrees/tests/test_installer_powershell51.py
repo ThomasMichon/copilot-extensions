@@ -378,26 +378,156 @@ def test_slot_clean_reports_failure_instead_of_silently_downgrading_signed_venv(
     assert 'Write-ServiceErr "Runtime slot still in use after retries' in deploy_fn
 
 
-def test_uv_venv_fallback_retries_transient_access_denied():
-    """A Windows file-handle race while uv renames the freshly-written
-    python.exe into place ('Access is denied' / 'failed to persist temporary
-    file', typically AV/EDR briefly holding the file open) must not abort the
-    whole plugin update on the first hit -- Deploy-Venv must retry the uv venv
-    attempt a bounded number of times, the same way it already retries the
-    signed-Python slot-clean race above. A non-transient uv failure (any
-    output not matching the transient signature) must still fail immediately
-    without burning the retry budget."""
+def test_deploy_venv_calls_uv_retry_helper():
+    """Deploy-Venv's uv fallback must go through the shared retry helper
+    (behavior is covered standalone by the Invoke-UvVenvWithRetry tests
+    below) rather than re-inlining its own ad hoc retry loop."""
     installer = INSTALLER.read_text(encoding="utf-8")
     deploy_fn = installer.split("function Deploy-Venv", 1)[1].split(
         "function Deploy-Wrappers", 1
     )[0]
 
-    assert "$transientPattern = 'Access is denied|failed to persist temporary file'" in deploy_fn
-    assert "for ($i = 0; $i -lt 3; $i++) {" in deploy_fn
-    # Bounded: stop retrying once it succeeds, or once the failure isn't the
-    # known-transient signature -- never retry a genuine/persistent failure.
-    assert "if ($uvResult.ExitCode -eq 0) { break }" in deploy_fn
-    assert "if ($uvResult.Output -notmatch $transientPattern) { break }" in deploy_fn
+    assert "$uvResult = Invoke-UvVenvWithRetry -VenvDir $VenvDir" in deploy_fn
+
+
+def _run_uv_retry_script(pwsh: str, tmp_path: Path, uv_body: str) -> subprocess.CompletedProcess:
+    """Extract Invoke-UvVenvWithRetry from the real installer via its AST and
+    execute it with a scripted fake `uv`, capturing both its result and how
+    many times `uv` was actually invoked -- real behavioral coverage of the
+    retry/backoff/attempt-limit logic, not just a source-text assertion."""
+    script = f"""
+$tokens = $null
+$errors = $null
+$source = Get-Content -LiteralPath $env:INSTALLER -Raw
+$ast = [System.Management.Automation.Language.Parser]::ParseInput(
+    $source, [ref]$tokens, [ref]$errors
+)
+$functionAst = $ast.Find({{
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'Invoke-UvVenvWithRetry'
+}}, $true)
+if (-not $functionAst) {{ throw 'Missing installer function: Invoke-UvVenvWithRetry' }}
+Invoke-Expression $functionAst.Extent.Text
+
+function Write-ServiceWarn {{ param($msg) }}
+function Invoke-NativeCapture {{ param($Script) & $Script }}
+function Start-Sleep {{ param($Milliseconds) }}  # skip real backoff delay in tests
+
+$script:callCount = 0
+function uv {{
+{uv_body}
+}}
+
+$result = Invoke-UvVenvWithRetry -VenvDir $env:FAKE_VENV_DIR
+[Console]::Out.Write("$($result.ExitCode)|$script:callCount")
+"""
+    return subprocess.run(
+        [pwsh, "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={**os.environ, "INSTALLER": str(INSTALLER), "FAKE_VENV_DIR": str(tmp_path)},
+        timeout=30,
+    )
+
+
+def test_uv_venv_retry_succeeds_without_retrying_on_first_try():
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        proc = _run_uv_retry_script(
+            pwsh,
+            Path(tmp),
+            """
+            $script:callCount++
+            [pscustomobject]@{ ExitCode = 0; Output = '' }
+            """,
+        )
+    assert proc.returncode == 0, proc.stderr
+    exit_code, call_count = proc.stdout.strip().split("|")
+    assert exit_code == "0"
+    assert call_count == "1"
+
+
+def test_uv_venv_retry_recovers_after_transient_access_denied():
+    """A transient Access Denied on the first attempt must be retried and
+    succeed on the second -- the whole update must not abort on one hit."""
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        proc = _run_uv_retry_script(
+            pwsh,
+            Path(tmp),
+            """
+            $script:callCount++
+            if ($script:callCount -eq 1) {
+                [pscustomobject]@{ ExitCode = 1; Output = 'failed to persist temporary file: Access is denied. (os error 5)' }
+            } else {
+                [pscustomobject]@{ ExitCode = 0; Output = '' }
+            }
+            """,
+        )
+    assert proc.returncode == 0, proc.stderr
+    exit_code, call_count = proc.stdout.strip().split("|")
+    assert exit_code == "0"
+    assert call_count == "2"
+
+
+def test_uv_venv_retry_gives_up_after_three_attempts_on_persistent_transient_failure():
+    """A persistently-transient failure must not retry forever -- exactly 3
+    retry iterations (each iteration tries the version-constrained venv call,
+    then the unconstrained fallback, so 6 total `uv` invocations here), then
+    surface the last failure."""
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        proc = _run_uv_retry_script(
+            pwsh,
+            Path(tmp),
+            """
+            $script:callCount++
+            [pscustomobject]@{ ExitCode = 1; Output = 'Access is denied. (os error 5)' }
+            """,
+        )
+    assert proc.returncode == 0, proc.stderr
+    exit_code, call_count = proc.stdout.strip().split("|")
+    assert exit_code == "1"
+    assert call_count == "6"
+
+
+def test_uv_venv_retry_does_not_retry_non_transient_failure():
+    """A non-transient failure (e.g. uv missing/misconfigured) must fail
+    immediately after the first retry iteration (version-constrained call
+    plus its unconstrained fallback -- 2 total `uv` invocations) -- never
+    burn the rest of the retry budget on a genuine, persistent error."""
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        proc = _run_uv_retry_script(
+            pwsh,
+            Path(tmp),
+            """
+            $script:callCount++
+            [pscustomobject]@{ ExitCode = 1; Output = 'error: no such command: venv' }
+            """,
+        )
+    assert proc.returncode == 0, proc.stderr
+    exit_code, call_count = proc.stdout.strip().split("|")
+    assert exit_code == "1"
+    assert call_count == "2"
 
 
 def test_early_installer_utilities_are_powershell_51_safe_ascii():

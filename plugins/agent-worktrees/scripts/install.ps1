@@ -2021,6 +2021,40 @@ function Get-SignedBasePython {
     return $null
 }
 
+function Invoke-UvVenvWithRetry {
+    <#
+    Create a venv via `uv` at $VenvDir, retrying a bounded number of times
+    past the transient Windows file-handle race ("Access is denied" /
+    "failed to persist temporary file" while uv renames the freshly-written
+    python.exe into place -- typically AV/EDR real-time scanning briefly
+    holding the file open), mirroring the signed-Python slot-clean retry in
+    Deploy-Venv above. Only that transient-signature failure is retried; any
+    other failure (e.g. uv missing/misconfigured) surfaces immediately
+    without burning the retry budget. Returns the final Invoke-NativeCapture
+    result (success or the last failure).
+    #>
+    param([Parameter(Mandatory)][string]$VenvDir)
+
+    $transientPattern = 'Access is denied|failed to persist temporary file'
+    $uvResult = $null
+    for ($i = 0; $i -lt 3; $i++) {
+        $args_ = @('venv', $VenvDir, '--python', '3.11', '--allow-existing')
+        $uvResult = Invoke-NativeCapture { & uv @args_ }
+        if ($uvResult.ExitCode -ne 0) {
+            # Fallback: try without version constraint
+            $args_ = @('venv', $VenvDir, '--allow-existing')
+            $uvResult = Invoke-NativeCapture { & uv @args_ }
+        }
+        if ($uvResult.ExitCode -eq 0) { break }
+        if ($uvResult.Output -notmatch $transientPattern) { break }
+        if ($i -lt 2) {
+            Write-ServiceWarn "uv venv creation hit a transient file-lock error -- retrying ($($i + 1)/3)..."
+            Start-Sleep -Milliseconds 750
+        }
+    }
+    return $uvResult
+}
+
 function Deploy-Venv {
     <# Create venv and install pyyaml via uv. #>
 
@@ -2085,31 +2119,7 @@ function Deploy-Venv {
             $prevLoc = Get-Location
             Set-Location "$env:SystemDrive\"
             try {
-                # uv's venv creation can transiently fail with "Access is
-                # denied" / "failed to persist temporary file" while renaming
-                # the freshly-written python.exe into place -- a Windows
-                # file-handle race (AV/EDR real-time scan momentarily holding
-                # the file open), not a real, persistent failure. Retry a
-                # handful of times with a short backoff before giving up,
-                # mirroring the signed-Python slot-clean retry above; only the
-                # transient-signature errors are retried so a genuine failure
-                # (e.g. uv missing/misconfigured) still surfaces immediately.
-                $transientPattern = 'Access is denied|failed to persist temporary file'
-                for ($i = 0; $i -lt 3; $i++) {
-                    $args_ = @('venv', $VenvDir, '--python', '3.11', '--allow-existing')
-                    $uvResult = Invoke-NativeCapture { & uv @args_ }
-                    if ($uvResult.ExitCode -ne 0) {
-                        # Fallback: try without version constraint
-                        $args_ = @('venv', $VenvDir, '--allow-existing')
-                        $uvResult = Invoke-NativeCapture { & uv @args_ }
-                    }
-                    if ($uvResult.ExitCode -eq 0) { break }
-                    if ($uvResult.Output -notmatch $transientPattern) { break }
-                    if ($i -lt 2) {
-                        Write-ServiceWarn "uv venv creation hit a transient file-lock error -- retrying ($($i + 1)/3)..."
-                        Start-Sleep -Milliseconds 750
-                    }
-                }
+                $uvResult = Invoke-UvVenvWithRetry -VenvDir $VenvDir
             } finally {
                 Set-Location $prevLoc
             }
