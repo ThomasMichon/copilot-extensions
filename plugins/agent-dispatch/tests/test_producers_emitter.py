@@ -542,3 +542,248 @@ def test_serve_rejects_a_zero_exit_payload_missing_the_held_key(tmp_path):
     )
 
     assert ticks[0]["error"] == "emitter tick produced no valid JSON result (exit 0)"
+
+
+# --- emitter-command-receipts ------------------------------------------------
+
+
+def test_run_tick_writes_receipts_keyed_by_dedup_key(tmp_path, monkeypatch):
+    """A ``task_output=json`` tick that creates tasks durably records one
+    receipt per task, keyed by the same ``dedup_key`` it emitted, readable by
+    ``read_receipts`` on a LATER call -- not just observed in the instant of
+    creation and then lost."""
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    client = FakeClient()
+
+    def runner(_command, **_kwargs):
+        return SimpleNamespace(
+            returncode=0,
+            stdout=(
+                '[{"title": "range 1", "dedup_key": "range:1"}, '
+                '{"title": "range 2", "dedup_key": "range:2"}]'
+            ),
+        )
+
+    emitter.run_tick(
+        client,
+        _spec(task_output="json"),
+        holder="host-a",
+        runner=runner,
+        clock=lambda: 100.0,
+    )
+
+    result = emitter.read_receipts("review-inbox")
+    assert result["cursor"] == 2
+    by_key = {r["dedup_key"]: r["task_id"] for r in result["receipts"]}
+    assert by_key == {"range:1": "t-1", "range:2": "t-2"}
+
+
+def test_read_receipts_since_cursor_returns_only_new_rows(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    client = FakeClient()
+
+    def runner(_command, **_kwargs):
+        return SimpleNamespace(
+            returncode=0, stdout='[{"title": "range 1", "dedup_key": "range:1"}]',
+        )
+
+    emitter.run_tick(
+        client, _spec(task_output="json"), holder="host-a", runner=runner,
+        clock=lambda: 1.0,
+    )
+    first = emitter.read_receipts("review-inbox")
+    assert first["cursor"] == 1
+
+    def runner2(_command, **_kwargs):
+        return SimpleNamespace(
+            returncode=0, stdout='[{"title": "range 2", "dedup_key": "range:2"}]',
+        )
+
+    emitter.run_tick(
+        client, _spec(task_output="json"), holder="host-a", runner=runner2,
+        clock=lambda: 2.0,
+    )
+
+    new_only = emitter.read_receipts("review-inbox", since=first["cursor"])
+    assert [r["dedup_key"] for r in new_only["receipts"]] == ["range:2"]
+    assert new_only["cursor"] == 2
+
+    everything = emitter.read_receipts("review-inbox")
+    assert len(everything["receipts"]) == 2
+
+
+def test_dedup_colliding_task_records_the_existing_task_id(tmp_path, monkeypatch):
+    """A re-emitted ``dedup_key`` that collides with an already-existing task
+    must record the EXISTING task's id in its receipt, not a phantom new one
+    -- ``FakeClient.create`` always mints a fresh id, so this test stands in
+    for the coordinator's own dedup-collide behavior by returning the SAME id
+    for a repeated ``dedup_key``."""
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+
+    class DedupingClient(FakeClient):
+        def __init__(self):
+            super().__init__()
+            self._by_key: dict[str, str] = {}
+
+        def create(self, title, **kwargs):
+            key = kwargs.get("dedup_key")
+            if key in self._by_key:
+                task = {"id": self._by_key[key], "title": title, **kwargs}
+            else:
+                task = super().create(title, **kwargs)
+                self._by_key[key] = task["id"]
+            return task
+
+    client = DedupingClient()
+
+    def runner(_command, **_kwargs):
+        return SimpleNamespace(
+            returncode=0, stdout='[{"title": "range 1", "dedup_key": "range:1"}]',
+        )
+
+    emitter.run_tick(
+        client, _spec(task_output="json"), holder="host-a", runner=runner,
+        clock=lambda: 1.0,
+    )
+    emitter.run_tick(
+        client, _spec(task_output="json"), holder="host-a", runner=runner,
+        clock=lambda: 2.0,
+    )
+
+    result = emitter.read_receipts("review-inbox")
+    task_ids = {r["task_id"] for r in result["receipts"]}
+    assert task_ids == {"t-1"}
+    assert len(result["receipts"]) == 2
+
+
+def test_run_tick_exposes_receipts_path_in_command_env(tmp_path, monkeypatch):
+    """The declared command's own subprocess receives the receipts path via
+    env, so a domain command can read its own prior tick's receipts directly
+    with no CLI round trip."""
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    client = FakeClient()
+    seen_env: dict = {}
+
+    def runner(_command, **kwargs):
+        seen_env.update(kwargs.get("env") or {})
+        return SimpleNamespace(returncode=0, stdout="[]")
+
+    emitter.run_tick(
+        client, _spec(task_output="json"), holder="host-a", runner=runner,
+    )
+
+    assert seen_env[emitter.RECEIPTS_PATH_ENV] == str(
+        emitter.receipts_path("review-inbox")
+    )
+
+
+def test_run_side_load_writes_to_the_same_receipts_sink(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        emitter, "no_window_kwargs", lambda: {"creationflags": 0x08000000}
+    )
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    client = FakeClient()
+    registration = {
+        "id": "review-inbox-reg",
+        "kind": "emitter",
+        "spec": {
+            "id": "review-inbox",
+            "command": ["review-emitter", "tick"],
+            "interval_seconds": 60,
+            "task_output": "json",
+            "side_load": {"command": ["review-emitter", "side-load", "{change_ref}"]},
+        },
+    }
+
+    def runner(_command, **_kwargs):
+        return SimpleNamespace(
+            returncode=0, stdout='{"title": "pr 42", "dedup_key": "pr:42"}',
+        )
+
+    emitter.run_side_load(client, registration, "owner/name#42", runner=runner)
+
+    result = emitter.read_receipts("review-inbox")
+    assert [r["dedup_key"] for r in result["receipts"]] == ["pr:42"]
+
+
+def test_receipts_log_is_bounded_under_sustained_emission(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+
+    max_receipts = 5
+    for n in range(max_receipts + 3):
+        emitter._append_receipts(
+            "review-inbox",
+            [{"id": f"t-{n}", "dedup_key": f"k:{n}"}],
+            clock=lambda n=n: float(n),
+            max_receipts=max_receipts,
+        )
+
+    result = emitter.read_receipts("review-inbox")
+    assert len(result["receipts"]) == max_receipts
+    # The oldest records were trimmed; the newest survive.
+    assert result["receipts"][-1]["dedup_key"] == f"k:{max_receipts + 2}"
+    assert result["receipts"][0]["dedup_key"] == "k:3"
+
+
+def test_read_receipts_reports_gap_when_cursor_predates_a_trim(tmp_path, monkeypatch):
+    """A cursor taken BEFORE receipts between it and the oldest retained
+    record were trimmed away must be flagged, not silently treated as a
+    clean "nothing new" read -- the caller has an incomplete handoff."""
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    for n in range(3):
+        emitter._append_receipts(
+            "review-inbox", [{"id": f"t-{n}", "dedup_key": f"k:{n}"}],
+            clock=lambda n=n: float(n), max_receipts=100,
+        )
+    cursor = emitter.read_receipts("review-inbox")["cursor"]
+    assert cursor == 3
+
+    for n in range(3, 10):
+        emitter._append_receipts(
+            "review-inbox", [{"id": f"t-{n}", "dedup_key": f"k:{n}"}],
+            clock=lambda n=n: float(n), max_receipts=5,
+        )
+
+    # Records 4-5 existed and were trimmed before this cursor consumed them
+    # -- the read must say so, not quietly return 6-10 as if it were complete.
+    stale_read = emitter.read_receipts("review-inbox", since=cursor)
+    assert stale_read["gap"] is True
+    assert all(r["seq"] > cursor for r in stale_read["receipts"])
+
+
+def test_read_receipts_reports_no_gap_when_cursor_is_current(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    for n in range(3):
+        emitter._append_receipts(
+            "review-inbox", [{"id": f"t-{n}", "dedup_key": f"k:{n}"}],
+            clock=lambda n=n: float(n), max_receipts=100,
+        )
+    cursor = emitter.read_receipts("review-inbox")["cursor"]
+
+    emitter._append_receipts(
+        "review-inbox", [{"id": "t-3", "dedup_key": "k:3"}],
+        clock=lambda: 3.0, max_receipts=100,
+    )
+
+    fresh_read = emitter.read_receipts("review-inbox", since=cursor)
+    assert fresh_read["gap"] is False
+    assert [r["dedup_key"] for r in fresh_read["receipts"]] == ["k:3"]
+
+
+def test_append_receipts_serializes_concurrent_writers(tmp_path, monkeypatch):
+    """Two 'overlapping' writers (a periodic tick and an on-demand side-load,
+    modeled here as two direct ``_append_receipts`` calls) must never choose
+    the same ``seq`` or clobber each other's record -- the receipts
+    transaction is locked, not a bare unlocked read-modify-write."""
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+
+    for n in range(20):
+        emitter._append_receipts(
+            "review-inbox", [{"id": f"t-{n}", "dedup_key": f"k:{n}"}],
+            clock=lambda n=n: float(n), max_receipts=1000,
+        )
+
+    result = emitter.read_receipts("review-inbox")
+    seqs = [r["seq"] for r in result["receipts"]]
+    assert seqs == list(range(1, 21)), "no duplicate/skipped seq under serialized writes"
+    assert len({r["dedup_key"] for r in result["receipts"]}) == 20

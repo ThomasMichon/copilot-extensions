@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .loop_commands import _resolve_cli_module
+from .registrations import RegistrationKind
 
 if TYPE_CHECKING:
     from .registrar import ProfileDeclaration
@@ -37,8 +38,27 @@ def _reject_worktree_checkout_as_repo_root(repo_root: Path) -> None:
 
 
 def _declaration_summary(decl: ProfileDeclaration) -> dict[str, Any]:
-    """Return a JSON-friendly summary of a discovered declaration."""
+    """Return a JSON-friendly summary of a discovered declaration.
+
+    A ``supervised-lane`` declaration summarizes through its pool-profile
+    fields (``body``/``concurrency``/``labels``). Any other kind
+    (``evaluator``, ``emitter``, ``schedule``, ``plugin-companion``) carries
+    its real identity in ``kind``/``spec`` instead, and is summarized through
+    those fields plus its effective filters.
+    """
     ef = decl.effective_filters()
+    filters = {
+        "permit": {dim: sorted(vals) for dim, vals in ef.permit.items()},
+        "reject": {dim: sorted(vals) for dim, vals in ef.reject.items()},
+    }
+    if decl.kind != RegistrationKind.SUPERVISED_LANE:
+        return {
+            "name": decl.name,
+            "owner": decl.owner,
+            "kind": decl.kind,
+            "spec": dict(decl.spec),
+            "filters": filters,
+        }
     return {
         "name": decl.name,
         "owner": decl.owner,
@@ -47,10 +67,7 @@ def _declaration_summary(decl: ProfileDeclaration) -> dict[str, Any]:
         "concurrency": decl.concurrency,
         "max_active_processes": decl.concurrency,
         "body": {"type": decl.body.type, "agent": decl.body.agent},
-        "filters": {
-            "permit": {dim: sorted(vals) for dim, vals in ef.permit.items()},
-            "reject": {dim: sorted(vals) for dim, vals in ef.reject.items()},
-        },
+        "filters": filters,
     }
 
 

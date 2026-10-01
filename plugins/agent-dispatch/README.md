@@ -946,6 +946,37 @@ branch code by default, and any sandboxed test or `land=self` permission is an
 explicit repository policy. An identity that cannot approve or land records a
 visible blocked/terminal outcome instead of retrying indefinitely.
 
+### Emitter command receipts (`agent-dispatch emitter receipts`)
+
+A `task_output=json` command-emitter authors tasks on every tick, but the
+resulting ids are otherwise visible for exactly that tick and then gone. A
+durable **receipts** log records each created task's id keyed by the same
+`dedup_key` the command emitted, readable on a **later** invocation -- so a
+domain producer (one with its own backing state: a carved reservation, a
+tracked work item) can learn which dispatch task its own emitted description
+became, and close its own transaction (link the id, stop re-offering the
+same work) without inventing a per-domain polling reconciliation.
+
+```bash
+agent-dispatch emitter receipts <emitter-id> [--since <cursor>]
+```
+
+Returns `{"receipts": [...], "cursor": N}` -- each receipt is
+`{"seq", "ts", "tick_id", "dedup_key", "task_id", "status"}`. Pass the
+returned `cursor` back as `--since` on the next call to read only new
+receipts; `since` defaults to 0 (everything recorded so far). The log is
+bounded (oldest records trimmed once it exceeds a cap) and `seq` is stable
+across a trim -- it is never reused or shifted, so a cursor from before a
+trim still reads correctly after one.
+
+The declared command's own subprocess also receives the receipts path
+directly via the `AGENT_DISPATCH_EMITTER_RECEIPTS_PATH` environment
+variable, so it can read its own prior tick's receipts with no CLI round
+trip. Both the `tick`/`serve` path and the on-demand `side-load` path write
+to the identical sink, keyed by the emitter's declared `id` (not by its spec
+file path -- a side-loaded emitter's spec lives only in a coordinator
+registration, with no local file to sit beside).
+
 ### Driving a recipe loop (`agent-dispatch recipes drive`)
 
 A recipe declares the *shape* of a loop; the **driver** is the small state machine
