@@ -4,6 +4,9 @@ import argparse
 import asyncio
 import json
 import os
+import subprocess
+import sys
+import textwrap
 import types
 from pathlib import Path
 
@@ -401,6 +404,97 @@ def test_stop_hold_mux_error_still_stops_releases_and_deregisters(
     assert any("tmux kill-session" in command for command in seams.remote)
     assert seams.release == [("anchor-repo@devbox", None)]
     assert seams.deregister == ["sid-42"]
+
+
+def test_stop_keeper_lock_timeout_still_releases_and_deregisters(
+    tmp_path: Path, monkeypatch, capsys
+):
+    store = detach.KeeperStore(tmp_path)
+    monkeypatch.setattr(detach, "_STORE", store)
+    monkeypatch.setattr(
+        detach,
+        "_holds",
+        lambda: shared_keeper_holds.KeeperHoldStore(
+            store,
+            protocol=detach._KEEPER_PROTOCOL,
+            lock_timeout=0.05,
+            lock_poll=0.01,
+        ),
+    )
+    monkeypatch.setattr(detach, "_ssh_config", lambda target: object())
+    monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: None)
+    calls = types.SimpleNamespace(remote=[], release=[], deregister=[])
+    store.write(
+        "devbox",
+        {
+            "keeper_protocol": 2,
+            "pid": 1000,
+            "target": "devbox",
+            "venue_port": 41234,
+            "holds": {
+                "anchor-repo@devbox": {"mux": "wt-anchor-repo", "updated_at": 1.0},
+            },
+        },
+    )
+
+    def remote(_cfg, command, *, timeout=60.0):
+        calls.remote.append(command)
+        if "tmux kill-session" in command:
+            return 0, "STOPPED\n", ""
+        return 0, "", ""
+
+    monkeypatch.setattr(detach, "_remote", remote)
+    monkeypatch.setattr(
+        "venue_copilot.live_session_for",
+        lambda handle: {"session_id": "sid-42", "venue": {"target": "devbox"}},
+    )
+    monkeypatch.setattr(
+        "venue_copilot.detached.release_cli_mode",
+        lambda scope, reservation_id=None: calls.release.append((scope, reservation_id)) or 1,
+    )
+    monkeypatch.setattr(
+        "venue_copilot.detached.deregister_live_session",
+        lambda sid: calls.deregister.append(sid) or True,
+    )
+    holder = tmp_path / "hold_keeper_lock.py"
+    holder.write_text(
+        textwrap.dedent(
+            """\
+            import sys
+            import time
+            from pathlib import Path
+            from ssh_manager.forward_keeper import KeeperStore
+            from ssh_manager.keeper_holds import KeeperHoldStore
+
+            holds = KeeperHoldStore(KeeperStore(Path(sys.argv[1])), lock_timeout=1.0, lock_poll=0.01)
+            with holds.lock("devbox"):
+                print("READY", flush=True)
+                time.sleep(60)
+            """
+        ),
+        encoding="utf-8",
+    )
+    proc = subprocess.Popen(
+        [sys.executable, str(holder), str(tmp_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert proc.stdout is not None
+        assert proc.stdout.readline().strip() == "READY"
+
+        assert detach.cmd_stop(_args(stop=True, detach=False)) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
+
+    captured = capsys.readouterr()
+    assert "[WARN] could not update the forward keeper" in captured.err
+    assert any("tmux kill-session" in command for command in calls.remote)
+    assert calls.release == [("anchor-repo@devbox", None)]
+    assert calls.deregister == ["sid-42"]
 
 
 def test_workspace_resolution_order_prefers_explicit_then_host_config(tmp_path: Path):

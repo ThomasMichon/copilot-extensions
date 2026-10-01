@@ -13,14 +13,13 @@ import logging
 import os
 import subprocess
 import time
-import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from .forward_keeper import KeeperStore
-from .locks import pid_alive, process_identity
+from .locks import process_identity
 
 ProbeVerdict = bool | None
 HoldProbe = Callable[[str], ProbeVerdict]
@@ -30,6 +29,7 @@ DEFAULT_HOLD_STARTUP_GRACE = 300.0
 DEFAULT_UNKNOWN_HOLD_GRACE = 1800.0
 DEFAULT_LOCK_TIMEOUT = 10.0
 DEFAULT_LOCK_POLL = 0.05
+_WIN_LOCK_OFFSET = 1 << 30
 log = logging.getLogger("ssh-manager.keeper_holds")
 
 
@@ -74,92 +74,84 @@ class KeeperHoldStore:
     def lock(self, key: str) -> Iterator[None]:
         self.store.state_dir.mkdir(parents=True, exist_ok=True)
         lock = self.store.state_path(key).with_suffix(".lock")
-        owner = {
-            "pid": os.getpid(),
-            "identity": process_identity(os.getpid()),
-            "token": uuid.uuid4().hex,
-            "created_at": time.time(),
-        }
+        handle = None
         deadline = time.monotonic() + self.lock_timeout
         while True:
             try:
-                self.publish_lock(lock, owner)
+                handle = self.open_lock(lock)
                 break
-            except (FileExistsError, PermissionError):
+            except OSError:
                 if time.monotonic() >= deadline:
-                    if self.reclaim_lock(lock):
-                        continue
                     raise RuntimeError("Could not acquire forward-keeper state lock") from None
                 time.sleep(self.lock_poll)
         try:
             yield
         finally:
-            self.release_lock(lock, owner)
+            self.close_lock(handle)
 
-    def publish_lock(self, lock: Path, owner: dict[str, Any]) -> None:
-        tmp = lock.with_name(f".{lock.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    def open_lock(self, lock: Path):
+        fd = os.open(str(lock), os.O_RDWR | os.O_CREAT, 0o644)
+        handle = os.fdopen(fd, "r+", encoding="utf-8")
         try:
-            tmp.write_text(json.dumps(owner), encoding="utf-8")
-            os.link(tmp, lock)
-        finally:
+            self.acquire_os_lock(handle)
+        except OSError:
             try:
-                tmp.unlink(missing_ok=True)
+                handle.close()
             except OSError:
                 pass
+            raise
+        self.write_lock_owner(handle)
+        return handle
 
-    def reclaim_lock(self, lock: Path) -> bool:
-        guard = lock.with_name(f".{lock.name}.reclaim")
+    def acquire_os_lock(self, handle) -> None:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(_WIN_LOCK_OFFSET)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            handle.seek(0)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def release_os_lock(self, handle) -> None:
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                handle.seek(_WIN_LOCK_OFFSET)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+
+    def write_lock_owner(self, handle) -> None:
         owner = {
             "pid": os.getpid(),
             "identity": process_identity(os.getpid()),
-            "token": uuid.uuid4().hex,
             "created_at": time.time(),
         }
         try:
-            self.publish_lock(guard, owner)
-        except (FileExistsError, PermissionError):
-            if self.lock_owner_dead(guard) and self.unlink_lock(guard):
-                return True
-            return False
-        try:
-            # Serialize stale-lock deletion and re-check while guarded so two
-            # reclaimers cannot both remove a fresh lock published by the winner.
-            return self.lock_owner_dead(lock) and self.unlink_lock(lock)
-        finally:
-            self.release_lock(guard, owner)
+            handle.seek(0)
+            handle.truncate()
+            json.dump(owner, handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        except OSError:
+            pass
 
-    def lock_owner_dead(self, lock: Path) -> bool:
-        try:
-            raw = json.loads(lock.read_text(encoding="utf-8"))
-            pid = int(raw.get("pid") or 0)
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            try:
-                return time.time() - lock.stat().st_mtime >= self.lock_timeout
-            except OSError:
-                return False
-        identity = raw.get("identity")
-        if isinstance(identity, str) and identity:
-            return process_identity(pid) != identity
-        return not pid_alive(pid)
-
-    def release_lock(self, lock: Path, owner: dict[str, Any]) -> None:
-        try:
-            raw = json.loads(lock.read_text(encoding="utf-8"))
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+    def close_lock(self, handle) -> None:
+        if handle is None:
             return
-        if raw.get("token") == owner["token"]:
-            self.unlink_lock(lock)
-
-    def unlink_lock(self, lock: Path, attempts: int = 3) -> bool:
-        for attempt in range(max(1, attempts)):
-            try:
-                lock.unlink(missing_ok=True)
-                return True
-            except PermissionError:
-                if attempt + 1 >= max(1, attempts):
-                    return False
-                time.sleep(self.lock_poll)
-        return False
+        self.release_os_lock(handle)
+        try:
+            handle.close()
+        except OSError:
+            pass
 
     def read_holds(self, state: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
         if not state:

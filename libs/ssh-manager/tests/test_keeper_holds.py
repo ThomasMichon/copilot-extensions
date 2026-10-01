@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
-import threading
+import subprocess
+import sys
+import textwrap
+import time
 
 import pytest
 
@@ -164,19 +167,17 @@ def test_remove_self_state_preserves_new_holds(tmp_path, monkeypatch):
 
 def test_lock_treats_permission_error_as_contention(tmp_path, monkeypatch):
     holds = _holds(tmp_path)
-    import os
-
-    real_link = os.link
     attempts = 0
+    real_acquire = holds.acquire_os_lock
 
-    def flaky_link(*args, **kwargs):
+    def flaky_acquire(handle):
         nonlocal attempts
         attempts += 1
         if attempts == 1:
             raise PermissionError("pending delete")
-        return real_link(*args, **kwargs)
+        return real_acquire(handle)
 
-    monkeypatch.setattr("ssh_manager.keeper_holds.os.link", flaky_link)
+    monkeypatch.setattr(holds, "acquire_os_lock", flaky_acquire)
 
     with holds.lock("repo-1"):
         pass
@@ -195,110 +196,110 @@ def test_partial_lock_file_is_reclaimed_after_acquisition_window(tmp_path, monke
     monkeypatch.setattr("ssh_manager.keeper_holds.time.sleep", lambda delay: None)
 
     with holds.lock("repo-1"):
-        assert json.loads(lock.read_text(encoding="utf-8"))["token"]
+        assert json.loads(lock.read_text(encoding="utf-8"))["pid"]
 
 
-def test_two_reclaimers_do_not_steal_winners_live_lock(tmp_path, monkeypatch):
-    holds = _holds(tmp_path, lock_timeout=0.0, lock_poll=0.001)
-    lock = holds.state_path("repo-1").with_suffix(".lock")
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    lock.write_text(
-        json.dumps({"pid": 987654321, "identity": "dead-owner", "token": "stale"}),
+def test_os_lock_released_when_holder_process_dies(tmp_path):
+    script = tmp_path / "hold_lock.py"
+    script.write_text(
+        textwrap.dedent(
+            """\
+            import sys
+            import time
+            from pathlib import Path
+            from ssh_manager.forward_keeper import KeeperStore
+            from ssh_manager.keeper_holds import KeeperHoldStore
+
+            holds = KeeperHoldStore(KeeperStore(Path(sys.argv[1])), lock_timeout=1.0, lock_poll=0.01)
+            with holds.lock("repo-1"):
+                print("READY", flush=True)
+                time.sleep(60)
+            """
+        ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(
-        "ssh_manager.keeper_holds.process_identity",
-        lambda pid: "current-owner" if pid == __import__("os").getpid() else None,
+    proc = subprocess.Popen(
+        [sys.executable, str(script), str(tmp_path)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
-    entered: list[str] = []
-    errors: list[str] = []
-    start = threading.Barrier(2)
-    winner_entered = threading.Event()
-    loser_failed = threading.Event()
-    release_winner = threading.Event()
+    try:
+        assert proc.stdout is not None
+        assert proc.stdout.readline().strip() == "READY"
+        proc.kill()
+        proc.wait(timeout=5)
+        with _holds(tmp_path, lock_timeout=1.0, lock_poll=0.01).lock("repo-1"):
+            pass
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait(timeout=5)
 
-    def worker(name: str) -> None:
-        start.wait(timeout=2)
-        try:
+
+def test_two_process_contenders_never_both_hold_lock(tmp_path):
+    script = tmp_path / "contend_lock.py"
+    script.write_text(
+        textwrap.dedent(
+            """\
+            import sys
+            import time
+            from pathlib import Path
+            from ssh_manager.forward_keeper import KeeperStore
+            from ssh_manager.keeper_holds import KeeperHoldStore
+
+            root, active, overlap, name = sys.argv[1:]
+            holds = KeeperHoldStore(KeeperStore(Path(root)), lock_timeout=5.0, lock_poll=0.01)
             with holds.lock("repo-1"):
-                entered.append(name)
-                winner_entered.set()
-                release_winner.wait(timeout=2)
-        except RuntimeError:
-            errors.append(name)
-            loser_failed.set()
+                active_path = Path(active)
+                if active_path.exists():
+                    Path(overlap).write_text(name, encoding="utf-8")
+                active_path.write_text(name, encoding="utf-8")
+                print(f"ENTER {name}", flush=True)
+                time.sleep(0.25)
+                active_path.unlink(missing_ok=True)
+                print(f"EXIT {name}", flush=True)
+            """
+        ),
+        encoding="utf-8",
+    )
+    active = tmp_path / "active"
+    overlap = tmp_path / "overlap"
+    procs: list[subprocess.Popen[str]] = []
+    with _holds(tmp_path, lock_timeout=1.0, lock_poll=0.01).lock("repo-1"):
+        for name in ("a", "b"):
+            procs.append(
+                subprocess.Popen(
+                    [sys.executable, str(script), str(tmp_path), str(active), str(overlap), name],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+            )
+        time.sleep(0.25)
+    outputs = [proc.communicate(timeout=10) for proc in procs]
 
-    threads = [threading.Thread(target=worker, args=(name,)) for name in ("a", "b")]
-    for thread in threads:
-        thread.start()
-    assert winner_entered.wait(timeout=2)
-    assert loser_failed.wait(timeout=2)
-    release_winner.set()
-    for thread in threads:
-        thread.join(timeout=2)
-
-    assert len(entered) == 1
-    assert len(errors) == 1
-
-
-def test_publish_lock_temp_cleanup_failure_does_not_lose_acquired_lock(tmp_path, monkeypatch):
-    holds = _holds(tmp_path)
-    real_unlink = type(holds.state_path("repo-1")).unlink
-    temp_unlinks = 0
-
-    def flaky_temp_unlink(self, *args, **kwargs):
-        nonlocal temp_unlinks
-        if self.name.endswith(".tmp"):
-            temp_unlinks += 1
-            raise PermissionError("scanner still holds temp file")
-        return real_unlink(self, *args, **kwargs)
-
-    monkeypatch.setattr(type(holds.state_path("repo-1")), "unlink", flaky_temp_unlink)
-
-    with holds.lock("repo-1"):
-        assert json.loads(holds.state_path("repo-1").with_suffix(".lock").read_text())["token"]
-
-    assert temp_unlinks == 1
+    assert [proc.returncode for proc in procs] == [0, 0]
+    assert not overlap.exists()
+    assert sorted(line for out, _err in outputs for line in out.splitlines()) == [
+        "ENTER a",
+        "ENTER b",
+        "EXIT a",
+        "EXIT b",
+    ]
 
 
-def test_lock_release_retries_permission_error(tmp_path, monkeypatch):
-    holds = _holds(tmp_path)
-    lock = holds.state_path("repo-1").with_suffix(".lock")
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    owner = {"pid": 123, "identity": None, "token": "owner"}
-    lock.write_text(json.dumps(owner), encoding="utf-8")
-    real_unlink = type(lock).unlink
-    attempts = 0
-
-    def flaky_unlink(self, *args, **kwargs):
-        nonlocal attempts
-        if self == lock:
-            attempts += 1
-            if attempts == 1:
-                raise PermissionError("pending delete")
-        return real_unlink(self, *args, **kwargs)
-
-    monkeypatch.setattr(type(lock), "unlink", flaky_unlink)
-
-    holds.release_lock(lock, owner)
-
-    assert attempts == 2
-    assert not lock.exists()
-
-
-def test_live_lock_owner_is_not_stolen(tmp_path, monkeypatch):
+def test_live_os_lock_owner_is_not_stolen(tmp_path, monkeypatch):
     holds = _holds(tmp_path, lock_timeout=0.0)
-    owner = {"pid": 123, "identity": "live", "token": "owner"}
-    lock = holds.state_path("repo-1").with_suffix(".lock")
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    lock.write_text(json.dumps(owner), encoding="utf-8")
-    monkeypatch.setattr("ssh_manager.keeper_holds.process_identity", lambda pid: "live")
+    monkeypatch.setattr(
+        holds,
+        "acquire_os_lock",
+        lambda _handle: (_ for _ in ()).throw(PermissionError("lock held")),
+    )
 
     with pytest.raises(RuntimeError, match="Could not acquire"):
         with holds.lock("repo-1"):
             pass
-
-    assert json.loads(lock.read_text(encoding="utf-8")) == owner
 
 
 def test_alive_or_fail_open_catches_lock_and_state_errors(tmp_path, monkeypatch):

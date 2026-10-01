@@ -997,18 +997,14 @@ def test_forward_keeper_self_remove_preserves_new_holds(tmp_path, monkeypatch):
     assert set(forward_keeper.read_state("repo-1")["holds"]) == {"new@repo-1"}
 
 
-def test_forward_keeper_lock_release_does_not_delete_another_owner(tmp_path, monkeypatch):
+def test_forward_keeper_lock_uses_persistent_os_lock_file(tmp_path, monkeypatch):
     monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
     lock = forward_keeper.state_path("repo-1").with_suffix(".lock")
 
     with forward_keeper._keeper_lock("repo-1"):
-        lock.write_text(
-            json.dumps({"pid": 123456, "identity": None, "token": "other"}),
-            encoding="utf-8",
-        )
+        assert json.loads(lock.read_text(encoding="utf-8"))["pid"]
 
-    assert json.loads(lock.read_text(encoding="utf-8"))["token"] == "other"
-    lock.unlink()
+    assert lock.exists()
 
 
 def test_forward_keeper_lock_treats_permission_error_as_contention(
@@ -1016,17 +1012,17 @@ def test_forward_keeper_lock_treats_permission_error_as_contention(
 ):
     monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
     monkeypatch.setattr(forward_keeper, "_LOCK_POLL", 0.0)
-    real_link = shared_keeper_holds.os.link
     attempts = 0
+    real_acquire = shared_keeper_holds.KeeperHoldStore.acquire_os_lock
 
-    def flaky_link(*args, **kwargs):
+    def flaky_acquire(self, handle):
         nonlocal attempts
         attempts += 1
         if attempts == 1:
             raise PermissionError("pending delete")
-        return real_link(*args, **kwargs)
+        return real_acquire(self, handle)
 
-    monkeypatch.setattr(shared_keeper_holds.os, "link", flaky_link)
+    monkeypatch.setattr(shared_keeper_holds.KeeperHoldStore, "acquire_os_lock", flaky_acquire)
 
     with forward_keeper._keeper_lock("repo-1"):
         pass
@@ -1034,49 +1030,19 @@ def test_forward_keeper_lock_treats_permission_error_as_contention(
     assert attempts == 2
 
 
-def test_forward_keeper_lock_release_retries_permission_error(
-    tmp_path, monkeypatch
-):
-    monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
-    monkeypatch.setattr(forward_keeper, "_LOCK_POLL", 0.0)
-    lock = forward_keeper.state_path("repo-1").with_suffix(".lock")
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    owner = {"pid": 123, "identity": None, "token": "owner"}
-    lock.write_text(json.dumps(owner), encoding="utf-8")
-    real_unlink = type(lock).unlink
-    attempts = 0
-
-    def flaky_unlink(self, *args, **kwargs):
-        nonlocal attempts
-        if self == lock:
-            attempts += 1
-            if attempts == 1:
-                raise PermissionError("pending delete")
-        return real_unlink(self, *args, **kwargs)
-
-    monkeypatch.setattr(type(lock), "unlink", flaky_unlink)
-
-    forward_keeper._release_lock(lock, owner)
-
-    assert attempts == 2
-    assert not lock.exists()
-
-
 def test_forward_keeper_live_lock_owner_is_not_stolen(tmp_path, monkeypatch):
     monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
     monkeypatch.setattr(forward_keeper, "_LOCK_TIMEOUT", 0.0)
     monkeypatch.setattr(forward_keeper, "_LOCK_POLL", 0.0)
-    owner = {"pid": 123, "identity": "live", "token": "owner"}
-    lock = forward_keeper.state_path("repo-1").with_suffix(".lock")
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    lock.write_text(json.dumps(owner), encoding="utf-8")
-    monkeypatch.setattr(shared_keeper_holds, "process_identity", lambda pid: "live")
+    monkeypatch.setattr(
+        shared_keeper_holds.KeeperHoldStore,
+        "acquire_os_lock",
+        lambda _self, _handle: (_ for _ in ()).throw(PermissionError("lock held")),
+    )
 
     with pytest.raises(RuntimeError, match="Could not acquire"):
         with forward_keeper._keeper_lock("repo-1"):
             pass
-
-    assert json.loads(lock.read_text(encoding="utf-8")) == owner
 
 
 def test_forward_keeper_exits_when_mux_is_gone(tmp_path, monkeypatch):

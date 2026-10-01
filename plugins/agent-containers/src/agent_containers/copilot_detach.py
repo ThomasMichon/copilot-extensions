@@ -279,15 +279,11 @@ class _ContainerAdapter:
     def stop_keeper(self) -> bool:
         from . import forward_keeper
 
-        try:
-            return forward_keeper.stop_keeper(
-                self.name,
-                hold_id=self.hold_id,
-                mux_alive=lambda held_mux: forward_keeper._mux_exists(self.ssh_config, held_mux),
-            )
-        except (RuntimeError, OSError) as exc:
-            print(f"[WARN] could not update the forward keeper: {exc}", file=sys.stderr)
-            return False
+        return forward_keeper.stop_keeper(
+            self.name,
+            hold_id=self.hold_id,
+            mux_alive=lambda held_mux: forward_keeper._mux_exists(self.ssh_config, held_mux),
+        )
 
     def attach_command(self, plan: dict[str, Any]) -> str:
         return f"agent-containers copilot {self.name}"

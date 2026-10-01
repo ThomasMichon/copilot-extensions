@@ -61,10 +61,6 @@ def _keeper_lock(name: str):
     return _holds().lock(name)
 
 
-def _release_lock(lock: Path, owner: dict[str, Any]) -> None:
-    _holds().release_lock(lock, owner)
-
-
 def _same_forward(
     state: dict[str, Any],
     *,

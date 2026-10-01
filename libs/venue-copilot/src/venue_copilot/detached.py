@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+import sys
 from typing import Any, Protocol
 
 from . import (
@@ -348,7 +349,11 @@ def stop_detached(
             error="could not verify the session stopped; nothing was released",
             detail=err,
         )
-    keeper_stopped = adapter.stop_keeper()
+    try:
+        keeper_stopped = adapter.stop_keeper()
+    except (RuntimeError, OSError) as exc:
+        print(f"[WARN] could not update the forward keeper: {exc}", file=sys.stderr)
+        keeper_stopped = False
     release_cli_mode(plan["scope_id"])
     deregistered = bool(session_id) and deregister_live_session(str(session_id))
     return 0, _payload(
