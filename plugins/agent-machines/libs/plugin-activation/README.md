@@ -33,19 +33,17 @@ live. It retains prior values when registry or source evidence is indeterminate
 and returns structured findings for missing, mismatched, or ambiguous evidence.
 Consumers decide how often to refresh and how to render findings.
 
-**In dev**, every consumer's `pyproject.toml` references this library through
-a `uv`-editable canonical pointer (`vendor-pointer-generalization` effort,
-Phase 1), so there is no per-plugin dev copy to keep in sync. **At release**,
-`tools/materialize_main.py` rewrites that pointer into a real, promoted copy
-at `plugins/<plugin>/libs/plugin-activation/` for each consumer -- non-
-editable, so a published plugin installs a self-contained source tree.
-`customizing-copilot`'s `installing-plugins` skill script resolves this
-library's `state.py` by reading its own local copy directly, without ever
-importing the `plugin_activation` package -- it has no `pyproject.toml` of
-its own, so it is not a `uv`-editable-convertible consumer at all. It keeps
-a `src-passthrough` `VENDOR_POINTER.json` pointer copy under
-`plugins/customizing-copilot/libs/plugin-activation/` (no real `src/` tree
-of its own): `tools/materialize_main.py` expands that pointer at release
-time exactly like any other, since it discovers pointer copies by scanning
-`plugins/*/libs/<lib>/VENDOR_POINTER.json` directly, independent of any
-consuming `pyproject.toml`.
+**In dev**, most consumers' `pyproject.toml` reference this library through a
+`uv`-editable canonical pointer (`vendor-pointer-generalization` effort,
+Phase 1), so there is no per-plugin dev copy to keep in sync. The two
+deliberate exceptions keep this full local copy instead:
+
+- `agent-worktrees`, so a staged non-editable install never depends on a
+  throwaway passthrough source tree; and
+- `customizing-copilot`, whose standalone `installing-plugins` skill script
+  resolves `state.py` directly by file path and has no consuming
+  `pyproject.toml` surface the `uv`-editable form could target.
+
+**At release**, `tools/materialize_main.py` rewrites any `uv`-editable
+consumers into the same real, promoted copy shape present here -- non-editable,
+so every published plugin installs a self-contained source tree.

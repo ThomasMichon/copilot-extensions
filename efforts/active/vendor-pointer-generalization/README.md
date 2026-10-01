@@ -624,28 +624,18 @@ shape before committing to a design)_
       never carries a live reference to a path that won't exist on the
       end-user's machine) — it does NOT yet exist, and blocks any real
       lib from safely completing this form's conversion until built.
-- [ ] **Retire the `src-passthrough` pointer kind — still open, but now for
-      ONE intentional consumer only.** `agent-worktrees`'s former pointer
-      copy is retired as of 2026-10-01 (full real vendored copy, issue
-      #4788), so the old "two blocked leftovers" framing no longer
-      applies. The only remaining real user is `customizing-copilot`'s
-      current structural exception: a pointer copy with no consuming
-      `pyproject.toml`, whose `installing-plugins/scripts/
-      plugin-activation.py` still resolves `state.py` by reading that
-      local pointer's own `source` field directly. Repo-wide retirement of
-      the pointer kind therefore **does not close yet** — doing so would
-      first require a separate replacement for that script's load path, not
-      another `agent-worktrees`-style conversion. Once genuinely
-      unblocked: remove
-      `--pointerize`'s src-passthrough writer, the generated-stub template,
-      and its containment tests from `sync-vendored-libs.py`; remove the
-      pointer-expansion loop `materialize_main.py`/`preview_release.py`
-      added for it (deliberate, reviewed removal — not a silent deletion,
-      per this repo's subtractive-change convention). Keep
-      `_resolve_within()`/`_escapes_root()`/`_find_symlink()` themselves
-      (the file-pointer kind still needs them, and the reference-rewrite
-      step above reuses `_escapes_root()` directly). Note the removal's
-      rationale in this effort's Journal (not just the commit message).
+- [x] **Retire the `src-passthrough` pointer kind.** Done, 2026-10-01
+      (**PR #4805**): converted `customizing-copilot`'s last real
+      `plugin-activation` holdout from a pointer copy to a full real
+      vendored tree, simplified `installing-plugins/scripts/
+      plugin-activation.py` to resolve that local `state.py` directly, and
+      removed the retired kind's writer/materialize support from
+      `sync-vendored-libs.py`, `materialize_main.py`, and
+      `preview_release.py`. **Kept** `_resolve_within()`/
+      `_escapes_root()`/`_find_symlink()` because the file-pointer kind
+      still needs them, and the reference-rewrite step above still reuses
+      `_escapes_root()` directly. The removal rationale is recorded in the
+      Journal entry below, not only in the commit message.
 - [x] Update `tools/preview_release.py` ("preview-promo") to perform the
       same copy-then-rewrite operation into its scratch preview copy
       (never the real tree) for a plugin using the reference form — its
@@ -3111,3 +3101,45 @@ _Pending._
   just needs the remaining plugins run through the same non-editable
   check already proven 4 times over. A future session should either close
   both here or scope them as tracked follow-ups.
+
+### 2026-10-01 — `customizing-copilot` `plugin-activation` converted to a full real copy; `src-passthrough` retired repo-wide
+
+- Landed the final real consumer conversion for this mechanism (**PR #4805**):
+  `plugins/customizing-copilot/libs/plugin-activation/` now matches the
+  full real vendored copy shape `agent-worktrees` adopted earlier instead of
+  carrying a `VENDOR_POINTER.json` passthrough stub. The standalone
+  `installing-plugins/scripts/plugin-activation.py` loader no longer reads a
+  pointer's `source` field at all; `_resolve_state_py()` now resolves the
+  vendored local `state.py` directly, which works the same way in `dev` and
+  in a materialized payload because this consumer never had a `pyproject.toml`
+  surface the `uv`-editable mechanism could target.
+- With that last holdout gone, the repo has **zero** live
+  `src-passthrough` `VENDOR_POINTER.json` users. Per the Plan's own removal
+  checklist, this leg then removed the retired kind's authoring/promote-time
+  surfaces:
+  - deleted `sync-vendored-libs.py`'s `--pointerize` writer path and the
+    generated stub template (`tools/passthrough_pointer_template.py`), plus
+    the writer-specific containment/regeneration tests; and
+  - deleted `materialize_main.py` / `preview_release.py`'s directory-pointer
+    expansion loop (`find_pointers`, `_materialize_one_pointer`, and the
+    preview-only pointer-copy refresh pass), leaving only the still-live
+    file-pointer and `uv`-editable / installer-engine / launch-wrapper
+    materializers.
+- **Explicitly kept** `_resolve_within()` / `_escapes_root()` /
+  `_find_symlink()`: the file-pointer mechanism still depends on them, and
+  the `uv`-editable reference rewrite continues to reuse `_escapes_root()`
+  directly. The trusted worktree-manager compatibility copy was left as a
+  legacy self-update reader for older payloads, but the current repo no
+  longer authors or promotes this pointer kind anywhere.
+- Reconfirmed the operator's main-branch invariant explicitly: `main` still
+  ships **only real local files**. The new `customizing-copilot` full copy is
+  committed directly on `dev`; `materialize_main.py` is now a no-op passthrough
+  for that tree, and a full-repo materialized snapshot confirmed the
+  `customizing-copilot/libs/plugin-activation/` payload is carried forward
+  byte-for-byte unchanged with no cross-folder reference, no pointer file, and
+  no `editable = true`.
+- Net checklist state after this leg: the long-open `src-passthrough`
+  retirement Plan item is now closed. The effort still is **not Done**:
+  the only remaining unchecked work is the separate non-editable top-level
+  suite proof already called out above (the Phase 1 twin checklist item plus
+  the Validation Plan item), which stays intentionally untouched by this leg.

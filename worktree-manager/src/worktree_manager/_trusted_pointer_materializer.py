@@ -1,12 +1,9 @@
 """Trusted, LOCALLY-DEFINED vendor-pointer materializer for self_install.py.
 
-This is a deliberate, hand-maintained COPY of the pointer-expansion core
-from ``tools/materialize_main.py`` (specifically ``find_pointers_in_libs_dir``,
-``materialize_libs_dir``, ``_materialize_one_pointer``, and their small
-helpers -- plus, for the `uv`-editable canonical-reference form,
-``materialize_uv_editable_ref_into`` and the ``find_uv_editable_refs``/
-``uv_sources_table_span`` helpers it shares with ``tools/uv_editable_ref.py``)
--- NOT a dynamic src-passthrough pointer, and NOT dynamically loaded from a
+This is a deliberate, hand-maintained COPY of the legacy directory-pointer
+compatibility logic and the still-live `uv`-editable canonical-reference
+expansion logic that originally shipped from ``tools/materialize_main.py`` --
+NOT a dynamic src-passthrough pointer, and NOT dynamically loaded from a
 fetched repository file.
 
 Why a real, static copy instead of the DRY mechanism this whole effort
@@ -22,16 +19,18 @@ already-trusted package, so it is compiled into the running installer
 itself; it only ever READS fetched content as DATA (canonical file
 bytes), never EXECUTES anything from the fetch.
 
-Keep this in sync BY HAND with ``tools/materialize_main.py`` when that
-module's pointer-expansion logic changes -- this file's whole point is to
-NOT be kept in sync via dynamic loading, so no import-time or runtime
-mechanism enforces agreement. What DOES catch a drift:
-``worktree-manager/tests/test_trusted_materializer_parity.py`` runs the
-same battery of scenarios through both implementations' shared
-``materialize_libs_dir()``/``find_pointers_in_libs_dir()`` API (in a full
-monorepo checkout) and fails if either one behaves differently for the
-same input -- a test-time parity guard, not a build/import-time one, so
-still run it after any hand-applied sync.
+Keep the still-shared `uv`-editable logic in sync BY HAND with
+``tools/materialize_main.py`` / ``tools/uv_editable_ref.py`` when that
+reference-rewrite behavior changes. The legacy directory-pointer path that
+only this trusted compatibility reader still carries is independently
+maintained here on purpose. This file's whole point is to NOT be kept in sync
+via dynamic loading, so no import-time or runtime mechanism enforces
+agreement. The shipped compatibility path is therefore covered directly by
+``worktree-manager/tests/test_trusted_pointer_materializer.py`` and the
+higher-level ``test_self_install.py`` scenarios whenever the legacy
+directory-pointer behavior changes, while
+``test_trusted_materializer_parity.py`` continues to guard the still-shared
+`uv`-editable rewrite logic against drift from the repo tooling copy.
 """
 from __future__ import annotations
 
