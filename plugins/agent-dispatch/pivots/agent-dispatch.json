@@ -3,6 +3,8 @@
   "label": "Tasks",
   "after": "Worktrees",
   "list": ["agent-dispatch-board", "--machine", "{machine}"],
+  "stream": true,
+  "subscribe": true,
   "entry": {
     "id": "id",
     "title": "title",
