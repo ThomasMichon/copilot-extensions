@@ -166,7 +166,8 @@ def seams(monkeypatch):
     monkeypatch.setattr(
         forward_keeper,
         "ensure_running",
-        lambda *a, **k: calls.keeper.append((a, k)) or {"started": True, "state": {"pid": 123}},
+        lambda *a, **k: calls.keeper.append((a, k))
+        or {"started": True, "hold_added": True, "state": {"pid": 123}},
     )
     monkeypatch.setattr(
         forward_keeper,
@@ -513,6 +514,15 @@ def test_forward_keeper_holds_share_one_container_forward(tmp_path, monkeypatch)
         )["started"]
         is False
     )
+    assert (
+        forward_keeper.ensure_running(
+            "repo-1",
+            venue_port=41234,
+            mux="wt-anchor-repo",
+            hold_id="anchor-repo@repo-1",
+        )["hold_added"]
+        is False
+    )
     out = forward_keeper.ensure_running(
         "repo-1",
         venue_port=41234,
@@ -521,6 +531,7 @@ def test_forward_keeper_holds_share_one_container_forward(tmp_path, monkeypatch)
         popen=lambda *a, **k: Proc(),
     )
     assert out["started"] is False
+    assert out["hold_added"] is True
     state = forward_keeper.read_state("repo-1")
     assert state["pid"] == 100
     assert set(state["holds"]) == {"anchor-repo@repo-1", "other@repo-1"}

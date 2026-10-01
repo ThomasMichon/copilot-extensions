@@ -133,6 +133,7 @@ def ensure_running(
     with holds.lock(name):
         existing = read_state(name) or {}
         current_holds = holds.read_holds(existing)
+        hold_added = hold_id not in current_holds
         current_holds = holds.refresh_hold(current_holds, hold_id, mux)
         can_reuse = (
             existing.get("keeper_protocol") == holds.protocol
@@ -147,7 +148,7 @@ def ensure_running(
         if can_reuse:
             state = holds.state_with_holds(existing, current_holds)
             _STORE.write(name, state)
-            return {"started": False, "state": state}
+            return {"started": False, "hold_added": hold_added, "state": state}
         if existing:
             _STORE.stop(name)
         argv = [
@@ -192,7 +193,7 @@ def ensure_running(
         latest_holds.update(current_holds)
         state = holds.state_with_holds({**state, "holds": latest_holds}, latest_holds)
         _STORE.write(name, state)
-        return {"started": True, "state": state}
+        return {"started": True, "hold_added": hold_added, "state": state}
 
 
 def stop_keeper(

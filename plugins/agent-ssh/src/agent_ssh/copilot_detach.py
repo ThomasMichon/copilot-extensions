@@ -412,6 +412,7 @@ def ensure_keeper(
     with holds_store.lock(_state_key(target)):
         state = read_keeper_state(target)
         holds = holds_store.read_holds(state)
+        hold_added = hold_id not in holds
         holds = holds_store.refresh_hold(holds, hold_id, hold_mux)
         if (
             state
@@ -422,7 +423,7 @@ def ensure_keeper(
         ):
             state = holds_store.state_with_holds(state, holds)
             _STORE.write(_state_key(target), state)
-            return {"started": False, "state": state}
+            return {"started": False, "hold_added": hold_added, "state": state}
         _STORE.stop(_state_key(target))
         argv = [
             windowless_python(),
@@ -461,7 +462,7 @@ def ensure_keeper(
         current_holds.update(holds)
         state = holds_store.state_with_holds({**state, "holds": current_holds}, current_holds)
         _write_keeper_state(target, state)
-        return {"started": True, "state": state}
+        return {"started": True, "hold_added": hold_added, "state": state}
 
 
 class _SshAdapter:

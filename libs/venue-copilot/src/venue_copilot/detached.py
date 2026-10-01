@@ -133,6 +133,14 @@ def _bridge_path_ok(adapter: DetachAdapter, port: int) -> bool:
     return False
 
 
+def _stop_keeper_best_effort(adapter: DetachAdapter) -> bool:
+    try:
+        return adapter.stop_keeper()
+    except (RuntimeError, OSError) as exc:
+        print(f"[WARN] could not update the forward keeper: {exc}", file=sys.stderr)
+        return False
+
+
 def launch_detached(
     adapter: DetachAdapter,
     plan: dict[str, Any],
@@ -182,7 +190,7 @@ def launch_detached(
             )
 
         keeper = adapter.ensure_keeper(venue_port=daemon_port, mux=plan["mux_session"])
-        keeper_hold_acquired = True
+        keeper_hold_acquired = bool(keeper.get("hold_added"))
         if not _bridge_path_ok(adapter, daemon_port):
             return 1, _payload(
                 False,
@@ -323,7 +331,7 @@ def launch_detached(
                 progress("cleanup", f"stopping the unrepresented session {plan['mux_session']}")
                 adapter.run(stop_script(plan["mux_session"], verify=False), timeout=60.0)
             if keeper_hold_acquired:
-                adapter.stop_keeper()
+                _stop_keeper_best_effort(adapter)
 
 
 def stop_detached(
@@ -349,11 +357,7 @@ def stop_detached(
             error="could not verify the session stopped; nothing was released",
             detail=err,
         )
-    try:
-        keeper_stopped = adapter.stop_keeper()
-    except (RuntimeError, OSError) as exc:
-        print(f"[WARN] could not update the forward keeper: {exc}", file=sys.stderr)
-        keeper_stopped = False
+    keeper_stopped = _stop_keeper_best_effort(adapter)
     release_cli_mode(plan["scope_id"])
     deregistered = bool(session_id) and deregister_live_session(str(session_id))
     return 0, _payload(

@@ -66,7 +66,8 @@ def seams(monkeypatch):
     monkeypatch.setattr(
         detach,
         "ensure_keeper",
-        lambda *a, **k: calls.keeper.append((a, k)) or {"started": True, "state": {"pid": 123}},
+        lambda *a, **k: calls.keeper.append((a, k))
+        or {"started": True, "hold_added": True, "state": {"pid": 123}},
     )
     monkeypatch.setattr(
         detach,
@@ -336,6 +337,15 @@ def test_attached_and_detached_holds_share_keeper(
     )
 
     assert got["started"] is False
+    assert got["hold_added"] is True
+    refreshed = detach.ensure_keeper(
+        "devbox",
+        venue_port=41234,
+        mux="wt-anchor-repo",
+        hold_id="anchor-repo@devbox",
+    )
+    assert refreshed["started"] is False
+    assert refreshed["hold_added"] is False
     assert sorted(got["state"]["holds"]) == ["anchor-repo@devbox", "attached:first"]
     assert detach.stop_keeper("devbox", hold_id="anchor-repo@devbox") is False
     assert sorted(detach.read_keeper_state("devbox")["holds"]) == ["attached:first"]
@@ -674,7 +684,7 @@ def test_rejoin_reuses_keeper_and_does_not_stop_it(seams, monkeypatch, capsys):
     assert seams.stop_keeper == []
 
 
-def test_launch_failure_releases_reused_keeper_hold(seams, monkeypatch):
+def test_rejoin_launch_failure_does_not_release_existing_keeper_hold(seams, monkeypatch):
     monkeypatch.setattr(
         detach,
         "ensure_keeper",
@@ -695,7 +705,7 @@ def test_launch_failure_releases_reused_keeper_hold(seams, monkeypatch):
     assert detach.cmd_detach(_args()) == 1
 
     assert any("tmux kill-session" in command for command in seams.remote)
-    assert seams.stop_keeper == [("devbox", "anchor-repo@devbox")]
+    assert seams.stop_keeper == []
 
 
 def test_stop_kills_mux_stops_keeper_and_deregisters(seams, capsys):
