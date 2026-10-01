@@ -1,0 +1,5 @@
+{
+  "schema": "copilot-extensions.instruction-projections-config",
+  "version": 1,
+  "maxAggregateBytes": 16384
+}

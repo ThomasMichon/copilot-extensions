@@ -9,6 +9,7 @@ the same loader the sync uses.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -58,3 +59,48 @@ def test_shipped_projections_fit_the_budgets(plugin: Path, tmp_path: Path) -> No
         assert rendered.byte_count <= projections.MAX_PROJECTION_BYTES, (
             f"{spec.template} renders to {rendered.byte_count} bytes"
         )
+
+
+def test_repository_enabled_stack_fits_the_aggregate_budget(tmp_path: Path) -> None:
+    """The real stack this repository enables for its own self-sync
+    (``.github/copilot/settings.json``'s ``enabledPlugins``) fits this
+    repository's own effective aggregate budget (``_load_aggregate_budget``,
+    honoring ``.github/copilot/instruction-projections.config.json`` if
+    present) -- the exact aggregate check `sync_repository` itself runs
+    here. Reads the real committed settings rather than the full plugin
+    catalog, since most plugins this repo ships are not self-enabled.
+    """
+    settings = json.loads(
+        (REPO / ".github" / "copilot" / "settings.json").read_text(encoding="utf-8")
+    )
+    enabled_names = {
+        origin.split("@", 1)[0]
+        for origin, enabled in settings["enabledPlugins"].items()
+        if enabled
+    }
+    enabled_plugins = [plugin for plugin in _PLUGINS if plugin.name in enabled_names]
+    assert enabled_plugins, "expected at least one enabled plugin to declare projections"
+
+    result = projections.Result(operation="test")
+    total = 0
+    for plugin in enabled_plugins:
+        source = SimpleNamespace(
+            origin=f"copilot-extensions/{plugin.name}",
+            payload_root=plugin,
+            skills_root=plugin / "skills",
+            controlled=False,
+            source="",
+            version="",
+        )
+        specs, _unknown = projections._load_specs(tmp_path, [source], result)
+        for spec in specs:
+            total += projections.render_projection(spec).byte_count
+
+    budget_result = projections.Result(operation="test")
+    budget = projections._load_aggregate_budget(REPO, budget_result)
+    assert budget_result.blocking == 0, budget_result.findings
+
+    assert total <= budget, (
+        f"enabled stack totals {total} bytes; the effective aggregate "
+        f"budget is {budget} bytes"
+    )

@@ -644,6 +644,30 @@ _Pending._
     `agent-worktrees` wiring open. The PR's Documentation impact statement
     is corrected accordingly -- this *did* need a doc update, unlike
     slice 4's first round.
+- **Review round 3 finding (PR #4798):** `test_unrelated_extra_key_is_
+  rejected`'s own docstring recorded the superseded strict-superset
+  comparison and its intermediate failure -- a review-process narrative
+  baked into test prose, against `CONTRIBUTING.md`'s own Code Style
+  guidance (code/docstrings describe current, timeless state; the review
+  history belongs only in this Journal, where it already is). Reworded to
+  describe only the invariant under test.
+- **Review round 4 finding (PR #4798), a genuine aggregate-budget
+  overflow:** this repository's own checked-in projection lock
+  (`.github/copilot/context-projections.json`) already totaled 12,162
+  bytes against the default 12,288-byte `MAX_AGGREGATE_BYTES` ceiling --
+  126 bytes of headroom, less than the new catch-all's own ~1,078
+  checked-in bytes. The next `sync_repository` run against this repo
+  would have hit a blocking aggregate-budget finding instead of
+  publishing the projection. Added a reviewed
+  `.github/copilot/instruction-projections.config.json` (`maxAggregateBytes:
+  16384`) -- the mechanism's own documented override path
+  (`_load_aggregate_budget`), rather than shrinking the already-landed
+  stack. Added `test_repository_enabled_stack_fits_the_aggregate_budget`:
+  reads this repo's own `.github/copilot/settings.json` `enabledPlugins`
+  (not the full plugin catalog -- most of what this repo ships is not
+  self-enabled) and asserts the real enabled stack's rendered total fits
+  the effective budget, closing the gap the per-plugin budget tests above
+  don't cover.
 - Phase 7 Plan items remaining: `agent-worktrees`' own create/resume/
   `sessionStart` wiring -- the actual consumer of everything built across
   slices 1-4 -- is the last unstarted item.
