@@ -106,10 +106,11 @@ def test_all_installers_deploy_platform_pane_wrapper():
         "install.sh": _INSTALL_SH.read_text("utf-8"),
         "installer.py": _INSTALLER_PY.read_text("utf-8"),
     }
+    manifest = json.loads((_PLUGIN / "launch-wrapper-assets.json").read_text("utf-8"))
     required = {
         "install.ps1": "pane-wrapper.ps1",
         "install.sh": "pane-wrapper.sh",
-        "installer.py": ("pane-wrapper.ps1", "pane-wrapper.sh"),
+        "installer.py": ("load_manifest(", "resolve_source_dir("),
     }
     missing: list[str] = []
     for name, expected in required.items():
@@ -118,4 +119,7 @@ def test_all_installers_deploy_platform_pane_wrapper():
         ):
             if wrapper not in installers[name]:
                 missing.append(f"{name} does not deploy {wrapper}")
+    for wrapper in ("pane-wrapper.ps1", "pane-wrapper.sh"):
+        if wrapper not in manifest["files"]:
+            missing.append(f"launch-wrapper-assets.json does not list {wrapper}")
     assert not missing, "\n".join(missing)

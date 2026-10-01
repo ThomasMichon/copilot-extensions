@@ -17,6 +17,10 @@ _TOOLS = Path(__file__).resolve().parent
 _REQUIRED_TOOLS = (
     "accumulate_bumps.py", "materialize_main.py", "changefile.py", "uv_editable_ref.py",
     "nested_uv_editable_ref.py",
+    "installer_engine_ref.py",
+    "launch_wrapper_assets_ref.py",
+    "materialize_installer_engine.py",
+    "materialize_launch_wrapper_assets.py",
 )
 
 
