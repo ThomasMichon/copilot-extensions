@@ -398,20 +398,11 @@ def cmd_detach(
 
     github_auth = github_credential_preflight(args.name)
     if not github_auth.ok:
-        if github_auth.reason_code == "github-credential-ambiguous":
-            print(
-                f"[WARN] {github_auth.reason_code}: {github_auth.detail}\n"
-                f"       Remedy: {github_auth.remedy}",
-                file=sys.stderr,
-            )
-        else:
-            return _fail(
-                github_auth.detail or "github.com credential unavailable",
-                plan,
-                reason_code=github_auth.reason_code,
-                remedy=github_auth.remedy,
-                github_credential=github_auth.to_dict(),
-            )
+        print(
+            f"[WARN] {github_auth.reason_code}: {github_auth.detail}\n"
+            f"       Remedy: {github_auth.remedy}",
+            file=sys.stderr,
+        )
 
     claim_rc = claim_or_exit_code(args)
     if claim_rc is not None:

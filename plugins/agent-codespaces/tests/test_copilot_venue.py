@@ -173,15 +173,15 @@ def _no_target_lock_enforcement(request, monkeypatch):
     own dedicated coverage (`TestCmdCopilotTargetLockEnforcement`), so it's
     faked out everywhere else unless a test explicitly re-patches it."""
     _FakeTargetLock.instances.clear()
-    if request.cls is not None and request.cls.__name__ == "TestCmdCopilotTargetLockEnforcement":
-        return
-    import ssh_manager
-    monkeypatch.setattr(ssh_manager, "TargetLock", _FakeTargetLock)
     monkeypatch.setattr(
         copilot_venue,
         "github_credential_preflight",
         lambda name: argparse.Namespace(ok=True),
     )
+    if request.cls is not None and request.cls.__name__ == "TestCmdCopilotTargetLockEnforcement":
+        return
+    import ssh_manager
+    monkeypatch.setattr(ssh_manager, "TargetLock", _FakeTargetLock)
 
 
 def _ns(**kw):

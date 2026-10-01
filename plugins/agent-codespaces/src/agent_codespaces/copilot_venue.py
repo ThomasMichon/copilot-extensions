@@ -473,11 +473,8 @@ def _cmd_copilot_connect(
     if not args.no_relay:
         github_auth = github_credential_preflight(args.name)
         if not github_auth.ok:
-            level = "WARN" if github_auth.reason_code == "github-credential-ambiguous" else "FAIL"
-            print(f"[{level}] {github_auth.reason_code}: {github_auth.detail}\n"
+            print(f"[WARN] {github_auth.reason_code}: {github_auth.detail}\n"
                   f"       Remedy: {github_auth.remedy}", file=sys.stderr)
-            if level == "FAIL":
-                return 1
 
     _ensure_agent_bridge_plugin(args.name)
 

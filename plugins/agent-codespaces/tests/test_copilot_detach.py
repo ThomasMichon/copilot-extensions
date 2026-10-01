@@ -220,7 +220,7 @@ def test_busy_claim_touches_nothing(seams, monkeypatch):
     assert seams.holds == [] and seams.ssh == [] and seams.reserve == []
 
 
-def test_github_credential_preflight_fails_before_owner_hold(seams, monkeypatch, capsys):
+def test_github_credential_unavailable_warns_and_continues(seams, monkeypatch, capsys):
     monkeypatch.setattr(
         copilot_venue,
         "github_credential_preflight",
@@ -237,13 +237,12 @@ def test_github_credential_preflight_fails_before_owner_hold(seams, monkeypatch,
         ),
     )
 
-    rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams))
+    rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout=_CREATED))
 
-    assert rc == 1
-    out = json.loads(capsys.readouterr().out)
-    assert out["reason_code"] == "github-credential-unavailable"
-    assert out["remedy"] == "sign in"
-    assert seams.holds == [] and seams.ssh == [] and seams.reserve == []
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "github-credential-unavailable" in err
+    assert seams.holds and seams.ssh
 
 
 def test_github_credential_ambiguity_warns_and_continues(seams, monkeypatch, capsys):
