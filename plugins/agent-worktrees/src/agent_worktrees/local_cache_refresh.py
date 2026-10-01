@@ -67,11 +67,20 @@ def _load_instruction_projections(home: Path):
         if spec is None or spec.loader is None:
             continue
         module = importlib.util.module_from_spec(spec)
+        # Register in sys.modules BEFORE executing: the real shipped
+        # instruction_projections.py declares postponed-annotation
+        # dataclasses, whose machinery looks up `sys.modules[cls.__module__]`
+        # while the class body runs. Executing first (as this loader
+        # originally did) leaves that lookup unresolved -- the resulting
+        # AttributeError is swallowed below and every lifecycle refresh
+        # silently becomes a no-op. Remove the partial entry on failure so a
+        # broken module is never left cached as if it had loaded.
+        sys.modules[_MODULE_NAME] = module
         try:
             spec.loader.exec_module(module)
         except Exception:
+            sys.modules.pop(_MODULE_NAME, None)
             continue
-        sys.modules[_MODULE_NAME] = module
         return module
     return None
 

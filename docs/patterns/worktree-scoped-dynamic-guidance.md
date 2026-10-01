@@ -184,7 +184,10 @@ The per-file "prefer local" preamble (step 2), the repo-wide catch-all
 projection (step 3, opted out of its own local cache per step 1's
 exception), and the `agent-worktrees` create/resume + `sessionStart` wiring
 (step 4, via `agent_worktrees.local_cache_refresh`) have all landed --
-Phase 7 is complete.
+Phase 7's **Plan** is complete. Its Validation Plan is not: a clean-room,
+agent-driven proof that the preamble/catch-all actually drive an agent to
+the fresher content remains open (see the effort README's own Journal and
+Validation Plan).
 
 ## See Also
 

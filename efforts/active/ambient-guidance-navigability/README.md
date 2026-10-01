@@ -654,6 +654,31 @@ _Pending._
   dropped -- it's the one remaining item before Phase 7 is Done.
 - Phase 7's Plan is now fully landed (slices 1-5); the effort stays Active
   pending that one Validation Plan item.
+- **Review round 1 findings (PR #4809), both addressed in the same PR:**
+  - **Real, severe bug:** `local_cache_refresh._load_instruction_
+    projections` registered the freshly-loaded module in `sys.modules`
+    *after* `exec_module` ran. The real shipped `instruction_
+    projections.py` declares postponed-annotation (`from __future__ import
+    annotations`) dataclasses, whose decorator machinery looks up
+    `sys.modules[cls.__module__]` while the class body executes --
+    registering only after execution left that lookup unresolved, raising
+    `AttributeError` *every single time* the real module was loaded. The
+    broad `except Exception: continue` swallowed it silently, so every
+    create/resume/sessionStart refresh since this landed would have been a
+    **permanent, invisible no-op** -- confirmed by reproducing the exact
+    failure directly against the real file before fixing (`exec_module`
+    before registering fails with `AttributeError("'NoneType' object has
+    no attribute '__dict__'")`; swapping the order fixes it). Fixed by
+    registering in `sys.modules` before `exec_module`, and popping the
+    partial entry back out on failure so a broken module is never left
+    cached as if it had loaded. Added two regression tests: one using the
+    exact dataclass-with-postponed-annotations shape that reproduces the
+    real bug, and one proving a failed load leaves nothing cached.
+  - The pattern doc's new landing note claimed "Phase 7 is complete,"
+    contradicting the effort README's own still-open Validation Plan item
+    one paragraph away. Reworded to "Phase 7's **Plan** is complete,"
+    explicitly naming the open Validation Plan item -- matching the PR
+    description's own narrower framing, which was already correct.
 
 ### 2026-10-01 -- Phase 7 slice 4: the repo-wide catch-all static projection
 - Picked up the next unstarted Plan item (slice 3's steer): `customizing-

@@ -83,6 +83,58 @@ class TestLoadInstructionProjections:
 
             sys.modules.pop(lcr._MODULE_NAME, None)
 
+    def test_loads_a_module_whose_classes_need_sys_modules_during_exec(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression test: the real shipped ``instruction_projections.py``
+        declares postponed-annotation dataclasses, whose decorator looks up
+        ``sys.modules[cls.__module__]`` while the class body executes. The
+        module must be registered in ``sys.modules`` *before*
+        ``exec_module`` runs -- registering it only after (as this loader
+        originally did) makes that lookup fail, the ``AttributeError`` is
+        swallowed, and the module never loads at all."""
+        scripts_dir = (
+            tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions"
+            / "customizing-copilot" / "skills" / "reviewing-customizations"
+            / "scripts"
+        )
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "instruction_projections.py").write_text(
+            "from __future__ import annotations\n"
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Spec:\n"
+            "    name: str\n",
+            encoding="utf-8",
+        )
+
+        try:
+            module = lcr._load_instruction_projections(tmp_path)
+            assert module is not None
+            assert module.Spec(name="x").name == "x"
+        finally:
+            import sys
+
+            sys.modules.pop(lcr._MODULE_NAME, None)
+
+    def test_a_failed_load_leaves_no_partial_module_cached(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        scripts_dir = (
+            tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions"
+            / "customizing-copilot" / "skills" / "reviewing-customizations"
+            / "scripts"
+        )
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "instruction_projections.py").write_text(
+            "raise RuntimeError('boom')\n", encoding="utf-8"
+        )
+
+        import sys
+
+        assert lcr._load_instruction_projections(tmp_path) is None
+        assert lcr._MODULE_NAME not in sys.modules
+
 
 class TestRefreshLocalCache:
     def test_never_raises_when_not_installed(self, tmp_path: Path) -> None:
