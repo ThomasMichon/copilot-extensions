@@ -401,6 +401,15 @@ jobs:
         # builtin TimeoutError without asyncio.TimeoutError, so the class of bug
         # behind dotfiles#1549 cannot recur unseen (dev-box/CI are 3.11/3.12).
         run: python tools/check-asyncio-timeout-handlers.py
+      - name: Coverage-guided-ci selection prototype tests (Phase 0 pilot)
+        # tools/coverage_guided_selection/'s own synthetic unit tests (fast,
+        # pure stdlib). The one real-suite integration test in this same
+        # file self-skips unless CGS_RUN_INTEGRATION_TEST=1 (set only by the
+        # separate, workflow_dispatch-only
+        # 'coverage-guided-selection-integration' job below): it spawns a
+        # real 'uv run --with coverage ...' subprocess against a real
+        # plugin's suite, which doesn't belong in this fast, always-on lane.
+        run: python -m pytest -q tools/test_coverage_guided_selection.py
       # Internal-identifier enforcement moved out of this untrusted PR lane.
       # Fork PRs receive no repository secrets on `pull_request`, and repo
       # `vars.*` would be plain-text/public, so this workflow can never hold the
@@ -685,6 +694,31 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Full suite - ${{ matrix.plugin }}
         run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
+
+  coverage-guided-selection-integration:
+    name: coverage-guided-ci selection prototype (real-suite integration)
+    # The two real-subprocess integration tests in
+    # tools/test_coverage_guided_selection.py self-skip unless
+    # CGS_RUN_INTEGRATION_TEST=1 -- deliberately opt-in/manual (this phase 0
+    # pilot's own effort Journal), not part of required PR CI, since they
+    # spawn a real 'uv run --with coverage --with pytest-cov --with
+    # pytest-json-report' subprocess against a real plugin's suite (or a
+    # constructed throwaway one).
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Real-suite round-trip + fixture-phase integration tests
+        env:
+          CGS_RUN_INTEGRATION_TEST: "1"
+        run: >-
+          uv run --with pytest python -m pytest -q
+          tools/test_coverage_guided_selection.py
 
   pr-gate:
     name: PR gate (required check)
