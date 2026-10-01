@@ -15,7 +15,7 @@ from typing import cast
 from dropin_registry import EntryDecision, ScanAuthority
 from plugin_activation import ActivationReport, ActivePlugin
 
-from .pivot_actions import ManifestError
+from .pivot_actions import ManifestError, _as_argv
 from .pivot_manifest import (
     MANAGED_SCHEMA_VERSION,
     _FILE_ATTRIBUTE_REPARSE_POINT,
@@ -162,6 +162,17 @@ def _rewrite_manifest_commands(
             rewrite(item, "run")
     create_action = data.get("create_action")
     if isinstance(create_action, dict) and "run" in create_action:
+        # Validate the argv shape BEFORE resolving an executable: classification
+        # rewrites commands ahead of `parse_manifest`'s own strict validation, so
+        # an unvalidated `run: 42` or `run: {"command": "x"}` would otherwise
+        # raise an uncaught TypeError/KeyError inside `_resolve_command` --
+        # aborting the whole registry scan instead of sinking only this one
+        # malformed manifest (the `ManifestError` this raises IS caught by
+        # `pivot_registry_scan`'s per-entry handling, same as every other
+        # manifest-shape error).
+        create_action["run"] = list(
+            _as_argv(create_action.get("run"), where="`create_action.run`")
+        )
         rewrite(create_action, "run")
     return data
 

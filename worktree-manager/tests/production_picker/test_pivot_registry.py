@@ -733,6 +733,36 @@ def test_unattributed_create_action_missing_target_is_validated(tmp_path):
     assert report.findings[0].reason == "missing-target"
 
 
+def test_unattributed_create_action_malformed_run_does_not_abort_scan(tmp_path):
+    # A `create_action.run` shape `_as_argv` would reject (not a non-empty
+    # array of strings) must raise ManifestError -- sinking only this one
+    # manifest -- rather than an uncaught TypeError/KeyError from
+    # `_resolve_command` aborting the whole registry scan.
+    registry = tmp_path / "pivots"
+    registry.mkdir()
+    ok_command = _command(tmp_path / "commands", name="ok")
+    (registry / "ok.json").write_text(
+        json.dumps({"label": "Ok", "list": [str(ok_command)]}), encoding="utf-8",
+    )
+    for bad_run in (42, {"command": "x"}, [], ["", "x"]):
+        bad_path = registry / "bad.json"
+        bad_path.write_text(
+            json.dumps({
+                "label": "Bad", "list": [str(ok_command)],
+                "create_action": {"label": "New", "run": bad_run},
+            }),
+            encoding="utf-8",
+        )
+
+        report = pivots.scan_pivot_registry(
+            registry,
+            materialize=False,
+            activation_report=ActivationReport(ScanAuthority.COMPLETE, {}),
+        )
+
+        assert [p.label for p in report.pivots] == ["Ok"]
+
+
 def test_superseded_v2_manifest_resolves_from_live_template(tmp_path):
     """A pre-existing on-disk file from before the pointer redesign (full
     baked content, schema_version 2) keeps working -- advisory, prunable,
