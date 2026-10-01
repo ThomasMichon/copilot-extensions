@@ -472,10 +472,16 @@ and the new sibling pattern doc,
       through the sync/scan/decide pass, which this path deliberately
       skips). Consent-free, lock-free, git-free by construction; see the
       Journal for the negative-proof tests covering this.
-- [ ] A single repo-wide catch-all static projection (its own
+- [x] A single repo-wide catch-all static projection (its own
       `instruction-projections.json` entry, applying to every repo that
       adopts this pattern) directing the agent to scan for and read any
       `**/*.local.instructions.md` files present, per the pattern doc's §3.
+      **Landed**: `customizing-copilot` -- the mechanism's own home, and
+      the one plugin guaranteed present wherever it's adopted -- ships a
+      single `local-cache-catchall` source (`applyTo: "**"`), verbatim from
+      the pattern doc's §3 template. Covered by the generic
+      `test_shipped_projection_budgets.py` (auto-discovers any plugin's
+      `instruction-projections.json`) plus a dedicated validity test.
 - [ ] `agent-worktrees`: wire the render-only entry point into worktree
       **create and resume**, and repeat it from the plugin's own
       `sessionStart` hook as a backup for drift accrued since. Requires the
@@ -565,6 +571,35 @@ and the new sibling pattern doc,
 _Pending._
 
 ## Journal
+
+### 2026-10-01 -- Phase 7 slice 4: the repo-wide catch-all static projection
+- Picked up the next unstarted Plan item (slice 3's steer): `customizing-
+  copilot` -- which already owns the whole projection mechanism
+  (`instruction_projections.py`, `render_local_cache`,
+  `local_sibling_destination`) and is therefore the one plugin guaranteed
+  present in every repo that has adopted this pattern at all -- now ships
+  its own `instruction-projections.json` declaring a single
+  `local-cache-catchall` source, `applyTo: "**"`, rendered verbatim from
+  `docs/patterns/worktree-scoped-dynamic-guidance.md` §3's template. This
+  is the one thing every launch path loads unconditionally regardless of
+  hooks, and the only piece that can help a source that has **never**
+  synced in yet (slice 3's per-file preamble needs an existing checked-in
+  file to carry it; this doesn't).
+- New `plugins/customizing-copilot/instructions/` directory (the plugin
+  had none before -- it previously shipped skills only, no projected
+  instructions of its own).
+- Renders to 1078 bytes, comfortably inside `MAX_PROJECTION_BYTES` --
+  `test_shipped_projection_budgets.py` auto-discovers any plugin's
+  `instruction-projections.json`, so no manual registration was needed
+  there; added a dedicated
+  `test_customizing_copilot_ships_the_repo_wide_local_cache_catchall` for
+  the specific content/applyTo/byte-budget contract.
+- `tools/run-plugin-tests.py customizing-copilot`: 303 passed, 8 skipped.
+  `check-docs-consistency`, `check-version-consistency`, and
+  `check-module-size` all clean (no production module touched this slice).
+- Phase 7 Plan items remaining: `agent-worktrees`' own create/resume/
+  `sessionStart` wiring -- the actual consumer of everything built across
+  slices 1-4 -- is the last unstarted item.
 
 ### 2026-09-30 (cont.) -- Phase 7 slice 3: the per-file "prefer local" preamble
 - Picked up the next unstarted Plan item (previous entry's steer): extended

@@ -1,0 +1,9 @@
+{
+  "comment": "Phase 7 slice 4: ship a repo-wide catch-all static projection (docs/patterns/worktree-scoped-dynamic-guidance.md section 3) directing the agent to scan for and prefer any *.local.instructions.md sibling present, closing the gap the per-file preamble can't -- a source with no checked-in file yet.",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "minor"
+    }
+  ]
+}

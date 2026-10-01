@@ -2528,3 +2528,34 @@ def test_context_handoff_handoff_fallback_projection_is_valid() -> None:
     )
     rendered = projections.render_projection(handoff_fallback)
     assert rendered.byte_count <= projections.MAX_PROJECTION_BYTES
+
+
+@pytest.mark.guard
+def test_customizing_copilot_ships_the_repo_wide_local_cache_catchall() -> None:
+    """``customizing-copilot`` -- the projection mechanism's own home -- ships
+    the single repo-wide catch-all this effort's Phase 7 Plan calls for
+    (``docs/patterns/worktree-scoped-dynamic-guidance.md`` §3): the one
+    thing every launch path loads unconditionally, closing the gap the
+    per-file preamble (slice 3) cannot -- a source that has never synced in
+    yet has no checked-in file to carry a preamble at all.
+    """
+    sources = [
+        _source(
+            REPO / "plugins" / "customizing-copilot",
+            "copilot-extensions",
+            "customizing-copilot",
+        ),
+    ]
+    result = projections.Result(operation="test")
+
+    specs, _unknown = projections._load_specs(REPO, sources, result)
+
+    assert result.blocking == 0
+    assert {spec.source_id for spec in specs} == {"local-cache-catchall"}
+    spec = specs[0]
+    assert spec.apply_to == "**"
+    rendered = projections.render_projection(spec)
+    assert rendered.byte_count <= projections.MAX_PROJECTION_BYTES
+    text = rendered.content.decode("utf-8")
+    assert ".github/instructions/**/*.local.instructions.md" in text
+    assert "Their absence is not an error." in text
