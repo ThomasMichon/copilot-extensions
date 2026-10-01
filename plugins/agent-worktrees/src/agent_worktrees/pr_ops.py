@@ -443,44 +443,6 @@ def _title_from_commits(worktree_path: str, upstream: str) -> str | None:
     return subject or None
 
 
-def _ensure_fork_and_remote(worktree_path: str, repo_slug: str, prcfg) -> dict:
-    """Ensure the caller's fork of ``repo_slug`` exists and a local git remote
-    (``prcfg.fork.remote``) points at it.
-
-    Returns ``{"owner": <fork-owner>}`` on success, or ``{"error": <message>}``
-    on any failure (never raises) -- GitHub-only, matching ``pr.fork``'s scope.
-    An explicit ``prcfg.fork.owner`` overrides the fork-owner login used to
-    build the PR head, in case the caller pushes through a differently-named
-    fork than the one their own token would create/read.
-    """
-    if prcfg.provider != "github":
-        return {"error": (
-            f"pr.fork is only supported for provider 'github' today "
-            f"(this repo is configured for provider {prcfg.provider!r})."
-        )}
-    from . import providers
-    try:
-        provider = providers.get_provider(prcfg.provider)
-        token = providers.account_token_for_slug(repo_slug, prcfg)
-        fork = provider.ensure_fork(repo_slug, token=token)
-    except (providers.ProviderError, OSError) as exc:
-        return {"error": f"Could not create/verify a fork of '{repo_slug}': {exc}"}
-    if fork is None:
-        return {"error": (
-            f"Could not create/verify a fork of '{repo_slug}' (no 'gh' auth, "
-            f"an API error, or an unsupported provider)."
-        )}
-    owner, clone_url = fork
-    if prcfg.fork.owner:
-        owner = prcfg.fork.owner
-    if not git_ops.ensure_remote(prcfg.fork.remote, clone_url, cwd=worktree_path):
-        return {"error": (
-            f"Could not point local git remote '{prcfg.fork.remote}' at "
-            f"'{clone_url}'."
-        )}
-    return {"owner": owner}
-
-
 def create_pr(
     worktree_id: str,
     config: Config,
@@ -819,7 +781,10 @@ def create_pr(
         prcfg = actor_flow.pr_config
         base["viewer_permission"] = actor_flow.viewer_permission
     if prcfg.fork.enabled:
-        if not confirm_fork:
+        from . import fork_pr
+
+        prior_consent = fork_pr.fork_consent_for(default_pr_repo)
+        if not confirm_fork and not prior_consent:
             return {
                 **base, "success": False,
                 "needs_confirmation": "fork_setup",
@@ -831,14 +796,19 @@ def create_pr(
                     f"direct push. Ask the user to confirm forking it to "
                     f"their own GitHub account and pushing the branch "
                     f"there, then re-run create-pr with --confirm-fork "
-                    f"(or confirm_fork=True) once they agree."
+                    f"(or confirm_fork=True) once they agree. This is "
+                    f"asked only once per repo -- once confirmed, future "
+                    f"create-pr calls for '{default_pr_repo}' won't ask "
+                    f"again."
                 ),
             }
-        fork_setup = _ensure_fork_and_remote(worktree_path, default_pr_repo, prcfg)
+        fork_setup = fork_pr.ensure_fork_and_remote(worktree_path, default_pr_repo, prcfg)
         if fork_setup.get("error"):
             return {**base, "error": fork_setup["error"]}
         publish_remote = prcfg.fork.remote
         fork_owner = fork_setup["owner"]
+        if confirm_fork and not prior_consent:
+            fork_pr.record_fork_consent(default_pr_repo, prcfg.fork.remote, fork_owner)
 
     if not git_ops.is_clean(cwd=worktree_path):
         return {**base, "error": (
