@@ -198,17 +198,22 @@ reads as authoritative.
   (e.g. "Full inception exchange: `inception-transcript.md`"). This keeps the
   README a navigable map — its own stated purpose — without losing the
   authoritative record of what was actually said.
-- **Redaction is the one safety exception to verbatim capture.** If the
-  operator's own words name a real private/internal identifier this repo's
-  own leak-guard conventions would flag (see *Keep internal specifics out of
-  a public-facing effort* below), capture everything else verbatim and
-  replace only that identifier with a generic placeholder — never drop,
-  paraphrase, or soften the surrounding intent to work around it. This
-  applies equally to the sidecar transcript: a verbatim exchange that
-  necessarily contains such an identifier is captured in full in a private
-  knowledge repo's own sidecar instead of the public repo's
-  `inception-transcript.md`, with the public README linking to it
-  generically rather than reproducing it.
+- **Redaction is the one safety exception to verbatim capture — but a name
+  swap alone is not always enough.** If the operator's own words name a real
+  private/internal identifier this repo's own leak-guard conventions would
+  flag (see *Keep internal specifics out of a public-facing effort* below),
+  capture everything else verbatim and generalize that part: replace the
+  identifier with a generic placeholder *and*, if the surrounding sentence
+  would still describe the private system's specific internals even with the
+  name removed (its architecture, a specific mechanism it lacks, an
+  implementation detail), generalize that narrative too using the same
+  *abstract, don't omit* technique below — never drop, paraphrase, or soften
+  the surrounding *intent* to work around it, only the private specifics
+  that intent doesn't depend on. This applies equally to the sidecar
+  transcript: a verbatim exchange that necessarily contains such content is
+  captured in full in a private knowledge repo's own sidecar instead of the
+  public repo's `inception-transcript.md`, with the public README linking to
+  it generically rather than reproducing it.
 
 ## Plan an effort
 
