@@ -57,38 +57,58 @@ too, not only to the OS-temp default.
    the temp root either, for the same reason as above), and verify its
    privacy before trusting it with anything sensitive (a draft containing
    PII, secrets, or other sensitive output) rather than assuming either
-   platform's temp directory is private by default:
-   - **Create the subfolder atomically with restrictive permissions in the
-     same operation**, never a separate create-then-restrict step (a
-     `mkdir` followed by a later `chmod`/ACL-tightening call leaves a
-     window where another local user can populate or replace the
-     directory before it's locked down).
-     - **POSIX**: call the platform's atomic "create with mode" primitive
-       (e.g. Python's `os.mkdir(path, 0o700)` with the process umask
-       temporarily cleared via `os.umask(0)` for that call, restoring the
-       prior umask immediately after -- the mode argument alone is
-       masked by umask and silently loosened otherwise), under
-       `${TMPDIR:-/tmp}/agent-scratch-$(id -u)` (a private, per-user name,
-       not a bare shared `/tmp/agent-scratch`). If the path already
-       exists, verify before trusting it: a real directory (not a
-       symlink), owned by the current user, with mode exactly `0700`.
-       Treat a failed check, or an `EEXIST` creation race against another
-       process, as "not trustworthy" and fall back to a fresh
-       unpredictable directory via `mkdtemp` instead of reusing it.
-     - **Windows**: `%TEMP%` is conventionally per-user but its ACL is not
-       guaranteed private by the platform and the standard temp-path APIs
-       don't validate it -- don't assume privacy by default. Before
-       writing anything sensitive there, verify the resolved directory's
-       effective ACL grants access only to the current user (and
-       Administrators), for example via `icacls <path>` showing no
-       inherited broad grant; if it doesn't already, create the
-       `agent-scratch` subfolder with an explicit restrictive ACL in the
-       same step (e.g. `New-Item` followed immediately by
-       `icacls <path> /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F"`
-       before anything is written into it, not after). If privacy can't
-       be verified or established, don't write sensitive data there --
-       fall back to an operator-configured default (step 2) or escalate
-       to the operator instead.
+   platform's temp directory is private by default.
+
+### Harden the base scratch directory once; per-task subfolders inherit it
+
+Apply the privacy hardening below to the **base** scratch directory itself
+(the `agent-scratch`-style folder directly under whichever root was
+resolved above), not to every per-task subfolder created under it later --
+a correctly-hardened base already keeps every subfolder beneath it equally
+private, and repeating per-subfolder ACL/mode changes after creation is
+exactly the non-atomic, racy pattern this section avoids.
+
+- **POSIX**: create the base directory with `os.mkdir(path, 0o700)` (or
+  the shell equivalent, `mkdir -m 700`) directly -- **do not** touch the
+  process umask to do this. Clearing or changing `umask` is process-wide,
+  mutable state; doing it even briefly races every other thread or
+  concurrently-running code in the same process that creates files during
+  that window, trading one race for a worse one. It is also unnecessary:
+  umask can only ever *remove* permission bits from the requested mode, it
+  can never add bits beyond what was requested, so asking for `0o700`
+  directly already caps the result at `0o700` or tighter regardless of the
+  ambient umask. Use a private, per-user path -- e.g.
+  `${TMPDIR:-/tmp}/agent-scratch-$(id -u)` (not a bare shared
+  `/tmp/agent-scratch`). If the path already exists, verify before
+  trusting it: a real directory (not a symlink), owned by the current
+  user, with mode exactly `0700`. Treat a failed check, or an `EEXIST`
+  creation race against another process, as "not trustworthy" and fall
+  back to a fresh unpredictable directory via `mkdtemp` instead of reusing
+  it. Because the base directory is mode `0700`, only its owner can even
+  traverse into it -- every subfolder and file created under it is
+  contained by that single check, with nothing further required per task.
+- **Windows**: `%TEMP%` is conventionally per-user but its ACL is not
+  guaranteed private by the platform and the standard temp-path APIs
+  don't validate it -- don't assume privacy by default. Create the base
+  `agent-scratch` folder with its restrictive ACL set **at creation**, not
+  as a follow-up step, so there is no window where it exists with an
+  inherited, broader ACL: use an API that accepts the ACL as part of
+  directory creation (e.g. .NET's
+  `[System.IO.Directory]::CreateDirectory(path, $directorySecurity)` from
+  PowerShell, with `$directorySecurity` granting full control only to the
+  current user and marked to propagate to children via container-inherit
+  flags) rather than `New-Item` followed by a separate `icacls` call. If
+  the folder already exists, verify its effective ACL grants access only
+  to the current user (and Administrators) before trusting it (e.g.
+  `icacls <path>` showing no broader inherited grant); if that check
+  fails, don't reuse it. Because the base folder's ACL is set to
+  propagate to children at creation, every per-task subfolder created
+  under it inherits the same restriction automatically -- no further
+  per-subfolder ACL step is needed.
+- **Either platform**: if privacy can't be verified or established for the
+  base directory, don't write sensitive data under it -- fall back to an
+  operator-configured default (step 2) or escalate to the operator
+  instead.
 
 Fall through silently -- don't ask the operator to configure something just
 to write one scratch file; only escalate if even the operating system's
@@ -118,9 +138,10 @@ writing anything into it:
   nothing recognizable survives sanitization, fall back to a short generic
   word (e.g. `task`) and rely on the uniqueness suffix below to disambiguate.
 - `<YYYYMMDD-HHMMSS>` -- the subfolder's own creation time, local or UTC
-  (either is fine; be consistent within one environment). This is what makes
-  staleness legible at a glance -- a folder from weeks ago is obviously safe
-  to sweep, one from the current session obviously isn't.
+  (either is fine; be consistent within one environment). This makes
+  staleness legible at a glance -- a folder from weeks ago is an obvious
+  *candidate* to review for cleanup -- but age alone never proves a folder
+  is safe to delete outright; see Cleanup below.
 
 **Create the subfolder with an exclusive/atomic operation** (one that fails
 if the exact name already exists -- e.g. a plain `mkdir` without a
@@ -158,14 +179,20 @@ elsewhere, or otherwise no longer needed), remove that task's own subfolder
 rather than leaving it indefinitely. If the content might still be useful
 pending follow-up (e.g. draft PR comments that may need another round),
 leave it and say so rather than silently deleting or silently leaving it
-with no note; the timestamp in the folder name is exactly what lets a later
-cleanup pass judge it safe to remove even without that note. Scratch space
-is never the right home for anything meant to last: a durable artifact --
-a plan, a decision record, a finding worth keeping -- gets filed through
-whatever mechanism the operator's own environment already defines for that
-(an effort, a tracked issue, a committed doc), or by asking the operator
-on demand when no such mechanism is established; it does not get left
-behind in a scratch subfolder because the session ended.
+with no note. The folder-name timestamp is only a staleness *signal*, not
+proof of safety to delete by itself -- a task can legitimately stay active
+for weeks, or intentionally leave scratch output pending a later round, as
+above. Before anyone (or anything) sweeps a folder based on its age, they
+need a positive signal that the task is actually done or abandoned (the
+owning task/session confirms completion, or an explicit note says it's safe
+to remove) -- age by itself is never sufficient to conclude a folder is
+inactive. Scratch space is never the right home for anything meant to
+last: a durable artifact -- a plan, a decision record, a finding worth
+keeping -- gets filed through whatever mechanism the operator's own
+environment already defines for that (an effort, a tracked issue, a
+committed doc), or by asking the operator on demand when no such mechanism
+is established; it does not get left behind in a scratch subfolder because
+the session ended.
 
 ## Never stage checkouts, builds, or sensitive data in session state
 
