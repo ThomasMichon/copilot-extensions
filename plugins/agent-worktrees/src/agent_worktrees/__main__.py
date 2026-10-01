@@ -4151,6 +4151,10 @@ def _run_session_lifecycle(
         if deadline is None or time.time() < deadline - 1.0:
             diagnostics += _anchor_hygiene_diagnostic(cwd)
         if deadline is None or time.time() < deadline - 1.0:
+            from . import local_cache_refresh
+
+            local_cache_refresh.sessionstart_diagnostic(cwd, deadline=deadline)
+        if deadline is None or time.time() < deadline - 1.0:
             if provisioning_start_event is None:
                 diagnostics += _start_provisioning_if_needed(cwd, session_environment)
             else:

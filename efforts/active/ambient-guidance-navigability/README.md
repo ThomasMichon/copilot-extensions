@@ -482,12 +482,25 @@ and the new sibling pattern doc,
       the pattern doc's §3 template. Covered by the generic
       `test_shipped_projection_budgets.py` (auto-discovers any plugin's
       `instruction-projections.json`) plus a dedicated validity test.
-- [ ] `agent-worktrees`: wire the render-only entry point into worktree
+- [x] `agent-worktrees`: wire the render-only entry point into worktree
       **create and resume**, and repeat it from the plugin's own
       `sessionStart` hook as a backup for drift accrued since. Requires the
       target repo to already be a trusted folder (same prerequisite
       `session-scoped-dynamic-guidance.md` §3 already documents for
-      repository-level hooks).
+      repository-level hooks). **Landed**: a new
+      `agent_worktrees.local_cache_refresh` module resolves customizing-
+      copilot's declared, versioned `render-local-cache` CLI operation
+      (`manage-instruction-projections.py`) and invokes it as a
+      bounded-timeout subprocess -- never importing that plugin's Python
+      package directly, per `a-la-carte-independence.md`'s "no
+      cross-plugin reach-around" rule -- fully best-effort (never raises,
+      never gates the caller). Wired into `worktree_creation.
+      _create_worktree_core` (after trust/permission approval, every
+      `kind`), `resolve_launch_cli._resolve_resume_context` (after the
+      fast-forward, skipped on `--dry-run`), and `__main__.
+      _run_session_lifecycle` (the real `sessionStart` handler, via
+      `local_cache_refresh.sessionstart_diagnostic()` as a silent,
+      synchronous, deadline-bounded backup). See the Journal.
 - [x] Guard test: a synthetic plugin with a fresh installed payload produces
       a `.local.instructions.md` sibling whose content byte-matches a fresh
       `sync`-equivalent `render_projection` call, and the checked-in file's
@@ -564,13 +577,412 @@ and the new sibling pattern doc,
       preamble and the repo-wide catch-all are each independently provable
       to drive an agent to the fresher content in a clean-room-style test
       matching the methodology `session-scoped-dynamic-guidance.md`'s own
-      evidence section used.
+      evidence section used. **Partially covered:** every Plan item's own
+      guard/negative-proof unit and integration tests pass (preamble
+      placement/naming, local-cache self-reference exclusion, the
+      `skipLocalCache` opt-out and its schema validation, the aggregate-
+      budget fit, and the `agent-worktrees` create/resume/`sessionStart`
+      wiring, each with dedicated tests -- see the Journal for every
+      slice). The specific **clean-room, agent-driven proof** this item
+      asks for (an isolated sub-agent, given only a system-prompt snapshot
+      carrying both a checked-in projection and a divergent
+      `.local.instructions.md` sibling, demonstrably prefers the sibling's
+      content) has **not** been built -- it is a distinct, heavier
+      validation exercise (the navigability audit's own 3-sub-agent,
+      skill/tool-forbidden methodology), not yet attempted. This is the
+      one remaining item before Phase 7 can be marked Done.
 
 ## Proposal
 
 _Pending._
 
 ## Journal
+
+### 2026-10-01 (cont.) -- Phase 7 slice 5: `agent-worktrees` wiring (last Plan item)
+- Picked up the last unstarted Plan item: wired `customizing-copilot`'s
+  `render_local_cache()` into `agent-worktrees`' own lifecycle boundaries.
+  Explicit operator goal for this slice: roughly eliminate the need for a
+  manual force-sync, in favor of an occasional housekeeping sync -- this
+  wiring is what actually makes the mechanism built across slices 1-4
+  *automatic* rather than something an operator has to remember to trigger.
+- New `agent_worktrees.local_cache_refresh` module: resolves customizing-
+  copilot's installed `skills/reviewing-customizations/scripts/
+  instruction_projections.py` at runtime (marketplace layout first, falling
+  back to a `_direct` install matched by `plugin.json` name -- generalizing
+  `update_stage.discover_plugin_dir`'s own agent-worktrees-specific
+  resolution to a named sibling plugin, since no prior cross-plugin runtime
+  import existed anywhere in this codebase), then calls its
+  `render_local_cache()` against `discover_enabled_sources(repo_root,
+  require_trust=False)` -- the same `require_trust=False` the mechanism's
+  own tests already use for a context where trust is already established.
+  Fully best-effort by construction: customizing-copilot not being
+  installed, the repo not yet trusted, or any render failure are all
+  absorbed inside `refresh_local_cache()` itself, never gating the caller.
+- Three call sites, exactly matching the pattern doc's §4:
+  - `worktree_creation._create_worktree_core`, right after trust +
+    extension-permission approval (every `kind`, including `system`) --
+    before the paired-knowledge carve and before Copilot ever launches.
+  - `resolve_launch_cli._resolve_resume_context`, right after the
+    fast-forward (which may have just changed the installed payload this
+    worktree sees), guarded by `not args.dry_run` -- a preview must never
+    have this side effect.
+  - `__main__._run_session_lifecycle` (the real handler
+    `hook_client.py`'s thin client subprocess-dispatches to for
+    `sessionStart` -- the hook itself never contained the real logic),
+    alongside the existing anchor-hygiene/provisioning diagnostics, as a
+    silent backup (no diagnostics string, since the refresh is itself
+    silent by design and this call is pure backup, not a user-facing
+    event).
+- Tests: a new `tests/test_local_cache_refresh.py` (candidate-root
+  resolution incl. marketplace + `_direct`-install-by-manifest-name
+  fallback, graceful absence, internal-failure absorption, successful
+  delegation to a stub module; direct wiring assertions for create and
+  resume including a dry-run-never-refreshes case) plus two new tests in
+  `tests/test_hook_ipc.py` for the `sessionStart` backup (calls through,
+  and absorbs an internal failure without surfacing it). Patched every
+  pre-existing test that exercises `_create_worktree_core`/
+  `_resolve_resume(_context)` unmocked (`test_paired_carve.py`,
+  `test_launch_project_scoping.py`) to stub the new call, so those tests
+  stay hermetic rather than implicitly depending on whatever customizing-
+  copilot install happens to be present on the machine running them.
+  `tools/run-plugin-tests.py agent-worktrees`: 396 passed (plus the
+  pre-existing, unrelated `test_posix_binstub_self_provisions_from_a_
+  direct_install_layout` POSIX-shell failure on this Windows environment,
+  confirmed via `git stash` to predate this change) across the suite's
+  first three sub-suites before the test-supervisor's own wall-clock cap
+  on this large suite; a broader targeted run across every file touched or
+  exercising the new wiring (323 tests) passed clean.
+- **Not done in this slice:** the clean-room, agent-driven proof the
+  Validation Plan item above calls for. Flagged there rather than silently
+  dropped -- it's the one remaining item before Phase 7 is Done.
+- Phase 7's Plan is now fully landed (slices 1-5); the effort stays Active
+  pending that one Validation Plan item.
+- **Review round 1 findings (PR #4809), both addressed in the same PR:**
+  - **Real, severe bug:** `local_cache_refresh._load_instruction_
+    projections` registered the freshly-loaded module in `sys.modules`
+    *after* `exec_module` ran. The real shipped `instruction_
+    projections.py` declares postponed-annotation (`from __future__ import
+    annotations`) dataclasses, whose decorator machinery looks up
+    `sys.modules[cls.__module__]` while the class body executes --
+    registering only after execution left that lookup unresolved, raising
+    `AttributeError` *every single time* the real module was loaded. The
+    broad `except Exception: continue` swallowed it silently, so every
+    create/resume/sessionStart refresh since this landed would have been a
+    **permanent, invisible no-op** -- confirmed by reproducing the exact
+    failure directly against the real file before fixing (`exec_module`
+    before registering fails with `AttributeError("'NoneType' object has
+    no attribute '__dict__'")`; swapping the order fixes it). Fixed by
+    registering in `sys.modules` before `exec_module`, and popping the
+    partial entry back out on failure so a broken module is never left
+    cached as if it had loaded. Added two regression tests: one using the
+    exact dataclass-with-postponed-annotations shape that reproduces the
+    real bug, and one proving a failed load leaves nothing cached.
+  - The pattern doc's new landing note claimed "Phase 7 is complete,"
+    contradicting the effort README's own still-open Validation Plan item
+    one paragraph away. Reworded to "Phase 7's **Plan** is complete,"
+    explicitly naming the open Validation Plan item -- matching the PR
+    description's own narrower framing, which was already correct.
+- **Review round 2 findings (PR #4809), both addressed in the same PR:**
+  - **Real concurrency race, introduced by round 1's own fix:** the
+    sessionStart resident server handles concurrent hook requests on its
+    own threads, so two callers can reach `_load_instruction_projections`
+    at once. Pre-registering in `sys.modules` before `exec_module` (round
+    1's fix, required for the dataclass self-lookup) opened a window where
+    a racing second caller's `cached = sys.modules.get(...)` early-return
+    could observe the *first* caller's module mid-`exec_module` --
+    partially initialized, `render_local_cache` not yet defined on it --
+    and silently skip its own refresh. Fixed by serializing the whole
+    check-and-load critical section behind a module-level
+    `threading.Lock`. Added a 4-thread concurrent-load regression test
+    (an artificial `time.sleep` inside the loaded module widens the race
+    window) asserting every thread gets back a fully-executed module.
+  - `discover_enabled_sources` was called without `agent_worktrees_command`,
+    so a repo whose marketplace declares an `agent-worktrees-repo` source
+    falls back to ambient `PATH` -- which could resolve a different
+    installation cell's `agent-worktrees` (or none), silently omitting that
+    source from the cache refresh. `reviewing-customizations/SKILL.md`'s
+    own contract requires passing the current cell's catalog-resolved
+    command. Added `_resolve_own_agent_worktrees_command()`, which resolves
+    this exact cell's own deployed binstub via `installer.bin_dir()` (the
+    same global-binstub location `installer.py`'s own deploy path writes
+    to) rather than shelling out or trusting ambient `PATH`; `None` when
+    this cell has no deployed binstub (unchanged fallback behavior).
+    Threaded through `refresh_local_cache`. Added three dedicated tests
+    (binstub present, absent, and `installer.bin_dir()` itself failing).
+  - Also caught and fixed in the same push: the new regression test's
+    docstring, and a code comment in `local_cache_refresh.py` itself, both
+    named the review history ("as this loader originally did") rather than
+    describing only the timeless invariant -- reworded both.
+- **Review round 3 finding (PR #4809):** round 2's own `agent_worktrees_
+  command` fix was itself wrong -- `installer.bin_dir()` resolves
+  `install_dir()/"bin"` (the runtime-helper directory holding
+  `resolve-runtime.*`/hook scripts), not any deployed binstub; the actual
+  global shim lives in `installer.local_bin()` (`~/.local/bin`), which
+  isn't reliably cell-pinned either, since it can be shared/overwritten
+  across installs. The genuinely cell-pinned command is the owning
+  payload's own `bin/payload/agent-worktrees[.cmd]` -- the exact path
+  every project binstub `installer._project_binstub_specs` generates execs
+  into -- resolved via `installer._payload_root()`. Fixed
+  `_resolve_own_agent_worktrees_command` to use that instead. Replaced the
+  three unit tests (which had exercised the wrong function) and added a
+  fourth against a realistic deployed-plugin directory layout
+  (`plugins/agent-worktrees/{plugin.json,src/agent_worktrees/,
+  bin/payload/agent-worktrees}`), per the reviewer's explicit ask for a
+  real-layout regression test rather than only a monkeypatched stand-in.
+- **Review round 4 findings (PR #4809), both addressed in the same PR:**
+  - **Real timing bug:** the `sessionStart` backup ran synchronously inside
+    `_run_session_lifecycle`, but the resident hook server's own decision
+    deadline is far shorter than `refresh_local_cache`'s worst-case cost
+    (an `agent-worktrees-repo` source's own resolution budget, plus the
+    renderer's git probes) -- a slow refresh could make the *entire*
+    lifecycle response miss its deadline and get discarded, exactly the
+    kind of harm a "pure backup" must never cause. Fixed by dispatching
+    `refresh_local_cache` to a daemon thread instead of awaiting it inline
+    -- never blocks this function's return; if the hosting process exits
+    before the thread finishes, the refresh simply doesn't complete that
+    round, no worse than skipping it. Updated the two existing `sessionStart`
+    tests (a `_SynchronousThread` stand-in runs the dispatched target
+    inline so the assertions don't race the real background thread).
+  - **Real gap in round 2's own concurrency fix:** the lock only protected
+    `_load_instruction_projections`'s own module load, not the nested,
+    separately-unsynchronized lazy load `instruction_projections.py`'s own
+    `discover_enabled_sources` performs internally (its own `scan-
+    customizations.py` support module) during the render call -- a
+    concurrent caller could still race on *that* nested load even with
+    round 2's fix in place. Widened the lock (now an `RLock`, since
+    `refresh_local_cache` holds it for its *entire* body and
+    `_load_instruction_projections` also acquires it internally) to cover
+    the whole refresh, transitively serializing any nested load the
+    render call performs, without touching customizing-copilot's own
+    source. Added a dedicated concurrent-`refresh_local_cache` regression
+    test (not just the outer module load) with a fake nested-module lazy
+    loader reproducing the shape of the real one.
+- **Review round 5 findings (PR #4809), all addressed with a redesign in
+  the same PR:**
+  - **Cross-plugin reach-around (the deepest finding):** every fix through
+    round 4 still had `local_cache_refresh` directly `importlib`-loading
+    customizing-copilot's own private `instruction_projections.py` module
+    and calling its internals in-process. This violates
+    `docs/patterns/a-la-carte-independence.md` and
+    `docs/patterns/runtime-agent-plugin.md`'s "no cross-plugin
+    reach-around" rule -- a plugin may only talk to a sibling through its
+    own declared, versioned surface, never by importing/poking its
+    internal files, mirroring the precedent `claim_providers.py` already
+    set (resolve only to a sibling's own payload-local binstub, invoke as
+    a subprocess). Fixed with a real redesign: customizing-copilot's
+    `manage-instruction-projections.py` CLI gained a third operation,
+    `render-local-cache`, as the new declared surface; `local_cache_
+    refresh.py` was rewritten from scratch to resolve that script's path
+    and invoke it via a bounded-timeout `subprocess.run()` instead of any
+    Python import. This incidentally eliminated the `sys.modules`/
+    threading/lock machinery rounds 1-4 had been patching entirely --
+    each subprocess is a fresh interpreter with no shared state to race.
+  - **Round 4's daemon-thread fix was itself wrong:** dispatching the
+    `sessionStart` backup to a background thread solved the deadline-
+    blocking problem but broke correctness -- `docs/patterns/worktree-
+    scoped-dynamic-guidance.md` §4's guarantee that the catch-all
+    instruction's first-turn tool read is safe *because* `sessionStart`
+    has already finished only holds if the render completes
+    synchronously before the hook returns; an async dispatch races that
+    read instead of guaranteeing it. Reverted to synchronous execution,
+    but bounded: the backup now computes a timeout from the hook's own
+    remaining decision-deadline budget (capped at a new
+    `SESSIONSTART_MAX_TIMEOUT_S = 5.0`), skipping the call outright once
+    under 2s of budget remains, so a slow refresh can again never cause
+    the whole lifecycle response to miss its deadline -- without ever
+    risking the first-turn-read race a thread would have introduced.
+  - **Thread/lock accumulation:** every `sessionStart` call would have
+    spawned a new daemon thread, all serialized behind one process-global
+    lock -- unbounded queueing, violating
+    `docs/patterns/work-coalescing-singleton.md`. Moot under the
+    subprocess redesign: there is no shared lock or thread pool left to
+    accumulate against.
+  - **Missing Graceful cutover impact statement** (`CONTRIBUTING.md:609-
+    628`, required for any change touching the resident `sessionStart`
+    hook server): added to the PR description -- the redesign makes this
+    a non-issue by construction, since the backup is a synchronous,
+    timeout-bounded subprocess call inside the same request-handling
+    thread, with no background daemon thread and no state held across a
+    drain/cutover.
+  - Also moved `_refresh_local_cache_diagnostic` (renamed
+    `sessionstart_diagnostic`) out of the already-near-its-ceiling
+    `__main__.py` into `local_cache_refresh.py` itself, alongside the
+    function it wraps, shrinking `__main__.py` well clear of its 7083-line
+    module-size cap instead of requiring a deliberate baseline widen.
+  - `test_local_cache_refresh.py` rewritten for the subprocess-based
+    design (including a real CLI round-trip test against the shipped
+    `manage-instruction-projections.py`, not a stub); `test_hook_ipc.py`'s
+    sessionStart coverage updated to match (removed the `_SynchronousThread`
+    stand-in the round-4 fix had needed). Full targeted suite: 105 passed,
+    4 skipped; customizing-copilot's own suite (for the new CLI operation):
+    307 passed, 8 skipped. `tools/check-module-size.py` and `tools/check-
+    docs-consistency.py` both clean with no baseline changes needed.
+- **Review round 6 findings (PR #4809), all addressed in the same PR:**
+  - **Real descendant-leak bug in round 5's own redesign:** the new
+    `subprocess.run(argv, timeout=timeout)` call only terminates its
+    direct child, not any descendant the CLI itself spawns (an
+    `agent-worktrees repos find` lookup, git subprocesses --
+    `scan_plugin_sources.py`) -- exactly the limitation `push_timeout.py`
+    already documents and exists to close. Fixed by routing the call
+    through `push_timeout.run_bounded()` instead (already reused for a
+    non-push purpose by `git_ops.py`, so this isn't a new cross-purpose
+    use), which kills the whole process tree on a stall. Added a real,
+    non-mocked descendant-timeout regression test mirroring
+    `test_git_ops.py`'s own `TestPushTimeoutTreeKill`: a stand-in CLI
+    script spawns a grandchild and hangs, proving the grandchild does not
+    survive `refresh_local_cache`'s own timeout.
+  - **Two stale-design mentions the round-5 redesign missed:** a Plan-
+    section landing note (separate from the Journal) and the PR
+    description itself still described the superseded in-process
+    `importlib`/`render_local_cache()` design. Updated both to describe
+    the actual subprocess/CLI-boundary design.
+  - **Graceful cutover impact statement** had been added to the PR
+    description in round 5's own fix, but the round-6 review ran against
+    an earlier fetch of that description (before the edit propagated) and
+    flagged it as missing again -- reconfirmed present, no further action
+    needed.
+- **Review round 7 findings (PR #4809), all addressed in the same PR:**
+  - **Real identity-spoofing gap in the `_direct`-install fallback:**
+    `_resolve_cli_script`'s `_direct` candidate trusted a directory merely
+    because it contained a `plugin.json` self-declaring the expected
+    `"customizing-copilot"` name, with sorted-path order deciding which
+    candidate wins when more than one claims it -- a stale or unrelated
+    direct install could impersonate the real plugin, a direct violation
+    of `docs/patterns/marketplace-installation-cells.md`'s "plugin name
+    alone never selects a runtime" invariant. Fixed by resolving the
+    sibling's root through `plugin_activation.resolve_active_plugins()`
+    instead -- the same identity-verified active-plugin evidence
+    `claim_providers.py` uses for its own sibling callbacks -- filtering
+    its `.active` plugins by declared name and taking the reported live
+    root. No active-plugin match (or an unreachable resolver) now fails
+    closed to `None`: the refresh is silently skipped for that round
+    rather than falling back to any unverified directory scan. This
+    retired the home-grown `_candidate_plugin_roots` glob/manifest-name
+    matcher entirely.
+  - **Real deadline-budget bug in round 6's own fix:** `sessionstart_
+    diagnostic`'s budget calculation reserved only a flat 1-second margin
+    before the hook's own decision deadline, but `push_timeout.run_
+    bounded`'s timeout path can itself spend up to 5 more seconds past its
+    own `timeout` draining a killed process's pipes (`proc.communicate
+    (timeout=5)` after the tree-kill) -- so a timed-out refresh could
+    still overrun the hook's deadline despite round 4/6's bounding,
+    silently breaking the synchronous-completion guarantee this whole
+    backup exists to provide. Fixed by also reserving a new
+    `_RUN_BOUNDED_CLEANUP_GRACE_S` (5.0s) in the budget math before
+    deciding how much of it to hand to `refresh_local_cache` as its own
+    `timeout`; when there's no deadline at all the grace reservation
+    doesn't apply (nothing external to overrun), so the no-deadline case
+    is unchanged.
+  - **Code-style nit:** a new test's docstring named the review round
+    that produced it instead of describing the invariant timelessly;
+    fixed (review-round narrative belongs only in this Journal).
+  - `_resolve_cli_script`'s and `sessionstart_diagnostic`'s own tests
+    rewritten for the identity-verified resolution and the corrected
+    budget math (including a reserved-cleanup-grace regression distinct
+    from the plain too-tight-budget case); the `TestRefreshLocalCache`
+    tests that used to create real files at the old naive path convention
+    now monkeypatch `_resolve_cli_script` directly, decoupling them from
+    the resolution mechanism. Targeted suite (`test_local_cache_refresh.py`,
+    `test_hook_ipc.py`, `test_paired_carve.py`, `test_launch_project_
+    scoping.py`, `test_git_ops.py`): 219 passed, 4 skipped. `tools/check-
+    module-size.py` and `tools/check-docs-consistency.py` both clean.
+- **Review round 8 findings (PR #4809), both addressed in the same PR:**
+  - **Real cross-repo contamination gap in round 7's own identity-
+    verified fix:** `resolve_active_plugins()` aggregates every
+    agent-worktrees-registered project plus global settings, and its own
+    scope-precedence contract orders a project-local root ahead of the
+    global installed one for the same source. `_resolve_cli_script`'s
+    round-7 fix iterated `.active.values()` and took whichever root
+    `ActivePlugin.root`/`live_roots` reported first, with no regard for
+    *which* scope that root came from -- so a session in repo B could end
+    up executing repo A's project-scoped local dev override of
+    customizing-copilot, and multiple same-name marketplace identities
+    were picked by dictionary iteration order rather than failing closed.
+    Fixed: only the plugin's **global** activation scope
+    (`ActivePlugin.root_for_scope("global")`) is ever trusted now --
+    never any project-scoped override, regardless of which repo the
+    refresh runs for -- and resolution now requires **exactly one**
+    matching active-plugin entry to even consider a root, failing closed
+    (`None`) on zero or more than one match.
+  - **Real unbounded-resolution gap in round 7's own identity-verified
+    fix:** `resolve_active_plugins()` verifies every registered project
+    with its own pair of Git calls (each up to a 10s timeout) before
+    returning -- a step `_resolve_cli_script` performed with no bound of
+    its own, ahead of the already-bounded `push_timeout.run_bounded`
+    subprocess call, so a single slow or unreachable registered project
+    could blow the sessionStart hook's entire deadline before the render
+    step even started. Fixed: `_resolve_cli_script` now accepts an
+    optional `timeout`, running the resolution call on a daemon thread
+    and failing closed if it doesn't finish within that bound (never
+    blocking past it, and never treating an unfinished resolution as
+    success); `refresh_local_cache`'s own `timeout` is now split between
+    a capped `_RESOLUTION_TIMEOUT_S` (2.0s) for this step and whatever
+    remains for the render subprocess, so the function's total
+    worst-case cost still respects the caller's single `timeout` budget.
+  - Targeted suite (`test_local_cache_refresh.py`, `test_hook_ipc.py`,
+    `test_paired_carve.py`, `test_launch_project_scoping.py`,
+    `test_git_ops.py`): 222 passed, 4 skipped. `tools/check-module-
+    size.py` and `tools/check-docs-consistency.py` both clean.
+- **Review round 9 finding (PR #4809):** round 8's own daemon-thread fix
+  was itself wrong, for the same class of reason round 4's daemon-thread
+  fix was wrong. `thread.join(timeout)` only stops *waiting*; it never
+  cancels the thread's own in-flight work, so a slow `resolve_active_
+  plugins()` call keeps running its Git child processes to completion
+  regardless, and the resident hook server accepts concurrent requests
+  on separate threads -- so repeated `sessionStart` calls could
+  accumulate abandoned resolver threads and orphaned Git children
+  indefinitely, long after their own 2-second budgets had expired.
+  `daemon=True` only changes process-*shutdown* behavior, not whether the
+  thread's own children get reaped mid-session. Fixed by retiring the
+  threading approach entirely: resolution now runs in its own bounded
+  subprocess via `push_timeout.run_bounded` (the exact mechanism the
+  render step already used), invoked as `python -m agent_worktrees.
+  local_cache_refresh <home>` -- a real self-contained subprocess entry
+  point this module now exposes, printing the resolved root (or nothing)
+  to stdout. A timeout here hits the same process-tree kill the render
+  step's own timeout does, so no orphaned Git child can outlive it. The
+  pure selection/filtering logic (global-scope-only trust, exactly-one-
+  match requirement) was extracted into a directly unit-testable
+  `_select_global_root()`, keeping the previous round's fast logic-level
+  tests intact while `_resolve_cli_script`'s own tests now mock
+  `push_timeout.run_bounded` instead of `plugin_activation.resolve_
+  active_plugins` directly (plus one real, non-mocked subprocess round
+  trip proving the new entry point actually runs). `sessionstart_
+  diagnostic`'s deadline budget now reserves `_RUN_BOUNDED_CLEANUP_
+  GRACE_S` **twice** (once per sequential bounded subprocess -- resolution,
+  then render -- since either can independently overrun its own timeout
+  during cleanup), not once (**round 10 found this reasoning itself
+  wrong -- see below**). No explicit coalescing lock was added for
+  concurrent calls: unlike the thread-based approach, each call's
+  resolution subprocess is now independently bounded and guaranteed
+  torn down by the OS-level tree-kill at its own timeout, so there is no
+  unbounded accumulation left to coalesce against. Targeted suite:
+  226 passed, 4 skipped. `tools/check-module-size.py` and `tools/check-
+  docs-consistency.py` both clean.
+- **Review round 10 finding (PR #4809):** round 9's "reserve the cleanup
+  grace twice" fix was itself over-conservative to the point of breaking
+  the feature entirely: the real production `sessionStart` decision
+  deadline (`hook_client.py`'s `_SESSION_START_DECISION_S`) is only
+  **10 seconds**, shared across every diagnostic the hook runs -- and
+  reserving `2 * _RUN_BOUNDED_CLEANUP_GRACE_S + 1.0` (11 seconds) alone
+  already exceeds that entire budget before any elapsed time is even
+  subtracted, so the sessionStart backup refresh would *always* compute
+  a negative budget and skip, unconditionally, in production. Re-derived
+  the actual worst case: `refresh_local_cache` runs its two bounded
+  subprocesses (resolution, then render) **sequentially**, and a timed-
+  out resolution returns before the render subprocess is ever attempted
+  -- so only ONE of the two can ever be the one that actually times out
+  and pays `_RUN_BOUNDED_CLEANUP_GRACE_S` in a given call, never both.
+  The combined worst case is `timeout + _RUN_BOUNDED_CLEANUP_GRACE_S`
+  (single reservation), not `timeout + 2 * _RUN_BOUNDED_CLEANUP_GRACE_S`.
+  Reverted the budget math to a single reservation, restoring a usable
+  (if still tight) real-world budget for the backup to actually run.
+  Also confirmed the review's other two listed findings were stale
+  restatements against an old commit (`e211df82...`, round 5's push) --
+  the Graceful cutover impact statement and PR-description update they
+  named were already addressed in rounds 5-9; replied on that thread to
+  help it resolve. Targeted suite: 226 passed, 4 skipped. `tools/check-
+  module-size.py` and `tools/check-docs-consistency.py` both clean.
 
 ### 2026-10-01 -- Phase 7 slice 4: the repo-wide catch-all static projection
 - Picked up the next unstarted Plan item (slice 3's steer): `customizing-

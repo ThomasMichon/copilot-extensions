@@ -12,6 +12,7 @@ from instruction_projections import (
     BLOCKING,
     Result,
     discover_enabled_sources,
+    render_local_cache,
     scan_repository,
     sync_repository,
     validate_repository_root,
@@ -36,11 +37,15 @@ def _print_human(result) -> None:
             )
     else:
         print("[OK] instruction projections are consistent")
-    if result.operation == "sync":
+    if result.operation in ("sync", "render-local-cache"):
+        lock_suffix = (
+            f", lock {'updated' if result.lock_updated else 'unchanged'}"
+            if result.operation == "sync"
+            else ""
+        )
         print(
             f"\n{len(result.changed)} changed, "
-            f"{len(result.unchanged)} unchanged, "
-            f"lock {'updated' if result.lock_updated else 'unchanged'}"
+            f"{len(result.unchanged)} unchanged{lock_suffix}"
         )
     print(
         f"{result.blocking} blocking, {result.warnings} warning(s); "
@@ -51,7 +56,7 @@ def _print_human(result) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="operation", required=True)
-    for operation in ("sync", "scan"):
+    for operation in ("sync", "scan", "render-local-cache"):
         subparser = subparsers.add_parser(operation)
         subparser.add_argument("root", nargs="?", default=".")
         subparser.add_argument("--json", action="store_true")
@@ -89,19 +94,35 @@ def main(argv: list[str] | None = None) -> int:
         else:
             _print_human(result)
         return 1
-    sources = None
-    if args.operation == "sync" or args.from_settings:
+    installed_root = (
+        args.installed_root.expanduser().resolve()
+        if args.installed_root is not None
+        else None
+    )
+
+    def _discover():
+        return discover_enabled_sources(
+            root,
+            installed_root=installed_root,
+            require_trust=False,
+            agent_worktrees_command=args.agent_worktrees_path,
+        )
+
+    if args.operation == "render-local-cache":
         try:
-            sources = discover_enabled_sources(
-                root,
-                installed_root=(
-                    args.installed_root.expanduser().resolve()
-                    if args.installed_root is not None
-                    else None
-                ),
-                require_trust=False,
-                agent_worktrees_command=args.agent_worktrees_path,
-            )
+            result = render_local_cache(root, _discover)
+        except ValueError as exc:
+            result = Result(operation=args.operation)
+            result.add(BLOCKING, "projection-settings", root, str(exc))
+        if args.json:
+            print(json.dumps(result.to_dict(), indent=2, sort_keys=True))
+        else:
+            _print_human(result)
+        return 1 if result.blocking else 0
+    sources = None
+    if args.operation == "sync" or getattr(args, "from_settings", False):
+        try:
+            sources = _discover()
         except ValueError as exc:
             result = Result(operation=args.operation)
             result.add(

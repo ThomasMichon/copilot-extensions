@@ -10,6 +10,7 @@ import types
 
 import agent_worktrees.__main__ as m
 from agent_worktrees import knowledge_plugins as kp
+from agent_worktrees import local_cache_refresh as lcr
 from agent_worktrees import repos as repos_mod
 from agent_worktrees import state_root as sr
 from agent_worktrees import tracking as tk
@@ -39,6 +40,7 @@ def _common_patches(monkeypatch, tmp_path):
     monkeypatch.setattr(m.permissions, "clone_permissions", lambda a, b: False)
     monkeypatch.setattr(m.permissions, "add_trusted_folder", lambda p: False)
     monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
+    monkeypatch.setattr(lcr, "refresh_local_cache", lambda *a, **k: None)
     # codename-attribution-by-default (PR #3037 review finding): the
     # allocation-policy second revalidation reloads config fresh -- tests
     # in this module don't register a real project on disk, so give the
@@ -454,6 +456,7 @@ class TestCarvePairedKnowledgeAttributionPolicy:
         monkeypatch.setattr(m.permissions, "clone_permissions", lambda *a: False)
         monkeypatch.setattr(m.permissions, "add_trusted_folder", lambda *a: False)
         monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
+        monkeypatch.setattr(lcr, "refresh_local_cache", lambda *a, **k: None)
 
         try:
             m._create_worktree_core(harness_config)
