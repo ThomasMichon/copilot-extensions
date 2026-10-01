@@ -9,7 +9,7 @@ visions:
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-phase PR worktrees to `dev`
 - **Created:** 2026-09-28
-- **Status:** Done (Phase 1 of 6 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 6 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 6 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 6 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 6 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to Phase 6; Phase 6 of 6 landed — [#4664](https://github.com/ThomasMichon/copilot-extensions/pull/4664) implemented the opt-in `CR_LIVE_TURN_DRILL=1` drill, then verified by a real live Docker clean-room run ([#4672](https://github.com/ThomasMichon/copilot-extensions/pull/4672)) that also fixed two bugs the review round couldn't catch and one wrong assertion; Phase 0's design fork resolved and the opt-in reconcile gate removed — [#4694](https://github.com/ThomasMichon/copilot-extensions/pull/4694). A checkbox audit found 3 more Plan/Validation Plan items already satisfied by prior work but never ticked; the one remaining item -- the abrupt-termination drill's real-`_generation_id` exposure -- closed via a new local `running-version.json` field (not `/health`, which had hit a real contract-registry wall), run for real (`PROBE-SUMMARY: 4/4 passed`). Every Plan and Validation Plan item is now checked.)
+- **Status:** Done (Phase 1 of 6 merged — [#4478](https://github.com/ThomasMichon/copilot-extensions/pull/4478); Phase 2 of 6 merged — [#4522](https://github.com/ThomasMichon/copilot-extensions/pull/4522); Phase 3 of 6 merged — [#4543](https://github.com/ThomasMichon/copilot-extensions/pull/4543); Phase 4 of 6 merged — [#4581](https://github.com/ThomasMichon/copilot-extensions/pull/4581); Phase 5 of 6 partially landed — [#4586](https://github.com/ThomasMichon/copilot-extensions/pull/4586), live-turn drill deferred to Phase 6; Phase 6 of 6 landed — [#4664](https://github.com/ThomasMichon/copilot-extensions/pull/4664) implemented the opt-in `CR_LIVE_TURN_DRILL=1` drill, then verified by a real live Docker clean-room run ([#4672](https://github.com/ThomasMichon/copilot-extensions/pull/4672)) that also fixed two bugs the review round couldn't catch and one wrong assertion; Phase 0's design fork resolved and the opt-in reconcile gate removed — [#4694](https://github.com/ThomasMichon/copilot-extensions/pull/4694). A checkbox audit found 3 more Plan/Validation Plan items already satisfied by prior work but never ticked; the one remaining item -- the abrupt-termination drill's real-`_generation_id` exposure -- closed via a new local `running-version.json`/`pending-generation-ids.json` marker-file pair (not `/health`, which had hit a real contract-registry wall) — [#4727](https://github.com/ThomasMichon/copilot-extensions/pull/4727), run for real (`PROBE-SUMMARY: 4/4 passed`). Every Plan and Validation Plan item is now checked.)
 - **Vision:** closes
   [`visions/plugins/agent-bridge`](../../../../visions/plugins/agent-bridge/README.md)
   with §Concepts/*the daemon generation and its session-host handoff*,
@@ -273,11 +273,13 @@ layer — is the operator's own, captured verbatim in Request.)_
   [issue #4681](https://github.com/ThomasMichon/copilot-extensions/issues/4681)).
 - [x] A forced-abrupt-termination drill: kill the old generation before it
   releases its claims, and confirm a later generation recovers them cleanly.
-  Closed for real: the claim is now stamped with the killed daemon's own
-  REAL `_generation_id`, not a test-chosen label -- exposed via a new local
-  `running-version.json` field (`runtime_version.set_running_generation_id`,
-  no `/health` contract involved) and read back by the drill. Run for real
-  (`PROBE-SUMMARY: 4/4 passed`, including this check) -- see Journal.
+  Closed for real ([#4727](https://github.com/ThomasMichon/copilot-extensions/pull/4727)):
+  the claim is now stamped with the killed daemon's own REAL
+  `_generation_id`, not a test-chosen label -- exposed via a new local
+  `running-version.json`/`pending-generation-ids.json` pair
+  (`runtime_version.py`, no `/health` contract involved) and read back by
+  the drill. Run for real (`PROBE-SUMMARY: 4/4 passed`, including this
+  check) -- see Journal.
 - [x] Extend or add a clean-room scenario (Tier P, `agent-bridge-solo` or a
   new `agent-bridge-cutover` companion) that exercises this on a real fresh
   machine.
@@ -354,9 +356,11 @@ the full reasoning).
   (Docker clean-room, real Copilot auth/credits) -- see Phase 6's Journal
   entry for the evidence.
 - [x] An abrupt-termination drill shows a stale claim is recovered by the
-  next generation without manual intervention. Resolved: the claim is now
-  stamped with the killed daemon's own real generation identity (exposed
-  via a new local marker file, not `/health`) -- see Journal.
+  next generation without manual intervention. Resolved
+  ([#4727](https://github.com/ThomasMichon/copilot-extensions/pull/4727)):
+  the claim is now stamped with the killed daemon's own real generation
+  identity (exposed via a new local marker-file pair, not `/health`) -- see
+  Journal.
 - [x] Reconcile staleness is observable via a status command, independent of
   whether Phase 0's opt-in-gate question is resolved to keep or remove it.
   Resolved: the gate was removed; `agent-bridge service status` reports
@@ -429,6 +433,89 @@ entry below for what was inspected, what was already covered, and the one new
 test that closes the gap.
 
 ## Journal
+
+### 2026-09-30 — Real generation-id exposure landed ([#4727](https://github.com/ThomasMichon/copilot-extensions/pull/4727)), closing the effort for real
+
+- Discussed the design options with the operator before touching code (per
+  this effort's own Phase 0 precedent -- a genuine design fork, not
+  something to silently pick): (1) split the `/health` field across two
+  PRs to dodge the contract-registry self-reference wall, (2) a new
+  debug-only, non-contract HTTP endpoint, or (3) extend the existing
+  local `running-version.json` marker file. **Operator chose (3).**
+- First implementation used a single shared field merged directly into
+  the canonical marker at a passive successor's own boot. Four real
+  automated-review rounds, each catching a genuine gap before the design
+  was actually sound:
+  1. **Coexistence-window race**: a passive merging its id straight into
+     the SHARED marker before promotion meant an ABORTED cutover would
+     permanently pair the surviving active daemon's own pid/version with
+     an abandoned generation. Fixed by introducing a separate, PID-keyed
+     pending-staging file (`pending-generation-ids.json`) a passive
+     stages into without ever touching the canonical marker; only
+     `_reconcile_service_marker`, at CONFIRMED-promotion time, consumes
+     the matching entry.
+  2. **Wrong role signal**: the first cut used `ServiceConfig.
+     enable_credential_relay` to distinguish "normal primary" from
+     "passive"/"elevated" -- but that field is user-configurable
+     *persisted* config (`config.yaml`), so an operator disabling the
+     relay on an otherwise normal primary for unrelated reasons would
+     silently stop that daemon from ever recording its id at all (ALSO:
+     a persisted `is_passive` field, tried next, would have had the same
+     persistence hazard the other direction). Settled on the real role
+     signals: `elevated.is_subdaemon()` (an existing function, checks
+     the real elevated-runtime-dir + Windows-elevation-token condition)
+     for "never touch", and the existing transient `app.state.passive`
+     launch-state flag for "stage" -- neither is persisted config.
+  3. **Unlocked concurrent read-modify-write**: staging (a passive's own
+     boot) and consuming (a promotion) both wrote the pending file
+     without coordination -- a genuine interleaving could lose an
+     update. Closed with a dedicated, cross-process, cross-platform
+     advisory lock scoped ONLY to this file (same POSIX `fcntl.flock`/
+     Windows `msvcrt.locking` primitive `zdd.cutover_lock` already uses,
+     wrapped in its own short poll-retry loop) -- deliberately NOT
+     `zdd.cutover_lock`'s own lock, which `CutoverOrchestrator.run()`
+     holds for its ENTIRE duration; a passive's own boot-time staging
+     call happens INSIDE that same window, so reusing that lock would
+     have deadlocked the very staging call this needs to let through.
+     Verified with a real-subprocess concurrency test (not threads --
+     the guarantee is explicitly cross-process).
+  4. **PID-reuse hazard**: pending entries keyed only by bare pid number,
+     pruned only by liveness, meant an abandoned/never-promoted
+     passive's pid could later be reused by a wholly unrelated process
+     (including an unrelated normal agent-bridge daemon via
+     `_reconcile_live_dynamic_daemon`, a second, non-cutover caller of
+     `_reconcile_service_marker` this effort hadn't originally
+     accounted for), misattributing the abandoned generation onto that
+     daemon's marker. Closed by binding each entry to
+     `zdd.diagnostics.process_start_time(pid)` -- this repo's own
+     identity-token primitive for exactly this hazard class -- and
+     re-verifying it at consumption time; a mismatch is discarded, not
+     trusted, even when the bare pid number still matches. A fifth,
+     related gap (`set_running_generation_id` could merge a new
+     process's id onto a STALE marker still describing a different,
+     now-dead daemon's pid/version) was caught and fixed in the same
+     pass: reset fresh whenever the existing marker's pid doesn't match
+     the current process.
+  - Two further rounds (the 5th/6th automated passes) then repeated
+    several of these same findings verbatim after they were already
+    fixed and re-verified -- consistent with the bot re-surfacing
+    unresolved review threads rather than re-reading the diff fresh
+    each time (the same pattern Phase 6's own Journal entry documented).
+    Per this repo's non-blocking `COMMENTED`-review policy, merged once
+    every actual finding was independently re-confirmed fixed against
+    the exact pushed commit content, rather than chasing a verdict that
+    wasn't converging.
+- **Final verified state before merge**: full `agent-bridge` suite green
+  throughout (471+416 across its pytest markers, then all 7 full
+  sub-suites); the real Tier-P clean-room probe run end to end after
+  every fix (`PROBE-SUMMARY: 4/4 passed` each time, including
+  `abrupt-kill-recovery` with the real generation id verified); manually
+  verified against REAL `agent-bridge deploy` cutovers (not just the
+  synthetic drill) that the post-promotion marker carries the new
+  daemon's own real id and the pending file empties out correctly
+  afterward.
+- This closes the effort's last open item for real. Every Plan and
+  Validation Plan checkbox is checked; see the Status line above.
 
 ### 2026-09-30 — Effort Done: the real generation-id gap closed, every box checked
 
