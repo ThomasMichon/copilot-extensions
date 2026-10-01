@@ -474,8 +474,9 @@ It proxies credential requests to local credential stores.
 1. agent-bridge runs the relay server on `127.0.0.1:<live-port>`
 2. The catalog command's `ssh` action includes an SSH reverse-forward for that live port
 3. CodeSpace sends git-credential-protocol requests to `localhost:<live-port>`
-4. Relay routes to matching source (GCM / `git-credential`, `gh-auth` fallback
-   for allowed GitHub hosts, plus `az-login` for allowed Azure resources)
+4. Relay routes to matching source (GCM / `git-credential`, plus `gh-auth`
+   only for explicit `get-github-token`, plus `az-login` for allowed Azure
+   resources)
 5. Response flows back through the tunnel
 
 ### Available Sources
@@ -483,7 +484,7 @@ It proxies credential requests to local credential stores.
 | Source | Action | What It Does |
 |--------|--------|-------------|
 | `git-credential` | `get`/`store`/`erase` | Proxies to local Git Credential Manager |
-| `gh-auth` | `get`/`fill` for `github.com`; `get-github-token` | Falls back to `gh auth token --user <account>` for the CodeSpace's bound GitHub account when GCM cannot serve a GitHub credential |
+| `gh-auth` | `get-github-token` | Returns the active `gh auth token` for explicit token requests only; it is not used for git credential `get`/`fill` |
 | `az-login` | `get-azure-token` | Returns Azure access tokens for the built-in ADO/Storage resources plus configured `allowed_resources` |
 
 ### Policy Enforcement
@@ -495,12 +496,11 @@ All requests pass through a policy gate before reaching any source:
 
 GitHub order is per connection: inject the bound CodeSpace account, or the
 active `gh` account for ambient-owned CodeSpaces, as `username=<account>` for
-`github.com`; call non-interactive GCM; then fall back to `gh-auth` for the same
-username only if GCM still cannot serve it. The relay profile is account-free.
+`github.com`; then call non-interactive GCM. The relay profile is account-free.
 Missing or ambiguous GitHub credentials are warnings for connect/detach (ADO-only
-or interactive work can still proceed) but remain doctor findings. The fallback
-only serves credential `get`/`fill`; it never stores or erases the `gh` token in
-GCM.
+or interactive work can still proceed) but remain doctor findings. The relay
+does not substitute `gh auth token` for git credential `get`/`fill`, and never
+stores or erases tokens in GCM.
 
 ## Agent-Bridge Integration
 

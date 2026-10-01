@@ -23,7 +23,6 @@ from dataclasses import dataclass
 from collections.abc import Awaitable, Callable
 from urllib.parse import urlsplit
 
-from credential_relay.sources.gh_auth import GhAuthSource
 from credential_relay.sources.git_credential import GitCredentialSource
 
 from .provision import DOTFILES_DIR
@@ -224,12 +223,11 @@ def github_credential_remedy(account: str | None, *, ambiguous: bool = False) ->
             "account as the GCM username. Optional interim only: "
             "`git config --global credential.https://github.com.username <account>`."
         )
-    who = f" for {account}" if account else ""
-    user = f" -u {account}" if account else ""
+    user = f" --username {account}" if account else ""
     return (
-        f"sign in to GitHub{who}: `gh auth login --hostname github.com` "
-        f"(or `gh auth refresh -h github.com{user}`) -- the relay uses gh "
-        "when Git Credential Manager has no stored credential."
+        f"sign in to GitHub in Git Credential Manager: "
+        f"`git credential-manager github login{user}`. Optional interim only: "
+        "`git config --global credential.https://github.com.username <account>`."
     )
 
 
@@ -263,25 +261,20 @@ async def github_credential_preflight(
     account: str | None = None,
     *,
     git_source: GitCredentialSource | None = None,
-    gh_source: GhAuthSource | None = None,
     gcm_accounts: list[str] | None = None,
     timeout: float = 15.0,
 ) -> GithubCredentialPreflight:
     """Verify the relay can produce a github.com git credential on the host.
 
     Mirrors the runtime relay order for CodeSpaces: non-interactive Git
-    Credential Manager first, then ``gh auth token`` for the bound account (or
-    the sole logged-in account when no binding exists).
+    Credential Manager with the per-connection username when available.
     """
     login = (account or "").strip() or None
     fields = {"protocol": "https", "host": "github.com"}
     if login:
         fields["username"] = login
 
-    sources = [
-        git_source or GitCredentialSource(github_username=login),
-        gh_source or GhAuthSource(account=login),
-    ]
+    sources = [git_source or GitCredentialSource(github_username=login)]
     for source in sources:
         try:
             response = await source.resolve("get", dict(fields), timeout=timeout)
@@ -318,7 +311,7 @@ async def github_credential_preflight(
             "the host relay could not produce a non-interactive github.com "
             f"credential for {login}" if login
             else "the host relay could not produce a non-interactive "
-            "github.com credential from Git Credential Manager or gh"
+            "github.com credential from Git Credential Manager"
         ),
         remedy=github_credential_remedy(login),
         account=login,

@@ -339,10 +339,9 @@ CodeSpaces use their persisted account; ambient-owned CodeSpaces use the active
 interactivity has been disabled`) when several GitHub accounts are stored. The
 relay profile itself stays account-free, and a missing/ambiguous GitHub
 credential warns during launch rather than blocking the session; `doctor`
-continues to report it. If GCM still cannot serve the selected account, the
-relay can fall back to the existing `gh-auth` source for that same username.
-The fallback only serves `get`/`fill`; it never stores or erases the `gh` token
-in GCM.
+continues to report it. If GCM still cannot serve the selected account, sign in
+to GitHub in GCM for that account; the relay never substitutes a `gh auth token`
+for git `get`/`fill`, and never stores or erases tokens in GCM.
 
 Provisioning installs the relay-first wrapper only as `~/ado-auth-helper`.
 It deliberately leaves `~/azure-auth-helper` to the native Azure tooling so
