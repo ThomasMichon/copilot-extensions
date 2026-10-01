@@ -782,8 +782,11 @@ shape before committing to a design)_
       still depends on external `worktree-manager/bin/*` wrapper assets, and
       the PEP 610 `direct_url.json` source-recovery path can still point at a
       transient installer staging directory rather than a durable checkout.
-      Until those two review findings are resolved with committed regression
-      coverage, this checkbox stays open.
+      Those two blockers are now tracked explicitly as issue **#4787**
+      (wrapper assets not self-contained in packaged fallback) and issue
+      **#4788** (staged non-editable installs lose the remaining
+      `src-passthrough` source binding). Until those land with committed
+      regression coverage, this checkbox stays open.
 - [x] Editing the canonical `libs/<lib>` source and re-running a
       converted plugin's tests **without reinstalling** picks up the edit
       — the "in-place test scripts in `dev`" / "call across folders"
@@ -2927,13 +2930,28 @@ _Pending._
   two specific packaging/runtime blockers:
   1. the packaged-fallback installer path still wants wrapper assets currently
      sourced from `worktree-manager/bin/*`, so the wheel payload is not yet
-     self-contained under marketplace isolation; and
+     self-contained under marketplace isolation (**tracked as #4787**); and
   2. the `plugin-activation` src-passthrough fallback currently relies on PEP
      610 `direct_url.json`, but review correctly notes that in a staged install
      that metadata can name the throwaway `.install-stage/...` source path
-     rather than a durable checkout, so a later update can orphan the runtime.
+     rather than a durable checkout, so a later update can orphan the runtime
+     (**tracked as #4788**).
 - **Validation Plan status after stopping:** round-trip/losslessness is closed;
   the broader non-editable top-level-suite proof is still open for the concrete
   blocker above.
 - **Effort status:** **not ready for Done**. Validation is not fully closed,
   and the Plan section still has its own unresolved work/blocked items.
+
+### 2026-10-01 — PR #4767 merged; blocker 2 split into tracked follow-up issues
+
+- PR **#4767** merged after the round-trip regression was tightened to exercise
+  the whole-snapshot `materialize()` path and to build the expected vendored
+  manifests independently rather than reusing the nested production helper as
+  its oracle.
+- The still-open non-editable packaging blocker is now split into two precise,
+  public follow-ups instead of living only as review prose in this effort:
+  - **#4787** — `agent-worktrees: package wrapper assets for non-editable fallback installs`
+  - **#4788** — `plugin-activation: staged non-editable installs lose the remaining src-passthrough source`
+- Validation status is unchanged by those issues being filed: blocker 2 remains
+  OPEN until one of those issues lands a real fix (or otherwise removes the
+  remaining `src-passthrough` holdout safely).
