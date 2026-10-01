@@ -156,6 +156,86 @@ def test_ci_loader_splits_first_pipe_only(repo: Path):
     ]
 
 
+def test_regex_ci_token_matches_whole_word_without_embedded_words(repo: Path):
+    module = _load_module(repo)
+    token = r"regex:\bexample\b"
+    assert module._load_ci_identifiers(token + "|Use a placeholder") == [
+        (token, "Use a placeholder")
+    ]
+    matches = module._scan_text(
+        "plugins/new/clean.txt",
+        "spexample example-ish EXAMPLE example_spoon teaspoon\n",
+        [token, "missing-literal"],
+        {token: "Use a placeholder"},
+    )
+    assert [(match.line, match.col, match.identifier, match.reason) for match in matches] == [
+        (1, 11, "example", "Use a placeholder")
+    ]
+
+
+def test_regex_ci_loader_preserves_alternation_and_pipe_in_reason(repo: Path):
+    module = _load_module(repo)
+    assert module._load_ci_identifiers(
+        r"regex:\b(foo||bar)\b|Use generic | not internal;plain|plain reason"
+    ) == [
+        (r"regex:\b(foo|bar)\b", "Use generic | not internal"),
+        ("plain", "plain reason"),
+    ]
+    matches = module._scan_text(
+        "plugins/new/clean.txt",
+        "bar",
+        [r"regex:\b(foo|bar)\b"],
+        {},
+    )
+    assert [(match.col, match.identifier) for match in matches] == [(1, "bar")]
+
+
+def test_regex_ci_mode_redacts_pattern_but_trusted_details_report_match(
+    repo: Path, tmp_path: Path
+):
+    _write(repo, "plugins/new/clean.txt", "fool FOO teaspoon\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "introduce bounded identifier")
+    details_out = tmp_path / "details.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(repo / "tools" / SCRIPT.name),
+            "--ci",
+            "--trusted-details-json-out",
+            str(details_out),
+        ],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **_base_env(),
+            "COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI": r"regex:\bfoo\b|Use a generic placeholder",
+        },
+    )
+    assert result.returncode == 1
+    assert "FOO" not in result.stdout
+    assert "regex:" not in result.stdout
+    assert json.loads(details_out.read_text(encoding="utf-8")) == [
+        {
+            "file": "plugins/new/clean.txt",
+            "line": 1,
+            "col": 6,
+            "identifier": "FOO",
+            "reason": "Use a generic placeholder",
+        }
+    ]
+
+
+def test_invalid_regex_fails_explicitly_without_printing_token(repo: Path):
+    module = _load_module(repo)
+    with pytest.raises(ValueError, match="invalid regular expression in forbidden identifier list"):
+        module._scan_text("example.txt", "anything", ["regex:(private-marker"], {})
+    with pytest.raises(ValueError, match="empty regular expression match"):
+        module._scan_text("example.txt", "anything", ["regex:(?=anything)"], {})
+
+
 def test_load_paths_file_preserves_filename_whitespace(repo: Path):
     module = _load_module(repo)
     paths_file = repo / "paths.txt"
