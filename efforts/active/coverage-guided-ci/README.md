@@ -165,9 +165,12 @@ order.
       fallback curation** Concept: a greedy, budget-bounded weighted-set-cover
       selection over the baseline's own per-test coverage + runtime-cost
       data (repeatedly add whichever remaining test is cheapest per unit of
-      still-uncovered baseline coverage, stop at a tunable runtime budget) —
-      not a hand-picked list — and recompute it whenever the baseline
-      changes meaningfully. Validate that curated set carries real assurance
+      still-uncovered baseline coverage, stopping as soon as either the
+      coverage universe is fully covered or no remaining candidate both adds
+      new coverage and still fits the leftover budget, tunable per repo) —
+      not a hand-picked list, and never padded out to spend the whole budget
+      once saturated — and recompute it whenever the baseline changes
+      meaningfully. Validate that curated set carries real assurance
       (per `test-portfolio`'s own evidence-bearing-family bar), not just that
       it exists.
 - [ ] Wire the smoke-fallback trigger: missing baseline, stale baseline,

@@ -72,15 +72,21 @@ fallback's membership is chosen to maximize the source coverage it carries
 per unit of total runtime it costs — the baseline already has everything
 needed to compute this (which lines/branches each test covers, how long
 each test takes) without any additional instrumentation. This is a
-**budget-first** choice, not a fixed-size one: the set is built by repeatedly
-adding whichever remaining test is cheapest per unit of *still-uncovered*
-baseline coverage, stopping once a runtime budget is spent (not once
-coverage saturates) — a classic weighted-set-cover-style greedy selection,
-not an exhaustive optimum, since the general problem is NP-hard and an
-approximate, auditable, periodically-recomputed set is the right shape for a
-safety net that must stay cheap to recompute as the baseline itself evolves.
-A repo may re-run the curation whenever its baseline changes meaningfully,
-rather than hand-maintaining the fallback set as a static list.
+**budget-bounded** choice, not a fixed-size one: the set is built by
+repeatedly adding whichever remaining test is cheapest per unit of
+*still-uncovered* baseline coverage, stopping as soon as either the
+coverage universe is fully covered **or** no remaining candidate both adds
+new coverage and still fits the leftover budget — whichever comes first.
+The budget is never treated as a quota to be spent in full: a test that
+adds no new coverage is never added merely because budget remains, and a
+test that would exceed the remaining budget is never force-added merely to
+guarantee a non-empty result. This is a classic weighted-set-cover-style
+greedy selection, not an exhaustive optimum, since the general problem is
+NP-hard and an approximate, auditable, periodically-recomputed set is the
+right shape for a safety net that must stay cheap to recompute as the
+baseline itself evolves. A repo may re-run the curation whenever its
+baseline changes meaningfully, rather than hand-maintaining the fallback
+set as a static list.
 
 ### baseline correlation
 

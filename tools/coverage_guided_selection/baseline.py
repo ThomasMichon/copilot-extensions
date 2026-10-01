@@ -36,11 +36,6 @@ from pathlib import Path
 
 BASELINE_SCHEMA_VERSION = 1
 
-# coverage.py dynamic-context labels end in "|run" for the real execution
-# phase (as opposed to "|setup"/"|teardown", or "" for collection-time-only
-# coverage outside any test context, e.g. module-level import statements).
-_RUN_CONTEXT_SUFFIX = "|run"
-
 # Environment variables that can silently narrow which tests pytest
 # actually collects/runs (e.g. `PYTEST_ADDOPTS=-k smoke` or `-m guard`)
 # while pytest still exits 0 -- any of these would make a partial run look
@@ -85,7 +80,7 @@ _DRIVER_SCRIPT = textwrap.dedent(
     cov.read()
 
     cwd_path = Path(cwd).resolve()
-    run_suffix = "|run"
+    phase_suffixes = ("|run", "|setup", "|teardown")
     coverage_map = {}
     for measured_file in cov.measured_files():
         try:
@@ -94,11 +89,14 @@ _DRIVER_SCRIPT = textwrap.dedent(
             rel = measured_file
         per_line = {}
         for lineno, contexts in cov.contexts_by_lineno(measured_file).items():
-            tests = sorted(
-                ctx[: -len(run_suffix)] for ctx in contexts if ctx.endswith(run_suffix)
-            )
+            tests = set()
+            for ctx in contexts:
+                for suffix in phase_suffixes:
+                    if ctx.endswith(suffix):
+                        tests.add(ctx[: -len(suffix)])
+                        break
             if tests:
-                per_line[str(lineno)] = tests
+                per_line[str(lineno)] = sorted(tests)
         if per_line:
             coverage_map[rel] = per_line
 
@@ -160,6 +158,9 @@ def collect_baseline(
     evidence the validation gate itself would accept.
     """
     with tempfile.TemporaryDirectory(prefix="cgs-baseline-") as tmp:
+        cwd = cwd.resolve()  # resolve once: both the subprocess cwd and the
+        # driver's own cwd argv must agree, or a relative `cwd` double-joins
+        # itself when the driver re-resolves it from inside that directory.
         tmp_path = Path(tmp)
         driver_file = tmp_path / "_cgs_driver.py"
         driver_file.write_text(_DRIVER_SCRIPT)
@@ -167,31 +168,48 @@ def collect_baseline(
         json_report_file = tmp_path / "report.json"
         out_file = tmp_path / "baseline.json"
 
-        proc = subprocess.run(
-            [
-                "uv",
-                "run",
-                "--with",
-                "pytest-cov",
-                "--with",
-                "coverage",
-                "--with",
-                "pytest-json-report",
-                "python",
-                str(driver_file),
-                test_path,
-                cov_source,
-                str(cwd),
-                str(cov_data_file),
-                str(json_report_file),
-                str(out_file),
-            ],
-            cwd=cwd,
-            env=_subprocess_env(cov_data_file),
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-        )
+        proc = None
+        try:
+            proc = subprocess.run(
+                [
+                    "uv",
+                    "run",
+                    "--with",
+                    "pytest-cov",
+                    "--with",
+                    "coverage",
+                    "--with",
+                    "pytest-json-report",
+                    "python",
+                    str(driver_file),
+                    test_path,
+                    cov_source,
+                    str(cwd),
+                    str(cov_data_file),
+                    str(json_report_file),
+                    str(out_file),
+                ],
+                cwd=cwd,
+                env=_subprocess_env(cov_data_file),
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+            )
+        except subprocess.TimeoutExpired as exc:
+            # A hang is just as non-clean a collection outcome as a nonzero
+            # exit: translate it into the same error contract instead of
+            # letting it escape as an undocumented `TimeoutExpired`, so every
+            # caller only ever needs to catch `BaselineCollectionError`.
+            raise BaselineCollectionError(
+                -1,
+                (exc.stdout or b"").decode() if isinstance(exc.stdout, bytes) else (exc.stdout or ""),
+                f"timed out after {timeout_s}s"
+                + (
+                    (": " + ((exc.stderr or b"").decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")))
+                    if exc.stderr
+                    else ""
+                ),
+            ) from exc
         if proc.returncode != 0:
             raise BaselineCollectionError(proc.returncode, proc.stdout, proc.stderr)
 

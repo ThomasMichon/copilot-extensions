@@ -13,11 +13,18 @@ real integration check: it runs `baseline.collect_baseline` against the
 round-trip produces internally consistent, real coverage/duration data --
 proving Phase 0's "spike coverage collection ... confirm the artifact it
 produces round-trips through the chosen storage/correlation mechanism"
-checklist item against a real suite, not just synthetic data.
+checklist item against a real suite, not just synthetic data. It is
+deliberately **opt-in**: it self-skips unless `CGS_RUN_INTEGRATION_TEST=1`
+is set, since it spawns a real subprocess with network-dependent package
+resolution rather than running as part of the fast, always-on, pure-stdlib
+synthetic tests above. `.github/workflows/ci.yml` runs the synthetic tests
+in every PR's required `checks` job, and this one test only in a separate,
+workflow_dispatch-only `coverage-guided-selection-integration` job.
 """
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -240,6 +247,16 @@ class TestComputeFallbackSet:
 
 
 def test_collect_baseline_round_trips_against_a_real_plugin_suite() -> None:
+    # Deliberately opt-in: spawns a real "uv run --with coverage ..."
+    # subprocess against a real plugin's suite (seconds, network-dependent
+    # package resolution), which doesn't belong in the fast, always-on PR
+    # lane -- see this effort's own Journal and ci.yml's separate,
+    # workflow_dispatch-only "coverage-guided-selection-integration" job.
+    if os.environ.get("CGS_RUN_INTEGRATION_TEST") != "1":
+        pytest.skip(
+            "opt-in only: set CGS_RUN_INTEGRATION_TEST=1 to run the real "
+            "uv/coverage subprocess integration test"
+        )
     # `collect_baseline`'s own `timeout_s` bounds the ephemeral subprocess;
     # no separate pytest-timeout dependency is needed for this test itself.
     plugin_dir = _REPO_ROOT / "plugins" / "ai-attribution"
@@ -287,4 +304,69 @@ def test_collect_baseline_round_trips_against_a_real_plugin_suite() -> None:
     assert fb.total_runtime_s < full_suite_cost, (
         "the curated fallback set must cost less than running the full suite "
         "-- otherwise it isn't a fallback"
+    )
+
+
+def test_collect_baseline_attributes_fixture_setup_and_teardown_coverage(
+    tmp_path: Path,
+) -> None:
+    # Regression test for the "run"-context-only bug: a line that only ever
+    # executes during a test's fixture setup/teardown phase (never during
+    # its "call" phase) must still be attributed to that test. Constructs a
+    # throwaway module + suite rather than relying on an existing plugin's
+    # tests, since this needs a line that is deliberately *only* reachable
+    # from setup/teardown.
+    if os.environ.get("CGS_RUN_INTEGRATION_TEST") != "1":
+        pytest.skip(
+            "opt-in only: set CGS_RUN_INTEGRATION_TEST=1 to run the real "
+            "uv/coverage subprocess integration test"
+        )
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "__init__.py").write_text("")
+    (src_dir / "helper.py").write_text(
+        "def setup_only_line():\n"
+        "    return 'this line only ever runs during fixture setup'\n"
+        "\n\n"
+        "def teardown_only_line():\n"
+        "    return 'this line only ever runs during fixture teardown'\n"
+    )
+
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_fixture_phases.py").write_text(
+        "import sys\n"
+        "sys.path.insert(0, str((__import__('pathlib').Path(__file__).parent.parent / 'src')))\n"
+        "import pytest\n"
+        "from helper import setup_only_line, teardown_only_line\n"
+        "\n\n"
+        "@pytest.fixture\n"
+        "def resource():\n"
+        "    setup_only_line()\n"
+        "    yield object()\n"
+        "    teardown_only_line()\n"
+        "\n\n"
+        "def test_uses_the_fixture(resource):\n"
+        "    assert resource is not None\n"
+    )
+
+    result = baseline_mod.collect_baseline(
+        cwd=tmp_path,
+        test_path="tests",
+        cov_source="src",
+        plugin="fixture-phase-regression",
+        timeout_s=60.0,
+    )
+
+    helper_file = "src/helper.py"
+    assert helper_file in result["coverage"], "helper.py must be attributed at all"
+    attributed_tests = {
+        test_id
+        for tests in result["coverage"][helper_file].values()
+        for test_id in tests
+    }
+    assert any("test_uses_the_fixture" in t for t in attributed_tests), (
+        "a line executed only during fixture setup/teardown must still be "
+        f"attributed to the test using that fixture; got {attributed_tests!r}"
     )

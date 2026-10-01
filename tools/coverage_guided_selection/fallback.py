@@ -98,7 +98,7 @@ def compute_fallback_set(
     )
 
     durations = baseline.get("tests", {})
-    cost_of: dict[str, float] = {}
+    actual_cost: dict[str, float] = {}
     for test in eligible_test_lines:
         raw = durations.get(test, {}).get("duration_s")
         if (
@@ -108,10 +108,17 @@ def compute_fallback_set(
             or raw < 0
         ):
             continue  # missing/invalid duration -> ineligible, not "free"
-        cost_of[test] = max(raw, _MIN_DURATION_S)
+        actual_cost[test] = float(raw)  # a genuine 0.0s test is real, not invalid
+
+    def score_cost(test: str) -> float:
+        # _MIN_DURATION_S guards only the scoring division, never the
+        # budget/report accounting below -- a genuinely free (0.0s) test
+        # must cost exactly 0.0 in `total_runtime_s`/affordability, not an
+        # invented near-zero floor.
+        return max(actual_cost[test], _MIN_DURATION_S)
 
     remaining = set(universe)
-    candidates = set(cost_of)
+    candidates = set(actual_cost)
     selected: list[str] = []
     total_cost = 0.0
 
@@ -122,8 +129,8 @@ def compute_fallback_set(
         ranked = sorted(
             (t for t in candidates if eligible_test_lines[t] & remaining),
             key=lambda t: (
-                -(len(eligible_test_lines[t] & remaining) / cost_of[t]),
-                cost_of[t],
+                -(len(eligible_test_lines[t] & remaining) / score_cost(t)),
+                actual_cost[t],
                 t,
             ),
         )
@@ -131,14 +138,14 @@ def compute_fallback_set(
             break  # no remaining candidate covers anything new
 
         affordable = next(
-            (t for t in ranked if total_cost + cost_of[t] <= runtime_budget_s),
+            (t for t in ranked if total_cost + actual_cost[t] <= runtime_budget_s),
             None,
         )
         if affordable is None:
             break  # the budget is a hard cap -- never force an over-budget pick
 
         selected.append(affordable)
-        total_cost += cost_of[affordable]
+        total_cost += actual_cost[affordable]
         remaining -= eligible_test_lines[affordable]
         candidates.discard(affordable)
 
