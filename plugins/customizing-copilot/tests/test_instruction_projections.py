@@ -2635,11 +2635,8 @@ def test_skip_local_cache_must_be_boolean(tmp_path: Path) -> None:
 
 
 def test_unrelated_extra_key_is_rejected(tmp_path: Path) -> None:
-    """Regression test for the ``skipLocalCache`` key-set check: a strict
-    ``set(entry) - required > optional`` superset comparison wrongly let an
-    unrelated extra key (not ``skipLocalCache``, and not a superset of it)
-    through, silently ignored, weakening the exact-key schema contract this
-    check exists to enforce."""
+    """A declaration entry with any key outside the required/optional union
+    is rejected -- an unrelated extra key must never silently pass."""
     repo = tmp_path / "repo"
     repo.mkdir()
     _plugin, source = _write_plugin(
