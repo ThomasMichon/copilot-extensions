@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from . import config as cfg, finalize as fin, output, profile_assignment, sessions, tracking
+from . import pending_seed as pending_seed_mod
 from . import reclaim_cli, resolve_launch_cli, status_monitor_runtime
 
 
@@ -222,35 +223,6 @@ def _resolve_codename_anywhere(codename_arg: str) -> tuple[str | None, str | Non
     return None, f"No worktree found with codename '{codename_arg}'"
 
 
-def _claim_pending_seed(path: Path) -> str | None:
-    """Atomically claim+clear a ``pending_seed`` (race-safe: see caller)."""
-    with tracking._RecordLock(path) as lk:
-        if not lk.acquired:
-            return None
-        try:
-            record = tracking.load_record(path)
-        except Exception:
-            return None
-        seed = getattr(record, "pending_seed", None)
-        if seed:
-            record.pending_seed = None
-            tracking.save_record(record, path)
-        return seed or None
-
-
-def _restore_pending_seed(path: Path, seed: str) -> None:
-    """Roll back an unconfirmed claim so a later attach can retry."""
-    with tracking._RecordLock(path) as lk:
-        if lk.acquired:
-            try:
-                record = tracking.load_record(path)
-            except Exception:
-                return
-            if not record.pending_seed:
-                record.pending_seed = seed
-                tracking.save_record(record, path)
-
-
 def cmd_embody(args: argparse.Namespace) -> int:
     """Create or resume a **detached** mux+Copilot CLI session in a worktree (D5).
 
@@ -355,7 +327,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
 
     record = None
     selection = profile_assignment.LaunchProfileSelection(profile=None)
-    claimed_seed: str | None = None
+    explicit_seed = bool(seed)
     if not already:
         try:
             record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
@@ -363,16 +335,11 @@ def cmd_embody(args: argparse.Namespace) -> int:
             if not make_new:
                 return _json_error(f"Worktree record not found: {wt_id}")
         if record is not None:
-            # An explicit --seed always wins; absent one, a persisted
-            # pending_seed is delivered instead. Always claim (clear) any
-            # pending_seed under the write guard -- an explicit --seed
-            # supersedes it too, so a later resume never re-delivers a
-            # stale prompt into an already-active conversation. Only a
-            # claimed (not explicit) value is restored if unconfirmed.
-            yaml_claimed = _claim_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml")
+            # Peek only (no clear) -- the real claim happens right before
+            # delivery, so an early return (dry-run, a validation failure,
+            # a concurrent session) can never consume it undelivered.
             if not seed:
-                claimed_seed = yaml_claimed
-                seed = claimed_seed
+                seed = getattr(record, "pending_seed", None)
             backend_error = _unsupported_hosted_launch(
                 record,
                 "embody",
@@ -427,7 +394,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
         claimed = None
         if copilot_pane:
             try:
-                claimed = _claim_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml")
+                claimed = pending_seed_mod.claim_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml")
             except Exception:
                 claimed = None
         pending_seed_result = {}
@@ -438,7 +405,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
             )
             if not pending_seed_result.get("ok"):
                 try:
-                    _restore_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml", claimed)
+                    pending_seed_mod.restore_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml", claimed)
                 except Exception:
                     pass
         _json_output(
@@ -562,6 +529,15 @@ def cmd_embody(args: argparse.Namespace) -> int:
         )
 
     new_pane = result.get("new_pane")
+    # Claim (clear) pending_seed now, right before delivery -- not earlier,
+    # so an exit above can never consume it undelivered. An explicit --seed
+    # still supersedes/clears it; only a claimed (not explicit) value is
+    # restored on a failed delivery below.
+    claimed_seed: str | None = None
+    if record is not None:
+        claimed_seed = pending_seed_mod.claim_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml")
+        if not explicit_seed:
+            seed = claimed_seed
     # A freshly-embodied session can be MCP/skill-heavy and take well over the
     # 20s handoff default to reach Copilot's input caret; seeding races that
     # load, and if it loses, the seed is never typed and the session sits idle
@@ -573,8 +549,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
         if (new_pane and seed)
         else {}
     )
-    if claimed_seed and not seed_result.get("ok"):
-        _restore_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml", claimed_seed)
+    if not explicit_seed and claimed_seed and not seed_result.get("ok"):
+        pending_seed_mod.restore_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml", claimed_seed)
 
     verified = None
     verify_timeout = getattr(args, "verify_timeout", 0.0) or 0.0

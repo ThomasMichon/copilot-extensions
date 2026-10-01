@@ -734,3 +734,49 @@ Tests: agent-worktrees targeted regression set (`tracking`,
 `test_resolve_cli_seed_guard.py`): 483 passed. Module-size gate: OK
 (`tools/check-module-size.py` run directly, not just inferred from the
 earlier pre-push hook output).
+
+### 2026-09-30 — A THIRD review round found three more correctness issues
+Three rounds of real findings now, each a genuine issue, none a repeat:
+
+1. **`_RecordLock`'s default mode silently degrades** to an in-process-only
+   lock when the cross-process sidecar times out (a deliberate graceful-
+   degradation feature for *critical* writers per its own docstring) --
+   which defeated the claim-once guarantee entirely under contention: a
+   stalled holder and a degraded contender could both read+deliver the
+   same seed. Fixed: both `claim_pending_seed`/`restore_pending_seed` now
+   pass `require_sidecar=True` (fail closed -- `TimeoutError` caught,
+   nothing claimed -- rather than ever degrade).
+2. **The claim happened far too early** -- right where the record was
+   first loaded, well before dry-run handling, profile/backend validation,
+   lifecycle rejection, a concurrent-session check, or even confirming
+   `mux_new_session` actually succeeded. Any of those early-return paths
+   could permanently consume `pending_seed` with nothing ever delivered.
+   Fixed: the create path now only PEEKS (read-only) at the pending seed
+   early (for display/dry-run purposes), and does the real claim (lock +
+   reload + clear + save) immediately before the actual `mux_seed_pane`
+   call, after `mux_new_session` has already succeeded.
+3. **`pending_seed`'s YAML serialization was unsafe for arbitrary text.**
+   The hand-rolled `_yaml_scalar` helper (shared with simpler fields like
+   `bound_agent`) only quotes a LEADING reserved-indicator character --
+   a value like `"false"` would round-trip as the YAML boolean `False`,
+   and a multiline or `": "`-containing prompt could produce invalid YAML
+   entirely. Fixed: `pending_seed` now serializes through `yaml.safe_dump`
+   (the same pattern this file already uses for structured fields like
+   `dispatch_attempt`), which handles arbitrary scalars correctly.
+   Strengthened the round-trip test with an explicit `"false"`-as-string
+   case (not just multiline) to prove the fix.
+
+Also extracted `claim_pending_seed`/`restore_pending_seed` into a new
+sibling module, `pending_seed.py` (mechanical extraction, matching this
+file's and this repo's own established "many small `_cli.py`/helper
+modules, not one growing monolith" convention) -- `handoff_cli.py` kept
+hitting its own 1000-line hard cap on every one of these fix rounds, and
+splitting out a self-contained, independently-testable pair of functions
+is the correct response once a module is genuinely full, not another round
+of comment-shrinking. `tracking.py`'s own soft baseline was widened again
+(4082 -> 4090) for the real `yaml.safe_dump` fix's few extra lines.
+
+Tests: full targeted regression set (`tracking`, `tracking_write`,
+`embody`, `handoff_cutover`, `codename_cli`, `launch_preflight`,
+`owner_inheritance`, `paired_carve`, `resolve_cli_seed_guard`): 483
+passed. Module-size gate: OK.

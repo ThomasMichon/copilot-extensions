@@ -2859,7 +2859,15 @@ def _save_record_unlocked(
     if record.bound_agent:
         content += f"bound_agent: {_yaml_scalar(record.bound_agent)}\n"
     if record.pending_seed:
-        content += f"pending_seed: {_yaml_scalar(record.pending_seed)}\n"
+        # yaml.safe_dump (not the hand-rolled _yaml_scalar, which only
+        # quotes a leading reserved-indicator char) so arbitrary, possibly
+        # multiline text round-trips exactly -- incl. a value that looks
+        # like a YAML bool/number or contains ": ".
+        content += yaml.safe_dump(
+            {"pending_seed": record.pending_seed},
+            default_flow_style=False,
+            sort_keys=False,
+        )
     # citadel paired -harness/-knowledge worktree lifecycle (#957): the pair
     # linkage. Emitted only when set, so an unpaired worktree's YAML stays
     # byte-identical (the common case is unpaired).

@@ -3315,9 +3315,13 @@ class TestSystemWorktreeKind:
     def test_create_new_record_pending_seed_round_trips(self, tmp_path: Path):
         """picker-new-session-prompt-and-composer: a prompt persisted at
         creation time (`create`/`resolve --new --seed`) round-trips through
-        real save/load (not a fake), including a multiline value and YAML
-        special characters; a worktree with none carries no pending_seed
-        key at all (legacy-shape preserved, mirrors bound_agent)."""
+        real save/load (not a fake), including a multiline value, YAML
+        special characters, and a value that LOOKS like a YAML boolean (the
+        hand-rolled ``_yaml_scalar`` used for most string fields would emit
+        this unquoted and load it back as the bool ``False``, not the
+        string ``"false"`` -- this field must use the real YAML emitter
+        instead); a worktree with none carries no pending_seed key at all
+        (legacy-shape preserved, mirrors bound_agent)."""
         multiline = 'fix the "flaky" test:\n- check retries\n- see #123'
         rec = create_new_record(
             "wt-seeded", "worktree/wt-seeded", "/tmp/wt-seeded", "test-repo",
@@ -3326,6 +3330,15 @@ class TestSystemWorktreeKind:
         assert rec.pending_seed == multiline
         loaded = load_record(tmp_path / "wt-seeded.yaml")
         assert loaded.pending_seed == multiline
+
+        boolish = create_new_record(
+            "wt-boolish", "worktree/wt-boolish", "/tmp/wt-boolish",
+            "test-repo", "test", "wsl", tmp_path, pending_seed="false",
+        )
+        assert boolish.pending_seed == "false"
+        loaded_boolish = load_record(tmp_path / "wt-boolish.yaml")
+        assert loaded_boolish.pending_seed == "false"
+        assert loaded_boolish.pending_seed is not False
 
         unseeded = create_new_record(
             "wt-unseeded", "worktree/wt-unseeded", "/tmp/wt-unseeded",
