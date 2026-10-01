@@ -11,6 +11,7 @@ import pytest
 import venue_copilot
 from venue_copilot import detached as venue_detached
 from ssh_manager import forward_keeper as shared_forward_keeper
+from ssh_manager import keeper_holds as shared_keeper_holds
 
 from agent_containers import copilot_detach as detach
 from agent_containers import forward_keeper
@@ -632,7 +633,7 @@ def test_forward_keeper_stop_releases_one_hold_then_last_stops(tmp_path, monkeyp
 
 def test_forward_keeper_unknown_probe_keeps_old_hold(tmp_path, monkeypatch):
     monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
-    monkeypatch.setattr(forward_keeper.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(shared_keeper_holds.time, "time", lambda: 2000.0)
     forward_keeper._STORE.write(
         "repo-1",
         {
@@ -660,7 +661,7 @@ def test_forward_keeper_gone_probe_drops_recently_confirmed_old_hold(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
-    monkeypatch.setattr(forward_keeper.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(shared_keeper_holds.time, "time", lambda: 2000.0)
     forward_keeper._STORE.write(
         "repo-1",
         {
@@ -686,7 +687,7 @@ def test_forward_keeper_gone_probe_drops_recently_confirmed_old_hold(
 
 def test_forward_keeper_unknown_probe_eventually_drops_hold(tmp_path, monkeypatch):
     monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
-    monkeypatch.setattr(forward_keeper.time, "time", lambda: 4000.0)
+    monkeypatch.setattr(shared_keeper_holds.time, "time", lambda: 4000.0)
     forward_keeper._STORE.write(
         "repo-1",
         {
@@ -714,7 +715,7 @@ def test_forward_keeper_upgrade_confirms_legacy_mux_before_unknown_probe(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
-    monkeypatch.setattr(forward_keeper.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(shared_keeper_holds.time, "time", lambda: 2000.0)
     forward_keeper._STORE.write(
         "repo-1",
         {
@@ -735,7 +736,7 @@ def test_forward_keeper_upgrade_confirms_legacy_mux_before_unknown_probe(
 
 def test_forward_keeper_alive_probe_refreshes_confirmed_at(tmp_path, monkeypatch):
     monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
-    monkeypatch.setattr(forward_keeper.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(shared_keeper_holds.time, "time", lambda: 2000.0)
     forward_keeper._STORE.write(
         "repo-1",
         {
@@ -758,7 +759,7 @@ def test_forward_keeper_alive_probe_refreshes_confirmed_at(tmp_path, monkeypatch
 
 def test_forward_keeper_prune_is_compare_and_delete(tmp_path, monkeypatch):
     monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
-    monkeypatch.setattr(forward_keeper.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(shared_keeper_holds.time, "time", lambda: 2000.0)
     forward_keeper._STORE.write(
         "repo-1",
         {
@@ -786,7 +787,7 @@ def test_forward_keeper_prune_is_compare_and_delete(tmp_path, monkeypatch):
 
 def test_forward_keeper_prunes_stale_holds(tmp_path, monkeypatch):
     monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
-    monkeypatch.setattr(forward_keeper.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(shared_keeper_holds.time, "time", lambda: 2000.0)
     forward_keeper._STORE.write(
         "repo-1",
         {
@@ -905,7 +906,7 @@ def test_forward_keeper_restart_preserves_existing_holds(tmp_path, monkeypatch):
 
 def test_forward_keeper_self_prune_removes_retiring_state(tmp_path, monkeypatch):
     monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
-    monkeypatch.setattr(forward_keeper.time, "time", lambda: 2000.0)
+    monkeypatch.setattr(shared_keeper_holds.time, "time", lambda: 2000.0)
     monkeypatch.setattr(forward_keeper.os, "getpid", lambda: 100)
     forward_keeper._STORE.write(
         "repo-1",
@@ -1050,7 +1051,7 @@ def test_forward_keeper_live_lock_owner_is_not_stolen(tmp_path, monkeypatch):
     lock = forward_keeper.state_path("repo-1").with_suffix(".lock")
     lock.parent.mkdir(parents=True, exist_ok=True)
     lock.write_text(json.dumps(owner), encoding="utf-8")
-    monkeypatch.setattr(forward_keeper, "process_identity", lambda pid: "live")
+    monkeypatch.setattr(shared_keeper_holds, "process_identity", lambda pid: "live")
 
     with pytest.raises(RuntimeError, match="Could not acquire"):
         with forward_keeper._keeper_lock("repo-1"):

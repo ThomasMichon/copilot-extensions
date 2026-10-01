@@ -4,13 +4,8 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import os
 import subprocess
-import time
-import uuid
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -22,19 +17,25 @@ from agent_procutil import (
 )
 from ssh_manager import SupervisedRelayForward
 from ssh_manager.forward_keeper import KeeperStore, run_supervised_loop, spawn_keeper
-from ssh_manager.locks import pid_alive, process_identity
+from ssh_manager.keeper_holds import (
+    DEFAULT_HOLD_STARTUP_GRACE,
+    DEFAULT_LOCK_POLL,
+    DEFAULT_LOCK_TIMEOUT,
+    DEFAULT_UNKNOWN_HOLD_GRACE,
+    KEEPER_HOLDS_PROTOCOL,
+    HoldProbe,
+    KeeperHoldStore,
+)
 
 from .config import RESTRICTED_PROFILE, RUNTIME_DIR
 
 _STATE_DIR = RUNTIME_DIR / "forward-keepers"
 _STORE = KeeperStore(_STATE_DIR)
-_KEEPER_PROTOCOL = 2
-_HOLD_STARTUP_GRACE = 300.0
-_UNKNOWN_HOLD_GRACE = 1800.0
-_LOCK_TIMEOUT = 10.0
-_LOCK_POLL = 0.05
-
-MuxProbe = Callable[[str], bool | None]
+_KEEPER_PROTOCOL = KEEPER_HOLDS_PROTOCOL
+_HOLD_STARTUP_GRACE = DEFAULT_HOLD_STARTUP_GRACE
+_UNKNOWN_HOLD_GRACE = DEFAULT_UNKNOWN_HOLD_GRACE
+_LOCK_TIMEOUT = DEFAULT_LOCK_TIMEOUT
+_LOCK_POLL = DEFAULT_LOCK_POLL
 
 
 def state_path(name: str) -> Path:
@@ -45,67 +46,23 @@ def read_state(name: str) -> dict[str, Any] | None:
     return _STORE.read(name)
 
 
-@contextmanager
-def _keeper_lock(name: str) -> Iterator[None]:
-    _STORE.state_dir.mkdir(parents=True, exist_ok=True)
-    lock = _STORE.state_path(name).with_suffix(".lock")
-    owner = {
-        "pid": os.getpid(),
-        "identity": process_identity(os.getpid()),
-        "token": uuid.uuid4().hex,
-        "created_at": time.time(),
-    }
-    deadline = time.monotonic() + _LOCK_TIMEOUT
-    while True:
-        try:
-            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                json.dump(owner, stream)
-            break
-        except (FileExistsError, PermissionError):
-            if time.monotonic() >= deadline:
-                if _lock_owner_dead(lock):
-                    if _unlink_lock(lock):
-                        continue
-                raise RuntimeError("Could not acquire forward-keeper state lock") from None
-            time.sleep(_LOCK_POLL)
-    try:
-        yield
-    finally:
-        _release_lock(lock, owner)
+def _holds() -> KeeperHoldStore:
+    return KeeperHoldStore(
+        _STORE,
+        protocol=_KEEPER_PROTOCOL,
+        startup_grace=_HOLD_STARTUP_GRACE,
+        unknown_grace=_UNKNOWN_HOLD_GRACE,
+        lock_timeout=_LOCK_TIMEOUT,
+        lock_poll=_LOCK_POLL,
+    )
 
 
-def _lock_owner_dead(lock: Path) -> bool:
-    try:
-        raw = json.loads(lock.read_text(encoding="utf-8"))
-        pid = int(raw.get("pid") or 0)
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        return False
-    identity = raw.get("identity")
-    if isinstance(identity, str) and identity:
-        return process_identity(pid) != identity
-    return not pid_alive(pid)
+def _keeper_lock(name: str):
+    return _holds().lock(name)
 
 
 def _release_lock(lock: Path, owner: dict[str, Any]) -> None:
-    try:
-        raw = json.loads(lock.read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        return
-    if raw.get("token") == owner["token"]:
-        _unlink_lock(lock)
-
-
-def _unlink_lock(lock: Path, attempts: int = 3) -> bool:
-    for attempt in range(max(1, attempts)):
-        try:
-            lock.unlink(missing_ok=True)
-            return True
-        except PermissionError:
-            if attempt + 1 >= max(1, attempts):
-                return False
-            time.sleep(_LOCK_POLL)
-    return False
+    _holds().release_lock(lock, owner)
 
 
 def _same_forward(
@@ -125,196 +82,20 @@ def _same_forward(
 
 
 def _read_holds(state: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
-    if not state:
-        return {}
-    raw = state.get("holds")
-    holds: dict[str, dict[str, Any]] = {}
-    if isinstance(raw, dict):
-        for hold_id, hold in raw.items():
-            if not isinstance(hold_id, str) or not isinstance(hold, dict):
-                continue
-            mux = hold.get("mux")
-            if not isinstance(mux, str) or not mux:
-                continue
-            try:
-                updated_at = float(hold.get("updated_at", 0.0))
-            except (TypeError, ValueError):
-                updated_at = 0.0
-            normalized: dict[str, Any] = {"mux": mux, "updated_at": updated_at}
-            try:
-                confirmed_at = float(hold.get("confirmed_at", 0.0))
-            except (TypeError, ValueError):
-                confirmed_at = 0.0
-            if confirmed_at:
-                normalized["confirmed_at"] = confirmed_at
-            holds[hold_id] = normalized
-    if raw is None and not holds and isinstance(state.get("mux"), str) and state["mux"]:
-        try:
-            updated_at = float(state.get("started_at", 0.0))
-        except (TypeError, ValueError):
-            updated_at = 0.0
-        holds[str(state["mux"])] = {"mux": str(state["mux"]), "updated_at": updated_at}
-    return holds
-
-
-def _probe_holds(
-    holds: dict[str, dict[str, Any]],
-    *,
-    mux_alive: MuxProbe | None,
-    startup_grace: float,
-) -> tuple[dict[str, dict[str, Any]], set[str]]:
-    now = time.time()
-    kept: dict[str, dict[str, Any]] = {}
-    live_muxes: set[str] = set()
-    for hold_id, hold in holds.items():
-        mux = str(hold.get("mux") or "")
-        if not mux:
-            continue
-        try:
-            updated_at = float(hold.get("updated_at", 0.0))
-        except (TypeError, ValueError):
-            updated_at = 0.0
-        try:
-            confirmed_at = float(hold.get("confirmed_at", 0.0))
-        except (TypeError, ValueError):
-            confirmed_at = 0.0
-        if mux_alive is None:
-            kept[hold_id] = hold
-            continue
-        try:
-            verdict = mux_alive(mux)
-        except (OSError, RuntimeError, subprocess.SubprocessError):
-            verdict = None
-        if verdict is True:
-            kept[hold_id] = {**hold, "confirmed_at": now}
-            live_muxes.add(mux)
-        elif now - updated_at <= startup_grace:
-            kept[hold_id] = hold
-        elif (
-            verdict is None
-            and confirmed_at > 0
-            and now - confirmed_at <= _UNKNOWN_HOLD_GRACE
-        ):
-            kept[hold_id] = hold
-    return kept, live_muxes
+    return _holds().read_holds(state)
 
 
 def _prune_snapshot(
     name: str,
     *,
-    mux_alive: MuxProbe | None,
+    mux_alive: HoldProbe | None,
     startup_grace: float = _HOLD_STARTUP_GRACE,
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]], set[str]]:
-    with _keeper_lock(name):
-        state = read_state(name) or {}
-        holds = _read_holds(state)
-        if state and not holds and int(state.get("pid") or 0) == os.getpid():
-            _STORE.remove(name)
-            return state, {}, set()
-        holds, confirmed_changed = _confirm_missing_holds(holds)
-        if state and confirmed_changed:
-            _STORE.write(name, _state_with_holds(state, holds))
-    kept, live_muxes = _probe_holds(
-        holds,
-        mux_alive=mux_alive,
-        startup_grace=startup_grace,
-    )
-    stale = {
-        hold_id: hold
-        for hold_id, hold in holds.items()
-        if hold_id not in kept
-    }
-    refreshed = {
-        hold_id: hold
-        for hold_id, hold in kept.items()
-        if hold != holds.get(hold_id)
-    }
-    if not stale and not refreshed:
-        return state, kept, live_muxes
-    with _keeper_lock(name):
-        current = read_state(name) or {}
-        current_holds = _read_holds(current)
-        for hold_id, stale_hold in stale.items():
-            current_hold = current_holds.get(hold_id)
-            if (
-                current_hold
-                and current_hold.get("updated_at") == stale_hold.get("updated_at")
-            ):
-                current_holds.pop(hold_id, None)
-        for hold_id, refreshed_hold in refreshed.items():
-            original = holds.get(hold_id) or {}
-            current_hold = current_holds.get(hold_id)
-            if (
-                current_hold
-                and current_hold.get("updated_at") == original.get("updated_at")
-            ):
-                current_holds[hold_id] = {**current_hold, **refreshed_hold}
-        if current:
-            if not current_holds and int(current.get("pid") or 0) == os.getpid():
-                _STORE.remove(name)
-            else:
-                _STORE.write(name, _state_with_holds(current, current_holds))
-        return current, current_holds, {
-            mux
-            for hold in current_holds.values()
-            for mux in [str(hold.get("mux") or "")]
-            if mux in live_muxes
-        }
-
-
-def _hold_live(
-    hold: dict[str, Any],
-    *,
-    now: float,
-    mux_alive: MuxProbe | None,
-    startup_grace: float,
-) -> bool:
-    mux = str(hold.get("mux") or "")
-    if not mux:
-        return False
-    if mux_alive is None:
-        return True
-    try:
-        verdict = mux_alive(mux)
-        if verdict is True:
-            return True
-        if verdict is None:
-            return True
-    except (OSError, RuntimeError, subprocess.SubprocessError):
-        return True
-    try:
-        updated_at = float(hold.get("updated_at", 0.0))
-    except (TypeError, ValueError):
-        updated_at = 0.0
-    return now - updated_at <= startup_grace
-
-
-def _prune_holds(
-    holds: dict[str, dict[str, Any]],
-    *,
-    mux_alive: MuxProbe | None,
-    startup_grace: float = _HOLD_STARTUP_GRACE,
-) -> dict[str, dict[str, Any]]:
-    now = time.time()
-    return {
-        hold_id: hold
-        for hold_id, hold in holds.items()
-        if _hold_live(
-            hold,
-            now=now,
-            mux_alive=mux_alive,
-            startup_grace=startup_grace,
-        )
-    }
+    return _holds().prune_snapshot(name, probe=mux_alive, startup_grace=startup_grace)
 
 
 def _state_with_holds(state: dict[str, Any], holds: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    out = {**state, "holds": holds}
-    if holds:
-        out["mux"] = next(iter(holds.values()))["mux"]
-    else:
-        out.pop("mux", None)
-    return out
+    return _holds().state_with_holds(state, holds)
 
 
 def _confirm_missing_holds(
@@ -322,37 +103,20 @@ def _confirm_missing_holds(
     *,
     now: float | None = None,
 ) -> tuple[dict[str, dict[str, Any]], bool]:
-    confirmed_now = time.time() if now is None else now
-    changed = False
-    confirmed: dict[str, dict[str, Any]] = {}
-    for hold_id, hold in holds.items():
-        if hold.get("confirmed_at"):
-            confirmed[hold_id] = hold
-        else:
-            confirmed[hold_id] = {**hold, "confirmed_at": confirmed_now}
-            changed = True
-    return confirmed, changed
+    return _holds().confirm_missing_holds(holds, now=now)
 
 
 def hold_mux(name: str, hold_id: str) -> str | None:
-    with _keeper_lock(name):
-        state = read_state(name)
-        hold = _read_holds(state).get(hold_id)
-    mux = hold.get("mux") if hold else None
-    return str(mux) if isinstance(mux, str) and mux else None
+    return _holds().hold_mux(name, hold_id)
 
 
 def list_holds(
     name: str,
     *,
-    mux_alive: Callable[[str], bool] | None = None,
+    mux_alive: HoldProbe | None = None,
     prune: bool = True,
 ) -> dict[str, dict[str, Any]]:
-    if prune:
-        _state, holds, _live_muxes = _prune_snapshot(name, mux_alive=mux_alive)
-        return holds
-    with _keeper_lock(name):
-        return _read_holds(read_state(name) or {})
+    return _holds().list_holds(name, probe=mux_alive, prune=prune)
 
 
 def ensure_running(
@@ -363,18 +127,19 @@ def ensure_running(
     hold_id: str | None = None,
     relay_port: int | None = None,
     host_relay_port: int | None = None,
-    mux_alive: MuxProbe | None = None,
+    mux_alive: HoldProbe | None = None,
     popen: Any = subprocess.Popen,
 ) -> dict[str, Any]:
     """Start a keeper unless a live one already owns this container forward."""
+    holds = _holds()
     hold_id = hold_id or mux
-    _prune_snapshot(name, mux_alive=mux_alive)
-    with _keeper_lock(name):
+    holds.prune_snapshot(name, probe=mux_alive)
+    with holds.lock(name):
         existing = read_state(name) or {}
-        holds = _read_holds(existing)
-        holds[hold_id] = {"mux": mux, "updated_at": time.time()}
+        current_holds = holds.read_holds(existing)
+        current_holds = holds.refresh_hold(current_holds, hold_id, mux)
         can_reuse = (
-            existing.get("keeper_protocol") == _KEEPER_PROTOCOL
+            existing.get("keeper_protocol") == holds.protocol
             and _STORE.alive(name)
             and _same_forward(
                 existing,
@@ -384,7 +149,7 @@ def ensure_running(
             )
         )
         if can_reuse:
-            state = _state_with_holds(existing, holds)
+            state = holds.state_with_holds(existing, current_holds)
             _STORE.write(name, state)
             return {"started": False, "state": state}
         if existing:
@@ -420,16 +185,16 @@ def ensure_running(
                 "container": name,
                 "venue_port": int(venue_port),
                 "mux": mux,
-                "holds": holds,
+                "holds": current_holds,
                 "relay_port": int(relay_port) if relay_port else None,
                 "host_relay_port": int(host_relay_port) if host_relay_port else None,
             },
             popen=popen,
             popen_kwargs=windowless_daemon_kwargs(breakaway=True),
         )
-        current_holds = _read_holds(read_state(name) or {})
-        current_holds.update(holds)
-        state = _state_with_holds({**state, "holds": current_holds}, current_holds)
+        latest_holds = holds.read_holds(read_state(name) or {})
+        latest_holds.update(current_holds)
+        state = holds.state_with_holds({**state, "holds": latest_holds}, latest_holds)
         _STORE.write(name, state)
         return {"started": True, "state": state}
 
@@ -438,73 +203,29 @@ def stop_keeper(
     name: str,
     *,
     hold_id: str | None = None,
-    mux_alive: MuxProbe | None = None,
+    mux_alive: HoldProbe | None = None,
 ) -> bool:
-    if hold_id is None:
-        with _keeper_lock(name):
-            return _STORE.stop(name)
-    with _keeper_lock(name):
-        state = read_state(name)
-        if not state:
-            return False
-        holds = _read_holds(state)
-        holds.pop(hold_id, None)
-        _STORE.write(name, _state_with_holds(state, holds))
-        if not holds:
-            return _STORE.stop(name)
-    _prune_snapshot(name, mux_alive=mux_alive)
-    with _keeper_lock(name):
-        state = read_state(name)
-        if not state:
-            return False
-        holds = _read_holds(state)
-        if holds:
-            _STORE.write(name, _state_with_holds(state, holds))
-            return False
-        return _STORE.stop(name)
+    return _holds().release_hold(name, hold_id=hold_id, probe=mux_alive)
 
 
 def _write_self_state(args: argparse.Namespace) -> None:
-    with _keeper_lock(args.name):
-        existing = read_state(args.name) or {}
-        holds = _read_holds(existing)
-        now = time.time()
-        if not holds and args.hold_id:
-            holds[str(args.hold_id)] = {
-                "mux": args.mux,
-                "updated_at": now,
-                "confirmed_at": now,
-            }
-        holds = _confirm_missing_holds(holds, now=now)[0]
-        _STORE.write(
-            args.name,
-            _state_with_holds(
-                {
-                    **existing,
-                    "keeper_protocol": _KEEPER_PROTOCOL,
-                    "pid": os.getpid(),
-                    "pid_identity": process_identity(os.getpid()),
-                    "container": args.name,
-                    "venue_port": int(args.venue_port),
-                    "relay_port": int(args.relay_port) if args.relay_port else None,
-                    "host_relay_port": (
-                        int(args.host_relay_port) if args.host_relay_port else None
-                    ),
-                },
-                holds,
+    _holds().write_self_state(
+        args.name,
+        {
+            "container": args.name,
+            "venue_port": int(args.venue_port),
+            "relay_port": int(args.relay_port) if args.relay_port else None,
+            "host_relay_port": (
+                int(args.host_relay_port) if args.host_relay_port else None
             ),
-        )
+        },
+        fallback_hold_id=str(args.hold_id) if args.hold_id else None,
+        fallback_mux=args.mux,
+    )
 
 
 def _remove_self_state(name: str) -> None:
-    with _keeper_lock(name):
-        state = read_state(name)
-        if (
-            state
-            and int(state.get("pid") or 0) == os.getpid()
-            and not _read_holds(state)
-        ):
-            _STORE.remove(name)
+    _holds().remove_self_state(name)
 
 
 def _mux_exists(ssh_config: Any, mux: str) -> bool | None:

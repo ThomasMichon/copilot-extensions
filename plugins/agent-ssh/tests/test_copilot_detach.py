@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import types
 from pathlib import Path
 
@@ -63,7 +64,11 @@ def seams(monkeypatch):
         "ensure_keeper",
         lambda *a, **k: calls.keeper.append((a, k)) or {"started": True, "state": {"pid": 123}},
     )
-    monkeypatch.setattr(detach, "stop_keeper", lambda target: calls.stop_keeper.append(target) or True)
+    monkeypatch.setattr(
+        detach,
+        "stop_keeper",
+        lambda target, **kw: calls.stop_keeper.append((target, kw.get("hold_id"))) or True,
+    )
     monkeypatch.setattr(detach, "read_keeper_state", lambda target: None)
     monkeypatch.setattr(
         "venue_copilot.live_session_for",
@@ -115,7 +120,11 @@ def test_detach_success_reserves_ssh_venue_and_reports_handle(seams, capsys):
     assert "agent-ssh copilot devbox --stop --workspace /workspaces/repo" == out["commands"]["stop"]
     assert seams.reserve[0][0] == "anchor-repo@devbox"
     assert seams.reserve[0][1]["kind"] == "ssh"
-    assert seams.keeper[0][1] == {"venue_port": 41234, "mux": "wt-anchor-repo"}
+    assert seams.keeper[0][1].items() >= {
+        "venue_port": 41234,
+        "mux": "wt-anchor-repo",
+        "hold_id": "anchor-repo@devbox",
+    }.items()
     launch = next(command for command in seams.remote if "agent-worktrees embody" in command)
     assert "cd /workspaces/repo" in launch
     assert "--bridge-scope-id anchor-repo@devbox" in launch
@@ -176,7 +185,14 @@ def test_attached_default_uses_venue_copilot_over_ssh(seams, monkeypatch):
     }
     argv = seen["ssh_argv"]
     assert "-t" in argv
-    assert ["-R", "41234:127.0.0.1:41234"] == argv[argv.index("-R") : argv.index("-R") + 2]
+    assert "-R" not in argv
+    assert seams.keeper[0][1].items() >= {
+        "venue_port": 41234,
+        "mux": "wt-anchor-repo",
+        "hold_pid": os.getpid(),
+    }.items()
+    assert seams.keeper[0][1]["hold_id"].startswith(f"attached:{os.getpid()}:")
+    assert seams.stop_keeper == [("devbox", seams.keeper[0][1]["hold_id"])]
     remote_command = argv[-1]
     assert remote_command.startswith("bash -lc ")
     assert "cd /workspaces/repo" in remote_command
@@ -207,6 +223,7 @@ def test_attached_skips_reverse_forward_when_live_keeper_holds_route(seams, monk
     monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
     monkeypatch.setattr(detach, "read_keeper_state", lambda target: {"venue_port": 41234})
     monkeypatch.setattr(detach._STORE, "alive", lambda key: True)
+    monkeypatch.setattr(detach, "_update_keeper_hold_pid", lambda *a, **k: None)
     seen = {}
 
     monkeypatch.setattr(
@@ -231,198 +248,93 @@ def test_attached_skips_reverse_forward_when_live_keeper_holds_route(seams, monk
     assert "-R" not in seen["ssh_argv"]
 
 
-def test_attached_skips_reverse_forward_when_live_attached_owner_holds_route(
-    seams, monkeypatch,
-):
-    monkeypatch.setattr(
-        detach,
-        "_ssh_config",
-        lambda target: types.SimpleNamespace(
-            config_file=None,
-            port=None,
-            identity_file=None,
-            extra_options={},
-            ssh_target=target,
-        ),
-    )
-    monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: None)
-    monkeypatch.setattr(detach, "_ensure_remote_tooling", lambda _cfg: None)
-    monkeypatch.setattr(detach, "resolve_daemon_port", lambda: 41234)
-    monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
-    monkeypatch.setattr(
-        detach,
-        "read_keeper_state",
-        lambda target: {
-            "mode": "attached",
-            "pid": 111,
-            "pid_identity": "id-111",
-            "venue_port": 41234,
-        },
-    )
-    monkeypatch.setattr(detach._STORE, "alive", lambda key: True)
-    seen = {}
-
-    class FakeProcess:
-        pid = 999
-
-        def wait(self):
-            return 0
-
-    monkeypatch.setattr(
-        detach,
-        "run_venue_copilot",
-        lambda _identity, *, connect, **_kwargs: connect("agent-worktrees copilot --anchor"),
-    )
-    def fake_popen(argv, **_kwargs):
-        seen["ssh_argv"] = argv
-        return FakeProcess()
-
-    monkeypatch.setattr(detach.subprocess, "Popen", fake_popen)
-
-    assert detach.cmd_attached(_args(detach=False, workspace="/workspaces/repo", copilot_args=[])) == 0
-    assert "-R" not in seen["ssh_argv"]
-
-
-def test_attached_adds_reverse_forward_when_attached_owner_state_is_stale(
-    seams, monkeypatch,
-):
-    monkeypatch.setattr(
-        detach,
-        "_ssh_config",
-        lambda target: types.SimpleNamespace(
-            config_file=None,
-            port=None,
-            identity_file=None,
-            extra_options={},
-            ssh_target=target,
-        ),
-    )
-    monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: None)
-    monkeypatch.setattr(detach, "_ensure_remote_tooling", lambda _cfg: None)
-    monkeypatch.setattr(detach, "resolve_daemon_port", lambda: 41234)
-    monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
-    monkeypatch.setattr(detach, "read_keeper_state", lambda target: {"mode": "attached", "venue_port": 41234})
-    monkeypatch.setattr(detach._STORE, "alive", lambda key: False)
-    seen = {}
-
-    class FakeProcess:
-        pid = 999
-
-        def wait(self):
-            return 0
-
-    monkeypatch.setattr(
-        detach,
-        "run_venue_copilot",
-        lambda _identity, *, connect, **_kwargs: connect("agent-worktrees copilot --anchor"),
-    )
-    def fake_popen(argv, **_kwargs):
-        seen["ssh_argv"] = argv
-        return FakeProcess()
-
-    monkeypatch.setattr(detach.subprocess, "Popen", fake_popen)
-
-    assert detach.cmd_attached(_args(detach=False, workspace="/workspaces/repo", copilot_args=[])) == 0
-    argv = seen["ssh_argv"]
-    assert ["-R", "41234:127.0.0.1:41234"] == argv[argv.index("-R") : argv.index("-R") + 2]
-
-
-def test_attached_records_route_owner_for_foreground_ssh_lifetime(
-    tmp_path: Path, monkeypatch,
+def test_two_attached_holds_share_keeper_and_first_exit_keeps_route(
+    tmp_path: Path,
+    monkeypatch,
 ):
     store = detach.KeeperStore(tmp_path)
     monkeypatch.setattr(detach, "_STORE", store)
-    monkeypatch.setattr(detach, "process_identity", lambda pid: f"id-{pid}")
+    monkeypatch.setattr(store, "alive", lambda key: store.read(key) is not None)
     monkeypatch.setattr(
         detach,
-        "_ssh_config",
-        lambda target: types.SimpleNamespace(
-            config_file=None,
-            port=None,
-            identity_file=None,
-            extra_options={},
-            ssh_target=target,
-        ),
+        "process_identity",
+        lambda pid: "keeper-id" if pid == 1000 else f"id-{pid}",
     )
-    monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: None)
-    monkeypatch.setattr(detach, "_ensure_remote_tooling", lambda _cfg: None)
-    monkeypatch.setattr(detach, "resolve_daemon_port", lambda: 41234)
-    monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
-    monkeypatch.setattr(detach, "_remote", lambda *_args, **_kwargs: (0, "", ""))
     monkeypatch.setattr(
         detach,
-        "run_venue_copilot",
-        lambda _identity, *, connect, **_kwargs: connect("agent-worktrees copilot --anchor"),
+        "spawn_keeper",
+        lambda _argv, _env, state, **_kwargs: {
+            **state,
+            "pid": 1000,
+            "pid_identity": "keeper-id",
+        },
     )
 
-    class FakeProcess:
-        pid = 999
+    assert detach.ensure_keeper(
+        "devbox",
+        venue_port=41234,
+        mux="wt-anchor-repo",
+        hold_id="attached:first",
+        hold_pid=111,
+    )["started"] is True
+    assert detach.ensure_keeper(
+        "devbox",
+        venue_port=41234,
+        mux="wt-anchor-repo",
+        hold_id="attached:second",
+        hold_pid=222,
+    )["started"] is False
 
-        def wait(self):
-            state = detach.read_keeper_state("devbox")
-            assert state is not None
-            assert state["mode"] == "attached"
-            assert state["pid"] == 999
-            assert state["pid_identity"] == "id-999"
-            assert state["venue_port"] == 41234
-            return 0
+    assert detach.stop_keeper("devbox", hold_id="attached:first") is False
+    state = detach.read_keeper_state("devbox")
+    assert state is not None
+    assert sorted(state["holds"]) == ["attached:second"]
+    assert detach._STORE.alive(detach._state_key("devbox")) is True
 
-    monkeypatch.setattr(detach.subprocess, "Popen", lambda _argv, **_kwargs: FakeProcess())
-
-    assert detach.cmd_attached(_args(detach=False, workspace="/workspaces/repo", copilot_args=[])) == 0
+    detach.stop_keeper("devbox", hold_id="attached:second")
     assert detach.read_keeper_state("devbox") is None
 
 
-def test_attached_keeps_reverse_forward_when_only_stray_local_daemon_answers(
-    seams, monkeypatch,
+def test_attached_and_detached_holds_share_keeper(
+    tmp_path: Path,
+    monkeypatch,
 ):
+    store = detach.KeeperStore(tmp_path)
+    monkeypatch.setattr(detach, "_STORE", store)
+    monkeypatch.setattr(store, "alive", lambda key: store.read(key) is not None)
     monkeypatch.setattr(
         detach,
-        "_ssh_config",
-        lambda target: types.SimpleNamespace(
-            config_file=None,
-            port=None,
-            identity_file=None,
-            extra_options={},
-            ssh_target=target,
-        ),
+        "process_identity",
+        lambda pid: "keeper-id" if pid == 1000 else f"id-{pid}",
     )
-    monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: None)
-    monkeypatch.setattr(detach, "_ensure_remote_tooling", lambda _cfg: None)
-    monkeypatch.setattr(detach, "resolve_daemon_port", lambda: 41234)
-    monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
-    monkeypatch.setattr(detach, "read_keeper_state", lambda target: None)
-    seen = {}
-
-    def remote(_cfg, command, *, timeout=60.0):
-        seams.remote.append(command)
-        if "curl -fsS" in command:
-            return 0, "", ""
-        return 0, "", ""
-
-    monkeypatch.setattr(detach, "_remote", remote)
     monkeypatch.setattr(
         detach,
-        "run_venue_copilot",
-        lambda _identity, *, connect, **_kwargs: connect("agent-worktrees copilot --anchor"),
+        "spawn_keeper",
+        lambda _argv, _env, state, **_kwargs: {
+            **state,
+            "pid": 1000,
+            "pid_identity": "keeper-id",
+        },
     )
 
-    class FakeProcess:
-        pid = 999
+    detach.ensure_keeper(
+        "devbox",
+        venue_port=41234,
+        mux="wt-anchor-repo",
+        hold_id="attached:first",
+        hold_pid=111,
+    )
+    got = detach.ensure_keeper(
+        "devbox",
+        venue_port=41234,
+        mux="wt-anchor-repo",
+        hold_id="anchor-repo@devbox",
+    )
 
-        def wait(self):
-            return 0
-
-    def fake_popen(argv, **kwargs):
-        seen["ssh_argv"] = argv
-        return FakeProcess()
-
-    monkeypatch.setattr(detach.subprocess, "Popen", fake_popen)
-
-    assert detach.cmd_attached(_args(detach=False, workspace="/workspaces/repo", copilot_args=[])) == 0
-    argv = seen["ssh_argv"]
-    assert ["-R", "41234:127.0.0.1:41234"] == argv[argv.index("-R") : argv.index("-R") + 2]
-    assert not any("curl -fsS" in command for command in seams.remote)
+    assert got["started"] is False
+    assert sorted(got["state"]["holds"]) == ["anchor-repo@devbox", "attached:first"]
+    assert detach.stop_keeper("devbox", hold_id="anchor-repo@devbox") is False
+    assert sorted(detach.read_keeper_state("devbox")["holds"]) == ["attached:first"]
 
 
 def test_workspace_resolution_order_prefers_explicit_then_host_config(tmp_path: Path):
@@ -563,7 +475,7 @@ def test_missing_agent_worktrees_message(seams, monkeypatch, capsys):
     rc = detach.cmd_detach(_args())
     assert rc == 1
     assert "agent-worktrees is not installed on the SSH target" in capsys.readouterr().err
-    assert seams.stop_keeper == ["devbox"]
+    assert seams.stop_keeper == [("devbox", "anchor-repo@devbox")]
 
 
 def test_launch_failure_cleanup_kills_mux_and_stops_keeper(seams, monkeypatch):
@@ -580,7 +492,7 @@ def test_launch_failure_cleanup_kills_mux_and_stops_keeper(seams, monkeypatch):
     monkeypatch.setattr(detach, "_remote", remote)
     assert detach.cmd_detach(_args()) == 1
     assert any("tmux kill-session" in command for command in seams.remote)
-    assert seams.stop_keeper == ["devbox"]
+    assert seams.stop_keeper == [("devbox", "anchor-repo@devbox")]
 
 
 def test_rejoin_reuses_keeper_and_does_not_stop_it(seams, monkeypatch, capsys):
@@ -606,7 +518,7 @@ def test_stop_kills_mux_stops_keeper_and_deregisters(seams, capsys):
     rc = detach.cmd_stop(_args(stop=True, detach=False))
     assert rc == 0
     assert any("tmux kill-session" in command for command in seams.remote)
-    assert seams.stop_keeper == ["devbox"]
+    assert seams.stop_keeper == [("devbox", "anchor-repo@devbox")]
     assert seams.release == [("anchor-repo@devbox", None)]
     assert seams.deregister == ["sid-42"]
     assert json.loads(capsys.readouterr().out)["deregistered"] == "sid-42"
@@ -682,54 +594,25 @@ def test_forward_keeper_rewrites_state_when_relay_pid_changes(tmp_path, monkeypa
     assert store.read("devbox")["children"] == [{"pid": 222, "identity": "id-222"}]
 
 
-def test_keeper_state_token_fences_overlapping_launches(tmp_path, monkeypatch):
+def test_keeper_hold_store_reads_legacy_single_mux_state(tmp_path, monkeypatch):
     store = detach.KeeperStore(tmp_path)
     monkeypatch.setattr(detach, "_STORE", store)
 
-    first = {
-        "pid": 101,
-        "pid_identity": "keep-101",
-        "target": "devbox",
-        "venue_port": 41234,
-        "mux": "wt-a",
-        "instance_token": "tok-a",
-        "children": [],
-    }
-    second = {
-        "pid": 202,
-        "pid_identity": "keep-202",
-        "target": "devbox",
-        "venue_port": 41234,
-        "mux": "wt-b",
-        "instance_token": "tok-b",
-        "children": [],
-    }
-
-    detach._write_keeper_state("devbox", first)
-    detach._write_keeper_state("devbox", second)
-
-    detach._write_keeper_state(
+    store.write(
         "devbox",
-        {**first, "children": [{"pid": 111, "identity": "id-111"}]},
-    )
-    detach._remove_keeper_state("devbox", "tok-a")
-
-    detach._write_keeper_state(
-        "devbox",
-        {**second, "children": [{"pid": 222, "identity": "id-222"}]},
+        {"pid": 101, "pid_identity": "keep-101", "mux": "wt-legacy", "started_at": 123.0},
     )
 
-    assert store.read("devbox") == {
-        **second,
-        "children": [{"pid": 222, "identity": "id-222"}],
+    assert detach._holds().read_holds(store.read("devbox")) == {
+        "wt-legacy": {"mux": "wt-legacy", "updated_at": 123.0}
     }
 
 
-def test_state_lock_path_uses_sanitized_keeper_state_path(tmp_path, monkeypatch):
+def test_keeper_hold_store_uses_sanitized_keeper_state_path(tmp_path, monkeypatch):
     store = detach.KeeperStore(tmp_path)
     monkeypatch.setattr(detach, "_STORE", store)
 
-    path = detach._state_lock_path("codespace:repo/branch")
+    path = detach._holds().state_path("codespace:repo/branch").with_suffix(".lock")
 
     assert path.parent == tmp_path
     assert path.name == "codespace-repo-branch.lock"

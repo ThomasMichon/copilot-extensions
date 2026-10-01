@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import shlex
@@ -18,13 +19,17 @@ from agent_procutil import (
     windowless_python,
     windowless_python_env,
 )
-from .file_lock import exclusive_file_lock
 from ssh_manager import SSHProfileSource, SupervisedRelayForward, build_remote_exec_args
 from ssh_manager.forward_keeper import (
     KeeperStore,
     process_identity,
     run_supervised_loop,
     spawn_keeper,
+)
+from ssh_manager.keeper_holds import (
+    KEEPER_HOLDS_PROTOCOL,
+    HoldProbe,
+    KeeperHoldStore,
 )
 from venue_copilot import (
     DEFAULT_TTL_SECONDS,
@@ -44,11 +49,13 @@ from venue_copilot.refs import upload_for
 _RESERVATION_TTL = 900.0
 _RESERVE_RETRY_WINDOW = 90.0
 _PROBE_ATTEMPTS = 2
+_KEEPER_PROTOCOL = KEEPER_HOLDS_PROTOCOL
 _LEGACY_ROOT = ".agent-ssh"  # marketplace-isolation: allow legacy compatibility root
 _KEEPER_TOKEN_ENV = "AGENT_SSH_KEEPER_TOKEN"
 _STATE_DIR = Path.home() / _LEGACY_ROOT / "forward-keepers"
 _STORE = KeeperStore(_STATE_DIR)
 _COPILOT_HOSTS_FILE = "copilot-hosts.json"
+_ATTACHED_HOLD_PREFIX = "__attached_pid__:"
 
 
 class CopilotConfigError(ValueError):
@@ -290,17 +297,18 @@ def _state_key(target: str) -> str:
     return target
 
 
-def _state_lock_path(target: str) -> Path:
-    return _STORE.state_path(_state_key(target)).with_suffix(".lock")
+def _holds() -> KeeperHoldStore:
+    return KeeperHoldStore(_STORE, protocol=_KEEPER_PROTOCOL)
 
 
 def read_keeper_state(target: str) -> dict[str, Any] | None:
     return _STORE.read(_state_key(target))
 
 
-def stop_keeper(target: str) -> bool:
-    with exclusive_file_lock(_state_lock_path(target)):
-        return _STORE.stop(_state_key(target))
+def stop_keeper(target: str, *, hold_id: str | None = None, probe: HoldProbe | None = None) -> bool:
+    if hold_id is not None and read_keeper_state(target) is None:
+        return False
+    return _holds().release_hold(_state_key(target), hold_id=hold_id, probe=probe)
 
 
 def _keeper_state(
@@ -313,11 +321,8 @@ def _keeper_state(
         if isinstance(pid, int) and pid > 0 and isinstance(identity, str) and identity
     ]
     return {
-        "pid": os.getpid(),
-        "pid_identity": process_identity(os.getpid()) or "",
         "target": target,
         "venue_port": int(venue_port),
-        "mux": mux,
         "children": children,
         "instance_token": os.environ.get(_KEEPER_TOKEN_ENV, ""),
     }
@@ -330,46 +335,43 @@ def _keeper_route_active(target: str, daemon_port: int) -> bool:
     return _STORE.alive(_state_key(target))
 
 
-def _attached_route_state(
-    target: str,
-    *,
-    venue_port: int,
-    mux: str,
-    pid: int,
-    instance_token: str,
-) -> dict[str, Any]:
-    return {
-        "pid": int(pid),
-        "pid_identity": process_identity(int(pid)) or "",
-        "target": target,
-        "venue_port": int(venue_port),
-        "mux": mux,
-        "mode": "attached",
-        "instance_token": instance_token,
-    }
+def _attached_hold_mux(pid: int) -> str:
+    identity = process_identity(int(pid)) or ""
+    payload = json.dumps(
+        {"pid": int(pid), "identity": identity},
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return _ATTACHED_HOLD_PREFIX + base64.urlsafe_b64encode(payload).decode("ascii")
 
 
-def _write_attached_route_state(target: str, payload: dict[str, Any]) -> bool:
-    with exclusive_file_lock(_state_lock_path(target)):
-        current = read_keeper_state(target)
-        if (
-            current
-            and int(current.get("venue_port") or 0) == int(payload.get("venue_port") or 0)
-            and _STORE.alive(_state_key(target))
-        ):
+def _probe_hold(ssh_config: Any, mux: str) -> bool | None:
+    if mux.startswith(_ATTACHED_HOLD_PREFIX):
+        encoded = mux[len(_ATTACHED_HOLD_PREFIX):]
+        try:
+            raw = base64.urlsafe_b64decode(encoded.encode("ascii"))
+            payload = json.loads(raw.decode("utf-8"))
+            pid = int(payload.get("pid") or 0)
+        except (ValueError, TypeError, UnicodeError, json.JSONDecodeError):
             return False
-        _STORE.write(_state_key(target), payload)
-        return True
+        identity = payload.get("identity")
+        if not isinstance(identity, str) or not identity or pid <= 0:
+            return False
+        return process_identity(pid) == identity
+    return _mux_exists(ssh_config, mux)
 
 
-def _remove_attached_route_state(target: str, instance_token: str) -> None:
-    with exclusive_file_lock(_state_lock_path(target)):
-        current = read_keeper_state(target)
-        if not current or current.get("mode") != "attached":
+def _update_keeper_hold_pid(target: str, hold_id: str, pid: int) -> None:
+    if read_keeper_state(target) is None:
+        return
+    holds_store = _holds()
+    with holds_store.lock(_state_key(target)):
+        state = read_keeper_state(target)
+        holds = holds_store.read_holds(state)
+        if not state or hold_id not in holds:
             return
-        if current.get("instance_token") != instance_token:
-            return
-        _STORE.remove(_state_key(target))
+        holds = holds_store.refresh_hold(holds, hold_id, _attached_hold_mux(pid), confirmed=True)
+        _STORE.write(_state_key(target), holds_store.state_with_holds(state, holds))
 
 
 def _write_keeper_state(target: str, payload: dict[str, Any]) -> None:
@@ -389,28 +391,37 @@ def _write_keeper_state(target: str, payload: dict[str, Any]) -> None:
         and not payload.get("children")
     ):
         payload = {**payload, "children": current["children"]}
+    if current and current.get("holds") and not payload.get("holds"):
+        payload = {**payload, "holds": current["holds"]}
     _STORE.write(_state_key(target), payload)
 
 
-def _remove_keeper_state(target: str, instance_token: str) -> None:
-    current = read_keeper_state(target)
-    if (
-        not current
-        or current.get("instance_token") != instance_token
-    ):
-        return
-    _STORE.remove(_state_key(target))
-
-
-def ensure_keeper(target: str, *, venue_port: int, mux: str) -> dict[str, Any]:
-    with exclusive_file_lock(_state_lock_path(target)):
+def ensure_keeper(
+    target: str,
+    *,
+    venue_port: int,
+    mux: str,
+    hold_id: str | None = None,
+    hold_pid: int | None = None,
+    probe: HoldProbe | None = None,
+) -> dict[str, Any]:
+    holds_store = _holds()
+    hold_id = hold_id or mux
+    hold_mux = _attached_hold_mux(hold_pid) if hold_pid and hold_pid > 0 else mux
+    holds_store.prune_snapshot(_state_key(target), probe=probe)
+    with holds_store.lock(_state_key(target)):
         state = read_keeper_state(target)
+        holds = holds_store.read_holds(state)
+        holds = holds_store.refresh_hold(holds, hold_id, hold_mux)
         if (
+            state
+            and state.get("keeper_protocol") == _KEEPER_PROTOCOL
+            and
             _STORE.alive(_state_key(target))
-            and state
-            and state.get("mux") == mux
             and int(state.get("venue_port") or 0) == int(venue_port)
         ):
+            state = holds_store.state_with_holds(state, holds)
+            _STORE.write(_state_key(target), state)
             return {"started": False, "state": state}
         _STORE.stop(_state_key(target))
         argv = [
@@ -423,6 +434,8 @@ def ensure_keeper(target: str, *, venue_port: int, mux: str) -> dict[str, Any]:
             str(int(venue_port)),
             "--mux",
             mux,
+            "--hold-id",
+            hold_id,
             "--startup-grace",
             "300",
         ]
@@ -435,13 +448,18 @@ def ensure_keeper(target: str, *, venue_port: int, mux: str) -> dict[str, Any]:
                 _KEEPER_TOKEN_ENV: instance_token,
             },
             {
+                "keeper_protocol": _KEEPER_PROTOCOL,
                 "target": target,
                 "venue_port": int(venue_port),
                 "mux": mux,
+                "holds": holds,
                 "instance_token": instance_token,
             },
             popen_kwargs=windowless_daemon_kwargs(breakaway=True),
         )
+        current_holds = holds_store.read_holds(read_keeper_state(target) or {})
+        current_holds.update(holds)
+        state = holds_store.state_with_holds({**state, "holds": current_holds}, current_holds)
         _write_keeper_state(target, state)
         return {"started": True, "state": state}
 
@@ -449,9 +467,10 @@ def ensure_keeper(target: str, *, venue_port: int, mux: str) -> dict[str, Any]:
 class _SshAdapter:
     probe_attempts = _PROBE_ATTEMPTS
 
-    def __init__(self, *, target: str, ssh_config: Any) -> None:
+    def __init__(self, *, target: str, ssh_config: Any, hold_id: str | None = None) -> None:
         self.target = target
         self.ssh_config = ssh_config
+        self.hold_id = hold_id
 
     def run(self, command: str, *, timeout: float) -> tuple[int, str, str]:
         return _remote(self.ssh_config, _bash(command), timeout=timeout)
@@ -463,10 +482,20 @@ class _SshAdapter:
         return _remote_input(self.ssh_config, _bash(command), stdin, timeout=timeout)
 
     def ensure_keeper(self, *, venue_port: int, mux: str) -> dict[str, Any]:
-        return ensure_keeper(self.target, venue_port=venue_port, mux=mux)
+        return ensure_keeper(
+            self.target,
+            venue_port=venue_port,
+            mux=mux,
+            hold_id=self.hold_id,
+            probe=lambda held_mux: _probe_hold(self.ssh_config, held_mux),
+        )
 
     def stop_keeper(self) -> bool:
-        return stop_keeper(self.target)
+        return stop_keeper(
+            self.target,
+            hold_id=self.hold_id,
+            probe=lambda mux: _probe_hold(self.ssh_config, mux),
+        )
 
     def attach_command(self, plan: dict[str, Any]) -> str:
         return (
@@ -505,7 +534,7 @@ def cmd_detach(args: argparse.Namespace) -> int:
     try:
         _ensure_remote_tooling(ssh_config)
         rc, payload = launch_detached(
-            _SshAdapter(target=args.target, ssh_config=ssh_config),
+            _SshAdapter(target=args.target, ssh_config=ssh_config, hold_id=plan["scope_id"]),
             plan,
             seed=seed,
             driver=args.driver,
@@ -537,7 +566,7 @@ def cmd_stop(args: argparse.Namespace) -> int:
         plan["venue"]["mux_session_name"] = plan["mux_session"]
     row = live_session_for(plan["scope_id"])
     rc, payload = stop_detached(
-        _SshAdapter(target=args.target, ssh_config=ssh_config),
+        _SshAdapter(target=args.target, ssh_config=ssh_config, hold_id=plan["scope_id"]),
         plan,
         session_row=row,
     )
@@ -564,7 +593,7 @@ def cmd_attached(args: argparse.Namespace) -> int:
     plan = plan_for(args)
     daemon_port = resolve_daemon_port()
     token = resolve_local_auth_token()
-    reverse_forwards: list[str] = []
+    attached_hold_id: str | None = None
     if daemon_port and token:
         rc, _out, err = _remote(
             ssh_config,
@@ -577,8 +606,15 @@ def cmd_attached(args: argparse.Namespace) -> int:
                 + (f" ({err.strip()})" if err.strip() else ""),
                 plan,
             )
-        if not _keeper_route_active(args.target, daemon_port):
-            reverse_forwards.append(f"{daemon_port}:127.0.0.1:{daemon_port}")
+        attached_hold_id = f"attached:{os.getpid()}:{uuid.uuid4().hex}"
+        ensure_keeper(
+            args.target,
+            venue_port=daemon_port,
+            mux=plan["mux_session"],
+            hold_id=attached_hold_id,
+            hold_pid=os.getpid(),
+            probe=lambda mux: _probe_hold(ssh_config, mux),
+        )
     else:
         print(
             "[WARN] Could not resolve the host agent-bridge daemon's live "
@@ -595,31 +631,23 @@ def cmd_attached(args: argparse.Namespace) -> int:
         argv = build_remote_exec_args(
             ssh_config,
             command,
-            reverse_forwards=reverse_forwards,
             pty=True,
         )
         proc = subprocess.Popen(  # noqa: S603 - argv is built from the configured SSH profile.
             argv,
             creationflags=no_window_flags(),
         )
-        instance_token = ""
-        if reverse_forwards and daemon_port:
-            instance_token = uuid.uuid4().hex
-            _write_attached_route_state(
-                args.target,
-                _attached_route_state(
-                    args.target,
-                    venue_port=daemon_port,
-                    mux=plan["mux_session"],
-                    pid=proc.pid,
-                    instance_token=instance_token,
-                ),
-            )
+        if attached_hold_id:
+            _update_keeper_hold_pid(args.target, attached_hold_id, proc.pid)
         try:
             return int(proc.wait())
         finally:
-            if instance_token:
-                _remove_attached_route_state(args.target, instance_token)
+            if attached_hold_id:
+                stop_keeper(
+                    args.target,
+                    hold_id=attached_hold_id,
+                    probe=lambda mux: _probe_hold(ssh_config, mux),
+                )
 
     try:
         return run_venue_copilot(
@@ -640,30 +668,47 @@ def cmd_attached(args: argparse.Namespace) -> int:
         return 1
 
 
-def _mux_exists(ssh_config: Any, mux: str) -> bool:
-    rc, _out, _err = _remote(ssh_config, f"tmux has-session -t {shlex.quote('=' + mux)}", timeout=60.0)
-    return rc == 0
+def _mux_exists(ssh_config: Any, mux: str) -> bool | None:
+    try:
+        rc, _out, _err = _remote(
+            ssh_config,
+            f"tmux has-session -t {shlex.quote('=' + mux)}",
+            timeout=60.0,
+        )
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        return None
+    if rc == 0:
+        return True
+    if rc == 1:
+        return False
+    return None
+
+
+def _any_hold_alive(target: str, ssh_config: Any) -> bool:
+    return _holds().alive_or_fail_open(
+        _state_key(target),
+        probe=lambda mux: _probe_hold(ssh_config, mux),
+    )
 
 
 async def _run_forward_keeper(args: argparse.Namespace) -> int:
     ssh_config = _ssh_config(args.target)
-    instance_token = os.environ.get(_KEEPER_TOKEN_ENV, "")
 
     def write_state() -> None:
-        with exclusive_file_lock(_state_lock_path(args.target)):
-            _write_keeper_state(
+        _holds().write_self_state(
+            _state_key(args.target),
+            _keeper_state(
                 args.target,
-                _keeper_state(
-                    args.target,
-                    int(args.venue_port),
-                    args.mux,
-                    forwards,
-                ),
-            )
+                int(args.venue_port),
+                args.mux,
+                forwards,
+            ),
+            fallback_hold_id=getattr(args, "hold_id", None),
+            fallback_mux=args.mux,
+        )
 
     def remove_state() -> None:
-        with exclusive_file_lock(_state_lock_path(args.target)):
-            _remove_keeper_state(args.target, instance_token)
+        _holds().remove_self_state(_state_key(args.target))
 
     forwards = [
         SupervisedRelayForward(
@@ -676,7 +721,7 @@ async def _run_forward_keeper(args: argparse.Namespace) -> int:
     ]
     return await run_supervised_loop(
         forwards,
-        session_alive=lambda: _mux_exists(ssh_config, args.mux),
+        session_alive=lambda: _any_hold_alive(args.target, ssh_config),
         write_state=write_state,
         remove_state=remove_state,
         probe_interval=float(args.probe_interval),
@@ -738,6 +783,7 @@ def add_forward_keeper_subparser(sub) -> None:
     p.add_argument("target")
     p.add_argument("--venue-port", type=int, required=True)
     p.add_argument("--mux", required=True)
+    p.add_argument("--hold-id")
     p.add_argument("--probe-interval", type=float, default=120.0)
     p.add_argument("--startup-grace", type=float, default=300.0)
     p.set_defaults(func=cmd_forward_keeper)

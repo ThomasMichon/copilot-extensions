@@ -2,7 +2,19 @@
   "comment": "Keep one container bridge forward alive with per-session holds and reject detached TTL overrides",
   "changes": [
     {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
       "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
       "type": "patch"
     }
   ]
