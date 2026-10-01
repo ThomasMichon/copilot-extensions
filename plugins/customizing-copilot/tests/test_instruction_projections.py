@@ -2632,3 +2632,37 @@ def test_skip_local_cache_must_be_boolean(tmp_path: Path) -> None:
         "skipLocalCache must be a boolean" in finding.message
         for finding in result.findings
     )
+
+
+def test_unrelated_extra_key_is_rejected(tmp_path: Path) -> None:
+    """Regression test for the ``skipLocalCache`` key-set check: a strict
+    ``set(entry) - required > optional`` superset comparison wrongly let an
+    unrelated extra key (not ``skipLocalCache``, and not a superset of it)
+    through, silently ignored, weakening the exact-key schema contract this
+    check exists to enforce."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(
+        tmp_path,
+        "market",
+        "policy",
+        entries=[
+            {
+                "id": "fallback",
+                "template": "instructions/fallback.instructions.md",
+                "destination": ".github/instructions/policy/fallback.instructions.md",
+                "customizationKind": "instructions",
+                "applyTo": "**",
+                "legacyMarkers": [],
+                "someUnrelatedKey": True,
+            }
+        ],
+    )
+    result = projections.Result(operation="test")
+
+    specs, _unknown = projections._load_specs(repo, [source], result)
+
+    assert specs == []
+    assert any(
+        "unknown or missing keys" in finding.message for finding in result.findings
+    )

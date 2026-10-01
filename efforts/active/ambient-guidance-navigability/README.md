@@ -596,8 +596,10 @@ _Pending._
   the specific content/applyTo/byte-budget contract.
 - `tools/run-plugin-tests.py customizing-copilot`: 303 passed, 8 skipped.
   `check-docs-consistency`, `check-version-consistency`, and
-  `check-module-size` all clean (no production module touched this slice).
-- **Review round 1 finding (PR #4798), addressed in the same PR:** the
+  `check-module-size` all clean (as declared and tested at that point in
+  the PR -- the review round below went on to touch
+  `instruction_projections.py` after all).
+- **Review round 1 findings (PR #4798), all addressed in the same PR:** the
   catch-all is a declared source like any other, so `render_local_cache`
   would also render it into its own `local-cache-catchall.local.
   instructions.md` -- which the catch-all's own glob
@@ -616,6 +618,32 @@ _Pending._
   validation), plus asserted `skip_local_cache is True` on the real shipped
   spec. A second, small module-size baseline widen (2439 -> 2457) for this
   real fix, same documented-policy reasoning as slice 3's two widens.
+- **Review round 2 findings (PR #4798), all addressed in the same PR:**
+  - **Real bug in round 1's own fix:** the key-set guard used
+    `set(entry) - _required_keys > _optional_keys` (a *strict superset*
+    comparison) -- an unrelated extra key such as `{"someUnrelatedKey"}` is
+    not a superset of `{"skipLocalCache"}`, so the comparison evaluated
+    `False` and the entry silently passed validation, quietly weakening
+    the exact-key schema contract this guard exists to enforce. Fixed to
+    `not set(entry) - _required_keys <= _optional_keys` (extras must be a
+    *subset* of the optional keys to pass). Added
+    `test_unrelated_extra_key_is_rejected`.
+  - The new changefile wrongly used `minor`; `CONTRIBUTING.md`'s own
+    Release & Versioning section defaults to `patch` absent an explicit
+    maintainer request for `minor`/`major`. Corrected.
+  - This Journal's own "no production module touched this slice" claim
+    (written before round 1's fix touched `instruction_projections.py`)
+    was stale; reworded above rather than left contradicting the final
+    diff.
+  - `docs/patterns/worktree-scoped-dynamic-guidance.md` still said *every*
+    checked-in projection gets a local sibling (§1) and that the catch-all
+    "remains open" (its own landing note) -- both now stale once
+    `skipLocalCache` shipped. Updated §1 to document the opt-out exception
+    (naming the catch-all as the one shipped example) and the landing note
+    to reflect slices 3 and 4 both having landed, leaving only the
+    `agent-worktrees` wiring open. The PR's Documentation impact statement
+    is corrected accordingly -- this *did* need a doc update, unlike
+    slice 4's first round.
 - Phase 7 Plan items remaining: `agent-worktrees`' own create/resume/
   `sessionStart` wiring -- the actual consumer of everything built across
   slices 1-4 -- is the last unstarted item.

@@ -674,7 +674,7 @@ def _load_specs(
                 if (
                     not isinstance(entry, dict)
                     or not _required_keys <= set(entry)
-                    or set(entry) - _required_keys > _optional_keys
+                    or not set(entry) - _required_keys <= _optional_keys
                 ):
                     raise ValueError("projection entry has unknown or missing keys")
                 source_id = entry["id"]
