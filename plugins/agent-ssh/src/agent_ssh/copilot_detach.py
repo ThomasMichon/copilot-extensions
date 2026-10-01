@@ -305,10 +305,21 @@ def read_keeper_state(target: str) -> dict[str, Any] | None:
     return _STORE.read(_state_key(target))
 
 
-def stop_keeper(target: str, *, hold_id: str | None = None, probe: HoldProbe | None = None) -> bool:
+def stop_keeper(
+    target: str,
+    *,
+    hold_id: str | None = None,
+    probe: HoldProbe | None = None,
+    expected_updated_at: float | None = None,
+) -> bool:
     if hold_id is not None and read_keeper_state(target) is None:
         return False
-    return _holds().release_hold(_state_key(target), hold_id=hold_id, probe=probe)
+    return _holds().release_hold(
+        _state_key(target),
+        hold_id=hold_id,
+        probe=probe,
+        expected_updated_at=expected_updated_at,
+    )
 
 
 def _keeper_state(
@@ -412,8 +423,11 @@ def ensure_keeper(
     with holds_store.lock(_state_key(target)):
         state = read_keeper_state(target)
         holds = holds_store.read_holds(state)
-        hold_added = hold_id not in holds
-        holds = holds_store.refresh_hold(holds, hold_id, hold_mux)
+        holds, hold_added, hold_updated_at = holds_store.refresh_hold_with_status(
+            holds,
+            hold_id,
+            hold_mux,
+        )
         if (
             state
             and state.get("keeper_protocol") == _KEEPER_PROTOCOL
@@ -423,7 +437,12 @@ def ensure_keeper(
         ):
             state = holds_store.state_with_holds(state, holds)
             _STORE.write(_state_key(target), state)
-            return {"started": False, "hold_added": hold_added, "state": state}
+            return {
+                "started": False,
+                "hold_added": hold_added,
+                "hold_updated_at": hold_updated_at,
+                "state": state,
+            }
         _STORE.stop(_state_key(target))
         argv = [
             windowless_python(),
@@ -462,7 +481,12 @@ def ensure_keeper(
         current_holds.update(holds)
         state = holds_store.state_with_holds({**state, "holds": current_holds}, current_holds)
         _write_keeper_state(target, state)
-        return {"started": True, "hold_added": hold_added, "state": state}
+        return {
+            "started": True,
+            "hold_added": hold_added,
+            "hold_updated_at": hold_updated_at,
+            "state": state,
+        }
 
 
 class _SshAdapter:
@@ -472,6 +496,7 @@ class _SshAdapter:
         self.target = target
         self.ssh_config = ssh_config
         self.hold_id = hold_id
+        self._hold_updated_at: float | None = None
 
     def run(self, command: str, *, timeout: float) -> tuple[int, str, str]:
         return _remote(self.ssh_config, _bash(command), timeout=timeout)
@@ -483,19 +508,23 @@ class _SshAdapter:
         return _remote_input(self.ssh_config, _bash(command), stdin, timeout=timeout)
 
     def ensure_keeper(self, *, venue_port: int, mux: str) -> dict[str, Any]:
-        return ensure_keeper(
+        result = ensure_keeper(
             self.target,
             venue_port=venue_port,
             mux=mux,
             hold_id=self.hold_id,
             probe=lambda held_mux: _probe_hold(self.ssh_config, held_mux),
         )
+        raw_updated = result.get("hold_updated_at")
+        self._hold_updated_at = float(raw_updated) if raw_updated is not None else None
+        return result
 
     def stop_keeper(self) -> bool:
         return stop_keeper(
             self.target,
             hold_id=self.hold_id,
             probe=lambda mux: _probe_hold(self.ssh_config, mux),
+            expected_updated_at=self._hold_updated_at,
         )
 
     def attach_command(self, plan: dict[str, Any]) -> str:

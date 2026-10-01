@@ -226,6 +226,26 @@ class KeeperHoldStore:
         refreshed[hold_id] = hold
         return refreshed
 
+    def refresh_hold_with_status(
+        self,
+        holds: dict[str, dict[str, Any]],
+        hold_id: str,
+        mux: str,
+        *,
+        now: float | None = None,
+        confirmed: bool = False,
+    ) -> tuple[dict[str, dict[str, Any]], bool, float]:
+        hold_added = hold_id not in holds
+        refreshed = self.refresh_hold(
+            holds,
+            hold_id,
+            mux,
+            now=now,
+            confirmed=confirmed,
+        )
+        updated_at = _float_value(refreshed.get(hold_id, {}).get("updated_at"))
+        return refreshed, hold_added, updated_at
+
     def hold_mux(self, key: str, hold_id: str) -> str | None:
         with self.lock(key):
             state = self.read_state(key)
@@ -353,6 +373,7 @@ class KeeperHoldStore:
         *,
         hold_id: str | None = None,
         probe: HoldProbe | None = None,
+        expected_updated_at: float | None = None,
     ) -> bool:
         if hold_id is None:
             with self.lock(key):
@@ -362,6 +383,15 @@ class KeeperHoldStore:
             if not state:
                 return False
             holds = self.read_holds(state)
+            current_hold = holds.get(hold_id)
+            if (
+                expected_updated_at is not None
+                and (
+                    not current_hold
+                    or current_hold.get("updated_at") != float(expected_updated_at)
+                )
+            ):
+                return False
             holds.pop(hold_id, None)
             self.store.write(key, self.state_with_holds(state, holds))
             if not holds:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import itertools
 import json
 import os
 import subprocess
@@ -349,6 +350,59 @@ def test_attached_and_detached_holds_share_keeper(
     assert sorted(got["state"]["holds"]) == ["anchor-repo@devbox", "attached:first"]
     assert detach.stop_keeper("devbox", hold_id="anchor-repo@devbox") is False
     assert sorted(detach.read_keeper_state("devbox")["holds"]) == ["attached:first"]
+
+
+def test_stale_launch_cleanup_does_not_remove_refreshed_keeper_hold(
+    tmp_path: Path,
+    monkeypatch,
+):
+    store = detach.KeeperStore(tmp_path)
+    monkeypatch.setattr(detach, "_STORE", store)
+    monkeypatch.setattr(store, "alive", lambda key: store.read(key) is not None)
+    stamps = itertools.count(1000.0)
+    monkeypatch.setattr(shared_keeper_holds.time, "time", lambda: next(stamps))
+    monkeypatch.setattr(
+        detach,
+        "process_identity",
+        lambda pid: "keeper-id" if pid == 1000 else f"id-{pid}",
+    )
+    monkeypatch.setattr(
+        detach,
+        "spawn_keeper",
+        lambda _argv, _env, state, **_kwargs: {
+            **state,
+            "pid": 1000,
+            "pid_identity": "keeper-id",
+        },
+    )
+
+    first = detach.ensure_keeper(
+        "devbox",
+        venue_port=41234,
+        mux="wt-anchor-repo",
+        hold_id="anchor-repo@devbox",
+    )
+    second = detach.ensure_keeper(
+        "devbox",
+        venue_port=41234,
+        mux="wt-anchor-repo",
+        hold_id="anchor-repo@devbox",
+    )
+
+    assert first["hold_added"] is True
+    assert second["hold_added"] is False
+    assert (
+        detach.stop_keeper(
+            "devbox",
+            hold_id="anchor-repo@devbox",
+            expected_updated_at=first["hold_updated_at"],
+        )
+        is False
+    )
+    state = detach.read_keeper_state("devbox")
+    assert state is not None
+    assert "anchor-repo@devbox" in state["holds"]
+    assert detach._STORE.alive(detach._state_key("devbox")) is True
 
 
 def test_stop_uses_detached_hold_mux_when_attached_hold_is_aggregate_mux(

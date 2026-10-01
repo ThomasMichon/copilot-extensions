@@ -133,8 +133,11 @@ def ensure_running(
     with holds.lock(name):
         existing = read_state(name) or {}
         current_holds = holds.read_holds(existing)
-        hold_added = hold_id not in current_holds
-        current_holds = holds.refresh_hold(current_holds, hold_id, mux)
+        current_holds, hold_added, hold_updated_at = holds.refresh_hold_with_status(
+            current_holds,
+            hold_id,
+            mux,
+        )
         can_reuse = (
             existing.get("keeper_protocol") == holds.protocol
             and _STORE.alive(name)
@@ -148,7 +151,12 @@ def ensure_running(
         if can_reuse:
             state = holds.state_with_holds(existing, current_holds)
             _STORE.write(name, state)
-            return {"started": False, "hold_added": hold_added, "state": state}
+            return {
+                "started": False,
+                "hold_added": hold_added,
+                "hold_updated_at": hold_updated_at,
+                "state": state,
+            }
         if existing:
             _STORE.stop(name)
         argv = [
@@ -193,7 +201,12 @@ def ensure_running(
         latest_holds.update(current_holds)
         state = holds.state_with_holds({**state, "holds": latest_holds}, latest_holds)
         _STORE.write(name, state)
-        return {"started": True, "hold_added": hold_added, "state": state}
+        return {
+            "started": True,
+            "hold_added": hold_added,
+            "hold_updated_at": hold_updated_at,
+            "state": state,
+        }
 
 
 def stop_keeper(
@@ -201,8 +214,14 @@ def stop_keeper(
     *,
     hold_id: str | None = None,
     mux_alive: HoldProbe | None = None,
+    expected_updated_at: float | None = None,
 ) -> bool:
-    return _holds().release_hold(name, hold_id=hold_id, probe=mux_alive)
+    return _holds().release_hold(
+        name,
+        hold_id=hold_id,
+        probe=mux_alive,
+        expected_updated_at=expected_updated_at,
+    )
 
 
 def _write_self_state(args: argparse.Namespace) -> None:

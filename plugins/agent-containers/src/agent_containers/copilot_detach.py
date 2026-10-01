@@ -238,6 +238,7 @@ class _ContainerAdapter:
         self.remote_env = remote_env
         self.relay_port = relay_port
         self.host_relay_port = host_relay_port
+        self._hold_updated_at: float | None = None
 
     def run(self, command: str, *, timeout: float) -> tuple[int, str, str]:
         return _remote(self.ssh_config, command, timeout=timeout)
@@ -262,7 +263,7 @@ class _ContainerAdapter:
     def ensure_keeper(self, *, venue_port: int, mux: str) -> dict[str, Any]:
         from . import forward_keeper
 
-        return forward_keeper.ensure_running(
+        result = forward_keeper.ensure_running(
             self.name,
             venue_port=venue_port,
             mux=mux,
@@ -271,6 +272,9 @@ class _ContainerAdapter:
             host_relay_port=self.host_relay_port,
             mux_alive=lambda held_mux: forward_keeper._mux_exists(self.ssh_config, held_mux),
         )
+        raw_updated = result.get("hold_updated_at")
+        self._hold_updated_at = float(raw_updated) if raw_updated is not None else None
+        return result
 
     def stop_keeper(self) -> bool:
         from . import forward_keeper
@@ -279,6 +283,7 @@ class _ContainerAdapter:
             self.name,
             hold_id=self.hold_id,
             mux_alive=lambda held_mux: forward_keeper._mux_exists(self.ssh_config, held_mux),
+            expected_updated_at=self._hold_updated_at,
         )
 
     def attach_command(self, plan: dict[str, Any]) -> str:

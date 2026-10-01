@@ -93,6 +93,44 @@ def test_unknown_probe_eventually_drops_after_confirmation_grace(tmp_path, monke
     assert holds.read_state("repo-1")["holds"] == {}
 
 
+def test_release_hold_expected_updated_at_preserves_refreshed_hold(tmp_path):
+    holds = _holds(tmp_path)
+    state = {"pid": 100, "holds": {}}
+    current, added, first_stamp = holds.refresh_hold_with_status(
+        {},
+        "anchor-repo@devbox",
+        "wt-anchor-repo",
+        now=1000.0,
+    )
+    assert added is True
+    holds.store.write("repo-1", holds.state_with_holds(state, current))
+    current, added, second_stamp = holds.refresh_hold_with_status(
+        holds.read_holds(holds.read_state("repo-1")),
+        "anchor-repo@devbox",
+        "wt-anchor-repo",
+        now=1001.0,
+    )
+    assert added is False
+    holds.store.write("repo-1", holds.state_with_holds(state, current))
+
+    assert (
+        holds.release_hold(
+            "repo-1",
+            hold_id="anchor-repo@devbox",
+            expected_updated_at=first_stamp,
+        )
+        is False
+    )
+    assert "anchor-repo@devbox" in holds.read_state("repo-1")["holds"]
+
+    holds.release_hold(
+        "repo-1",
+        hold_id="anchor-repo@devbox",
+        expected_updated_at=second_stamp,
+    )
+    assert holds.read_state("repo-1") is None
+
+
 def test_prune_probes_outside_lock_and_compare_deletes(tmp_path, monkeypatch):
     holds = _holds(tmp_path)
     monkeypatch.setattr("ssh_manager.keeper_holds.time.time", lambda: 2000.0)
