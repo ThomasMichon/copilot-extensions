@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import time
 from unittest.mock import AsyncMock
 
 import pytest
@@ -223,13 +222,14 @@ class _FakeKernel32:
 
 
 class _FakeNtdll:
-    def __init__(self, calls):
+    def __init__(self, calls, *, resume_status=0):
         self.calls = calls
+        self.resume_status = resume_status
         self.NtResumeProcess = _FakeWinFunc("NtResumeProcess", self._resume_process)
 
     def _resume_process(self, process):
         self.calls.append(("NtResumeProcess", process))
-        return 0
+        return self.resume_status
 
 
 class _FakeProcess:
@@ -355,21 +355,31 @@ def test_spawn_in_kill_on_close_job_resumes_when_assignment_fails(monkeypatch):
     assert not process.killed
 
 
-def _windows_pid_alive(pid: int) -> bool:
-    from ctypes import wintypes
+def test_spawn_in_kill_on_close_job_kills_and_closes_job_when_resume_fails(monkeypatch):
+    fake = _FakeKernel32()
+    ntdll = _FakeNtdll(fake.calls, resume_status=-1)
+    process = _FakeProcess()
+    spawn = AsyncMock(return_value=process)
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(pu, "_kernel32", lambda: fake)
+    monkeypatch.setattr(pu, "_ntdll", lambda: ntdll)
+    monkeypatch.setattr(pu.asyncio, "create_subprocess_exec", spawn)
 
-    process = pu.ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)
-    if not process:
-        return False
-    try:
-        code = wintypes.DWORD()
-        if not pu.ctypes.windll.kernel32.GetExitCodeProcess(
-            process, pu.ctypes.byref(code)
-        ):
-            return False
-        return code.value == 259
-    finally:
-        pu.ctypes.windll.kernel32.CloseHandle(process)
+    with pytest.raises(RuntimeError, match="failed to resume suspended process"):
+        asyncio.run(pu.spawn_in_kill_on_close_job("python"))
+
+    assert process.killed
+    assert ("AssignProcessToJobObject", 101, 202) in fake.calls
+    assert ("NtResumeProcess", 202) in fake.calls
+    assert [call[1] for call in fake.calls if call[0] == "CloseHandle"].count(101) == 1
+
+
+def _wait_or_terminate_process_handle(handle: int, *, timeout_ms: int) -> None:
+    wait_result = pu.ctypes.windll.kernel32.WaitForSingleObject(handle, timeout_ms)
+    if wait_result == 0:
+        return
+    pu.ctypes.windll.kernel32.TerminateProcess(handle, 1)
+    pu.ctypes.windll.kernel32.WaitForSingleObject(handle, 5000)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows Job Object integration")
@@ -403,24 +413,19 @@ asyncio.run(main())
         env=env,
     )
     grandchild_pid = int(child.stdout.readline().strip())
+    grandchild_handle = pu.ctypes.windll.kernel32.OpenProcess(
+        0x00100000 | 0x1000 | 0x0001, False, grandchild_pid
+    )
+    assert grandchild_handle
     try:
         child.kill()
         child.wait(timeout=5)
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and _windows_pid_alive(grandchild_pid):
-            time.sleep(0.1)
-        assert not _windows_pid_alive(grandchild_pid)
+        assert pu.ctypes.windll.kernel32.WaitForSingleObject(grandchild_handle, 5000) == 0
     finally:
         if child.poll() is None:
             child.kill()
-        if _windows_pid_alive(grandchild_pid):
-            subprocess.run(
-                ["taskkill", "/PID", str(grandchild_pid), "/T", "/F"],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
+        _wait_or_terminate_process_handle(grandchild_handle, timeout_ms=0)
+        pu.ctypes.windll.kernel32.CloseHandle(grandchild_handle)
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows Job Object integration")

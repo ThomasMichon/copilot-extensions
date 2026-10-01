@@ -43,8 +43,8 @@ ownership. Runtime code with an additional in-process survival step can use
 instead of using `DETACHED_PROCESS`, so console-subsystem grandchildren do not
 allocate a visible console.
 
-A child that must never outlive the process that spawned it -- even a hard
-kill of that process -- is spawned inside a kill-on-close Windows Job Object:
+A child that must not outlive the process that spawned it is spawned inside a
+kill-on-close Windows Job Object:
 
 ```python
 proc, job = await spawn_in_kill_on_close_job(
@@ -53,12 +53,14 @@ proc, job = await spawn_in_kill_on_close_job(
 ```
 
 On Windows the child is created suspended, assigned to the job, and only then
-resumed, so it can neither run nor start descendants outside the job. Keep the
-returned `JobHandle` referenced for as long as the child should live: when it is
-closed (explicitly, or when the owning process exits for any reason) Windows
-terminates every process still in the job. It is best-effort: `job` is `None`
-off Windows or when the job can't be armed (the child still runs). Do not use it
-for children meant to outlive their launcher (detached daemons, keepers).
+resumed, so it can neither run nor start descendants outside the job while the
+job is armed. Keep the returned `JobHandle` referenced for as long as the child
+should live: when it is closed (explicitly, or when the owning process exits for
+any reason) Windows terminates every process still in the job. It is
+best-effort: `job` is `None` off Windows or when the job can't be armed (the
+child still runs). In that degraded case ordinary cleanup still applies, but a
+hard-killed owner can orphan the child. Do not use it for children meant to
+outlive their launcher (detached daemons, keepers).
 
 ## Vendoring
 
