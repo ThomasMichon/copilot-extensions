@@ -107,10 +107,11 @@ def transitive_obligations(
             # obligation -- the child it names has not finalized yet, which
             # is exactly what still blocks this worktree's own finalize
             # (proven end-to-end by `test_transitive_finalize_integration.py`).
-            # Reporting only its DESCENDANTS' leaf claims (the old behavior)
-            # could read as "settled" even while a clean-but-unfinalized
-            # child still blocks the parent -- so it is surfaced here too,
-            # in addition to descending for whatever it itself still owes.
+            # Omitting it and reporting only its descendants' leaf claims
+            # would read as "settled" whenever a child's own ledger is
+            # otherwise clean but it has simply not finalized yet -- so the
+            # edge itself is surfaced here too, in addition to descending
+            # for whatever the child additionally owes beneath it.
             found.append({
                 "path": here, "kind": c.kind, "ref": c.ref,
                 "state": c.state, "note": c.note,
