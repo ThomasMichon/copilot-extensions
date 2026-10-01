@@ -125,6 +125,7 @@ from . import loop_governance as loop_governance_mod  # noqa: F401 -- compatibil
 from . import services as _svc
 from . import session_context as session_context_mod  # noqa: F401 -- compatibility re-export
 from . import state_root as state_root_mod
+from .copilot_launch_prefs import resolve_launch_pref_flags
 from .update_stage import cmd_stage_update, discover_plugin_dir as _discover_plugin_dir
 
 # front_door_cli's own names are re-exported eagerly (not deferred to
@@ -2352,6 +2353,15 @@ def _build_launch_cmd(
         a == flag for a in passthrough for flag in ("--allow-all-tools", "--allow-all", "--yolo")
     ):
         cmd.append("--allow-all")
+
+    # Re-express the persisted model/effort/context-tier preference
+    # (agent-machines' copilot.settings is the sole writer of
+    # ~/.copilot/settings.json) as explicit CLI flags. Copilot CLI has been
+    # observed to ignore the persisted settings values at startup, so every
+    # worktree create/resume launch must carry the facility's current
+    # preference explicitly rather than rely on the settings file alone.
+    # Never overrides an explicit flag the caller already supplied.
+    cmd.extend(resolve_launch_pref_flags(passthrough))
 
     # Every resolved session command passes through one installed wrapper.
     # This gives optional sibling integrations a single pre-exec seam even for

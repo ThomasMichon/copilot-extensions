@@ -301,6 +301,25 @@ repos:
       windows: "otools\\bin\\OpenEnlistment.bat"
 ```
 
+### Persisted model/effort/context preference at launch
+
+Every launch built by `_build_launch_cmd` (interactive worktree create,
+resume, and recovery) appends `--model`, `--reasoning-effort`, and `--context`
+flags derived from the persisted `~/.copilot/settings.json` keys `model`,
+`effortLevel`, and `contextTier` — whichever of the three are present and
+non-empty. This exists because Copilot CLI has been observed to ignore its
+own persisted settings values at startup, honoring only an explicit CLI flag
+or a mid-session `/model` change; without this, a machine's intended default
+model/effort/context tier is only a preference, never a guarantee (see the
+facility's `agent-machines` plugin, which is typically the sole writer of
+that settings file).
+
+An explicit `--model`, `--reasoning-effort`, or `--context` already present in
+`copilot_args` or a backend profile's `copilot_args` always wins — this never
+duplicates or overrides a caller-supplied flag, bare or `=`-form. No
+`~/.copilot/settings.json`, or none of the three keys set, means no flags are
+injected; the launch falls back to Copilot's own default resolution.
+
 ### Backend profiles — `copilot_profiles[]`
 
 | Key | Type | Default | Meaning |

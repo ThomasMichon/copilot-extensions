@@ -15,7 +15,19 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
+from agent_worktrees import copilot_launch_prefs as launch_prefs
 from agent_worktrees import registry_paths
+
+
+@pytest.fixture(autouse=True)
+def _no_persisted_copilot_settings(tmp_path, monkeypatch):
+    """Isolate every test in this module from the *real* host machine's
+    ~/.copilot/settings.json -- otherwise this suite's behavior would depend
+    on whatever model/effort/context the machine running it happens to have
+    persisted. Tests that want to exercise the launch-pref injection
+    explicitly re-monkeypatch Path.home themselves (last write wins)."""
+    isolated_home = tmp_path / "isolated-home"
+    monkeypatch.setattr(launch_prefs.Path, "home", classmethod(lambda cls: isolated_home))
 
 
 def _config(launch: dict[str, list[str]] | None = None) -> cfg.Config:
@@ -55,6 +67,40 @@ def test_acp_launch_skips_allow_all():
     assert "--allow-all" not in cmd
     # ACP sessions get permissions managed by agent-bridge over the protocol.
     assert "--no-sandbox" not in cmd
+
+
+def test_launch_injects_persisted_model_effort_context_flags(tmp_path, monkeypatch):
+    # Copilot CLI has been observed to ignore persisted settings.json values
+    # at startup (model-policy-launcher gap) -- every launch must carry the
+    # facility's current preference as explicit CLI flags.
+    home = tmp_path / "home"
+    (home / ".copilot").mkdir(parents=True)
+    (home / ".copilot" / "settings.json").write_text(
+        json.dumps(
+            {"model": "claude-sonnet-5", "effortLevel": "medium", "contextTier": "long_context"}
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launch_prefs.Path, "home", classmethod(lambda cls: home))
+    cmd = m._build_launch_cmd(_config(), _args([]), "/w/wt")
+    assert "--model" in cmd
+    assert cmd[cmd.index("--model") + 1] == "claude-sonnet-5"
+    assert "--reasoning-effort" in cmd
+    assert cmd[cmd.index("--reasoning-effort") + 1] == "medium"
+    assert "--context" in cmd
+    assert cmd[cmd.index("--context") + 1] == "long_context"
+
+
+def test_launch_never_overrides_explicit_model_flag(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / ".copilot").mkdir(parents=True)
+    (home / ".copilot" / "settings.json").write_text(
+        json.dumps({"model": "claude-sonnet-5"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(launch_prefs.Path, "home", classmethod(lambda cls: home))
+    cmd = m._build_launch_cmd(_config(), _args(["--model", "gpt-5.4"]), "/w/wt")
+    assert cmd.count("--model") == 1
+    assert cmd[cmd.index("--model") + 1] == "gpt-5.4"
 
 
 def test_existing_all_perm_flag_not_duplicated():
