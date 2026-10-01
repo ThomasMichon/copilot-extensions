@@ -198,6 +198,28 @@ def test_render_projection_includes_prefer_local_preamble(tmp_path: Path) -> Non
     )
 
 
+def test_render_projection_omits_preamble_for_local_cache_rendering(
+    tmp_path: Path,
+) -> None:
+    """The local cache file is itself the fresher content -- it must never
+    carry a preamble pointing at its own sibling (``render_local_cache``
+    always renders with ``include_prefer_local=False``; a regression here
+    would make every local cache file self-referential)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    specs, _unknown = projections._load_specs(
+        repo, [source], projections.Result(operation="test")
+    )
+
+    rendered = projections.render_projection(specs[0], include_prefer_local=False)
+    text = rendered.content.decode("utf-8")
+
+    assert "If `" not in text
+    assert "prefer it" not in text
+    assert "Keep this static fallback useful." in text
+
+
 def test_local_sibling_destination_naming() -> None:
     assert (
         projections.local_sibling_destination(
@@ -240,13 +262,16 @@ def test_render_local_cache_writes_sibling_without_touching_checked_in_or_lock(
     assert not _projection(repo, "policy").exists()
     assert not (repo / ".github" / "copilot" / "context-projections.json").exists()
 
-    # Content matches what the checked-in sync would have rendered (same
-    # render_projection call, just a different destination).
+    # Content matches a render_projection call for the same spec, minus the
+    # prefer-local preamble (the local cache file is the fresher content
+    # itself, so it must never point at its own sibling -- see
+    # render_projection's own docstring).
     specs, _unknown = projections._load_specs(
         repo, [source], projections.Result(operation="test")
     )
-    expected = projections.render_projection(specs[0])
+    expected = projections.render_projection(specs[0], include_prefer_local=False)
     assert local_path.read_bytes() == expected.content
+    assert b"prefer it" not in local_path.read_bytes()
 
 
 def test_render_local_cache_never_touches_git_and_is_idempotent(
@@ -933,13 +958,15 @@ def test_render_local_cache_never_deletes_a_git_tracked_stale_sibling(
         / "fallback.local.instructions.md"
     )
     local_path.parent.mkdir(parents=True)
-    # A real render's own bytes (owned marker), but this copy got
-    # committed -- the reconciliation pass must never delete a git-tracked
-    # file, even one it can otherwise prove it owns.
+    # A real local-cache render's own bytes (owned marker, no
+    # self-referential preamble -- see render_projection's docstring), but
+    # this copy got committed -- the reconciliation pass must never delete
+    # a git-tracked file, even one it can otherwise prove it owns.
     rendered = projections.render_projection(
         projections._load_specs(repo, [source], projections.Result(operation="t"))[0][
             0
-        ]
+        ],
+        include_prefer_local=False,
     )
     local_path.write_bytes(rendered.content)
     _git_commit_all(repo, "accidentally commit a genuine-looking local cache")

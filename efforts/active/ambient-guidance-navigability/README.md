@@ -445,12 +445,15 @@ and the new sibling pattern doc,
 - [x] Extend the projection template (`customizing-copilot:reviewing-
       customizations`) with the per-file "prefer the local sibling if
       present" preamble, prepended ahead of the existing rendered body.
-      **Landed**: `render_projection` now computes a short preamble (via
-      `_local_cache_preamble`, naming the destination's own
-      `local_sibling_destination()` basename) and inserts it between the
-      provenance marker and the template's own body for every rendered
-      projection, repo-wide -- no per-template opt-in. Trimmed two shipped
-      templates that were within the new preamble's width of
+      **Landed**: `render_projection` now builds this preamble inline
+      (naming the destination's own `local_sibling_destination()` basename)
+      and inserts it between the provenance marker and the template's own
+      body for every rendered projection, repo-wide -- no per-template
+      opt-in. A new `include_prefer_local` keyword (default `True`) lets
+      `render_local_cache` render the same spec a second time with it
+      suppressed, since the local cache file is itself the fresher content
+      and must never carry a preamble pointing at its own sibling. Trimmed
+      three shipped templates that were within the new preamble's width of
       `MAX_PROJECTION_BYTES` (`agent-worktrees`'s `head-claim-fallback` and
       `context-handoff`'s `handoff-fallback`/`awareness`) so the budget test
       still passes with the preamble included; see the Journal.
@@ -566,12 +569,12 @@ _Pending._
 ### 2026-09-30 (cont.) -- Phase 7 slice 3: the per-file "prefer local" preamble
 - Picked up the next unstarted Plan item (previous entry's steer): extended
   `render_projection` (`customizing-copilot:reviewing-customizations`'s
-  `instruction_projections.py`) with `_local_cache_preamble`, a short
-  blockquote inserted between the provenance marker and the template's own
-  rendered body on **every** projection, repo-wide -- no per-template
-  opt-in, so the common case (a source that has synced in at least once)
-  self-directs to its own gitignored `*.local.instructions.md` sibling
-  with no further lookup, per
+  `instruction_projections.py`) to build, inline, a short blockquote
+  inserted between the provenance marker and the template's own rendered
+  body on **every** projection, repo-wide -- no per-template opt-in, so the
+  common case (a source that has synced in at least once) self-directs to
+  its own gitignored `*.local.instructions.md` sibling with no further
+  lookup, per
   `docs/patterns/worktree-scoped-dynamic-guidance.md` §2. The preamble
   names the sibling via the destination's own `local_sibling_destination()`
   basename rather than assuming `<sourceId>.instructions.md` naming (the
@@ -622,11 +625,42 @@ _Pending._
   unreviewed drift. Splitting this module further is out of scope for this
   slice; it already shares `render_projection`'s/`local_sibling_
   destination`'s spec-loading and atomic-write primitives directly, per the
-  earlier render-only-entry-point Plan note.
+  earlier render-only-entry-point Plan note. Review round 1's own
+  self-reference fix (below) needed a second, smaller widen (2429 -> 2439)
+  for the same documented-policy reason -- a real bug fix, not bloat.
 - Phase 7 Plan items remaining: the repo-wide catch-all static projection
   and the `agent-worktrees` wiring (the actual consumer of everything
   built so far) -- each its own separately-reviewed PR per the standing
   steer.
+- **Review round 1 findings (PR #4793), all addressed in the same PR:**
+  - **Medium, genuine pre-merge bug:** `render_local_cache` re-renders the
+    same checked-in-destination `spec` to produce the local cache file's
+    own content (`render_projection(spec)`, written straight to the
+    `*.local.instructions.md` path) -- so the just-landed preamble made
+    every local cache file self-referential, naming and preferring its own
+    path. Fixed by giving `render_projection` an `include_prefer_local`
+    keyword (default `True`); `render_local_cache` now passes `False`,
+    since the local cache file already *is* the fresher content and must
+    never point at itself. Added
+    `test_render_projection_omits_preamble_for_local_cache_rendering` and
+    updated the existing byte-equality/marker-reuse tests that previously
+    compared against a bare `render_projection(spec)` call.
+  - Corrected this Journal and the Plan item above, which wrongly named a
+    `_local_cache_preamble` helper -- the logic is inline in
+    `render_projection`, not a separate function (the module-size slack
+    this slice had to work within ruled a separate helper out; see above).
+  - Restored `handoff-fallback.instructions.md`'s "no auto-pickup, claim
+    tracking, or supersession" warning on the manual hand-write-the-file
+    path, which the prior trim had dropped entirely rather than just its
+    redundant `## Rules` recap -- the only other copies live in
+    `awareness.instructions.md` and the `efforts` completion-gate
+    instruction, neither of which is guaranteed to load in *this* file's
+    own failure mode (no `context-handoff` extension at all). Found a few
+    more bytes of genuinely redundant phrasing elsewhere in the same file
+    to restore it within `MAX_PROJECTION_BYTES`.
+  - Added this PR's required **Documentation impact** statement in the PR
+    description; `docs/patterns/worktree-scoped-dynamic-guidance.md`
+    already described this exact preamble design and needed no change.
 
 ### 2026-09-30 -- PR #4683 diagnosis and merge
 - After 7 consecutive `COMMENTED` review passes on PR #4683, diagnosed the
