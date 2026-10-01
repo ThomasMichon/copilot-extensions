@@ -453,6 +453,7 @@ LIVE_FILE = RUNTIME_DIR / "connection-owner.live.json"
 # flap on scheduler jitter).
 _LIVE_STALE_INTERVALS = 3
 _LIVE_STALE_FLOOR = 45.0
+_PROCESS_STARTED_AT = time.time()
 # A heartbeat timestamp this far in the future is treated as NOT fresh: a bogus
 # future beacon or a backward clock jump must fail safe (a tenant falls back to
 # owning its own relay), while a sub-second skew is tolerated so liveness does not
@@ -468,11 +469,10 @@ class OwnerLiveness:
     host: str
     heartbeat_at: float
     interval: float
-    # CodeSpaces the Owner currently has a *live* relay channel for (published so
-    # a tenant can tell the relay it wants to defer to is actually up before it
-    # skips standing up its own -- the timing seam the ssh/dispatch rewire needs).
+    process_started_at: float = 0.0
+    # CodeSpaces with live relay channels, so tenants can safely defer to them.
     active: tuple[str, ...] = ()
-    # CodeSpaces the Owner currently has a live host-bridge-daemon forward for.
+    # CodeSpaces with a live host-bridge-daemon forward.
     bridge_forwards: tuple[str, ...] = ()
 
     def staleness_threshold(self) -> float:
@@ -495,16 +495,15 @@ def _write_liveness(
 ) -> None:
     """Refresh the daemon liveness beacon (best-effort; never raises).
 
-    ``active`` is the set of CodeSpaces the Owner currently has a live relay
-    channel for; it is published so a tenant can wait for the relay it wants
-    before deferring. ``bridge_forwards`` likewise names the CodeSpaces with a
-    live host-bridge-daemon forward.
+    ``active`` names CodeSpaces with live relay channels; ``bridge_forwards``
+    names CodeSpaces with live host-bridge-daemon forwards.
     """
     try:
         ensure_runtime_dir()
         payload = {
             "pid": os.getpid(),
             "host": _this_host(),
+            "process_started_at": _PROCESS_STARTED_AT,
             "heartbeat_at": time.time(),
             "interval": float(interval),
             "active": sorted(active or ()),
@@ -549,6 +548,7 @@ def read_liveness() -> OwnerLiveness | None:
             host=str(raw.get("host", "")),
             heartbeat_at=float(raw.get("heartbeat_at", 0.0)),
             interval=float(raw.get("interval", 0.0)),
+            process_started_at=float(raw.get("process_started_at", 0.0)),
             active=tuple(str(cs) for cs in active_raw if isinstance(cs, str)),
             bridge_forwards=tuple(str(cs) for cs in bridge_raw if isinstance(cs, str)),
         )

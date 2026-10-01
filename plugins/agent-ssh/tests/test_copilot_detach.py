@@ -8,6 +8,7 @@ import types
 from pathlib import Path
 
 import pytest
+from ssh_manager import keeper_holds as shared_keeper_holds
 from venue_copilot import detached as venue_detached
 
 from agent_ssh import copilot_detach as detach
@@ -335,6 +336,71 @@ def test_attached_and_detached_holds_share_keeper(
     assert sorted(got["state"]["holds"]) == ["anchor-repo@devbox", "attached:first"]
     assert detach.stop_keeper("devbox", hold_id="anchor-repo@devbox") is False
     assert sorted(detach.read_keeper_state("devbox")["holds"]) == ["attached:first"]
+
+
+def test_stop_uses_detached_hold_mux_when_attached_hold_is_aggregate_mux(
+    tmp_path: Path, monkeypatch, capsys,
+):
+    store = detach.KeeperStore(tmp_path)
+    monkeypatch.setattr(detach, "_STORE", store)
+    monkeypatch.setattr(detach, "_ssh_config", lambda target: object())
+    monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: None)
+    commands = []
+
+    def remote(_cfg, command, *, timeout=60.0):
+        commands.append(command)
+        if "tmux kill-session" in command:
+            return 0, "STOPPED\n", ""
+        return 0, "", ""
+
+    monkeypatch.setattr(detach, "_remote", remote)
+    monkeypatch.setattr(
+        "venue_copilot.live_session_for",
+        lambda handle: {"session_id": "sid-42", "venue": {"target": "devbox"}},
+    )
+    monkeypatch.setattr("venue_copilot.detached.release_cli_mode", lambda *a, **k: 1)
+    monkeypatch.setattr("venue_copilot.detached.deregister_live_session", lambda sid: True)
+    state = {
+        "keeper_protocol": 2,
+        "pid": 1000,
+        "pid_identity": "keeper-id",
+        "target": "devbox",
+        "venue_port": 41234,
+        "mux": detach._attached_hold_mux(os.getpid()),
+        "holds": {
+            "attached:first": {
+                "mux": detach._attached_hold_mux(os.getpid()),
+                "updated_at": 1.0,
+            },
+            "anchor-repo@devbox": {"mux": "wt-anchor-repo", "updated_at": 2.0},
+        },
+    }
+    store.write("devbox", state)
+
+    assert detach.cmd_stop(_args(stop=True, detach=False)) == 0
+
+    assert any("tmux kill-session -t =wt-anchor-repo" in command for command in commands)
+    assert not any("__attached_pid__" in command for command in commands)
+    assert json.loads(capsys.readouterr().out)["mux_session"] == "wt-anchor-repo"
+
+
+def test_stop_hold_mux_error_still_stops_releases_and_deregisters(
+    seams, monkeypatch, caplog
+):
+    monkeypatch.setattr(
+        shared_keeper_holds.KeeperHoldStore,
+        "hold_mux",
+        lambda *a, **k: (_ for _ in ()).throw(PermissionError("pending delete")),
+    )
+    caplog.set_level("WARNING", logger="ssh-manager.keeper_holds")
+
+    rc = detach.cmd_stop(_args(stop=True, detach=False))
+
+    assert rc == 0
+    assert "Could not read forward-keeper hold for devbox/anchor-repo@devbox" in caplog.text
+    assert any("tmux kill-session" in command for command in seams.remote)
+    assert seams.release == [("anchor-repo@devbox", None)]
+    assert seams.deregister == ["sid-42"]
 
 
 def test_workspace_resolution_order_prefers_explicit_then_host_config(tmp_path: Path):

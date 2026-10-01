@@ -121,9 +121,13 @@ def reassign_dynamic_local_forward(
 
 def write_active_local_forwards(active: dict[str, dict[int, int]]) -> None:
     try:
+        from . import connection_owner as owner
+
         ensure_runtime_dir()
         payload = {
             "pid": os.getpid(),
+            "host": owner._this_host(),
+            "process_started_at": owner._PROCESS_STARTED_AT,
             "heartbeat_at": time.time(),
             "local_forwards": {
                 cs: {str(int(host)): int(venue) for host, venue in forwards.items()}
@@ -147,6 +151,20 @@ def read_active_local_forwards(*, now: float | None = None) -> dict[str, dict[in
     except (TypeError, ValueError):
         return {}
     if (time.time() if now is None else now) - heartbeat > _ACTIVE_TTL:
+        return {}
+    from . import connection_owner as owner
+
+    live = owner.read_liveness()
+    try:
+        same_owner = (
+            live is not None and live.is_fresh(now)
+            and int(raw.get("pid", 0)) == live.pid
+            and str(raw.get("host", "")) == live.host
+            and float(raw.get("process_started_at", 0.0)) == live.process_started_at
+        )
+    except (TypeError, ValueError):
+        same_owner = False
+    if not same_owner:
         return {}
     out: dict[str, dict[int, int]] = {}
     if isinstance(raw.get("local_forwards"), dict):

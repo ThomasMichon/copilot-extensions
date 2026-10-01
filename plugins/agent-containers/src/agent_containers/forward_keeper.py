@@ -107,7 +107,7 @@ def _confirm_missing_holds(
 
 
 def hold_mux(name: str, hold_id: str) -> str | None:
-    return _holds().hold_mux(name, hold_id)
+    return _holds().hold_mux_or_none(name, hold_id)
 
 
 def list_holds(

@@ -560,9 +560,9 @@ def cmd_stop(args: argparse.Namespace) -> int:
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
         return _fail(str(exc))
     plan = plan_for(args)
-    state = read_keeper_state(args.target)
-    if state and state.get("mux"):
-        plan["mux_session"] = str(state["mux"])
+    held_mux = _holds().hold_mux_or_none(_state_key(args.target), plan["scope_id"])
+    if held_mux:
+        plan["mux_session"] = held_mux
         plan["venue"]["mux_session_name"] = plan["mux_session"]
     row = live_session_for(plan["scope_id"])
     rc, payload = stop_detached(

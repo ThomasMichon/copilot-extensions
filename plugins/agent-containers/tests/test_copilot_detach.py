@@ -414,6 +414,25 @@ def test_stop_kills_mux_stops_keeper_and_deregisters(seams, capsys):
     assert json.loads(capsys.readouterr().out)["deregistered"] == "sid-42"
 
 
+def test_stop_hold_mux_error_still_stops_releases_and_deregisters(
+    seams, monkeypatch, caplog
+):
+    monkeypatch.setattr(
+        shared_keeper_holds.KeeperHoldStore,
+        "hold_mux",
+        lambda *a, **k: (_ for _ in ()).throw(PermissionError("pending delete")),
+    )
+    caplog.set_level("WARNING", logger="ssh-manager.keeper_holds")
+
+    rc = detach.cmd_stop(_args(stop=True, detach=False))
+
+    assert rc == 0
+    assert "Could not read forward-keeper hold for repo-1/anchor-repo@repo-1" in caplog.text
+    assert any("tmux kill-session" in cmd for cmd in seams.run)
+    assert seams.release == [("anchor-repo@repo-1", None)]
+    assert seams.deregister == ["sid-42"]
+
+
 def test_stop_keeper_error_does_not_skip_release_or_deregister(seams, monkeypatch, capsys):
     monkeypatch.setattr(
         forward_keeper,
@@ -997,17 +1016,17 @@ def test_forward_keeper_lock_treats_permission_error_as_contention(
 ):
     monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
     monkeypatch.setattr(forward_keeper, "_LOCK_POLL", 0.0)
-    real_open = forward_keeper.os.open
+    real_link = shared_keeper_holds.os.link
     attempts = 0
 
-    def flaky_open(*args, **kwargs):
+    def flaky_link(*args, **kwargs):
         nonlocal attempts
         attempts += 1
         if attempts == 1:
             raise PermissionError("pending delete")
-        return real_open(*args, **kwargs)
+        return real_link(*args, **kwargs)
 
-    monkeypatch.setattr(forward_keeper.os, "open", flaky_open)
+    monkeypatch.setattr(shared_keeper_holds.os, "link", flaky_link)
 
     with forward_keeper._keeper_lock("repo-1"):
         pass

@@ -9,6 +9,7 @@ pruning using an injected liveness probe, and safe keeper retirement.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import time
@@ -29,6 +30,7 @@ DEFAULT_HOLD_STARTUP_GRACE = 300.0
 DEFAULT_UNKNOWN_HOLD_GRACE = 1800.0
 DEFAULT_LOCK_TIMEOUT = 10.0
 DEFAULT_LOCK_POLL = 0.05
+log = logging.getLogger("ssh-manager.keeper_holds")
 
 
 class KeeperHoldStore:
@@ -81,13 +83,11 @@ class KeeperHoldStore:
         deadline = time.monotonic() + self.lock_timeout
         while True:
             try:
-                fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                    json.dump(owner, stream)
+                self.publish_lock(lock, owner)
                 break
             except (FileExistsError, PermissionError):
                 if time.monotonic() >= deadline:
-                    if self.lock_owner_dead(lock) and self.unlink_lock(lock):
+                    if self.reclaim_lock(lock):
                         continue
                     raise RuntimeError("Could not acquire forward-keeper state lock") from None
                 time.sleep(self.lock_poll)
@@ -96,12 +96,47 @@ class KeeperHoldStore:
         finally:
             self.release_lock(lock, owner)
 
+    def publish_lock(self, lock: Path, owner: dict[str, Any]) -> None:
+        tmp = lock.with_name(f".{lock.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        try:
+            tmp.write_text(json.dumps(owner), encoding="utf-8")
+            os.link(tmp, lock)
+        finally:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def reclaim_lock(self, lock: Path) -> bool:
+        guard = lock.with_name(f".{lock.name}.reclaim")
+        owner = {
+            "pid": os.getpid(),
+            "identity": process_identity(os.getpid()),
+            "token": uuid.uuid4().hex,
+            "created_at": time.time(),
+        }
+        try:
+            self.publish_lock(guard, owner)
+        except (FileExistsError, PermissionError):
+            if self.lock_owner_dead(guard) and self.unlink_lock(guard):
+                return True
+            return False
+        try:
+            # Serialize stale-lock deletion and re-check while guarded so two
+            # reclaimers cannot both remove a fresh lock published by the winner.
+            return self.lock_owner_dead(lock) and self.unlink_lock(lock)
+        finally:
+            self.release_lock(guard, owner)
+
     def lock_owner_dead(self, lock: Path) -> bool:
         try:
             raw = json.loads(lock.read_text(encoding="utf-8"))
             pid = int(raw.get("pid") or 0)
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            return False
+            try:
+                return time.time() - lock.stat().st_mtime >= self.lock_timeout
+            except OSError:
+                return False
         identity = raw.get("identity")
         if isinstance(identity, str) and identity:
             return process_identity(pid) != identity
@@ -205,6 +240,13 @@ class KeeperHoldStore:
             hold = self.read_holds(state).get(hold_id)
         mux = hold.get("mux") if hold else None
         return str(mux) if isinstance(mux, str) and mux else None
+
+    def hold_mux_or_none(self, key: str, hold_id: str) -> str | None:
+        try:
+            return self.hold_mux(key, hold_id)
+        except (RuntimeError, OSError) as exc:
+            log.warning("Could not read forward-keeper hold for %s/%s: %s", key, hold_id, exc)
+            return None
 
     def list_holds(
         self,

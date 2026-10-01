@@ -894,15 +894,19 @@ MANIFEST
 # survives version cutover.
 SYSTEMD_OWNER_UNIT="agent-codespaces-owner.service"
 
-# Echo "1" if the Connection Owner is enabled in the merged config, else "0".
-# Never fails the caller (disabled on any error).
+# Echo "enabled", "disabled", or "unknown" for the merged Connection Owner config.
+# Unknown means leave any existing unit untouched: only affirmative disabled removes.
 _owner_enabled() {
-    PYTHONUTF8=1 "$LINK_PYTHON" -m agent_codespaces owner --status 2>/dev/null \
-        | "$LINK_PYTHON" -c 'import sys, json
+    local json
+    json="$(PYTHONUTF8=1 "$LINK_PYTHON" -m agent_codespaces owner --status 2>/dev/null)" || {
+        echo "unknown"
+        return 0
+    }
+    printf '%s\n' "$json" | "$LINK_PYTHON" -c 'import sys, json
 try:
-    print("1" if json.load(sys.stdin).get("enabled") else "0")
+    print("enabled" if json.load(sys.stdin).get("enabled") else "disabled")
 except Exception:
-    print("0")' 2>/dev/null || echo "0"
+    print("unknown")' 2>/dev/null
 }
 
 _remove_owner_service() {
@@ -919,7 +923,13 @@ _remove_owner_service() {
 _sync_owner_service() {
     # Config-gated provisioning: enabled -> install + (re)start the systemd --user
     # unit; disabled (default) -> ensure it is absent. Idempotent + additive.
-    if [[ "$(_owner_enabled)" != "1" ]]; then
+    local owner_state
+    owner_state="$(_owner_enabled)"
+    if [[ "$owner_state" == "unknown" ]]; then
+        _warn "Connection Owner config query failed; leaving any existing systemd unit unchanged"
+        return 0
+    fi
+    if [[ "$owner_state" == "disabled" ]]; then
         _remove_owner_service
         return 0
     fi

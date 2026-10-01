@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 
@@ -163,22 +164,101 @@ def test_remove_self_state_preserves_new_holds(tmp_path, monkeypatch):
 
 def test_lock_treats_permission_error_as_contention(tmp_path, monkeypatch):
     holds = _holds(tmp_path)
-    real_open = __import__("os").open
+    import os
+
+    real_link = os.link
     attempts = 0
 
-    def flaky_open(*args, **kwargs):
+    def flaky_link(*args, **kwargs):
         nonlocal attempts
         attempts += 1
         if attempts == 1:
             raise PermissionError("pending delete")
-        return real_open(*args, **kwargs)
+        return real_link(*args, **kwargs)
 
-    monkeypatch.setattr("ssh_manager.keeper_holds.os.open", flaky_open)
+    monkeypatch.setattr("ssh_manager.keeper_holds.os.link", flaky_link)
 
     with holds.lock("repo-1"):
         pass
 
     assert attempts == 2
+
+
+def test_partial_lock_file_is_reclaimed_after_acquisition_window(tmp_path, monkeypatch):
+    holds = _holds(tmp_path, lock_timeout=0.0)
+    monkeypatch.setattr("ssh_manager.keeper_holds.time.time", lambda: 100.0)
+    lock = holds.state_path("repo-1").with_suffix(".lock")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text("{", encoding="utf-8")
+    lock.touch()
+    __import__("os").utime(lock, (0.0, 0.0))
+    monkeypatch.setattr("ssh_manager.keeper_holds.time.sleep", lambda delay: None)
+
+    with holds.lock("repo-1"):
+        assert json.loads(lock.read_text(encoding="utf-8"))["token"]
+
+
+def test_two_reclaimers_do_not_steal_winners_live_lock(tmp_path, monkeypatch):
+    holds = _holds(tmp_path, lock_timeout=0.0, lock_poll=0.001)
+    lock = holds.state_path("repo-1").with_suffix(".lock")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_text(
+        json.dumps({"pid": 987654321, "identity": "dead-owner", "token": "stale"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "ssh_manager.keeper_holds.process_identity",
+        lambda pid: "current-owner" if pid == __import__("os").getpid() else None,
+    )
+    entered: list[str] = []
+    errors: list[str] = []
+    start = threading.Barrier(2)
+    winner_entered = threading.Event()
+    loser_failed = threading.Event()
+    release_winner = threading.Event()
+
+    def worker(name: str) -> None:
+        start.wait(timeout=2)
+        try:
+            with holds.lock("repo-1"):
+                entered.append(name)
+                winner_entered.set()
+                release_winner.wait(timeout=2)
+        except RuntimeError:
+            errors.append(name)
+            loser_failed.set()
+
+    threads = [threading.Thread(target=worker, args=(name,)) for name in ("a", "b")]
+    for thread in threads:
+        thread.start()
+    assert winner_entered.wait(timeout=2)
+    assert loser_failed.wait(timeout=2)
+    release_winner.set()
+    for thread in threads:
+        thread.join(timeout=2)
+
+    assert len(entered) == 1
+    assert len(errors) == 1
+
+
+def test_publish_lock_temp_cleanup_failure_does_not_lose_acquired_lock(tmp_path, monkeypatch):
+    holds = _holds(tmp_path)
+    real_unlink = type(holds.state_path("repo-1")).unlink
+    temp_unlinks = 0
+
+    def flaky_temp_unlink(self, *args, **kwargs):
+        nonlocal temp_unlinks
+        if self.name.endswith(".tmp"):
+            temp_unlinks += 1
+            raise PermissionError("scanner still holds temp file")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(type(holds.state_path("repo-1")), "unlink", flaky_temp_unlink)
+
+    with holds.lock("repo-1"):
+        assert json.loads(holds.state_path("repo-1").with_suffix(".lock").read_text())["token"]
+
+    assert temp_unlinks == 1
 
 
 def test_lock_release_retries_permission_error(tmp_path, monkeypatch):

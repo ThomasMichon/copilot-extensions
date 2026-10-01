@@ -443,6 +443,17 @@ def test_repeated_dynamic_request_reuses_assignment_with_missing_or_stale_beacon
     assert kept.assigned_local_forwards == {"49152": 3000}
 
 
+def test_active_local_forward_beacon_requires_live_matching_owner(store):
+    owner._write_liveness(15.0)
+    olf.write_active_local_forwards({"cs-1": {49152: 3000}})
+    assert olf.read_active_local_forwards() == {"cs-1": {49152: 3000}}
+
+    raw = json.loads(olf.ACTIVE_LOCAL_FORWARDS_FILE.read_text(encoding="utf-8"))
+    raw["pid"] = raw["pid"] + 1
+    olf.ACTIVE_LOCAL_FORWARDS_FILE.write_text(json.dumps(raw), encoding="utf-8")
+    assert olf.read_active_local_forwards() == {}
+
+
 async def test_dynamic_reassignment_stops_replacement_when_hold_was_released(store):
     channels = []
 
