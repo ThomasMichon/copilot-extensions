@@ -122,9 +122,17 @@ class TestComputeFallbackSet:
         assert "test_b" not in fb.selected_tests
         assert fb.total_runtime_s <= 0.35
 
-    def test_always_selects_at_least_one_test_even_under_a_tiny_budget(self) -> None:
+    def test_budget_too_small_for_any_candidate_yields_an_empty_selection(
+        self,
+    ) -> None:
+        # The budget is a hard cap: if even the cheapest useful candidate
+        # (test_a, 0.1s) would exceed it, the correct result is an honestly
+        # empty, incomplete fallback -- never a pick that silently breaches
+        # the caller's own stated budget.
         fb = fallback.compute_fallback_set(_synthetic_baseline(), runtime_budget_s=0.001)
-        assert len(fb.selected_tests) == 1
+        assert fb.selected_tests == ()
+        assert fb.total_runtime_s == 0.0
+        assert fb.covered_fraction < 1.0
 
     def test_empty_baseline_yields_an_empty_fully_covered_fallback(self) -> None:
         empty = {"tests": {}, "coverage": {}}
@@ -134,18 +142,18 @@ class TestComputeFallbackSet:
         assert fb.universe_size == 0
 
     def test_eligible_tests_restriction_excludes_ineligible_candidates(self) -> None:
-        # Restricting to {test_a, test_c} must exclude test_b's lines from
-        # the universe entirely (not just from the selection), since
-        # test_b's own unique line (other.py#10) is never reachable by an
-        # eligible test.
+        # Restricting to {test_a, test_c} must leave test_b's unique line
+        # (other.py#10) in the universe (the denominator is always the full
+        # baseline) but permanently unreachable -- covered_fraction must
+        # show that gap, never hide it by shrinking its own denominator.
         fb = fallback.compute_fallback_set(
             _synthetic_baseline(),
             runtime_budget_s=10.0,
             eligible_tests=frozenset({"test_a", "test_c"}),
         )
         assert "test_b" not in fb.selected_tests
-        assert fb.universe_size == 3  # file.py#1, file.py#2, other.py#11
-        assert fb.covered_fraction == 1.0
+        assert fb.universe_size == 5  # the full baseline's own universe
+        assert fb.covered_fraction == pytest.approx(3 / 5)  # other.py#10, file.py#3 unreachable
 
     def test_missing_or_invalid_duration_excludes_a_test_as_ineligible(self) -> None:
         # test_bad is the *only* test covering file.py#2; a missing duration

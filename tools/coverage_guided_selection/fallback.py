@@ -18,6 +18,19 @@ test is a candidate) as a documented Phase 0 simplification, **not** a
 safety claim -- wiring real portfolio-tier eligibility (`test-portfolio`'s
 own tiering) into `eligible_tests` is required before this curation is used
 as an actual CI fallback tier (tracked in this effort's own Phase 3).
+
+**`covered_fraction` is always measured against the full baseline**,
+independent of `eligible_tests`: restricting candidates can leave lines
+only an ineligible test covers permanently unreachable, and the metric must
+show that gap rather than silently shrinking its own denominator to hide
+it.
+
+**The runtime budget is a hard cap, never silently breached.** If even the
+single cheapest useful candidate would exceed `runtime_budget_s`, this
+returns an empty selection rather than forcing a pick over budget -- an
+empty, clearly-incomplete fallback (`selected_tests == ()` with
+`covered_fraction < 1.0`) is auditable; a fallback that silently cost more
+than its own caller's stated budget is not.
 """
 
 from __future__ import annotations
@@ -52,37 +65,41 @@ def compute_fallback_set(
 ) -> FallbackSet:
     """Greedily build a smoke tier within `runtime_budget_s`.
 
-    Repeatedly adds whichever remaining **affordable** candidate is cheapest
-    per unit of still-uncovered baseline coverage (lines, each keyed by
-    (file, line)), stopping once no remaining candidate both covers
-    something new and fits the leftover budget -- a budget-first selection,
-    not a coverage-saturation-first one, per the vision's own framing. A
-    candidate exceeding the remaining budget is skipped in favor of a
-    cheaper, still-useful one rather than ending the pass early; only when
-    nothing fits at all and the fallback would otherwise be empty is the
-    single cheapest viable candidate force-picked, so the safety net is
-    never empty by construction.
+    Repeatedly adds whichever remaining **affordable** eligible candidate is
+    cheapest per unit of still-uncovered baseline coverage (lines, each
+    keyed by (file, line)), stopping once no remaining candidate both covers
+    something new and fits the leftover budget -- never by force-picking an
+    over-budget candidate (see module docstring). A candidate exceeding the
+    remaining budget is skipped in favor of a cheaper, still-useful one
+    rather than ending the pass early.
 
     A test with no, non-numeric, non-finite, or negative duration data is
     treated as **ineligible** (excluded from candidates entirely), never as
     a free/near-zero-cost pick -- incomplete timing data must never make a
     test look artificially attractive to the optimizer.
     """
-    test_lines: dict[str, set] = {}
+    all_test_lines: dict[str, set] = {}
     for file, lines in baseline.get("coverage", {}).items():
         for lineno, tests in lines.items():
             for test in tests:
-                if eligible_tests is not None and test not in eligible_tests:
-                    continue
-                test_lines.setdefault(test, set()).add((file, lineno))
+                all_test_lines.setdefault(test, set()).add((file, lineno))
 
+    # The universe is every line the *full* baseline attributes to any
+    # test, regardless of eligibility -- see module docstring on why this
+    # must not shrink when `eligible_tests` restricts candidates.
     universe: set = set()
-    for covered in test_lines.values():
+    for covered in all_test_lines.values():
         universe |= covered
+
+    eligible_test_lines = (
+        all_test_lines
+        if eligible_tests is None
+        else {t: lines for t, lines in all_test_lines.items() if t in eligible_tests}
+    )
 
     durations = baseline.get("tests", {})
     cost_of: dict[str, float] = {}
-    for test in test_lines:
+    for test in eligible_test_lines:
         raw = durations.get(test, {}).get("duration_s")
         if (
             not isinstance(raw, (int, float))
@@ -103,9 +120,9 @@ def compute_fallback_set(
         # asc, test-id asc) so ties never depend on set/hash iteration
         # order -- the same baseline always curates the same fallback set.
         ranked = sorted(
-            (t for t in candidates if test_lines[t] & remaining),
+            (t for t in candidates if eligible_test_lines[t] & remaining),
             key=lambda t: (
-                -(len(test_lines[t] & remaining) / cost_of[t]),
+                -(len(eligible_test_lines[t] & remaining) / cost_of[t]),
                 cost_of[t],
                 t,
             ),
@@ -118,16 +135,11 @@ def compute_fallback_set(
             None,
         )
         if affordable is None:
-            if selected:
-                break  # budget spent; a non-empty fallback already exists
-            # Never return an empty fallback when at least one candidate
-            # covers something: force the cheapest viable pick even if it
-            # alone exceeds the nominal budget.
-            affordable = min(ranked, key=lambda t: (cost_of[t], t))
+            break  # the budget is a hard cap -- never force an over-budget pick
 
         selected.append(affordable)
         total_cost += cost_of[affordable]
-        remaining -= test_lines[affordable]
+        remaining -= eligible_test_lines[affordable]
         candidates.discard(affordable)
 
     covered_fraction = 1.0 if not universe else 1.0 - (len(remaining) / len(universe))

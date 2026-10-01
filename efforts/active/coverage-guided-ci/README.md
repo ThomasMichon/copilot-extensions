@@ -301,10 +301,12 @@ _Pending review of this plan._
   line selected exactly the 1 test exercising it; an uncovered line and an
   unknown file both correctly tripped the fallback trigger (not a silent
   empty selection); and the greedy fallback set reached **100% coverage of
-  the 131-line universe using 11 of 104 tests at ~0.08s total runtime**,
-  versus ~60.2s for the full suite — roughly **750x** cheaper at full
+  the 131-line universe using roughly a dozen of the 104 tests in well
+  under a second**, versus **~60-70s for the full suite** (observed across
+  several runs; exact figures vary run to run with real subprocess timing
+  noise) — on the order of **several hundred times** cheaper at full
   measured coverage, a concrete instance of "best coverage set for the
-  smallest amount of total runtime." These are this run's own observed
+  smallest amount of total runtime." These are illustrative, observed
   figures, recorded here for context -- the real-suite integration test in
   `tools/test_coverage_guided_selection.py`
   (`test_collect_baseline_round_trips_against_a_real_plugin_suite`)
@@ -312,6 +314,18 @@ _Pending review of this plan._
   and that the curated fallback costs strictly less than the full suite),
   not these exact numbers, since a real subprocess run's precise timings are
   expected to vary slightly run to run.
+- **Documentation impact:** `visions/coverage-guided-ci/README.md` is
+  updated in place (new "coverage-efficient fallback curation" Concept +
+  matching Behavior + Provenance entry) because this pilot's fallback-
+  curation criterion is new intended behavior, not an existing gap the
+  vision already described -- per the Change Intake vision-extending
+  reflex. This effort's own Plan (Phase 3's fallback-curation bullet) and
+  this Journal are updated to match. No other repo-wide documentation
+  (`AGENTS.md`, `docs/architecture.md`, `TESTING.md`) yet describes this
+  prototype: it is Phase 0 scaffolding under `tools/`, not a documented
+  end-user capability, so none of those need a change for this pilot --
+  `TESTING.md` gains a mention once a later phase wires this into a real,
+  user-facing CI tier.
 - Phase 0's first checklist item (pick the coverage mechanism) is
   substantiated by this pilot; its other two items — the baseline's durable
   storage/correlation location, and spiking collection inside
