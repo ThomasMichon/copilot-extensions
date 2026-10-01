@@ -155,8 +155,11 @@ explicit admin escalation).** This is enforced on four layers that agree:
    context value rather than a repository secret/variable -- a repository
    *variable* is writable via the API/CLI by ordinary Write access, the same
    Maintainer tier this lockdown restricts, which would let a Maintainer
-   defeat it by simply re-pointing the value, so a fork's own owner is
-   protected automatically with zero configuration instead), not
+   defeat it by simply re-pointing the value, so a user-owned fork's own
+   owner is protected automatically with zero configuration instead --
+   this policy is scoped to user-owned repos only; an organization-owned
+   fork needs its own authorization mechanism, since no individual PR
+   author can ever equal an org login), not
    the wider Maintainer group (workflow changes can exfiltrate secrets/PATs,
    a materially different risk than an ordinary code change). A Maintainer's
    review-bypass above does *not* cover this: a required status check

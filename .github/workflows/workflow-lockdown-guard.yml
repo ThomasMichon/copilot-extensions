@@ -7,8 +7,16 @@
 # access, the same Maintainer tier this guard exists to restrict, so using
 # one here would let a Maintainer defeat the guard by simply re-pointing
 # it at their own login, with no protected-path change for this very check
-# to ever catch. Deriving from repo ownership instead means a fork
-# protects its own owner automatically, with zero configuration. Branch
+# to ever catch. Deriving from repo ownership instead means a USER-owned
+# fork protects its own owner automatically, with zero configuration.
+#
+# KNOWN LIMITATION: this policy is scoped to user-owned repos only. In an
+# ORGANIZATION-owned fork, `github.repository_owner` resolves to the org's
+# login, which no individual PR author (`pull_request.user.login`) can
+# ever equal -- that fork's copy of this guard would permanently reject
+# every protected-path PR. An org-owned fork needs its own explicit
+# authorization mechanism (e.g. a trusted team, or an admin-controlled
+# allowlist) in place of this check; not addressed here. Branch
 # rulesets alone can't express this on a
 # personal (non-Enterprise) account: the
 # `file_path_restriction` rule type that would do it natively returns
@@ -127,7 +135,12 @@ jobs:
           # `github.repository_owner` -- immutable, platform-controlled,
           # never a repository secret/variable (see the file header for
           # why a repo variable would be writable by the very Maintainer
-          # tier this guard restricts). Automatically correct for a fork.
+          # tier this guard restricts). Automatically correct for a
+          # USER-owned fork. KNOWN LIMITATION: in an ORGANIZATION-owned
+          # fork, this is the org login, which no individual PR author can
+          # ever equal, so this guard permanently rejects every protected-
+          # path PR there -- this policy is scoped to user-owned repos
+          # only; see the file header and ci.yml's matching note.
           ALLOWED_LOGIN: ${{ github.repository_owner }}
         with:
           script: |

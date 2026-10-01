@@ -109,7 +109,15 @@ jobs:
           # one here would let a Maintainer defeat the gate by simply
           # re-pointing it at their own login, with no file-path change for
           # workflow-lockdown-guard to ever catch. This automatically tracks
-          # a fork's own owner with zero configuration.
+          # a fork's own owner with zero configuration -- for a USER-owned
+          # fork. KNOWN LIMITATION: in an ORGANIZATION-owned fork,
+          # `github.repository_owner` is the org login, which no individual
+          # PR author (`pull_request.user.login`) can ever equal, so this
+          # gate and workflow-lockdown-guard's equivalent check permanently
+          # reject every PR there -- this policy is scoped to user-owned
+          # repos only; an org-owned fork needs its own explicit
+          # authorization mechanism (e.g. a trusted team), not addressed
+          # here.
           REPO_OWNER: ${{ github.repository_owner }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
