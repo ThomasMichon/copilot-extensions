@@ -761,8 +761,11 @@ worktree-manager.
       `cmd_manager_install_trigger` copy/tests. The richer in-Picker
       setup-first onboarding home remains the separately tracked
       Worktree-Manager-side work in #542, with #540/#541 as install-side
-      prerequisites and #357 as the broader configurator track. Closes picker
-      §`first-run-onboarding-entry`, installer §`onboards-from-empty-gracefully`.
+      prerequisites and #357 as the broader configurator track. This lands the
+      **absent-Manager seam's slice** of picker
+      §`first-run-onboarding-entry` and installer
+      §`onboards-from-empty-gracefully`; it does **not** claim the broader
+      Manager-side setup-first/home experience is done here.
 - [ ] **Open question, not yet designed:** the bare-invocation seam currently
       health-probes specifically for a `worktree-manager` binstub on `PATH` --
       it is not yet a generic, pluggable **registration** a third-party
