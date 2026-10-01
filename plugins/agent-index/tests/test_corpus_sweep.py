@@ -86,6 +86,85 @@ def test_specs_resolve_correct_per_repo_paths(tmp_path, monkeypatch) -> None:
     assert engine._connector_kwargs(specs["github:owner/dotfiles"]) == {"token": "tok-someacct"}
 
 
+def test_git_source_ref_override_and_authenticated_fetch(tmp_path, monkeypatch) -> None:
+    """A ``git:`` source may declare ``ref:`` (index a branch other than the
+    remote's default, e.g. a repo whose integration branch is ``dev`` not
+    ``main``) and ``auth.account`` (authenticate its fetch step the same way a
+    ``github:`` source's token is resolved) -- both wired through to the
+    connector kwargs, independent of each other and of other sources."""
+    dotfiles, ce = _registry(tmp_path, monkeypatch)
+    _write(dotfiles / ".agent-index" / "config.yaml", """\
+        corpus:
+          sources:
+            - name: git:dotfiles
+              repo: dotfiles
+              trust_domain: work
+            - name: git:copilot-extensions
+              repo: copilot-extensions
+              ref: origin/dev
+              auth: {account: someacct}
+              trust_domain: personal
+            - name: github:owner/dotfiles
+              type: github
+              repo: owner/dotfiles
+              auth: {account: someacct}
+    """)
+    monkeypatch.setattr(engine, "_resolve_gh_token", lambda account: f"tok-{account}")
+    specs = {s.name: s for s in engine.configured_source_specs()}
+
+    assert engine._connector_kwargs(specs["git:dotfiles"]) == {"repo_path": str(dotfiles)}
+    assert engine._connector_kwargs(specs["git:copilot-extensions"]) == {
+        "repo_path": str(ce),
+        "ref": "origin/dev",
+        "token": "tok-someacct",
+    }
+
+
+def test_git_source_ref_override_does_not_require_auth(tmp_path, monkeypatch) -> None:
+    """``ref:`` alone (no ``auth:``) does not force a token resolution -- a
+    repo may need a non-default branch without needing authenticated fetch."""
+    dotfiles, ce = _registry(tmp_path, monkeypatch)
+    _write(dotfiles / ".agent-index" / "config.yaml", """\
+        corpus:
+          sources:
+            - name: git:dotfiles
+              repo: dotfiles
+            - name: git:copilot-extensions
+              repo: copilot-extensions
+              ref: origin/dev
+    """)
+
+    def _unexpected_resolve(account):
+        raise AssertionError("must not resolve a token when auth.account is unset")
+
+    monkeypatch.setattr(engine, "_resolve_gh_token", _unexpected_resolve)
+    specs = {s.name: s for s in engine.configured_source_specs()}
+    assert engine._connector_kwargs(specs["git:copilot-extensions"]) == {
+        "repo_path": str(ce),
+        "ref": "origin/dev",
+    }
+
+
+def test_git_source_auth_token_resolution_failure_is_non_fatal(tmp_path, monkeypatch) -> None:
+    """Unlike a ``github:`` source (hard failure), a ``git:`` source whose
+    token can't be resolved proceeds WITHOUT one -- GitRepoConnector's own
+    fetch already falls back gracefully to stale-but-canonical remote-tracking
+    state or the local HEAD, so there's no need to fail the whole source."""
+    dotfiles, ce = _registry(tmp_path, monkeypatch)
+    _write(dotfiles / ".agent-index" / "config.yaml", """\
+        corpus:
+          sources:
+            - name: git:dotfiles
+              repo: dotfiles
+            - name: git:copilot-extensions
+              repo: copilot-extensions
+              auth: {account: someacct}
+    """)
+    monkeypatch.setattr(engine, "_resolve_gh_token", lambda account: None)
+    specs = {s.name: s for s in engine.configured_source_specs()}
+    assert engine._connector_kwargs(specs["git:copilot-extensions"]) == {"repo_path": str(ce)}
+
+
 def test_env_override_wins(tmp_path, monkeypatch) -> None:
     _registry(tmp_path, monkeypatch)
     monkeypatch.setenv("AGENT_INDEX_SOURCES", "git:only")
