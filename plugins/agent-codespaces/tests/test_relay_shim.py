@@ -471,6 +471,8 @@ class TestProvisioningAndClient:
         assert "LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT" in client
         assert "username=\" + github_account" in client
         assert 'm.get("github_account", "")' in client
+        assert "IFS=$'\\x1f' read -r _dport _dtoken _dhost _dghaccount" in client
+        assert "IFS=$'\\t' read -r _dport _dtoken _dhost _dghaccount" in client
 
 
 def _git_cache_python() -> str:
@@ -715,9 +717,16 @@ def _extract_js_function(src: str, name: str) -> str:
     raise AssertionError(f"could not extract {name}")
 
 
-def _write_mapping(path, port: int, token: str = "", ado_host: str = "") -> None:
+def _write_mapping(
+    path, port: int, token: str = "", ado_host: str = "", github_account: str = ""
+) -> None:
     path.write_text(
-        json.dumps({"port": port, "token": token, "ado_host": ado_host}),
+        json.dumps({
+            "port": port,
+            "token": token,
+            "ado_host": ado_host,
+            "github_account": github_account,
+        }),
         encoding="utf-8",
     )
 
@@ -785,7 +794,7 @@ class TestRelayServingLiveness:
             )
 
         assert result.returncode == 0
-        assert result.stdout.strip() == f"{serving.port}\ttok\thost"
+        assert result.stdout.rstrip("\r\n") == f"{serving.port}\x1ftok\x1fhost\x1f"
         assert serving_file.exists()
         assert old_file.exists()
         assert not closed_file.exists()
@@ -810,8 +819,72 @@ class TestRelayServingLiveness:
             )
 
         assert result.returncode == 0
-        assert result.stdout.strip() == f"{old_relay.port}\ttok\thost"
+        assert result.stdout.rstrip("\r\n") == f"{old_relay.port}\x1ftok\x1fhost\x1f"
         assert mapping.exists()
+
+    def test_python_discovery_preserves_empty_ado_host_with_github_account(self, tmp_path):
+        code = _extract_discovery_python()
+        ports_dir = tmp_path / "relay-ports"
+        ports_dir.mkdir()
+        env = {**os.environ, "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.5"}
+
+        with _OneShotRelay("pong\n\n") as relay:
+            _write_mapping(
+                ports_dir / "mapping.json",
+                relay.port,
+                token="tok",
+                ado_host="",
+                github_account="alice",
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", code, str(ports_dir)],
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=15,
+                check=False,
+            )
+
+        assert result.returncode == 0
+        assert result.stdout.strip() == f"{relay.port}\x1ftok\x1f\x1falice"
+
+    def test_python_discovery_preserves_both_and_neither_optional_fields(self, tmp_path):
+        code = _extract_discovery_python()
+        env = {**os.environ, "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.5"}
+
+        ports_dir = tmp_path / "both"
+        ports_dir.mkdir()
+        with _OneShotRelay("pong\n\n") as relay:
+            _write_mapping(
+                ports_dir / "mapping.json",
+                relay.port,
+                token="tok",
+                ado_host="ado.example",
+                github_account="alice",
+            )
+            both = subprocess.run(
+                [sys.executable, "-c", code, str(ports_dir)],
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=15,
+                check=False,
+            )
+        assert both.stdout.rstrip("\r\n") == f"{relay.port}\x1ftok\x1fado.example\x1falice"
+
+        ports_dir = tmp_path / "neither"
+        ports_dir.mkdir()
+        with _OneShotRelay("pong\n\n") as relay:
+            _write_mapping(ports_dir / "mapping.json", relay.port, token="tok")
+            neither = subprocess.run(
+                [sys.executable, "-c", code, str(ports_dir)],
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=15,
+                check=False,
+            )
+        assert neither.stdout.rstrip("\r\n") == f"{relay.port}\x1ftok\x1f\x1f"
 
     def test_wrapper_probe_distinguishes_pong_connect_dead(self, tmp_path):
         bash = _require_host_loopback_bash()

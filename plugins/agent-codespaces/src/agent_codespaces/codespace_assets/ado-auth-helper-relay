@@ -126,7 +126,7 @@ for f in files:
         except OSError:
             pass
         continue
-    line = "%d\t%s\t%s\t%s" % (
+    line = "%d\x1f%s\x1f%s\x1f%s" % (
         port, m.get("token", ""), m.get("ado_host", ""),
         m.get("github_account", ""),
     )
@@ -142,7 +142,11 @@ sys.exit(1)
 PY
 )"
     if [ -n "$_disc" ]; then
-        IFS=$'\t' read -r _dport _dtoken _dhost _dghaccount <<< "$_disc"
+        if [[ "$_disc" == *$'\x1f'* ]]; then
+            IFS=$'\x1f' read -r _dport _dtoken _dhost _dghaccount <<< "$_disc"
+        else
+            IFS=$'\t' read -r _dport _dtoken _dhost _dghaccount <<< "$_disc"
+        fi
         RELAY_PORT="$_dport"
         [ -z "$RELAY_TOKEN" ] && RELAY_TOKEN="$_dtoken"
         if [ -z "${LC_GIT_CREDENTIAL_RELAY_ADO_HOST:-}" ] && [ -n "$_dhost" ]; then
