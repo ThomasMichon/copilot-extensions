@@ -360,15 +360,24 @@ def _pr_claim_target(
         # rejected as "unconfigured".
         expected_host = GitHubProvider().authority_endpoint(api_base)
         if host == expected_host or (len(parts) >= 4 and parts[-2] == "pull"):
-            if len(parts) < 4 or parts[-2] != "pull" or not parts[-1].isdigit():
-                return None
-            if not api_base and (
-                parsed.scheme != "https"
-                or parsed.netloc.casefold() != expected_host
-                or len(parts) != 4
+            # Require the EXACT canonical ``owner/repo/pull/N`` shape (four
+            # segments, no query/fragment) regardless of whether
+            # ``api_base`` is configured -- previously this strict check
+            # only ran in the unconfigured branch below, so a configured
+            # GitHub Enterprise claim accepted ANY extra leading segments
+            # (e.g. ``.../unrelated/owner/repo/pull/42``) and silently
+            # stripped them via ``parts[-4:-2]``, extracting the wrong
+            # repo identity from a noncanonical URL.
+            if (
+                len(parts) != 4
+                or parts[-2] != "pull"
+                or not parts[-1].isdigit()
+                or parsed.scheme != "https"
                 or parsed.query
                 or parsed.fragment
             ):
+                return None
+            if not api_base and parsed.netloc.casefold() != expected_host:
                 return None
             repo_parts = parts[-4:-2]
             if len(repo_parts) != 2:
@@ -387,18 +396,28 @@ def _pr_claim_target(
     if configured_provider == "azure-devops" and (
         host == "dev.azure.com" or host.endswith(".visualstudio.com")
     ):
-        try:
-            pullrequest_at = parts.index("pullrequest")
-            git_at = parts.index("_git")
-            number = parts[pullrequest_at + 1]
-            project, name = parts[git_at - 1], parts[git_at + 1]
-        except (ValueError, IndexError):
+        if parsed.query or parsed.fragment:
             return None
-        if not number.isdigit() or pullrequest_at + 1 != len(parts) - 1:
+        # Require the EXACT canonical shape -- ``<org>/<project>/_git/<repo>
+        # /pullrequest/<N>`` on ``dev.azure.com`` (6 segments), or
+        # ``<project>/_git/<repo>/pullrequest/<N>`` on a classic
+        # ``*.visualstudio.com`` org host (5 segments) -- rather than
+        # locating "pullrequest"/"_git" anywhere in the path via
+        # ``list.index()``. The previous index-based search tolerated extra
+        # noncanonical segments threaded through the path (e.g. an injected
+        # segment between the org and project) while still happening to
+        # extract a project/repo/number, silently accepting a malformed URL
+        # as though it were the genuine canonical one.
+        expected_len = 6 if host == "dev.azure.com" else 5
+        if (
+            len(parts) != expected_len
+            or parts[-2] != "pullrequest"
+            or parts[-4] != "_git"
+            or not parts[-1].isdigit()
+        ):
             return None
+        number, name, project = parts[-1], parts[-3], parts[-5]
         if host == "dev.azure.com":
-            if not parts:
-                return None
             url_org = parts[0]
             configured = _parse_provider_url(api_base)
             if not configured or not _same_provider_origin(parsed, configured):
@@ -415,6 +434,8 @@ def _pr_claim_target(
         return "azure-devops", f"{project}/{name}", int(number), api_base
 
     if configured_provider == "gitea":
+        if parsed.query or parsed.fragment:
+            return None
         configured = _parse_provider_url(api_base)
         if not configured or not _same_provider_origin(parsed, configured):
             return None
@@ -427,7 +448,15 @@ def _pr_claim_target(
         if base_parts and parts[:len(base_parts)] != base_parts:
             return None
         remaining = parts[len(base_parts):]
-        if len(remaining) < 4 or remaining[-2] != "pulls" or not remaining[-1].isdigit():
+        # Require the EXACT canonical ``owner/project/pulls/N`` shape (four
+        # remaining segments) rather than merely "at least four" -- the
+        # latter silently accepted extra noncanonical segments ahead of the
+        # trailing four and stripped them via ``remaining[-4:-2]``.
+        if (
+            len(remaining) != 4
+            or remaining[-2] != "pulls"
+            or not remaining[-1].isdigit()
+        ):
             return None
         repo_parts = remaining[-4:-2]
         if len(repo_parts) != 2:

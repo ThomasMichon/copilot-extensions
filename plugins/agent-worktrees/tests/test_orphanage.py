@@ -285,6 +285,63 @@ def test_pr_claim_target_rejects_gitea_claim_under_different_root_path():
     ) == ("gitea", "owner/project", 12, "https://forge.example")
 
 
+def test_pr_claim_target_rejects_noncanonical_configured_github_enterprise_url():
+    # The strict "exactly owner/repo/pull/N, no query/fragment" grammar was
+    # previously only enforced for the UNCONFIGURED (public github.com)
+    # branch -- a configured GitHub Enterprise claim accepted any extra
+    # leading segments and silently stripped them via a trailing-four-parts
+    # slice, extracting the wrong repo identity from a noncanonical URL.
+    ghe = types.SimpleNamespace(
+        provider="github", api_base="https://github.example.com/api/v3",
+    )
+    assert cleanup._pr_claim_target(
+        "https://github.example.com/unrelated/owner/project/pull/42", ghe,
+    ) is None
+    assert cleanup._pr_claim_target(
+        "https://github.example.com/owner/project/pull/42?x=1", ghe,
+    ) is None
+    assert cleanup._pr_claim_target(
+        "https://github.example.com/owner/project/pull/42", ghe,
+    ) == ("github", "owner/project", 42, "https://github.example.com/api/v3")
+
+
+def test_pr_claim_target_rejects_noncanonical_azure_devops_url():
+    # The previous parser located "pullrequest"/"_git" anywhere in the path
+    # via list.index(), tolerating an injected noncanonical segment (e.g.
+    # between the org and project) while still happening to extract a
+    # project/repo/number -- silently accepting a malformed URL as though
+    # it were the genuine canonical shape.
+    ado = types.SimpleNamespace(
+        provider="azure-devops", api_base="https://dev.azure.com/acme",
+    )
+    assert cleanup._pr_claim_target(
+        "https://dev.azure.com/acme/extra/Project/_git/repo/pullrequest/34",
+        ado,
+    ) is None
+    assert cleanup._pr_claim_target(
+        "https://dev.azure.com/acme/Project/_git/repo/pullrequest/34?x=1",
+        ado,
+    ) is None
+    assert cleanup._pr_claim_target(
+        "https://dev.azure.com/acme/Project/_git/repo/pullrequest/34", ado,
+    ) == ("azure-devops", "Project/repo", 34, "https://dev.azure.com/acme")
+
+
+def test_pr_claim_target_rejects_noncanonical_gitea_url():
+    # Previously "at least four trailing segments" (remaining[-4:-2])
+    # silently stripped any extra noncanonical segments ahead of the
+    # trailing owner/project/pulls/N -- require exactly four instead.
+    gitea = types.SimpleNamespace(
+        provider="gitea", api_base="https://forge.example/gitea",
+    )
+    assert cleanup._pr_claim_target(
+        "https://forge.example/gitea/extra/owner/project/pulls/12", gitea,
+    ) is None
+    assert cleanup._pr_claim_target(
+        "https://forge.example/gitea/owner/project/pulls/12?x=1", gitea,
+    ) is None
+
+
 def test_pr_claim_target_rejects_shorthand_for_non_github_providers():
     # owner/repo#N is a GitHub-only grammar (sweep.py's _GH_PR_SHORT); Gitea
     # and Azure DevOps claims always carry a full authority-bearing URL.
