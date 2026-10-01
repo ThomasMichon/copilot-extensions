@@ -99,8 +99,12 @@ exactly the non-atomic, racy pattern this section avoids.
   **Protect the DACL so it stops inheriting from the parent** (.NET's
   `DirectorySecurity.SetAccessRuleProtection($true, $false)` -- protect
   the DACL, discard inherited rules), *then* add the explicit rule
-  granting full control only to the current user with container-inherit
-  flags so children propagate it, and pass that fully-built
+  granting full control only to the current user with **both**
+  `ContainerInherit` and `ObjectInherit` flags (`ContainerInherit` alone
+  only propagates to child directories; without `ObjectInherit` too,
+  files created in per-task subfolders would fall back to a default
+  token DACL instead of the root's owner-only rule) so every descendant
+  file and folder propagates it, and pass that fully-built
   `DirectorySecurity` to the creation call itself (e.g. PowerShell's
   `[System.IO.Directory]::CreateDirectory(path, $directorySecurity)`)
   rather than `New-Item` followed by a separate `icacls` call. If the
