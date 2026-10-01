@@ -183,6 +183,22 @@ def test_pr_claim_target_rejects_unconfigured_github_enterprise_host():
     ) is None
 
 
+def test_pr_claim_target_honors_gh_host_ambient_authority(monkeypatch):
+    # api_base unconfigured but GH_HOST points at a GitHub Enterprise host --
+    # GitHubProvider.authority_endpoint() treats that as the effective
+    # authority, so a hardcoded "github.com" check would wrongly reject every
+    # valid full-URL claim on that host.
+    monkeypatch.setenv("GH_HOST", "github.example.com")
+    prcfg = types.SimpleNamespace(provider="github", api_base="")
+    assert cleanup._pr_claim_target(
+        "https://github.example.com/owner/project/pull/42", prcfg,
+    ) == ("github", "owner/project", 42, "github.example.com")
+    # The public host is no longer the ambient authority -- reject it.
+    assert cleanup._pr_claim_target(
+        "https://github.com/owner/project/pull/42", prcfg,
+    ) is None
+
+
 @pytest.mark.parametrize(
     "ref",
     [

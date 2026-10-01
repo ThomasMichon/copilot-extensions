@@ -903,6 +903,21 @@ class TestPrMergeStatusIndeterminateVsUnmerged:
         )
         assert finalize_open_pr_gate.pr_merge_status(record, repo=None) is None
 
+    def test_mismatched_tracked_provider_is_indeterminate_not_queried(self):
+        # A legacy record can retain a different provider than the repo is
+        # now configured for. Querying the configured provider with the
+        # same slug/number could confirm an unrelated merged PR and hand
+        # back the wrong head -- fail closed instead of ever calling it.
+        pr = SimpleNamespace(
+            branch="pr/some-fix", repo="owner/repo", number=7,
+            provider="azure-devops", state="open", head_sha="",
+        )
+        record = SimpleNamespace(pr=pr)
+        repo = SimpleNamespace(
+            pr=SimpleNamespace(provider="github", api_base=""),
+        )
+        assert finalize_open_pr_gate.pr_merge_status(record, repo) is None
+
 
 def test_content_exceeds_merged_head_any_checks_each_pr_branch_against_own_head(
     refspec_worktree, monkeypatch,

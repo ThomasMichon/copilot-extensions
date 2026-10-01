@@ -157,6 +157,14 @@ def pr_merge_status(record: tracking.WorktreeRecord, repo) -> bool | None:
     if not number or not slug:
         return None
     prcfg = repo.pr
+    provider_name = getattr(pr, "provider", "") or prcfg.provider
+    if provider_name != prcfg.provider:
+        # A legacy/stale record can retain a different provider than the
+        # repo is now configured for; querying the configured provider with
+        # that slug/number could confirm an unrelated merged PR and hand
+        # back the wrong head. Fail closed rather than trust it (mirrors
+        # pr_ops.py's active-PR mismatch check).
+        return None
     try:
         from . import providers
         provider = providers.get_provider(prcfg.provider)

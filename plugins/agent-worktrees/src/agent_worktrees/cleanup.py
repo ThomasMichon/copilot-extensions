@@ -328,33 +328,38 @@ def _pr_claim_target(
     host = parsed_host.lower()
     parts = [part for part in parsed.path.split("/") if part]
 
-    if configured_provider == "github" and (
-        host == "github.com"
-        or (len(parts) >= 4 and parts[-2] == "pull")
-    ):
-        if len(parts) < 4 or parts[-2] != "pull" or not parts[-1].isdigit():
-            return None
-        if not api_base and host == "github.com" and (
-            parsed.scheme != "https"
-            or parsed.netloc.casefold() != "github.com"
-            or len(parts) != 4
-            or parsed.query
-            or parsed.fragment
-        ):
-            return None
-        repo_parts = parts[-4:-2]
-        if len(repo_parts) != 2:
-            return None
-        if api_base:
-            configured = _parse_provider_url(api_base)
-            if not configured or not _same_provider_origin(
-                parsed, configured, require_scheme=False,
+    if configured_provider == "github":
+        from .providers.github import GitHubProvider
+
+        # Honor the provider's own ambient authority (GH_HOST) rather than
+        # hardcoding the public host -- otherwise every valid full-URL claim
+        # on a GitHub Enterprise host configured through GH_HOST would be
+        # rejected as "unconfigured".
+        expected_host = GitHubProvider().authority_endpoint(api_base)
+        if host == expected_host or (len(parts) >= 4 and parts[-2] == "pull"):
+            if len(parts) < 4 or parts[-2] != "pull" or not parts[-1].isdigit():
+                return None
+            if not api_base and (
+                parsed.scheme != "https"
+                or parsed.netloc.casefold() != expected_host
+                or len(parts) != 4
+                or parsed.query
+                or parsed.fragment
             ):
                 return None
-        elif host != "github.com":
-            return None
-        api_base = api_base or host
-        return "github", "/".join(repo_parts), int(parts[-1]), api_base
+            repo_parts = parts[-4:-2]
+            if len(repo_parts) != 2:
+                return None
+            if api_base:
+                configured = _parse_provider_url(api_base)
+                if not configured or not _same_provider_origin(
+                    parsed, configured, require_scheme=False,
+                ):
+                    return None
+            elif host != expected_host:
+                return None
+            api_base = api_base or host
+            return "github", "/".join(repo_parts), int(parts[-1]), api_base
 
     if configured_provider == "azure-devops" and (
         host == "dev.azure.com" or host.endswith(".visualstudio.com")

@@ -1919,6 +1919,20 @@ class TestAzureDevOpsProvider:
         assert res.state == "merged"
         assert res.head_sha == "merged-head"
 
+    def test_observe_head_delegates_to_get_pull(self, monkeypatch):
+        # Azure has no separate server-clock observation endpoint; it must
+        # still return a live, authoritative head rather than always raising.
+        from agent_worktrees.providers import azure_devops as azure
+        body = json.dumps({
+            "status": "completed",
+            "lastMergeSourceCommit": {"commitId": "observed-head"},
+        })
+        monkeypatch.setattr(azure, "run_cli",
+                            lambda args, **kw: _proc(stdout=body))
+        observed = azure.AzureDevOpsProvider().observe_head(
+            "proj/repo", 5, api_base="https://dev.azure.com/org")
+        assert observed.head_sha == "observed-head"
+
     def test_get_pull_abandoned_and_active(self, monkeypatch):
         from agent_worktrees.providers import azure_devops as azure
         for status, exp_state in (("abandoned", "closed"), ("active", "open")):

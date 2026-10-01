@@ -173,11 +173,14 @@ class AzureDevOpsProvider:
     def observe_head(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> PullResult:
-        """Azure DevOps has no server-clock head observation implementation."""
-        _ = (repo, number, api_base, token)
-        raise ProviderError(
-            "Azure DevOps does not support authoritative PR-head observation."
-        )
+        """Live head observation, reusing ``get_pull``'s ``az repos pr show``
+        call -- the same server call that already supplies
+        ``lastMergeSourceCommit`` for the merged-head repair path. Azure
+        DevOps has no separate server-clock timestamp to attach, unlike
+        GitHub's HTTP ``Date`` header, but the returned head is still a live,
+        authoritative read (not a cached/local value).
+        """
+        return self.get_pull(repo, number, api_base=api_base, token=token)
 
     def publish_source_marker(
         self,
