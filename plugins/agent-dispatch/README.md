@@ -173,6 +173,20 @@ opens a per-task action sub-menu. The seam is a filesystem manifest registry,
 not a Python import -- the plugins live in separate venvs -- so a stale or absent
 picker simply ignores it. Source: `pivots/agent-dispatch.json`.
 
+The manifest declares `"stream": true, "subscribe": true` (pivot-streaming-
+transport Phase 1): the Picker runs `agent-dispatch-board --stream` instead of
+the plain one-shot call, consuming a line-delimited NDJSON envelope
+(`begin`/`row`/`done`) so the board paints progressively, then holds that
+channel open -- every two seconds (`--interval`, `board_cli.py`'s
+`DEFAULT_SUBSCRIBE_INTERVAL`) the board is re-fetched in-process and diffed
+against the last snapshot, emitting `delta`/`removed` frames so an open pivot
+updates live without re-invoking the CLI per refresh. Falls back automatically
+to the plain one-shot JSON call on an older `agent-dispatch-board` that
+doesn't understand `--stream` (`stream` is "always safe to declare" per the
+Picker's own contract); a held channel that drops mid-session reconnects with
+bounded backoff rather than freezing (the Picker-owned `subscribe` EOF/
+reconnect contract -- see `worktree-manager`'s `tasks.py`).
+
 ### Declared lifecycle tier (per `docs/patterns/service-lifecycle-supervision.md`)
 
 - **Default tier: 2 — scheduled activation**, layered around a tier-1

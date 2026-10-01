@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import sys
 import types
 from pathlib import Path
+from unittest import mock
 
 from agent_dispatch import board_cli, worktree_status_relay
 
@@ -575,3 +577,200 @@ def test_remote_machine_falls_back_to_full_cli(monkeypatch):
         "m2",
         "--board",
     ]
+
+
+def _run_stream_capture(argv: list[str]) -> tuple[int, list[dict]]:
+    """Run ``board_cli.main(argv)`` capturing the raw ``sys.__stdout__``
+    envelope (the stream path writes to the real stdout stream, which capsys
+    does not intercept -- same convention as agent-codespaces' ``finalize
+    --picker-progress`` test helper) and return ``(rc, frames)``."""
+    import io
+
+    buf = io.StringIO()
+    with mock.patch.object(sys, "__stdout__", buf):
+        rc = board_cli.main(argv)
+    frames = [json.loads(ln) for ln in buf.getvalue().splitlines() if ln.strip()]
+    return rc, frames
+
+
+def test_stream_emits_begin_row_done_envelope(monkeypatch):
+    """D2 (Phase 1): ``--stream`` wraps the board as the registered-pivot
+    NDJSON envelope -- begin -> a row per task -> done -- one JSON object per
+    line, so `tasks.py`'s streaming consumer can paint progressively."""
+    monkeypatch.setattr(
+        board_cli, "_fetch_rows",
+        lambda args: [{"id": "t1", "group": "Queued"}, {"id": "t2", "group": "Started"}],
+    )
+    rc, frames = _run_stream_capture(["--machine", "m1", "--stream"])
+    assert rc == 0
+    assert [frame["type"] for frame in frames] == ["begin", "row", "row", "done"]
+    assert frames[0]["count"] == 2
+    assert [frame["entry"]["id"] for frame in frames[1:3]] == ["t1", "t2"]
+    assert frames[3]["count"] == 2
+
+
+def test_stream_without_subscribe_exits_after_one_shot(monkeypatch):
+    """Without ``--subscribe``, ``--stream`` never loops -- it is a one-shot
+    NDJSON-framed fetch, same cardinality as the plain JSON path."""
+    calls = {"n": 0}
+
+    def fetch(args):
+        calls["n"] += 1
+        return []
+
+    monkeypatch.setattr(board_cli, "_fetch_rows", fetch)
+    rc, _frames = _run_stream_capture(["--machine", "m1", "--stream"])
+    assert rc == 0
+    assert calls["n"] == 1
+
+
+def test_stream_error_frame_on_initial_fetch_failure(monkeypatch):
+    """A failed initial fetch under ``--stream`` emits an ``error`` frame and
+    exits 1 -- the NDJSON-framed equivalent of the one-shot path's stderr +
+    exit-1 contract, so a streaming pivot can distinguish this from an empty
+    board."""
+    def fetch(args):
+        raise RuntimeError("coordinator unavailable")
+
+    monkeypatch.setattr(board_cli, "_fetch_rows", fetch)
+    rc, frames = _run_stream_capture(["--machine", "m1", "--stream"])
+    assert rc == 1
+    assert frames == [{"type": "error", "message": "coordinator unavailable"}]
+
+
+def test_subscribe_emits_delta_and_removed_frames(monkeypatch):
+    """D2: ``--subscribe`` holds the channel open, re-fetching on
+    ``--interval`` and diffing against the last snapshot -- a changed row
+    becomes a ``delta``, a vanished one becomes ``removed``, and an
+    unreachable channel (``KeyboardInterrupt``, standing in for the Picker
+    closing the pipe) ends the loop cleanly."""
+    snapshots = [
+        [{"id": "t1", "group": "Queued"}, {"id": "t2", "group": "Started"}],
+        [{"id": "t1", "group": "Started"}],  # t1 changed, t2 removed
+    ]
+    calls = {"n": 0}
+
+    def fetch(args):
+        if calls["n"] < len(snapshots):
+            snapshot = snapshots[calls["n"]]
+            calls["n"] += 1
+            return snapshot
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(board_cli, "_fetch_rows", fetch)
+    monkeypatch.setattr(board_cli.time, "sleep", lambda _secs: None)
+    rc, frames = _run_stream_capture(
+        ["--machine", "m1", "--stream", "--subscribe"]
+    )
+    assert rc == 0
+    types_seen = [frame["type"] for frame in frames]
+    assert types_seen == ["begin", "row", "row", "done", "delta", "removed"]
+    delta = next(f for f in frames if f["type"] == "delta")
+    assert delta["entry"]["id"] == "t1"
+    assert delta["entry"]["group"] == "Started"
+    removed = next(f for f in frames if f["type"] == "removed")
+    assert removed["id"] == "t2"
+
+
+def test_subscribe_skips_transient_fetch_failure(monkeypatch):
+    """A re-scan failure during ``--subscribe`` (coordinator hiccup) must not
+    kill the live channel -- it skips that tick and tries again next time."""
+    calls = {"n": 0}
+
+    def fetch(args):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return [{"id": "t1", "group": "Queued"}]
+        if calls["n"] == 2:
+            raise RuntimeError("transient hiccup")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(board_cli, "_fetch_rows", fetch)
+    monkeypatch.setattr(board_cli.time, "sleep", lambda _secs: None)
+    rc, frames = _run_stream_capture(
+        ["--machine", "m1", "--stream", "--subscribe"]
+    )
+    assert rc == 0
+    # No delta/removed/error frame from the skipped tick -- just the initial
+    # begin/row/done envelope.
+    assert [frame["type"] for frame in frames] == ["begin", "row", "done"]
+    assert calls["n"] == 3
+
+
+def test_diff_rows_detects_changes_and_removals():
+    prev = [{"id": "a", "v": 1}, {"id": "b", "v": 1}]
+    curr = [{"id": "a", "v": 2}, {"id": "c", "v": 1}]
+    deltas, removed = board_cli._diff_rows(prev, curr)
+    assert deltas == [{"id": "a", "v": 2}, {"id": "c", "v": 1}]
+    assert removed == ["b"]
+
+
+def test_fetch_rows_direct_delegates_to_build(monkeypatch):
+    """``_fetch_rows`` (the --stream/--subscribe fetch path) resolves to the
+    direct-coordinator path on this machine, running the raw task list
+    through the same `_build` the one-shot path uses."""
+    monkeypatch.setattr(board_cli, "_local_machine", lambda: "m1")
+    monkeypatch.setattr(board_cli, "_endpoint", lambda: "http://x:1")
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps([{"id": "t1", "status": "queued"}]).encode()
+
+    monkeypatch.setattr(
+        board_cli.urllib.request, "urlopen", lambda request, timeout: Response()
+    )
+    args = types.SimpleNamespace(
+        machine="m1", recent_mins=120, label=None, limit=200,
+    )
+    rows = board_cli._fetch_rows(args)
+    assert rows[0]["id"] == "t1"
+
+
+def test_fetch_rows_delegated_parses_subprocess_json(monkeypatch):
+    """Cross-machine ``_fetch_rows`` capture-parses the delegated inbox
+    subprocess's JSON-array stdout (rather than forwarding it verbatim, as
+    the plain one-shot path does) so the --stream path can frame it."""
+    monkeypatch.setattr(board_cli, "_local_machine", lambda: "m1")
+    monkeypatch.setattr(
+        board_cli, "_no_window_kwargs", lambda: {}
+    )
+
+    def run(command, check, env, capture_output, text, **kwargs):
+        assert capture_output is True
+        assert text is True
+        return types.SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps([{"id": "t9"}]),
+            stderr="",
+        )
+
+    monkeypatch.setattr(board_cli.subprocess, "run", run)
+    args = types.SimpleNamespace(
+        machine="m2", recent_mins=120, label=None, limit=200,
+    )
+    rows = board_cli._fetch_rows(args)
+    assert rows == [{"id": "t9"}]
+
+
+def test_fetch_rows_delegated_raises_on_nonzero_exit(monkeypatch):
+    monkeypatch.setattr(board_cli, "_local_machine", lambda: "m1")
+    monkeypatch.setattr(board_cli, "_no_window_kwargs", lambda: {})
+
+    def run(command, check, env, capture_output, text, **kwargs):
+        return types.SimpleNamespace(returncode=2, stdout="", stderr="boom")
+
+    monkeypatch.setattr(board_cli.subprocess, "run", run)
+    args = types.SimpleNamespace(
+        machine="m2", recent_mins=120, label=None, limit=200,
+    )
+    try:
+        board_cli._fetch_rows(args)
+        assert False, "expected RuntimeError"
+    except RuntimeError as exc:
+        assert "boom" in str(exc)
