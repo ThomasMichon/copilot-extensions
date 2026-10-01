@@ -8,6 +8,17 @@ from .engine_dialogs import ScopeDlgScreen
 from .engine_live_screens import ProgressScreen
 from .seed_prompt_screen import SeedPromptScreen
 
+# picker-new-session-prompt-and-composer Phase A: the prompt collected here
+# is persisted (`agent-worktrees create`/`resolve --new --seed`) but the
+# Picker's OWN launch path doesn't deliver it end-to-end yet --
+# engine_client.resolve_launch_plan() has no --seed forwarding (blocked on
+# a worktree-manager module-size cap; see the effort's Journal), and
+# launch-session.{ps1,sh} never calls `agent-worktrees embody` to trigger
+# delivery. Keep the screen OFF the live flow (exercised directly by its
+# own tests) until both seams are complete, rather than show a prompt the
+# Picker silently discards.
+_SEED_PROMPT_ENABLED = False
+
 class PickerScreenMaintenanceActionsMixin:
     def _confirm_new_worktree(self, dlg, seed_prompt: str = ""):
         """Confirmed New-worktree options (+ an optional seed prompt, gathered
@@ -435,7 +446,7 @@ class PickerScreenMaintenanceActionsMixin:
             if not confirmed:
                 return
             on = {o["label"] for o in dlg["opts"] if o["on"]}
-            if "Bare" in on:
+            if not _SEED_PROMPT_ENABLED or "Bare" in on:
                 # A bare worktree gets no Copilot bootstrap at all -- nothing
                 # to seed, so skip the prompt screen entirely and behave
                 # exactly as before this screen existed.

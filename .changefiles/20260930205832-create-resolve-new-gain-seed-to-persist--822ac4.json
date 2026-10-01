@@ -1,0 +1,9 @@
+{
+  "comment": "create/resolve --new gain --seed to persist an optional first-turn prompt; embody/copilot deliver and clear it on first attach (create path and resume path), race-safe.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

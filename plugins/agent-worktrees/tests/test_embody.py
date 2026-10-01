@@ -244,14 +244,16 @@ class TestCmdEmbody:
         monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtF")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         (tmp_path / "wtF.yaml").write_text("x")
-        record = type(
-            "Rec", (), {"worktree_path": "/w/wtF", "pending_seed": "not yet delivered"},
-        )()
-        monkeypatch.setattr(m.tracking, "load_record", lambda p: record)
-        monkeypatch.setattr(
-            m.tracking, "save_record",
-            lambda rec, path: pytest.fail("must not clear an unconfirmed seed"),
-        )
+        state = {"worktree_path": "/w/wtF", "pending_seed": "not yet delivered"}
+
+        def _load(p):
+            return type("Rec", (), dict(state))()
+
+        def _save(rec, path):
+            state["pending_seed"] = rec.pending_seed
+
+        monkeypatch.setattr(m.tracking, "load_record", _load)
+        monkeypatch.setattr(m.tracking, "save_record", _save)
         monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
         monkeypatch.setattr(sessions, "mux_copilot_pane", lambda w: "%4")
         monkeypatch.setattr(
@@ -266,7 +268,7 @@ class TestCmdEmbody:
         assert rc == 0
         out = json.loads(capfd.readouterr().out)
         assert out["resumed"] is True and out["seeded"] is False
-        assert record.pending_seed == "not yet delivered"
+        assert state["pending_seed"] == "not yet delivered"
 
     def test_create_detached_session_and_seed(self, monkeypatch, capfd, tmp_path):
         _stub_config(monkeypatch)
@@ -350,19 +352,23 @@ class TestCmdEmbody:
     ):
         """An unconfirmed delivery (pane never ready in time) must not lose
         the pending prompt -- a later attach should still be able to retry
-        it, so the record is left untouched."""
+        it. The claim-then-restore race guard clears it optimistically and
+        restores it on an unconfirmed delivery, so the net final state is
+        unchanged even though save_record is invoked twice."""
         _stub_config(monkeypatch)
         monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtQ")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         (tmp_path / "wtQ.yaml").write_text("x")
-        record = type(
-            "Rec", (), {"worktree_path": "/w/wtQ", "pending_seed": "still queued"},
-        )()
-        monkeypatch.setattr(m.tracking, "load_record", lambda p: record)
-        monkeypatch.setattr(
-            m.tracking, "save_record",
-            lambda rec, path: pytest.fail("must not clear an unconfirmed seed"),
-        )
+        state = {"worktree_path": "/w/wtQ", "pending_seed": "still queued"}
+
+        def _load(p):
+            return type("Rec", (), dict(state))()
+
+        def _save(rec, path):
+            state["pending_seed"] = rec.pending_seed
+
+        monkeypatch.setattr(m.tracking, "load_record", _load)
+        monkeypatch.setattr(m.tracking, "save_record", _save)
         monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
         monkeypatch.setattr(
             sessions, "mux_new_session",
@@ -381,7 +387,7 @@ class TestCmdEmbody:
         assert rc == 0
         out = json.loads(capfd.readouterr().out)
         assert out["seeded"] is False
-        assert record.pending_seed == "still queued"
+        assert state["pending_seed"] == "still queued"
 
     def test_explicit_seed_wins_over_pending_and_leaves_it_untouched(
         self, monkeypatch, capfd, tmp_path,

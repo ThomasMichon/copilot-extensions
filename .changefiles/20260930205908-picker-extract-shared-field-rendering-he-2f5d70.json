@@ -1,0 +1,9 @@
+{
+  "comment": "Picker: extract shared field-rendering helper, add a SeedPromptScreen for New-worktree's optional first-turn prompt (behind an internal flag until the delivery seam is complete).",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -3312,6 +3312,36 @@ class TestSystemWorktreeKind:
         raw = (tmp_path / "wt-unbound.yaml").read_text(encoding="utf-8")
         assert "bound_agent" not in raw
 
+    def test_create_new_record_pending_seed_round_trips(self, tmp_path: Path):
+        """picker-new-session-prompt-and-composer: a prompt persisted at
+        creation time (`create`/`resolve --new --seed`) round-trips through
+        real save/load (not a fake), including a multiline value and YAML
+        special characters; a worktree with none carries no pending_seed
+        key at all (legacy-shape preserved, mirrors bound_agent)."""
+        multiline = 'fix the "flaky" test:\n- check retries\n- see #123'
+        rec = create_new_record(
+            "wt-seeded", "worktree/wt-seeded", "/tmp/wt-seeded", "test-repo",
+            "test", "wsl", tmp_path, pending_seed=multiline,
+        )
+        assert rec.pending_seed == multiline
+        loaded = load_record(tmp_path / "wt-seeded.yaml")
+        assert loaded.pending_seed == multiline
+
+        unseeded = create_new_record(
+            "wt-unseeded", "worktree/wt-unseeded", "/tmp/wt-unseeded",
+            "test-repo", "test", "wsl", tmp_path,
+        )
+        assert unseeded.pending_seed is None
+        raw = (tmp_path / "wt-unseeded.yaml").read_text(encoding="utf-8")
+        assert "pending_seed" not in raw
+
+        # Clearing (the embody consumption contract) and re-saving must omit
+        # the key again, not emit it as an empty/null scalar.
+        loaded.pending_seed = None
+        save_record(loaded, tmp_path / "wt-seeded.yaml")
+        raw = (tmp_path / "wt-seeded.yaml").read_text(encoding="utf-8")
+        assert "pending_seed" not in raw
+
     def test_create_new_record_bound_agent_whitespace_normalizes_to_none(
         self, tmp_path: Path,
     ):

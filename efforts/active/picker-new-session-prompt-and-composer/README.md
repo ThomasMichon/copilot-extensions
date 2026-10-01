@@ -8,6 +8,20 @@
 - **Vision:** `picker` (no existing §Features entry yet -- candidate follow-up
   once Phase A lands)
 
+## Documentation impact
+
+New CLI help text (`agent-worktrees create --seed`/`resolve --new --seed`)
+is self-documenting at the flag level; no separate CLI reference doc exists
+for these commands to update. No vision, architecture, or operating
+procedure doc describes the New-worktree creation flow at a level this
+change affects -- behavior is additive and, for the Picker's own live flow,
+currently gated off (`_SEED_PROMPT_ENABLED = False`) pending the remaining
+`launch-session.{ps1,sh}`/`engine_client.py` seams, so no user-facing
+documentation yet describes a capability that doesn't yet work end-to-end.
+This effort's own README (here) is the authoritative in-progress record of
+what's implemented vs. outstanding, kept current in its Plan/Journal each
+session.
+
 ## Guiding Intent
 
 Two creation flows in the Picker both want the SAME missing capability --
@@ -177,11 +191,6 @@ real code, not assumption:
       `FocusGroup` button row, Enter-from-textarea advances to it (mirroring
       `PivotFormScreen`'s single-question path). 5 new Pilot tests cover
       launch/skip/escape/blank-launch/whitespace-stripping.
-- [ ] Build a new, lean creation-prompt screen (its own class -- NOT a reuse
-      of `PivotFormScreen` itself, whose Confirm/Save/Reset button row and
-      draft-persistence semantics don't fit a "collect one optional prompt
-      before launch" flow) using the extracted helper for the one `textarea`
-      field it needs.
 - [x] Chain it into `_open_optmenu()`'s flow: after `ScopeDlgScreen`
       confirms (and only when "Bare" is NOT selected -- a bare worktree gets
       no Copilot bootstrap at all, so a seed prompt has nothing to attach
@@ -613,3 +622,66 @@ both consumption paths end-to-end before #1/#2 are tackled. Everything
 else in the chain (persistence, both consumption paths, the Picker UI
 collecting the prompt and threading it onto `LaunchRequest`) is
 implemented and tested.
+
+### 2026-09-30 — PR #4768 opened, then hardened against real Copilot review findings
+Pushed and opened PR #4768 for Phase A items 1-4. Its automated review came
+back `COMMENTED` with 2 HIGH + 4 MEDIUM/LOW findings, all legitimate --
+fixed rather than dismissed:
+
+- **HIGH -- discarded prompt:** confirmed `LaunchRequest.seed_prompt` never
+  reaches `resolve_launch_plan()` (the `engine_client.py` module-size
+  blocker above), so the live Picker flow would silently drop a typed
+  prompt. Fixed by gating `SeedPromptScreen` out of `_open_optmenu()`'s
+  live flow behind a new `_SEED_PROMPT_ENABLED = False` module constant
+  (`engine_maintenance_actions.py`) until both remaining seams land --
+  the screen/helper/persistence/consumption code all stay built and
+  tested, just not yet user-visible. The two integration tests
+  (`test_new_worktree_bare_skips_seed_prompt`,
+  `..._seed_prompt_carries_through`) now force the flag on via
+  `monkeypatch` to keep exercising the real wiring; the other five
+  pre-existing New-worktree tests reverted to their original (no extra
+  screen hop) expectations.
+- **HIGH -- unsafe pane targeting:** `cmd_embody`'s resume-path delivery
+  used `mux_copilot_pane(wt_id) or mux_active_pane(wt_id)` -- the fallback
+  is "whatever pane is currently active" (could be a bare shell), while
+  `mux_seed_pane` treats any `❯` as ready and would happily submit the
+  prompt as a shell command. Fixed: delivery now requires the
+  registry-identified `mux_copilot_pane(wt_id)` specifically; the
+  display-only `new_pane` JSON field keeps the friendlier fallback (purely
+  informational, never a delivery target).
+- **MEDIUM -- duplicate-delivery race:** two concurrent resume attempts
+  could both read the same `pending_seed` and both call `mux_seed_pane`.
+  Fixed with an explicit claim/restore pattern under `tracking._RecordLock`
+  (new `_claim_pending_seed`/`_restore_pending_seed` helpers in
+  `handoff_cli.py`): the claim (load -> clear -> save) is a short locked
+  RMW per this codebase's own documented lock-scoping convention ("never
+  hold the lock across I/O"); the slow `mux_seed_pane` wait happens
+  unlocked afterward, with a second short locked RMW to restore the text
+  only if delivery goes unconfirmed. Applied to BOTH consumption sites
+  (create path and resume path).
+- **MEDIUM -- missing real round-trip coverage:** the embody tests all
+  replace `load_record`/`save_record` with fakes, so they couldn't catch a
+  YAML-serialization bug. Added
+  `test_create_new_record_pending_seed_round_trips` (mirrors the existing
+  `..._bound_agent_round_trips` test exactly): a multiline, YAML-special-
+  character prompt through real `create_new_record`/`load_record`, the
+  no-prompt case omits the key entirely, and clearing + re-saving omits it
+  again (not an empty/null scalar).
+- **LOW fixes:** added this "Documentation impact" section (above) and a
+  patch changefile for each touched plugin (`agent-worktrees`,
+  `worktree-manager`, via `tools/changefile.py add`); replaced a personal
+  machine-name alias (`tmichon-cloud1`) in a new test with a neutral
+  `example-host` placeholder.
+
+Also found and fixed two leftover duplicate/stale Plan checkboxes in this
+README from an earlier editing pass (a duplicated, unchecked "build a new
+lean creation-prompt screen" item sitting right under its own already-
+`[x]`'d entry) -- the review flagged the doc at those exact line numbers.
+
+Tests after all fixes: `handoff_cli`/`tracking` targeted regression set
+(480 passed, now including the new round-trip test), full
+`production_picker` suite (848 passed, 1 pre-existing skip). Both
+`handoff_cli.py` and `tracking.py` stayed within their module-size budgets
+throughout (1000/1000 and 4082/4082 respectively -- genuinely zero slack
+left in `handoff_cli.py` now; any FURTHER addition there needs its own
+trim-or-split, same as `engine_client.py` already does).

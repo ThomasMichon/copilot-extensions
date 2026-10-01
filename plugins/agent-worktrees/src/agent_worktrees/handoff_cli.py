@@ -222,6 +222,35 @@ def _resolve_codename_anywhere(codename_arg: str) -> tuple[str | None, str | Non
     return None, f"No worktree found with codename '{codename_arg}'"
 
 
+def _claim_pending_seed(path: Path) -> str | None:
+    """Atomically claim+clear a ``pending_seed`` (race-safe: see caller)."""
+    with tracking._RecordLock(path) as lk:
+        if not lk.acquired:
+            return None
+        try:
+            record = tracking.load_record(path)
+        except Exception:
+            return None
+        seed = getattr(record, "pending_seed", None)
+        if seed:
+            record.pending_seed = None
+            tracking.save_record(record, path)
+        return seed or None
+
+
+def _restore_pending_seed(path: Path, seed: str) -> None:
+    """Roll back an unconfirmed claim so a later attach can retry."""
+    with tracking._RecordLock(path) as lk:
+        if lk.acquired:
+            try:
+                record = tracking.load_record(path)
+            except Exception:
+                return
+            if not record.pending_seed:
+                record.pending_seed = seed
+                tracking.save_record(record, path)
+
+
 def cmd_embody(args: argparse.Namespace) -> int:
     """Create or resume a **detached** mux+Copilot CLI session in a worktree (D5).
 
@@ -326,7 +355,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
 
     record = None
     selection = profile_assignment.LaunchProfileSelection(profile=None)
-    seed_from_pending = False
+    claimed_seed: str | None = None
     if not already:
         try:
             record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
@@ -334,17 +363,15 @@ def cmd_embody(args: argparse.Namespace) -> int:
             if not make_new:
                 return _json_error(f"Worktree record not found: {wt_id}")
         if record is not None:
-            # picker-new-session-prompt-and-composer Phase A item 4: an
-            # explicit --seed always wins; absent one, a prompt persisted at
-            # creation time (`create`/`resolve --new --seed`) is delivered
-            # here instead -- this is the first (and here, only) real
-            # attach for a brand-new worktree. Cleared below only once
-            # actually confirmed delivered (`seed_result["ok"]`), so an
-            # unconfirmed delivery (pane never became ready in time) can
-            # still be retried by a later attach instead of being lost.
-            if not seed and getattr(record, "pending_seed", None):
-                seed = record.pending_seed
-                seed_from_pending = True
+            # An explicit --seed always wins; absent one, a prompt
+            # persisted at creation time (`create`/`resolve --new --seed`)
+            # is delivered here instead -- the first real attach for a
+            # brand-new worktree. Claimed (cleared) under the record's
+            # write guard so a concurrent attach can't double-deliver it;
+            # restored below if delivery goes unconfirmed.
+            if not seed:
+                claimed_seed = _claim_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml")
+                seed = claimed_seed
             backend_error = _unsupported_hosted_launch(
                 record,
                 "embody",
@@ -387,31 +414,31 @@ def cmd_embody(args: argparse.Namespace) -> int:
         return 0
 
     if already:
-        # picker-new-session-prompt-and-composer Phase A item 4: a pending
-        # prompt from creation time may still be unconsumed if whatever
-        # first stood up this worktree's mux pane did so OUTSIDE this
-        # function (e.g. the Picker's own launch-session.{ps1,sh}, which
-        # creates the `wt-<id>` pane directly rather than calling embody).
-        # Deliver it here too, on this same "pane already exists" path --
-        # an explicit --seed is deliberately NOT delivered on resume (one
-        # live session per worktree; this is the resume path, not a fresh
-        # attach), only a persisted pending_seed is.
-        resumed_pane = sessions.mux_copilot_pane(wt_id) or sessions.mux_active_pane(wt_id)
+        # A pending prompt from creation time may still be unconsumed if
+        # whatever first stood up this worktree's mux pane did so OUTSIDE
+        # this function (e.g. the Picker's launch-session.{ps1,sh}, which
+        # creates the `wt-<id>` pane directly). Deliver it here too -- only
+        # against the registry-identified Copilot pane (never the generic
+        # "active pane" fallback, which could be a bare shell or something
+        # else entirely); claimed under the write guard so a concurrent
+        # resume can't double-deliver it, restored if unconfirmed.
+        display_pane = sessions.mux_copilot_pane(wt_id) or sessions.mux_active_pane(wt_id)
+        copilot_pane = sessions.mux_copilot_pane(wt_id)
+        claimed = None
+        if copilot_pane:
+            try:
+                claimed = _claim_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml")
+            except Exception:
+                claimed = None
         pending_seed_result = {}
-        try:
-            resumed_record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
-        except Exception:
-            resumed_record = None
-        pending = getattr(resumed_record, "pending_seed", None) if resumed_record else None
-        if pending and resumed_pane:
+        if claimed:
             pending_seed_result = sessions.mux_seed_pane(
-                resumed_pane, pending,
+                copilot_pane, claimed,
                 ready_timeout=getattr(args, "seed_ready_timeout", None) or 180.0,
             )
-            if pending_seed_result.get("ok"):
+            if not pending_seed_result.get("ok"):
                 try:
-                    resumed_record.pending_seed = None
-                    tracking.save_record(resumed_record, cfg.tracking_dir() / f"{wt_id}.yaml")
+                    _restore_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml", claimed)
                 except Exception:
                     pass
         _json_output(
@@ -422,9 +449,9 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 "work_dir": work_dir,
                 "created": False,
                 "resumed": True,
-                "new_pane": resumed_pane,
+                "new_pane": display_pane,
                 "note": "a live mux session already embodies this worktree",
-                "seeded": bool(pending_seed_result.get("ok")) if pending else False,
+                "seeded": bool(pending_seed_result.get("ok")) if claimed else False,
             }
         )
         return 0
@@ -546,15 +573,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
         if (new_pane and seed)
         else {}
     )
-    if seed_from_pending and seed_result.get("ok") and record is not None:
-        # Confirmed delivered -- clear so a later attach doesn't re-type it.
-        # An unconfirmed delivery (pane never ready in time) deliberately
-        # leaves it in place for a future attach to retry.
-        try:
-            record.pending_seed = None
-            tracking.save_record(record, cfg.tracking_dir() / f"{wt_id}.yaml")
-        except Exception:
-            pass
+    if claimed_seed and not seed_result.get("ok"):
+        _restore_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml", claimed_seed)
 
     verified = None
     verify_timeout = getattr(args, "verify_timeout", 0.0) or 0.0

@@ -36,7 +36,7 @@ class _Host(App):
 
 
 def test_seed_prompt_launch_returns_typed_text():
-    scr = SeedPromptScreen(target="tmichon-cloud1 local")
+    scr = SeedPromptScreen(target="example-host local")
     app = _Host(scr)
 
     async def run():
