@@ -107,7 +107,10 @@ def resolve_launch_pref_flags(passthrough: list[str]) -> list[str]:
     flags: list[str] = []
     for key, flag in _LAUNCH_PREF_FLAGS.items():
         value = settings.get(key)
-        if not isinstance(value, str) or not value:
+        if not isinstance(value, str):
+            continue
+        value = value.strip()
+        if not value:
             continue
         if _flag_already_present(passthrough, flag):
             continue

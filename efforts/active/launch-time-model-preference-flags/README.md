@@ -93,6 +93,16 @@ rule.
       unrelated to this change (no file this effort touches is anywhere
       near `test_git_ops.py`).
 
+## Proposal
+
+Phase 1's design *is* the proposal: a small, standalone module
+(`copilot_launch_prefs`) that reads the persisted settings file and
+translates it into CLI flags, wired into the one existing launch-command
+builder (`_build_launch_cmd`) rather than duplicated per launch-path branch.
+No further design iteration was needed — the plan above was implemented as
+originally scoped, with precedence/ACP/whitespace edge cases folded in
+during automated-review iteration rather than requiring a redesign.
+
 ## Journal
 
 ### 2026-09-30 — Implemented and validated
@@ -109,3 +119,15 @@ rule.
   `copilot_args`), excluded ACP sessions (Copilot ignores these flags
   there), added comment-tolerant settings parsing, and removed private/
   internal identifiers from this document.
+- Addressed a second review round: ACP detection now also inspects a
+  template-embedded `--acp` (applied uniformly to the pre-existing
+  `--allow-all` suppression too, same class of gap); persisted values are
+  trimmed before validation/emission so a whitespace-only or padded value
+  can't become an invalid CLI argument; added the required `## Proposal`
+  section. Attempted a plugin-wide conftest fixture for the
+  "isolate across all test modules" finding, but caught in validation that
+  it *conflicted* with the pre-existing `_isolate_agent_worktrees_home`
+  fixture (both patch the same global `pathlib.Path.home` classmethod,
+  each overwriting the other's fake home) — reverted to documenting and
+  regression-testing that the existing fixture already covers this for
+  free, since `copilot_launch_prefs`'s `Path` is the identical class object.

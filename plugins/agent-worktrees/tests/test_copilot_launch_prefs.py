@@ -92,6 +92,16 @@ def test_non_string_or_empty_values_are_skipped(tmp_path, monkeypatch):
     assert prefs.resolve_launch_pref_flags([]) == []
 
 
+def test_whitespace_only_value_is_skipped(tmp_path, monkeypatch):
+    _write_settings(tmp_path, monkeypatch, {"model": "   "})
+    assert prefs.resolve_launch_pref_flags([]) == []
+
+
+def test_padded_value_is_trimmed_before_emission(tmp_path, monkeypatch):
+    _write_settings(tmp_path, monkeypatch, {"model": " claude-sonnet-5 "})
+    assert prefs.resolve_launch_pref_flags([]) == ["--model", "claude-sonnet-5"]
+
+
 def test_caller_supplied_bare_flag_is_never_duplicated(tmp_path, monkeypatch):
     _write_settings(tmp_path, monkeypatch, {"model": "claude-sonnet-5"})
     assert prefs.resolve_launch_pref_flags(["--model", "gpt-5.4"]) == []

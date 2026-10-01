@@ -2347,8 +2347,12 @@ def _build_launch_cmd(
     # session never stalls on a tool, path, or URL prompt.  Skip ACP
     # sessions (agent-bridge manages permissions over the protocol) and
     # never duplicate an all-permissions flag the caller already supplied.
+    # ACP detection inspects the complete command assembled so far (not just
+    # copilot_args/profile args), so a configured `launch` template that
+    # embeds `--acp` directly is detected too -- same class of gap as the
+    # duplicate-flag check below, applied uniformly.
     passthrough = list(extra) + list(profile_args)
-    is_acp = "--acp" in passthrough
+    is_acp = "--acp" in cmd
     if not is_acp and not any(
         a == flag for a in passthrough for flag in ("--allow-all-tools", "--allow-all", "--yolo")
     ):
