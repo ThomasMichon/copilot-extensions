@@ -725,11 +725,10 @@ def test_receipts_log_is_bounded_under_sustained_emission(tmp_path, monkeypatch)
     assert result["receipts"][0]["dedup_key"] == "k:3"
 
 
-def test_read_receipts_cursor_stable_across_a_trim(tmp_path, monkeypatch):
-    """A cursor taken BEFORE a trim must still make sense after it: a trim
-    only drops already-old, already-consumed records -- it never reuses or
-    renumbers a ``seq``, so a consumer that already advanced past the
-    trimmed records sees no gap and no duplicate."""
+def test_read_receipts_reports_gap_when_cursor_predates_a_trim(tmp_path, monkeypatch):
+    """A cursor taken BEFORE receipts between it and the oldest retained
+    record were trimmed away must be flagged, not silently treated as a
+    clean "nothing new" read -- the caller has an incomplete handoff."""
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
     for n in range(3):
         emitter._append_receipts(
@@ -745,7 +744,46 @@ def test_read_receipts_cursor_stable_across_a_trim(tmp_path, monkeypatch):
             clock=lambda n=n: float(n), max_receipts=5,
         )
 
-    # Nothing new since the earlier cursor was already trimmed away --
-    # reading from it must not resurrect or duplicate already-seen records.
+    # Records 4-5 existed and were trimmed before this cursor consumed them
+    # -- the read must say so, not quietly return 6-10 as if it were complete.
     stale_read = emitter.read_receipts("review-inbox", since=cursor)
+    assert stale_read["gap"] is True
     assert all(r["seq"] > cursor for r in stale_read["receipts"])
+
+
+def test_read_receipts_reports_no_gap_when_cursor_is_current(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    for n in range(3):
+        emitter._append_receipts(
+            "review-inbox", [{"id": f"t-{n}", "dedup_key": f"k:{n}"}],
+            clock=lambda n=n: float(n), max_receipts=100,
+        )
+    cursor = emitter.read_receipts("review-inbox")["cursor"]
+
+    emitter._append_receipts(
+        "review-inbox", [{"id": "t-3", "dedup_key": "k:3"}],
+        clock=lambda: 3.0, max_receipts=100,
+    )
+
+    fresh_read = emitter.read_receipts("review-inbox", since=cursor)
+    assert fresh_read["gap"] is False
+    assert [r["dedup_key"] for r in fresh_read["receipts"]] == ["k:3"]
+
+
+def test_append_receipts_serializes_concurrent_writers(tmp_path, monkeypatch):
+    """Two 'overlapping' writers (a periodic tick and an on-demand side-load,
+    modeled here as two direct ``_append_receipts`` calls) must never choose
+    the same ``seq`` or clobber each other's record -- the receipts
+    transaction is locked, not a bare unlocked read-modify-write."""
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+
+    for n in range(20):
+        emitter._append_receipts(
+            "review-inbox", [{"id": f"t-{n}", "dedup_key": f"k:{n}"}],
+            clock=lambda n=n: float(n), max_receipts=1000,
+        )
+
+    result = emitter.read_receipts("review-inbox")
+    seqs = [r["seq"] for r in result["receipts"]]
+    assert seqs == list(range(1, 21)), "no duplicate/skipped seq under serialized writes"
+    assert len({r["dedup_key"] for r in result["receipts"]}) == 20

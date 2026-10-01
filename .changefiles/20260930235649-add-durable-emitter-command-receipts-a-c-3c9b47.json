@@ -1,0 +1,9 @@
+{
+  "comment": "Add durable emitter-command receipts: a command-emitter's created tasks (dedup_key -> real task id) are now recorded in a per-emitter log readable on a later tick, with a cursor-based CLI read and direct env exposure.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
