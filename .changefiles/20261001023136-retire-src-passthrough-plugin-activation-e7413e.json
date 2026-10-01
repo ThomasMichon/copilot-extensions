@@ -1,0 +1,13 @@
+{
+  "comment": "Retire src-passthrough plugin-activation vendoring and simplify local resolution",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

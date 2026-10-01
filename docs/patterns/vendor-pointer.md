@@ -173,11 +173,10 @@ Reference example: `plugins/agent-pull-requests/scripts/install.{sh,ps1}`.
 
 ## What is *not* the current adoption path
 
-`src-passthrough` `VENDOR_POINTER.json` directory pointers are historical, not
-the preferred mechanism for new work. They survive only as legacy holdouts
-where the current two forms do not yet fit cleanly. New conversions should use
-the file-pointer form or the canonical-reference form above, not introduce a
-new `src-passthrough` adopter.
+`src-passthrough` `VENDOR_POINTER.json` directory pointers are retired. New
+and existing work should use the file-pointer form or the canonical-reference
+form above; no live repo consumer still depends on the older directory-pointer
+mechanism.
 
 ## See Also
 
