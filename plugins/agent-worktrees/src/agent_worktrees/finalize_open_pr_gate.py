@@ -30,8 +30,80 @@ live.
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from . import output, tracking
 from .config import Config
+
+
+def _authority_origin(value: str) -> tuple[str, str, int] | None:
+    """Parse ``value`` (an ``authority_endpoint()`` result OR a tracked PR
+    URL) into a comparable ``(scheme, host, port)`` origin triple, or
+    ``None`` when it cannot be confidently parsed (no host). Port defaults
+    per-scheme (``http`` -> 80, ``https`` -> 443) when not explicit, so
+    ``http://host`` and ``http://host:80`` compare equal while
+    ``http://host`` and ``https://host`` -- a DIFFERENT origin entirely --
+    do not.
+    """
+    value = (value or "").strip()
+    if not value:
+        return None
+    parsed = urlparse(value if "://" in value else f"//{value}")
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return None
+    scheme = (parsed.scheme or "https").lower()
+    port = parsed.port
+    if port is None:
+        port = {"http": 80, "https": 443}.get(scheme)
+    return scheme, host, port
+
+
+def _authority_path_parts(value: str) -> list[str]:
+    """Extract the non-empty path segments of an ``authority_endpoint()``
+    result or a tracked PR URL (e.g. Azure DevOps' organization segment in
+    ``https://dev.azure.com/<org>``, or a path-hosted Gitea instance's root
+    in ``https://forge.example/gitea``). GitHub's endpoint never carries a
+    path, so this is empty for it.
+    """
+    value = (value or "").strip()
+    if not value:
+        return []
+    parsed = urlparse(value if "://" in value else f"//{value}")
+    return [part for part in (parsed.path or "").split("/") if part]
+
+
+def _authority_matches(tracked_url: str, expected_endpoint: str) -> bool:
+    """True iff ``tracked_url``'s authority is consistent with the
+    configured provider's ``expected_endpoint`` -- the full origin (scheme,
+    host, and effective port) must match exactly, AND when the expected
+    endpoint itself carries a path (Azure DevOps' organization, or a
+    path-hosted Gitea instance's root), the tracked URL's path must fall
+    under that same root.
+
+    Fails CLOSED (returns ``False``) whenever either side cannot be
+    confidently parsed into a definite origin -- the caller must then
+    treat the PR as indeterminate rather than silently skip the check.
+    Comparing host[:port] alone is not enough either: it collapses
+    ``http://`` and ``https://`` onto the same value, which would let a
+    tracked PR on one scheme be confirmed against a configured endpoint on
+    the OTHER scheme as though they were the same service. And two
+    different Azure DevOps organizations -- or two different Gitea
+    instances path-hosted on the same shared host -- would otherwise
+    compare as the same authority, letting a stale tracked PR be re-queried
+    against an unrelated org/instance and confirm the wrong merge.
+    """
+    tracked_origin = _authority_origin(tracked_url)
+    expected_origin = _authority_origin(expected_endpoint)
+    if tracked_origin is None or expected_origin is None:
+        return False
+    if tracked_origin != expected_origin:
+        return False
+    base_parts = _authority_path_parts(expected_endpoint)
+    if not base_parts:
+        return True
+    tracked_parts = _authority_path_parts(tracked_url)
+    return tracked_parts[: len(base_parts)] == base_parts
 
 
 def dirty_worktree_error(worktree_path: str, *, wt_exists: bool) -> str | None:
@@ -125,13 +197,45 @@ def _tracked_branch_ahead(
 
 
 def pr_merge_status(record: tracking.WorktreeRecord, repo) -> bool | None:
-    """Tri-state merge lookup: ``True`` (confirmed merged), ``False``
-    (confirmed NOT merged -- no ``pr`` at all, or NEITHER ``number`` nor
-    ``repo`` recorded, meaning a PR was never even opened -- nothing that
-    could have merged), ``None`` (indeterminate: a PR record exists with
-    identifying fields but is otherwise unqueryable -- exactly ONE of
-    ``number``/``repo`` present, or a provider/network error, #4400 rounds
-    13-14).
+    """Tri-state merge lookup for ``record.pr`` (the ACTIVE tracked PR) --
+    see :func:`_pr_entry_merge_status` for the full contract. ``False`` when
+    there is no ``pr`` at all (nothing that could have merged); otherwise
+    delegates to the entry-level lookup, which also repairs ``pr.head_sha``
+    in place on a confirmed merge.
+
+    Also best-effort repairs every OTHER tracked PR's own missing
+    ``head_sha`` (:func:`repair_other_tracked_pr_heads`) -- this is the ONE
+    call site every finalize path reaches unconditionally (``finalize.py``'s
+    ``_pr_is_merged`` always calls it before the per-branch boundary check
+    runs), so piggybacking the repair here, rather than requiring every
+    caller to remember it separately, closes the gap for all of them.
+    """
+    pr = getattr(record, "pr", None)
+    if not pr:
+        return False
+    try:
+        repair_other_tracked_pr_heads(record, repo)
+    except Exception:
+        pass
+    return _pr_entry_merge_status(pr, repo)
+
+
+def _pr_entry_merge_status(pr, repo) -> bool | None:
+    """Tri-state merge lookup for a single tracked PR entry: ``True``
+    (confirmed merged), ``False`` (confirmed NOT merged -- neither
+    ``number`` nor ``repo`` recorded, meaning a PR was never even opened --
+    nothing that could have merged), ``None`` (indeterminate: a PR record
+    exists with identifying fields but is otherwise unqueryable -- exactly
+    ONE of ``number``/``repo`` present, or a provider/network error, #4400
+    rounds 13-14).
+
+    Generalized out of :func:`pr_merge_status` (which calls this for
+    ``record.pr``, the active PR) so :func:`repair_other_tracked_pr_heads`
+    can apply the SAME authority-validated repair to every OTHER tracked PR
+    entry too -- a worktree can carry more than one tracked
+    :class:`~agent_worktrees.tracking.PRRecord` (``record.prs``), and each
+    one's own merged ``head_sha`` is needed independently by
+    ``content_exceeds_merged_head_any``'s per-branch boundary check.
 
     ``finalize._pr_is_merged`` collapses ``None`` into ``False`` for ITS OWN
     fail-closed purpose (never certify unmerged-or-unknown work safe to
@@ -144,29 +248,109 @@ def pr_merge_status(record: tracking.WorktreeRecord, repo) -> bool | None:
     unmerged would let a tree-only upstream match certify and prune a
     record whose merge boundary genuinely can't be checked.
     """
-    pr = getattr(record, "pr", None)
-    if not pr:
-        return False
-    if getattr(pr, "state", "") == "merged":
+    head_sha = (getattr(pr, "head_sha", "") or "").strip()
+    if getattr(pr, "state", "") == "merged" and head_sha:
         return True
     number = getattr(pr, "number", None)
     slug = getattr(pr, "repo", "") or ""
     if not number and not slug:
-        return False
+        return None if getattr(pr, "state", "") == "merged" else False
     if not number or not slug:
         return None
     prcfg = repo.pr
+    provider_name = getattr(pr, "provider", "") or prcfg.provider
+    if provider_name != prcfg.provider:
+        # A legacy/stale record can retain a different provider than the
+        # repo is now configured for; querying the configured provider with
+        # that slug/number could confirm an unrelated merged PR and hand
+        # back the wrong head. Fail closed rather than trust it (mirrors
+        # pr_ops.py's active-PR mismatch check).
+        return None
     try:
         from . import providers
         provider = providers.get_provider(prcfg.provider)
+        tracked_url = (getattr(pr, "url", "") or "").strip()
+        if tracked_url:
+            expected_endpoint = provider.authority_endpoint(
+                getattr(prcfg, "api_base", "") or "",
+            )
+            if not _authority_matches(tracked_url, expected_endpoint):
+                # Same provider kind, but the configured authority has
+                # since changed -- a different GitHub Enterprise host, a
+                # different Azure DevOps organization on the shared
+                # dev.azure.com host, or a different Gitea instance
+                # path-hosted on the same shared host. Querying the NEW
+                # authority with the OLD slug/number can confirm an
+                # unrelated merged PR there and hand back the wrong head.
+                return None
         token = providers.account_token_for_slug(slug, prcfg)
         result = provider.get_pull(
             slug, int(number),
             api_base=getattr(prcfg, "api_base", "") or "", token=token,
         )
-        return bool(getattr(result, "merged", False))
+        merged = bool(getattr(result, "merged", False)) or (
+            (getattr(result, "state", "") or "").strip().lower() == "merged"
+        )
+        if not merged:
+            return False
+        if not head_sha:
+            head_sha = (getattr(result, "head_sha", "") or "").strip()
+            if not head_sha:
+                # Best-effort fallback for providers whose get_pull() doesn't
+                # eagerly report head_sha -- not every provider supports this
+                # (e.g. Azure DevOps deliberately keeps observe_head()
+                # unsupported, since it has no server-clock timestamp to
+                # satisfy that method's contract; its merged head comes from
+                # get_pull() above instead), so swallow any failure here.
+                try:
+                    observed = provider.observe_head(
+                        slug, int(number),
+                        api_base=getattr(prcfg, "api_base", "") or "",
+                        token=token,
+                    )
+                    head_sha = (getattr(observed, "head_sha", "") or "").strip()
+                except Exception:
+                    head_sha = ""
+            if head_sha:
+                pr.head_sha = head_sha
+        pr.state = "merged"
+        return True
     except Exception:
         return None
+
+
+def repair_other_tracked_pr_heads(record: tracking.WorktreeRecord, repo) -> None:
+    """Best-effort, authority-validated repair of every OTHER tracked PR's
+    missing ``head_sha`` -- not just ``record.pr`` (the active entry).
+
+    ``upstream_match_is_trustworthy`` only ever repairs ``record.pr`` before
+    delegating to :func:`content_exceeds_merged_head_any`, which also
+    inspects every ``record.prs[*]`` branch finalize's cleanup will
+    force-delete and fails CLOSED when any such branch's own tracked PR is
+    missing ``head_sha`` (:func:`_cleanup_branch_refs`). A legacy worktree
+    carrying more than one merged PR could therefore never finalize even
+    when every one of them is confirmable and repairable via the provider --
+    only the active entry ever got the repair attempt. Call this before the
+    boundary check so each OTHER entry gets the same chance.
+
+    Mutates each repairable entry's ``head_sha``/``state`` in place via
+    :func:`_pr_entry_merge_status` (same authority validation, same
+    provider/network error handling). Never raises; a per-entry failure
+    just leaves that entry's local state untouched, to be caught by the
+    existing fail-closed boundary check.
+    """
+    active = getattr(record, "pr", None)
+    for entry in getattr(record, "prs", None) or []:
+        if entry is active:
+            continue
+        if (getattr(entry, "head_sha", "") or "").strip():
+            continue
+        if not getattr(entry, "number", None) or not (getattr(entry, "repo", "") or ""):
+            continue
+        try:
+            _pr_entry_merge_status(entry, repo)
+        except Exception:
+            pass
 
 
 def upstream_match_is_trustworthy(
@@ -215,10 +399,17 @@ def upstream_match_is_trustworthy(
     pr = getattr(record, "pr", None)
     head_sha = (getattr(pr, "head_sha", "") or "").strip()
     if not head_sha:
-        if pr_merge_status(record, repo) is not False:
+        merge_status = pr_merge_status(record, repo)
+        head_sha = (getattr(pr, "head_sha", "") or "").strip()
+        if not head_sha and merge_status is not False:
             return False
-        return not other_pr_branches_unreachable_from_upstream(record, upstream, cwd=cwd)
-    return not content_exceeds_merged_head_any(record, content_ref, upstream, cwd=cwd)
+        if not head_sha:
+            return not other_pr_branches_unreachable_from_upstream(
+                record, upstream, cwd=cwd,
+            )
+    return not content_exceeds_merged_head_any(
+        record, content_ref, upstream, cwd=cwd, repo=repo,
+    )
 
 
 def other_pr_branches_unreachable_from_upstream(
@@ -370,7 +561,8 @@ def content_exceeds_merged_head(
 
 
 def content_exceeds_merged_head_any(
-    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str, *, cwd: str,
+    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str, *,
+    cwd: str, repo=None,
 ) -> bool:
     """True iff ``content_ref`` OR any branch finalize's cleanup will
     force-delete carries commits beyond ITS OWN corresponding PR's merged
@@ -386,10 +578,22 @@ def content_exceeds_merged_head_any(
     THAT PR's own ``head_sha`` (never the active PR's, round 14) -- sharing
     one boundary across unrelated PRs can mask real content via unrelated
     ancestry. A tracked branch with no ``head_sha`` to validate against
-    fails closed.
+    fails closed -- UNLESS that missing ``head_sha`` can itself be repaired
+    first: when ``repo`` is supplied, :func:`repair_other_tracked_pr_heads`
+    attempts a provider-confirmed repair of every OTHER tracked PR's
+    missing ``head_sha`` before the per-branch check runs, so a worktree
+    carrying more than one merged PR isn't permanently blocked here just
+    because a non-active entry's cached head was never populated.
+    ``repo`` is optional (defaults to ``None``, skipping the repair) so
+    callers that already know no repair is possible/needed can omit it.
     """
     if content_ref is None:
         return True
+    if repo is not None:
+        try:
+            repair_other_tracked_pr_heads(record, repo)
+        except Exception:
+            pass
     if content_exceeds_merged_head(record, content_ref, upstream, cwd=cwd):
         return True
     from . import git_ops

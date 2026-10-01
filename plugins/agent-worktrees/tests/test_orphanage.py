@@ -14,7 +14,7 @@ import pytest
 
 import agent_worktrees.__main__ as m
 from agent_worktrees import config as cfg
-from agent_worktrees import finalize, tracking
+from agent_worktrees import cleanup, finalize, providers, tracking
 
 
 def _seed_project(tmp_path, monkeypatch, machine="m", project="p"):
@@ -27,7 +27,13 @@ def _claim(kind, ref, state="active", note=""):
 
 
 def _config(machine="m", project="p"):
-    return types.SimpleNamespace(machine=machine, repo_name=project)
+    return types.SimpleNamespace(
+        machine=machine,
+        repo_name=project,
+        default_repo=types.SimpleNamespace(
+            pr=types.SimpleNamespace(provider="github", api_base=""),
+        ),
+    )
 
 
 # ── rehome_abandoned_obligations / load_orphaned_obligations ─────────────────
@@ -141,6 +147,320 @@ def test_claims_orphans_empty_message(tmp_path, monkeypatch, capfd):
     rc = m.cmd_claims(argparse.Namespace(target=["orphans"], json=False))
     assert rc == 0
     assert "no re-homed obligations" in capfd.readouterr().out.lower()
+
+
+@pytest.mark.parametrize(
+    ("ref", "expected"),
+    [
+        (
+            "https://github.com/example/project/pull/42",
+            ("github", "example/project", 42, "github.com"),
+        ),
+        ("example/project#42", ("github", "example/project", 42, "")),
+    ],
+)
+def test_pr_claim_target_parses_github_references(ref, expected):
+    prcfg = types.SimpleNamespace(provider="github", api_base="")
+    assert cleanup._pr_claim_target(ref, prcfg) == expected
+
+
+def test_pr_claim_target_preserves_configured_github_enterprise_api():
+    prcfg = types.SimpleNamespace(
+        provider="github", api_base="https://github.example.com/api/v3",
+    )
+    assert cleanup._pr_claim_target(
+        "https://github.example.com/owner/project/pull/42", prcfg,
+    ) == ("github", "owner/project", 42, "https://github.example.com/api/v3")
+
+
+def test_pr_claim_target_rejects_unconfigured_github_enterprise_host():
+    prcfg = types.SimpleNamespace(provider="github", api_base="")
+    assert cleanup._pr_claim_target(
+        "https://untrusted.example/owner/project/pull/42", prcfg,
+    ) is None
+    assert cleanup._pr_claim_target(
+        "https://[broken/owner/project/pull/42", prcfg,
+    ) is None
+
+
+def test_pr_claim_target_honors_gh_host_ambient_authority(monkeypatch):
+    # api_base unconfigured but GH_HOST points at a GitHub Enterprise host --
+    # GitHubProvider.authority_endpoint() treats that as the effective
+    # authority, so a hardcoded "github.com" check would wrongly reject every
+    # valid full-URL claim on that host.
+    monkeypatch.setenv("GH_HOST", "github.example.com")
+    prcfg = types.SimpleNamespace(provider="github", api_base="")
+    assert cleanup._pr_claim_target(
+        "https://github.example.com/owner/project/pull/42", prcfg,
+    ) == ("github", "owner/project", 42, "github.example.com")
+    # The public host is no longer the ambient authority -- reject it.
+    assert cleanup._pr_claim_target(
+        "https://github.com/owner/project/pull/42", prcfg,
+    ) is None
+
+
+def test_pr_claim_target_preserves_gh_host_port(monkeypatch):
+    # An ambient GH_HOST authority carrying a port must survive into the
+    # resolved api_base -- a bare `parsed.hostname` drops the port, which
+    # would silently make get_pull() query the default port instead of the
+    # configured one.
+    monkeypatch.setenv("GH_HOST", "github.example.com:8443")
+    prcfg = types.SimpleNamespace(provider="github", api_base="")
+    assert cleanup._pr_claim_target(
+        "https://github.example.com:8443/owner/project/pull/42", prcfg,
+    ) == ("github", "owner/project", 42, "github.example.com:8443")
+    # A request to the same host but the wrong (default) port must still be
+    # rejected as a different authority.
+    assert cleanup._pr_claim_target(
+        "https://github.example.com/owner/project/pull/42", prcfg,
+    ) is None
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "https://github.com:8443/owner/project/pull/42",
+        "https://github.com/prefix/owner/project/pull/42",
+        "https://github.com/owner/project/pull/42/extra",
+        "http://github.com/owner/project/pull/42",
+        "https://github.com/owner/project/pull/42?redirect=elsewhere",
+        "https://github.com/owner/project/pull/42#comment",
+    ],
+)
+def test_pr_claim_target_rejects_noncanonical_public_github_urls(ref):
+    prcfg = types.SimpleNamespace(provider="github", api_base="")
+    assert cleanup._pr_claim_target(ref, prcfg) is None
+
+
+def test_pr_claim_target_rejects_unqualified_and_credentialed_urls():
+    prcfg = types.SimpleNamespace(provider="github", api_base="")
+    assert cleanup._pr_claim_target("#42", prcfg) is None
+    assert cleanup._pr_claim_target(
+        "https://user:password@example.com/owner/repo/pull/42", prcfg,
+    ) is None
+
+
+def test_pr_claim_target_resolves_configured_gitea_and_azure_devops():
+    gitea = types.SimpleNamespace(
+        provider="gitea", api_base="https://forge.example/gitea",
+    )
+    assert cleanup._pr_claim_target(
+        "https://forge.example/gitea/owner/project/pulls/12", gitea,
+    ) == ("gitea", "owner/project", 12, "https://forge.example/gitea")
+
+    ado = types.SimpleNamespace(
+        provider="azure-devops", api_base="https://dev.azure.com/acme",
+    )
+    assert cleanup._pr_claim_target(
+        "https://dev.azure.com/acme/Project/_git/repo/pullrequest/34", ado,
+    ) == (
+        "azure-devops", "Project/repo", 34, "https://dev.azure.com/acme",
+    )
+    assert cleanup._pr_claim_target(
+        "https://dev.azure.com/other/Project/_git/repo/pullrequest/34", ado,
+    ) is None
+
+
+def test_pr_claim_target_rejects_gitea_claim_under_different_root_path():
+    # A path-hosted Gitea instance's api_base is the instance ROOT, not the
+    # whole host -- same host/port/scheme alone doesn't prove the claim URL
+    # names the same application. A claim under a different root on that
+    # same host (a different app entirely) must be rejected, not queried
+    # against the configured root with its own repo/PR number.
+    gitea = types.SimpleNamespace(
+        provider="gitea", api_base="https://forge.example/gitea",
+    )
+    assert cleanup._pr_claim_target(
+        "https://forge.example/owner/project/pulls/12", gitea,
+    ) is None
+    assert cleanup._pr_claim_target(
+        "https://forge.example/other-app/owner/project/pulls/12", gitea,
+    ) is None
+    # Root-hosted Gitea (empty api_base path) is unaffected.
+    root_gitea = types.SimpleNamespace(
+        provider="gitea", api_base="https://forge.example",
+    )
+    assert cleanup._pr_claim_target(
+        "https://forge.example/owner/project/pulls/12", root_gitea,
+    ) == ("gitea", "owner/project", 12, "https://forge.example")
+
+
+def test_pr_claim_target_rejects_noncanonical_configured_github_enterprise_url():
+    # A configured GitHub Enterprise claim must match the EXACT canonical
+    # owner/repo/pull/N shape (four path segments, no query/fragment) --
+    # extra leading segments, or a query/fragment suffix, must be rejected
+    # rather than silently stripped down to the trailing four segments,
+    # which would extract the wrong repo identity.
+    ghe = types.SimpleNamespace(
+        provider="github", api_base="https://github.example.com/api/v3",
+    )
+    assert cleanup._pr_claim_target(
+        "https://github.example.com/unrelated/owner/project/pull/42", ghe,
+    ) is None
+    assert cleanup._pr_claim_target(
+        "https://github.example.com/owner/project/pull/42?x=1", ghe,
+    ) is None
+    assert cleanup._pr_claim_target(
+        "https://github.example.com/owner/project/pull/42", ghe,
+    ) == ("github", "owner/project", 42, "https://github.example.com/api/v3")
+
+
+def test_pr_claim_target_rejects_noncanonical_azure_devops_url():
+    # An Azure DevOps claim must match the EXACT canonical
+    # org/project/_git/repo/pullrequest/N shape -- an injected noncanonical
+    # segment anywhere in the path (e.g. between the org and project), or a
+    # query/fragment suffix, must be rejected rather than extracting a
+    # project/repo/number from a malformed URL as though it were genuine.
+    ado = types.SimpleNamespace(
+        provider="azure-devops", api_base="https://dev.azure.com/acme",
+    )
+    assert cleanup._pr_claim_target(
+        "https://dev.azure.com/acme/extra/Project/_git/repo/pullrequest/34",
+        ado,
+    ) is None
+    assert cleanup._pr_claim_target(
+        "https://dev.azure.com/acme/Project/_git/repo/pullrequest/34?x=1",
+        ado,
+    ) is None
+    assert cleanup._pr_claim_target(
+        "https://dev.azure.com/acme/Project/_git/repo/pullrequest/34", ado,
+    ) == ("azure-devops", "Project/repo", 34, "https://dev.azure.com/acme")
+
+
+def test_pr_claim_target_rejects_noncanonical_gitea_url():
+    # A Gitea claim must have EXACTLY four remaining segments
+    # (owner/project/pulls/N) after the configured root is stripped --
+    # extra noncanonical segments ahead of that trailing four, or a
+    # query/fragment suffix, must be rejected.
+    gitea = types.SimpleNamespace(
+        provider="gitea", api_base="https://forge.example/gitea",
+    )
+    assert cleanup._pr_claim_target(
+        "https://forge.example/gitea/extra/owner/project/pulls/12", gitea,
+    ) is None
+    assert cleanup._pr_claim_target(
+        "https://forge.example/gitea/owner/project/pulls/12?x=1", gitea,
+    ) is None
+
+
+def test_pr_claim_target_rejects_shorthand_for_non_github_providers():
+    # owner/repo#N is a GitHub-only grammar (sweep.py's _GH_PR_SHORT); Gitea
+    # and Azure DevOps claims always carry a full authority-bearing URL.
+    # Recognizing the shorthand there would let a legacy slug/number be
+    # re-queried against a different service if the provider ever changes.
+    gitea = types.SimpleNamespace(
+        provider="gitea", api_base="https://forge.example/gitea",
+    )
+    assert cleanup._pr_claim_target("owner/project#12", gitea) is None
+
+    ado = types.SimpleNamespace(
+        provider="azure-devops", api_base="https://dev.azure.com/acme",
+    )
+    assert cleanup._pr_claim_target("owner/project#34", ado) is None
+
+
+def test_pr_claim_target_rejects_shorthand_when_gh_host_is_non_default(
+    monkeypatch,
+):
+    # The owner/repo#N shorthand carries no authority of its own. If it was
+    # resolvable while GH_HOST pointed at an Enterprise host (or any
+    # non-default authority), it must be rejected once that authority no
+    # longer matches the implicit default public github.com -- the shape
+    # this guards against is the reverse of the test below: a shorthand
+    # claim re-queried after the ambient authority changed could confirm an
+    # unrelated PR under the new authority and silently drop the original
+    # obligation.
+    monkeypatch.setenv("GH_HOST", "github.example.com")
+    prcfg = types.SimpleNamespace(provider="github", api_base="")
+    assert cleanup._pr_claim_target("owner/project#12", prcfg) is None
+
+
+def test_pr_claim_target_rejects_shorthand_with_configured_enterprise_api():
+    # Same risk as the GH_HOST case above, but via a configured Enterprise
+    # api_base instead of the ambient env var.
+    prcfg = types.SimpleNamespace(
+        provider="github", api_base="https://github.example.com/api/v3",
+    )
+    assert cleanup._pr_claim_target("owner/project#12", prcfg) is None
+
+
+@pytest.mark.parametrize(
+    ("provider", "api_base", "ref"),
+    [
+        (
+            "github", "",
+            "https://dev.azure.com/acme/Project/_git/repo/pullrequest/34",
+        ),
+        (
+            "azure-devops", "https://dev.azure.com/acme",
+            "https://dev.azure.com/other/Project/_git/repo/pullrequest/34",
+        ),
+    ],
+)
+def test_reclaim_pr_rejects_provider_or_authority_mismatch_before_credentials(
+        monkeypatch, provider, api_base, ref):
+    calls = []
+    config = _config()
+    config.default_repo.pr = types.SimpleNamespace(
+        provider=provider, api_base=api_base,
+    )
+    monkeypatch.setattr(
+        providers, "account_token_for_slug",
+        lambda *_a, **_k: calls.append("token"),
+    )
+    monkeypatch.setattr(
+        providers, "get_provider",
+        lambda _name: calls.append("provider"),
+    )
+    result = cleanup.reclaim_pr(ref, config, apply=True)
+    assert result.status == "failed"
+    assert calls == []
+
+
+def test_claims_cleanup_releases_only_provider_confirmed_merged_prs(
+        tmp_path, monkeypatch):
+    _seed_project(tmp_path, monkeypatch)
+    ref = "https://github.com/example/project/pull/42"
+    tracking.rehome_abandoned_obligations(
+        [_claim("pr", ref)], source_worktree="wt-owner", config=_config())
+
+    class Provider:
+        def get_pull(self, repo, number, **kwargs):
+            assert repo == "example/project"
+            assert number == 42
+            return types.SimpleNamespace(state="merged", merged=True)
+
+    monkeypatch.setattr(providers, "get_provider", lambda _name: Provider())
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_a, **_k: None)
+    config = _config()
+
+    preview = cleanup.cleanup_orphanage(config, apply=False)
+    assert preview[0]["status"] == "reclaimed"
+    assert "would release" in preview[0]["detail"]
+    assert len(tracking.load_orphaned_obligations()) == 1
+
+    applied = cleanup.cleanup_orphanage(config, apply=True)
+    assert applied[0]["status"] == "reclaimed"
+    assert tracking.load_orphaned_obligations() == []
+
+
+def test_claims_cleanup_keeps_unmerged_or_unqueryable_pr_claims(
+        tmp_path, monkeypatch):
+    _seed_project(tmp_path, monkeypatch)
+    ref = "https://github.com/example/project/pull/42"
+    tracking.rehome_abandoned_obligations(
+        [_claim("pr", ref)], source_worktree="wt-owner", config=_config())
+
+    class Provider:
+        def get_pull(self, repo, number, **kwargs):
+            return types.SimpleNamespace(state="closed", merged=False)
+
+    monkeypatch.setattr(providers, "get_provider", lambda _name: Provider())
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_a, **_k: None)
+
+    result = cleanup.cleanup_orphanage(_config(), apply=True)
+    assert result[0]["status"] == "skipped"
+    assert tracking.load_orphaned_obligations()[0]["ref"] == ref
 
 
 # ── finalize wiring: --abandon re-homes only unsettled, before releasing ─────

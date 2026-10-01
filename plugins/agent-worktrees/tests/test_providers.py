@@ -1907,13 +1907,31 @@ class TestAzureDevOpsProvider:
     def test_get_pull_completed_is_merged(self, monkeypatch):
         # Azure status "completed" == merged; canonicalize state to "merged".
         from agent_worktrees.providers import azure_devops as azure
-        body = json.dumps({"status": "completed"})
+        body = json.dumps({
+            "status": "completed",
+            "lastMergeSourceCommit": {"commitId": "merged-head"},
+        })
         monkeypatch.setattr(azure, "run_cli",
                             lambda args, **kw: _proc(stdout=body))
         res = azure.AzureDevOpsProvider().get_pull(
             "proj/repo", 5, api_base="https://dev.azure.com/org")
         assert res.merged is True
         assert res.state == "merged"
+        assert res.head_sha == "merged-head"
+
+    def test_observe_head_remains_unsupported(self, monkeypatch):
+        # Azure has no separate server-clock observation endpoint; delegating
+        # to get_pull() would silently violate observe_head's observed_at
+        # contract for generic callers (pr_ops.py's post-push observation
+        # rejects a result with no server timestamp) -- stay explicitly
+        # unsupported instead. Merged-head repair uses get_pull()'s own
+        # head_sha directly (see finalize_open_pr_gate.py).
+        from agent_worktrees.providers import azure_devops as azure
+        from agent_worktrees.providers.base import ProviderError
+
+        with pytest.raises(ProviderError):
+            azure.AzureDevOpsProvider().observe_head(
+                "proj/repo", 5, api_base="https://dev.azure.com/org")
 
     def test_get_pull_abandoned_and_active(self, monkeypatch):
         from agent_worktrees.providers import azure_devops as azure
