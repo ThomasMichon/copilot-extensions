@@ -364,9 +364,9 @@ class TestOrphanedHandoffs:
         assert health.find_orphaned_handoffs([rec], now=_NOW) == []
 
     def test_skips_freshly_yielded_handoff_despite_stale_record_timestamps(self):
-        """Review follow-up: `open_handoff()` only ever runs on an *active*
-        session, so a handoff it opened moments ago is itself fresh activity
-        -- a long-dormant `last_resumed_at` must never outrank it. Without
+        """`open_handoff()` only ever runs on an *active* session, so a
+        handoff it opened moments ago is itself fresh activity -- a
+        long-dormant `last_resumed_at` must never outrank it. Without
         folding `SessionHandoff.opened_at` into the activity calculation, a
         record with stale legacy timestamps but a handoff opened seconds ago
         would be misjudged stale and `doctor --fix` would undo an in-flight
@@ -447,7 +447,34 @@ class TestOrphanedHandoffs:
         o.record.head_session = o.session_id
         assert rec.resolved_head_session == "s1"  # resumable again
 
+    def test_detects_yielded_tail_despite_an_older_active_session(self):
+        """aperture-labs#7824 regression: an older session left
+        "active" must not save a worktree from detection when the ledger's
+        authoritative head is a LATER, now-yielded session -- the real
+        `resolved_head_session` ledger replay (not a naive "any session is
+        head-eligible" scan) is what must gate this, since the naive scan
+        would wrongly treat the older active session as still current."""
+        old = SessionEntry(session_id="old", started_at="2026-01-01T00:00:00",
+                           state="active")
+        new = SessionEntry(session_id="new", started_at="2026-01-01T00:01:00",
+                           state="yielded")
+        rec = WorktreeRecord(
+            worktree_id="wt-1", branch="worktree/wt-1", worktree_path="/tmp/wt-1",
+            repo="test-repo", machine="test", platform="wsl",
+            started_at="2026-01-01T00:00:00", last_resumed_at="2026-01-01T00:00:00",
+            resume_count=0, title=None, status="active", completed_at=None,
+            sessions=[old, new],
+            head_transitions=[
+                HeadTransition(revision=1, session_id="new", reason="initial",
+                               at="2026-01-01T00:01:00"),
+            ],
+        )
+        assert rec.resolved_head_session is None  # the ledger says "new", ineligible
+        orphans = health.find_orphaned_handoffs([rec])
+        assert len(orphans) == 1 and orphans[0].session_id == "new"
 
+
+def test_finds_stale_head_cache_from_transition_replay():
     record = WorktreeRecord(
         worktree_id="wt-head",
         branch="worktree/wt-head",

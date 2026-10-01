@@ -232,7 +232,7 @@ class TestTransitions:
     def test_link_succession_concluded_rejects_terminal_successor(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):
-        """aperture-labs#7824 review follow-up: the ``else`` branch must mirror
+        """aperture-labs#7824 regression: the ``else`` branch must mirror
         ``link_handoff``'s terminal-successor guard -- never resurrect an
         explicitly ``"handed-off"``/``"concluded"`` successor and hand it
         head just because a manual-repair caller named it."""
@@ -469,7 +469,7 @@ class TestExactHandoffLedger:
     def test_older_yielded_session_cannot_steal_head_from_newer_yielded_lineage(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):
-        """aperture-labs#7824 review follow-up: mirrors `cancel_handoff`'s
+        """aperture-labs#7824 regression: mirrors `cancel_handoff`'s
         `predecessor_is_latest_head` guard. `resolved_head_session` hides
         EVERY yielded session, so without checking the raw latest head
         transition, an older yielded session could rebind and silently steal

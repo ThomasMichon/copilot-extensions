@@ -643,8 +643,14 @@ def find_orphaned_handoffs(
     is **never** touched:
 
       * the worktree is non-terminal (``status == "active"``);
-      * it has sessions, and **none** is head-eligible (so the derived head is
-        None -- there is no current session; see ``_NON_HEAD_STATES``);
+      * ``resolved_head_session`` is ``None`` -- the ledger-aware resolution
+        (replaying ``head_transitions`` when present, else the legacy
+        head/newest-eligible fallback), not merely "is the OLDEST session
+        head-eligible": an older session left ``active`` doesn't save a
+        worktree whose authoritative head -- e.g. a later session that has
+        since yielded its own handoff -- is no longer eligible. (Lightweight
+        test doubles without a ``resolved_head_session`` fall back to a naive
+        any-head-eligible scan over ``_NON_HEAD_STATES``.);
       * the **tail** session is ``handed-off`` or ``yielded`` with **no linked
         successor** (the cutover/handoff began but no successor was ever
         recorded -- see ``_ORPHANABLE_TAIL_STATES``);
@@ -667,10 +673,22 @@ def find_orphaned_handoffs(
         sessions = getattr(r, "sessions", None) or []
         if not sessions:
             continue
-        # Any head-eligible session => the head resolves to it => not orphaned.
-        if any(getattr(s, "state", "active") not in _NON_HEAD_STATES
-               for s in sessions):
-            continue
+        if hasattr(r, "resolved_head_session"):
+            # The real ledger-aware resolution (replays `head_transitions`
+            # when present, else the legacy head/newest-eligible fallback):
+            # an older session left ``active`` doesn't save a record whose
+            # AUTHORITATIVE head -- e.g. a later session that has since
+            # yielded its own handoff -- is no longer eligible. A naive
+            # "any non-eligible session" scan would miss that case.
+            if r.resolved_head_session is not None:
+                continue
+        else:
+            # Lightweight test doubles (e.g. SimpleNamespace fixtures) don't
+            # implement ledger-aware resolution; fall back to the naive scan
+            # -- any head-eligible session => the head resolves to it.
+            if any(getattr(s, "state", "active") not in _NON_HEAD_STATES
+                   for s in sessions):
+                continue
         tail = sessions[-1]
         if getattr(tail, "state", None) not in _ORPHANABLE_TAIL_STATES:
             continue
