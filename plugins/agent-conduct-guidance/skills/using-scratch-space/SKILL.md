@@ -26,18 +26,30 @@ with no record of which task produced them or when they stopped mattering.
 
 Different machines and operators have different drive layouts; this skill's
 own guidance (and any checked-in instruction that references it) must never
-bake in a specific path. Resolve in this order, first match wins:
+bake in a specific path. Resolve in this order, first match wins. **Whichever
+step resolves the root, verify its privacy before trusting it with anything
+sensitive** (a draft containing PII, secrets, or other sensitive output) --
+an explicit override or a machine-local default is just as capable of
+pointing at a shared, symlinked, or overly permissive directory as the OS
+temp fallback is, so the same ownership/no-symlink/effective-permission
+checks described under step 3 apply to the root resolved by step 1 or step 2
+too, not only to the OS-temp default.
 
 1. **`AGENT_SCRATCH_ROOT` environment variable**, if set -- an operator's or
    session's explicit choice. Honor it as-is (create it if it doesn't exist
-   yet; don't second-guess its location).
+   yet; don't second-guess its location) -- but still verify ownership and
+   effective permissions before writing anything sensitive into it, exactly
+   as for the OS-temp fallback below; an operator-set variable is not
+   automatically private.
 2. **A machine-local convention the current context already resolves**, if
    one is available and documented for this environment (e.g. a harness's
    own machine-local config declaring a preferred scratch root, the same
    way it might declare a preferred source-checkout root) -- prefer a
    mechanism already in scope over inventing a new one. This is how an
    operator configures a durable *default* scratch root, instead of relying
-   on an ad hoc per-invocation environment variable every time.
+   on an ad hoc per-invocation environment variable every time. Apply the
+   same privacy verification here too before trusting it with sensitive
+   content.
 3. **The operating system's preferred/standard temporary-folder system**
    (what `$env:TEMP` resolves to on Windows, `${TMPDIR:-/tmp}` on POSIX) --
    the default when neither of the above is configured. Use a private,
