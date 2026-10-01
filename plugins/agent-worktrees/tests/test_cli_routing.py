@@ -1294,8 +1294,8 @@ def test_install_trigger_reads_as_first_run_onboarding(monkeypatch, capsys):
     assert rc == 0
     assert captured.out == ""
     assert "interactive mode needs Worktree Manager" in err
-    assert "expected first-run state" in err
-    assert "not a broken launch" in err
+    assert "On a first run that's expected" in err
+    assert "update or repair" in err
     assert m._WORKTREE_MANAGER_REPO_URL in err
     assert "Bootstrap / update Worktree Manager:" in err
     assert "bootstrap.sh" in err and "curl -fsSL" in err
