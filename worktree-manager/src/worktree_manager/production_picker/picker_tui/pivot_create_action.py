@@ -96,6 +96,36 @@ def _parse_create_fields(raw: object, *, where: str) -> tuple[Mapping[str, objec
                 "equals": condition["equals"].strip(),
             }
         out.append(field)
+    # A second pass (after every field is known) validates each show_when
+    # actually names a field the runtime evaluator can match against --
+    # steering_form.PivotFormScreen._condition_value only resolves a
+    # controller's current answer when it is a *choice* field, and
+    # ``_condition_matches`` looks the controller up by name among the SAME
+    # field list. A predicate naming a text/textarea/multichoice controller,
+    # an unknown name, itself, a controller with its own show_when (chained
+    # conditionals the evaluator doesn't support), or an ``equals`` value
+    # that isn't one of the controller's declared options can never match --
+    # the dependent field would be permanently hidden once UI wiring
+    # consumes this schema. Reject it here instead.
+    by_name = {f["name"]: f for f in out}
+    for i, f in enumerate(out):
+        condition = f.get("show_when")
+        if condition is None:
+            continue
+        controller_name = condition["field"]
+        controller = by_name.get(controller_name)
+        if (
+            controller is None
+            or controller_name == f["name"]
+            or controller["type"] != "choice"
+            or "show_when" in controller
+            or condition["equals"] not in controller.get("options", ())
+        ):
+            raise ManifestError(
+                f"{where}[{i}].show_when.field must name a different, "
+                "unconditional 'choice' field (declared earlier or later in "
+                "'fields') whose 'options' include show_when.equals"
+            )
     return tuple(out)
 
 

@@ -286,7 +286,7 @@ real code, not assumption:
       pivot list's render/selection state machine (`engine_views.py`'s
       `TasksView`, `engine_selection.py`, `engine.py`'s `sel`/`stops()`) a
       "no row focused, pivot focused" state already exists or needs adding.
-- [x] `agent-dispatch`'s manifest declares its own `create_action` (title +
+- [ ] `agent-dispatch`'s manifest declares its own `create_action` (title +
       prompt/goal textarea + a tags/criteria picker -- see the Tasks-pane
       effort's own Phase 10 Plan for the exact field list and the pool-
       filter-vocabulary source still to be confirmed). **Investigated, not

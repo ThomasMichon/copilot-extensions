@@ -812,6 +812,7 @@ def test_form_action_requires_run(tmp_path):
             name="m", source_path="x")
 
 
+@pytest.mark.guard
 def test_create_action_parses(tmp_path):
     _write(tmp_path, "m", {"label": "M", "list": ["agent-x", "y"], "create_action": {
         "label": "New task\u2026", "key": "new-task",
@@ -834,12 +835,14 @@ def test_create_action_parses(tmp_path):
     assert ca.run[:2] == ("agent-dispatch", "create")
 
 
+@pytest.mark.guard
 def test_create_action_absent_defaults_to_none(tmp_path):
     _write(tmp_path, "m", {"label": "M", "list": ["agent-x", "y"]})
     [p] = pivots.discover_pivots(tmp_path)
     assert p.create_action is None
 
 
+@pytest.mark.guard
 def test_create_action_requires_label(tmp_path):
     with pytest.raises(pivots.ManifestError):
         pivots.parse_manifest(
@@ -848,6 +851,7 @@ def test_create_action_requires_label(tmp_path):
             name="m", source_path="x")
 
 
+@pytest.mark.guard
 def test_create_action_requires_run(tmp_path):
     with pytest.raises(pivots.ManifestError):
         pivots.parse_manifest(
@@ -856,6 +860,7 @@ def test_create_action_requires_run(tmp_path):
             name="m", source_path="x")
 
 
+@pytest.mark.guard
 def test_create_action_choice_field_requires_options(tmp_path):
     with pytest.raises(pivots.ManifestError):
         pivots.parse_manifest(
@@ -866,6 +871,7 @@ def test_create_action_choice_field_requires_options(tmp_path):
             name="m", source_path="x")
 
 
+@pytest.mark.guard
 def test_create_action_field_requires_name(tmp_path):
     with pytest.raises(pivots.ManifestError):
         pivots.parse_manifest(
@@ -875,6 +881,7 @@ def test_create_action_field_requires_name(tmp_path):
             name="m", source_path="x")
 
 
+@pytest.mark.guard
 def test_create_action_bad_manifest_is_skipped_not_fatal(tmp_path):
     _write(tmp_path, "ok", {"label": "Ok", "list": ["agent-x", "y"]})
     _write(tmp_path, "bad", {"label": "Bad", "list": ["agent-x", "y"],
@@ -882,6 +889,7 @@ def test_create_action_bad_manifest_is_skipped_not_fatal(tmp_path):
     assert {p.name for p in pivots.discover_pivots(tmp_path)} == {"ok"}
 
 
+@pytest.mark.guard
 def test_create_action_default_key_is_create(tmp_path):
     [p] = [pivots.parse_manifest(
         {"label": "M", "list": ["x"],
@@ -891,6 +899,7 @@ def test_create_action_default_key_is_create(tmp_path):
     assert p.create_action.fields == ()
 
 
+@pytest.mark.guard
 def test_create_action_rejects_duplicate_field_names_after_normalization(tmp_path):
     with pytest.raises(pivots.ManifestError):
         pivots.parse_manifest(
@@ -901,6 +910,7 @@ def test_create_action_rejects_duplicate_field_names_after_normalization(tmp_pat
             name="m", source_path="x")
 
 
+@pytest.mark.guard
 def test_create_action_non_string_type_is_manifest_error_not_fatal(tmp_path):
     # A `type` that isn't even hashable-comparable (list/dict) must not crash
     # discovery with an unhandled TypeError -- it must sink to ManifestError
@@ -926,6 +936,7 @@ def test_create_action_non_string_type_is_manifest_error_not_fatal(tmp_path):
     assert {p.name for p in pivots.discover_pivots(tmp_path)} == {"ok"}
 
 
+@pytest.mark.guard
 def test_create_action_rejects_non_boolean_allow_other(tmp_path):
     with pytest.raises(pivots.ManifestError):
         pivots.parse_manifest(
@@ -933,6 +944,77 @@ def test_create_action_rejects_non_boolean_allow_other(tmp_path):
                 "label": "New", "run": ["x"],
                 "fields": [{"name": "p", "type": "choice", "options": ["a"],
                             "allow_other": "false"}],
+            }},
+            name="m", source_path="x")
+
+
+@pytest.mark.guard
+def test_create_action_show_when_requires_a_matching_unconditional_choice(tmp_path):
+    # Valid: a forward OR backward reference to a plain `choice` field whose
+    # `options` include the predicate's `equals` value.
+    [p] = [pivots.parse_manifest(
+        {"label": "M", "list": ["x"], "create_action": {
+            "label": "New", "run": ["x"], "fields": [
+                {"name": "priority", "type": "choice",
+                 "options": ["low", "high"]},
+                {"name": "escalation", "type": "text",
+                 "show_when": {"field": "priority", "equals": "high"}},
+            ],
+        }},
+        name="m", source_path="x")]
+    assert p.create_action.fields[1]["show_when"] == {
+        "field": "priority", "equals": "high"}
+
+    # Invalid: the controller is a text field (the runtime evaluator
+    # (`steering_form._condition_value`) can only resolve a `choice`
+    # controller's current answer).
+    with pytest.raises(pivots.ManifestError):
+        pivots.parse_manifest(
+            {"label": "M", "list": ["x"], "create_action": {
+                "label": "New", "run": ["x"], "fields": [
+                    {"name": "note", "type": "text"},
+                    {"name": "dep", "type": "text",
+                     "show_when": {"field": "note", "equals": "x"}},
+                ],
+            }},
+            name="m", source_path="x")
+
+    # Invalid: `equals` isn't one of the controller's declared options.
+    with pytest.raises(pivots.ManifestError):
+        pivots.parse_manifest(
+            {"label": "M", "list": ["x"], "create_action": {
+                "label": "New", "run": ["x"], "fields": [
+                    {"name": "priority", "type": "choice",
+                     "options": ["low", "high"]},
+                    {"name": "dep", "type": "text",
+                     "show_when": {"field": "priority", "equals": "urgent"}},
+                ],
+            }},
+            name="m", source_path="x")
+
+    # Invalid: the controller itself is conditional (chained predicates the
+    # evaluator doesn't support).
+    with pytest.raises(pivots.ManifestError):
+        pivots.parse_manifest(
+            {"label": "M", "list": ["x"], "create_action": {
+                "label": "New", "run": ["x"], "fields": [
+                    {"name": "a", "type": "choice", "options": ["x", "y"]},
+                    {"name": "b", "type": "choice", "options": ["low", "high"],
+                     "show_when": {"field": "a", "equals": "x"}},
+                    {"name": "dep", "type": "text",
+                     "show_when": {"field": "b", "equals": "high"}},
+                ],
+            }},
+            name="m", source_path="x")
+
+    # Invalid: no field by that name at all.
+    with pytest.raises(pivots.ManifestError):
+        pivots.parse_manifest(
+            {"label": "M", "list": ["x"], "create_action": {
+                "label": "New", "run": ["x"], "fields": [
+                    {"name": "dep", "type": "text",
+                     "show_when": {"field": "nope", "equals": "x"}},
+                ],
             }},
             name="m", source_path="x")
 
