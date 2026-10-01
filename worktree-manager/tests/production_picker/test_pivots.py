@@ -969,6 +969,18 @@ def test_create_action_rejects_non_boolean_allow_other(tmp_path):
                             "allow_other": "false"}],
             }},
             name="m", source_path="x")
+    # allow_other is validated for EVERY field type, not just choice/
+    # multichoice -- a text/textarea field carrying a malformed value must
+    # not silently pass discovery just because the property is unused there.
+    for ftype in ("text", "textarea"):
+        with pytest.raises(pivots.ManifestError):
+            pivots.parse_manifest(
+                {"label": "M", "list": ["x"], "create_action": {
+                    "label": "New", "run": ["x"],
+                    "fields": [{"name": "p", "type": ftype,
+                                "allow_other": "false"}],
+                }},
+                name="m", source_path="x")
 
 
 @pytest.mark.guard

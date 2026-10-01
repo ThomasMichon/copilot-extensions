@@ -63,6 +63,11 @@ def _parse_create_fields(raw: object, *, where: str) -> tuple[Mapping[str, objec
         if not isinstance(ftype, str) or ftype not in valid_types:
             raise ManifestError(f"{where}[{i}].type must be one of {sorted(valid_types)}")
         field: dict = {"name": normalized_name, "type": ftype}
+        allow_other = item.get("allow_other", False)
+        if not isinstance(allow_other, bool):
+            raise ManifestError(
+                f"{where}[{i}].allow_other must be a boolean when present"
+            )
         if ftype in choice_types:
             opts = item.get("options")
             if not isinstance(opts, Sequence) or isinstance(opts, (str, bytes)) or not opts:
@@ -75,11 +80,6 @@ def _parse_create_fields(raw: object, *, where: str) -> tuple[Mapping[str, objec
                     f"{where}[{i}].options must be an array of non-blank strings"
                 )
             field["options"] = tuple(opts)
-            allow_other = item.get("allow_other", False)
-            if not isinstance(allow_other, bool):
-                raise ManifestError(
-                    f"{where}[{i}].allow_other must be a boolean when present"
-                )
             if allow_other:
                 field["allow_other"] = True
         condition = item.get("show_when")

@@ -142,9 +142,26 @@ def _rewrite_manifest_commands(
                 cast(Sequence[str], value),
                 root=root,
             )
+        except ManifestError:
+            raise
         except (FileNotFoundError, OSError, TargetUnusableError):
             if require_targets:
                 raise
+        except ValueError as exc:
+            # Covers an invalid-path argv head (e.g. an embedded null byte)
+            # that `Path()`/`os.path` construction itself rejects before any
+            # filesystem check -- re-raised as `TargetUnusableError` (already
+            # a `ValueError` subclass) so it is caught by the SAME
+            # `target-unusable` handling every other unusable target already
+            # gets, rather than an uncaught plain `ValueError` aborting the
+            # whole scan. `ManifestError` (also a `ValueError` subclass, see
+            # above) is deliberately excluded from this conversion -- it
+            # already has its own, distinct `invalid-entry` handling upstream
+            # and must always propagate unconverted, regardless of
+            # `require_targets` (e.g. `_resolve_command`'s own empty-argv
+            # check).
+            if require_targets:
+                raise TargetUnusableError(str(exc)) from exc
 
     if isinstance(data.get("list"), Sequence) and not isinstance(
         data.get("list"), (str, bytes)
