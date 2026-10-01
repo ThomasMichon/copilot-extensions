@@ -2611,9 +2611,14 @@ function Invoke-Update {
         return
     }
 
+    $activeForward = Test-ActiveIsForward
+    if ($activeForward) {
+        Write-Step 'Forwarded host bridge route detected -- updating runtime files without draining/stopping/starting a local daemon'
+    }
+
     # Stop running instance first -- a rebuild/repair of the venv (below) must
     # not race a live bridge holding python.exe open.
-    $wasRunning = $null -ne (Get-RunningProcess)
+    $wasRunning = (-not $activeForward) -and ($null -ne (Get-RunningProcess))
 
     # Thread B: the ZDD active/passive cutover is now the DEFAULT whenever a live
     # daemon is running -- activation always cuts over automatically (no opt-in).
@@ -2631,7 +2636,7 @@ function Invoke-Update {
     $prevVersion = ''
     if ($VersionedRuntime) {
         $prevVersion = Get-VersionedCurrent
-        $useCutover = $wasRunning
+        $useCutover = $wasRunning -and (-not $activeForward)
         # Cutover onto the *same* slot is impossible (there is only one dir of that
         # name and the live daemon holds it). A same-version refresh downgrades to
         # the classic stop-and-rebuild.
@@ -2640,7 +2645,7 @@ function Invoke-Update {
             $useCutover = $false
         }
     } else {
-        $useCutover = $wasRunning -and (Test-Path $VenvPython)
+        $useCutover = $wasRunning -and (-not $activeForward) -and (Test-Path $VenvPython)
     }
     if ($useCutover) {
         Write-Step 'Graceful cutover: building the new runtime; will cut over (no stop)'
@@ -2815,7 +2820,7 @@ function Invoke-Update {
                 $failedSlot = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
                 if (Test-Path $failedSlot) { Remove-Item -Recurse -Force $failedSlot -ErrorAction SilentlyContinue }
             }
-            if ($wasRunning -and -not $useCutover) {
+            if ($wasRunning -and -not $useCutover -and -not $activeForward) {
                 Write-Step 'Restarting the previous version...'
                 Invoke-Start
             }
@@ -2826,7 +2831,7 @@ function Invoke-Update {
             Write-Step 'Rolling back to the previous venv...'
             if (Restore-Venv) {
                 Write-Ok 'Previous venv restored'
-                if ($wasRunning) {
+                if ($wasRunning -and -not $activeForward) {
                     Write-Step 'Restarting the previous service...'
                     Invoke-Start
                 }
@@ -2888,7 +2893,10 @@ function Invoke-Update {
     # collapsed. The classic path just (re)starts -- the old daemon was already
     # stopped above. Launch via the `venv` link ($LinkPython) so the process
     # resolves through the junction (never a versions/<v> absolute).
-    if ($useCutover) {
+    if ($activeForward) {
+        Write-Step 'Forwarded host bridge route still active -- not starting a local daemon'
+    }
+    elseif ($useCutover) {
         # Warm the freshly-built slot before the timed cutover (#864): the slot's
         # first full-app start is cold -- Python compiles the whole app graph and,
         # on a managed Windows box, Defender / Smart App Control scans the freshly

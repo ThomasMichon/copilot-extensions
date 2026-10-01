@@ -326,6 +326,19 @@ def test_install_sh_forward_classifier(active, expected, tmp_path):
     assert _install_sh_active_is_forward(active, tmp_path) is expected
 
 
+def test_install_sh_update_checks_forward_before_lifecycle_actions():
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    body = text.split("do_update() {", 1)[1].split("\n}\n\ncase", 1)[0]
+    forward_at = body.index("active_forward=false")
+    drain_at = body.index("_drain_service")
+    stop_at = body.index("do_stop")
+    start_at = body.index("do_start")
+    assert forward_at < drain_at < stop_at < start_at
+    assert 'if [[ "$active_forward" == true ]]; then' in body
+    assert 'Forwarded host bridge route still active -- not starting a local daemon' in body
+    assert '&& "$active_forward" != true' in body
+
+
 @pytest.mark.skipif(os.name == "nt", reason="a POSIX bash environment is needed")
 def test_install_sh_start_does_not_start_a_daemon_over_a_forward(tmp_path):
     home = tmp_path / "home"

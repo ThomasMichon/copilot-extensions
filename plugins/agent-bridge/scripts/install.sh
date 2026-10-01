@@ -1979,9 +1979,15 @@ do_update() {
         return 0
     fi
 
+    local active_forward=false
+    if _active_is_forward; then
+        active_forward=true
+        _step "Forwarded host bridge route detected -- updating runtime files without draining/stopping/starting a local daemon"
+    fi
+
     # Is the service currently running?
     local was_running=false
-    if pid=$(_get_pid) || (command -v systemctl &>/dev/null && systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null); then
+    if [[ "$active_forward" != true ]] && { pid=$(_get_pid) || (command -v systemctl &>/dev/null && systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null); }; then
         was_running=true
     fi
 
@@ -2022,7 +2028,7 @@ do_update() {
     # longer needs the (new) venv to pre-exist -- gate only on "running".
     local cutover=false
     if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
-        if [[ "$was_running" == true ]]; then
+        if [[ "$was_running" == true && "$active_forward" != true ]]; then
             cutover=true
             # Cutover onto the same slot is impossible; downgrade to stop-and-rebuild.
             if [[ "$SRC_VERSION" == "$prev_version" ]]; then
@@ -2030,7 +2036,7 @@ do_update() {
                 cutover=false
             fi
         fi
-    elif [[ "$was_running" == true && -x "$VENV_DIR/bin/agent-bridge" ]]; then
+    elif [[ "$was_running" == true && "$active_forward" != true && -x "$VENV_DIR/bin/agent-bridge" ]]; then
         cutover=true
     fi
 
@@ -2053,7 +2059,7 @@ do_update() {
             if [[ -n "$SRC_VERSION" && "$SRC_VERSION" != "$prev_version" ]]; then
                 rm -rf "$INSTALL_DIR/versions/$SRC_VERSION"
             fi
-            if [[ "$was_running" == true && "$cutover" == false ]]; then
+            if [[ "$was_running" == true && "$cutover" == false && "$active_forward" != true ]]; then
                 _step "Restarting the previous version..."
                 do_start
             fi
@@ -2064,7 +2070,7 @@ do_update() {
                 _ok "Previous venv restored"
                 # Only restart in the default path -- in cutover mode the old
                 # daemon was never stopped, so it is still serving.
-                if [[ "$was_running" == true && "$cutover" == false ]]; then
+                if [[ "$was_running" == true && "$cutover" == false && "$active_forward" != true ]]; then
                     _step "Restarting the previous service..."
                     do_start
                 fi
@@ -2101,7 +2107,9 @@ do_update() {
     _write_deploy_manifest
 
     # Bring the new version into service, via the resolved slot interpreter.
-    if [[ "$cutover" == true ]]; then
+    if [[ "$active_forward" == true ]]; then
+        _step "Forwarded host bridge route still active -- not starting a local daemon"
+    elif [[ "$cutover" == true ]]; then
         _step "Zero-downtime cutover (agent-bridge deploy)..."
         if _bridge_cli deploy \
                 --drain-timeout "${AGENT_BRIDGE_DRAIN_TIMEOUT:-300}"; then
