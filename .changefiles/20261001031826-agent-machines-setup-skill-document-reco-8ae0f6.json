@@ -1,0 +1,9 @@
+{
+  "comment": "agent-machines-setup skill: document recommended baseline copilot.settings values (experimental, powershellFlags) and the launch-time model/effort/context-tier CLI-flag guarantee agent-worktrees provides independently of the settings file.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

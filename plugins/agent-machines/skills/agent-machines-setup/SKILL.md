@@ -148,6 +148,46 @@ supported false-only `copilot.settings.plugin-tombstones` enforce group instead.
 It may contain only `enabledPlugins.<plugin>: false` entries and preserves every
 undeclared operator plugin.
 
+**Recommended baseline `copilot.settings` values.** Beyond the bare minimal
+shape above, a few settings are worth enforcing from day one on any Windows
+harness, because the Copilot CLI features and behaviors they gate are
+relied on broadly across this marketplace's plugins:
+
+```yaml
+manage:
+  copilot.settings:
+    disposition: enforce
+    values:
+      model: <model>
+      effortLevel: high
+      contextTier: <tier>           # e.g. "long_context" for large repos
+      experimental: true            # several plugins rely on experimental-gated
+                                     # features (fleet mode, dynamic retrieval,
+                                     # assisted-approval)
+  copilot.settings.powershell:      # list-valued -> ensure-present, not enforce
+    disposition: ensure-present
+    values:
+      # Suppresses the headed console window a naive pwsh.exe spawn otherwise
+      # pops when Copilot runs a hook. Windows-only; harmless elsewhere.
+      # Each flag/value is its OWN array item -- Copilot passes the array
+      # straight through as argv tokens, one per item. A combined
+      # single-string item ("-WindowStyle Hidden") is NOT a valid pwsh flag
+      # and breaks parsing; confirmed empirically that the split form is
+      # what actually suppresses the window.
+      powershellFlags: ["-NoProfile", "-NoLogo", "-WindowStyle", "Hidden"]
+```
+
+`model`/`effortLevel`/`contextTier` are also independently guaranteed at
+**launch time**, not just in the persisted settings file: `agent-worktrees`
+re-expresses whatever is persisted there as explicit `--model`/
+`--reasoning-effort`/`--context` CLI flags on every worktree
+create/resume/recovery launch (unconditional, upstream behavior -- see
+`plugins/agent-worktrees/docs/config-reference.md` § "Persisted model/effort/
+context preference at launch"), because Copilot CLI has been observed to
+ignore the persisted values alone at startup. Declaring these three in your
+own `copilot.settings` package is still what feeds that mechanism the
+correct values.
+
 To make selected installed plugins repository-only, use schema v3 desired
 absence. This removes user-global activation keys without uninstalling plugin
 inventory:
