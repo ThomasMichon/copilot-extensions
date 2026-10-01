@@ -1261,6 +1261,38 @@ def test_cleanup_branch_refs_keeps_latest_entry_for_a_reused_branch_name():
     assert reused_count == 1, "a reused branch name must appear only once"
 
 
+def test_cleanup_branch_refs_uses_opened_at_recency_not_raw_list_order():
+    # #4699: `record.prs` is not guaranteed to be chronological --
+    # `tracking.WorktreeRecord.active_pr` defines recency by `opened_at`,
+    # only falling back to list position as a tie-breaker; concurrent-save
+    # reconciliation can append an OLDER unmatched on-disk entry after a
+    # NEWER in-memory one. A reused branch name must therefore be paired
+    # with whichever entry has the LATEST `opened_at`, never simply the
+    # last one in raw list order.
+    record = SimpleNamespace(
+        worktree_id="some-worktree",
+        branch="",
+        pr=SimpleNamespace(head_sha="active" * 8),
+        prs=[
+            # Chronologically LATER (opened_at), but appears FIRST in the
+            # list -- e.g. reconciliation appended the older entry after it.
+            SimpleNamespace(
+                branch="reused-branch", head_sha="new-head-sha",
+                opened_at="2026-02-01T00:00:00Z", state="merged",
+            ),
+            SimpleNamespace(
+                branch="reused-branch", head_sha="old-head-sha",
+                opened_at="2026-01-01T00:00:00Z", state="merged",
+            ),
+        ],
+    )
+
+    pairs = finalize_open_pr_gate._cleanup_branch_refs(record)
+
+    assert ("reused-branch", "new-head-sha") in pairs
+    assert ("reused-branch", "old-head-sha") not in pairs
+
+
 def test_cleanup_branch_refs_prefers_merged_entry_over_a_later_rejected_reuse():
     # #4699: the LATEST tracked entry for a reused branch
     # name is not necessarily the one that merged -- a rejected (closed)

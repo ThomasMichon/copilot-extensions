@@ -499,14 +499,22 @@ def _cleanup_branch_refs(record: tracking.WorktreeRecord) -> list[tuple[str, str
     PRs on one long-lived worktree (``tracking._merge_pr_attribution_state``
     documents this exact reuse pattern for ``pr_id``-less records) -- the
     live git ref for that name can only ever point at the MOST RECENT push,
-    never an earlier one. Keeping the first-seen ``record.prs`` entry for a
-    reused name (iteration is append-ordered, oldest first) paired an
-    already-advanced branch tip against a stale, superseded ``head_sha`` --
-    every commit made for a LATER reuse of that name then read as "extra"
-    commits beyond that stale boundary, falsely blocking finalize on
-    content that had already landed (#4699). Iterating in order and
-    overwriting on each repeat occurrence keeps whichever entry is LAST in
-    append order -- i.e. the most recent -- for any reused branch name.
+    never an earlier one. ``record.prs`` is NOT guaranteed to be
+    chronological though (``tracking.WorktreeRecord.active_pr`` defines
+    recency by ``opened_at``, only falling back to list position as a
+    tie-breaker -- concurrent-save reconciliation can append an older
+    unmatched on-disk entry after a newer in-memory one, #4699): iterating
+    raw list order for a reused name can select an older SHA and recreate
+    the exact false positive this fix exists to close. Entries for a
+    reused name are therefore processed in the SAME recency order
+    ``active_pr`` itself uses (``opened_at``, then original list index) --
+    an already-advanced branch tip paired against a stale, superseded
+    ``head_sha`` from an earlier reuse read every commit made for a LATER
+    reuse of that name as "extra" commits beyond that stale boundary,
+    falsely blocking finalize on content that had already landed.
+    Processing in recency order and overwriting on each repeat occurrence
+    keeps whichever entry is chronologically LAST for any reused branch
+    name.
 
     The LATEST tracked entry for a reused name is not necessarily the one
     that actually merged either (#4699): a REJECTED (closed, never merged)
@@ -528,7 +536,16 @@ def _cleanup_branch_refs(record: tracking.WorktreeRecord) -> list[tuple[str, str
     pairs: list[tuple[str, str]] = [(tracked, active_head_sha)]
     index_by_branch = {tracked: 0}
     rejected_by_index = {0: False}
-    for pr in getattr(record, "prs", None) or []:
+    all_prs = list(getattr(record, "prs", None) or [])
+    # Same recency ordering as tracking.WorktreeRecord.active_pr: oldest
+    # opened_at (missing -> "") first, original list position as the
+    # tie-breaker -- never raw append order, which concurrent-save
+    # reconciliation does not guarantee is chronological.
+    ordered_prs = sorted(
+        enumerate(all_prs),
+        key=lambda item: ((getattr(item[1], "opened_at", "") or ""), item[0]),
+    )
+    for _original_index, pr in ordered_prs:
         branch = (getattr(pr, "branch", "") or "").strip()
         if not branch:
             continue
