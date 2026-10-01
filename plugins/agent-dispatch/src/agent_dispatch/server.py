@@ -17,6 +17,7 @@ from .config import (
     has_live_local_coordinator,
     load_config,
     requires_token_bind,
+    resolve_control_token,
     routing_dir,
     run_dir,
 )
@@ -81,7 +82,7 @@ def check_bind_safety(cfg: Config) -> None:
 
 def build_app(cfg: Config | None = None):
     """Construct the coordinator app, ensuring the queue DB directory exists."""
-    cfg = cfg or load_config()
+    cfg = cfg or replace(load_config(), control_token=resolve_control_token())
     # Install a telemetry sink if one is configured (generic open hook; a no-op
     # unless a consumer wired a sink). Prefer a convention-located config file
     # (env-free); fall back to the environment so env-wired deploys don't
@@ -304,7 +305,7 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
     from . import procutil
     procutil.relocate_off_payload()
 
-    cfg = cfg or load_config()
+    cfg = cfg or replace(load_config(), control_token=resolve_control_token())
     start_lock: SingleInstance | None = None
     if not passive:
         # Keyed by routing_dir() -- the directory the actual raced-over

@@ -468,10 +468,11 @@ eligible for the protected label pool, and is not authorized work from that
 managed producer. The coordinator requires a separate
 `AGENT_DISPATCH_CONTROL_TOKEN` for every transition; ordinary client auth and a
 caller-asserted producer id do not grant authority. The control token is a
-superset queue credential, so prefer its environment setting (or the shared
-token-command setting) over `--control-token`, which can expose it in process
-listings. A successful transition returns a one-time high-entropy capability
-whose hash alone is stored:
+superset queue credential, so prefer its environment or command-fetch setting
+(`AGENT_DISPATCH_CONTROL_TOKEN` / `AGENT_DISPATCH_CONTROL_TOKEN_COMMAND`) over
+`--control-token`, which can expose it in process listings. A successful
+transition returns a one-time high-entropy capability whose hash alone is
+stored:
 
 ```bash
 <agent-dispatch catalog argv[0]> producer-fence status \
@@ -999,7 +1000,7 @@ returns it in the completed task record; `dispatch_result` retrieves it later.
 |---------|------|
 | `AGENT_DISPATCH_URL` | coordinator base URL the CLI talks to (point at a remote host) |
 | `AGENT_DISPATCH_TOKEN` | ordinary bearer token (client sends, server validates) |
-| `AGENT_DISPATCH_CONTROL_TOKEN` | superset queue bearer required to activate/transition managed producer scopes; prefer env over argv |
+| `AGENT_DISPATCH_CONTROL_TOKEN` / `AGENT_DISPATCH_CONTROL_TOKEN_COMMAND` | superset queue bearer required to activate/transition managed producer scopes (and to register evaluators); prefer env/command over argv |
 | `AGENT_DISPATCH_PRODUCER_CAPABILITY_COMMAND` | preferred command that prints the current producer capability on demand |
 | `AGENT_DISPATCH_PRODUCER_CAPABILITY` | raw fallback capability for one selected producer generation's managed creates; applied only with the rest of the fence tuple |
 | `AGENT_DISPATCH_SHARED_URL` | shared/elected coordinator endpoint for cross-machine dispatch (the hosted coordinator); used only with `--shared` |

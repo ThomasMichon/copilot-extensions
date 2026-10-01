@@ -1031,7 +1031,8 @@ AGENT_DISPATCH_HOST=127.0.0.1
 # AGENT_DISPATCH_PORT=9847  # unset = OS-assigned dynamic port (Stage C), advertised via the rendezvous file; uncomment to pin
 # AGENT_DISPATCH_DB=%h/.agent-dispatch/tasks.db   # default; uncomment to override
 # AGENT_DISPATCH_TOKEN=                            # set to require bearer auth
-# AGENT_DISPATCH_CONTROL_TOKEN=                    # required to manage producer scopes
+# AGENT_DISPATCH_CONTROL_TOKEN=                    # required to manage producer scopes (and to register evaluators)
+# AGENT_DISPATCH_CONTROL_TOKEN_COMMAND=            # or fetch it on demand (e.g. a vault CLI) instead of a raw value above
 ENVEOF
         _ok "Service env: $ENV_FILE (defaults; edit to expose on the network / add a token)"
     else

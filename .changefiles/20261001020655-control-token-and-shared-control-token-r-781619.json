@@ -1,0 +1,9 @@
+{
+  "comment": "plain control token resolvable on demand via AGENT_DISPATCH_CONTROL_TOKEN_COMMAND, mirroring the existing shared-token-command pattern; forwarded through the same-cell peer-launch allowlist",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -186,8 +186,44 @@ def _truthy_env(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def resolve_control_token(
+    direct_var: str = "AGENT_DISPATCH_CONTROL_TOKEN",
+    command_var: str = "AGENT_DISPATCH_CONTROL_TOKEN_COMMAND",
+) -> str | None:
+    """Resolve a control-bearer token: a direct env value, else a fetch command.
+
+    Mirrors :func:`shared_token`'s command-indirection pattern for the plain
+    (non-shared) control token, so a deployment can fetch it **on demand**
+    from an external store (e.g. a credential/vault CLI) via
+    ``<command_var>`` instead of persisting the raw secret in the
+    environment -- fetch, use, let go.
+
+    Deliberately **not** called from :func:`load_config` -- a command fetch
+    can shell out (and even prompt interactively), so it must run only where
+    the token is actually needed (:func:`client_control_token`, and the
+    coordinator's own serve startup), never as a side effect of resolving
+    unrelated config (host/port/db) a caller like ``client_url()`` only
+    wants for addressing, which would otherwise run the fetch command
+    redundantly on every default-path CLI invocation.
+    """
+    direct = os.environ.get(direct_var)
+    if direct:
+        return direct
+    command = os.environ.get(command_var)
+    if command:
+        return _run_token_command(command)
+    return None
+
+
 def load_config() -> Config:
-    """Resolve the coordinator config from the environment."""
+    """Resolve the coordinator config from the environment.
+
+    ``control_token`` here is the raw env value only (no command fetch) --
+    see :func:`resolve_control_token`'s docstring for why. Call sites that
+    actually need the token (coordinator serve startup) must resolve it
+    explicitly via :func:`resolve_control_token` rather than reading
+    ``Config.control_token``.
+    """
     return Config(
         host=os.environ.get("AGENT_DISPATCH_HOST", DEFAULT_HOST),
         port=int(os.environ.get("AGENT_DISPATCH_PORT", str(DEFAULT_PORT))),
@@ -500,8 +536,15 @@ def client_token() -> str | None:
 
 
 def client_control_token() -> str | None:
-    """The separate control bearer for managed producer transitions."""
-    return os.environ.get("AGENT_DISPATCH_CONTROL_TOKEN") or None
+    """The separate control bearer for managed producer transitions and
+    evaluator registrations.
+
+    Resolved from ``AGENT_DISPATCH_CONTROL_TOKEN`` when set; otherwise, if
+    ``AGENT_DISPATCH_CONTROL_TOKEN_COMMAND`` is set, by running that command
+    (mirrors :func:`shared_token`'s on-demand fetch pattern) so the secret
+    need not persist in the client's environment.
+    """
+    return resolve_control_token()
 
 
 def failover_machine() -> str | None:

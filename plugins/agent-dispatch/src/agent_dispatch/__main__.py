@@ -641,7 +641,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--token", help="bearer token (default: AGENT_DISPATCH_TOKEN)")
     parser.add_argument(
         "--control-token",
-        help="separate managed-producer control bearer (default: AGENT_DISPATCH_CONTROL_TOKEN)",
+        help=(
+            "separate managed-producer control bearer (default: "
+            "AGENT_DISPATCH_CONTROL_TOKEN, or AGENT_DISPATCH_CONTROL_TOKEN_COMMAND "
+            "to fetch it on demand)"
+        ),
     )
     parser.add_argument(
         "--shared",
