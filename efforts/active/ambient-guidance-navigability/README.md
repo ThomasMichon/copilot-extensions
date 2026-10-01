@@ -841,6 +841,51 @@ _Pending._
     an earlier fetch of that description (before the edit propagated) and
     flagged it as missing again -- reconfirmed present, no further action
     needed.
+- **Review round 7 findings (PR #4809), all addressed in the same PR:**
+  - **Real identity-spoofing gap in the `_direct`-install fallback:**
+    `_resolve_cli_script`'s `_direct` candidate trusted a directory merely
+    because it contained a `plugin.json` self-declaring the expected
+    `"customizing-copilot"` name, with sorted-path order deciding which
+    candidate wins when more than one claims it -- a stale or unrelated
+    direct install could impersonate the real plugin, a direct violation
+    of `docs/patterns/marketplace-installation-cells.md`'s "plugin name
+    alone never selects a runtime" invariant. Fixed by resolving the
+    sibling's root through `plugin_activation.resolve_active_plugins()`
+    instead -- the same identity-verified active-plugin evidence
+    `claim_providers.py` uses for its own sibling callbacks -- filtering
+    its `.active` plugins by declared name and taking the reported live
+    root. No active-plugin match (or an unreachable resolver) now fails
+    closed to `None`: the refresh is silently skipped for that round
+    rather than falling back to any unverified directory scan. This
+    retired the home-grown `_candidate_plugin_roots` glob/manifest-name
+    matcher entirely.
+  - **Real deadline-budget bug in round 6's own fix:** `sessionstart_
+    diagnostic`'s budget calculation reserved only a flat 1-second margin
+    before the hook's own decision deadline, but `push_timeout.run_
+    bounded`'s timeout path can itself spend up to 5 more seconds past its
+    own `timeout` draining a killed process's pipes (`proc.communicate
+    (timeout=5)` after the tree-kill) -- so a timed-out refresh could
+    still overrun the hook's deadline despite round 4/6's bounding,
+    silently breaking the synchronous-completion guarantee this whole
+    backup exists to provide. Fixed by also reserving a new
+    `_RUN_BOUNDED_CLEANUP_GRACE_S` (5.0s) in the budget math before
+    deciding how much of it to hand to `refresh_local_cache` as its own
+    `timeout`; when there's no deadline at all the grace reservation
+    doesn't apply (nothing external to overrun), so the no-deadline case
+    is unchanged.
+  - **Code-style nit:** a new test's docstring named the review round
+    that produced it instead of describing the invariant timelessly;
+    fixed (review-round narrative belongs only in this Journal).
+  - `_resolve_cli_script`'s and `sessionstart_diagnostic`'s own tests
+    rewritten for the identity-verified resolution and the corrected
+    budget math (including a reserved-cleanup-grace regression distinct
+    from the plain too-tight-budget case); the `TestRefreshLocalCache`
+    tests that used to create real files at the old naive path convention
+    now monkeypatch `_resolve_cli_script` directly, decoupling them from
+    the resolution mechanism. Targeted suite (`test_local_cache_refresh.py`,
+    `test_hook_ipc.py`, `test_paired_carve.py`, `test_launch_project_
+    scoping.py`, `test_git_ops.py`): 219 passed, 4 skipped. `tools/check-
+    module-size.py` and `tools/check-docs-consistency.py` both clean.
 
 ### 2026-10-01 -- Phase 7 slice 4: the repo-wide catch-all static projection
 - Picked up the next unstarted Plan item (slice 3's steer): `customizing-

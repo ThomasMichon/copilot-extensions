@@ -127,11 +127,18 @@ freshly-synced set" behavior, made automatic and moved earlier. **Landed**:
 `agent_worktrees.local_cache_refresh.refresh_local_cache()` locates
 `customizing-copilot`'s installed, declared `render-local-cache` CLI
 operation (`manage-instruction-projections.py`) and invokes it as a
-bounded-timeout subprocess -- never importing that plugin's Python package
-directly, per
+bounded-timeout subprocess (via `push_timeout.run_bounded`, which kills the
+invoked CLI's whole process tree on a stall, not just its direct child) --
+never importing that plugin's Python package directly, per
 [`a-la-carte-independence.md`](a-la-carte-independence.md)'s "no
-cross-plugin reach-around" rule (the same payload-local-binstub resolution
-`claim_providers.py` already uses for its own sibling callbacks).
+cross-plugin reach-around" rule. The sibling's root is resolved through
+`plugin_activation.resolve_active_plugins()` -- the same identity-verified
+active-plugin evidence `claim_providers.py` uses for its own sibling
+callbacks -- rather than trusting a directory merely because it
+self-declares the expected name in a `plugin.json`, per
+[`marketplace-installation-cells.md`](marketplace-installation-cells.md)'s
+"plugin name alone never selects a runtime" invariant; missing or
+ambiguous provenance fails closed.
 `worktree_creation._create_worktree_core` and
 `resolve_launch_cli._resolve_resume_context` (skipped on `--dry-run`) both
 call it at exactly the point described above. Fully best-effort: customizing-

@@ -13,9 +13,16 @@ reach-around" rule, this module never imports that plugin's Python package
 or assumes its internal layout beyond locating its own declared,
 versioned CLI entry point (``manage-instruction-projections.py``'s
 ``render-local-cache`` operation) -- it invokes that payload-local script
-across a process boundary (a bounded-timeout subprocess), exactly as
-``claim_providers.py`` resolves a sibling's payload-local binstub for its
-own callbacks.
+across a process boundary (a bounded-timeout subprocess).
+
+Per ``docs/patterns/marketplace-installation-cells.md``'s "plugin name
+alone never selects a runtime" invariant, the sibling's root is resolved
+through ``plugin_activation.resolve_active_plugins()`` -- the same
+identity-verified active-plugin evidence ``claim_providers.py`` uses for
+its own sibling callbacks -- never by trusting a directory merely because
+it contains a ``plugin.json`` self-declaring the expected name. Missing or
+ambiguous provenance fails closed: no script is resolved, and the refresh
+is silently skipped for that round.
 
 Every entry point here is deliberately best-effort and silent: customizing-
 copilot not being installed, the repo not yet being a trusted folder, a
@@ -26,7 +33,6 @@ on create/resume/sessionStart succeeding.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import time
@@ -49,36 +55,38 @@ DEFAULT_TIMEOUT_S = 30.0
 # sharing that same budget. Callers compute a tighter, deadline-derived
 # timeout and pass it explicitly; this is only the floor/ceiling.
 SESSIONSTART_MAX_TIMEOUT_S = 5.0
-
-
-def _candidate_plugin_roots(home: Path) -> list[Path]:
-    roots = [
-        home / ".copilot" / "installed-plugins" / "copilot-extensions" / _SIBLING_PLUGIN_NAME
-    ]
-    direct_root = home / ".copilot" / "installed-plugins" / "_direct"
-    if direct_root.is_dir():
-        try:
-            children = sorted(direct_root.iterdir())
-        except OSError:
-            children = []
-        for child in children:
-            manifest = child / "plugin.json"
-            if not manifest.is_file():
-                continue
-            try:
-                declared = json.loads(manifest.read_text(encoding="utf-8"))
-            except (OSError, UnicodeError, ValueError):
-                continue
-            if isinstance(declared, dict) and declared.get("name") == _SIBLING_PLUGIN_NAME:
-                roots.append(child)
-    return roots
+# push_timeout.run_bounded's own timeout path kills the whole process tree,
+# then waits up to this much longer for the pipes to drain before giving up
+# (see push_timeout.py) -- wall-clock on top of the subprocess timeout
+# itself that a deadline-derived budget must also reserve.
+_RUN_BOUNDED_CLEANUP_GRACE_S = 5.0
 
 
 def _resolve_cli_script(home: Path) -> Path | None:
-    for root in _candidate_plugin_roots(home):
-        script = root / _SIBLING_RELATIVE_SCRIPT
-        if script.is_file():
-            return script
+    """Resolve customizing-copilot's ``render-local-cache`` CLI script
+    through identity-verified active-plugin evidence, never a bare
+    directory scan: a self-declared ``plugin.json`` name alone is not
+    installation identity (``docs/patterns/marketplace-installation-
+    cells.md``), so a stale or unrelated directory must never be trusted
+    to supply code this module goes on to execute. Returns ``None`` --
+    failing closed -- when customizing-copilot isn't resolved as an
+    active plugin, or its script isn't present at the reported root.
+    """
+    try:
+        from plugin_activation import resolve_active_plugins
+    except Exception:
+        return None
+    try:
+        report = resolve_active_plugins(home=home)
+    except Exception:
+        return None
+    for plugin in report.active.values():
+        if plugin.name != _SIBLING_PLUGIN_NAME:
+            continue
+        for live_root in plugin.live_roots:
+            script = live_root.root / _SIBLING_RELATIVE_SCRIPT
+            if script.is_file():
+                return script
     return None
 
 
@@ -178,15 +186,20 @@ def sessionstart_diagnostic(cwd: str, *, deadline: float | None) -> None:
     own unbounded worst case, so it can never itself cause the whole
     lifecycle response to miss the resident hook server's deadline --
     skipped entirely once too little budget remains to be worth
-    attempting.
+    attempting. The reserved margin also covers
+    ``_RUN_BOUNDED_CLEANUP_GRACE_S``, the extra wall-clock
+    ``push_timeout.run_bounded`` itself can spend past its own ``timeout``
+    draining a killed process's pipes -- not just the subprocess timeout
+    passed to it.
     """
     try:
-        budget = (
-            SESSIONSTART_MAX_TIMEOUT_S if deadline is None else deadline - time.time() - 1.0
-        )
-        if budget < 2.0:
-            return
-        timeout = min(budget, SESSIONSTART_MAX_TIMEOUT_S)
+        if deadline is None:
+            timeout = SESSIONSTART_MAX_TIMEOUT_S
+        else:
+            budget = deadline - time.time() - _RUN_BOUNDED_CLEANUP_GRACE_S - 1.0
+            if budget < 2.0:
+                return
+            timeout = min(budget, SESSIONSTART_MAX_TIMEOUT_S)
         refresh_local_cache(cwd, timeout=timeout)
     except Exception:
         pass

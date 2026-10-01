@@ -25,65 +25,70 @@ from agent_worktrees import local_cache_refresh as lcr
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-class TestCandidatePluginRoots:
-    def test_marketplace_layout_is_the_first_candidate(self, tmp_path: Path) -> None:
-        roots = lcr._candidate_plugin_roots(tmp_path)
-        assert roots[0] == (
-            tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions"
-            / "customizing-copilot"
-        )
-
-    def test_direct_install_layout_is_found_by_manifest_name(
-        self, tmp_path: Path
-    ) -> None:
-        direct_root = tmp_path / ".copilot" / "installed-plugins" / "_direct"
-        plugin_dir = direct_root / "some-hash"
-        plugin_dir.mkdir(parents=True)
-        (plugin_dir / "plugin.json").write_text(
-            json.dumps({"name": "customizing-copilot", "version": "1.0.0"}),
-            encoding="utf-8",
-        )
-        # An unrelated direct install must never match.
-        other_dir = direct_root / "unrelated"
-        other_dir.mkdir()
-        (other_dir / "plugin.json").write_text(
-            json.dumps({"name": "some-other-plugin", "version": "1.0.0"}),
-            encoding="utf-8",
-        )
-
-        roots = lcr._candidate_plugin_roots(tmp_path)
-
-        assert plugin_dir in roots
-        assert other_dir not in roots
-
-    def test_direct_install_with_malformed_manifest_is_skipped(
-        self, tmp_path: Path
-    ) -> None:
-        direct_root = tmp_path / ".copilot" / "installed-plugins" / "_direct"
-        plugin_dir = direct_root / "broken"
-        plugin_dir.mkdir(parents=True)
-        (plugin_dir / "plugin.json").write_text("{not json", encoding="utf-8")
-
-        # Must not raise.
-        roots = lcr._candidate_plugin_roots(tmp_path)
-        assert plugin_dir not in roots
-
-
 class TestResolveCliScript:
     def test_returns_none_when_not_installed(self, tmp_path: Path) -> None:
         assert lcr._resolve_cli_script(tmp_path) is None
 
-    def test_finds_the_marketplace_installed_cli(self, tmp_path: Path) -> None:
+    def test_finds_the_script_at_an_identity_verified_active_root(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        plugin_root = tmp_path / "customizing-copilot"
         scripts_dir = (
-            tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions"
-            / "customizing-copilot" / "skills" / "reviewing-customizations"
-            / "scripts"
+            plugin_root / "skills" / "reviewing-customizations" / "scripts"
         )
         scripts_dir.mkdir(parents=True)
         script = scripts_dir / "manage-instruction-projections.py"
         script.write_text("", encoding="utf-8")
 
+        fake_plugin = SimpleNamespace(
+            name="customizing-copilot",
+            live_roots=[SimpleNamespace(root=plugin_root)],
+        )
+        fake_report = SimpleNamespace(active={"customizing-copilot@local": fake_plugin})
+        monkeypatch.setattr(
+            "plugin_activation.resolve_active_plugins", lambda **k: fake_report
+        )
+
         assert lcr._resolve_cli_script(tmp_path) == script
+
+    def test_ignores_an_active_plugin_with_a_different_name(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        fake_plugin = SimpleNamespace(
+            name="some-other-plugin", live_roots=[SimpleNamespace(root=tmp_path)]
+        )
+        fake_report = SimpleNamespace(active={"some-other-plugin@local": fake_plugin})
+        monkeypatch.setattr(
+            "plugin_activation.resolve_active_plugins", lambda **k: fake_report
+        )
+
+        assert lcr._resolve_cli_script(tmp_path) is None
+
+    def test_fails_closed_when_the_reported_root_has_no_script(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """An active-plugin match whose reported root doesn't actually
+        contain the expected script (a stale or mismatched report) must
+        never fall back to trusting anything else -- fail closed."""
+        fake_plugin = SimpleNamespace(
+            name="customizing-copilot", live_roots=[SimpleNamespace(root=tmp_path)]
+        )
+        fake_report = SimpleNamespace(active={"customizing-copilot@local": fake_plugin})
+        monkeypatch.setattr(
+            "plugin_activation.resolve_active_plugins", lambda **k: fake_report
+        )
+
+        assert lcr._resolve_cli_script(tmp_path) is None
+
+    def test_never_raises_when_resolution_itself_fails(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        def _boom(**k):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr("plugin_activation.resolve_active_plugins", _boom)
+
+        assert lcr._resolve_cli_script(tmp_path) is None
 
 
 class TestResolveOwnAgentWorktreesCommand:
@@ -156,15 +161,9 @@ class TestRefreshLocalCache:
     def test_never_raises_on_a_subprocess_failure(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        scripts_dir = (
-            tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions"
-            / "customizing-copilot" / "skills" / "reviewing-customizations"
-            / "scripts"
-        )
-        scripts_dir.mkdir(parents=True)
-        (scripts_dir / "manage-instruction-projections.py").write_text(
-            "", encoding="utf-8"
-        )
+        script = tmp_path / "manage-instruction-projections.py"
+        script.write_text("", encoding="utf-8")
+        monkeypatch.setattr(lcr, "_resolve_cli_script", lambda home: script)
 
         def _boom(*a, **k):
             raise RuntimeError("boom")
@@ -180,15 +179,9 @@ class TestRefreshLocalCache:
     def test_never_raises_on_a_subprocess_timeout(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        scripts_dir = (
-            tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions"
-            / "customizing-copilot" / "skills" / "reviewing-customizations"
-            / "scripts"
-        )
-        scripts_dir.mkdir(parents=True)
-        (scripts_dir / "manage-instruction-projections.py").write_text(
-            "", encoding="utf-8"
-        )
+        script = tmp_path / "manage-instruction-projections.py"
+        script.write_text("", encoding="utf-8")
+        monkeypatch.setattr(lcr, "_resolve_cli_script", lambda home: script)
 
         import subprocess as subprocess_mod
 
@@ -206,14 +199,9 @@ class TestRefreshLocalCache:
     def test_invokes_the_cli_with_the_expected_argv(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        scripts_dir = (
-            tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions"
-            / "customizing-copilot" / "skills" / "reviewing-customizations"
-            / "scripts"
-        )
-        scripts_dir.mkdir(parents=True)
-        script = scripts_dir / "manage-instruction-projections.py"
+        script = tmp_path / "manage-instruction-projections.py"
         script.write_text("", encoding="utf-8")
+        monkeypatch.setattr(lcr, "_resolve_cli_script", lambda home: script)
         monkeypatch.setattr(
             lcr, "_resolve_own_agent_worktrees_command", lambda: "/bin/agent-worktrees"
         )
@@ -246,15 +234,9 @@ class TestRefreshLocalCache:
     def test_omits_agent_worktrees_path_when_unresolved(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        scripts_dir = (
-            tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions"
-            / "customizing-copilot" / "skills" / "reviewing-customizations"
-            / "scripts"
-        )
-        scripts_dir.mkdir(parents=True)
-        (scripts_dir / "manage-instruction-projections.py").write_text(
-            "", encoding="utf-8"
-        )
+        script = tmp_path / "manage-instruction-projections.py"
+        script.write_text("", encoding="utf-8")
+        monkeypatch.setattr(lcr, "_resolve_cli_script", lambda home: script)
         monkeypatch.setattr(lcr, "_resolve_own_agent_worktrees_command", lambda: None)
 
         calls = []
@@ -276,10 +258,10 @@ class TestRefreshLocalCache:
     def test_descendant_of_a_timed_out_cli_does_not_survive(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        """Real-subprocess regression (round 6 review finding): a plain
-        ``subprocess.run(timeout=...)`` only terminates its direct child,
-        so a CLI invocation that itself spawns a descendant (the real CLI
-        can launch an ``agent-worktrees`` lookup and git subprocesses, see
+        """Real-subprocess regression: a plain ``subprocess.run(
+        timeout=...)`` only terminates its direct child, so a CLI
+        invocation that itself spawns a descendant (the real CLI can
+        launch an ``agent-worktrees`` lookup and git subprocesses, see
         ``scan_plugin_sources.py``) could leak that descendant past a
         timeout -- exactly the limitation ``push_timeout.py`` documents
         and ``test_git_ops.py``'s ``TestPushTimeoutTreeKill`` already
@@ -302,13 +284,6 @@ class TestRefreshLocalCache:
         # disable the real descendant sweep this test asserts on.
         monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
 
-        scripts_dir = (
-            tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions"
-            / "customizing-copilot" / "skills" / "reviewing-customizations"
-            / "scripts"
-        )
-        scripts_dir.mkdir(parents=True)
-
         ready = tmp_path / "ready"
         pidfile = tmp_path / "grandchild.pid"
         grandchild_script = tmp_path / "grandchild.py"
@@ -320,12 +295,14 @@ class TestRefreshLocalCache:
         # Stand-in for manage-instruction-projections.py: spawns a
         # descendant (mirroring the real CLI's own subprocess calls) then
         # hangs well past the timeout below.
-        (scripts_dir / "manage-instruction-projections.py").write_text(
+        script = tmp_path / "manage-instruction-projections.py"
+        script.write_text(
             f"import subprocess, sys, time\n"
             f"p = subprocess.Popen([sys.executable, {str(grandchild_script)!r}])\n"
             f"open({str(ready)!r}, 'w').write(str(p.pid))\n"
             f"time.sleep(60)\n"
         )
+        monkeypatch.setattr(lcr, "_resolve_cli_script", lambda home: script)
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -435,8 +412,34 @@ class TestSessionstartDiagnostic:
         self, monkeypatch, tmp_path: Path
     ) -> None:
         """Less deadline budget than the max timeout shrinks the bound to
-        what actually remains, rather than risking the shared lifecycle
-        deadline."""
+        what actually remains -- after reserving margin for
+        ``push_timeout.run_bounded``'s own post-kill cleanup wait, not
+        just the subprocess timeout itself -- rather than risking the
+        shared lifecycle deadline."""
+        import time
+
+        calls = []
+        monkeypatch.setattr(
+            lcr,
+            "refresh_local_cache",
+            lambda repo_root, **k: calls.append(k.get("timeout")),
+        )
+
+        lcr.sessionstart_diagnostic(str(tmp_path), deadline=time.time() + 9.0)
+
+        assert len(calls) == 1
+        assert 2.0 <= calls[0] < lcr.SESSIONSTART_MAX_TIMEOUT_S
+
+    def test_skips_when_deadline_cannot_absorb_the_cleanup_grace(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        """A deadline with enough room for the subprocess timeout alone
+        (a flat 1s margin) but not enough to also absorb
+        ``_RUN_BOUNDED_CLEANUP_GRACE_S`` must still skip -- a timed-out
+        ``run_bounded`` call can spend that much longer past its own
+        timeout draining pipes, and attempting the call anyway would risk
+        the shared lifecycle deadline exactly the budget check exists to
+        prevent."""
         import time
 
         calls = []
@@ -448,8 +451,7 @@ class TestSessionstartDiagnostic:
 
         lcr.sessionstart_diagnostic(str(tmp_path), deadline=time.time() + 3.5)
 
-        assert len(calls) == 1
-        assert 2.0 <= calls[0] < lcr.SESSIONSTART_MAX_TIMEOUT_S
+        assert calls == []
 
     def test_skips_when_budget_is_too_tight(
         self, monkeypatch, tmp_path: Path
