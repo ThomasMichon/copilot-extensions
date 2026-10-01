@@ -591,7 +591,10 @@ def test_launch_reports_assigned_local_forward_from_owner_hold(seams, monkeypatc
         calls["get_hold"] += 1
         if calls["get_hold"] == 1:
             return None
-        return types.SimpleNamespace(local_forwards={"49152": 3000})
+        return types.SimpleNamespace(
+            local_forwards={"49152": 3000},
+            assigned_local_forwards={"49152": 3000},
+        )
 
     monkeypatch.setattr(owner, "get_hold", get_hold)
 
@@ -612,6 +615,7 @@ def test_repeated_dynamic_local_forward_reuses_prior_assigned_port(seams, monkey
         }},
         reverse_forwards={},
         local_forwards={"49152": 3000},
+        assigned_local_forwards={"49152": 3000},
     )
     monkeypatch.setattr(owner, "get_hold", lambda *a, **k: prior)
     monkeypatch.setattr(
@@ -630,6 +634,38 @@ def test_repeated_dynamic_local_forward_reuses_prior_assigned_port(seams, monkey
     assert out["local_forwards"] == {"49152": 3000}
     assert out["local_forwards_ready"] == {"49152": True}
     assert "local_forwards_pending" not in out
+
+
+def test_rejoin_reports_current_reassigned_dynamic_local_forward(seams, monkeypatch, capsys):
+    prior = types.SimpleNamespace(
+        sessions={"cli:anchor-example-web@cs-1": {
+            "mux_session": "wt-anchor-example-web", "confirmed": True,
+        }},
+        reverse_forwards={},
+        local_forwards={"49152": 3000},
+        assigned_local_forwards={"49152": 3000},
+    )
+    current = types.SimpleNamespace(
+        local_forwards={"49153": 3000},
+        assigned_local_forwards={"49153": 3000},
+    )
+    calls = {"get_hold": 0}
+
+    def get_hold(*a, **k):
+        calls["get_hold"] += 1
+        return prior if calls["get_hold"] == 1 else current
+
+    monkeypatch.setattr(owner, "get_hold", get_hold)
+    monkeypatch.setattr(
+        owner_local_forwards, "read_active_local_forwards", lambda: {"cs-1": {49153: 3000}},
+    )
+
+    rc = detach.cmd_detach(_args(seed=None), ssh_session=_ssh(seams, stdout=_CREATED))
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["local_forwards"] == {"49153": 3000}
+    assert out["local_forwards_ready"] == {"49153": True}
 
 
 def test_dynamic_local_forward_assignment_timeout_reports_pending_success(seams, capsys):

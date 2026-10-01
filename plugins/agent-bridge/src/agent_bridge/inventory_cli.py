@@ -222,7 +222,9 @@ def _release_unclaimed_cli_mode_reservation(
     ):
         return
     try:
-        client.release_cli_mode_reservation(worktree_id, reservation_id=reservation_id)
+        client.release_cli_mode_reservation(
+            worktree_id, reservation_id=reservation_id, unclaimed_only=True,
+        )
     except Exception as exc:  # best effort: preserve the original launch failure/result
         print(
             f"[WARN] failed to release CLI-mode reservation {reservation_id}: {exc}",

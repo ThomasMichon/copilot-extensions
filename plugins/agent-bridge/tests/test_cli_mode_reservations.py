@@ -109,6 +109,24 @@ class TestCreateReservation:
         ) == 0
         assert tmp_db.get_cli_mode_reservation("wt-A")["reservation_id"] == second
 
+    def test_unclaimed_only_release_keeps_claimed_reservation(
+        self, tmp_db: Database
+    ) -> None:
+        now = time.time()
+        reservation_id = tmp_db.create_cli_mode_reservation("wt-A", now=now)
+        assert _register(tmp_db, "cli-1", "wt-A", now + 1) == "live"
+
+        assert tmp_db.release_cli_mode_reservation(
+            "wt-A", reservation_id=reservation_id, unclaimed_only=True,
+        ) == 0
+        row = tmp_db.get_cli_mode_reservation("wt-A")
+        assert row["reservation_id"] == reservation_id
+        assert row["claimed_by_session_id"] == "cli-1"
+
+        assert tmp_db.release_cli_mode_reservation(
+            "wt-A", reservation_id=reservation_id,
+        ) == 1
+
 
 class TestClaimOnRegistration:
     def test_registration_claims_a_pending_reservation(
@@ -379,6 +397,34 @@ class TestReservationVenueRoutes:
             params={"reservation_id": created["reservation_id"]},
         )
         assert hit.json() == {"removed": 1}
+
+    def test_release_route_unclaimed_only_survives_claim_between_check_and_delete(
+        self, tmp_db: Database
+    ) -> None:
+        client = self._client(tmp_db)
+        created = client.post(
+            "/api/v1/live-sessions/cli-mode-reservations/wt-A",
+            json={"worktree_id": "wt-A"},
+        ).json()
+        checked = client.get("/api/v1/live-sessions/cli-mode-reservations/wt-A")
+        assert checked.json()["claimed_by_session_id"] is None
+
+        claimed = client.post(
+            "/api/v1/live-sessions",
+            json={"session_id": "cli-1", "worktree_id": "wt-A", "role": "picker"},
+        )
+        assert claimed.status_code == 200
+        cleanup = client.delete(
+            "/api/v1/live-sessions/cli-mode-reservations/wt-A",
+            params={
+                "reservation_id": created["reservation_id"],
+                "unclaimed_only": "true",
+            },
+        )
+        assert cleanup.json() == {"removed": 0}
+        survived = client.get("/api/v1/live-sessions/cli-mode-reservations/wt-A")
+        assert survived.status_code == 200
+        assert survived.json()["claimed_by_session_id"] == "cli-1"
 
     def test_claimed_session_exposes_venue_in_live_session_view(
         self, tmp_db: Database,

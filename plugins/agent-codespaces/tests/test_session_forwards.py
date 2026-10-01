@@ -364,6 +364,57 @@ async def test_dynamic_local_forward_reassigns_after_repeated_rebind_failures(st
     assert forwards.active_local_forwards() == {"cs-1": {49153: 3000}}
 
 
+async def test_new_dynamic_local_forward_stops_when_assignment_record_fails(store):
+    channels = []
+
+    def make(codespace, host_port, venue_port):
+        channel = FakeChannel((codespace, host_port, venue_port))
+        channel.bound_port = 49152
+        channels.append(channel)
+        return channel
+
+    owner.hold("cs-1", "cli:t", daemon_port=41234, mux_session="wt-x",
+               local_forwards={0: 3000})
+    holds = {h.codespace: h for h in owner.list_holds()}
+    owner.release("cs-1", "cli:t")
+    forwards = sf.SessionForwards(_any_factory({}), local_factory=make)
+
+    await forwards.reconcile(holds)
+
+    assert channels[0].stops == 1
+    assert forwards.active_local_forwards() == {}
+
+
+async def test_dynamic_local_forward_excludes_fixed_requested_host_ports(store):
+    assigned = iter([49152, 49153])
+    channels = []
+
+    def make(codespace, host_port, venue_port):
+        channel = FakeChannel((codespace, host_port, venue_port))
+        if host_port == 0:
+            channel.bound_port = next(assigned)
+        else:
+            channel.bound_port = host_port
+        channels.append(channel)
+        return channel
+
+    owner.hold("cs-1", "cli:t", daemon_port=41234, mux_session="wt-x",
+               local_forwards={0: 3000, 49152: 4000})
+    forwards = sf.SessionForwards(_any_factory({}), local_factory=make)
+
+    await forwards.reconcile({h.codespace: h for h in owner.list_holds()})
+    assert channels[0].key == ("cs-1", 0, 3000)
+    assert channels[0].bound_port == 49152
+    assert channels[0].stops == 1
+    assert owner.get_hold("cs-1").local_forwards == {"0": 3000, "49152": 4000}
+    assert forwards.active_local_forwards() == {"cs-1": {49152: 4000}}
+
+    await forwards.reconcile({h.codespace: h for h in owner.list_holds()})
+    assert owner.get_hold("cs-1").local_forwards == {"49152": 4000, "49153": 3000}
+    assert owner.get_hold("cs-1").assigned_local_forwards == {"49153": 3000}
+    assert forwards.active_local_forwards() == {"cs-1": {49152: 4000, 49153: 3000}}
+
+
 def test_repeated_dynamic_request_reuses_active_assignment_inside_owner_lock(store):
     owner.hold("cs-1", "cli:t", daemon_port=41234, mux_session="wt-x",
                local_forwards={49152: 3000})

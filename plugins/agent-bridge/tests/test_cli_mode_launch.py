@@ -41,7 +41,7 @@ class _FakeClient:
         self._create_error = create_error
         self.create_calls: list[tuple[str, float]] = []
         self.get_calls: list[str] = []
-        self.release_calls: list[tuple[str, str | None]] = []
+        self.release_calls: list[tuple[str, str | None, bool]] = []
 
     def create_cli_mode_reservation(
         self, worktree_id: str, *, ttl_seconds: float = 300.0,
@@ -58,9 +58,13 @@ class _FakeClient:
         return self._reservation
 
     def release_cli_mode_reservation(
-        self, worktree_id: str, *, reservation_id: str | None = None,
+        self,
+        worktree_id: str,
+        *,
+        reservation_id: str | None = None,
+        unclaimed_only: bool = False,
     ) -> int:
-        self.release_calls.append((worktree_id, reservation_id))
+        self.release_calls.append((worktree_id, reservation_id, unclaimed_only))
         return 1
 
 
@@ -140,7 +144,7 @@ def test_launch_surfaces_nonzero_embody_exit_code() -> None:
     outcome = _launch_cli_mode_session(client, "wt-A", run=fake_run)
     assert outcome["exit_code"] == 3
     assert outcome["session"] is None
-    assert client.release_calls == [("wt-A", "r1")]
+    assert client.release_calls == [("wt-A", "r1", True)]
 
 
 def test_launch_releases_reservation_when_embody_raises() -> None:
@@ -151,7 +155,7 @@ def test_launch_releases_reservation_when_embody_raises() -> None:
 
     with pytest.raises(RuntimeError, match="boom"):
         _launch_cli_mode_session(client, "wt-A", run=fake_run)
-    assert client.release_calls == [("wt-A", "r1")]
+    assert client.release_calls == [("wt-A", "r1", True)]
 
 
 def test_launch_tolerates_non_json_embody_stdout_and_releases_reservation() -> None:
@@ -163,7 +167,7 @@ def test_launch_tolerates_non_json_embody_stdout_and_releases_reservation() -> N
     outcome = _launch_cli_mode_session(client, "wt-A", run=fake_run)
     assert outcome["embody"] == {}
     assert outcome["session"] is None
-    assert client.release_calls == [("wt-A", "r1")]
+    assert client.release_calls == [("wt-A", "r1", True)]
 
 
 def test_launch_releases_reservation_when_embody_produces_no_session() -> None:
@@ -175,7 +179,7 @@ def test_launch_releases_reservation_when_embody_produces_no_session() -> None:
     outcome = _launch_cli_mode_session(client, "wt-A", run=fake_run)
     assert outcome["exit_code"] == 0
     assert outcome["session"] is None
-    assert client.release_calls == [("wt-A", "r1")]
+    assert client.release_calls == [("wt-A", "r1", True)]
 
 
 def test_launch_failure_does_not_release_a_claimed_reservation() -> None:
@@ -202,4 +206,4 @@ def test_launch_failure_releases_only_the_original_reservation_id() -> None:
         return _FakeCompletedProcess(3, stdout="")
 
     _launch_cli_mode_session(client, "wt-A", run=fake_run)
-    assert client.release_calls == [("wt-A", "r1")]
+    assert client.release_calls == [("wt-A", "r1", True)]

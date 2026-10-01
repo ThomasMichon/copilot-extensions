@@ -179,6 +179,12 @@ class SessionForwards:
             for host, venue in (getattr(hold, "assigned_local_forwards", None) or {}).items()
             if wanted.get((cs, int(host))) == venue
         }
+        fixed_hosts = {
+            int(host)
+            for cs, hold in holds.items()
+            for host in (getattr(hold, "local_forwards", None) or {})
+            if (cs, int(host)) not in dynamic and int(host) != 0
+        }
         for key, (venue, channel) in list(self._local.items()):
             if wanted.get(key) != venue or self._local_factory is None:
                 self._local.pop(key, None)
@@ -197,10 +203,12 @@ class SessionForwards:
             if not await self._ensure(f"local forward {key[1]}->{venue} for {key[0]}", entry[1]):
                 self._local.pop(key, None)
                 if key in dynamic and self._note_local_failure(key):
-                    await self._reassign_dynamic_local_forward(key, venue, entry[1])
+                    await self._reassign_dynamic_local_forward(key, venue, entry[1], fixed_hosts)
                 continue
             self._local_failures.pop(key, None)
-            self._record_assigned_local_port(key, venue, entry[1])
+            if not self._record_assigned_local_port(key, venue, entry[1], fixed_hosts):
+                self._local.pop(key, None)
+                await self._stop_untracked_local_forward(entry[1])
         from .owner_local_forwards import write_active_local_forwards
 
         write_active_local_forwards(self.active_local_forwards())
@@ -211,7 +219,7 @@ class SessionForwards:
         return count >= LOCAL_REBIND_FAILURES_BEFORE_REASSIGN
 
     async def _reassign_dynamic_local_forward(
-        self, key: tuple[str, int], venue: int, old_channel: RelayChannel,
+        self, key: tuple[str, int], venue: int, old_channel: RelayChannel, fixed_hosts: set[int],
     ) -> None:
         if self._local_factory is None:
             return
@@ -225,6 +233,9 @@ class SessionForwards:
             return
         assigned = _bound_local_port(entry[1])
         if assigned is None:
+            await self._stop_untracked_local_forward(entry[1])
+            return
+        if assigned in fixed_hosts:
             await self._stop_untracked_local_forward(entry[1])
             return
         from .owner_local_forwards import reassign_dynamic_local_forward
@@ -248,13 +259,15 @@ class SessionForwards:
             log.debug("untracked local forward stop failed")
 
     def _record_assigned_local_port(
-        self, key: tuple[str, int], venue: int, channel: RelayChannel,
-    ) -> None:
+        self, key: tuple[str, int], venue: int, channel: RelayChannel, fixed_hosts: set[int],
+    ) -> bool:
         if key[1] != 0:
-            return
+            return True
         assigned = _bound_local_port(channel)
         if assigned is None:
-            return
+            return False
+        if assigned in fixed_hosts:
+            return False
         from .owner_local_forwards import record_assigned_local_forward
 
         if record_assigned_local_forward(
@@ -262,6 +275,8 @@ class SessionForwards:
         ):
             self._local.pop(key, None)
             self._local[(key[0], assigned)] = (venue, channel)
+            return True
+        return False
 
     async def _reconcile_extra(self, holds: dict[str, OwnerHold]) -> None:
         wanted = {

@@ -308,13 +308,18 @@ async def get_cli_mode_reservation(
 
 @router.delete("/cli-mode-reservations/{worktree_id}")
 async def release_cli_mode_reservation(
-    worktree_id: str, request: Request, reservation_id: str | None = None,
+    worktree_id: str,
+    request: Request,
+    reservation_id: str | None = None,
+    unclaimed_only: bool = False,
 ) -> dict[str, int]:
     """Release a reservation; with ``?reservation_id=`` only that exact one
-    (compare-and-delete), never a newer reservation created since."""
+    (compare-and-delete), never a newer reservation created since. With
+    ``?unclaimed_only=true``, atomically leave already-claimed reservations
+    intact."""
     db = _db(request)
     removed = db.release_cli_mode_reservation(
-        worktree_id, reservation_id=reservation_id,
+        worktree_id, reservation_id=reservation_id, unclaimed_only=unclaimed_only,
     )
     return {"removed": removed}
 

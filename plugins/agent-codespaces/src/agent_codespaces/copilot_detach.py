@@ -307,6 +307,7 @@ def _reported_local_forwards(
     codespace: str,
     requested: dict[int, int],
     fallback: dict[str, int],
+    fallback_assigned: dict[str, int] | None = None,
     *,
     attempts: int = _LOCAL_FORWARD_ASSIGNMENT_ATTEMPTS,
 ) -> dict[int, int]:
@@ -317,28 +318,38 @@ def _reported_local_forwards(
     of pre-picking a port itself, avoiding the caller-side TOCTOU race.
     """
     wanted = dict(requested) if requested else _int_port_map(fallback)
-    if not wanted or 0 not in wanted:
+    dynamic_venues = set(_int_port_map(fallback_assigned or {}).values())
+    if not wanted:
         return wanted
-    fixed = {host: venue for host, venue in wanted.items() if host != 0}
-    dynamic_venue = wanted[0]
+    if 0 not in wanted and not dynamic_venues:
+        return wanted
+    fixed = {
+        host: venue for host, venue in wanted.items()
+        if host != 0 and venue not in dynamic_venues
+    }
+    dynamic_venues.update([wanted[0]] if 0 in wanted else [])
     from . import connection_owner as owner
     from .owner_local_forwards import read_active_local_forwards
 
     for attempt in range(attempts):
         held = owner.get_hold(codespace)
         current = _int_port_map(getattr(held, "local_forwards", None) or {})
+        assigned_current = _int_port_map(getattr(held, "assigned_local_forwards", None) or {})
         active = read_active_local_forwards().get(codespace, {})
         candidates = {
             host: venue for host, venue in current.items()
-            if host != 0 and host not in fixed and venue == dynamic_venue and active.get(host) == venue
+            if (
+                host != 0 and host not in fixed and venue in dynamic_venues
+                and assigned_current.get(host) == venue and active.get(host) == venue
+            )
         }
-        if candidates:
-            assigned = min(candidates)
-            return {**fixed, assigned: dynamic_venue}
+        if len(set(candidates.values())) == len(dynamic_venues):
+            return {**fixed, **candidates}
         if attempt + 1 < attempts:
             time.sleep(5.0)
+    pending = ",".join(str(v) for v in sorted(dynamic_venues))
     raise TimeoutError(
-        f"the Connection Owner did not report an assigned host port for --forward 0:{dynamic_venue}; "
+        f"the Connection Owner did not report an assigned host port for --forward 0:{pending}; "
         "its local forward may still be binding, or a pre-upgrade Owner may be running "
         "and dropping the pending '0' key while sanitizing holds"
     )
@@ -353,18 +364,21 @@ def _local_forwards_ready(
     codespace: str,
     reported: dict[int, int],
     requested: dict[int, int],
+    assigned: dict[str, int] | None = None,
 ) -> dict[int, bool]:
-    dynamic_venue = requested.get(0)
-    fixed = [host for host, venue in reported.items() if venue != dynamic_venue]
+    dynamic_venues = set(_int_port_map(assigned or {}).values())
+    if 0 in requested:
+        dynamic_venues.add(requested[0])
+    fixed = [host for host, venue in reported.items() if venue not in dynamic_venues]
     ready = _host_ports_listening(sorted(fixed)) if fixed else {}
-    if dynamic_venue is not None:
+    if dynamic_venues:
         from .owner_local_forwards import read_active_local_forwards
 
         active = read_active_local_forwards().get(codespace, {})
         ready.update({
             host: active.get(host) == venue
             for host, venue in reported.items()
-            if venue == dynamic_venue
+            if venue in dynamic_venues
         })
     return ready
 
@@ -497,6 +511,7 @@ def cmd_detach(
     prior_session = dict((held.sessions.get(plan["tenant"]) if held else None) or {}) or None
     prior_forwards = dict(getattr(held, "reverse_forwards", None) or {})
     prior_local = dict(getattr(held, "local_forwards", None) or {})
+    prior_assigned_local = dict(getattr(held, "assigned_local_forwards", None) or {})
     owner.hold(
         args.name, plan["tenant"], daemon_port=daemon_port,
         mux_session=plan["mux_session"], fresh=True,
@@ -657,7 +672,9 @@ def cmd_detach(
         local_pending: dict[int, int] = {}
         local_forward_error: str | None = None
         try:
-            reported_local = _reported_local_forwards(args.name, local_forwards, prior_local)
+            reported_local = _reported_local_forwards(
+                args.name, local_forwards, prior_local, prior_assigned_local,
+            )
         except TimeoutError as exc:
             reported_local = {host: venue for host, venue in local_forwards.items() if host != 0}
             local_pending = _pending_local_forwards(local_forwards, prior_local)
@@ -665,7 +682,10 @@ def cmd_detach(
         forwards_ready = (
             _venue_ports_listening(args.name, sorted(reverse_forwards)) if reverse_forwards else {}
         )
-        local_ready = _local_forwards_ready(args.name, reported_local, local_forwards) if reported_local else {}
+        local_ready = (
+            _local_forwards_ready(args.name, reported_local, local_forwards, prior_assigned_local)
+            if reported_local else {}
+        )
         print(json.dumps({
             "ok": True, **plan, "session_id": session_id, "created": created,
             **({"ref_files": refs_note_text.splitlines()[1:], "refs_delivered": refs_delivered}
