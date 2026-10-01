@@ -2967,7 +2967,7 @@ def _cmd_doctor(*, json_output: bool = False) -> int:
         return 1 if has_findings else 0
 
     if not auth_findings:
-        print("[OK] gh is authenticated with the 'codespace' scope (ambient + all mapped accounts).")
+        print("[OK] gh is authenticated with the 'codespace' scope (CodeSpace-serving accounts).")
     else:
         print("[gh] CodeSpace auth issue(s) -- `gh codespace` ops will fail until resolved:", file=sys.stderr)
         for finding in auth_findings:

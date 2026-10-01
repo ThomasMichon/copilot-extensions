@@ -24,7 +24,7 @@ def _args(**kw):
         name="cs-1", worktree_id=None, driver="orchestrator", seed="do the task",
         seed_file=None, copilot_args=["--no-ask-user"], register_timeout=0.0,
         ensure_mux=True, dry_run=False, effort=None, force=False, force_claim=False,
-        detach=True, stop=False,
+        detach=True, stop=False, no_relay=False,
     )
     base.update(kw)
     return argparse.Namespace(**base)
@@ -264,6 +264,20 @@ def test_github_credential_ambiguity_warns_and_continues(seams, monkeypatch, cap
     err = capsys.readouterr().err
     assert "github-credential-ambiguous" in err
     assert seams.holds and seams.ssh
+
+
+def test_no_relay_skips_github_credential_preflight(seams, monkeypatch):
+    monkeypatch.setattr(
+        copilot_venue,
+        "github_credential_preflight",
+        lambda n: (_ for _ in ()).throw(AssertionError("must not preflight")),
+    )
+
+    rc = detach.cmd_detach(
+        _args(no_relay=True), ssh_session=_ssh(seams, stdout=_CREATED),
+    )
+
+    assert rc == 0
 
 
 def test_no_host_bridge_fails_before_any_hold(seams, monkeypatch, capsys):

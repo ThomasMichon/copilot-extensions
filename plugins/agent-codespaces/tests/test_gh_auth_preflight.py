@@ -12,11 +12,11 @@ from agent_codespaces.auth_preflight import GithubCredentialPreflight
 from agent_codespaces.config import ConfigDropinRegistryReport, ConfigProviderReports
 
 _STATUS = """github.com
-  x Logged in to github.com account ThomasMichon (keyring)
+  x Logged in to github.com account alice (keyring)
   - Active account: true
   - Token scopes: 'codespace', 'gist', 'read:org', 'repo', 'workflow'
 
-  x Logged in to github.com account example-operator (keyring)
+  x Logged in to github.com account bob (keyring)
   - Active account: false
   - Token scopes: 'gist', 'read:org', 'repo', 'workflow'
 """
@@ -47,20 +47,20 @@ def _clean_provider_reports() -> ConfigProviderReports:
 
 def test_parse_gh_account_scopes():
     parsed = m._parse_gh_account_scopes(_STATUS)
-    assert "codespace" in parsed["ThomasMichon"]
-    assert "codespace" not in parsed["example-operator"]
+    assert "codespace" in parsed["alice"]
+    assert "codespace" not in parsed["bob"]
 
 
 def test_preflight_flags_mapped_account_missing_codespace_scope():
     with patch("subprocess.run") as run, \
          patch("agent_codespaces.auth_preflight.codespace_scope_accounts",
-               return_value=("ThomasMichon", "example-operator")):
+               return_value=("alice", "bob")):
         run.return_value = MagicMock(returncode=0, stdout=_STATUS, stderr="")
         msgs = m._gh_auth_preflight()
     joined = "\n".join(msgs)
-    assert "example-operator" in joined and "codespace" in joined
+    assert "bob" in joined and "codespace" in joined
     # The account that HAS the scope must not be flagged.
-    assert "ThomasMichon" not in joined
+    assert "alice" not in joined
 
 
 def test_preflight_flags_missing_mapped_account():
@@ -81,7 +81,7 @@ def test_preflight_clean_when_all_scoped():
     )
     with patch("subprocess.run") as run, \
          patch("agent_codespaces.auth_preflight.codespace_scope_accounts",
-               return_value=("ThomasMichon", "example-operator")):
+               return_value=("alice", "bob")):
         run.return_value = MagicMock(returncode=0, stdout=status, stderr="")
         msgs = m._gh_auth_preflight()
     assert msgs == []
@@ -89,11 +89,11 @@ def test_preflight_clean_when_all_scoped():
 
 def test_preflight_ignores_mapped_non_codespace_account_for_other_owner():
     status = """github.com
-  x Logged in to github.com account nakanaki_microsoft (keyring)
+  x Logged in to github.com account alice (keyring)
   - Active account: true
   - Token scopes: 'gist', 'repo'
 
-  x Logged in to github.com account namankanakiya (keyring)
+  x Logged in to github.com account bob (keyring)
   - Active account: false
   - Token scopes: 'gist', 'repo'
 """
@@ -102,17 +102,39 @@ def test_preflight_ignores_mapped_non_codespace_account_for_other_owner():
          patch("agent_codespaces.config.load_merged_config") as load_cfg, \
          patch("agent_codespaces.gh_account.account_for_repo") as account_for_repo:
         load_cfg.return_value = MagicMock(
-            repos={"odsp-microsoft/example-codespaces": object()},
+            repos={"example-org/example-codespaces": object()},
         )
         account_for_repo.side_effect = lambda repo: {
-            "ThomasMichon/copilot-extensions": "namankanakiya",
-            "odsp-microsoft/example-codespaces": "nakanaki_microsoft",
+            "example-tools/example-extension": "bob",
+            "example-org/example-codespaces": "alice",
         }.get(repo)
         run.return_value = MagicMock(returncode=0, stdout=status, stderr="")
         msgs = m._gh_auth_preflight()
     joined = "\n".join(msgs)
-    assert "nakanaki_microsoft" in joined and "codespace" in joined
-    assert "namankanakiya" not in joined
+    assert "alice" in joined and "codespace" in joined
+    assert "bob" not in joined
+
+
+def test_preflight_checks_active_account_when_no_codespace_accounts():
+    status = """github.com
+  x Logged in to github.com account alice (keyring)
+  - Active account: true
+  - Token scopes: 'gist', 'repo'
+
+  x Logged in to github.com account bob (keyring)
+  - Active account: false
+  - Token scopes: 'codespace', 'gist', 'repo'
+"""
+    with patch("subprocess.run") as run, \
+         patch("agent_codespaces.auth_preflight.codespace_scope_accounts",
+               return_value=()), \
+         patch("agent_codespaces.gh_account.active_account",
+               return_value="alice"):
+        run.return_value = MagicMock(returncode=0, stdout=status, stderr="")
+        msgs = m._gh_auth_preflight()
+    joined = "\n".join(msgs)
+    assert "alice" in joined and "codespace" in joined
+    assert "bob" not in joined
 
 
 def test_credential_account_for_ambient_codespace_uses_active_gh_account(monkeypatch):

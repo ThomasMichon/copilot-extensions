@@ -396,13 +396,14 @@ def cmd_detach(
 
     from .copilot_venue import claim_or_exit_code, github_credential_preflight
 
-    github_auth = github_credential_preflight(args.name)
-    if not github_auth.ok:
-        print(
-            f"[WARN] {github_auth.reason_code}: {github_auth.detail}\n"
-            f"       Remedy: {github_auth.remedy}",
-            file=sys.stderr,
-        )
+    if not getattr(args, "no_relay", False):
+        github_auth = github_credential_preflight(args.name)
+        if not github_auth.ok:
+            print(
+                f"[WARN] {github_auth.reason_code}: {github_auth.detail}\n"
+                f"       Remedy: {github_auth.remedy}",
+                file=sys.stderr,
+            )
 
     claim_rc = claim_or_exit_code(args)
     if claim_rc is not None:

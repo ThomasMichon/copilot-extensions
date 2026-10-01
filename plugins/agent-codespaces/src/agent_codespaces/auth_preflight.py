@@ -103,7 +103,16 @@ def gh_auth_preflight(status_func, account_login_remedy) -> list[str]:
     lowered = {login.casefold(): scopes for login, scopes in per_account.items()}
     accounts = codespace_scope_accounts()
     if not accounts:
-        if "codespace" not in combined.lower():
+        from . import gh_account
+
+        active = gh_account.active_account()
+        scopes = lowered.get(active.casefold()) if active else None
+        if active and "codespace" not in {scope.casefold() for scope in (scopes or set())}:
+            msgs.append(
+                f"active gh account '{active}' is missing the 'codespace' scope "
+                f"-- run: gh auth refresh -h github.com -u {active} -s codespace"
+            )
+        elif not active and "codespace" not in combined.lower():
             msgs.append(
                 "gh token is missing the 'codespace' scope (needed for CodeSpace "
                 "operations) -- run: gh auth refresh -h github.com -s codespace"
@@ -307,8 +316,9 @@ async def github_credential_preflight(
         reason_code=GITHUB_CREDENTIAL_UNAVAILABLE,
         detail=(
             "the host relay could not produce a non-interactive github.com "
-            f"credential for {login}" if login else
-            "credential from Git Credential Manager or gh"
+            f"credential for {login}" if login
+            else "the host relay could not produce a non-interactive "
+            "github.com credential from Git Credential Manager or gh"
         ),
         remedy=github_credential_remedy(login),
         account=login,
