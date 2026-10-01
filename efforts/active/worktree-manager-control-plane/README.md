@@ -887,6 +887,15 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-09-29** — Claiming Phase 4's "onboarding polish for the
+  absent-Manager path" item: making the install-trigger path (what fires
+  when a bare invocation resolves to no usable Worktree Manager) read as a
+  guided first-run onboarding experience rather than an error, per the
+  Guiding Intent's picker §`first-run-onboarding-entry` and installer
+  §`onboards-from-empty-gracefully` closures this item targets. Working
+  solo per standing operator directive; recorded here per this effort's own
+  Coordination-section claiming discipline since #352 is closed.
+
 - **2026-09-29** — Resumed this exact worktree after an interrupted landing
   pass rather than restarting from scratch. Found one good committed slice
   already landed locally (`d7d1183d4`, the Step 8 housekeeping cutover) plus a
