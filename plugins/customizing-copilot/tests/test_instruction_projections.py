@@ -1001,6 +1001,164 @@ def test_render_local_cache_files_excluded_from_checked_in_orphan_scan(
     assert lock["projections"]
 
 
+def test_orphan_scan_still_excludes_local_cache_file_in_an_untracked_git_repo(
+    tmp_path: Path,
+) -> None:
+    """The exclusion must still hold once a repo *does* have git, so long as
+    the ``.local.instructions.md`` file itself is genuinely untracked (the
+    adopted-the-convention case this mechanism is built for)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    assert projections.sync_repository(repo, [source]).blocking == 0
+    _git_commit_all(repo, "commit the checked-in projection")
+
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+    local_path.write_bytes(_projection(repo).read_bytes())
+    # Deliberately left untracked (no git add/commit) -- this is the
+    # adopted-the-convention case the suffix exclusion exists for.
+
+    scan_result = projections.scan_repository(repo)
+
+    assert not any(
+        finding.check == "projection-orphan-file" for finding in scan_result.findings
+    )
+
+
+def test_orphan_scan_flags_a_git_tracked_local_cache_file_instead_of_hiding_it(
+    tmp_path: Path,
+) -> None:
+    """A stray ``*.local.instructions.md`` file committed before (or
+    without) the ``.gitignore`` convention being adopted must never be
+    silently excluded from the orphan scan merely because of its suffix."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    assert projections.sync_repository(repo, [source]).blocking == 0
+    _git_commit_all(repo, "commit the checked-in projection")
+
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+    local_path.write_bytes(_projection(repo).read_bytes())
+    _git_commit_all(repo, "accidentally commit a local cache file")
+
+    scan_result = projections.scan_repository(repo)
+
+    assert any(
+        finding.check == "projection-orphan-file" for finding in scan_result.findings
+    )
+
+
+def test_orphan_scan_treats_inconclusive_git_check_as_not_excludable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    assert projections.sync_repository(repo, [source]).blocking == 0
+    _git_commit_all(repo, "commit the checked-in projection")
+
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+    local_path.write_bytes(_projection(repo).read_bytes())
+    # Left untracked -- an inconclusive check must never be treated as
+    # "confirmed untracked" merely because it also happens to be true here.
+
+    def broken_run(*args, **kwargs):
+        if "rev-parse" in args[0]:
+            return subprocess.CompletedProcess(args[0], 0, stdout=b"true\n", stderr=b"")
+        raise subprocess.TimeoutExpired(cmd="git", timeout=5)
+
+    monkeypatch.setattr(projections.subprocess, "run", broken_run)
+
+    scan_result = projections.scan_repository(repo)
+
+    assert any(
+        finding.check == "projection-orphan-file" for finding in scan_result.findings
+    )
+
+
+def test_orphan_scan_distinguishes_a_failed_probe_from_a_confirmed_non_repo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real git working tree whose ``rev-parse`` probe itself fails to
+    complete (timeout, transient subprocess error) must never be treated
+    like a confirmed plain, non-git directory -- that would silently hide
+    a tracked local-cache file from the orphan scan. Only a *completed*
+    probe reporting "not a work tree", or a genuinely missing ``git``
+    binary (``FileNotFoundError``), may be treated that way."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    assert projections.sync_repository(repo, [source]).blocking == 0
+    _git_commit_all(repo, "commit the checked-in projection")
+
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+    local_path.write_bytes(_projection(repo).read_bytes())
+    _git_commit_all(repo, "accidentally commit a local cache file")
+
+    def broken_rev_parse(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="git", timeout=5)
+
+    monkeypatch.setattr(projections.subprocess, "run", broken_rev_parse)
+
+    scan_result = projections.scan_repository(repo)
+
+    assert any(
+        finding.check == "projection-orphan-file" for finding in scan_result.findings
+    )
+
+
+def test_resolve_git_tracked_paths_treats_missing_git_binary_as_not_applicable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A genuinely missing ``git`` binary is the one case kept as "not
+    applicable" (``inconclusive=False``, matching the plain-directory
+    case) rather than inconclusive -- it can never itself be a transient
+    failure *of* an existing repository."""
+
+    def missing_git(*args, **kwargs):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(projections.subprocess, "run", missing_git)
+
+    tracked, inconclusive = projections._resolve_git_tracked_paths(
+        tmp_path, ["some/file.local.instructions.md"]
+    )
+
+    assert tracked == set()
+    assert inconclusive is False
+
+
 def test_sync_safely_creates_then_updates_projection_and_lock(
     tmp_path: Path,
 ) -> None:

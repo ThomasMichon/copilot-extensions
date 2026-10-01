@@ -5,10 +5,12 @@ description: >
   wants its enabled plugins' static instruction-projection content kept
   current automatically, instead of only at the next session's proactive
   resync. Requires the adopting repo's own explicit, committed opt-in before
-  scaffolding anything -- never merely an operator request in the current
-  session. Use when a repo asks to automate instruction-projection sync, add
-  a scheduled projection-reflect worker, or enable a projection bypass
-  profile for its review gate.
+  scaffolding the scheduler, bypass profile, or reconciler agent -- never
+  merely an operator request in the current session. (The `.gitignore`
+  local-cache convention is the one exception -- see its own section below.)
+  Use when a repo asks to automate instruction-projection sync, add a
+  scheduled projection-reflect worker, or enable a projection bypass profile
+  for its review gate.
   Trigger phrases include:
   - 'set up instruction sync'
   - 'automate projection sync'
@@ -40,8 +42,11 @@ for the two repo-specific pieces to adapt.
 
 ## The consent gate comes first -- always
 
-**Never scaffold anything without the adopting repo's explicit, committed,
-in-repo opt-in already present.** Per
+**Never scaffold the reconciler agent, scheduler config, or bypass profile
+without the adopting repo's explicit, committed, in-repo opt-in already
+present.** (The `.gitignore` local-cache convention is the one exception --
+see its own section below, which carries its own, different authority
+requirement instead.) Per
 [`docs/patterns/install-vs-adopt-boundary.md`](../../../../docs/patterns/install-vs-adopt-boundary.md):
 granting a scheduler repo-write authority and a review-bypass profile is repo
 mutation, not a machine-local install/update concern -- and "the operator
@@ -76,20 +81,59 @@ issue #3132 for the still-open externally-installed-source half of this
 gap).
 
 - **No file present, or `enabled` is not literally `true`:** decline to
-  scaffold anything. You may still report what drift exists (`scan
-  --from-settings`) -- report-only mode never requires consent -- but never
-  open an auto-mergeable PR or install a scheduler.
+  scaffold the reconciler agent, scheduler, or bypass profile. You may
+  still report what drift exists (`scan --from-settings`) -- report-only
+  mode never requires consent -- but never open an auto-mergeable PR or
+  install a scheduler. (The `.gitignore` convention below is unaffected by
+  this.)
 - **A repo genuinely wants this:** its own maintainer commits this file
   through the repo's normal contribution flow (a PR, reviewed like any other
-  change) *before* asking this skill to scaffold anything. If the file is
-  missing, walk the operator through authoring and landing it first -- do
-  not write it yourself as a side effect of "setting up the worker."
+  change) *before* asking this skill to scaffold the reconciler, scheduler,
+  or bypass profile. If the file is missing, walk the operator through
+  authoring and landing it first -- do not write it yourself as a side
+  effect of "setting up the worker."
 - **Consent is rechecked live, not only at setup time.** Both the scheduled
   worker and the bypass profile call `load_consent` on every run/every PR --
   there is no cache. The moment the file is deleted, edited to
   `"enabled": false`, or otherwise fails validation, both the worker and the
   bypass fail closed on their very next run, without a second `setup`
   invocation. Withdrawing consent is exactly: edit or delete the file.
+
+## The `.gitignore` convention -- not gated by this skill's consent file, but still a repo mutation
+
+This scaffolding step is **not** gated by the `projection-reflect.json`
+consent file above: `render_local_cache()` (Phase 7,
+`docs/patterns/worktree-scoped-dynamic-guidance.md`) is permissionless by
+design -- a local, gitignored file write, no commit, no PR -- regardless of
+whether a repo ever adopts the scheduler/bypass pieces this skill otherwise
+scaffolds. So scaffolding this rule never needs that specific opt-in file
+to exist first.
+
+But committing a `.gitignore` rule is still an ordinary **repo mutation**,
+not a machine-local concern -- per
+[`docs/patterns/install-vs-adopt-boundary.md`](../../../../docs/patterns/install-vs-adopt-boundary.md):
+repo-write authority comes from the repository's ownership and its own
+contribution flow, never merely from an operator's in-session request. Only
+propose this rule through that repo's normal PR flow, as you would any
+other change to a repo you don't unilaterally own -- never commit it
+directly as a side effect of an unrelated session. Keep the *render*
+permissionless; gate the *ignore-rule commit* like any other repo change.
+
+Scaffold, from
+[`references/templates/gitignore-rule.md`](references/templates/gitignore-rule.md):
+`**/*.local.instructions.md` under `.github/instructions/` (a dedicated
+`.github/instructions/.gitignore`, or an equivalent repo-root recursive
+rule). This rule does not make the orphan scan's git-tracked check work --
+`git ls-files` already excludes every untracked file regardless of ignore
+matching, so a freshly rendered, unignored local-cache file is still
+excluded correctly without it. What the rule actually prevents is a later
+`git add -A` (or an editor's "stage all") turning that file into a *tracked*
+one by accident -- and only a tracked file is no longer excluded from the
+checked-in orphan scan
+(`instruction_projections._iter_projection_files`), where it is instead
+caught and reported as `projection-orphan-file` rather than hidden. Add the
+rule to close off that accidental-staging path up front, not because the
+scan depends on it.
 
 ## What to scaffold, once consent is present
 

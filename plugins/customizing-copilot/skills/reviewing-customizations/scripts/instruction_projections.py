@@ -1314,26 +1314,24 @@ def _resolve_git_tracked_paths(
 
     Returns ``(tracked, inconclusive)``:
 
-    * ``inconclusive`` is ``False`` and ``tracked`` is empty when ``root``
-      is not (as far as this can tell) a git working tree at all -- no
-      ``git`` binary, or genuinely not a repository. This is the documented
-      plain-directory case (the render-only path is proven to work with no
-      ``.git`` present at all) and must keep behaving exactly as if no
-      tracking concept applied.
-    * ``inconclusive`` is ``True`` when ``root`` *is* a git working tree but
-      the actual tracked-files query itself failed (timeout, a corrupted
-      index, any other subprocess failure) -- the caller must then treat
-      *every* path in this batch as un-confirmable and refuse to write or
-      delete any of them, never assume "untracked" merely because the
-      check itself broke.
+    * ``inconclusive`` is ``False`` and ``tracked`` is empty only when
+      ``root`` is *confirmed* not a git working tree: no ``git`` binary
+      (``FileNotFoundError``), or a completed ``rev-parse`` probe reporting
+      so. This is the documented plain-directory case (the render-only
+      path works with no ``.git`` at all) and behaves as if no tracking
+      concept applied.
+    * ``inconclusive`` is ``True`` whenever that can't be confirmed either
+      way: the ``rev-parse`` probe itself failed to complete (timeout, any
+      other subprocess error besides a missing binary), or ``root`` *is* a
+      confirmed git working tree but the tracked-files query failed. The
+      caller must treat every path in the batch as un-confirmable -- never
+      assume "untracked"/"not applicable" merely because a check broke.
     * Otherwise ``tracked`` is the exact subset of ``relatives`` git
       currently tracks.
 
-    Uses ``--literal-pathspecs`` so a filename containing pathspec magic
-    characters (``[``, ``]``, ``*``, ``?``, ...) is matched literally, never
-    interpreted as a glob, and a git-isolated environment
-    (:func:`_git_isolated_env`) so an inherited ``GIT_DIR``/``GIT_INDEX_FILE``
-    can never redirect the query at an unrelated repository or index.
+    Uses ``--literal-pathspecs`` (never glob-interprets pathspec magic
+    characters) and a git-isolated environment (:func:`_git_isolated_env`,
+    so an inherited ``GIT_DIR``/``GIT_INDEX_FILE`` can't redirect the query).
     """
     if not relatives:
         return set(), False
@@ -1345,8 +1343,10 @@ def _resolve_git_tracked_paths(
             timeout=5,
             env=env,
         )
-    except (OSError, subprocess.SubprocessError):
+    except FileNotFoundError:
         return set(), False
+    except (OSError, subprocess.SubprocessError):
+        return set(), True
     if probe.returncode != 0 or probe.stdout.strip() != b"true":
         return set(), False
     # From here on, root IS a git working tree -- any further failure is
@@ -1760,30 +1760,30 @@ def _validate_projection_file(
 
 
 def _iter_projection_files(repo_root: Path) -> Iterable[Path]:
+    """Yield checked-in ``*.instructions.md`` files for the orphan scan. A
+    ``*.local.instructions.md`` file is excluded unless
+    :func:`_resolve_git_tracked_paths` reports it tracked or inconclusive,
+    including the plain-directory case where tracking is inapplicable."""
     instructions = repo_root / ".github" / "instructions"
     if not instructions.is_dir() or _is_indirection(instructions):
         return ()
     found: list[Path] = []
+    local_cache: dict[str, Path] = {}
     for dirpath, dirnames, filenames in os.walk(instructions):
-        safe_dirs: list[str] = []
-        for name in dirnames:
-            candidate = Path(dirpath) / name
-            if not _is_indirection(candidate):
-                safe_dirs.append(name)
-        dirnames[:] = safe_dirs
+        dirnames[:] = [d for d in dirnames if not _is_indirection(Path(dirpath) / d)]
         for name in filenames:
-            # Local-cache siblings (docs/patterns/worktree-scoped-dynamic-
-            # guidance.md) are deliberately never locked -- they'd otherwise
-            # surface here as a false projection-orphan-file finding, which
-            # projection_reflect.classify_findings() routes to conflict-
-            # dispatch by default (it isn't in PLAIN_DRIFT_CHECKS). Excluding
-            # them keeps the checked-in scan scoped to what it actually
-            # governs.
-            if name.endswith(".instructions.md") and not name.endswith(
-                _LOCAL_CACHE_SUFFIX
-            ):
-                found.append(Path(dirpath) / name)
-    return found
+            if not name.endswith(_INSTRUCTIONS_SUFFIX):
+                continue
+            path = Path(dirpath) / name
+            if not name.endswith(_LOCAL_CACHE_SUFFIX):
+                found.append(path)
+                continue
+            try:
+                local_cache[path.relative_to(repo_root).as_posix()] = path
+            except ValueError:
+                pass
+    tracked, inconclusive = _resolve_git_tracked_paths(repo_root, list(local_cache))
+    return found + [p for r, p in local_cache.items() if inconclusive or r in tracked]
 
 
 def _scan_orphan_files(
