@@ -1,0 +1,9 @@
+{
+  "comment": "maintenance tick now routes its reindex through the live service's own POST /reindex endpoint instead of a second raw 'agent-index index' CLI process, eliminating a recurring two-directional concurrent-writer race class entirely.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "minor"
+    }
+  ]
+}
