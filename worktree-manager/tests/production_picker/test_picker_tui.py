@@ -4397,13 +4397,82 @@ def test_new_worktree_decision_exits():
             assert all(not o["on"] for o in dlg._dlg["opts"])
             await pilot.press("enter")      # confirm Create, no options
             await pilot.pause()
+            from worktree_manager.production_picker.picker_tui.engine import SeedPromptScreen
+            assert isinstance(app.screen, SeedPromptScreen)
+            await pilot.press("enter")      # textarea -> button row (Launch)
+            await pilot.press("enter")      # activate Launch (blank -> no seed)
+            await pilot.pause()
         assert app.result is not None
         assert app.result["action"] == "new"
         assert app.result["is_local"] is True
         assert app.result["options"] == {
             "anchor": False, "bare": False,
             "no_mux": False, "ahp": False, "local_model": False,
+            "seed_prompt": "",
         }
+
+    asyncio.run(run())
+
+
+def test_new_worktree_bare_skips_seed_prompt():
+    """#4778-ish (picker-new-session-prompt-and-composer Phase A item 3): a
+    Bare worktree gets no Copilot bootstrap at all -- nothing to seed -- so
+    confirming Create with Bare selected must go straight to the launch
+    decision, never opening SeedPromptScreen."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 0
+            scr.btn_idx = 0
+            scr.sel = ("BTN", 0)
+            scr._activate()
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            labels = [o["label"] for o in dlg._dlg["opts"]]
+            bare = labels.index("Bare")
+            await pilot.press("tab")
+            for _ in range(bare):
+                await pilot.press("down")
+            await pilot.press("space")          # toggle Bare on
+            await pilot.press("tab")
+            await pilot.press("enter")          # confirm Create
+            await pilot.pause()
+        assert app.result is not None
+        assert app.result["action"] == "new"
+        assert app.result["options"]["bare"] is True
+        assert app.result["options"]["seed_prompt"] == ""
+
+    asyncio.run(run())
+
+
+def test_new_worktree_seed_prompt_carries_through():
+    """A typed prompt in the SeedPromptScreen that follows Create reaches the
+    launch decision's ``options["seed_prompt"]``."""
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 0
+            scr.btn_idx = 0
+            scr.sel = ("BTN", 0)
+            scr._activate()
+            await pilot.pause()
+            await pilot.press("enter")          # confirm Create, no options
+            await pilot.pause()
+            from worktree_manager.production_picker.picker_tui.engine import SeedPromptScreen
+            seed_screen = app.screen
+            assert isinstance(seed_screen, SeedPromptScreen)
+            seed_screen._rec["primary"].text = "fix the flaky test"
+            await pilot.press("enter")          # textarea -> button row (Launch)
+            await pilot.press("enter")          # activate Launch
+            await pilot.pause()
+        assert app.result["action"] == "new"
+        assert app.result["options"]["seed_prompt"] == "fix the flaky test"
 
     asyncio.run(run())
 
@@ -4439,6 +4508,10 @@ def test_new_worktree_no_mux_option():
             await pilot.press("tab")            # options -> button group
             await pilot.press("enter")          # confirm Create
             await pilot.pause()
+            await pilot.press("enter")          # SeedPromptScreen: Launch (blank)
+            await pilot.pause()
+            await pilot.press("enter")          # activate Launch
+            await pilot.pause()
         assert app.result["action"] == "new"
         assert app.result["options"]["no_mux"] is True
 
@@ -4467,6 +4540,10 @@ def test_new_worktree_ahp_option_defaults_off_and_toggles():
             await pilot.press("space")
             await pilot.press("tab")
             await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("enter")          # SeedPromptScreen: Launch (blank)
+            await pilot.pause()
+            await pilot.press("enter")          # activate Launch
             await pilot.pause()
         assert app.result["options"]["ahp"] is True
         assert app.result["options"]["no_mux"] is False
@@ -4501,6 +4578,10 @@ def test_new_worktree_modifiers_can_be_combined():
             await pilot.press("space")
             await pilot.press("tab")
             await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("enter")          # SeedPromptScreen: Launch (blank)
+            await pilot.pause()
+            await pilot.press("enter")          # activate Launch
             await pilot.pause()
         assert app.result["options"]["no_mux"] is True
         assert app.result["options"]["ahp"] is True
@@ -4552,6 +4633,10 @@ def test_new_worktree_anchor_option_shows_selected_state():
             assert "Selected: Anchor repo" in prompt.render().plain
             await pilot.press("tab")
             await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("enter")          # SeedPromptScreen: Launch (blank)
+            await pilot.pause()
+            await pilot.press("enter")          # activate Launch
             await pilot.pause()
         assert app.result["action"] == "new"
         assert app.result["options"]["anchor"] is True

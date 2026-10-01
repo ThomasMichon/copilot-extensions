@@ -157,31 +157,55 @@ real code, not assumption:
 ## Plan
 
 ### Phase A — "New worktree…" gains an optional Prompt field
-- [ ] Extract `PivotFormScreen`'s field-type-to-widget rendering
+- [x] Extract `PivotFormScreen`'s field-type-to-widget rendering
       (`steering_form.py:154-210`) into a shared, submit-semantics-agnostic
       helper (mirroring this file's own "mechanical extraction" precedent);
       re-wire `PivotFormScreen` to call it, confirming byte-identical
-      behavior (existing steer tests must still pass unchanged).
+      behavior (existing steer tests must still pass unchanged). **Done
+      2026-09-30:** new `picker_tui/field_widgets.py` module, `compose_field(f,
+      i) -> (widgets, rec)` (pure, no `self`/draft/visibility coupling);
+      `PivotFormScreen._compose_one` now calls it and layers its own
+      `show_when`/`visible` bookkeeping on top. Full `production_picker` suite
+      (840 passed, 1 skipped) confirms byte-identical behavior.
+- [x] Build a new, lean creation-prompt screen (its own class -- NOT a reuse
+      of `PivotFormScreen` itself, whose Confirm/Save/Reset button row and
+      draft-persistence semantics don't fit a "collect one optional prompt
+      before launch" flow) using the extracted helper for the one `textarea`
+      field it needs. **Done 2026-09-30:** new `picker_tui/seed_prompt_screen
+      .py`, `SeedPromptScreen(ModalScreen[str])` -- always dismisses with a
+      plain `str` (`""` when skipped/escaped/blank-launch), a `Launch`/`Skip`
+      `FocusGroup` button row, Enter-from-textarea advances to it (mirroring
+      `PivotFormScreen`'s single-question path). 5 new Pilot tests cover
+      launch/skip/escape/blank-launch/whitespace-stripping.
 - [ ] Build a new, lean creation-prompt screen (its own class -- NOT a reuse
       of `PivotFormScreen` itself, whose Confirm/Save/Reset button row and
       draft-persistence semantics don't fit a "collect one optional prompt
       before launch" flow) using the extracted helper for the one `textarea`
       field it needs.
-- [ ] Chain it into `_open_optmenu()`'s flow: after `ScopeDlgScreen`
+- [x] Chain it into `_open_optmenu()`'s flow: after `ScopeDlgScreen`
       confirms (and only when "Bare" is NOT selected -- a bare worktree gets
       no Copilot bootstrap at all, so a seed prompt has nothing to attach
       to), open the new prompt screen; an empty/skipped prompt behaves
-      exactly as today (no change to existing behavior when unused).
-- [ ] Thread the collected prompt through `_confirm_new_worktree()`'s
+      exactly as today (no change to existing behavior when unused). **Done
+      2026-09-30:** `_open_optmenu()`'s `_after` callback now checks "Bare"
+      and either calls `_confirm_new_worktree(dlg)` directly (Bare) or pushes
+      `SeedPromptScreen` and calls `_confirm_new_worktree(dlg,
+      seed_prompt=result)` on its dismiss. `_confirm_new_worktree` always
+      carries `options["seed_prompt"]` (`""` when none). 5 existing
+      New-worktree confirm tests updated for the extra screen hop (each now
+      needs 2 Enter presses: textarea->buttons, then activate Launch); 2 new
+      tests cover the Bare-skips-the-screen path and a typed prompt carrying
+      through to the decision. Full suite: 847 passed, 1 skipped.
+- [~] Thread the collected prompt through `_confirm_new_worktree()`'s
       decision dict -> `picker_app.LaunchRequest` -> `_run_relocated_mux_launch()`'s
       `args` list -> `launch-session.{ps1,sh}` -- a NEW optional argument
       (name TBD at implementation time, e.g. `--seed-prompt`) that the
-      script forwards to whatever it ultimately execs (confirm at
-      implementation time whether that's a raw `copilot` invocation the
-      passthrough `--` mechanism can carry it through unchanged, or whether
-      the script needs its own explicit new flag wired to an equivalent of
-      `agent-worktrees copilot`'s own `--seed`/`--seed-ready-timeout`
-      mechanism).
+      script forwards to whatever it ultimately execs. **Redesigned +
+      mostly implemented 2026-09-30 (see this session's Journal for the
+      full reasoning):** the operator's own question ("can this not be a
+      standard part of `agent-worktrees create`?") led to a cleaner design
+      than Picker-specific argument-threading -- see Journal for what's done
+      vs. the one remaining piece (launch-session.{ps1,sh} wiring).
 - [ ] Confirm the end-to-end behavior matches `agent-worktrees copilot
       --seed`'s own documented contract ("Seed prompt injected as the
       session's first interactive turn once Copilot is ready") -- the
@@ -276,3 +300,316 @@ No code changed yet this session -- this entry (+ the effort doc itself) IS
 the handoff artifact. Next session should start at Phase A's first Plan
 item (the `PivotFormScreen` field-rendering extraction) since it's shared
 groundwork both phases depend on.
+
+### 2026-09-30 — Phase A item 1: field-rendering extraction
+Extracted `PivotFormScreen._compose_one`'s field-type -> widget-construction
+logic (the `choice`/`multichoice`/`text`/`textarea` branches, `steering_form
+.py:154-210`) into a new pure function `compose_field(f, i) -> (widgets, rec)`
+in a new sibling module, `picker_tui/field_widgets.py`. It takes no `self`,
+touches no draft/visibility/conditional-field state, and returns exactly the
+same `rec` shape (`name`/`type`/`options`/`allow_other`/`primary`/`other`)
+`PivotFormScreen._q` has always stored, minus the two caller-owned keys
+(`show_when`/`visible`) a conditional-fields caller layers on afterward.
+`PivotFormScreen._compose_one` now calls it and adds those two keys itself;
+`steering_form.py`'s imports were trimmed to drop what moved out (`Input`,
+`Widget`, `_AutoExpandTextArea`, `_OTHER_LABEL`, `_SteerRadioSet`,
+`_SteerSelectionList` are no longer referenced directly there).
+
+Verified byte-identical behavior: the three steer-form-focused suites
+(`test_pivot_steering_modals.py`, `test_picker_steer_form_flow.py`,
+`test_picker_steer_button_row.py`, 44 tests) pass unchanged, and the full
+`worktree-manager/tests/production_picker` suite (840 passed, 1 skipped --
+the skip pre-dates this change) is fully green, confirming no regression
+anywhere else that touches this code path.
+
+Next: Phase A item 2 (the new lean creation-prompt screen using
+`compose_field` for its one `textarea` field), then item 3 (wiring into
+`_open_optmenu()`'s flow) and item 4 (threading the prompt through the
+decision dict -> `LaunchRequest` -> launch-script argument chain -- see this
+README's own "Investigation already done" §5-6 for the exact call sites).
+
+### 2026-09-30 — Phase A item 2: the new lean creation-prompt screen
+Built `SeedPromptScreen` (`picker_tui/seed_prompt_screen.py`), a
+`ModalScreen[str]` using `field_widgets.compose_field` for its one `textarea`
+field. Deliberately its own class, not a `PivotFormScreen` reuse -- no
+Confirm/Save/Reset row, no draft persistence, nothing to resume (a
+skipped/blank prompt is exactly today's launch, unchanged). Dismisses with a
+plain `str`: the collected (stripped) prompt, or `""` for skip/escape/blank
+Launch -- never `None`, so a caller never needs a tri-state check.
+
+**A real bug the mid-session rendering-preview check caught:** the first cut
+put `padding: 1 0 0 0` directly on the 1-row-tall `#seed-buttons` `FocusGroup`
+to add a visual gap above it -- but that padding eats into the widget's own
+fixed `height: 1` content box, pushing its child `Static` row fully outside
+the visible area. The Launch/Skip buttons were composed, mounted, and
+logically present (`query_one` found them fine) but **invisible** -- headless
+Pilot assertions on values/dismiss results never caught this since they don't
+inspect rendered pixels. Caught by literally exporting the screen to an SVG
+snapshot (`App.export_screenshot()`) and rasterizing it (`resvg-py`; `cairosvg`
+needs a native `libcairo` this Windows box doesn't have, `svglib`+`reportlab`
+hit the same native-backend gap) to actually look at it. Fixed by moving the
+gap to `margin: 1 0 0 0` (space *outside* the widget) instead of `padding`,
+matching `PivotFormScreen`'s own convention of a separate spacer `Static`
+rather than padding a fixed-height button row. Re-rendered to confirm both
+buttons are now visible and correctly styled.
+
+**Takeaway for the rest of this effort (and Phase B's generic create-action
+UI):** a CSS-driven modal's layout correctness is not fully covered by
+headless Pilot assertions alone (widget presence/values only, not paint
+'') -- an SVG-export + raster spot-check is a cheap, repeatable way to catch a
+"logically there but invisible" layout bug before it ships. Worth doing once
+per new screen, not just once here.
+
+5 new Pilot tests (`test_seed_prompt_screen.py`): Launch with typed text,
+Skip button, Escape, blank Launch (⇔ Skip), and whitespace-stripping. Full
+`production_picker` suite: 845 passed, 1 skipped (the one unrelated failure
+seen mid-run, `test_registered_pivot_action_menu_runs_and_invalidates`, is a
+pre-existing timing flake -- passes clean in isolation, confirmed before
+concluding this).
+
+**A circular-import bug surfaced and was fixed in the same pass:**
+`field_widgets.py` originally imported `_AutoExpandTextArea`/`_OTHER_LABEL`/
+`_OTHER_SENTINEL`/`_SteerRadioSet`/`_SteerSelectionList` FROM `.steering` --
+but `steering.py` itself imports `PivotFormScreen` from `steering_form.py`,
+which imports `compose_field` FROM `field_widgets.py`, so any entry point
+that reaches `field_widgets` before `steering`/`engine` have fully
+initialized hit a partial-module `ImportError`. Worse, mid-fix (before
+`steering.py` was updated to match), the two modules briefly defined their
+OWN separate copies of these classes, producing a stealth isinstance-mismatch
+failure (`WrongType: Node matching '#q-0'... found _AutoExpandTextArea`) that
+only one test caught. Fixed properly, not papered over: the five widget
+classes/constants now live ONLY in `field_widgets.py` (a dependency-free base
+layer with zero import of `.steering`/`.steering_form`), and `steering.py`
+imports them back for backward-compatible re-export. Full suite green after
+the fix confirms both the cycle and the duplicate-class issue are resolved,
+not just hidden by import order.
+
+Next: Phase A item 3 (wiring `SeedPromptScreen` into `_open_optmenu()`'s
+flow, skipped when "Bare" is selected) and item 4 (threading the collected
+prompt through the decision dict -> `LaunchRequest` -> launch-script argument
+chain).
+
+### 2026-09-30 — Phase A item 3: wired into `_open_optmenu()`'s flow
+`_open_optmenu()`'s `ScopeDlgScreen` confirm callback now branches on
+whether "Bare" is among the confirmed options: Bare skips straight to
+`_confirm_new_worktree(dlg)` exactly as before (nothing to seed -- a bare
+worktree gets no Copilot bootstrap at all); otherwise it pushes
+`SeedPromptScreen(target=f"{tm} {te}")` and, on its dismiss, calls
+`_confirm_new_worktree(dlg, seed_prompt=result)`. `_confirm_new_worktree`
+now always includes `options["seed_prompt"]` in the decision dict (`""` when
+none was collected) -- `__main__.py`'s decision-handling doesn't read it yet
+(that's item 4), so today it's inert but present, ready to thread through.
+
+Updated the 5 pre-existing New-worktree confirm tests in `test_picker_tui.py`
+for the new screen hop: each now presses Enter twice after confirming
+Create (once to advance focus from the textarea to the button row, once
+more to actually activate Launch) -- the same "accept+advance, not
+accept+submit" mechanic `_AutoExpandTextArea`/`PivotFormScreen` already use.
+Added 2 new tests: `test_new_worktree_bare_skips_seed_prompt` (Bare -> no
+screen, `seed_prompt == ""`) and `test_new_worktree_seed_prompt_carries_
+through` (a typed prompt reaches `options["seed_prompt"]` unchanged). Full
+`production_picker` suite: 847 passed, 1 skipped. Also ran the rest of
+`worktree-manager`'s test tree (`tests/` minus `production_picker/`): 643
+passed, 5 pre-existing failures confirmed unrelated (mux-daemon,
+trusted-materializer-parity, tarball-update tests -- none touch
+steering/field_widgets/seed_prompt code).
+
+### Phase A item 4 -- deliberately NOT started this session; a concrete
+### recommendation for the next one instead of a rushed attempt
+Threading the collected prompt from here to an actual typed keystroke in a
+freshly-launched Copilot session is a materially different kind of risk than
+items 1-3: those only touched Picker-internal TUI code with a thorough
+Pilot-test harness. Item 4's target, `launch-session.{ps1,sh}`, is the ONE
+canonical script every real "New worktree…" launch on this machine goes
+through (`_run_relocated_mux_launch`'s own docstring: "the ONE canonical
+muxed-launch implementation") -- it is ~2000 lines of PowerShell managing
+mux-pane creation, bootstrap, and update sequencing, with no equivalent
+Pilot-style test harness, and the harness's own "Validate beyond unit tests"
+policy (`AGENTS.md`) explicitly calls for more than unit coverage before
+landing a change to a shared launch path this consequential.
+
+**What this session's investigation clarified that the original Plan didn't
+know yet:** `agent-worktrees copilot --seed` does NOT pass `--seed` to the
+`copilot` CLI process itself -- it delegates to `handoff_cli.cmd_embody`,
+which (after the real mux pane + copilot process already exist) calls
+`sessions.mux_seed_pane(pane, seed, ready_timeout=...)`: a pane-level
+primitive that waits for Copilot's input prompt to actually appear inside
+the mux pane, THEN sends the seed text as keystrokes. There is no
+`copilot --seed` CLI flag to forward through the launch script's existing
+`--` passthrough at all -- the effort README's original "confirm whether the
+passthrough mechanism can carry it through unchanged" question is now
+answered: **it cannot**, because the seeding happens one layer up, against
+the pane, after the process is already running and ready.
+
+**Recommended shape for item 4** (not yet implemented): expose the existing
+`sessions.mux_seed_pane` primitive as a small, focused `agent-worktrees`
+CLI subcommand (e.g. `agent-worktrees internal seed-pane --session <name>
+--seed <text> --ready-timeout <n>`), callable from PowerShell/Bash via a
+plain subprocess call, the same way the script already shells out to
+`agent-worktrees resolve`/`remux`/etc. `launch-session.{ps1,sh}` would call
+it once it knows the mux pane it just created holds the live `copilot`
+process (right after the point where it currently just returns/attaches),
+guarded behind a new optional argument (name TBD, e.g. `--seed-prompt`)
+threaded from `_run_relocated_mux_launch`'s `args` <- `LaunchRequest.
+seed_prompt` <- `decision["options"]["seed_prompt"]` (the last mile already
+built this session). This reuses a primitive already proven correct in
+production (`embody`/`handoff-cutover` already depend on it) rather than
+reimplementing pane-ready-detection and keystroke-typing a second time in
+PowerShell.
+
+**Validation bar for whoever picks this up** (per the harness's own
+"Validate beyond unit tests" policy): unit tests for the new CLI subcommand
+and the argument-threading layers, PLUS an actual live "New worktree…"
+launch from the Picker with a typed prompt, confirmed to land as the
+session's real first interactive turn with no race against bootstrap --
+this item should not be called done on unit tests alone.
+
+### 2026-09-30 — Item 4 redesigned + mostly implemented, after the operator
+### asked a better question than this effort's own original Plan
+The operator, reviewing the "new CLI subcommand" recommendation above,
+asked: **"Can this not be a standard part of `agent-worktrees create`?"**
+That reframing turned out to be architecturally correct and significantly
+simplified the implementation -- recorded here in full since it replaces
+most of the "recommended shape" written earlier in this same session.
+
+**Why it works:** the Picker's "New worktree…" never calls `agent-worktrees
+create` directly -- it calls `agent-worktrees resolve --new --json`
+(`engine_client.resolve_launch_plan`) -- but investigation confirmed **both
+commands share the exact same core function**, `worktree_creation
+._create_worktree_core()`. `create`/`resolve` are both documented as "no
+launch, no mux": they can only ever PERSIST a seed as intent, never type it
+(no pane/process exists yet at creation time) -- but persisting it on the
+worktree's own tracking record, rather than threading it through
+Picker-specific decision-dict/LaunchRequest/launch-script plumbing, means
+**any** path that later creates a live Copilot session for that worktree
+can discover and deliver it, not just the Picker's own launch-session
+script. This also makes `--seed` usable directly from a script/automation
+context (`agent-worktrees create --seed "..."`), which the original
+Picker-only design never would have been.
+
+**Implemented this session** (`plugins/agent-worktrees`):
+1. **Persistence:** `tracking.WorktreeRecord` gained `pending_seed: str |
+   None` (mirrors `bound_agent`'s "emitted only when set, byte-identical
+   legacy YAML" convention exactly -- same read/write pattern in
+   `load_record`/the raw-YAML content builder). Threaded through
+   `tracking_lifecycle.create_new_record()` -> `worktree_creation
+   ._create_worktree_core()` (new `pending_seed` kwarg, end to end).
+2. **Both creation CLI surfaces gained `--seed`:** `resolve_cli.py`'s
+   `resolve --new --seed <text>` (what the Picker actually calls) and
+   `worktree_ops_cli.py`'s `create --seed <text>` (the direct
+   agent/script-facing command) -- both pass straight to
+   `_create_worktree_core(..., pending_seed=...)`.
+3. **TWO independent consumption points**, since there are genuinely two
+   ways a live Copilot session gets attached to a freshly created
+   worktree, and item 4's Plan text originally only knew about one:
+   - **`agent-worktrees embody`/`copilot`'s own "create" path**
+     (`handoff_cli.cmd_embody`, the `--new`-or-fresh-worktree branch):
+     when no explicit `--seed` is given, it now falls back to the record's
+     `pending_seed` (`seed_from_pending` flag) and clears it on confirmed
+     delivery (`seed_result["ok"]`) -- left in place on a timeout/failure so
+     a later attach can retry, never silently lost.
+   - **`cmd_embody`'s own RESUME ("already a live mux session") path** --
+     this is the one the original Plan text didn't anticipate needing at
+     all: the Picker's `launch-session.{ps1,sh}` creates the exact same
+     `wt-<id>` mux-session name `cmd_embody` itself uses
+     (`sessions.mux_session_name`), but *without ever calling embody* --
+     so from `cmd_embody`'s perspective, calling it after the script has
+     already stood up the pane looks exactly like an ordinary **resume**.
+     The resume branch previously just reported `resumed: true` and
+     returned -- now it ALSO checks for and delivers a `pending_seed`
+     against the resolved pane (`mux_copilot_pane`/`mux_active_pane`)
+     before returning, with the same confirmed-delivery-clears /
+     unconfirmed-leaves-in-place contract as the create path. An explicit
+     `--seed` is deliberately NOT delivered on this resume path (unchanged
+     "one live session per worktree" contract -- only a *persisted*
+     pending prompt is, since that's a leftover obligation from creation,
+     not a fresh request).
+4. **Picker plumbing, now much smaller than originally planned, but with
+   ONE more hard blocker found and deliberately left for next time:**
+   `picker_app.LaunchRequest` gained `seed_prompt: str | None`; `__main__
+   .py`'s `action == "new"` decision handler reads `decision["options"]
+   ["seed_prompt"]` into it -- that much is done and tested. **Reverted
+   this session:** threading `seed_prompt` on into `engine_client
+   .resolve_launch_plan()` (as a new `seed` kwarg, forwarded as `--seed`
+   only when `new=True`) -- `engine_client.py` is at `worktree-manager`'s
+   hard 1000-line module-size cap with ZERO slack (999/1000 BEFORE this
+   session touched it at all, confirmed via `git show` against this
+   session's own starting commit) and, unlike `tracking.py`'s shrink-only
+   BASELINE (soft, explicitly wideneable via a reviewed
+   `tools/module-size-baseline.json` edit -- done this session, 4078 ->
+   4082), this is a hard CAP with no such escape hatch; the tool's own
+   message is explicit: "split this module into smaller components." A
+   proper split of `engine_client.py` is its own real refactor, not a
+   corner to cut mid-feature by deleting unrelated lines elsewhere to buy
+   headroom -- so the `seed` kwarg and its `--seed` forwarding were
+   reverted back out (confirmed via `git checkout <pre-session-commit> --
+   engine_client.py`/its test file) rather than shipped as a line-count
+   workaround. **No new argument on `LaunchRequest` needed reaching
+   `_run_relocated_mux_launch`'s `args` or `launch-session.{ps1,sh}` at
+   all** -- that script's job is simply "exist and create the pane" exactly
+   as it always has; something else (today: a dedicated `agent-worktrees
+   embody --worktree-id <id>` call) discovers and delivers whatever got
+   persisted onto the record.
+
+Tests: `tracking`/`tracking_write` (round-trip unaffected -- 262 passed),
+`embody` (6 new cases: pending-seed-on-create delivered+cleared,
+unconfirmed-delivery-leaves-it, explicit-seed-doesn't-touch-pending,
+pending-seed-on-RESUME delivered+cleared, unconfirmed-on-resume-leaves-it,
+plus the pre-existing 46 unaffected -- 48 total). `engine_client`'s own
+`seed`-forwarding was implemented, tested (4 new cases), THEN REVERTED this
+same session once the module-size gate caught `engine_client.py`'s hard
+1000-line cap (see above) -- its test file was reverted alongside it, back
+to this session's own starting commit. `test_production_picker_transplant
+.py` (2 new, both still valid and kept: `seed_prompt` reaches
+`LaunchRequest` from the decision dict, blank normalizes to `None` not
+`""` -- this layer doesn't touch `engine_client.py` at all). Targeted
+`agent-worktrees` regression set (`tracking`, `tracking_write`,
+`codename_cli`, `launch_preflight`, `owner_inheritance`, `paired_carve`,
+`embody`, `handoff_cutover`): 480 passed. Full `worktree-manager` suite
+(both `tests/` and `tests/production_picker/`): 644 + 847 passed, only the
+same pre-existing unrelated failures seen before this session touched
+anything (`test_mux_daemon`, `test_trusted_materializer_parity` x2,
+`test_update` -- all four about update/tarball/materializer-parity
+machinery nothing here touches). One additional pre-existing flake
+observed and confirmed unrelated: `test_profile_assignment.py::
+test_concurrent_allocation_serializes_bag_positions` races on a Windows
+pycache-clearing guard (`plugin_activation`'s own anti-stale-bytecode
+check, copilot-extensions #3802) under concurrent subprocess imports on
+this busy shared machine -- nothing to do with tracking/create/embody.
+
+**What's genuinely still missing -- TWO remaining pieces now, not one:**
+1. `launch-session.{ps1,sh}` itself needs to actually CALL
+   `agent-worktrees embody --worktree-id <id>` (no `--seed`
+   flag -- let it discover `pending_seed` itself via the resume path just
+   built) once it has created the worktree's pane, for a **brand-new**
+   worktree creation launch only (never on an ordinary resume launch, where
+   there's nothing newly pending in the overwhelming majority of cases,
+   though harmlessly a no-op there too since a resume's record has no
+   `pending_seed` unless one was persisted and never yet delivered). This
+   is still real PowerShell/Bash surgery on the "ONE canonical muxed-launch
+   implementation" script with no Pilot-style test harness, and still needs
+   a live "New worktree…" launch with a typed prompt to confirm delivery,
+   not just unit tests -- the validation bar recorded earlier in this same
+   Journal entry family still applies, now narrowed to exactly this one
+   call site instead of a whole new CLI subcommand plus multi-layer
+   argument threading.
+2. **New this session:** `engine_client.resolve_launch_plan()` needs its
+   own `seed` kwarg + `--seed` forwarding (reverted here for the
+   module-size reason above) -- genuinely needs `engine_client.py` split
+   into smaller components first (a real refactor, not a quick follow-on),
+   OR a deliberate, separately-reviewed decision to raise its hard
+   1000-line cap in `tools/module-size-baseline.json`/wherever that cap is
+   actually enforced from (distinct from `tracking.py`'s already-wideneable
+   soft baseline) -- whoever picks this up should resolve that choice
+   explicitly, not default to widening without discussion.
+
+Without #2, `LaunchRequest.seed_prompt` reaches `_resolve_for()` but is
+currently dropped on the floor there (never passed to
+`resolve_launch_plan()`, so a locally created worktree's `pending_seed`
+never actually gets persisted via the Picker's own flow) -- `--seed` on
+`agent-worktrees create`/`resolve --new` directly (bypassing the Picker)
+already works today and is the quickest way to verify the persistence +
+both consumption paths end-to-end before #1/#2 are tackled. Everything
+else in the chain (persistence, both consumption paths, the Picker UI
+collecting the prompt and threading it onto `LaunchRequest`) is
+implemented and tested.

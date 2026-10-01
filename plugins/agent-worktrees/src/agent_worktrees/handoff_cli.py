@@ -326,6 +326,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
 
     record = None
     selection = profile_assignment.LaunchProfileSelection(profile=None)
+    seed_from_pending = False
     if not already:
         try:
             record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
@@ -333,6 +334,17 @@ def cmd_embody(args: argparse.Namespace) -> int:
             if not make_new:
                 return _json_error(f"Worktree record not found: {wt_id}")
         if record is not None:
+            # picker-new-session-prompt-and-composer Phase A item 4: an
+            # explicit --seed always wins; absent one, a prompt persisted at
+            # creation time (`create`/`resolve --new --seed`) is delivered
+            # here instead -- this is the first (and here, only) real
+            # attach for a brand-new worktree. Cleared below only once
+            # actually confirmed delivered (`seed_result["ok"]`), so an
+            # unconfirmed delivery (pane never became ready in time) can
+            # still be retried by a later attach instead of being lost.
+            if not seed and getattr(record, "pending_seed", None):
+                seed = record.pending_seed
+                seed_from_pending = True
             backend_error = _unsupported_hosted_launch(
                 record,
                 "embody",
@@ -375,6 +387,33 @@ def cmd_embody(args: argparse.Namespace) -> int:
         return 0
 
     if already:
+        # picker-new-session-prompt-and-composer Phase A item 4: a pending
+        # prompt from creation time may still be unconsumed if whatever
+        # first stood up this worktree's mux pane did so OUTSIDE this
+        # function (e.g. the Picker's own launch-session.{ps1,sh}, which
+        # creates the `wt-<id>` pane directly rather than calling embody).
+        # Deliver it here too, on this same "pane already exists" path --
+        # an explicit --seed is deliberately NOT delivered on resume (one
+        # live session per worktree; this is the resume path, not a fresh
+        # attach), only a persisted pending_seed is.
+        resumed_pane = sessions.mux_copilot_pane(wt_id) or sessions.mux_active_pane(wt_id)
+        pending_seed_result = {}
+        try:
+            resumed_record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
+        except Exception:
+            resumed_record = None
+        pending = getattr(resumed_record, "pending_seed", None) if resumed_record else None
+        if pending and resumed_pane:
+            pending_seed_result = sessions.mux_seed_pane(
+                resumed_pane, pending,
+                ready_timeout=getattr(args, "seed_ready_timeout", None) or 180.0,
+            )
+            if pending_seed_result.get("ok"):
+                try:
+                    resumed_record.pending_seed = None
+                    tracking.save_record(resumed_record, cfg.tracking_dir() / f"{wt_id}.yaml")
+                except Exception:
+                    pass
         _json_output(
             {
                 "ok": True,
@@ -383,8 +422,9 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 "work_dir": work_dir,
                 "created": False,
                 "resumed": True,
-                "new_pane": (sessions.mux_copilot_pane(wt_id) or sessions.mux_active_pane(wt_id)),
+                "new_pane": resumed_pane,
                 "note": "a live mux session already embodies this worktree",
+                "seeded": bool(pending_seed_result.get("ok")) if pending else False,
             }
         )
         return 0
@@ -506,6 +546,15 @@ def cmd_embody(args: argparse.Namespace) -> int:
         if (new_pane and seed)
         else {}
     )
+    if seed_from_pending and seed_result.get("ok") and record is not None:
+        # Confirmed delivered -- clear so a later attach doesn't re-type it.
+        # An unconfirmed delivery (pane never ready in time) deliberately
+        # leaves it in place for a future attach to retry.
+        try:
+            record.pending_seed = None
+            tracking.save_record(record, cfg.tracking_dir() / f"{wt_id}.yaml")
+        except Exception:
+            pass
 
     verified = None
     verify_timeout = getattr(args, "verify_timeout", 0.0) or 0.0

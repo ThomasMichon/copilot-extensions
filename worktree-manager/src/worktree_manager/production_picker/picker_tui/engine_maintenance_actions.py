@@ -6,10 +6,13 @@ import threading
 
 from .engine_dialogs import ScopeDlgScreen
 from .engine_live_screens import ProgressScreen
+from .seed_prompt_screen import SeedPromptScreen
 
 class PickerScreenMaintenanceActionsMixin:
-    def _confirm_new_worktree(self, dlg):
-        """Confirmed New-worktree options -> the launch decision (#88 F4)."""
+    def _confirm_new_worktree(self, dlg, seed_prompt: str = ""):
+        """Confirmed New-worktree options (+ an optional seed prompt, gathered
+        by ``SeedPromptScreen`` beforehand -- see ``_open_optmenu``) -> the
+        launch decision (#88 F4)."""
         on = {o["label"] for o in dlg["opts"] if o["on"]}
         tm, te = dlg["target"]
         self._decide({
@@ -21,6 +24,7 @@ class PickerScreenMaintenanceActionsMixin:
                 "no_mux": "No Mux" in on,
                 "ahp": "AHP" in on,
                 "local_model": "Local model" in on,
+                "seed_prompt": seed_prompt,
             },
         })
     def _confirm_cleanup(self, dlg):
@@ -428,6 +432,17 @@ class PickerScreenMaintenanceActionsMixin:
                "opts": opts}
 
         def _after(confirmed):
-            if confirmed:
+            if not confirmed:
+                return
+            on = {o["label"] for o in dlg["opts"] if o["on"]}
+            if "Bare" in on:
+                # A bare worktree gets no Copilot bootstrap at all -- nothing
+                # to seed, so skip the prompt screen entirely and behave
+                # exactly as before this screen existed.
                 self._confirm_new_worktree(dlg)
+                return
+
+            def _seeded(prompt: str) -> None:
+                self._confirm_new_worktree(dlg, seed_prompt=prompt)
+            self.app.push_screen(SeedPromptScreen(target=f"{tm} {te}"), _seeded)
         self.app.push_screen(ScopeDlgScreen(dlg), _after)

@@ -324,6 +324,17 @@ def add_parsers(sub) -> None:
         "owner's claim (resource-obligation-settlement). For a "
         "bridge spawn, the dispatching (caller) worktree's ref.",
     )
+    parser.add_argument(
+        "--seed",
+        default=None,
+        help="With --new: an optional prompt queued as the session's "
+        "first interactive turn once Copilot is actually ready, "
+        "fire-and-forget past the auto-update/bootstrap flow. "
+        "Persisted on the new record (this command never launches "
+        "Copilot itself, so it can only be stored here); whichever "
+        "path first attaches a live session to this worktree "
+        "delivers and clears it.",
+    )
     parser.add_argument("copilot_args", nargs="*", default=[])
 
 
@@ -506,6 +517,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                 caller_worktree=getattr(state.args, "caller_worktree", None),
                 owner_ref=getattr(state.args, "owner_ref", None),
                 recovery=getattr(state.args, "recovery", False),
+                pending_seed=getattr(state.args, "seed", None),
             )
         except getattr(_core(), "CoordinationReadinessFailure") as exc:
             return _core()._emit_coordination_rejection(exc.readiness, json_out=True)

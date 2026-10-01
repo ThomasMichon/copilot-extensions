@@ -197,6 +197,77 @@ class TestCmdEmbody:
         assert out["created"] is False and out["resumed"] is True
         assert out["session"] == "wt-wtY" and out["new_pane"] == "%1"
 
+    def test_resume_delivers_pending_seed_left_by_an_external_pane_creator(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        """picker-new-session-prompt-and-composer Phase A item 4: the
+        Picker's own launch-session.{ps1,sh} creates the `wt-<id>` mux pane
+        directly (never calling embody) -- so THIS is the path that actually
+        delivers a pending_seed for that flow, via the resume branch, not
+        the create branch."""
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtE")
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+        (tmp_path / "wtE.yaml").write_text("x")
+        record = type(
+            "Rec", (), {"worktree_path": "/w/wtE", "pending_seed": "external pane prompt"},
+        )()
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: record)
+        saved = {}
+        monkeypatch.setattr(
+            m.tracking, "save_record",
+            lambda rec, path: saved.update(pending_seed=rec.pending_seed, path=path),
+        )
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
+        monkeypatch.setattr(sessions, "mux_copilot_pane", lambda w: "%3")
+        monkeypatch.setattr(sessions, "mux_new_session",
+                            lambda *a, **k: pytest.fail("should not spawn"))
+        seeded = {}
+        def _seed(pane, seed, **k):
+            seeded.update(pane=pane, seed=seed)
+            return {"ok": True, "pane": pane, "ready": True, "sent": True,
+                    "submitted": True, "reason": None}
+        monkeypatch.setattr(sessions, "mux_seed_pane", _seed)
+
+        rc = m.cmd_embody(_ns(worktree_id="wtE"))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["resumed"] is True and out["seeded"] is True
+        assert seeded == {"pane": "%3", "seed": "external pane prompt"}
+        assert saved == {"pending_seed": None, "path": tmp_path / "wtE.yaml"}
+
+    def test_resume_leaves_unconfirmed_pending_seed_for_a_later_retry(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtF")
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+        (tmp_path / "wtF.yaml").write_text("x")
+        record = type(
+            "Rec", (), {"worktree_path": "/w/wtF", "pending_seed": "not yet delivered"},
+        )()
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: record)
+        monkeypatch.setattr(
+            m.tracking, "save_record",
+            lambda rec, path: pytest.fail("must not clear an unconfirmed seed"),
+        )
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
+        monkeypatch.setattr(sessions, "mux_copilot_pane", lambda w: "%4")
+        monkeypatch.setattr(
+            sessions, "mux_seed_pane",
+            lambda pane, seed, **k: {"ok": False, "pane": pane, "ready": False,
+                                     "sent": False, "submitted": False,
+                                     "reason": "timeout"},
+        )
+
+        rc = m.cmd_embody(_ns(worktree_id="wtF"))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["resumed"] is True and out["seeded"] is False
+        assert record.pending_seed == "not yet delivered"
+
     def test_create_detached_session_and_seed(self, monkeypatch, capfd, tmp_path):
         _stub_config(monkeypatch)
         monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtZ")
@@ -232,6 +303,122 @@ class TestCmdEmbody:
         assert seeded == {
             "pane": "%5", "seed": "do the thing", "ready_timeout": 180.0,
         }
+
+    def test_pending_seed_is_delivered_and_cleared_on_confirmed_submit(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        """picker-new-session-prompt-and-composer Phase A item 4: a prompt
+        persisted at creation time (`create`/`resolve --new --seed`) is
+        delivered on the first real attach even with no explicit --seed, and
+        the record is updated to clear it once confirmed submitted."""
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtP")
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+        (tmp_path / "wtP.yaml").write_text("x")
+        record = type(
+            "Rec", (), {"worktree_path": "/w/wtP", "pending_seed": "queued prompt"},
+        )()
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: record)
+        saved = {}
+        monkeypatch.setattr(
+            m.tracking, "save_record",
+            lambda rec, path: saved.update(pending_seed=rec.pending_seed, path=path),
+        )
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        monkeypatch.setattr(
+            sessions, "mux_new_session",
+            lambda *a, **k: {"ok": True, "session": "wt-wtP",
+                             "new_pane": "%7", "error": None},
+        )
+        seeded = {}
+        def _seed(pane, seed, **k):
+            seeded.update(pane=pane, seed=seed)
+            return {"ok": True, "pane": pane, "ready": True, "sent": True,
+                    "submitted": True, "reason": None}
+        monkeypatch.setattr(sessions, "mux_seed_pane", _seed)
+
+        rc = m.cmd_embody(_ns(worktree_id="wtP"))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["seeded"] is True and out["seed_submitted"] is True
+        assert seeded == {"pane": "%7", "seed": "queued prompt"}
+        assert saved == {"pending_seed": None, "path": tmp_path / "wtP.yaml"}
+
+    def test_pending_seed_left_in_place_when_delivery_unconfirmed(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        """An unconfirmed delivery (pane never ready in time) must not lose
+        the pending prompt -- a later attach should still be able to retry
+        it, so the record is left untouched."""
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtQ")
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+        (tmp_path / "wtQ.yaml").write_text("x")
+        record = type(
+            "Rec", (), {"worktree_path": "/w/wtQ", "pending_seed": "still queued"},
+        )()
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: record)
+        monkeypatch.setattr(
+            m.tracking, "save_record",
+            lambda rec, path: pytest.fail("must not clear an unconfirmed seed"),
+        )
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        monkeypatch.setattr(
+            sessions, "mux_new_session",
+            lambda *a, **k: {"ok": True, "session": "wt-wtQ",
+                             "new_pane": "%8", "error": None},
+        )
+        monkeypatch.setattr(
+            sessions, "mux_seed_pane",
+            lambda pane, seed, **k: {"ok": False, "pane": pane, "ready": False,
+                                     "sent": False, "submitted": False,
+                                     "reason": "timeout"},
+        )
+
+        rc = m.cmd_embody(_ns(worktree_id="wtQ"))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["seeded"] is False
+        assert record.pending_seed == "still queued"
+
+    def test_explicit_seed_wins_over_pending_and_leaves_it_untouched(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        """An explicit --seed always wins -- it doesn't consume or clear a
+        separately persisted pending_seed, which stays available for a
+        future bare attach."""
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtR")
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+        (tmp_path / "wtR.yaml").write_text("x")
+        record = type(
+            "Rec", (), {"worktree_path": "/w/wtR", "pending_seed": "persisted"},
+        )()
+        monkeypatch.setattr(m.tracking, "load_record", lambda p: record)
+        monkeypatch.setattr(
+            m.tracking, "save_record",
+            lambda rec, path: pytest.fail("explicit seed must not touch pending_seed"),
+        )
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        monkeypatch.setattr(
+            sessions, "mux_new_session",
+            lambda *a, **k: {"ok": True, "session": "wt-wtR",
+                             "new_pane": "%6", "error": None},
+        )
+        seeded = {}
+        def _seed(pane, seed, **k):
+            seeded.update(pane=pane, seed=seed)
+            return {"ok": True, "pane": pane, "ready": True, "sent": True,
+                    "submitted": True, "reason": None}
+        monkeypatch.setattr(sessions, "mux_seed_pane", _seed)
+
+        rc = m.cmd_embody(_ns(worktree_id="wtR", seed="explicit wins"))
+
+        assert rc == 0
+        assert seeded == {"pane": "%6", "seed": "explicit wins"}
+        assert record.pending_seed == "persisted"
 
     def test_ensure_mux_not_called_without_explicit_opt_in(self, monkeypatch, tmp_path):
         # opt-in-not-ambient-default: a bare embody must never install tmux

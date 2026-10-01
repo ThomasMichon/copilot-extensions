@@ -774,6 +774,7 @@ class WorktreeRecord:
     # resuming a session here, instead of the venue's bare default. Absent =
     # no charter bound (the common case; the venue's default agent drives).
     bound_agent: str | None = None
+    pending_seed: str | None = None  # queued first-turn prompt; see create --seed
     # worktree-status-core: the agent-asserted DISPOSITION overlay -- orthogonal
     # to git/session state (which cannot tell "done" from "finalized-with-
     # follow-ups"). Set via `agent-worktrees status`; absent (legacy) = the safe
@@ -2141,6 +2142,7 @@ def _load_record_uncached(path: Path) -> WorktreeRecord:
         last_finalize_released=last_finalize_released_list,
         bound_agent=(str(data["bound_agent"]).strip() or None
                      if data.get("bound_agent") else None),
+        pending_seed=(str(data["pending_seed"]) if data.get("pending_seed") else None),
         follow_up=bool(data.get("follow_up", False)),
         follow_ups=follow_ups_list,
         summary=str(data.get("summary", "") or ""),
@@ -2856,6 +2858,8 @@ def _save_record_unlocked(
     # when set, so an unbound worktree's YAML stays byte-identical.
     if record.bound_agent:
         content += f"bound_agent: {_yaml_scalar(record.bound_agent)}\n"
+    if record.pending_seed:
+        content += f"pending_seed: {_yaml_scalar(record.pending_seed)}\n"
     # citadel paired -harness/-knowledge worktree lifecycle (#957): the pair
     # linkage. Emitted only when set, so an unpaired worktree's YAML stays
     # byte-identical (the common case is unpaired).

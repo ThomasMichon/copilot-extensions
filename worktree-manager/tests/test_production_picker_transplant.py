@@ -485,7 +485,7 @@ def test_manager_acts_on_production_picker_new_decision(monkeypatch):
         lambda project: {
             "action": "new",
             "is_local": True,
-            "options": {"no_mux": False},
+            "options": {"no_mux": False, "seed_prompt": "fix the flaky test"},
         },
     )
     requests = []
@@ -500,6 +500,33 @@ def test_manager_acts_on_production_picker_new_decision(monkeypatch):
     assert requests[0].mode == "new"
     assert requests[0].worktree_id is None
     assert requests[0].no_mux is False
+    assert requests[0].seed_prompt == "fix the flaky test"
+
+
+def test_manager_acts_on_production_picker_new_decision_with_no_seed_prompt(
+    monkeypatch,
+):
+    """An absent/blank seed_prompt (Bare, or a skipped/blank Launch) must
+    translate to None, not an empty string, through to LaunchRequest --
+    engine_client.resolve_launch_plan only forwards --seed on a truthy value."""
+    monkeypatch.setattr(
+        runner,
+        "run",
+        lambda project: {
+            "action": "new",
+            "is_local": True,
+            "options": {"no_mux": False, "seed_prompt": ""},
+        },
+    )
+    requests = []
+    monkeypatch.setattr(
+        entrypoint,
+        "_run_launch",
+        lambda request: requests.append(request) or 23,
+    )
+
+    assert entrypoint._run_production_picker("demo") == 23
+    assert requests[0].seed_prompt is None
 
 
 def test_manager_acts_on_production_picker_resume_decision(monkeypatch):
