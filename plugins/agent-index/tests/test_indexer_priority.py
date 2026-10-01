@@ -24,6 +24,23 @@ def test_config_nice_env_override(monkeypatch) -> None:
     assert IndexConfig().indexer_nice == 0
 
 
+def test_engine_config_default_nice(monkeypatch) -> None:
+    """The engine's own throttle defaults gentler than the worker's (5 vs 10):
+    it also serves live interactive search embeddings, not only background
+    reindexing."""
+    from agent_index.index_config import IndexConfig
+
+    monkeypatch.delenv("AGENT_INDEX_ENGINE_NICE", raising=False)
+    assert IndexConfig().engine_nice == 5
+
+
+def test_engine_config_nice_env_override(monkeypatch) -> None:
+    from agent_index.index_config import IndexConfig
+
+    monkeypatch.setenv("AGENT_INDEX_ENGINE_NICE", "0")
+    assert IndexConfig().engine_nice == 0
+
+
 def test_disabled_is_noop(monkeypatch) -> None:
     """nice <= 0 must not touch priority (explicit full-speed run)."""
     called = False
