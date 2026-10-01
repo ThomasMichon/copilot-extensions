@@ -10,6 +10,17 @@ from pathlib import Path
 SCHEMA = "copilot-extensions.launch-wrapper-assets"
 VERSION = 1
 MANIFEST = "launch-wrapper-assets.json"
+WRAPPER_FILES = (
+    "launch-session.cmd",
+    "launch-session.ps1",
+    "launch-session.sh",
+    "pane-wrapper.ps1",
+    "pane-wrapper.sh",
+    "psmux-path.ps1",
+    "psmux-passthrough.conf",
+    "session-options.ps1",
+    "session-options.sh",
+)
 
 
 @dataclass(frozen=True)

@@ -147,6 +147,32 @@ def test_packaged_preview_deploy_wrappers_uses_only_packaged_assets(
         assert (install / "bin" / name).exists()
 
 
+def test_live_checkout_deploy_wrappers_falls_back_to_canonical_assets(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    repo = tmp_path / "repo"
+    plugin = repo / "plugins" / "agent-worktrees"
+    plugin.mkdir(parents=True, exist_ok=True)
+    _write_wrapper_manifest(repo, ("launch-session.sh", "pane-wrapper.sh", "session-options.sh"))
+    canonical = repo / "worktree-manager" / "bin"
+    canonical.mkdir(parents=True)
+    for name, content in {
+        "launch-session.sh": "#!/usr/bin/env bash\n",
+        "pane-wrapper.sh": "#!/usr/bin/env bash\n",
+        "session-options.sh": "session opts\n",
+    }.items():
+        (canonical / name).write_text(content, encoding="utf-8")
+
+    install = tmp_path / "install"
+    monkeypatch.setattr(installer, "install_dir", lambda: install)
+    monkeypatch.setattr(installer.platform, "system", lambda: "Linux")
+
+    assert not (plugin / "bin").exists()
+    assert installer.deploy_wrappers(repo)
+    for name in ("launch-session.sh", "pane-wrapper.sh", "session-options.sh"):
+        assert (install / "bin" / name).exists()
+
+
 def test_remove_managed_instruction_retires_marked(tmp_path: Path) -> None:
     proj = tmp_path / ".proj"
     path = _warning_file(proj)
