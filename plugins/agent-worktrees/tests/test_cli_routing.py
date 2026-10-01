@@ -1283,21 +1283,30 @@ def test_bare_no_project_install_trigger_when_picker_retired(monkeypatch):
     assert trig["project"] is None
 
 
-def test_install_trigger_shows_source_and_platform_command(monkeypatch, capsys):
-    """The install trigger prints the verifiable source URL and the correct
-    per-platform install command, and never auto-runs anything."""
+def test_install_trigger_reads_as_first_run_onboarding(monkeypatch, capsys):
+    """The absent-Manager install trigger is a calm first-run onboarding
+    message: trustworthy source, explicit bootstrap command, and all output on
+    stderr."""
     monkeypatch.setattr(m.platform, "system", lambda: "Linux")
     rc = m.cmd_manager_install_trigger("demo")
-    err = capsys.readouterr().err
+    captured = capsys.readouterr()
+    err = captured.err
     assert rc == 0
+    assert captured.out == ""
+    assert "interactive mode needs Worktree Manager" in err
+    assert "On a first run that's expected" in err
+    assert "update or repair" in err
     assert m._WORKTREE_MANAGER_REPO_URL in err
+    assert "Bootstrap / update Worktree Manager:" in err
     assert "bootstrap.sh" in err and "curl -fsSL" in err
     assert "bootstrap.ps1" not in err  # posix must not show the Windows one-liner
 
     monkeypatch.setattr(m.platform, "system", lambda: "Windows")
     rc = m.cmd_manager_install_trigger("demo")
-    err = capsys.readouterr().err
+    captured = capsys.readouterr()
+    err = captured.err
     assert rc == 0
+    assert captured.out == ""
     assert "bootstrap.ps1" in err and "irm " in err
     assert "bootstrap.sh" not in err
 
