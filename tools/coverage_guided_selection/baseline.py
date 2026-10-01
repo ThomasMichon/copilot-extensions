@@ -40,7 +40,10 @@ BASELINE_SCHEMA_VERSION = 1
 # actually collects/runs (e.g. `PYTEST_ADDOPTS=-k smoke` or `-m guard`)
 # while pytest still exits 0 -- any of these would make a partial run look
 # like a complete, authoritative baseline. Scrubbed before the ephemeral
-# subprocess launches so only the explicit arguments below decide scope.
+# subprocess launches; the driver's own `-o addopts=` override (below)
+# separately neutralizes the same risk from a *project-configured* addopts
+# (pytest.ini/pyproject.toml/setup.cfg), which this environment-variable
+# scrub alone cannot reach.
 _AMBIENT_PYTEST_SELECTION_ENV_VARS = ("PYTEST_ADDOPTS",)
 
 # Executed inside the ephemeral `uv run` venv (never the caller's own
@@ -68,6 +71,16 @@ _DRIVER_SCRIPT = textwrap.dedent(
             f"--json-report-file={json_report_file}",
             "-p",
             "no:cacheprovider",
+            # Override any project-configured `addopts` (pytest.ini/
+            # pyproject.toml/setup.cfg) for this invocation only: an
+            # addopts like "-m smoke" would otherwise silently narrow
+            # collection to a subset while this run still exits 0, letting
+            # a partial run be recorded as a complete, authoritative
+            # baseline. Clearing the *environment* variable alone (see
+            # _AMBIENT_PYTEST_SELECTION_ENV_VARS) does not reach this
+            # configured-file source.
+            "-o",
+            "addopts=",
         ]
     )
 

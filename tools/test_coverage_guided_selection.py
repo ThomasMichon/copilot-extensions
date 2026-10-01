@@ -246,6 +246,56 @@ class TestComputeFallbackSet:
         assert first.selected_tests == second.selected_tests
 
 
+class TestBaselineCollectionErrorContract:
+    """Fast, mocked tests for the two non-clean collection outcomes --
+    neither spawns a real subprocess, so both run in the always-on
+    synthetic lane alongside `TestSelectTests`/`TestComputeFallbackSet`."""
+
+    def test_nonzero_exit_raises_baseline_collection_error(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        fake_result = type(
+            "FakeCompletedProcess",
+            (),
+            {"returncode": 1, "stdout": "1 failed", "stderr": ""},
+        )()
+        monkeypatch.setattr(
+            baseline_mod.subprocess, "run", lambda *a, **k: fake_result
+        )
+        with pytest.raises(baseline_mod.BaselineCollectionError) as exc_info:
+            baseline_mod.collect_baseline(
+                cwd=tmp_path,
+                test_path="tests",
+                cov_source="src",
+                plugin="mocked",
+            )
+        assert exc_info.value.returncode == 1
+        assert "1 failed" in str(exc_info.value)
+
+    def test_timeout_raises_baseline_collection_error(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        import subprocess as subprocess_module
+
+        def _raise_timeout(*args, **kwargs):
+            raise subprocess_module.TimeoutExpired(cmd=["uv", "run"], timeout=1.0)
+
+        monkeypatch.setattr(baseline_mod.subprocess, "run", _raise_timeout)
+        with pytest.raises(baseline_mod.BaselineCollectionError) as exc_info:
+            baseline_mod.collect_baseline(
+                cwd=tmp_path,
+                test_path="tests",
+                cov_source="src",
+                plugin="mocked",
+                timeout_s=1.0,
+            )
+        assert "timed out after 1.0s" in str(exc_info.value)
+        # The documented contract is specifically that callers only ever
+        # need to catch `BaselineCollectionError`; confirm the raw
+        # `TimeoutExpired` never escapes as the exception type itself.
+        assert not isinstance(exc_info.value, subprocess_module.TimeoutExpired)
+
+
 def test_collect_baseline_round_trips_against_a_real_plugin_suite() -> None:
     # Deliberately opt-in: spawns a real "uv run --with coverage ..."
     # subprocess against a real plugin's suite (seconds, network-dependent

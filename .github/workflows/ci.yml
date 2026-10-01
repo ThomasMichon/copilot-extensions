@@ -697,12 +697,13 @@ jobs:
 
   coverage-guided-selection-integration:
     name: coverage-guided-ci selection prototype (real-suite integration)
-    # The one real-subprocess integration test in
-    # tools/test_coverage_guided_selection.py self-skips unless
+    # The two real-subprocess integration tests in
+    # tools/test_coverage_guided_selection.py self-skip unless
     # CGS_RUN_INTEGRATION_TEST=1 -- deliberately opt-in/manual (this phase 0
-    # pilot's own effort Journal), not part of required PR CI, since it
-    # spawns a real 'uv run --with coverage --with pytest-cov --with
-    # pytest-json-report' subprocess against a real plugin's suite.
+    # pilot's own effort Journal), not part of required PR CI, since they
+    # spawn a real 'uv run --with coverage --with pytest-cov --with
+    # pytest-json-report' subprocess against a real plugin's suite (or a
+    # constructed throwaway one).
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -712,13 +713,12 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
-      - run: python -m pip install pytest
-      - name: Real-suite round-trip integration test
+      - name: Real-suite round-trip + fixture-phase integration tests
         env:
           CGS_RUN_INTEGRATION_TEST: "1"
         run: >-
-          python -m pytest -q
-          tools/test_coverage_guided_selection.py::test_collect_baseline_round_trips_against_a_real_plugin_suite
+          uv run --with pytest python -m pytest -q
+          tools/test_coverage_guided_selection.py
 
   pr-gate:
     name: PR gate (required check)
