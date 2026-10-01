@@ -4403,7 +4403,78 @@ def test_new_worktree_decision_exits():
         assert app.result["options"] == {
             "anchor": False, "bare": False,
             "no_mux": False, "ahp": False, "local_model": False,
+            "seed_prompt": "",
         }
+
+    asyncio.run(run())
+
+
+def test_new_worktree_bare_skips_seed_prompt(monkeypatch):
+    """#4778-ish (picker-new-session-prompt-and-composer Phase A item 3): a
+    Bare worktree gets no Copilot bootstrap at all -- nothing to seed -- so
+    confirming Create with Bare selected must go straight to the launch
+    decision, never opening SeedPromptScreen. Exercises the integration with
+    ``_SEED_PROMPT_ENABLED`` forced on (off by default until the Picker's own
+    delivery seam is complete -- see the effort's Journal)."""
+    from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
+    monkeypatch.setattr(ema, "_SEED_PROMPT_ENABLED", True)
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 0
+            scr.btn_idx = 0
+            scr.sel = ("BTN", 0)
+            scr._activate()
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            labels = [o["label"] for o in dlg._dlg["opts"]]
+            bare = labels.index("Bare")
+            await pilot.press("tab")
+            for _ in range(bare):
+                await pilot.press("down")
+            await pilot.press("space")          # toggle Bare on
+            await pilot.press("tab")
+            await pilot.press("enter")          # confirm Create
+            await pilot.pause()
+        assert app.result is not None
+        assert app.result["action"] == "new"
+        assert app.result["options"]["bare"] is True
+        assert app.result["options"]["seed_prompt"] == ""
+
+    asyncio.run(run())
+
+
+def test_new_worktree_seed_prompt_carries_through(monkeypatch):
+    """A typed prompt in the SeedPromptScreen that follows Create reaches the
+    launch decision's ``options["seed_prompt"]`` (``_SEED_PROMPT_ENABLED``
+    forced on -- see ``test_new_worktree_bare_skips_seed_prompt``)."""
+    from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
+    monkeypatch.setattr(ema, "_SEED_PROMPT_ENABLED", True)
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 0
+            scr.btn_idx = 0
+            scr.sel = ("BTN", 0)
+            scr._activate()
+            await pilot.pause()
+            await pilot.press("enter")          # confirm Create, no options
+            await pilot.pause()
+            from worktree_manager.production_picker.picker_tui.engine import SeedPromptScreen
+            seed_screen = app.screen
+            assert isinstance(seed_screen, SeedPromptScreen)
+            seed_screen._rec["primary"].text = "fix the flaky test"
+            await pilot.press("enter")          # textarea -> button row (Launch)
+            await pilot.press("enter")          # activate Launch
+            await pilot.pause()
+        assert app.result["action"] == "new"
+        assert app.result["options"]["seed_prompt"] == "fix the flaky test"
 
     asyncio.run(run())
 

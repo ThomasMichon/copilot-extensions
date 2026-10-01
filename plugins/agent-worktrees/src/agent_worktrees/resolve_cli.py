@@ -324,6 +324,19 @@ def add_parsers(sub) -> None:
         "owner's claim (resource-obligation-settlement). For a "
         "bridge spawn, the dispatching (caller) worktree's ref.",
     )
+    parser.add_argument(
+        "--seed",
+        default=None,
+        help="With --new (not supported alongside --machine): an optional "
+        "prompt queued as the session's first interactive turn once "
+        "Copilot is actually ready, fire-and-forget past the "
+        "auto-update/bootstrap flow. Persisted on the new record (this "
+        "command never launches Copilot itself, so it can only be "
+        "stored here); delivered and cleared by `agent-worktrees "
+        "embody`/`copilot` on the first attach -- an arbitrary direct "
+        "tmux/psmux attach, or a launch that bypasses embody, will not "
+        "deliver it.",
+    )
     parser.add_argument("copilot_args", nargs="*", default=[])
 
 
@@ -334,6 +347,36 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         state = ResolveCommandState.from_args(args)
     except _ResolveEarlyExit as exc:
         return exc.exit_code
+
+    requested_seed = getattr(state.args, "seed", None)
+    if requested_seed and not state.use_new:
+        # --seed is documented as valid only with --new (it persists onto
+        # a NEWLY created worktree's record) -- without it, --worktree-id/
+        # --base resolve calls would otherwise silently succeed and
+        # discard the value.
+        message = "--seed is only valid with --new."
+        if state.use_json:
+            return _json_error(message)
+        output.err(message)
+        return 2
+
+    if state.use_new and state.requested_machine and requested_seed:
+        # Validated here, before the JSON/non-JSON split: the non-JSON
+        # dispatcher checks state.use_new before state.requested_machine
+        # (below) and would otherwise silently create a LOCAL seeded
+        # worktree instead of honoring (or rejecting) --machine -- a
+        # confusing result regardless of --seed. The JSON path's own
+        # reason still applies too: its remote dispatch relays a naively
+        # space-joined command string with zero shell quoting, unsafe for
+        # an arbitrary --seed value.
+        message = (
+            "--seed is not yet supported for a remote --machine target; "
+            "use --seed on this machine only, or omit --machine."
+        )
+        if state.use_json:
+            return _json_error(message)
+        output.err(message)
+        return 2
 
     if (
         state.use_new
@@ -506,6 +549,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
                 caller_worktree=getattr(state.args, "caller_worktree", None),
                 owner_ref=getattr(state.args, "owner_ref", None),
                 recovery=getattr(state.args, "recovery", False),
+                pending_seed=getattr(state.args, "seed", None),
             )
         except getattr(_core(), "CoordinationReadinessFailure") as exc:
             return _core()._emit_coordination_rejection(exc.readiness, json_out=True)

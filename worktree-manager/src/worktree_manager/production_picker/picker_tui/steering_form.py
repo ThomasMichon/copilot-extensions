@@ -12,23 +12,18 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widget import Widget
 from textual.widgets import (
-    Input,
     RadioButton,
     Static,
     TabbedContent,
     TabPane,
 )
 
+from .field_widgets import compose_field
 from .steering import (
     ResetConfirmScreen,
     SteerButtonRow,
-    _AutoExpandTextArea,
-    _OTHER_LABEL,
     _OTHER_SENTINEL,
-    _SteerRadioSet,
-    _SteerSelectionList,
     _card_markdown,
     _steer_draft_path,
 )
@@ -164,51 +159,11 @@ class PivotFormScreen(ModalScreen[dict]):
                     yield from self._compose_one(f, i)
 
     def _compose_one(self, f: dict, i: int):
-        name, ftype = f["name"], f["type"]
-        options = list(f.get("options", []))
-        allow_other = bool(f.get("allow_other"))
-        rec = {
-            "name": name,
-            "type": ftype,
-            "options": options,
-            "allow_other": allow_other,
-            "show_when": f.get("show_when"),
-            "visible": True,
-            "primary": None,
-            "other": None,
-        }
         yield Static(self._q_label(f), classes="steer-qlabel")
-        if ftype == "choice":
-            btns = [RadioButton(o, value=(j == 0)) for j, o in enumerate(options)]
-            if allow_other:
-                btns.append(RadioButton(_OTHER_LABEL))
-            rs = _SteerRadioSet(*btns, id=f"q-{i}")
-            rec["primary"] = rs
-            yield rs
-            if allow_other:
-                other = _AutoExpandTextArea(id=f"other-{i}")
-                other.display = False
-                rec["other"] = other
-                yield other
-        elif ftype == "multichoice":
-            sels = [(o, o) for o in options]
-            if allow_other:
-                sels.append((_OTHER_LABEL, _OTHER_SENTINEL))
-            sl = _SteerSelectionList(*sels, id=f"q-{i}")
-            rec["primary"] = sl
-            yield sl
-            if allow_other:
-                other = _AutoExpandTextArea(id=f"other-{i}")
-                other.display = False
-                rec["other"] = other
-                yield other
-        else:  # text -> single-line Input; textarea -> free-form auto-expand box
-            if ftype == "text":
-                w: Widget = Input(id=f"q-{i}")
-            else:
-                w = _AutoExpandTextArea(id=f"q-{i}")
-            rec["primary"] = w
-            yield w
+        widgets, rec = compose_field(f, i)
+        rec["show_when"] = f.get("show_when")
+        rec["visible"] = True
+        yield from widgets
         self._q.append(rec)
 
     # ---- rendering helpers --------------------------------------------------

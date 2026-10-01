@@ -92,6 +92,7 @@ from .engine_views import MaintenanceView, TasksView, WorktreesView
 from .engine_worker_actions import PickerScreenWorkerActionsMixin
 from .engine_worktree_actions import PickerScreenWorktreeActionsMixin
 from .listview import ListView
+from .seed_prompt_screen import SeedPromptScreen  # noqa: F401 -- re-export for tests
 from .selection import ListSelection
 from .steering import (
     PivotCardScreen,
@@ -134,6 +135,7 @@ __all__ = [
     "QuitConfirmScreen",
     "ResetConfirmScreen",
     "ScopeDlgScreen",
+    "SeedPromptScreen",
     "SessionsViewScreen",
     "SteerButtonRow",
     "SubMenuScreen",

@@ -774,6 +774,12 @@ class WorktreeRecord:
     # resuming a session here, instead of the venue's bare default. Absent =
     # no charter bound (the common case; the venue's default agent drives).
     bound_agent: str | None = None
+    pending_seed: str | None = None  # queued first-turn prompt; see create --seed
+    # Monotonic counter, bumped on every claim/restore (pending_seed.py) --
+    # lets _save_record_unlocked merge like effort_revision/lifecycle_revision:
+    # a stale full-record writer's save can never resurrect an already-
+    # delivered (cleared) seed, since its own revision is behind on-disk.
+    pending_seed_revision: int = 0
     # worktree-status-core: the agent-asserted DISPOSITION overlay -- orthogonal
     # to git/session state (which cannot tell "done" from "finalized-with-
     # follow-ups"). Set via `agent-worktrees status`; absent (legacy) = the safe
@@ -2141,6 +2147,8 @@ def _load_record_uncached(path: Path) -> WorktreeRecord:
         last_finalize_released=last_finalize_released_list,
         bound_agent=(str(data["bound_agent"]).strip() or None
                      if data.get("bound_agent") else None),
+        pending_seed=(str(data["pending_seed"]) if data.get("pending_seed") else None),
+        pending_seed_revision=int(data.get("pending_seed_revision", 0) or 0),
         follow_up=bool(data.get("follow_up", False)),
         follow_ups=follow_ups_list,
         summary=str(data.get("summary", "") or ""),
@@ -2383,6 +2391,13 @@ def _save_record_unlocked(
             record.follow_up = current.follow_up
             record.summary = current.summary
             record.status_note_at = current.status_note_at
+        # A claim/restore (pending_seed.py) advances pending_seed_revision
+        # under the record lock. A stale full-record writer loaded BEFORE
+        # that transition must never resurrect an already-delivered
+        # (cleared) seed by saving its own older snapshot back over it.
+        if current.pending_seed_revision > record.pending_seed_revision:
+            record.pending_seed = current.pending_seed
+            record.pending_seed_revision = current.pending_seed_revision
         # Lifecycle writers advance ``lifecycle_revision`` under the record
         # lock. An unrelated writer may have loaded an older snapshot before
         # that transition; never let its later save roll the append-only ledger
@@ -2856,6 +2871,18 @@ def _save_record_unlocked(
     # when set, so an unbound worktree's YAML stays byte-identical.
     if record.bound_agent:
         content += f"bound_agent: {_yaml_scalar(record.bound_agent)}\n"
+    if record.pending_seed:
+        # yaml.safe_dump (not the hand-rolled _yaml_scalar, which only
+        # quotes a leading reserved-indicator char) so arbitrary, possibly
+        # multiline text round-trips exactly -- incl. a value that looks
+        # like a YAML bool/number or contains ": ".
+        content += yaml.safe_dump(
+            {"pending_seed": record.pending_seed},
+            default_flow_style=False,
+            sort_keys=False,
+        )
+    if record.pending_seed_revision:
+        content += f"pending_seed_revision: {record.pending_seed_revision}\n"
     # citadel paired -harness/-knowledge worktree lifecycle (#957): the pair
     # linkage. Emitted only when set, so an unpaired worktree's YAML stays
     # byte-identical (the common case is unpaired).

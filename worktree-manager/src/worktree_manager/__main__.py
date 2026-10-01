@@ -1095,6 +1095,7 @@ def _run_production_picker(project: str) -> int:
                 ahp=bool(opts.get("ahp")),
                 machine=machine,
                 environment=environment,
+                seed_prompt=str(opts.get("seed_prompt") or "") or None,
             ))
         if action in ("refresh", "manager-update"):
             # Apply the update, then loop back to reopen the Picker rather

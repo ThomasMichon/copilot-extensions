@@ -163,6 +163,18 @@ def add_parsers(sub) -> None:
         "whole-host AGENT_WORKTREES_NO_PAIR env var, which still applies "
         "on top of this flag.",
     )
+    p.add_argument(
+        "--seed",
+        default=None,
+        help="An optional prompt queued as the session's first "
+        "interactive turn once Copilot is actually ready, "
+        "fire-and-forget past the auto-update/bootstrap flow. "
+        "Persisted on the new record (this command never launches "
+        "Copilot itself, so it can only be stored here); delivered "
+        "and cleared by `agent-worktrees embody`/`copilot` on the "
+        "first attach -- an arbitrary direct tmux/psmux attach, or a "
+        "launch that bypasses embody, will not deliver it.",
+    )
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
     p = sub.add_parser(
@@ -345,6 +357,7 @@ def cmd_create(args: argparse.Namespace) -> int:
                 dispatch_attempt=dispatch_attempt,
                 bound_agent=getattr(args, "bound_agent", None),
                 no_pair=getattr(args, "no_pair", False),
+                pending_seed=getattr(args, "seed", None),
             )
         except claims_cli.CoordinationReadinessFailure as exc:
             return claims_cli._emit_coordination_rejection(exc.readiness, json_out=args.json)

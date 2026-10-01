@@ -144,6 +144,7 @@ class LaunchRequest:
     ahp: bool = False
     machine: str | None = None
     environment: str | None = None
+    seed_prompt: str | None = None
 
 
 def _state_cell(w: Worktree) -> str:

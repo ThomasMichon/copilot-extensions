@@ -488,6 +488,7 @@ def create_new_record(
     codename: str | None = None,
     codename_source: str | None = None,
     bound_agent: str | None = None,
+    pending_seed: str | None = None,
 ) -> tracking.WorktreeRecord:
     tracking = _tracking()
     from .tracking_controller_relations import (
@@ -542,6 +543,7 @@ def create_new_record(
         codename=codename or None,
         codename_source=codename_source or None,
         bound_agent=normalized_bound_agent,
+        pending_seed=pending_seed or None,
     )
     _mark_controller_projection_dirty(
         record, *(relation.controller_session_id for relation in controllers)

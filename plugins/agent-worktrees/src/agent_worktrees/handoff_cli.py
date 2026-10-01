@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from . import config as cfg, finalize as fin, output, profile_assignment, sessions, tracking
+from . import pending_seed as pending_seed_mod
 from . import reclaim_cli, resolve_launch_cli, status_monitor_runtime
 
 
@@ -326,6 +327,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
 
     record = None
     selection = profile_assignment.LaunchProfileSelection(profile=None)
+    explicit_seed = bool(seed)
     if not already:
         try:
             record = tracking.load_record(cfg.tracking_dir() / f"{wt_id}.yaml")
@@ -333,6 +335,11 @@ def cmd_embody(args: argparse.Namespace) -> int:
             if not make_new:
                 return _json_error(f"Worktree record not found: {wt_id}")
         if record is not None:
+            # Peek only (no clear) -- the real claim happens right before
+            # delivery, so an early return (dry-run, a validation failure,
+            # a concurrent session) can never consume it undelivered.
+            if not seed:
+                seed = getattr(record, "pending_seed", None)
             backend_error = _unsupported_hosted_launch(
                 record,
                 "embody",
@@ -375,6 +382,32 @@ def cmd_embody(args: argparse.Namespace) -> int:
         return 0
 
     if already:
+        # A pending prompt from creation time may still be unconsumed if
+        # whatever first stood up this worktree's mux pane did so OUTSIDE
+        # this function (the Picker's launch-session.{ps1,sh} creates the
+        # `wt-<id>` pane directly). Deliver it here too -- only against the
+        # registry-identified Copilot pane (never "active pane", which
+        # could be a bare shell); claimed under the write guard so a
+        # concurrent resume can't double-deliver it, restored if unconfirmed.
+        display_pane = sessions.mux_copilot_pane(wt_id) or sessions.mux_active_pane(wt_id)
+        copilot_pane = sessions.mux_copilot_pane(wt_id)
+        claimed = None
+        if copilot_pane:
+            try:
+                claimed = pending_seed_mod.claim_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml")
+            except Exception:
+                claimed = None
+        pending_seed_result = {}
+        if claimed:
+            pending_seed_result = sessions.mux_seed_pane(
+                copilot_pane, claimed,
+                ready_timeout=getattr(args, "seed_ready_timeout", None) or 180.0,
+            )
+            if not pending_seed_result.get("ok"):
+                try:
+                    pending_seed_mod.restore_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml", claimed)
+                except Exception:
+                    pass
         _json_output(
             {
                 "ok": True,
@@ -383,8 +416,9 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 "work_dir": work_dir,
                 "created": False,
                 "resumed": True,
-                "new_pane": (sessions.mux_copilot_pane(wt_id) or sessions.mux_active_pane(wt_id)),
+                "new_pane": display_pane,
                 "note": "a live mux session already embodies this worktree",
+                "seeded": bool(pending_seed_result.get("ok")) if claimed else False,
             }
         )
         return 0
@@ -495,6 +529,15 @@ def cmd_embody(args: argparse.Namespace) -> int:
         )
 
     new_pane = result.get("new_pane")
+    # Claim (clear) pending_seed now, right before delivery -- not earlier,
+    # so an exit above can never consume it undelivered. An explicit --seed
+    # still supersedes/clears it; only a claimed (not explicit) value is
+    # restored on a failed delivery below.
+    claimed_seed: str | None = None
+    if record is not None:
+        claimed_seed = pending_seed_mod.claim_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml")
+        if not explicit_seed:
+            seed = claimed_seed
     # A freshly-embodied session can be MCP/skill-heavy and take well over the
     # 20s handoff default to reach Copilot's input caret; seeding races that
     # load, and if it loses, the seed is never typed and the session sits idle
@@ -506,6 +549,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
         if (new_pane and seed)
         else {}
     )
+    if not explicit_seed and claimed_seed and not seed_result.get("ok"):
+        pending_seed_mod.restore_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml", claimed_seed)
 
     verified = None
     verify_timeout = getattr(args, "verify_timeout", 0.0) or 0.0
