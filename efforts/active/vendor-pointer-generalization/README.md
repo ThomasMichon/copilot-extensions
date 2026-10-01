@@ -635,7 +635,7 @@ shape before committing to a design)_
       compares the output against a fresh current-canonical vendored
       reconstruction (copy canonical -> materialize nested refs) rather than a
       stale historical tree. No `SKIP`s, no tree drift.
-- [x] Confirm every consuming plugin's own test suite
+- [ ] Confirm every consuming plugin's own test suite
       (`tools/run-plugin-tests.py <plugin>`) passes with **no local
       `libs/<lib>` directory present at all** in the `dev` checkout —
       proving the canonical reference alone (via `[tool.uv.sources]`
@@ -644,15 +644,13 @@ shape before committing to a design)_
       confirm (this is the whole point of the second course correction) a
       NON-editable `uv pip install <plugin-dir>` still resolves the
       shared-lib dependency to canonical live (not copied) — the property
-      `src-passthrough` lacked. **Done, 2026-10-01:** the editable
-      full-suite proof already covers every converted plugin consumer
+      `src-passthrough` lacked. **Status, 2026-10-01:** the editable
+      half is DONE — the full-suite proof already covers every converted plugin consumer
       (`tools/run-plugin-tests.py agent-worktrees --reinstall` plus the earlier
-      10-plugin sweep recorded below). The non-editable cross-section now
-      includes `lazy-cli-dispatch`, `agent-vault`, `agent-ssh`, and
-      `agent-worktrees`; the last one required a general packaging fix so its
-      installed wheel now ships the payload-root assets the suite/runtime
-      expects, and its full non-editable suite passed green
-      (`6087 passed, 27 skipped`).
+      10-plugin sweep recorded below). The non-editable half remains OPEN for
+      the same blocker recorded in Validation Plan / Journal below: local
+      experiments got `agent-worktrees` green in scratch validation, but the
+      shippable packaging/runtime fix has not landed and is still under review.
 
 ### Phase 2 — Canonical-reference form for the shared installer engine
 > **Status note (2026-09-30, updated):** libs' mechanism pivoted away to

@@ -1102,9 +1102,14 @@ def test_real_repo_uv_editable_materialization_matches_current_canonical_trees(
 
     assert discovered, "expected at least one real uv-editable consumer"
     checked: list[str] = []
+    actual_root = tmp_path / "actual"
+
+    def _consumer_snapshot_dir(root: Path, consumer: str) -> Path:
+        return root / consumer if consumer == "worktree-manager" else root / "plugins" / consumer
+
     for consumer, consumer_dir, refs in discovered:
-        actual_consumer_dir = tmp_path / "actual" / consumer
-        expected_consumer_dir = tmp_path / "expected" / consumer
+        actual_consumer_dir = _consumer_snapshot_dir(actual_root, consumer)
+        expected_consumer_dir = _consumer_snapshot_dir(tmp_path / "expected", consumer)
         actual_consumer_dir.mkdir(parents=True, exist_ok=True)
         expected_consumer_dir.mkdir(parents=True, exist_ok=True)
         pyproject_text = (consumer_dir / "pyproject.toml").read_text(encoding="utf-8")
@@ -1117,14 +1122,12 @@ def test_real_repo_uv_editable_materialization_matches_current_canonical_trees(
             encoding="utf-8",
         )
 
-        log = mm.materialize_uv_editable_ref_into(
-            source_consumer_dir=consumer_dir,
-            dest_consumer_dir=actual_consumer_dir,
-            canonical_root=repo,
-        )
-        skips = [line for line in log if line.startswith("SKIP")]
-        assert not skips, f"{consumer}: {'; '.join(skips)}"
-
+    log = mm.materialize(actual_root, canonical_root=repo)
+    skips = [line for line in log if line.startswith("SKIP")]
+    assert not skips, "; ".join(skips)
+    for consumer, _consumer_dir, refs in discovered:
+        actual_consumer_dir = _consumer_snapshot_dir(actual_root, consumer)
+        expected_consumer_dir = _consumer_snapshot_dir(tmp_path / "expected", consumer)
         for _name, _raw_path, lib, _editable in refs:
             expected_lib = expected_consumer_dir / "libs" / lib
             if not expected_lib.exists():
@@ -1144,7 +1147,6 @@ def test_real_repo_uv_editable_materialization_matches_current_canonical_trees(
                 f"reconstruction built from canonical libs/{lib}"
             )
             checked.append(f"{consumer}:{lib}")
-
     assert checked, "expected at least one materialized consumer/lib pair"
 
 
