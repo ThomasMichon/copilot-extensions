@@ -66,6 +66,7 @@ that pattern to this repository.
 | [Mux Companion Manual Cutover Diagnostics](active/mux-companion-manual-cutover-diagnostics/README.md) | Active | #4369 |
 | [Coverage-Guided CI Test Selection](active/coverage-guided-ci/README.md) | Draft | #4453 |
 | [agent-dispatch Emitter Receipts](active/agent-dispatch-emitter-receipts/README.md) | Draft | #4774 |
+| [Launch-Time Model/Effort/Context Preference Flags](active/launch-time-model-preference-flags/README.md) | Done; pending archive | #4776 |
 
 
 ## Local conventions

@@ -125,6 +125,7 @@ from . import loop_governance as loop_governance_mod  # noqa: F401 -- compatibil
 from . import services as _svc
 from . import session_context as session_context_mod  # noqa: F401 -- compatibility re-export
 from . import state_root as state_root_mod
+from .copilot_launch_prefs import resolve_launch_pref_flags
 from .update_stage import cmd_stage_update, discover_plugin_dir as _discover_plugin_dir
 
 # front_door_cli's own names are re-exported eagerly (not deferred to
@@ -2346,12 +2347,31 @@ def _build_launch_cmd(
     # session never stalls on a tool, path, or URL prompt.  Skip ACP
     # sessions (agent-bridge manages permissions over the protocol) and
     # never duplicate an all-permissions flag the caller already supplied.
+    # ACP detection inspects the complete command assembled so far (not just
+    # copilot_args/profile args), so a configured `launch` template that
+    # embeds `--acp` directly is detected too -- same class of gap as the
+    # duplicate-flag check below, applied uniformly.
     passthrough = list(extra) + list(profile_args)
-    is_acp = "--acp" in passthrough
+    is_acp = "--acp" in cmd
     if not is_acp and not any(
         a == flag for a in passthrough for flag in ("--allow-all-tools", "--allow-all", "--yolo")
     ):
         cmd.append("--allow-all")
+
+    # Re-express the persisted model/effort/context-tier preference
+    # (agent-machines' copilot.settings is the sole writer of
+    # ~/.copilot/settings.json) as explicit CLI flags. Copilot CLI has been
+    # observed to ignore the persisted settings values at startup, so every
+    # worktree create/resume launch must carry the facility's current
+    # preference explicitly rather than rely on the settings file alone.
+    # Never overrides a flag already present ANYWHERE in the command so far
+    # (a configured `launch` template may already embed one, not just
+    # `copilot_args`/profile args). Skipped for ACP sessions: Copilot ignores
+    # these CLI flags in ACP mode, and agent-bridge's ACP client carries
+    # model/effort through its own configuration path there instead (context
+    # tier is not yet carried through ACP -- a separate, tracked gap).
+    if not is_acp:
+        cmd.extend(resolve_launch_pref_flags(cmd))
 
     # Every resolved session command passes through one installed wrapper.
     # This gives optional sibling integrations a single pre-exec seam even for

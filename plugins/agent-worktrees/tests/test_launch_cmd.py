@@ -15,7 +15,14 @@ import pytest
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config as cfg
+from agent_worktrees import copilot_launch_prefs as launch_prefs
 from agent_worktrees import registry_paths
+
+# NOTE: isolation from the real host ~/.copilot/settings.json is handled
+# plugin-wide by conftest.py's `_isolate_copilot_launch_prefs` autouse
+# fixture. Tests below that want to exercise the launch-pref injection
+# explicitly re-monkeypatch `launch_prefs.Path.home` themselves (last write
+# wins within a test).
 
 
 def _config(launch: dict[str, list[str]] | None = None) -> cfg.Config:
@@ -55,6 +62,106 @@ def test_acp_launch_skips_allow_all():
     assert "--allow-all" not in cmd
     # ACP sessions get permissions managed by agent-bridge over the protocol.
     assert "--no-sandbox" not in cmd
+
+
+def test_launch_injects_persisted_model_effort_context_flags(tmp_path, monkeypatch):
+    # Copilot CLI has been observed to ignore persisted settings.json values
+    # at startup (model-policy-launcher gap) -- every launch must carry the
+    # facility's current preference as explicit CLI flags.
+    home = tmp_path / "home"
+    (home / ".copilot").mkdir(parents=True)
+    (home / ".copilot" / "settings.json").write_text(
+        json.dumps(
+            {"model": "claude-sonnet-5", "effortLevel": "medium", "contextTier": "long_context"}
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launch_prefs.Path, "home", classmethod(lambda cls: home))
+    cmd = m._build_launch_cmd(_config(), _args([]), "/w/wt")
+    assert "--model" in cmd
+    assert cmd[cmd.index("--model") + 1] == "claude-sonnet-5"
+    assert "--reasoning-effort" in cmd
+    assert cmd[cmd.index("--reasoning-effort") + 1] == "medium"
+    assert "--context" in cmd
+    assert cmd[cmd.index("--context") + 1] == "long_context"
+
+
+def test_launch_never_overrides_explicit_model_flag(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    (home / ".copilot").mkdir(parents=True)
+    (home / ".copilot" / "settings.json").write_text(
+        json.dumps({"model": "claude-sonnet-5"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(launch_prefs.Path, "home", classmethod(lambda cls: home))
+    cmd = m._build_launch_cmd(_config(), _args(["--model", "gpt-5.4"]), "/w/wt")
+    assert cmd.count("--model") == 1
+    assert cmd[cmd.index("--model") + 1] == "gpt-5.4"
+
+
+def test_launch_never_overrides_flag_embedded_in_configured_template(tmp_path, monkeypatch):
+    # A repo's configured `launch` template may already bake in a flag
+    # directly (not via copilot_args/profile args) -- that must still win
+    # over the ambient settings.json default, and must not be duplicated.
+    home = tmp_path / "home"
+    (home / ".copilot").mkdir(parents=True)
+    (home / ".copilot" / "settings.json").write_text(
+        json.dumps({"model": "claude-sonnet-5"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(launch_prefs.Path, "home", classmethod(lambda cls: home))
+    config = _config(launch={"linux": ["copilot", "--model", "gpt-5.4"]})
+    cmd = m._build_launch_cmd(config, _args([]), "/w/wt")
+    assert cmd.count("--model") == 1
+    assert cmd[cmd.index("--model") + 1] == "gpt-5.4"
+
+
+def test_launch_skips_preference_flags_for_acp_sessions(tmp_path, monkeypatch):
+    # Copilot CLI ignores these flags in ACP mode; agent-bridge's ACP client
+    # carries model/effort through its own configuration path instead, so
+    # injecting them here would be dead weight at best.
+    home = tmp_path / "home"
+    (home / ".copilot").mkdir(parents=True)
+    (home / ".copilot" / "settings.json").write_text(
+        json.dumps(
+            {"model": "claude-sonnet-5", "effortLevel": "medium", "contextTier": "long_context"}
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launch_prefs.Path, "home", classmethod(lambda cls: home))
+    cmd = m._build_launch_cmd(_config(), _args(["--acp", "--stdio"]), "/w/wt")
+    assert "--model" not in cmd
+    assert "--reasoning-effort" not in cmd
+    assert "--context" not in cmd
+
+
+def test_launch_skips_preference_flags_for_template_embedded_acp(tmp_path, monkeypatch):
+    # A configured `launch` template may bake `--acp` in directly rather
+    # than via copilot_args/profile args -- ACP detection must still catch
+    # it, matching the --allow-all suppression's own detection.
+    home = tmp_path / "home"
+    (home / ".copilot").mkdir(parents=True)
+    (home / ".copilot" / "settings.json").write_text(
+        json.dumps({"model": "claude-sonnet-5"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(launch_prefs.Path, "home", classmethod(lambda cls: home))
+    config = _config(launch={"linux": ["copilot", "--acp", "--stdio"]})
+    cmd = m._build_launch_cmd(config, _args([]), "/w/wt")
+    assert "--model" not in cmd
+    assert "--allow-all" not in cmd
+
+
+def test_launch_skips_whitespace_only_persisted_preference(tmp_path, monkeypatch):
+    # A padded/whitespace-only persisted value must never be emitted
+    # verbatim as a CLI argument -- it would break the launch entirely.
+    home = tmp_path / "home"
+    (home / ".copilot").mkdir(parents=True)
+    (home / ".copilot" / "settings.json").write_text(
+        json.dumps({"model": "   ", "effortLevel": " medium "}), encoding="utf-8"
+    )
+    monkeypatch.setattr(launch_prefs.Path, "home", classmethod(lambda cls: home))
+    cmd = m._build_launch_cmd(_config(), _args([]), "/w/wt")
+    assert "--model" not in cmd
+    assert "--reasoning-effort" in cmd
+    assert cmd[cmd.index("--reasoning-effort") + 1] == "medium"
 
 
 def test_existing_all_perm_flag_not_duplicated():
