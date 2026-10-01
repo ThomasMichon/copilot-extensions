@@ -685,3 +685,52 @@ Tests after all fixes: `handoff_cli`/`tracking` targeted regression set
 throughout (1000/1000 and 4082/4082 respectively -- genuinely zero slack
 left in `handoff_cli.py` now; any FURTHER addition there needs its own
 trim-or-split, same as `engine_client.py` already does).
+
+### 2026-09-30 — A second review round found three more real issues
+Pushed the fixes above; the automated review ran again and found three
+MORE legitimate issues (none repeats of the first round -- all fixed, not
+dismissed):
+
+1. **An explicit `--seed` left a separately-persisted stale `pending_seed`
+   behind.** If a worktree had BOTH an unconsumed `pending_seed` (from
+   creation) and the caller later ran `embody --seed "..."` explicitly, the
+   explicit seed delivered fine but the old `pending_seed` was never
+   touched -- a LATER ordinary resume would then re-deliver that stale
+   prompt into an already-active conversation as an unwanted later-turn
+   injection. Fixed: the create-path now ALWAYS claims (clears) any
+   `pending_seed` under the write guard on first attach, regardless of
+   whether an explicit `--seed` was also given -- an explicit seed
+   supersedes AND consumes the stale one. Only a value that was actually
+   *claimed* (not an explicit one) is restored if its own delivery goes
+   unconfirmed, so a failed explicit `--seed` never resurrects an unrelated
+   old prompt. Renamed the test
+   (`test_explicit_seed_wins_and_supersedes_any_stale_pending_seed`) to
+   assert the corrected contract with a stateful fake record.
+2. **`--seed` was only threaded through ONE of `resolve --new`'s three
+   creation call sites.** Fixed the other two: the interactive-TTY path
+   (`resolve_launch_cli._resolve_new_context`, used when `--new` is given
+   without `--json`) now also passes `pending_seed=getattr(args, "seed",
+   None)`. The remote-machine path (`--machine` + `--new`, which relays a
+   NAIVELY space-joined command string over SSH with zero shell quoting)
+   does NOT attempt to thread `--seed` through that same unsafe
+   string-concatenation -- proper quoting for an arbitrary remote shell is
+   its own real, security-sensitive task, not a quick addition. Instead
+   `--seed` is explicitly rejected when combined with `--machine`, with a
+   clear error naming why; 2 new tests (`test_resolve_cli_seed_guard.py`)
+   cover the rejection and confirm an ordinary (no-`--seed`) remote `--new`
+   is completely unaffected.
+3. **`create --seed`'s own help text overpromised delivery.** It said
+   "whichever path first attaches a live session... delivers and clears
+   it" -- true in intent, but today only `agent-worktrees embody`/`copilot`
+   actually implement that contract; an arbitrary direct tmux/psmux attach
+   does nothing. Reworded the help text (both `create --seed` and `resolve
+   --new --seed`) and `_create_worktree_core`'s own docstring to name the
+   actual supported consumer explicitly, matching the gated-off Picker
+   flow's own honesty bar from the first review round.
+
+Tests: agent-worktrees targeted regression set (`tracking`,
+`tracking_write`, `embody`, `handoff_cutover`, `codename_cli`,
+`launch_preflight`, `owner_inheritance`, `paired_carve`, plus the new
+`test_resolve_cli_seed_guard.py`): 483 passed. Module-size gate: OK
+(`tools/check-module-size.py` run directly, not just inferred from the
+earlier pre-push hook output).

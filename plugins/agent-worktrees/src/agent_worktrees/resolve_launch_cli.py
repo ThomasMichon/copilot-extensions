@@ -626,6 +626,7 @@ def _resolve_new_context(context: ResolveLaunchContext) -> int:
             owner_ref=getattr(args, "owner_ref", None),
             launch_preflight=launch_preflight,
             recovery=getattr(args, "recovery", False),
+            pending_seed=getattr(args, "seed", None),
         )
     except _coordination_failure_type() as exc:
         _emit_coordination_rejection(exc.readiness, json_out=False)

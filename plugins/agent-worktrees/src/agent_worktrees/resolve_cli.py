@@ -327,13 +327,15 @@ def add_parsers(sub) -> None:
     parser.add_argument(
         "--seed",
         default=None,
-        help="With --new: an optional prompt queued as the session's "
-        "first interactive turn once Copilot is actually ready, "
-        "fire-and-forget past the auto-update/bootstrap flow. "
-        "Persisted on the new record (this command never launches "
-        "Copilot itself, so it can only be stored here); whichever "
-        "path first attaches a live session to this worktree "
-        "delivers and clears it.",
+        help="With --new (not supported alongside --machine): an optional "
+        "prompt queued as the session's first interactive turn once "
+        "Copilot is actually ready, fire-and-forget past the "
+        "auto-update/bootstrap flow. Persisted on the new record (this "
+        "command never launches Copilot itself, so it can only be "
+        "stored here); delivered and cleared by `agent-worktrees "
+        "embody`/`copilot` on the first attach -- an arbitrary direct "
+        "tmux/psmux attach, or a launch that bypasses embody, will not "
+        "deliver it.",
     )
     parser.add_argument("copilot_args", nargs="*", default=[])
 
@@ -448,6 +450,14 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         return _json_error(str(exc))
 
     if state.requested_machine:
+        if state.use_new and getattr(state.args, "seed", None):
+            return _json_error(
+                "--seed is not yet supported for a remote --machine target "
+                "(its command line is relayed as a plain space-joined "
+                "string, unsafe for a value that can contain arbitrary "
+                "text/shell metacharacters); use --seed on this machine "
+                "only, or omit --machine."
+            )
         remote_args: list[str] = []
         if state.use_base:
             remote_args.append("--base")

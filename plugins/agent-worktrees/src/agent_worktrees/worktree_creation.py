@@ -514,10 +514,9 @@ def _create_worktree_core(
     ``AGENT_WORKTREES_NO_PAIR`` env var; either one skips the carve.
 
     ``pending_seed`` persists an optional first-turn prompt onto the new
-    record (picker-new-session-prompt-and-composer Phase A item 4) -- this
-    function never launches Copilot, so it can only be stored here, not
-    delivered; whichever path first attaches a live session to this worktree
-    consumes and clears it.
+    record -- this function never launches Copilot, so it can only be
+    stored here; `agent-worktrees embody`/`copilot` deliver and clear it
+    on the first attach.
 
     Raises ``RuntimeError`` on failure.
     """

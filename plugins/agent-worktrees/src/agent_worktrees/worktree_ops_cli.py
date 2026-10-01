@@ -170,9 +170,10 @@ def add_parsers(sub) -> None:
         "interactive turn once Copilot is actually ready, "
         "fire-and-forget past the auto-update/bootstrap flow. "
         "Persisted on the new record (this command never launches "
-        "Copilot itself, so it can only be stored here); whichever "
-        "path first attaches a live session to this worktree "
-        "delivers and clears it.",
+        "Copilot itself, so it can only be stored here); delivered "
+        "and cleared by `agent-worktrees embody`/`copilot` on the "
+        "first attach -- an arbitrary direct tmux/psmux attach, or a "
+        "launch that bypasses embody, will not deliver it.",
     )
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 

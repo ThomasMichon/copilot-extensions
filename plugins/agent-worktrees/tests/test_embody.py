@@ -389,24 +389,28 @@ class TestCmdEmbody:
         assert out["seeded"] is False
         assert state["pending_seed"] == "still queued"
 
-    def test_explicit_seed_wins_over_pending_and_leaves_it_untouched(
+    def test_explicit_seed_wins_and_supersedes_any_stale_pending_seed(
         self, monkeypatch, capfd, tmp_path,
     ):
-        """An explicit --seed always wins -- it doesn't consume or clear a
-        separately persisted pending_seed, which stays available for a
-        future bare attach."""
+        """An explicit --seed always wins for DELIVERY -- but it must also
+        CLEAR any separately persisted pending_seed, not leave it behind:
+        otherwise a later ordinary resume would re-deliver that stale
+        prompt into an already-active conversation as an unwanted
+        later-turn injection."""
         _stub_config(monkeypatch)
         monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtR")
         monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
         (tmp_path / "wtR.yaml").write_text("x")
-        record = type(
-            "Rec", (), {"worktree_path": "/w/wtR", "pending_seed": "persisted"},
-        )()
-        monkeypatch.setattr(m.tracking, "load_record", lambda p: record)
-        monkeypatch.setattr(
-            m.tracking, "save_record",
-            lambda rec, path: pytest.fail("explicit seed must not touch pending_seed"),
-        )
+        state = {"worktree_path": "/w/wtR", "pending_seed": "persisted"}
+
+        def _load(p):
+            return type("Rec", (), dict(state))()
+
+        def _save(rec, path):
+            state["pending_seed"] = rec.pending_seed
+
+        monkeypatch.setattr(m.tracking, "load_record", _load)
+        monkeypatch.setattr(m.tracking, "save_record", _save)
         monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
         monkeypatch.setattr(
             sessions, "mux_new_session",
@@ -424,7 +428,7 @@ class TestCmdEmbody:
 
         assert rc == 0
         assert seeded == {"pane": "%6", "seed": "explicit wins"}
-        assert record.pending_seed == "persisted"
+        assert state["pending_seed"] is None
 
     def test_ensure_mux_not_called_without_explicit_opt_in(self, monkeypatch, tmp_path):
         # opt-in-not-ambient-default: a bare embody must never install tmux

@@ -363,14 +363,15 @@ def cmd_embody(args: argparse.Namespace) -> int:
             if not make_new:
                 return _json_error(f"Worktree record not found: {wt_id}")
         if record is not None:
-            # An explicit --seed always wins; absent one, a prompt
-            # persisted at creation time (`create`/`resolve --new --seed`)
-            # is delivered here instead -- the first real attach for a
-            # brand-new worktree. Claimed (cleared) under the record's
-            # write guard so a concurrent attach can't double-deliver it;
-            # restored below if delivery goes unconfirmed.
+            # An explicit --seed always wins; absent one, a persisted
+            # pending_seed is delivered instead. Always claim (clear) any
+            # pending_seed under the write guard -- an explicit --seed
+            # supersedes it too, so a later resume never re-delivers a
+            # stale prompt into an already-active conversation. Only a
+            # claimed (not explicit) value is restored if unconfirmed.
+            yaml_claimed = _claim_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml")
             if not seed:
-                claimed_seed = _claim_pending_seed(cfg.tracking_dir() / f"{wt_id}.yaml")
+                claimed_seed = yaml_claimed
                 seed = claimed_seed
             backend_error = _unsupported_hosted_launch(
                 record,
@@ -416,12 +417,11 @@ def cmd_embody(args: argparse.Namespace) -> int:
     if already:
         # A pending prompt from creation time may still be unconsumed if
         # whatever first stood up this worktree's mux pane did so OUTSIDE
-        # this function (e.g. the Picker's launch-session.{ps1,sh}, which
-        # creates the `wt-<id>` pane directly). Deliver it here too -- only
-        # against the registry-identified Copilot pane (never the generic
-        # "active pane" fallback, which could be a bare shell or something
-        # else entirely); claimed under the write guard so a concurrent
-        # resume can't double-deliver it, restored if unconfirmed.
+        # this function (the Picker's launch-session.{ps1,sh} creates the
+        # `wt-<id>` pane directly). Deliver it here too -- only against the
+        # registry-identified Copilot pane (never "active pane", which
+        # could be a bare shell); claimed under the write guard so a
+        # concurrent resume can't double-deliver it, restored if unconfirmed.
         display_pane = sessions.mux_copilot_pane(wt_id) or sessions.mux_active_pane(wt_id)
         copilot_pane = sessions.mux_copilot_pane(wt_id)
         claimed = None
