@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import sys
 from pathlib import Path
 
 from agent_worktrees import __main__ as m
@@ -10,15 +12,37 @@ from agent_worktrees import installer
 
 
 PLUGIN = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PLUGIN.parents[1]))
+from tools import preview_release
+
 RETIRED_ASSETS = (
     "session-ext-reload.ps1",
     "session-ext-reload.sh",
     "ext-reload-hang.md",
 )
+_WRAPPER_MANIFEST = "launch-wrapper-assets.json"
 
 
 def _warning_file(proj_dir: Path) -> Path:
     return proj_dir / ".github" / "instructions" / "ext-reload-hang.instructions.md"
+
+
+def _write_wrapper_manifest(repo: Path, files: tuple[str, ...]) -> None:
+    plugin = repo / "plugins" / "agent-worktrees"
+    plugin.mkdir(parents=True, exist_ok=True)
+    (plugin / _WRAPPER_MANIFEST).write_text(
+        json.dumps(
+            {
+                "schema": "copilot-extensions.launch-wrapper-assets",
+                "version": 1,
+                "canonicalDir": "worktree-manager/bin",
+                "files": list(files),
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def test_warning_payload_and_hook_are_removed() -> None:
@@ -38,7 +62,16 @@ def test_installer_retires_previously_deployed_assets(
     repo = tmp_path / "repo"
     assets = repo / "plugins" / "agent-worktrees" / "bin"
     assets.mkdir(parents=True)
-    for name in ("launch-session.cmd", "launch-session.ps1", "pane-wrapper.ps1"):
+    wrapper_files = (
+        "launch-session.cmd",
+        "launch-session.ps1",
+        "pane-wrapper.ps1",
+        "psmux-path.ps1",
+        "psmux-passthrough.conf",
+        "session-options.ps1",
+    )
+    _write_wrapper_manifest(repo, wrapper_files)
+    for name in wrapper_files:
         (assets / name).write_text("wrapper\n", encoding="utf-8")
 
     install = tmp_path / "install"
@@ -61,7 +94,16 @@ def test_locked_retired_asset_warns_without_failing_update(
     repo = tmp_path / "repo"
     assets = repo / "plugins" / "agent-worktrees" / "bin"
     assets.mkdir(parents=True)
-    for name in ("launch-session.cmd", "launch-session.ps1", "pane-wrapper.ps1"):
+    wrapper_files = (
+        "launch-session.cmd",
+        "launch-session.ps1",
+        "pane-wrapper.ps1",
+        "psmux-path.ps1",
+        "psmux-passthrough.conf",
+        "session-options.ps1",
+    )
+    _write_wrapper_manifest(repo, wrapper_files)
+    for name in wrapper_files:
         (assets / name).write_text("wrapper\n", encoding="utf-8")
 
     install = tmp_path / "install"
@@ -84,6 +126,25 @@ def test_locked_retired_asset_warns_without_failing_update(
     assert installer.deploy_wrappers(repo)
     assert locked.exists()
     assert "Could not retire obsolete" in capsys.readouterr().out
+
+
+def test_packaged_preview_deploy_wrappers_uses_only_packaged_assets(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    preview = preview_release.build("agent-worktrees", tmp_path / "work")
+    packaged_root = tmp_path / "packaged-root"
+    packaged_plugin = packaged_root / "plugins" / "agent-worktrees"
+    packaged_plugin.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(preview, packaged_plugin)
+
+    install = tmp_path / "install"
+    monkeypatch.setattr(installer, "install_dir", lambda: install)
+    monkeypatch.setattr(installer.platform, "system", lambda: "Linux")
+
+    assert not (packaged_root / "worktree-manager").exists()
+    assert installer.deploy_wrappers(packaged_root)
+    for name in ("launch-session.sh", "pane-wrapper.sh", "session-options.sh"):
+        assert (install / "bin" / name).exists()
 
 
 def test_remove_managed_instruction_retires_marked(tmp_path: Path) -> None:

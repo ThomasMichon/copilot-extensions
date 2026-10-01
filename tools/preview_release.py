@@ -17,6 +17,10 @@ This composes three generators built earlier in this effort:
 * the same installer-engine canonical-reference expansion
   ``materialize_main.py`` performs for a plugin whose ``install.sh`` /
   ``install.ps1`` source ``libs/installer-engine`` directly on ``dev``.
+* the same packaged launch-wrapper materialization ``materialize_main.py``
+  performs for `agent-worktrees`, copying its authoritative
+  ``worktree-manager/bin`` launch assets into the plugin payload so the
+  non-editable fallback install stays self-contained.
 * ``accumulate_bumps.py``'s pure ``compute()`` (never ``apply()``) reports the
   version the plugin *would* get if its pending changefiles were consumed now.
 
@@ -276,6 +280,16 @@ def _materialize_installer_engine_refs_into_preview(dest: Path, plugin: str) -> 
     )
 
 
+def _materialize_launch_wrapper_assets_into_preview(dest: Path, plugin: str) -> list[str]:
+    """Expand a plugin's packaged launch-wrapper assets into the preview."""
+    mm = _load_materialize_main()
+    return mm.materialize_launch_wrapper_assets_into(
+        source_consumer_dir=PLUGINS_DIR / plugin,
+        dest_consumer_dir=dest,
+        canonical_root=REPO,
+    )
+
+
 def build(plugin: str, workdir: Path) -> Path:
     src = PLUGINS_DIR / plugin
     if not src.is_dir():
@@ -290,6 +304,7 @@ def build(plugin: str, workdir: Path) -> Path:
     file_pointer_log = _materialize_file_pointers_into_preview(dest)
     uv_editable_log = _materialize_uv_editable_refs_into_preview(dest, plugin)
     installer_engine_log = _materialize_installer_engine_refs_into_preview(dest, plugin)
+    launch_wrapper_log = _materialize_launch_wrapper_assets_into_preview(dest, plugin)
 
     grouped = {p: t for p, t in acc.pending_bumps().items() if p == plugin}
     computed = acc.compute(grouped) if grouped else {}
@@ -310,6 +325,7 @@ def build(plugin: str, workdir: Path) -> Path:
         "vendored_file_pointers_materialize_log": file_pointer_log,
         "vendored_uv_editable_refs_materialize_log": uv_editable_log,
         "vendored_installer_engine_materialize_log": installer_engine_log,
+        "vendored_launch_wrapper_assets_materialize_log": launch_wrapper_log,
     }
     (dest / "PREVIEW.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return dest

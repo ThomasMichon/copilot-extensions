@@ -1,0 +1,9 @@
+{
+  "comment": "Package launch-wrapper assets into agent-worktrees previews and releases",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

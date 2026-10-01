@@ -3,7 +3,8 @@
 **Serves:** `docs/install-contract.md`'s self-contained shipped-payload guarantee.
 **Exemplars:** file-pointer doc mirrors (`plugins/*/docs/entity-relationship-model.md`),
 `agent-worktrees`'s `lazy-cli-dispatch` lib reference, `agent-pull-requests`'s
-installer-engine reference.
+installer-engine reference, and `agent-worktrees`' packaged launch-wrapper
+fallback assets.
 
 ## Problem
 
@@ -92,6 +93,21 @@ directly and carries **no plugin-local `scripts/installer-engine.*` copy**.
 Promotion restores the local shipped form by copying canonical back into
 `scripts/installer-engine.{sh,ps1}` and rewriting the wrapper's source line to
 the local path.
+
+### Packaged launch-wrapper assets: manifest-driven materialization
+
+`agent-worktrees`' Python-only packaged fallback installer deploys launch
+wrappers from its own payload `bin/` tree, but the canonical sources live under
+`worktree-manager/bin/` on `dev`. Instead of carrying a second editable copy in
+the plugin tree, `plugins/agent-worktrees/launch-wrapper-assets.json` names the
+authoritative source directory plus the exact files the packaged fallback
+requires. Promotion and preview copy those files into
+`plugins/agent-worktrees/bin/`, yielding the same shipped self-contained payload
+contract as the other canonical-reference forms.
+
+The runtime installer prefers those packaged copies when present; a live `dev`
+checkout may still fall back to the canonical `worktree-manager/bin/` source so
+local non-packaged install paths remain runnable while authoring.
 
 ## Tool ownership: who enforces which invariant
 

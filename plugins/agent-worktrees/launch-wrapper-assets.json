@@ -1,0 +1,16 @@
+{
+  "schema": "copilot-extensions.launch-wrapper-assets",
+  "version": 1,
+  "canonicalDir": "worktree-manager/bin",
+  "files": [
+    "launch-session.cmd",
+    "launch-session.ps1",
+    "launch-session.sh",
+    "pane-wrapper.ps1",
+    "pane-wrapper.sh",
+    "psmux-path.ps1",
+    "psmux-passthrough.conf",
+    "session-options.ps1",
+    "session-options.sh"
+  ]
+}
