@@ -74,8 +74,10 @@ SESSIONSTART_MAX_TIMEOUT_S = 5.0
 # then waits up to this much longer for the pipes to drain before giving up
 # (see push_timeout.py) -- wall-clock on top of the subprocess timeout
 # itself that a deadline-derived budget must also reserve. refresh_local_
-# cache runs TWO such bounded subprocesses in sequence (resolution, then
-# render), so a deadline-derived budget must reserve this grace TWICE.
+# cache runs two such bounded subprocesses in sequence (resolution, then
+# render), but only ever one of them can be the one that actually times
+# out and pays this grace in a given call, so a deadline-derived budget
+# reserves it once, not per subprocess.
 _RUN_BOUNDED_CLEANUP_GRACE_S = 5.0
 # resolve_active_plugins() verifies every agent-worktrees-registered
 # project with its own pair of Git calls (each up to a 10s timeout) before
@@ -252,19 +254,21 @@ def sessionstart_diagnostic(cwd: str, *, deadline: float | None) -> None:
     lifecycle response to miss the resident hook server's deadline --
     skipped entirely once too little budget remains to be worth
     attempting. The reserved margin also covers
-    ``_RUN_BOUNDED_CLEANUP_GRACE_S`` **twice** -- once for each of the two
-    sequential bounded subprocesses ``refresh_local_cache`` runs
-    (resolution, then render), since either one can independently spend
-    that much extra wall-clock past its own ``timeout`` draining a killed
-    process's pipes.
+    ``_RUN_BOUNDED_CLEANUP_GRACE_S`` once: ``refresh_local_cache`` runs
+    two sequential bounded subprocesses (resolution, then render), but
+    only ever ONE of them can be the one that actually times out and
+    pays that grace in a given call -- a timed-out resolution returns
+    before the render subprocess is ever attempted, and a resolution
+    that succeeds within its own share of ``timeout`` never pays the
+    grace itself. The combined worst case is therefore ``timeout +
+    _RUN_BOUNDED_CLEANUP_GRACE_S``, never ``timeout +
+    2 * _RUN_BOUNDED_CLEANUP_GRACE_S``.
     """
     try:
         if deadline is None:
             timeout = SESSIONSTART_MAX_TIMEOUT_S
         else:
-            budget = (
-                deadline - time.time() - (2 * _RUN_BOUNDED_CLEANUP_GRACE_S) - 1.0
-            )
+            budget = deadline - time.time() - _RUN_BOUNDED_CLEANUP_GRACE_S - 1.0
             if budget < 2.0:
                 return
             timeout = min(budget, SESSIONSTART_MAX_TIMEOUT_S)

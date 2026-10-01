@@ -951,13 +951,38 @@ _Pending._
   diagnostic`'s deadline budget now reserves `_RUN_BOUNDED_CLEANUP_
   GRACE_S` **twice** (once per sequential bounded subprocess -- resolution,
   then render -- since either can independently overrun its own timeout
-  during cleanup), not once. No explicit coalescing lock was added for
+  during cleanup), not once (**round 10 found this reasoning itself
+  wrong -- see below**). No explicit coalescing lock was added for
   concurrent calls: unlike the thread-based approach, each call's
   resolution subprocess is now independently bounded and guaranteed
   torn down by the OS-level tree-kill at its own timeout, so there is no
   unbounded accumulation left to coalesce against. Targeted suite:
   226 passed, 4 skipped. `tools/check-module-size.py` and `tools/check-
   docs-consistency.py` both clean.
+- **Review round 10 finding (PR #4809):** round 9's "reserve the cleanup
+  grace twice" fix was itself over-conservative to the point of breaking
+  the feature entirely: the real production `sessionStart` decision
+  deadline (`hook_client.py`'s `_SESSION_START_DECISION_S`) is only
+  **10 seconds**, shared across every diagnostic the hook runs -- and
+  reserving `2 * _RUN_BOUNDED_CLEANUP_GRACE_S + 1.0` (11 seconds) alone
+  already exceeds that entire budget before any elapsed time is even
+  subtracted, so the sessionStart backup refresh would *always* compute
+  a negative budget and skip, unconditionally, in production. Re-derived
+  the actual worst case: `refresh_local_cache` runs its two bounded
+  subprocesses (resolution, then render) **sequentially**, and a timed-
+  out resolution returns before the render subprocess is ever attempted
+  -- so only ONE of the two can ever be the one that actually times out
+  and pays `_RUN_BOUNDED_CLEANUP_GRACE_S` in a given call, never both.
+  The combined worst case is `timeout + _RUN_BOUNDED_CLEANUP_GRACE_S`
+  (single reservation), not `timeout + 2 * _RUN_BOUNDED_CLEANUP_GRACE_S`.
+  Reverted the budget math to a single reservation, restoring a usable
+  (if still tight) real-world budget for the backup to actually run.
+  Also confirmed the review's other two listed findings were stale
+  restatements against an old commit (`e211df82...`, round 5's push) --
+  the Graceful cutover impact statement and PR-description update they
+  named were already addressed in rounds 5-9; replied on that thread to
+  help it resolve. Targeted suite: 226 passed, 4 skipped. `tools/check-
+  module-size.py` and `tools/check-docs-consistency.py` both clean.
 
 ### 2026-10-01 -- Phase 7 slice 4: the repo-wide catch-all static projection
 - Picked up the next unstarted Plan item (slice 3's steer): `customizing-

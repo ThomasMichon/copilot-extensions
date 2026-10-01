@@ -534,10 +534,11 @@ class TestSessionstartDiagnostic:
     ) -> None:
         """Less deadline budget than the max timeout shrinks the bound to
         what actually remains -- after reserving margin for
-        ``push_timeout.run_bounded``'s own post-kill cleanup wait TWICE
-        (once per sequential bounded subprocess), not just the subprocess
-        timeout itself -- rather than risking the shared lifecycle
-        deadline."""
+        ``push_timeout.run_bounded``'s own post-kill cleanup wait (once,
+        not per sequential bounded subprocess -- see
+        ``_RUN_BOUNDED_CLEANUP_GRACE_S``'s own docstring for why), not
+        just the subprocess timeout itself -- rather than risking the
+        shared lifecycle deadline."""
         import time
 
         calls = []
@@ -547,7 +548,7 @@ class TestSessionstartDiagnostic:
             lambda repo_root, **k: calls.append(k.get("timeout")),
         )
 
-        lcr.sessionstart_diagnostic(str(tmp_path), deadline=time.time() + 14.0)
+        lcr.sessionstart_diagnostic(str(tmp_path), deadline=time.time() + 9.0)
 
         assert len(calls) == 1
         assert 2.0 <= calls[0] < lcr.SESSIONSTART_MAX_TIMEOUT_S
