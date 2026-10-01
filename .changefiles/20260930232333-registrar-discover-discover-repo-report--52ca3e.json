@@ -1,0 +1,9 @@
+{
+  "comment": "registrar discover/discover-repo: report evaluator (and other non-lane) declarations' real kind/spec instead of a generic default pool-profile summary",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
