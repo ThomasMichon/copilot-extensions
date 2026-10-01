@@ -142,21 +142,24 @@ def test_attached_default_uses_venue_copilot_over_ssh(seams, monkeypatch):
     monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
     seen = {}
 
-    class Result:
-        returncode = 0
-
     def fake_run_venue(identity, *, connect, **kwargs):
         seen["identity"] = identity
         seen["kwargs"] = kwargs
         return connect("agent-worktrees copilot --anchor")
 
-    def fake_subprocess_run(argv, **kwargs):
+    class FakeProcess:
+        pid = 999
+
+        def wait(self):
+            return 0
+
+    def fake_popen(argv, **kwargs):
         seen["ssh_argv"] = argv
         seen["subprocess_kwargs"] = kwargs
-        return Result()
+        return FakeProcess()
 
     monkeypatch.setattr(detach, "run_venue_copilot", fake_run_venue)
-    monkeypatch.setattr(detach.subprocess, "run", fake_subprocess_run)
+    monkeypatch.setattr(detach.subprocess, "Popen", fake_popen)
 
     rc = detach.cmd_attached(
         _args(detach=False, workspace="/workspaces/repo", copilot_args=[]),
@@ -206,23 +209,168 @@ def test_attached_skips_reverse_forward_when_live_keeper_holds_route(seams, monk
     monkeypatch.setattr(detach._STORE, "alive", lambda key: True)
     seen = {}
 
-    class Result:
-        returncode = 0
-
     monkeypatch.setattr(
         detach,
         "run_venue_copilot",
         lambda _identity, *, connect, **_kwargs: connect("agent-worktrees copilot --anchor"),
     )
 
-    def fake_subprocess_run(argv, **kwargs):
-        seen["ssh_argv"] = argv
-        return Result()
+    class FakeProcess:
+        pid = 999
 
-    monkeypatch.setattr(detach.subprocess, "run", fake_subprocess_run)
+        def wait(self):
+            return 0
+
+    def fake_popen(argv, **kwargs):
+        seen["ssh_argv"] = argv
+        return FakeProcess()
+
+    monkeypatch.setattr(detach.subprocess, "Popen", fake_popen)
 
     assert detach.cmd_attached(_args(detach=False, workspace="/workspaces/repo", copilot_args=[])) == 0
     assert "-R" not in seen["ssh_argv"]
+
+
+def test_attached_skips_reverse_forward_when_live_attached_owner_holds_route(
+    seams, monkeypatch,
+):
+    monkeypatch.setattr(
+        detach,
+        "_ssh_config",
+        lambda target: types.SimpleNamespace(
+            config_file=None,
+            port=None,
+            identity_file=None,
+            extra_options={},
+            ssh_target=target,
+        ),
+    )
+    monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: None)
+    monkeypatch.setattr(detach, "_ensure_remote_tooling", lambda _cfg: None)
+    monkeypatch.setattr(detach, "resolve_daemon_port", lambda: 41234)
+    monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
+    monkeypatch.setattr(
+        detach,
+        "read_keeper_state",
+        lambda target: {
+            "mode": "attached",
+            "pid": 111,
+            "pid_identity": "id-111",
+            "venue_port": 41234,
+        },
+    )
+    monkeypatch.setattr(detach._STORE, "alive", lambda key: True)
+    seen = {}
+
+    class FakeProcess:
+        pid = 999
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(
+        detach,
+        "run_venue_copilot",
+        lambda _identity, *, connect, **_kwargs: connect("agent-worktrees copilot --anchor"),
+    )
+    def fake_popen(argv, **_kwargs):
+        seen["ssh_argv"] = argv
+        return FakeProcess()
+
+    monkeypatch.setattr(detach.subprocess, "Popen", fake_popen)
+
+    assert detach.cmd_attached(_args(detach=False, workspace="/workspaces/repo", copilot_args=[])) == 0
+    assert "-R" not in seen["ssh_argv"]
+
+
+def test_attached_adds_reverse_forward_when_attached_owner_state_is_stale(
+    seams, monkeypatch,
+):
+    monkeypatch.setattr(
+        detach,
+        "_ssh_config",
+        lambda target: types.SimpleNamespace(
+            config_file=None,
+            port=None,
+            identity_file=None,
+            extra_options={},
+            ssh_target=target,
+        ),
+    )
+    monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: None)
+    monkeypatch.setattr(detach, "_ensure_remote_tooling", lambda _cfg: None)
+    monkeypatch.setattr(detach, "resolve_daemon_port", lambda: 41234)
+    monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
+    monkeypatch.setattr(detach, "read_keeper_state", lambda target: {"mode": "attached", "venue_port": 41234})
+    monkeypatch.setattr(detach._STORE, "alive", lambda key: False)
+    seen = {}
+
+    class FakeProcess:
+        pid = 999
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(
+        detach,
+        "run_venue_copilot",
+        lambda _identity, *, connect, **_kwargs: connect("agent-worktrees copilot --anchor"),
+    )
+    def fake_popen(argv, **_kwargs):
+        seen["ssh_argv"] = argv
+        return FakeProcess()
+
+    monkeypatch.setattr(detach.subprocess, "Popen", fake_popen)
+
+    assert detach.cmd_attached(_args(detach=False, workspace="/workspaces/repo", copilot_args=[])) == 0
+    argv = seen["ssh_argv"]
+    assert ["-R", "41234:127.0.0.1:41234"] == argv[argv.index("-R") : argv.index("-R") + 2]
+
+
+def test_attached_records_route_owner_for_foreground_ssh_lifetime(
+    tmp_path: Path, monkeypatch,
+):
+    store = detach.KeeperStore(tmp_path)
+    monkeypatch.setattr(detach, "_STORE", store)
+    monkeypatch.setattr(detach, "process_identity", lambda pid: f"id-{pid}")
+    monkeypatch.setattr(
+        detach,
+        "_ssh_config",
+        lambda target: types.SimpleNamespace(
+            config_file=None,
+            port=None,
+            identity_file=None,
+            extra_options={},
+            ssh_target=target,
+        ),
+    )
+    monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: None)
+    monkeypatch.setattr(detach, "_ensure_remote_tooling", lambda _cfg: None)
+    monkeypatch.setattr(detach, "resolve_daemon_port", lambda: 41234)
+    monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
+    monkeypatch.setattr(detach, "_remote", lambda *_args, **_kwargs: (0, "", ""))
+    monkeypatch.setattr(
+        detach,
+        "run_venue_copilot",
+        lambda _identity, *, connect, **_kwargs: connect("agent-worktrees copilot --anchor"),
+    )
+
+    class FakeProcess:
+        pid = 999
+
+        def wait(self):
+            state = detach.read_keeper_state("devbox")
+            assert state is not None
+            assert state["mode"] == "attached"
+            assert state["pid"] == 999
+            assert state["pid_identity"] == "id-999"
+            assert state["venue_port"] == 41234
+            return 0
+
+    monkeypatch.setattr(detach.subprocess, "Popen", lambda _argv, **_kwargs: FakeProcess())
+
+    assert detach.cmd_attached(_args(detach=False, workspace="/workspaces/repo", copilot_args=[])) == 0
+    assert detach.read_keeper_state("devbox") is None
 
 
 def test_attached_keeps_reverse_forward_when_only_stray_local_daemon_answers(
@@ -246,9 +394,6 @@ def test_attached_keeps_reverse_forward_when_only_stray_local_daemon_answers(
     monkeypatch.setattr(detach, "read_keeper_state", lambda target: None)
     seen = {}
 
-    class Result:
-        returncode = 0
-
     def remote(_cfg, command, *, timeout=60.0):
         seams.remote.append(command)
         if "curl -fsS" in command:
@@ -262,11 +407,17 @@ def test_attached_keeps_reverse_forward_when_only_stray_local_daemon_answers(
         lambda _identity, *, connect, **_kwargs: connect("agent-worktrees copilot --anchor"),
     )
 
-    def fake_subprocess_run(argv, **kwargs):
-        seen["ssh_argv"] = argv
-        return Result()
+    class FakeProcess:
+        pid = 999
 
-    monkeypatch.setattr(detach.subprocess, "run", fake_subprocess_run)
+        def wait(self):
+            return 0
+
+    def fake_popen(argv, **kwargs):
+        seen["ssh_argv"] = argv
+        return FakeProcess()
+
+    monkeypatch.setattr(detach.subprocess, "Popen", fake_popen)
 
     assert detach.cmd_attached(_args(detach=False, workspace="/workspaces/repo", copilot_args=[])) == 0
     argv = seen["ssh_argv"]

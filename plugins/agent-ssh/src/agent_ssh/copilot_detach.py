@@ -330,6 +330,48 @@ def _keeper_route_active(target: str, daemon_port: int) -> bool:
     return _STORE.alive(_state_key(target))
 
 
+def _attached_route_state(
+    target: str,
+    *,
+    venue_port: int,
+    mux: str,
+    pid: int,
+    instance_token: str,
+) -> dict[str, Any]:
+    return {
+        "pid": int(pid),
+        "pid_identity": process_identity(int(pid)) or "",
+        "target": target,
+        "venue_port": int(venue_port),
+        "mux": mux,
+        "mode": "attached",
+        "instance_token": instance_token,
+    }
+
+
+def _write_attached_route_state(target: str, payload: dict[str, Any]) -> bool:
+    with exclusive_file_lock(_state_lock_path(target)):
+        current = read_keeper_state(target)
+        if (
+            current
+            and int(current.get("venue_port") or 0) == int(payload.get("venue_port") or 0)
+            and _STORE.alive(_state_key(target))
+        ):
+            return False
+        _STORE.write(_state_key(target), payload)
+        return True
+
+
+def _remove_attached_route_state(target: str, instance_token: str) -> None:
+    with exclusive_file_lock(_state_lock_path(target)):
+        current = read_keeper_state(target)
+        if not current or current.get("mode") != "attached":
+            return
+        if current.get("instance_token") != instance_token:
+            return
+        _STORE.remove(_state_key(target))
+
+
 def _write_keeper_state(target: str, payload: dict[str, Any]) -> None:
     current = read_keeper_state(target)
     token = payload.get("instance_token")
@@ -550,15 +592,34 @@ def cmd_attached(args: argparse.Namespace) -> int:
             f"cd {workspace} && {trust_folder_command(plan['workspace'])} && "
             f"{remote_command}"
         )
-        return subprocess.run(
-            build_remote_exec_args(
-                ssh_config,
-                command,
-                reverse_forwards=reverse_forwards,
-                pty=True,
-            ),
+        argv = build_remote_exec_args(
+            ssh_config,
+            command,
+            reverse_forwards=reverse_forwards,
+            pty=True,
+        )
+        proc = subprocess.Popen(  # noqa: S603 - argv is built from the configured SSH profile.
+            argv,
             creationflags=no_window_flags(),
-        ).returncode
+        )
+        instance_token = ""
+        if reverse_forwards and daemon_port:
+            instance_token = uuid.uuid4().hex
+            _write_attached_route_state(
+                args.target,
+                _attached_route_state(
+                    args.target,
+                    venue_port=daemon_port,
+                    mux=plan["mux_session"],
+                    pid=proc.pid,
+                    instance_token=instance_token,
+                ),
+            )
+        try:
+            return int(proc.wait())
+        finally:
+            if instance_token:
+                _remove_attached_route_state(args.target, instance_token)
 
     try:
         return run_venue_copilot(

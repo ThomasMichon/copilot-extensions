@@ -1248,6 +1248,26 @@ function Test-UpdateLifecycleStillTargetsPredecessor {
     return $true
 }
 
+function Invoke-UpdateDrainStop {
+    param([string]$Signature, [int]$TimeoutSec = 120)
+    if (-not (Test-UpdateLifecycleStillTargetsPredecessor -Signature $Signature)) {
+        return $false
+    }
+    Invoke-Drain -TimeoutSec $TimeoutSec
+    Invoke-Stop
+    return $true
+}
+
+function Invoke-UpdateStart {
+    param([string]$Signature, [string]$Message = 'Starting service...')
+    if (-not (Test-UpdateLifecycleStillTargetsPredecessor -Signature $Signature)) {
+        return $false
+    }
+    Write-Step $Message
+    Invoke-Start
+    return $true
+}
+
 function Test-HealthOnce {
     # Single-shot health probe (no retry/sleep). Used by readiness loops that do
     # their own pacing, so the loop interval is not multiplied by an inner retry.
@@ -2704,13 +2724,10 @@ function Invoke-Update {
 
     try {
         if ($wasRunning -and -not $useCutover) {
-            if (Test-UpdateLifecycleStillTargetsPredecessor -Signature $predecessorSignature) {
-                $drainTimeout = if ($env:AGENT_BRIDGE_DRAIN_TIMEOUT) {
-                    [int]$env:AGENT_BRIDGE_DRAIN_TIMEOUT
-                } else { 120 }
-                Invoke-Drain -TimeoutSec $drainTimeout
-                Invoke-Stop
-            } else {
+            $drainTimeout = if ($env:AGENT_BRIDGE_DRAIN_TIMEOUT) {
+                [int]$env:AGENT_BRIDGE_DRAIN_TIMEOUT
+            } else { 120 }
+            if (-not (Invoke-UpdateDrainStop -Signature $predecessorSignature -TimeoutSec $drainTimeout)) {
                 $wasRunning = $false
             }
         }
@@ -2865,8 +2882,7 @@ function Invoke-Update {
                 if (Test-Path $failedSlot) { Remove-Item -Recurse -Force $failedSlot -ErrorAction SilentlyContinue }
             }
             if ($wasRunning -and -not $useCutover -and -not $activeForward) {
-                Write-Step 'Restarting the previous version...'
-                Invoke-Start
+                if (-not (Invoke-UpdateStart -Signature $predecessorSignature -Message 'Restarting the previous version...')) { $wasRunning = $false }
             }
             $prevLabel = if ($prevVersion) { "versions/$prevVersion" } else { 'the previous runtime' }
             Write-Warn "Update failed; kept the previous runtime (venv -> $prevLabel)."
@@ -2876,8 +2892,7 @@ function Invoke-Update {
             if (Restore-Venv) {
                 Write-Ok 'Previous venv restored'
                 if ($wasRunning -and -not $activeForward) {
-                    Write-Step 'Restarting the previous service...'
-                    Invoke-Start
+                    if (-not (Invoke-UpdateStart -Signature $predecessorSignature -Message 'Restarting the previous service...')) { $wasRunning = $false }
                 }
             } else {
                 Write-Fail 'Rollback failed -- run "install.ps1 install" to rebuild the runtime'
@@ -2960,12 +2975,12 @@ function Invoke-Update {
             Write-Ok 'Cutover complete (zero-downtime)'
         } else {
             Write-Warn 'Cutover failed -- falling back to a stop-and-restart swap'
-            Invoke-Stop
-            Invoke-Start
+            if (Invoke-UpdateDrainStop -Signature $predecessorSignature -TimeoutSec 30) {
+                Invoke-UpdateStart -Signature $predecessorSignature | Out-Null
+            }
         }
     } else {
-        Write-Step 'Starting service...'
-        Invoke-Start
+        Invoke-UpdateStart -Signature $predecessorSignature | Out-Null
     }
 
     # Versioned layout: prune old version slots now that the new one is healthy

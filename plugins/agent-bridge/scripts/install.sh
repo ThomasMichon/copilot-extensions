@@ -723,6 +723,24 @@ _update_lifecycle_still_targets_predecessor() {
     return 0
 }
 
+_update_lifecycle_drain_stop() {
+    local pinned="${1:-}" timeout="${2:-120}"
+    if ! _update_lifecycle_still_targets_predecessor "$pinned"; then
+        return 1
+    fi
+    _drain_service "$timeout"
+    do_stop
+}
+
+_update_lifecycle_start() {
+    local pinned="${1:-}" message="${2:-Starting service...}"
+    if ! _update_lifecycle_still_targets_predecessor "$pinned"; then
+        return 1
+    fi
+    _step "$message"
+    do_start
+}
+
 _active_host() {
     # The daemon's LIVE bind address from the routing table, mirroring
     # install.ps1's endpoint resolution: default loopback, and treat a wildcard
@@ -2091,10 +2109,7 @@ do_update() {
     # doing a cutover (which keeps the old daemon up and retires it afterward).
     # Either way, drain first so in-flight turns get a chance to settle.
     if [[ "$was_running" == true && "$cutover" == false ]]; then
-        if _update_lifecycle_still_targets_predecessor "$predecessor_signature"; then
-            _drain_service "${AGENT_BRIDGE_DRAIN_TIMEOUT:-120}"
-            do_stop
-        else
+        if ! _update_lifecycle_drain_stop "$predecessor_signature" "${AGENT_BRIDGE_DRAIN_TIMEOUT:-120}"; then
             was_running=false
         fi
     fi
@@ -2111,8 +2126,7 @@ do_update() {
                 rm -rf "$INSTALL_DIR/versions/$SRC_VERSION"
             fi
             if [[ "$was_running" == true && "$cutover" == false && "$active_forward" != true ]]; then
-                _step "Restarting the previous version..."
-                do_start
+                _update_lifecycle_start "$predecessor_signature" "Restarting the previous version..." || was_running=false
             fi
             _warn "Update failed; kept the previous runtime (venv -> versions/${prev_version:-<previous>})."
         elif [[ "$have_backup" == true ]]; then
@@ -2122,8 +2136,7 @@ do_update() {
                 # Only restart in the default path -- in cutover mode the old
                 # daemon was never stopped, so it is still serving.
                 if [[ "$was_running" == true && "$cutover" == false && "$active_forward" != true ]]; then
-                    _step "Restarting the previous service..."
-                    do_start
+                    _update_lifecycle_start "$predecessor_signature" "Restarting the previous service..." || was_running=false
                 fi
             else
                 _fail "Rollback failed -- run install.sh install to rebuild the runtime"
@@ -2167,13 +2180,12 @@ do_update() {
             _ok "Cutover complete -- new daemon active, old retired"
         else
             _warn "Cutover failed -- falling back to drain/stop/start"
-            _drain_service 30
-            do_stop
-            do_start
+            if _update_lifecycle_drain_stop "$predecessor_signature" 30; then
+                _update_lifecycle_start "$predecessor_signature" "Starting service..." || true
+            fi
         fi
     else
-        _step "Starting service..."
-        do_start
+        _update_lifecycle_start "$predecessor_signature" "Starting service..." || true
     fi
 
     # Versioned layout: prune old version slots now that the new one is healthy

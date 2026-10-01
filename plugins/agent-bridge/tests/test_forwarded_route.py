@@ -374,18 +374,22 @@ def test_install_sh_forward_classifier(active, expected, tmp_path):
 
 def test_install_sh_update_checks_forward_before_lifecycle_actions():
     text = _INSTALL_SH.read_text(encoding="utf-8")
+    helper = text.split("_update_lifecycle_drain_stop() {", 1)[1].split("\n}\n\n_update_lifecycle_start", 1)[0]
     body = text.split("do_update() {", 1)[1].split("\n}\n\ncase", 1)[0]
     forward_at = body.index("active_forward=false")
-    revalidate_at = body.index('_update_lifecycle_still_targets_predecessor "$predecessor_signature"')
-    drain_at = body.index("_drain_service")
-    stop_at = body.index("do_stop")
-    start_at = body.index("do_start")
-    assert forward_at < revalidate_at < drain_at < stop_at < start_at
+    revalidate_at = body.index('_update_lifecycle_drain_stop "$predecessor_signature"')
+    start_at = body.index('_update_lifecycle_start "$predecessor_signature"')
+    assert forward_at < revalidate_at < start_at
+    assert helper.index("_update_lifecycle_still_targets_predecessor") < helper.index("_drain_service") < helper.index("do_stop")
     assert 'if [[ "$active_forward" == true ]]; then' in body
     assert 'Forwarded host bridge route still active -- not starting a local daemon' in body
     assert 'Forwarded host bridge route appeared during update -- skipping drain/stop/start' in text
     assert 'Active route changed during update -- skipping drain/stop/start' in text
     assert '&& "$active_forward" != true' in body
+    assert '_update_lifecycle_drain_stop "$predecessor_signature" 30' in body
+    assert '_update_lifecycle_start "$predecessor_signature" "Starting service..."' in body
+    assert '_update_lifecycle_start "$predecessor_signature" "Restarting the previous version..."' in body
+    assert '_update_lifecycle_start "$predecessor_signature" "Restarting the previous service..."' in body
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a POSIX bash environment is needed")
