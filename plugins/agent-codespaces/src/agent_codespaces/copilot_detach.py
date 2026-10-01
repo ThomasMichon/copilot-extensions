@@ -137,6 +137,7 @@ def _remote(
 
 _CONNECT_ATTEMPTS = 2
 _LAUNCH_ATTEMPTS = 2
+_LOCAL_FORWARD_ASSIGNMENT_ATTEMPTS = 19  # 18 * 5s ~= the Owner bridge-forward wait
 _last_json = last_json
 
 
@@ -189,7 +190,9 @@ def parse_local_forwards(specs: list[str]) -> dict[int, int]:
             h, v = int(host), int(venue if sep else host)
         except ValueError:
             h = v = 0
-        if not (0 < h < 65536 and 0 < v < 65536):
+        if h == 0 and not sep:
+            raise ValueError("--forward 0 requires an explicit VENUE_PORT (use 0:VENUE_PORT)")
+        if not ((0 <= h < 65536) and 0 < v < 65536):
             raise ValueError(f"--forward expects PORT or PORT:VENUE_PORT, got {spec!r}")
         if h in out and out[h] != v:
             raise ValueError(f"--forward names host port {h} twice")
@@ -287,6 +290,85 @@ def _host_ports_listening(ports: list[int], *, attempts: int = 6) -> dict[int, b
     return {p: p in ready for p in ports}
 
 
+def _int_port_map(value: Any) -> dict[int, int]:
+    out: dict[int, int] = {}
+    if isinstance(value, dict):
+        for host, venue in value.items():
+            try:
+                h, v = int(host), int(venue)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= h < 65536 and 0 < v < 65536:
+                out[h] = v
+    return out
+
+
+def _reported_local_forwards(
+    codespace: str,
+    requested: dict[int, int],
+    fallback: dict[str, int],
+    *,
+    attempts: int = _LOCAL_FORWARD_ASSIGNMENT_ATTEMPTS,
+) -> dict[int, int]:
+    """Local forwards to report to the launcher, with ``0:venue`` resolved.
+
+    The Owner owns the actual bind for ``0:venue`` and records the assigned
+    host port back into the hold. The launcher reads that durable state instead
+    of pre-picking a port itself, avoiding the caller-side TOCTOU race.
+    """
+    wanted = dict(requested) if requested else _int_port_map(fallback)
+    if not wanted or 0 not in wanted:
+        return wanted
+    fixed = {host: venue for host, venue in wanted.items() if host != 0}
+    dynamic_venue = wanted[0]
+    from . import connection_owner as owner
+    from .owner_local_forwards import read_active_local_forwards
+
+    for attempt in range(attempts):
+        held = owner.get_hold(codespace)
+        current = _int_port_map(getattr(held, "local_forwards", None) or {})
+        active = read_active_local_forwards().get(codespace, {})
+        candidates = {
+            host: venue for host, venue in current.items()
+            if host != 0 and host not in fixed and venue == dynamic_venue and active.get(host) == venue
+        }
+        if candidates:
+            assigned = min(candidates)
+            return {**fixed, assigned: dynamic_venue}
+        if attempt + 1 < attempts:
+            time.sleep(5.0)
+    raise TimeoutError(
+        f"the Connection Owner did not report an assigned host port for --forward 0:{dynamic_venue}; "
+        "its local forward may still be binding, or a pre-upgrade Owner may be running "
+        "and dropping the pending '0' key while sanitizing holds"
+    )
+
+
+def _pending_local_forwards(requested: dict[int, int], fallback: dict[str, int]) -> dict[int, int]:
+    wanted = dict(requested) if requested else _int_port_map(fallback)
+    return {0: wanted[0]} if 0 in wanted else {}
+
+
+def _local_forwards_ready(
+    codespace: str,
+    reported: dict[int, int],
+    requested: dict[int, int],
+) -> dict[int, bool]:
+    dynamic_venue = requested.get(0)
+    fixed = [host for host, venue in reported.items() if venue != dynamic_venue]
+    ready = _host_ports_listening(sorted(fixed)) if fixed else {}
+    if dynamic_venue is not None:
+        from .owner_local_forwards import read_active_local_forwards
+
+        active = read_active_local_forwards().get(codespace, {})
+        ready.update({
+            host: active.get(host) == venue
+            for host, venue in reported.items()
+            if venue == dynamic_venue
+        })
+    return ready
+
+
 def _ssh_namespace(args: argparse.Namespace, remote_cmd: str, *, timeout: float) -> argparse.Namespace:
     return argparse.Namespace(
         name=args.name,
@@ -315,6 +397,7 @@ def _commands(plan: dict[str, Any], session_id: str, effort: str | None = None) 
     return {
         **observe_commands(session_id),
         "attach": f"agent-codespaces copilot {cs}{claim}",
+        "rejoin": f"agent-codespaces copilot {cs} --detach{claim}",
         "stop": f"agent-codespaces copilot {cs} --stop{claim}",
     }
 
@@ -571,10 +654,18 @@ def cmd_detach(
         ok = True
         if created:  # a rejoin of a running session applied none of its flags
             launch_memory.remember(args.name, plan["tenant"], copilot_args, args.driver, session_id)
+        local_pending: dict[int, int] = {}
+        local_forward_error: str | None = None
+        try:
+            reported_local = _reported_local_forwards(args.name, local_forwards, prior_local)
+        except TimeoutError as exc:
+            reported_local = {host: venue for host, venue in local_forwards.items() if host != 0}
+            local_pending = _pending_local_forwards(local_forwards, prior_local)
+            local_forward_error = str(exc)
         forwards_ready = (
             _venue_ports_listening(args.name, sorted(reverse_forwards)) if reverse_forwards else {}
         )
-        local_ready = _host_ports_listening(sorted(local_forwards)) if local_forwards else {}
+        local_ready = _local_forwards_ready(args.name, reported_local, local_forwards) if reported_local else {}
         print(json.dumps({
             "ok": True, **plan, "session_id": session_id, "created": created,
             **({"ref_files": refs_note_text.splitlines()[1:], "refs_delivered": refs_delivered}
@@ -585,8 +676,10 @@ def cmd_detach(
             "plugin_dirs": captured.get("plugin_dirs", []),
             **({"reverse_forwards": reverse_forwards,
                 "reverse_forwards_ready": forwards_ready} if reverse_forwards else {}),
-            **({"local_forwards": local_forwards,
-                "local_forwards_ready": local_ready} if local_forwards else {}),
+            **({"local_forwards": reported_local,
+                "local_forwards_ready": local_ready} if reported_local else {}),
+            **({"local_forwards_pending": local_pending,
+                "error": local_forward_error} if local_pending else {}),
             "commands": _commands(plan, session_id, getattr(args, "effort", None)),
         }, indent=2))
         return 0

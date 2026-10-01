@@ -141,10 +141,11 @@ agent-containers lifecycle-clear [name]
                                       # clear only expired/dead admission records
 agent-containers exec <name>         # run the ACP launch command (testing)
 agent-containers copilot <name>      # attach a trusted-container CLI session
+                                      # (--ttl-seconds applies here only)
 agent-containers copilot <name> --detach [--seed-file task.md]
                                       # start/rejoin an observable background CLI session
 agent-containers copilot <name> --stop
-                                      # stop that detached session and its keeper
+                                      # stop that detached session and release its keeper hold
 agent-containers ssh-profile <name> [--alias <alias>]
                                       # publish a named restricted SSH target
 agent-containers ssh-profile <name> --project <project> [--label <label>]
@@ -167,8 +168,11 @@ host-side forward keeper for the bridge and credential-relay reverse forwards,
 runs `agent-worktrees embody --json` in the container workspace without a PTY,
 and prints a JSON handle with `session_id`, `scope_id`, and ready-made
 `status`/`observe`/`nudge`/`attach`/`stop` commands. `--stop` kills the
-container tmux session, verifies it is gone, stops the keeper, and deregisters
-the exact live-session row. Extra Copilot CLI flags can be repeated with
+container tmux session, verifies it is gone, releases that session's keeper
+hold, stops the shared per-container keeper only when no other session still
+holds it, and deregisters the exact live-session row. `--ttl-seconds` applies
+only to attached mode; detached sessions use their fixed reservation lease.
+Extra Copilot CLI flags can be repeated with
 `--copilot-arg`; use `--seed-file -` for long or multi-line prompts. A new
 session starts on the caller's own model, reasoning effort, and context tier
 (from `~/.copilot/settings.json`); an explicit `--copilot-arg=--model=...`

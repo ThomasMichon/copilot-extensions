@@ -1,0 +1,9 @@
+{
+  "comment": "Release stale CLI-mode reservations after failed launches. The in-session extension's last-resort bridge port is now 9280 on every platform, matching the Python client (the retired WSL 9281 fallback is gone).",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

@@ -11,6 +11,7 @@ import types
 
 import pytest
 from agent_codespaces import connection_owner as owner
+from agent_codespaces import owner_local_forwards as olf
 from agent_codespaces import session_forwards as sf
 from agent_codespaces import transcript_mirror as tm
 
@@ -207,7 +208,7 @@ def _local_factory(created):
 def test_local_forwards_persist_sanitized_and_clear_with_the_session(store):
     owner.hold("cs-1", "ssh:1")
     h = owner.hold("cs-1", "cli:t", daemon_port=41234, mux_session="wt-x",
-                   local_forwards={41909: 41909, 0: 1, "x": 5})
+                   local_forwards={41909: 41909, 0: 0, "x": 5})
     assert h.local_forwards == {"41909": 41909}
     kept = owner.hold("cs-1", "cli:t", mux_session="wt-x")  # rejoin without the flag
     assert kept.local_forwards == {"41909": 41909}
@@ -231,6 +232,216 @@ async def test_local_forward_follows_the_hold_and_stops_on_shutdown(store):
     await forwards.reconcile({h.codespace: h for h in owner.list_holds()})
     assert forwards.active_local_forwards() == {}
     assert created[("cs-1", 41909, 5000)].stops == 1
+
+
+async def test_dynamic_local_forward_records_the_assigned_host_port(store):
+    created = {}
+
+    def make(codespace, host_port, venue_port):
+        channel = FakeChannel((codespace, host_port, venue_port))
+        channel.bound_port = 49152
+        created[(codespace, host_port, venue_port)] = channel
+        return channel
+
+    forwards = sf.SessionForwards(_any_factory({}), local_factory=make)
+    owner.hold("cs-1", "cli:t", daemon_port=41234, mux_session="wt-x",
+               local_forwards={0: 3000})
+
+    await forwards.reconcile({h.codespace: h for h in owner.list_holds()})
+
+    assert created[("cs-1", 0, 3000)].starts == 1
+    assert owner.get_hold("cs-1").local_forwards == {"49152": 3000}
+    assert forwards.active_local_forwards() == {"cs-1": {49152: 3000}}
+    kept = owner.hold("cs-1", "cli:t", mux_session="wt-x")  # rejoin without the flag
+    assert kept.local_forwards == {"49152": 3000}
+
+
+async def test_dynamic_local_forward_keeps_assigned_port_across_reconnects_and_owner_restart(store):
+    ports = iter([49152, 49153])
+    forwards = []
+
+    class Forward:
+        def __init__(self, cfg, remote_port, *, local_port):
+            self.remote_port = remote_port
+            self.local_port = int(local_port) if local_port else None
+            self.fixed = bool(local_port)
+            self.establishes = 0
+            self.refreshes = 0
+            self.is_alive = False
+            forwards.append(self)
+
+        async def establish(self):
+            self.establishes += 1
+            if self.local_port is None:
+                self.local_port = next(ports)
+            self.is_alive = True
+            return self.local_port
+
+        async def refresh(self):
+            self.refreshes += 1
+            self.is_alive = True
+            return self.local_port
+
+        async def cancel(self):
+            self.is_alive = False
+
+    class Source:
+        def __init__(self, codespace, gh_env=None):
+            self.codespace = codespace
+
+        def get_ssh_config(self):
+            return f"cfg:{self.codespace}"
+
+    local_factory = sf.make_local_forward_factory(forward_cls=Forward, config_source_cls=Source)
+    forwards_mgr = sf.SessionForwards(_any_factory({}), local_factory=local_factory)
+    owner.hold("cs-1", "cli:t", daemon_port=41234, mux_session="wt-x",
+               local_forwards={0: 3000})
+
+    await forwards_mgr.reconcile({h.codespace: h for h in owner.list_holds()})
+    assert owner.get_hold("cs-1").local_forwards == {"49152": 3000}
+    assert forwards_mgr.active_local_forwards() == {"cs-1": {49152: 3000}}
+
+    await forwards_mgr.reconcile({h.codespace: h for h in owner.list_holds()})
+    assert len(forwards) == 1 and forwards[0].local_port == 49152
+
+    forwards[0].is_alive = False
+    await forwards_mgr.reconcile({h.codespace: h for h in owner.list_holds()})
+    assert forwards[0].refreshes == 1
+    assert forwards[0].local_port == 49152
+    assert forwards_mgr.active_local_forwards() == {"cs-1": {49152: 3000}}
+
+    restarted = sf.SessionForwards(_any_factory({}), local_factory=local_factory)
+    await restarted.reconcile({h.codespace: h for h in owner.list_holds()})
+    assert len(forwards) == 2
+    assert forwards[1].fixed is True
+    assert forwards[1].local_port == 49152
+    assert restarted.active_local_forwards() == {"cs-1": {49152: 3000}}
+
+
+async def test_dynamic_local_forward_reassigns_after_repeated_rebind_failures(store):
+    class Forward:
+        def __init__(self, cfg, remote_port, *, local_port):
+            self.remote_port = remote_port
+            self.local_port = int(local_port) if local_port else None
+            self.is_alive = False
+
+        async def establish(self):
+            if self.local_port == 49152:
+                raise ConnectionError("address already in use")
+            if self.local_port is None:
+                self.local_port = 49153
+            self.is_alive = True
+            return self.local_port
+
+        async def refresh(self):
+            return await self.establish()
+
+        async def cancel(self):
+            self.is_alive = False
+
+    class Source:
+        def __init__(self, codespace, gh_env=None):
+            pass
+
+        def get_ssh_config(self):
+            return object()
+
+    owner.hold("cs-1", "cli:t", daemon_port=41234, mux_session="wt-x",
+               local_forwards={49152: 3000})
+    h = owner.get_hold("cs-1")
+    h.assigned_local_forwards = {"49152": 3000}
+    owner._write_holds({"cs-1": h})
+    forwards = sf.SessionForwards(
+        _any_factory({}),
+        local_factory=sf.make_local_forward_factory(forward_cls=Forward, config_source_cls=Source),
+    )
+
+    await forwards.reconcile({h.codespace: h for h in owner.list_holds()})
+    await forwards.reconcile({h.codespace: h for h in owner.list_holds()})
+
+    assert owner.get_hold("cs-1").local_forwards == {"49153": 3000}
+    assert owner.get_hold("cs-1").assigned_local_forwards == {"49153": 3000}
+    assert forwards.active_local_forwards() == {"cs-1": {49153: 3000}}
+
+
+def test_repeated_dynamic_request_reuses_active_assignment_inside_owner_lock(store):
+    owner.hold("cs-1", "cli:t", daemon_port=41234, mux_session="wt-x",
+               local_forwards={49152: 3000})
+    h = owner.get_hold("cs-1")
+    h.assigned_local_forwards = {"49152": 3000}
+    owner._write_holds({"cs-1": h})
+    olf.write_active_local_forwards({"cs-1": {49152: 3000}})
+
+    kept = owner.hold("cs-1", "cli:t", mux_session="wt-x", local_forwards={0: 3000})
+
+    assert kept.local_forwards == {"49152": 3000}
+    assert kept.assigned_local_forwards == {"49152": 3000}
+
+
+def test_repeated_dynamic_request_reuses_assignment_with_missing_or_stale_beacon(store, monkeypatch):
+    owner.hold("cs-1", "cli:t", daemon_port=41234, mux_session="wt-x",
+               local_forwards={49152: 3000})
+    h = owner.get_hold("cs-1")
+    h.assigned_local_forwards = {"49152": 3000}
+    owner._write_holds({"cs-1": h})
+    monkeypatch.setattr(olf, "read_active_local_forwards", lambda: {})
+
+    kept = owner.hold("cs-1", "cli:t", mux_session="wt-x", local_forwards={0: 3000})
+
+    assert kept.local_forwards == {"49152": 3000}
+    assert kept.assigned_local_forwards == {"49152": 3000}
+
+
+async def test_dynamic_reassignment_stops_replacement_when_hold_was_released(store):
+    channels = []
+
+    class Forward:
+        def __init__(self, cfg, remote_port, *, local_port):
+            self.local_port = int(local_port) if local_port else None
+            self.is_alive = False
+            self.stops = 0
+            channels.append(self)
+
+        async def establish(self):
+            if self.local_port == 49152:
+                raise ConnectionError("address already in use")
+            self.local_port = 49153
+            self.is_alive = True
+            return self.local_port
+
+        async def refresh(self):
+            return await self.establish()
+
+        async def cancel(self):
+            self.stops += 1
+            self.is_alive = False
+
+    class Source:
+        def __init__(self, codespace, gh_env=None):
+            pass
+
+        def get_ssh_config(self):
+            return object()
+
+    owner.hold("cs-1", "cli:t", daemon_port=41234, mux_session="wt-x",
+               local_forwards={49152: 3000})
+    h = owner.get_hold("cs-1")
+    h.assigned_local_forwards = {"49152": 3000}
+    owner._write_holds({"cs-1": h})
+    forwards = sf.SessionForwards(
+        _any_factory({}),
+        local_factory=sf.make_local_forward_factory(forward_cls=Forward, config_source_cls=Source),
+    )
+    holds = {h.codespace: h for h in owner.list_holds()}
+
+    await forwards.reconcile(holds)
+    owner.release("cs-1", "cli:t")
+    await forwards.reconcile(holds)  # stale snapshot says the hold still wants 49152
+
+    assert len(channels) == 3
+    assert channels[-1].local_port == 49153
+    assert channels[-1].stops == 1
+    assert forwards.active_local_forwards() == {}
 
 
 async def test_local_forwards_are_ignored_without_a_local_factory(store):

@@ -476,9 +476,13 @@ def _match_agents(target: str, agents: list[dict]) -> list[str]:
 # command otherwise creates. Deliberately NOT a provider-registry action
 # (agent-bridge never imports sibling plugins -- process-boundary CLI seam,
 # #892/#1643): a namespaced target's prefix maps directly to its owning
-# plugin's binstub by the same fixed convention `codespace:`/`container:`
+# plugin's binstub by the same fixed convention `codespace:`/`container:`/`ssh:`
 # already use everywhere else in this codebase.
-_CLI_MODE_VENUE_BINSTUBS = {"codespace": "agent-codespaces", "container": "agent-containers"}
+_CLI_MODE_VENUE_BINSTUBS = {
+    "codespace": "agent-codespaces",
+    "container": "agent-containers",
+    "ssh": "agent-ssh",
+}
 
 
 def _cmd_create_cli(
@@ -491,7 +495,8 @@ def _cmd_create_cli(
     Resolves ``target``'s ``<prefix>:<name>`` the same way every other
     namespaced target in this codebase does, then hands off entirely to that
     provider's own venue `copilot` verb (`agent-codespaces copilot <name>` /
-    `agent-containers copilot <name>`) -- this command owns none of the
+    `agent-containers copilot <name>` / `agent-ssh copilot <alias>`) -- this
+    command owns none of the
     reserve/connect/attach mechanics itself, just the target-prefix ->
     binstub resolution. Defaults to anchor mode on the remote venue (neither
     verb requires --worktree-id): a CodeSpace/trusted container is
@@ -503,8 +508,8 @@ def _cmd_create_cli(
     here would only be a second, divergent way to do what that verb already
     does.
 
-    ``detach=True`` forwards ``--detach`` (CodeSpace and container venues): the venue
-    verb starts the session in the background and prints a JSON handle
+    ``detach=True`` forwards ``--detach``: the venue verb starts the session in
+    the background and prints a JSON handle
     instead of taking over this terminal -- the shape an orchestrating agent
     needs. The seed then travels over stdin (``--seed-file -``) so a long,
     multi-line prompt never transits a binstub's argv re-parsing.
@@ -729,8 +734,8 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     create_p.add_argument("--charter", dest="charter", default=None, metavar="AGENT", help="Optional .github/agents/<charter>.agent.md behavior overlay -- passed as Copilot's own --agent flag on the launched session, independent of TARGET (the venue this session spawns onto).")
     create_p.add_argument("--target-dir", dest="target_dir", default=None, metavar="PATH", help="Run this agent session in an existing checkout directory.")
     create_p.add_argument("--worktree-id", dest="worktree_id", default=None, metavar="ID", help="Bind the created session to an existing agent-worktrees worktree id.")
-    create_p.add_argument("--cli", action="store_true", help="Deliver a live, human-attachable CLI-mode Copilot session on the venue TARGET names (codespace:<name> or container:<name>) instead of an ordinary headless ACP session -- hands off entirely to that provider's own `copilot` verb, optionally seeded with the positional prompt as its first turn (agent-bridge-cli-mode-sessions Phase 4). Defaults to anchor mode on the venue (no worktree required). Refused for a bare/unprefixed TARGET -- use `agent-worktrees copilot` directly for a local session.")
+    create_p.add_argument("--cli", action="store_true", help="Deliver a live, human-attachable CLI-mode Copilot session on the venue TARGET names (codespace:<name>, container:<name>, or ssh:<name>) instead of an ordinary headless ACP session -- hands off entirely to that provider's own `copilot` verb, optionally seeded with the positional prompt as its first turn (agent-bridge-cli-mode-sessions Phase 4). Defaults to anchor mode on the venue (no worktree required). Refused for a bare/unprefixed TARGET -- use `agent-worktrees copilot` directly for a local session.")
     create_p.add_argument("--driver", default=None, metavar="LABEL", help="With --cli: forwarded to the remote `agent-worktrees copilot --driver` (stamps the 'driven by' banner).")
-    create_p.add_argument("--detach", action="store_true", help="With --cli on a codespace:<name> target: start the CLI-mode session in the background (seeded with the prompt) and print a JSON handle (session id plus attach/observe/nudge/stop commands) instead of taking over this terminal -- for an orchestrating agent that must not hand its TTY away.")
+    create_p.add_argument("--detach", action="store_true", help="With --cli on a codespace:<name>, container:<name>, or ssh:<name> target: start the CLI-mode session in the background (seeded with the prompt) and print a JSON handle (session id plus attach/observe/nudge/stop commands) instead of taking over this terminal -- for an orchestrating agent that must not hand its TTY away.")
     core._add_stream_args(create_p)
     create_p.set_defaults(func=_cmd_create)

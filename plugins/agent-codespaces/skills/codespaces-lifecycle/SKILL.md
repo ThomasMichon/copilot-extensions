@@ -163,6 +163,9 @@ session, running in a tmux session inside the CodeSpace, into **this**
 terminal (it reserves the CLI-mode slot on the host agent-bridge, forwards the
 credential relay and the host bridge port, and runs the venue's agent-worktrees
 `copilot` verb there). Re-running it re-attaches to the same session.
+`--ttl-seconds` applies only to this attached-mode CLI reservation (default
+300 seconds before an unclaimed reservation is reclaimable); do not pass it with
+`--detach` or `--stop`.
 
 An **orchestrating agent** uses the detached form instead -- nothing takes over
 its terminal:
@@ -225,9 +228,26 @@ this option is still running -- it exits once it holds nothing.
 keeps this host's `127.0.0.1:PORT` forwarded to the CodeSpace's
 `127.0.0.1:VENUE_PORT` (default: the same port) for the session's life -- for
 example the worker's dev server at a fixed `--port`, so a browser on this host
-loads `https://localhost:PORT`. The forward can exist before the server
-starts. A rejoin without the flag keeps it; `--stop` removes it. The launch
-reports `local_forwards_ready` per host port (bound locally); `false` usually
+loads `https://localhost:PORT`. A fixed host port is the default and documented
+contract: it keeps TLS certs, redirect URIs, cookies, and worker-facing URLs
+tied to the expected `https://localhost:PORT`; use `--forward N:VENUE_PORT`
+when the host port must remain pinned to exactly `N`. Use `--forward 0:VENUE_PORT`
+only when the caller explicitly wants the Owner to bind a system-assigned host
+port; `VENUE_PORT` is required, and the launch JSON reports the actual assigned
+host port in `local_forwards` and `local_forwards_ready`. Once assigned, that
+host port is kept for the session's life across reconnects, rejoins, and Owner
+restarts while the Owner can still bind it. If something else grabs that
+kernel-assigned port while the forward is down, the Owner records a replacement
+assigned port rather than reporting another process's listener as ready; the URL
+changes only because the old assigned port is unusable. Re-running the same
+`--forward 0:VENUE_PORT` for a running session reuses the already assigned host
+port only while the Owner currently owns that forward. The forward can exist
+before the server starts. A rejoin without the flag keeps the
+session's existing assigned or fixed port; `--stop` removes it. If the launch
+times out before the Owner reports the assigned port, the session still returns
+`ok: true` with `session_id`, `commands`, `local_forwards_pending: {"0":
+VENUE_PORT}`, and an `error` note; a pre-upgrade Owner that sanitizes away the
+pending `0` key is the usual cause. `false` in `local_forwards_ready` usually
 means the host port is taken or a pre-`--forward` Owner is still running.
 A multi-line or long seed is written to `~/.agent-bridge/seeds/` on the venue and <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 seeded as a one-line pointer (tmux-typed input must be a single line). It

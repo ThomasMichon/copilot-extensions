@@ -22,7 +22,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir, release } from "node:os";
+import { homedir } from "node:os";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { InFlightMessages, controlPlan, deliveryPlan, modeApplied } from "./delivery.mjs";
@@ -120,13 +120,9 @@ function resolveBaseUrl() {
   } catch {
     /* fall through */
   }
-  // 3) platform default: a host is 9280; only a WSL guest (which shares the
-  //    Windows host's TCP port namespace) uses 9281. The discriminator is
-  //    "am I a WSL guest?", not "am I non-Windows?" -- bare-metal Linux is 9280.
-  const isWsl =
-    process.platform === "linux" &&
-    (!!process.env.WSL_DISTRO_NAME || /microsoft|wsl/i.test(release()));
-  return `http://${host}:${isWsl ? 9281 : 9280}`;
+  // 3) platform default: the Python client retired the former WSL +1 fallback,
+  //    so every platform uses the canonical last-resort port.
+  return `http://${host}:9280`;
 }
 
 function resolveToken() {

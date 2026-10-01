@@ -17,28 +17,42 @@ agent-ssh verify --timeout 8 my-machine
 agent-ssh explore my-machine --json
 agent-ssh mesh-status
 agent-ssh refresh-mesh --json
-agent-ssh copilot my-machine --detach --workspace /workspaces/repo --seed-file task.md
-agent-ssh copilot my-machine --stop --workspace /workspaces/repo
+agent-ssh copilot-config set my-machine --workspace /workspaces/repo
+agent-ssh copilot my-machine
+agent-ssh copilot my-machine --detach --seed-file task.md
+agent-ssh copilot my-machine --stop
 ```
 
 The CLI manages only SSH aliases. Once `ssh <name>` works, sibling plugins such
 as agent-bridge or agent-codespaces can use that OpenSSH surface, but agent-ssh
 does not import their runtimes or require them to be installed.
 
-`copilot <ssh-target> --detach --workspace <remote-checkout>` starts or rejoins
-an observable Copilot CLI session on a POSIX SSH target without taking over the
-caller terminal. The remote machine must already have `bash`, `tmux`, `copilot`,
-`agent-worktrees`, and the `agent-bridge` Copilot plugin installed. The command
-provisions the host bridge registration token on the target, keeps the bridge
-reverse forward alive with a small keeper process, reserves a venue-qualified
-CLI-mode identity (`anchor-<repo>@<ssh-target>`), runs
-`agent-worktrees embody --anchor --bridge-scope-id ... --json` in the requested
-workspace, and prints a JSON handle with `status`, `observe`, `nudge`, `attach`,
-and `stop` commands. A new session starts on the caller's own model,
-reasoning effort, and context tier (from `~/.copilot/settings.json`); an
-explicit `--copilot-arg=--model=...` wins and
-`AGENT_CODESPACES_MODEL_PROPAGATE=0` opts out. Windows SSH targets are not supported yet; run the
-orchestrator on that machine and use local `agent-worktrees embody` there.
+`copilot <ssh-target>` attaches a real interactive Copilot CLI session in this
+terminal through the SSH target, matching the venue contract of
+`agent-codespaces copilot <name>` and `agent-containers copilot <name>`.
+Re-running the command re-attaches the same remote tmux-backed anchor session;
+if another process already holds the bridge reverse-forward route, the attached
+command reuses that route instead of trying to bind the same remote port again.
+`--detach` starts or rejoins the session in the background without taking over
+the caller terminal and prints a JSON handle with `status`, `observe`, `nudge`,
+`attach`, and `stop` commands; `--stop` verifies the detached session is gone and
+releases its bridge forward. The remote machine must already have `bash`, `tmux`,
+`copilot`, `agent-worktrees`, and the `agent-bridge` Copilot plugin installed.
+Windows SSH targets are not supported yet; run the orchestrator on that machine
+and use local `agent-worktrees embody` there.
+
+The remote checkout is resolved fail-closed: explicit `--workspace` first, then
+the agent-ssh-owned host config written by
+`agent-ssh copilot-config set <ssh-target> --workspace /path/to/checkout`
+(`~/.agent-ssh/copilot-hosts.json`). The command does not guess by scanning the
+remote machine; if neither source is present, it fails before launch with
+instructions to pass or configure the workspace. `--ttl-seconds` applies only
+to attached mode; detached launches use their short fixed launch reservation
+and release it after registration. A new detached session starts on the caller's
+own model, reasoning effort, and context tier (from `~/.copilot/settings.json`);
+an explicit
+`--copilot-arg=--model=...` wins and `AGENT_CODESPACES_MODEL_PROPAGATE=0` opts
+out.
 `--ref-file PATH` (repeatable) copies an operator file outside the checkout to
 `~/.agent-bridge/refs/<batch>/` and names it to the worker (seed for a new
 session, a message on rejoin).

@@ -1,0 +1,9 @@
+{
+  "comment": "Route CLI-mode sessions to SSH venues",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

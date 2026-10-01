@@ -27,8 +27,15 @@ from ssh_manager.forward_keeper import (
     spawn_keeper,
 )
 from venue_copilot import (
+    DEFAULT_TTL_SECONDS,
+    VenueCopilotError,
+    bridge_probe_script,
+    registration_credentials_script,
     read_seed,
     resolve_daemon_port,
+    resolve_local_auth_token,
+    run_venue_copilot,
+    trust_folder_command,
 )
 from venue_copilot.detached import launch_detached, public_plan, stop_detached
 from venue_copilot.models import model_copilot_args
@@ -42,6 +49,11 @@ _LEGACY_ROOT = ".agent-ssh"  # marketplace-isolation: allow legacy compatibility
 _KEEPER_TOKEN_ENV = "AGENT_SSH_KEEPER_TOKEN"
 _STATE_DIR = Path.home() / _LEGACY_ROOT / "forward-keepers"
 _STORE = KeeperStore(_STATE_DIR)
+_COPILOT_HOSTS_FILE = "copilot-hosts.json"
+
+
+class CopilotConfigError(ValueError):
+    """Invalid persisted `agent-ssh copilot-config` state."""
 
 
 def _with_caller_model(requested: list[str]) -> list[str]:
@@ -51,12 +63,111 @@ def _with_caller_model(requested: list[str]) -> list[str]:
     return requested + model_copilot_args(requested)
 
 
+def _normalize_workspace(value: str) -> str:
+    workspace = value.strip().rstrip("/")
+    if not workspace:
+        raise ValueError(
+            "agent-ssh copilot could not resolve a remote workspace. Pass "
+            "--workspace /path/to/checkout, or set it with "
+            "`agent-ssh copilot-config set <host> --workspace /path/to/checkout`."
+        )
+    if not workspace.startswith("/"):
+        raise ValueError(f"remote workspace must be an absolute POSIX path, got {value!r}")
+    return workspace
+
+
+def _copilot_config_path(home: Path | None = None) -> Path:
+    return (home or Path.home()) / _LEGACY_ROOT / _COPILOT_HOSTS_FILE
+
+
+def _load_copilot_config(path: Path | None = None) -> dict[str, Any]:
+    config_path = path or _copilot_config_path()
+    try:
+        text = config_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}
+    except (OSError, UnicodeError) as exc:
+        raise CopilotConfigError(f"could not read {config_path}: {exc}") from exc
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise CopilotConfigError(f"{config_path} is not valid JSON: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise CopilotConfigError(f"{config_path} must contain a JSON object")
+    return raw
+
+
+def _workspace_from_host_config(target: str, path: Path | None = None) -> str | None:
+    raw = _load_copilot_config(path)
+    hosts = raw.get("hosts")
+    if not isinstance(hosts, dict):
+        return None
+    target_key = target.casefold()
+    entries = []
+    exact = hosts.get(target_key)
+    if isinstance(exact, dict):
+        entries.append(exact)
+    entries.extend(
+        entry
+        for name, entry in hosts.items()
+        if isinstance(name, str) and name.casefold() == target_key and name != target_key
+    )
+    for entry in entries:
+        if isinstance(entry, dict):
+            workspace = entry.get("workspace")
+            if isinstance(workspace, str) and workspace.strip():
+                return _normalize_workspace(workspace)
+    return None
+
+
+def set_host_workspace(target: str, workspace: str, path: Path | None = None) -> Path:
+    normalized = _normalize_workspace(workspace)
+    config_path = path or _copilot_config_path()
+    raw = _load_copilot_config(config_path)
+    hosts = raw.get("hosts")
+    if not isinstance(hosts, dict):
+        hosts = {}
+    target_key = target.casefold()
+    hosts = {
+        name: entry
+        for name, entry in hosts.items()
+        if not isinstance(name, str) or name.casefold() != target_key
+    }
+    hosts[target_key] = {"workspace": normalized}
+    payload = {"version": 1, "hosts": hosts}
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = config_path.with_name(f".{config_path.name}.{os.getpid()}.tmp")
+    try:
+        temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        os.replace(temporary, config_path)
+    finally:
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+    return config_path
+
+
+def resolve_workspace(args: argparse.Namespace) -> str:
+    explicit = getattr(args, "workspace", None)
+    if explicit:
+        return _normalize_workspace(str(explicit))
+    configured = _workspace_from_host_config(args.target)
+    if configured:
+        return configured
+    raise ValueError(
+        "agent-ssh copilot could not resolve a remote workspace. Pass "
+        "--workspace /path/to/checkout, or set it with "
+        "`agent-ssh copilot-config set <host> --workspace /path/to/checkout`."
+    )
+
+
 def _progress(stage: str, detail: str = "") -> None:
     print(f"[DETACH] {stage}{': ' + detail if detail else ''}", file=sys.stderr, flush=True)
 
 
 def plan_for(args: argparse.Namespace) -> dict[str, Any]:
-    workspace = str(args.workspace).rstrip("/")
+    workspace = _normalize_workspace(str(args.workspace))
     identity = f"anchor-{os.path.basename(workspace) or args.target}"
     scope = f"{identity}@{args.target}"
     mux = f"wt-{identity}"
@@ -166,6 +277,16 @@ def _ensure_remote_tooling(ssh_config: Any) -> None:
         )
 
 
+def _prepare_ssh_and_workspace(args: argparse.Namespace, *, dry_run: bool = False) -> Any:
+    ssh_config = _ssh_config(args.target)
+    if dry_run:
+        args.workspace = resolve_workspace(args)
+        return ssh_config
+    _ensure_posix(ssh_config)
+    args.workspace = resolve_workspace(args)
+    return ssh_config
+
+
 def _state_key(target: str) -> str:
     return target
 
@@ -201,6 +322,18 @@ def _keeper_state(
         "children": children,
         "instance_token": os.environ.get(_KEEPER_TOKEN_ENV, ""),
     }
+
+
+def _keeper_route_active(target: str, daemon_port: int) -> bool:
+    state = read_keeper_state(target)
+    if not state or int(state.get("venue_port") or 0) != int(daemon_port):
+        return False
+    return _STORE.alive(_state_key(target))
+
+
+def _bridge_route_reachable(ssh_config: Any, daemon_port: int) -> bool:
+    rc, _out, _err = _remote(ssh_config, _bash(bridge_probe_script(daemon_port)), timeout=30.0)
+    return rc == 0
 
 
 def _write_keeper_state(target: str, payload: dict[str, Any]) -> None:
@@ -313,6 +446,13 @@ class _SshAdapter:
 
 
 def cmd_detach(args: argparse.Namespace) -> int:
+    if getattr(args, "ttl_seconds", None) is not None:
+        print("[FAIL] --ttl-seconds applies only to attached mode, not --detach", file=sys.stderr)
+        return 2
+    try:
+        ssh_config = _prepare_ssh_and_workspace(args, dry_run=bool(getattr(args, "dry_run", False)))
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        return _fail(str(exc))
     plan = plan_for(args)
     plan["venue"] = with_supervisor(plan["venue"])  # successor can find this worker
     try:
@@ -326,10 +466,7 @@ def cmd_detach(args: argparse.Namespace) -> int:
             "ref_files": [name for name, _ in refs[2]] if refs else [],
         }, indent=2))
         return 0
-
-    ssh_config = _ssh_config(args.target)
     try:
-        _ensure_posix(ssh_config)
         _ensure_remote_tooling(ssh_config)
         rc, payload = launch_detached(
             _SshAdapter(target=args.target, ssh_config=ssh_config),
@@ -350,23 +487,105 @@ def cmd_detach(args: argparse.Namespace) -> int:
 def cmd_stop(args: argparse.Namespace) -> int:
     from venue_copilot import live_session_for
 
+    if getattr(args, "ttl_seconds", None) is not None:
+        print("[FAIL] --ttl-seconds applies only to attached mode, not --stop", file=sys.stderr)
+        return 2
+    try:
+        ssh_config = _prepare_ssh_and_workspace(args)
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        return _fail(str(exc))
     plan = plan_for(args)
     state = read_keeper_state(args.target)
     if state and state.get("mux"):
         plan["mux_session"] = str(state["mux"])
         plan["venue"]["mux_session_name"] = plan["mux_session"]
     row = live_session_for(plan["scope_id"])
-    ssh_config = _ssh_config(args.target)
-    try:
-        _ensure_posix(ssh_config)
-    except (RuntimeError, subprocess.SubprocessError) as exc:
-        return _fail(str(exc), plan)
     rc, payload = stop_detached(
         _SshAdapter(target=args.target, ssh_config=ssh_config),
         plan,
         session_row=row,
     )
     return _emit(rc, payload)
+
+
+def cmd_attached(args: argparse.Namespace) -> int:
+    if getattr(args, "ref_files", None):
+        print("[FAIL] --ref-file requires --detach", file=sys.stderr)
+        return 2
+    if getattr(args, "copilot_args", None):
+        print("[FAIL] --copilot-arg requires --detach", file=sys.stderr)
+        return 2
+    if getattr(args, "dry_run", False):
+        print("[FAIL] --dry-run requires --detach", file=sys.stderr)
+        return 2
+    try:
+        ssh_config = _prepare_ssh_and_workspace(args)
+        seed = read_seed(args)
+        _ensure_remote_tooling(ssh_config)
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        return _fail(str(exc))
+
+    plan = plan_for(args)
+    daemon_port = resolve_daemon_port()
+    token = resolve_local_auth_token()
+    reverse_forwards: list[str] = []
+    if daemon_port and token:
+        rc, _out, err = _remote(
+            ssh_config,
+            _bash(registration_credentials_script(token, daemon_port)),
+            timeout=60.0,
+        )
+        if rc != 0:
+            return _fail(
+                "could not provision registration credentials on the SSH target"
+                + (f" ({err.strip()})" if err.strip() else ""),
+                plan,
+            )
+        if not (
+            _keeper_route_active(args.target, daemon_port)
+            or _bridge_route_reachable(ssh_config, daemon_port)
+        ):
+            reverse_forwards.append(f"{daemon_port}:127.0.0.1:{daemon_port}")
+    else:
+        print(
+            "[WARN] Could not resolve the host agent-bridge daemon's live "
+            "port/token; the remote session may not register back to it.",
+            file=sys.stderr,
+        )
+
+    def connect(remote_command: str) -> int:
+        workspace = shlex.quote(plan["workspace"])
+        command = _bash(
+            f"cd {workspace} && {trust_folder_command(plan['workspace'])} && "
+            f"{remote_command}"
+        )
+        return subprocess.run(
+            build_remote_exec_args(
+                ssh_config,
+                command,
+                reverse_forwards=reverse_forwards,
+                pty=True,
+            ),
+            creationflags=no_window_flags(),
+        ).returncode
+
+    try:
+        return run_venue_copilot(
+            plan["identity"],
+            connect=connect,
+            anchor=True,
+            ttl_seconds=(
+                DEFAULT_TTL_SECONDS
+                if getattr(args, "ttl_seconds", None) is None
+                else float(args.ttl_seconds)
+            ),
+            driver=args.driver,
+            seed=seed,
+            ensure_mux=True,
+        )
+    except VenueCopilotError as exc:
+        print(f"[FAIL] {exc}", file=sys.stderr)
+        return 1
 
 
 def _mux_exists(ssh_config: Any, mux: str) -> bool:
@@ -420,9 +639,16 @@ def cmd_forward_keeper(args: argparse.Namespace) -> int:
 
 
 def add_copilot_subparser(sub) -> None:
-    p = sub.add_parser("copilot", help="Start/stop detached CLI-mode Copilot on a POSIX SSH target.")
+    p = sub.add_parser(
+        "copilot",
+        help="Attach, start, or stop CLI-mode Copilot on a POSIX SSH target.",
+    )
     p.add_argument("target", help="SSH host alias")
-    p.add_argument("--workspace", required=True, help="Remote checkout path")
+    p.add_argument(
+        "--workspace",
+        help="Remote checkout path. Defaults to the target's `agent-ssh "
+             "copilot-config` workspace.",
+    )
     p.add_argument("--seed")
     p.add_argument("--seed-file", dest="seed_file")
     p.add_argument("--copilot-arg", dest="copilot_args", action="append", default=[])
@@ -432,12 +658,27 @@ def add_copilot_subparser(sub) -> None:
              "checkout and tell the worker where it is (repeatable)",
     )
     p.add_argument("--driver", default="cli-mode")
+    p.add_argument(
+        "--ttl-seconds",
+        type=float,
+        default=None,
+        help="Attached-mode CLI reservation lifetime before reclaim (default 300). "
+             "Not valid with --detach.",
+    )
     p.add_argument("--register-timeout", type=float, default=180.0)
     p.add_argument("--dry-run", action="store_true")
-    mode = p.add_mutually_exclusive_group(required=True)
+    mode = p.add_mutually_exclusive_group()
     mode.add_argument("--detach", action="store_true")
     mode.add_argument("--stop", action="store_true")
-    p.set_defaults(func=lambda args: cmd_stop(args) if args.stop else cmd_detach(args))
+    p.set_defaults(
+        func=lambda args: (
+            cmd_stop(args)
+            if args.stop
+            else cmd_detach(args)
+            if args.detach
+            else cmd_attached(args)
+        )
+    )
 
 
 def add_forward_keeper_subparser(sub) -> None:

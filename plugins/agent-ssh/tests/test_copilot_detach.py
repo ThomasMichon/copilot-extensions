@@ -4,11 +4,13 @@ import argparse
 import asyncio
 import json
 import types
+from pathlib import Path
 
 import pytest
 from venue_copilot import detached as venue_detached
 
 from agent_ssh import copilot_detach as detach
+from agent_ssh.__main__ import main
 
 
 def _args(**kw):
@@ -23,6 +25,7 @@ def _args(**kw):
         dry_run=False,
         detach=True,
         stop=False,
+        ttl_seconds=None,
     )
     base.update(kw)
     return argparse.Namespace(**base)
@@ -119,6 +122,225 @@ def test_detach_success_reserves_ssh_venue_and_reports_handle(seams, capsys):
     assert "--copilot-arg=--no-ask-user" in launch
     assert "--json" in launch
     assert seams.release == [("anchor-repo@devbox", "r1")]
+
+
+def test_attached_default_uses_venue_copilot_over_ssh(seams, monkeypatch):
+    monkeypatch.setattr(
+        detach,
+        "_ssh_config",
+        lambda target: types.SimpleNamespace(
+            config_file=None,
+            port=None,
+            identity_file=None,
+            extra_options={},
+            ssh_target=target,
+        ),
+    )
+    monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: None)
+    monkeypatch.setattr(detach, "_ensure_remote_tooling", lambda _cfg: None)
+    monkeypatch.setattr(detach, "resolve_daemon_port", lambda: 41234)
+    monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
+    monkeypatch.setattr(detach, "_bridge_route_reachable", lambda _cfg, _port: False)
+    seen = {}
+
+    class Result:
+        returncode = 0
+
+    def fake_run_venue(identity, *, connect, **kwargs):
+        seen["identity"] = identity
+        seen["kwargs"] = kwargs
+        return connect("agent-worktrees copilot --anchor")
+
+    def fake_subprocess_run(argv, **kwargs):
+        seen["ssh_argv"] = argv
+        seen["subprocess_kwargs"] = kwargs
+        return Result()
+
+    monkeypatch.setattr(detach, "run_venue_copilot", fake_run_venue)
+    monkeypatch.setattr(detach.subprocess, "run", fake_subprocess_run)
+
+    rc = detach.cmd_attached(
+        _args(detach=False, workspace="/workspaces/repo", copilot_args=[]),
+    )
+
+    assert rc == 0
+    assert seen["identity"] == "anchor-repo"
+    assert seen["kwargs"] == {
+        "anchor": True,
+        "ttl_seconds": 300.0,
+        "driver": "orchestrator",
+        "seed": "do the task",
+        "ensure_mux": True,
+    }
+    argv = seen["ssh_argv"]
+    assert "-t" in argv
+    assert ["-R", "41234:127.0.0.1:41234"] == argv[argv.index("-R") : argv.index("-R") + 2]
+    remote_command = argv[-1]
+    assert remote_command.startswith("bash -lc ")
+    assert "cd /workspaces/repo" in remote_command
+    assert "trustedFolders" in remote_command
+    assert "agent-worktrees copilot --anchor" in remote_command
+    assert remote_command.index("cd /workspaces/repo") < remote_command.index(
+        "agent-worktrees copilot --anchor"
+    )
+    assert "auth.yaml" not in remote_command
+    assert any("auth.yaml" in command for command in seams.remote)
+
+
+def test_attached_skips_reverse_forward_when_existing_route_is_reachable(seams, monkeypatch):
+    monkeypatch.setattr(
+        detach,
+        "_ssh_config",
+        lambda target: types.SimpleNamespace(
+            config_file=None,
+            port=None,
+            identity_file=None,
+            extra_options={},
+            ssh_target=target,
+        ),
+    )
+    monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: None)
+    monkeypatch.setattr(detach, "_ensure_remote_tooling", lambda _cfg: None)
+    monkeypatch.setattr(detach, "resolve_daemon_port", lambda: 41234)
+    monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
+    monkeypatch.setattr(detach, "_bridge_route_reachable", lambda _cfg, _port: True)
+    seen = {}
+
+    class Result:
+        returncode = 0
+
+    monkeypatch.setattr(
+        detach,
+        "run_venue_copilot",
+        lambda _identity, *, connect, **_kwargs: connect("agent-worktrees copilot --anchor"),
+    )
+
+    def fake_subprocess_run(argv, **kwargs):
+        seen["ssh_argv"] = argv
+        return Result()
+
+    monkeypatch.setattr(detach.subprocess, "run", fake_subprocess_run)
+
+    assert detach.cmd_attached(_args(detach=False, workspace="/workspaces/repo", copilot_args=[])) == 0
+    assert "-R" not in seen["ssh_argv"]
+
+
+def test_workspace_resolution_order_prefers_explicit_then_host_config(tmp_path: Path):
+    config = tmp_path / "copilot-hosts.json"
+    detach.set_host_workspace("devbox", "/workspaces/configured", config)
+
+    assert detach.resolve_workspace(
+        _args(workspace="/workspaces/explicit"),
+    ) == "/workspaces/explicit"
+    assert (
+        detach._workspace_from_host_config("DEVBOX", config)
+        == "/workspaces/configured"
+    )
+
+
+def test_copilot_config_set_writes_host_workspace(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(detach, "_copilot_config_path", lambda: tmp_path / "copilot-hosts.json")
+
+    assert main(["copilot-config", "set", "devbox", "--workspace", "/workspaces/repo"]) == 0
+
+    assert detach._workspace_from_host_config("devbox", tmp_path / "copilot-hosts.json") == (
+        "/workspaces/repo"
+    )
+
+
+def test_copilot_config_set_canonicalizes_host_alias_casing(tmp_path: Path):
+    config = tmp_path / "copilot-hosts.json"
+
+    detach.set_host_workspace("DevBox", "/workspaces/old", config)
+    detach.set_host_workspace("devbox", "/workspaces/new", config)
+
+    raw = json.loads(config.read_text(encoding="utf-8"))
+    assert raw["hosts"] == {"devbox": {"workspace": "/workspaces/new"}}
+    assert detach._workspace_from_host_config("DEVBOX", config) == "/workspaces/new"
+
+
+def test_copilot_config_set_refuses_corrupt_existing_file(tmp_path: Path):
+    config = tmp_path / "copilot-hosts.json"
+    config.write_text('{"hosts": {', encoding="utf-8")
+
+    with pytest.raises(detach.CopilotConfigError) as exc:
+        detach.set_host_workspace("devbox", "/workspaces/new", config)
+
+    text = str(exc.value)
+    assert str(config) in text
+    assert "not valid JSON" in text
+    assert config.read_text(encoding="utf-8") == '{"hosts": {'
+
+
+def test_resolve_workspace_reports_corrupt_copilot_config(tmp_path: Path, monkeypatch):
+    config = tmp_path / "copilot-hosts.json"
+    config.write_text('{"hosts": {', encoding="utf-8")
+    monkeypatch.setattr(detach, "_copilot_config_path", lambda: config)
+
+    with pytest.raises(detach.CopilotConfigError) as exc:
+        detach.resolve_workspace(_args(workspace=None))
+
+    assert str(config) in str(exc.value)
+    assert "not valid JSON" in str(exc.value)
+
+
+def test_copilot_config_cli_refuses_corrupt_existing_file(tmp_path: Path, monkeypatch, capsys):
+    config = tmp_path / "copilot-hosts.json"
+    config.write_text('{"hosts": {', encoding="utf-8")
+    monkeypatch.setattr(detach, "_copilot_config_path", lambda: config)
+
+    rc = main(["copilot-config", "set", "devbox", "--workspace", "/workspaces/new"])
+
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert str(config) in err
+    assert "not valid JSON" in err
+    assert config.read_text(encoding="utf-8") == '{"hosts": {'
+
+
+def test_missing_workspace_error_names_configuration_options(monkeypatch):
+    monkeypatch.setattr(detach, "_workspace_from_host_config", lambda target: None)
+
+    with pytest.raises(ValueError) as exc:
+        detach.resolve_workspace(_args(workspace=None))
+
+    text = str(exc.value)
+    assert "--workspace /path/to/checkout" in text
+    assert "agent-ssh copilot-config set" in text
+
+
+def test_dry_run_without_workspace_fails_before_remote_ssh(seams, monkeypatch):
+    calls = []
+    monkeypatch.setattr(detach, "_workspace_from_host_config", lambda target: None)
+    monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: calls.append("posix"))
+
+    rc = detach.cmd_detach(_args(workspace=None, dry_run=True))
+
+    assert rc == 1
+    assert calls == []
+    assert seams.remote == []
+
+
+def test_non_dry_run_checks_posix_before_missing_workspace(seams, monkeypatch, capsys):
+    monkeypatch.setattr(detach, "_workspace_from_host_config", lambda target: None)
+    monkeypatch.setattr(
+        detach,
+        "_ensure_posix",
+        lambda _cfg: (_ for _ in ()).throw(RuntimeError("Windows SSH targets are not supported yet")),
+    )
+
+    rc = detach.cmd_detach(_args(workspace=None))
+
+    assert rc == 1
+    assert "Windows SSH targets are not supported yet" in capsys.readouterr().err
+
+
+def test_ttl_seconds_with_detach_is_usage_error(seams, capsys):
+    rc = detach.cmd_detach(_args(ttl_seconds=30.0))
+
+    assert rc == 2
+    assert "--ttl-seconds applies only to attached mode" in capsys.readouterr().err
+    assert seams.reserve == []
 
 
 def test_non_posix_target_is_refused(seams, monkeypatch, capsys):

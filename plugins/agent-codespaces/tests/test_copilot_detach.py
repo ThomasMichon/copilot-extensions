@@ -16,6 +16,7 @@ from agent_codespaces import config as cs_config
 from agent_codespaces import connection_owner as owner
 from agent_codespaces import copilot_detach as detach
 from agent_codespaces import copilot_venue
+from agent_codespaces import owner_local_forwards
 from agent_codespaces import session_forwards
 
 
@@ -164,6 +165,7 @@ def test_launch_commands_carry_the_claim_owner_it_used(seams, capsys):
     assert rc == 0
     commands = json.loads(capsys.readouterr().out)["commands"]
     assert commands["attach"] == "agent-codespaces copilot cs-1 --effort task-7"
+    assert commands["rejoin"] == "agent-codespaces copilot cs-1 --detach --effort task-7"
     assert commands["stop"] == "agent-codespaces copilot cs-1 --stop --effort task-7"
     assert seams.ssh[0]["ns"].effort == "task-7"
 
@@ -357,6 +359,7 @@ def test_parser_exposes_detach_lifecycle_flags():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command")
     copilot_venue.add_copilot_subparser(sub)
+    assert parser.parse_args(["copilot", "cs-1"]).ttl_seconds is None
     args = parser.parse_args([
         "copilot", "cs-1", "--detach", "--seed-file", "-", "--copilot-arg=--autopilot",
         "--register-timeout", "30", "--dry-run",
@@ -376,6 +379,21 @@ def test_cmd_copilot_routes_detach_and_stop(monkeypatch):
         _args(detach=False, stop=True), interactive_ssh=None, ssh_session=object(),
     ) == 0
     assert seen == ["detach", "stop"]
+
+
+def test_ttl_seconds_is_usage_error_with_detach_or_stop(monkeypatch, capsys):
+    monkeypatch.setattr(detach, "cmd_detach", lambda a, ssh_session: 99)
+    monkeypatch.setattr(detach, "cmd_stop", lambda a, ssh_session: 99)
+
+    assert copilot_venue.cmd_copilot(
+        _args(ttl_seconds=10.0), interactive_ssh=None, ssh_session=object(),
+    ) == 2
+    assert copilot_venue.cmd_copilot(
+        _args(detach=False, stop=True, ttl_seconds=10.0),
+        interactive_ssh=None,
+        ssh_session=object(),
+    ) == 2
+    assert "--ttl-seconds applies only to attached mode" in capsys.readouterr().err
 
 
 def test_venue_reported_mux_name_wins_for_probe_and_handle(seams, capsys):
@@ -545,7 +563,9 @@ def test_failed_rejoin_restores_the_sessions_reverse_forwards(seams, monkeypatch
 
 
 def test_local_forward_specs_are_validated():
-    assert detach.parse_local_forwards(["41909", "8080:3000"]) == {41909: 41909, 8080: 3000}
+    assert detach.parse_local_forwards(["41909", "8080:3000", "0:3001"]) == {
+        41909: 41909, 8080: 3000, 0: 3001,
+    }
     for bad in (["x"], ["0"], ["70000"], ["1:x"], ["41909:1", "41909:2"]):
         with pytest.raises(ValueError):
             detach.parse_local_forwards(bad)
@@ -559,6 +579,70 @@ def test_launch_holds_requested_local_forwards_and_reports_readiness(seams, monk
     out = json.loads(capsys.readouterr().out)
     assert out["local_forwards"] == {"41909": 41909}
     assert out["local_forwards_ready"] == {"41909": True}
+
+
+def test_launch_reports_assigned_local_forward_from_owner_hold(seams, monkeypatch, capsys):
+    monkeypatch.setattr(
+        owner_local_forwards, "read_active_local_forwards", lambda: {"cs-1": {49152: 3000}},
+    )
+    calls = {"get_hold": 0}
+
+    def get_hold(*a, **k):
+        calls["get_hold"] += 1
+        if calls["get_hold"] == 1:
+            return None
+        return types.SimpleNamespace(local_forwards={"49152": 3000})
+
+    monkeypatch.setattr(owner, "get_hold", get_hold)
+
+    rc = detach.cmd_detach(_args(local_forwards=["0:3000"]), ssh_session=_ssh(seams, stdout=_CREATED))
+
+    assert rc == 0
+    assert seams.holds[0][1].get("local_forwards") == {0: 3000}
+    out = json.loads(capsys.readouterr().out)
+    assert out["local_forwards"] == {"49152": 3000}
+    assert out["local_forwards_ready"] == {"49152": True}
+    assert out["commands"]["rejoin"] == "agent-codespaces copilot cs-1 --detach"
+
+
+def test_repeated_dynamic_local_forward_reuses_prior_assigned_port(seams, monkeypatch, capsys):
+    prior = types.SimpleNamespace(
+        sessions={"cli:anchor-example-web@cs-1": {
+            "mux_session": "wt-anchor-example-web", "confirmed": True,
+        }},
+        reverse_forwards={},
+        local_forwards={"49152": 3000},
+    )
+    monkeypatch.setattr(owner, "get_hold", lambda *a, **k: prior)
+    monkeypatch.setattr(
+        owner_local_forwards, "read_active_local_forwards", lambda: {"cs-1": {49152: 3000}},
+    )
+    monkeypatch.setattr(
+        owner, "hold",
+        lambda *a, **k: seams.holds.append((a, {**k, "local_forwards": {49152: 3000}})),
+    )
+
+    rc = detach.cmd_detach(_args(local_forwards=["0:3000"]), ssh_session=_ssh(seams, stdout=_CREATED))
+
+    assert rc == 0
+    assert seams.holds[0][1].get("local_forwards") == {49152: 3000}
+    out = json.loads(capsys.readouterr().out)
+    assert out["local_forwards"] == {"49152": 3000}
+    assert out["local_forwards_ready"] == {"49152": True}
+    assert "local_forwards_pending" not in out
+
+
+def test_dynamic_local_forward_assignment_timeout_reports_pending_success(seams, capsys):
+    rc = detach.cmd_detach(_args(local_forwards=["0:3000"]), ssh_session=_ssh(seams, stdout=_CREATED))
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["ok"] is True
+    assert out["session_id"] == "sid-42"
+    assert out["commands"]["rejoin"] == "agent-codespaces copilot cs-1 --detach"
+    assert out["local_forwards_pending"] == {"0": 3000}
+    assert "local_forwards" not in out
+    assert "pre-upgrade Owner" in out["error"]
 
 
 def test_launch_without_local_forwards_keeps_existing_ones(seams, capsys):

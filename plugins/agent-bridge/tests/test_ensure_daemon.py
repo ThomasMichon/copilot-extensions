@@ -22,6 +22,7 @@ def _fast(monkeypatch, tmp_path):
     import time as _t
 
     monkeypatch.setattr(_t, "sleep", lambda *_a: None)
+    monkeypatch.setattr(m, "_INSTALL_DIR", str(tmp_path))
     monkeypatch.setattr(m, "_ENSURE_LOCK", str(tmp_path / ".ensure.lock"))
     monkeypatch.setattr(m, "_ENSURE_MARKER", str(tmp_path / ".ensure-attempt"))
     monkeypatch.delenv("AGENT_BRIDGE_NO_ENSURE", raising=False)

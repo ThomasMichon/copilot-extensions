@@ -95,8 +95,8 @@ class OwnerHold:
     launcher exits. ``sessions`` records, per such tenant, only transport facts
     the Owner needs to renew it on its own: the remote ``mux_session`` whose
     existence keeps the tenant alive and an absolute ``expires_at`` lease cap.
-    ``reverse_forwards`` ({venue port: fixed host port}) and ``local_forwards``
-    ({host port: venue port}) live as long as ``daemon_port``.
+    ``reverse_forwards`` / ``local_forwards`` live as long as ``daemon_port``;
+    assigned local forwards mark ports allocated from ``0:VENUE_PORT``.
     """
 
     codespace: str
@@ -109,6 +109,7 @@ class OwnerHold:
     sessions: dict[str, dict[str, Any]] = field(default_factory=dict)
     reverse_forwards: dict[str, int] = field(default_factory=dict)
     local_forwards: dict[str, int] = field(default_factory=dict)
+    assigned_local_forwards: dict[str, int] = field(default_factory=dict)
 
     def live_tenants(self, ttl: float = DEFAULT_TTL) -> dict[str, float]:
         """Tenants whose heartbeat is within ``ttl``."""
@@ -318,14 +319,12 @@ def hold(
     sticky and only cleared by :func:`release` with ``unpin=True``.
 
     ``mux_session`` makes this a **session tenant**: the Owner renews it on its
-    own for as long as that mux session still exists on the CodeSpace (see
-    :class:`ConnectionOwner`), up to an absolute ``max_lease`` counted from the
-    tenant's first hold (a re-hold never extends it). A session tenant is
-    *unconfirmed* until its launcher re-holds it with ``confirmed=True`` once
-    the session is up: until then a probe that cannot see the mux session (it
-    is still starting, or the CodeSpace is still booting) never releases it --
-    only the TTL does. ``daemon_port`` asks for the host bridge daemon reverse
-    forward (CodeSpace-side listen port). ``fresh=True`` starts a new launch
+    own while that mux session exists, up to an absolute ``max_lease`` counted
+    from the tenant's first hold (a re-hold never extends it). A session tenant
+    is *unconfirmed* until its launcher re-holds it with ``confirmed=True`` once
+    the session is up: until then a probe that cannot see the mux session never
+    releases it -- only the TTL does. ``daemon_port`` asks for the host bridge
+    daemon reverse forward. ``fresh=True`` starts a new launch
     generation (unconfirmed, new lease), so nothing -- neither an older
     session's confirmation nor an in-flight probe of it -- can release the new
     launch; ``restore`` puts back a session entry exactly as it was before a
@@ -363,10 +362,11 @@ def hold(
         port = _sanitize_port(daemon_port)
         if port is not None:
             existing.daemon_port = port
+        from .owner_local_forwards import reuse_assigned_local_forwards
+        local_forwards = reuse_assigned_local_forwards(existing, local_forwards)
         set_hold_forwards(existing, reverse_forwards, local_forwards)
         _write_holds(holds)
         return existing
-
 
 def heartbeat(
     codespace: str, tenant: str, ttl: float = DEFAULT_TTL,
