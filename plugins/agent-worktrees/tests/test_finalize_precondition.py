@@ -949,6 +949,74 @@ class TestPrMergeStatusIndeterminateVsUnmerged:
             )
             assert finalize_open_pr_gate.pr_merge_status(record, repo) is None
 
+    def test_mismatched_azure_devops_organization_is_indeterminate_not_queried(self):
+        # Same host (``dev.azure.com``), but the tracked PR's own URL names
+        # a DIFFERENT organization segment than the repo's currently
+        # configured ``api_base``. Azure DevOps' ``authority_endpoint()``
+        # returns the full ``.../<org>`` URL -- host[:port] equality alone
+        # would miss this (two different orgs share the same host), letting
+        # a stale tracked PR be re-queried against the wrong org and
+        # confirm an unrelated merge there. Fail closed instead.
+        from agent_worktrees import providers
+        from agent_worktrees.providers.azure_devops import AzureDevOpsProvider
+
+        class _BoomOnQuery(AzureDevOpsProvider):
+            def get_pull(self, *_args, **_kwargs):
+                raise AssertionError("must not query a provider across an org change")
+
+        with mock.patch.object(
+            providers, "get_provider", lambda _name: _BoomOnQuery(),
+        ):
+            pr = SimpleNamespace(
+                branch="pr/some-fix", repo="project/repo", number=7,
+                provider="azure-devops", state="open", head_sha="",
+                url=(
+                    "https://dev.azure.com/old-org/project/_git/repo"
+                    "/pullrequest/7"
+                ),
+            )
+            record = SimpleNamespace(pr=pr)
+            repo = SimpleNamespace(
+                pr=SimpleNamespace(
+                    provider="azure-devops",
+                    api_base="https://dev.azure.com/new-org",
+                ),
+            )
+            assert finalize_open_pr_gate.pr_merge_status(record, repo) is None
+
+    def test_mismatched_gitea_root_path_is_indeterminate_not_queried(self):
+        # Same host, but the tracked PR's own URL sits under a DIFFERENT
+        # root path than the repo's currently configured path-hosted
+        # ``api_base`` (e.g. a different Gitea instance sharing the host).
+        # Host[:port] equality alone would miss this -- Gitea's
+        # ``authority_endpoint()`` returns the full ``api_base`` URL
+        # including its root path, which host-only comparison discards.
+        # Fail closed instead of querying across instances.
+        from agent_worktrees import providers
+        from agent_worktrees.providers.gitea import GiteaProvider
+
+        class _BoomOnQuery(GiteaProvider):
+            def get_pull(self, *_args, **_kwargs):
+                raise AssertionError(
+                    "must not query a provider across a root-path change",
+                )
+
+        with mock.patch.object(
+            providers, "get_provider", lambda _name: _BoomOnQuery(),
+        ):
+            pr = SimpleNamespace(
+                branch="pr/some-fix", repo="owner/project", number=12,
+                provider="gitea", state="open", head_sha="",
+                url="https://forge.example/other-app/owner/project/pulls/12",
+            )
+            record = SimpleNamespace(pr=pr)
+            repo = SimpleNamespace(
+                pr=SimpleNamespace(
+                    provider="gitea", api_base="https://forge.example/gitea",
+                ),
+            )
+            assert finalize_open_pr_gate.pr_merge_status(record, repo) is None
+
 
 
 

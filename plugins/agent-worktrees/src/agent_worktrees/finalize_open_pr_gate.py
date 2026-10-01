@@ -51,6 +51,45 @@ def _authority_host(value: str) -> str:
     return f"{host}:{parsed.port}" if parsed.port else host
 
 
+def _authority_path_parts(value: str) -> list[str]:
+    """Extract the non-empty path segments of an ``authority_endpoint()``
+    result or a tracked PR URL (e.g. Azure DevOps' organization segment in
+    ``https://dev.azure.com/<org>``, or a path-hosted Gitea instance's root
+    in ``https://forge.example/gitea``). GitHub's endpoint never carries a
+    path, so this is empty for it.
+    """
+    value = (value or "").strip()
+    if not value:
+        return []
+    parsed = urlparse(value if "://" in value else f"//{value}")
+    return [part for part in (parsed.path or "").split("/") if part]
+
+
+def _authority_matches(tracked_url: str, expected_endpoint: str) -> bool:
+    """True iff ``tracked_url``'s authority is consistent with the
+    configured provider's ``expected_endpoint`` -- host[:port] must match
+    exactly, AND when the expected endpoint itself carries a path (Azure
+    DevOps' organization, or a path-hosted Gitea instance's root), the
+    tracked URL's path must fall under that same root. Host/port equality
+    alone is not enough: ``_authority_host`` discards any path, so two
+    different Azure DevOps organizations -- or two different Gitea
+    instances path-hosted on the same shared host -- would otherwise
+    compare as the same authority, letting a stale tracked PR be re-queried
+    against an unrelated org/instance and confirm the wrong merge.
+    """
+    tracked_host = _authority_host(tracked_url)
+    expected_host = _authority_host(expected_endpoint)
+    if not tracked_host or not expected_host:
+        return True
+    if tracked_host != expected_host:
+        return False
+    base_parts = _authority_path_parts(expected_endpoint)
+    if not base_parts:
+        return True
+    tracked_parts = _authority_path_parts(tracked_url)
+    return tracked_parts[: len(base_parts)] == base_parts
+
+
 def dirty_worktree_error(worktree_path: str, *, wt_exists: bool) -> str | None:
     """Refuse a PR-mode finalize on uncommitted/untracked changes (#4400).
 
@@ -187,15 +226,17 @@ def pr_merge_status(record: tracking.WorktreeRecord, repo) -> bool | None:
         provider = providers.get_provider(prcfg.provider)
         tracked_url = (getattr(pr, "url", "") or "").strip()
         if tracked_url:
-            tracked_host = _authority_host(tracked_url)
-            expected_host = _authority_host(
-                provider.authority_endpoint(getattr(prcfg, "api_base", "") or ""),
+            expected_endpoint = provider.authority_endpoint(
+                getattr(prcfg, "api_base", "") or "",
             )
-            if tracked_host and expected_host and tracked_host != expected_host:
-                # Same provider kind, but the configured host/authority has
-                # since changed (e.g. the repo moved to a different GitHub
-                # Enterprise instance); querying the NEW authority with the
-                # OLD slug/number can confirm an unrelated merged PR there.
+            if not _authority_matches(tracked_url, expected_endpoint):
+                # Same provider kind, but the configured authority has
+                # since changed -- a different GitHub Enterprise host, a
+                # different Azure DevOps organization on the shared
+                # dev.azure.com host, or a different Gitea instance
+                # path-hosted on the same shared host. Querying the NEW
+                # authority with the OLD slug/number can confirm an
+                # unrelated merged PR there and hand back the wrong head.
                 return None
         token = providers.account_token_for_slug(slug, prcfg)
         result = provider.get_pull(
