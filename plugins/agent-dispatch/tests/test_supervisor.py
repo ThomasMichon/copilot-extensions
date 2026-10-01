@@ -1352,45 +1352,21 @@ def test_reconcile_settles_reservation_once_task_is_confirmed(q, client):
     assert settled.state in (SpawnState.RELEASING, SpawnState.SETTLED)
 
 
-def test_recover_dead_lettered_cold_reservation(q, client):
-    """A reservation that's ``COLD`` because its body was intentionally
-    stopped while its task was dormant, whose task *independently* later
-    reaches ``DEAD_LETTER`` (a completely separate claim/attempt cycle),
-    must still be settled -- ``recover_gone()`` already settles this exact
-    combination for a ``SPAWNED`` reservation, but iterates ``SPAWNED``
-    only, never ``COLD`` (rubber-duck review, 2026-09-28)."""
+def test_reconcile_settles_abandoned_cold_reservation(q, client):
+    """The generic terminal reconciliation path settles a COLD reservation
+    after liveness-cap exhaustion abandons its task."""
     t = q.create("work")
     stale_reservation, _ = q.reserve_spawn(t.id)
-    q.record_spawn(
-        stale_reservation.key, session_handle="local-body:stale-session"
-    )
+    q.record_spawn(stale_reservation.key)
     q.record_cold(stale_reservation.key)
 
-    # Drive the SAME task through repeated claim/gone-owner cycles until it
-    # dead-letters -- reconcile_liveness treats it as headless-embodied
-    # (the stale COLD reservation above still satisfies
-    # `_active_headless_handle`), so a confirmed-gone owner requeues it
-    # (never auto-suspends) until `max_attempts` is exceeded.
-    max_attempts = q.DEFAULT_MAX_ATTEMPTS
-    for _ in range(max_attempts + 1):
-        if q.get(t.id).status == Status.DEAD_LETTER:
-            break
-        q.claim_one("owner", task_id=t.id)
-        q.start(t.id, "owner")
-        q.reconcile_liveness(headless_local_verdict=lambda _sid: "gone")
-    assert q.get(t.id).status == Status.DEAD_LETTER
+    q.abandon(t.id, permitted=True, reason="test")
+    assert q.get(t.id).status == Status.ABANDONED
     assert q.get_reservation(stale_reservation.key).state == SpawnState.COLD
 
     sup = Supervisor(client, spawn_fn=_ok_spawn(), repo=TEST_REPO)
-
-    assert sup.recover_gone() == 0  # only iterates SPAWNED -- confirms the gap
-    assert q.get_reservation(stale_reservation.key).state == SpawnState.COLD
-
-    assert sup.recover_dead_lettered_cold_reservations() == 1
+    assert sup.reconcile() == 1
     assert q.get_reservation(stale_reservation.key).state == SpawnState.SETTLED
-
-    # Idempotent: a second sweep finds nothing left to settle.
-    assert sup.recover_dead_lettered_cold_reservations() == 0
 
 
 def test_pool_reservations_transient_transport_error_does_not_abort_cycle(

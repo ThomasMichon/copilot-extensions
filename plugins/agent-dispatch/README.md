@@ -303,9 +303,10 @@ started -> suspended -> started
   this state only when `require_verification=true`; it then waits for a
   whole-goal evaluator (or an operator override) to decide whether the stated
   goal is actually complete or should be abandoned.
-- **completed** / **abandoned** / **dead_letter** -- terminal (abandon requires
-  permission; **dead_letter** is where a task lands when GC has requeued it past
-  the attempts cap -- its owner kept going gone -- an actionable failure state).
+- **completed** / **abandoned** -- terminal (abandon requires permission).
+  Liveness GC moves a held task whose owner has gone past the attempts cap to
+  **abandoned**, clearing its ownership and completion metadata. The legacy
+  **dead_letter** value is retained only for migration/read compatibility.
   `completed`/`submitted` briefly traded names (2026-09-25..2026-09-29) --
   if you see a stray `confirmed` status anywhere, see
   [`docs/status-rename-migration-2026-09-29.md`](docs/status-rename-migration-2026-09-29.md).
@@ -1155,7 +1156,7 @@ work under a fresh task id, claimed by the live session, so it can pick the
 work straight back up.
 
 ```bash
-# task-id must be TERMINAL (abandoned/completed/dead_letter) and carry a
+# task-id must be TERMINAL (abandoned/completed) and carry a
 # dedup_key -- see below for why. session-id must be confirmed live right now.
 agent-dispatch reattach <task-id> <session-id>
 

@@ -42,6 +42,46 @@ def test_create_defaults_to_queued(q):
     assert t.attempts == 0
 
 
+def test_dead_letter_status_migration_is_idempotent(q):
+    task = q.create("legacy", repo=TEST_REPO)
+    with q._connect() as conn:
+        conn.execute(
+            "UPDATE tasks SET status = 'dead_letter', owner = 'old-worker',"
+            " owner_session_id = 'old-session', lease_expires_at = 10 WHERE id = ?",
+            (task.id,),
+        )
+        conn.execute(
+            "INSERT INTO task_events(task_id, ts, from_status, to_status, note)"
+            " VALUES (?, 1, 'started', 'dead_letter', 'legacy')",
+            (task.id,),
+        )
+        conn.execute(
+            "DELETE FROM queue_migrations WHERE name = ?",
+            ("2026-09-30-retire-dead-letter-status",),
+        )
+
+    migrated = TaskQueue(q.db_path)
+    result = migrated.get(task.id)
+    assert result.status == Status.ABANDONED
+    assert result.owner is None
+    assert result.owner_session_id is None
+    assert result.completed_at is not None
+    with migrated._connect() as conn:
+        event = conn.execute(
+            "SELECT from_status, to_status FROM task_events"
+            " WHERE task_id = ? AND to_status = 'abandoned'",
+            (task.id,),
+        ).fetchone()
+        assert tuple(event) == ("started", "abandoned")
+        assert conn.execute(
+            "SELECT COUNT(*) FROM queue_migrations WHERE name = ?",
+            ("2026-09-30-retire-dead-letter-status",),
+        ).fetchone()[0] == 1
+
+    reopened = TaskQueue(q.db_path)
+    assert reopened.get(task.id).status == Status.ABANDONED
+
+
 def test_full_happy_path(q):
     t = q.create("work")
     claimed = q.claim_one("w1")

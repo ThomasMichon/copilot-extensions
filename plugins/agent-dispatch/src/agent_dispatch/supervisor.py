@@ -134,13 +134,8 @@ _GOVERNANCE_BACKOFF_SECONDS = 10.0
 #: before its next reconcile() pass permanently fenced its exclusive_key --
 #: reconcile() never settled the reservation, and no other sweep covers a
 #: RESERVING/SPAWNED/COLD reservation on a COMPLETED task either. Deliberately
-#: NOT Status.CONCLUDED (which also has DEAD_LETTER): DEAD_LETTER keeps its
-#: own, simpler settlement in recover_dead_lettered_cold_reservations() below
-#: rather than running it through this set's completion-verification-shaped
-#: branch in reconcile() (mirrors how ABANDONED already coexists with the
-#: completion-narrative-heavy branch below -- COMPLETED slots in the same
-#: way ABANDONED already does, not by relying on reconcile()'s completion
-#: fields being meaningful for a task that never completed a goal).
+#: NOT Status.CONCLUDED: this is the set of statuses whose reservations can
+#: be settled by the generic reconcile path.
 _TERMINAL = frozenset({Status.SUBMITTED, Status.COMPLETED, Status.ABANDONED})
 _LEASED = frozenset({Status.CLAIMED, Status.STARTED})
 _CONCLUSION_PER_CYCLE = 10
@@ -902,12 +897,6 @@ class Supervisor:
     def recover_stranded_cold_reservations(self) -> int:
         """See :func:`spawn_cold_recovery.recover_stranded_cold_reservations`."""
         from .spawn_cold_recovery import recover_stranded_cold_reservations as _r
-
-        return _r(self)
-
-    def recover_dead_lettered_cold_reservations(self) -> int:
-        """See :func:`spawn_cold_recovery.recover_dead_lettered_cold_reservations`."""
-        from .spawn_cold_recovery import recover_dead_lettered_cold_reservations as _r
 
         return _r(self)
 
@@ -2946,12 +2935,6 @@ class Supervisor:
                 continue  # reconcile() settles provably-finished tasks
             if status == Status.SUSPENDED:
                 continue  # dormant ownership is intentional, not a gone body
-            if status == Status.DEAD_LETTER:
-                try:
-                    self.client.settle_spawn(res["key"], detail="task dead_lettered")
-                except DispatchError:
-                    pass
-                continue
             owner = task.get("owner")
             # Headless fleet body: no worktree handle, but its recovery handle is
             # the pool host's agent-bridge session -- probe THAT for liveness and
@@ -3499,7 +3482,6 @@ class Supervisor:
             self.hold_live_leases()
         if self.recover:
             self.recover_gone()
-            self.recover_dead_lettered_cold_reservations()
         if self.consistency_sweep:
             # Read-only and additive (see sweep_spawn_consistency's own
             # docstring) -- never gates spawning, only classifies+logs.

@@ -278,7 +278,7 @@ class LivenessMixin:
                 if suspend:
                     to_status = Status.SUSPENDED
                 else:
-                    to_status = Status.DEAD_LETTER if attempts >= cap else Status.QUEUED
+                    to_status = Status.ABANDONED if attempts >= cap else Status.QUEUED
                 owner_clause = (
                     "owner_session_id = ?"
                     if owner_session_id is not None
@@ -308,7 +308,12 @@ class LivenessMixin:
                         " activity_updated_at = NULL"
                     )
                 else:
-                    set_sql = "status = ?, updated_at = ?"
+                    set_sql = (
+                        "status = ?, updated_at = ?, completed_at = ?,"
+                        " owner = NULL, owner_session_id = NULL,"
+                        " lease_expires_at = NULL"
+                    )
+                    params.append(ts)
                 sql = (
                     f"UPDATE tasks SET {set_sql} WHERE id = ? AND status IN (?, ?)"  # noqa: S608 (set_sql is a constant; all values parameterized)
                     f" AND generation = ? AND {owner_clause}"
@@ -323,7 +328,7 @@ class LivenessMixin:
                     elif to_status == Status.SUSPENDED:
                         note = "owner-gone: auto-suspended (CLI-embodied session ended)"
                     else:
-                        note = "owner-gone (dead-letter: max attempts)"
+                        note = "owner-gone: abandoned (max attempts exhausted)"
                     self._audit(
                         conn,
                         task_id,
