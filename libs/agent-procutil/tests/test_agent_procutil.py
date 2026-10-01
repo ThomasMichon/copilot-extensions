@@ -266,7 +266,7 @@ def test_bind_to_kill_on_close_job_failures_return_none_and_close_handles(
     fake.fail = failure
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     monkeypatch.setattr(pu, "_kernel32", lambda: fake)
-    monkeypatch.setattr(pu.ctypes, "get_last_error", lambda: 5)
+    monkeypatch.setattr(pu.ctypes, "get_last_error", lambda: 5, raising=False)  # Windows-only in ctypes
 
     assert pu.bind_to_kill_on_close_job(12345) is None
     assert [call[1] for call in fake.calls if call[0] == "CloseHandle"] == closed_handles
