@@ -873,7 +873,8 @@ def test_create_action_choice_field_requires_options(tmp_path):
 
 @pytest.mark.guard
 def test_create_action_rejects_blank_choice_options(tmp_path):
-    for bad_options in (["", "high"], ["  ", "high"], [""]):
+    for bad_options in (["", "high"], ["  ", "high"], [""], [None, "high"],
+                        [1, "high"]):
         with pytest.raises(pivots.ManifestError):
             pivots.parse_manifest(
                 {"label": "M", "list": ["x"], "create_action": {

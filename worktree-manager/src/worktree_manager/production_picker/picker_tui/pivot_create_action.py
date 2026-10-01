@@ -70,11 +70,11 @@ def _parse_create_fields(raw: object, *, where: str) -> tuple[Mapping[str, objec
                     f"{where}[{i}].options is required (non-empty array) for a "
                     f"{ftype} field"
                 )
-            if any(not str(o).strip() for o in opts):
+            if any(not isinstance(o, str) or not o.strip() for o in opts):
                 raise ManifestError(
-                    f"{where}[{i}].options must not contain a blank entry"
+                    f"{where}[{i}].options must be an array of non-blank strings"
                 )
-            field["options"] = tuple(str(o) for o in opts)
+            field["options"] = tuple(opts)
             allow_other = item.get("allow_other", False)
             if not isinstance(allow_other, bool):
                 raise ManifestError(
