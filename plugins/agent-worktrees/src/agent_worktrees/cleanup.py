@@ -34,7 +34,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import ParseResult, urlparse
 
 from agent_procutil import no_window_flags
 
@@ -261,6 +261,44 @@ def reclaim_worktree(
     return ReclaimResult("failed", f"finalize refused: {detail}")
 
 
+def _parse_provider_url(value: str) -> ParseResult | None:
+    try:
+        parsed = urlparse(value if "://" in value else f"//{value}")
+    except ValueError:
+        return None
+    if not parsed.hostname or parsed.username or parsed.password:
+        return None
+    return parsed
+
+
+def _same_provider_origin(
+    left: ParseResult, right: ParseResult, *, require_scheme: bool = True,
+) -> bool:
+    try:
+        left_port = left.port
+        if left_port is None:
+            left_port = {"http": 80, "https": 443}.get(
+                (left.scheme or "https").lower()
+            )
+        right_port = right.port
+        if right_port is None:
+            right_port = {"http": 80, "https": 443}.get(
+                (right.scheme or "https").lower()
+            )
+    except ValueError:
+        return False
+    return (
+        bool(left.hostname and right.hostname)
+        and left.hostname.casefold() == right.hostname.casefold()
+        and left_port == right_port
+        and (
+            not require_scheme
+            or (left.scheme or "https").casefold()
+            == (right.scheme or "https").casefold()
+        )
+    )
+
+
 def _pr_claim_target(
     ref: str, prcfg: cfg.PRConfig,
 ) -> tuple[str, str, int, str] | None:
@@ -271,22 +309,28 @@ def _pr_claim_target(
         r"([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#([0-9]+)", (ref or "").strip(),
     )
     if short:
-        if not configured_provider:
+        if (
+            configured_provider not in {"github", "gitea", "azure-devops"}
+            or (configured_provider != "github" and not api_base)
+        ):
             return None
         return configured_provider, short.group(1), int(short.group(2)), api_base
 
-    parsed = urlparse((ref or "").strip())
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+    try:
+        parsed = urlparse((ref or "").strip())
+        parsed_host = parsed.hostname
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"} or not parsed_host:
         return None
     if parsed.username or parsed.password:
         return None
-    host = parsed.hostname.lower()
+    host = parsed_host.lower()
     parts = [part for part in parsed.path.split("/") if part]
 
-    if host == "github.com" or (
-        configured_provider == "github"
-        and len(parts) >= 4
-        and parts[-2] == "pull"
+    if configured_provider == "github" and (
+        host == "github.com"
+        or (len(parts) >= 4 and parts[-2] == "pull")
     ):
         if len(parts) < 4 or parts[-2] != "pull" or not parts[-1].isdigit():
             return None
@@ -294,17 +338,19 @@ def _pr_claim_target(
         if len(repo_parts) != 2:
             return None
         if api_base:
-            configured = urlparse(
-                api_base if "://" in api_base else f"//{api_base}"
-            )
-            if not configured.hostname or configured.hostname.lower() != host:
+            configured = _parse_provider_url(api_base)
+            if not configured or not _same_provider_origin(
+                parsed, configured, require_scheme=False,
+            ):
                 return None
         elif host != "github.com":
             return None
         api_base = api_base or host
         return "github", "/".join(repo_parts), int(parts[-1]), api_base
 
-    if host == "dev.azure.com" or host.endswith(".visualstudio.com"):
+    if configured_provider == "azure-devops" and (
+        host == "dev.azure.com" or host.endswith(".visualstudio.com")
+    ):
         try:
             pullrequest_at = parts.index("pullrequest")
             git_at = parts.index("_git")
@@ -317,18 +363,26 @@ def _pr_claim_target(
         if host == "dev.azure.com":
             if not parts:
                 return None
-            api_base = f"{parsed.scheme}://{host}/{parts[0]}"
+            url_org = parts[0]
+            configured = _parse_provider_url(api_base)
+            if not configured or not _same_provider_origin(parsed, configured):
+                return None
+            configured_org = next(
+                (part for part in configured.path.split("/") if part), "",
+            )
+            if configured_org.casefold() != url_org.casefold():
+                return None
         else:
-            api_base = f"{parsed.scheme}://{host}"
+            configured = _parse_provider_url(api_base)
+            if not configured or not _same_provider_origin(parsed, configured):
+                return None
         return "azure-devops", f"{project}/{name}", int(number), api_base
 
     if configured_provider == "gitea":
         if len(parts) < 4 or parts[-2] != "pulls" or not parts[-1].isdigit():
             return None
-        configured = urlparse(
-            api_base if "://" in api_base else f"//{api_base}"
-        )
-        if not configured.hostname or configured.hostname.lower() != host:
+        configured = _parse_provider_url(api_base)
+        if not configured or not _same_provider_origin(parsed, configured):
             return None
         repo_parts = parts[-4:-2]
         if len(repo_parts) != 2:

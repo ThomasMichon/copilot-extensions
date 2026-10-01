@@ -13,6 +13,7 @@ already-merged PR.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -217,6 +218,58 @@ def test_precondition_still_blocks_new_commits_after_refreshed_merged_head(
     assert ok is False
     assert err is not None
     assert "further commits" in err
+
+
+def test_precondition_repairs_azure_merged_head_from_live_pr_metadata(
+        refspec_worktree, monkeypatch,
+):
+    from agent_worktrees import providers
+    from agent_worktrees.providers import azure_devops
+
+    env = refspec_worktree
+    head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
+    _land_on_master(env, squash=False)
+
+    monkeypatch.setattr(
+        azure_devops, "run_cli",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({
+                "status": "completed",
+                "lastMergeSourceCommit": {"commitId": head_sha},
+            }),
+            stderr="",
+        ),
+    )
+    monkeypatch.setattr(
+        providers, "get_provider", lambda _name: azure_devops.AzureDevOpsProvider(),
+    )
+    monkeypatch.setattr(
+        providers, "account_token_for_slug", lambda *_a, **_k: None,
+    )
+    pr = SimpleNamespace(
+        branch=env.slug, state="merged", head_sha="", number=7,
+        repo="Project/repo", provider="azure-devops",
+    )
+    record = SimpleNamespace(
+        worktree_id=env.worktree_id, pr=pr, prs=[pr], repo="Project/repo",
+    )
+    repo = SimpleNamespace(
+        remote="origin",
+        default_branch="master",
+        pr=SimpleNamespace(
+            enabled=True, branch=env.slug, provider="azure-devops",
+            api_base="https://dev.azure.com/acme",
+        ),
+    )
+
+    ok, err = finalize._pr_finalize_precondition(
+        record, repo, str(env.clone), str(env.clone),
+    )
+
+    assert ok is True
+    assert err is None
+    assert pr.head_sha == head_sha
 
 
 # ---------------------------------------------------------------------------

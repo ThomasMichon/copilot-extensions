@@ -178,6 +178,9 @@ def test_pr_claim_target_rejects_unconfigured_github_enterprise_host():
     assert cleanup._pr_claim_target(
         "https://untrusted.example/owner/project/pull/42", prcfg,
     ) is None
+    assert cleanup._pr_claim_target(
+        "https://[broken/owner/project/pull/42", prcfg,
+    ) is None
 
 
 def test_pr_claim_target_rejects_unqualified_and_credentialed_urls():
@@ -196,12 +199,50 @@ def test_pr_claim_target_resolves_configured_gitea_and_azure_devops():
         "https://forge.example/owner/project/pulls/12", gitea,
     ) == ("gitea", "owner/project", 12, "https://forge.example/gitea")
 
-    ado = types.SimpleNamespace(provider="github", api_base="")
+    ado = types.SimpleNamespace(
+        provider="azure-devops", api_base="https://dev.azure.com/acme",
+    )
     assert cleanup._pr_claim_target(
         "https://dev.azure.com/acme/Project/_git/repo/pullrequest/34", ado,
     ) == (
         "azure-devops", "Project/repo", 34, "https://dev.azure.com/acme",
     )
+    assert cleanup._pr_claim_target(
+        "https://dev.azure.com/other/Project/_git/repo/pullrequest/34", ado,
+    ) is None
+
+
+@pytest.mark.parametrize(
+    ("provider", "api_base", "ref"),
+    [
+        (
+            "github", "",
+            "https://dev.azure.com/acme/Project/_git/repo/pullrequest/34",
+        ),
+        (
+            "azure-devops", "https://dev.azure.com/acme",
+            "https://dev.azure.com/other/Project/_git/repo/pullrequest/34",
+        ),
+    ],
+)
+def test_reclaim_pr_rejects_provider_or_authority_mismatch_before_credentials(
+        monkeypatch, provider, api_base, ref):
+    calls = []
+    config = _config()
+    config.default_repo.pr = types.SimpleNamespace(
+        provider=provider, api_base=api_base,
+    )
+    monkeypatch.setattr(
+        providers, "account_token_for_slug",
+        lambda *_a, **_k: calls.append("token"),
+    )
+    monkeypatch.setattr(
+        providers, "get_provider",
+        lambda _name: calls.append("provider"),
+    )
+    result = cleanup.reclaim_pr(ref, config, apply=True)
+    assert result.status == "failed"
+    assert calls == []
 
 
 def test_claims_cleanup_releases_only_provider_confirmed_merged_prs(

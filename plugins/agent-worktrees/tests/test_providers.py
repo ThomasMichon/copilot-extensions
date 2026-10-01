@@ -1907,13 +1907,17 @@ class TestAzureDevOpsProvider:
     def test_get_pull_completed_is_merged(self, monkeypatch):
         # Azure status "completed" == merged; canonicalize state to "merged".
         from agent_worktrees.providers import azure_devops as azure
-        body = json.dumps({"status": "completed"})
+        body = json.dumps({
+            "status": "completed",
+            "lastMergeSourceCommit": {"commitId": "merged-head"},
+        })
         monkeypatch.setattr(azure, "run_cli",
                             lambda args, **kw: _proc(stdout=body))
         res = azure.AzureDevOpsProvider().get_pull(
             "proj/repo", 5, api_base="https://dev.azure.com/org")
         assert res.merged is True
         assert res.state == "merged"
+        assert res.head_sha == "merged-head"
 
     def test_get_pull_abandoned_and_active(self, monkeypatch):
         from agent_worktrees.providers import azure_devops as azure

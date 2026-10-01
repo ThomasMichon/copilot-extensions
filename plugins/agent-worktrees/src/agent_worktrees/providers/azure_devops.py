@@ -157,11 +157,17 @@ class AzureDevOpsProvider:
         status = str(data.get("status", "active")).lower()
         merged = (status == "completed")
         state = {"completed": "merged", "abandoned": "closed"}.get(status, "open")
+        merge_source = data.get("lastMergeSourceCommit")
+        head_sha = (
+            str(merge_source.get("commitId", "") or "")
+            if isinstance(merge_source, dict) else ""
+        )
         return PullResult(
             url=self._web_url(api_base, project, name, number),
             number=number,
             state=state,
             merged=merged,
+            head_sha=head_sha,
         )
 
     def observe_head(
