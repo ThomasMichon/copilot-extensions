@@ -7,10 +7,11 @@
 - **Status:** Draft <!-- Draft | Active | Blocked | Done -->
 - **Vision:** [`visions/picker`](../../../visions/picker/README.md) —
   §Behaviors/`live-not-snapshot`, `graceful-capability-scaling`;
-  §Non-Goals/*Not in-process with the engine — it sits on top of the CLI*
-  (a capability-negotiated daemon/HTTP fast path still sits on top of a
-  plugin's own CLI-exposed contract; it does not make the Picker in-process
-  with any plugin's runtime).
+  §Non-Goals/*Not in-process with the engine — it sits on top of the CLI*:
+  the Picker reaches each engine **only by invoking its machine-readable CLI
+  verbs** (`visions/picker/README.md:332-336`). Per Copilot review on this
+  effort's own plan PR (#4764), Phase 3 below is revised to stay inside this
+  boundary rather than propose a vision change — see Phase 3's note.
 - **Umbrella issue:** [#4762](https://github.com/ThomasMichon/copilot-extensions/issues/4762)
 - **Sub-issues:** _filed per-phase as each is scoped for execution_
 - **Related, not absorbed:**
@@ -180,10 +181,34 @@ otherwise verbatim across both messages.)
 
 ## Plan
 
+### Phase 0 — Fix the `subscribe` EOF/reconnect gap (prerequisite, blocks Phase 1)
+_(Added per Copilot review on #4764: "the current contract cannot provide this
+fallback... if that command emits an envelope and then exits, it is accepted
+as ready and a subscribe pivot is never repolled, so there is no automatic
+degradation." This is a correctness gap in the EXISTING `subscribe`
+consumption code, not just this plan's assumption about it — confirmed
+against `tasks.py:395` and the `subscribe` timeout-skip logic: today, nothing
+distinguishes "the channel is genuinely still open" from "the producer exited
+and we're silently frozen on its last snapshot.")_
+- [ ] Define an explicit contract: a `subscribe` pivot's stream process exiting
+      (EOF on stdout) must be treated as the channel dropping, not as
+      "finished successfully." On EOF, either (a) reconnect by re-invoking the
+      `list --stream` command after a short backoff, keeping the last-known
+      rows visible in the interim (never blank the pivot on a transient drop),
+      or (b) fall back to repolling via the plain one-shot path if reconnect
+      attempts are exhausted.
+- [ ] Add regression coverage: a `subscribe` pivot whose process exits
+      mid-session must resume updating (via reconnect or fallback), never
+      silently freeze on stale rows forever.
+- [ ] This is a `worktree-manager`-owned fix (the consuming runtime), landed
+      and verified **before** Phase 1 flips any real plugin's manifest to
+      `subscribe: true` — flipping the flag today would durably freeze that
+      pivot the first time its CLI process exits for any reason.
+
 ### Phase 1 — Adopt `stream`/`subscribe` for agent-dispatch's pivot
 _(agent-recommended ordering: lowest-risk, highest-signal first adopter —
 agent-dispatch's CLI already emits SSE-sourced JSON lines for `watch`, so this
-is closest to a manifest-only change.)_
+is closest to a manifest-only change. Depends on Phase 0.)_
 - [ ] Confirm `agent-dispatch-board --machine {machine}` (the pivot's current
       `list` command) can emit the `stream`/`subscribe` NDJSON envelope shape
       `tasks.py` expects (`begin`/`row`/`delta`/`removed`/`summary`/`done`), or
@@ -193,7 +218,8 @@ is closest to a manifest-only change.)_
       `"stream": true, "subscribe": true` once the CLI side is ready.
 - [ ] Verify live: Picker's Tasks pivot reflects a task-state change without a
       poll-interval delay, and degrades cleanly when `agent-dispatch` is
-      absent/stale (the existing one-shot fallback).
+      absent/stale (the existing one-shot fallback), and recovers per Phase 0's
+      contract if the stream process exits mid-session.
 
 ### Phase 2 — Same for agent-bridge's pivot
 - [ ] Same shape as Phase 1 against `agent-bridge --json agents` / agent-bridge's
@@ -201,24 +227,36 @@ is closest to a manifest-only change.)_
 - [ ] Flip `plugins/agent-bridge/pivots/agent-bridge.json`.
 - [ ] Verify live.
 
-### Phase 3 — Direct daemon escalation (the new capability)
-_(agent-recommended shape — the Plan item the operator asked for by name;
-design needs review before implementation, see Validation Plan)_
-- [ ] Design a manifest-declared **daemon discovery** contract: a pivot
-      optionally names a well-known liveness/endpoint file (mirroring
-      agent-bridge's existing `~/.agent-bridge/active.json`) the
-      `RegisteredPivotRuntime` can probe before falling back to the CLI.
-- [ ] When a live, reachable daemon is discovered, connect directly (HTTP
-      request + SSE line consumption, matching the same NDJSON-envelope shape
-      `stream`/`subscribe` already define) **instead of** spawning the CLI
-      subprocess at all for that refresh cycle — "the slower CLI flow gets out
-      of the way when a faster path exists."
-- [ ] Preserve every existing fallback rung: direct daemon → CLI
-      `subscribe` → CLI `stream` (one-shot) → CLI one-shot JSON — each rung
-      must degrade to the next on any failure, never raise into the Picker.
-- [ ] Apply to agent-bridge and agent-dispatch first (Phases 1-2 already proved
-      the NDJSON shape against their CLIs); evaluate extending to other
-      daemon-backed plugins only after this lands.
+### Phase 3 — CLI-relayed daemon fast path (the new capability, revised)
+_(Revised per Copilot review on #4764: the original shape — the Picker
+connecting directly to a pivot's daemon over HTTP, bypassing the CLI — directly
+contradicts the Picker vision's stated boundary, "reaches each engine **only by
+invoking its machine-readable CLI verbs**" (`visions/picker/README.md:332-336`).
+Rather than propose a vision change for this, the fast path stays **behind the
+CLI-owned client boundary** the reviewer suggested: the Picker still only ever
+invokes `list --stream`/`subscribe`; the SPEEDUP comes from that CLI's own
+`--stream` implementation choosing, internally, to relay its already-running
+daemon's live feed (e.g. `agent-dispatch`'s own `/events` SSE stream) through
+its stdout NDJSON instead of re-deriving the same data from scratch on each
+invocation — invisible to the Picker, which is unaffected by where the CLI's
+own implementation gets its data. This also resolves Phase 0's EOF/reconnect
+concern for the daemon-backed case specifically: the CLI process, not the
+Picker, owns reconnecting to its own daemon.)_
+- [ ] For agent-dispatch and agent-bridge (Phases 1-2 already proved the NDJSON
+      shape against their CLIs): change each plugin's own `--stream`
+      implementation to detect its daemon is live (the same discovery each
+      plugin's CLI already uses for its own non-Picker commands — e.g.
+      `~/.agent-bridge/active.json`) and relay the daemon's live feed through
+      stdout instead of a cold poll-and-diff loop, while keeping the exact
+      same NDJSON envelope shape the Picker already consumes.
+- [ ] Preserve graceful degradation **inside the CLI**: daemon unreachable →
+      the CLI's own existing poll-and-diff `--stream` implementation; CLI
+      doesn't support `--stream` at all → the Picker's own existing one-shot
+      JSON fallback (already built, see Context). The Picker-side fallback
+      chain does not grow a new rung; only the CLI's internal implementation
+      gains a faster data source.
+- [ ] Evaluate extending this pattern to other daemon-backed plugins only
+      after it lands for these two.
 
 ### Phase 4 — Segment-level React-esque diffing in the Picker's own render path
 - [ ] Profile `_refresh_nf_segments()` (`engine_rendering.py`) against a
@@ -234,42 +272,66 @@ design needs review before implementation, see Validation Plan)_
       desync a segment from the screen state it reads.
 
 ### Phase 5 — Group C: trust the resident monitor's fresh hint before rescanning
+### Phase 5 — Group C: trust an affirmative fresh hint, never a negative one
 _(extends `#918`'s Phase 3 catalog-reconciliation work into
 `picker-reconcile-local`; comment on `#918` claiming this phase before
-starting, per that issue's own convention)_
-- [ ] Flip `picker_reconcile_cli.py`'s precedence: when `#918`'s resident
-      monitor has stamped a sufficiently fresh `bound_live`/`mux_live` hint
-      (reusing `_fresh_bound_live_hint`'s existing freshness window), trust it
-      and skip `reclaim.resolve_bound_copilots()`/`sessions.mux_status_many()`
-      entirely; fall back to the live rescan only when the hint is stale,
-      absent, or the monitor isn't running.
+starting, per that issue's own convention. **Revised per Copilot review on
+#4764**: the original framing — skip the live rescan whenever the hint is
+"fresh," in either direction — would make a non-authoritative cache
+authoritative. The already-reviewed, already-shipped precedent for this exact
+hint (`agent_worktrees/__main__.py:478-486`, `scan_sessions_fast`'s own mux
+check) is **asymmetric**: a fresh `True` short-circuits the check (a false
+positive here is harmless — the session really is live), but a fresh `False`
+or missing hint **always** falls through to the authoritative probe, because
+"a cached negative is not proof a session hasn't attached since the stamp."
+This phase adopts that exact asymmetry, not a new, weaker rule.)_
+- [ ] In `picker_reconcile_cli.py`, when `_fresh_bound_live_hint(rec)` (and an
+      analogous fresh-hint read for `mux_live`/`mux_live_at`, mirroring the
+      same fields `tracking.stamp_mux_live` already stamps) is **affirmatively
+      `True` and fresh**, trust it and skip `reclaim.resolve_bound_copilots()`
+      for that record. A `False`, stale, or absent hint **always** falls
+      through to the live rescan — never trusted to skip it.
+- [ ] Keep the mux **client-count** scan (`sessions.mux_status_many()`)
+      unconditional regardless of the bound-live hint: the boolean hint has no
+      `mux_clients`/`mux_attached` granularity, and Group C's row payload needs
+      those fields. The hint only ever short-circuits
+      `resolve_bound_copilots()` (the ~4.8s unfiltered scan) for the
+      already-known-live case — it does not replace the (already cheap, ~tens
+      of ms) mux session-count probe.
 - [ ] Preserve every existing safety note from Phase 3's own history (never
       infer a conclusion from liveness alone; this hint-trust is a latency
-      optimization, not a new source of truth).
+      optimization for a confirmed-positive case only, never a new source of
+      truth for a negative or unknown one).
+
 
 ## Validation Plan
 
+- [ ] **Phase 0 (blocks Phase 1):** a regression test proving a `subscribe`
+      pivot whose stream process exits mid-session recovers (reconnects or
+      falls back to repolling) rather than freezing on stale rows forever.
 - [ ] **Phases 1-2:** a live-timed before/after of the Tasks/Bridges pivot's
       refresh latency (mirroring the `picker-reconcile-local` before/after
       methodology from 2026-09-30), plus a headless test proving the Picker
       repaints on a `delta`/`removed` envelope line without a poll tick.
-- [ ] **Phase 3 (design review gate):** this phase's daemon-discovery design
-      must be reviewed (rubber-duck or operator) **before** implementation
-      starts — it introduces a new trust boundary (the Picker now makes an
-      HTTP connection to another plugin's daemon) and a new failure mode
-      (a reachable-but-misbehaving daemon) that the existing CLI-subprocess
-      model doesn't have. Validate every fallback rung actually degrades
-      (kill the daemon mid-render; corrupt the discovery file; block the port)
-      without the Picker freezing or crashing.
+- [ ] **Phase 3 (design review gate):** each plugin's own daemon-relay change
+      must be reviewed before landing — it introduces a new internal failure
+      mode (the CLI's own daemon connection drops or misbehaves) that its
+      existing poll-and-diff path doesn't have. Validate that CLI-internal
+      degradation (daemon unreachable → existing poll-and-diff `--stream`
+      behavior) actually happens — kill the daemon mid-render and confirm the
+      Picker keeps getting data, just via the slower internal path, never a
+      frozen or crashed pivot.
 - [ ] **Phase 4:** a regression test asserting only the expected segment(s)
       refresh for a given cause (cosmetic pulse vs. nav vs. reload vs. pivot
       switch), plus confirmation (via the same real-timer profiling method
       used 2026-09-30) that Textual's compositor now chooses incremental
       updates for the common cosmetic-tick case.
 - [ ] **Phase 5:** the same live-timed before/after methodology as the
-      `cfg.load_config()` fix, run against a worktree the resident monitor has
-      actively kept warm; a regression test proving the hint-trust path is
-      skipped (falls back correctly) when the monitor is stale/absent.
+      `cfg.load_config()` fix, run against a worktree with a genuinely fresh
+      affirmative hint; a regression test proving (a) the scan is skipped only
+      when the hint is fresh AND `True`, and (b) a stale/absent/`False` hint
+      — including a simulated "session attached after the stamp" case — always
+      still falls through to the live rescan and is never missed.
 - [ ] Full relevant test files green per phase (`test_picker_tui.py` for
       Picker-side phases; the owning plugin's test suite for CLI-side
       manifest/transport changes); a full-suite run is impractically slow on
@@ -279,9 +341,10 @@ starting, per that issue's own convention)_
 
 ## Proposal
 
-_Pending — Phase 3's daemon-discovery contract shape is the one open design
-question flagged for review in the Validation Plan above; everything else in
-this plan reuses an existing, already-shipped mechanism._
+_Resolved during the plan's own review gate (#4764) — see the 2026-09-30
+journal entry below for what changed and why. Phase 3's daemon-relay shape
+(CLI-internal, not Picker-direct) and Phase 5's asymmetric hint-trust rule are
+now settled design, not open questions._
 
 ## Journal
 
@@ -315,3 +378,42 @@ this plan reuses an existing, already-shipped mechanism._
   genuinely new mechanism this effort adds; flagged for a design review gate
   before implementation given the new trust-boundary/failure-mode surface it
   introduces.
+
+### 2026-09-30 — Plan PR (#4764) review: three findings, plan revised before merge
+Per this effort's own review gate (`planning-efforts` skill), submitted the
+plan as PR #4764 before any implementation. Copilot's review came back
+`COMMENTED` (non-blocking per this repo's zero-required-reviews ruleset) but
+with three genuinely substantive, code-grounded findings — addressed in the
+plan itself rather than dismissed:
+
+1. **Phase 1/3's assumed `subscribe → one-shot` fallback doesn't exist.**
+   Verified against `tasks.py:395`: `subscribe` only removes the timeout and
+   disables repolling — it does not distinguish a genuinely-held-open channel
+   from a producer that emitted once and exited. Added **Phase 0** (a
+   prerequisite correctness fix to the existing, currently-unused `subscribe`
+   consumption code) requiring an explicit EOF/reconnect contract before any
+   real pivot adopts `subscribe: true`.
+2. **Phase 5's original "trust any fresh hint" framing would make a
+   non-authoritative cache authoritative.** Verified against
+   `agent_worktrees/__main__.py:478-486`: the existing, already-reviewed
+   precedent for this exact hint is asymmetric — trust a fresh `True` (a false
+   positive is harmless), never trust a fresh `False`/absent hint to skip the
+   check ("not proof a session hasn't attached since the stamp"). Revised
+   Phase 5 to adopt that exact asymmetry rather than a weaker new rule, and
+   clarified the mux **client-count** scan stays unconditional (the boolean
+   hint lacks `mux_clients`/`mux_attached` granularity Group C's payload
+   needs) — the hint only short-circuits `resolve_bound_copilots()`'s
+   expensive scan for the already-confirmed-live case.
+3. **Phase 3's original shape (Picker connects directly to a pivot's daemon
+   over HTTP) contradicts the Picker vision's stated boundary** —
+   `visions/picker/README.md:332-336`: the Picker reaches each engine **only
+   by invoking its machine-readable CLI verbs**, never in-process or via a
+   side-channel to another plugin's runtime. Rather than propose a vision
+   change, adopted the reviewer's suggested alternative: keep the fast path
+   **behind the CLI-owned client boundary** — each plugin's own `--stream`
+   implementation may internally relay its own already-running daemon's feed,
+   but the Picker still only ever invokes that CLI verb and never
+   distinguishes where the data actually came from. This also resolves most of
+   Phase 0's reconnect concern for the daemon-backed case specifically: the
+   CLI process, which already owns its own daemon's lifecycle, owns
+   reconnecting to it too.
