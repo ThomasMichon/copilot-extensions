@@ -401,15 +401,24 @@ def _pr_claim_target(
         return "azure-devops", f"{project}/{name}", int(number), api_base
 
     if configured_provider == "gitea":
-        if len(parts) < 4 or parts[-2] != "pulls" or not parts[-1].isdigit():
-            return None
         configured = _parse_provider_url(api_base)
         if not configured or not _same_provider_origin(parsed, configured):
             return None
-        repo_parts = parts[-4:-2]
+        # A path-hosted Gitea instance's `api_base` includes its own root
+        # path (e.g. ".../gitea"); same-origin alone doesn't rule out a
+        # claim URL under a DIFFERENT root on that same host (a different
+        # app entirely). Require the claim URL's path to actually be under
+        # the configured root before stripping it and extracting the repo.
+        base_parts = [part for part in configured.path.split("/") if part]
+        if base_parts and parts[:len(base_parts)] != base_parts:
+            return None
+        remaining = parts[len(base_parts):]
+        if len(remaining) < 4 or remaining[-2] != "pulls" or not remaining[-1].isdigit():
+            return None
+        repo_parts = remaining[-4:-2]
         if len(repo_parts) != 2:
             return None
-        return "gitea", "/".join(repo_parts), int(parts[-1]), api_base
+        return "gitea", "/".join(repo_parts), int(remaining[-1]), api_base
     return None
 
 

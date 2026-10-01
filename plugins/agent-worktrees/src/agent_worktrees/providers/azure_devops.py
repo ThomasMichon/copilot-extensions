@@ -173,14 +173,21 @@ class AzureDevOpsProvider:
     def observe_head(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> PullResult:
-        """Live head observation, reusing ``get_pull``'s ``az repos pr show``
-        call -- the same server call that already supplies
-        ``lastMergeSourceCommit`` for the merged-head repair path. Azure
-        DevOps has no separate server-clock timestamp to attach, unlike
-        GitHub's HTTP ``Date`` header, but the returned head is still a live,
-        authoritative read (not a cached/local value).
+        """Azure DevOps has no server-clock head observation implementation.
+
+        Unlike GitHub's HTTP ``Date`` header or Gitea's server timestamp,
+        there is no authoritative provider-clock value to attach here --
+        returning ``get_pull()``'s result without one would silently violate
+        the ``observe_head`` contract (``observed_at`` required) that generic
+        callers such as ``pr_ops.py``'s post-push observation rely on to
+        confirm a live read. Stay explicitly unsupported; merged-head repair
+        instead uses ``get_pull()``'s own ``head_sha`` directly (see
+        ``finalize_open_pr_gate.py``).
         """
-        return self.get_pull(repo, number, api_base=api_base, token=token)
+        _ = (repo, number, api_base, token)
+        raise ProviderError(
+            "Azure DevOps does not support authoritative PR-head observation."
+        )
 
     def publish_source_marker(
         self,

@@ -245,7 +245,7 @@ def test_pr_claim_target_resolves_configured_gitea_and_azure_devops():
         provider="gitea", api_base="https://forge.example/gitea",
     )
     assert cleanup._pr_claim_target(
-        "https://forge.example/owner/project/pulls/12", gitea,
+        "https://forge.example/gitea/owner/project/pulls/12", gitea,
     ) == ("gitea", "owner/project", 12, "https://forge.example/gitea")
 
     ado = types.SimpleNamespace(
@@ -259,6 +259,30 @@ def test_pr_claim_target_resolves_configured_gitea_and_azure_devops():
     assert cleanup._pr_claim_target(
         "https://dev.azure.com/other/Project/_git/repo/pullrequest/34", ado,
     ) is None
+
+
+def test_pr_claim_target_rejects_gitea_claim_under_different_root_path():
+    # A path-hosted Gitea instance's api_base is the instance ROOT, not the
+    # whole host -- same host/port/scheme alone doesn't prove the claim URL
+    # names the same application. A claim under a different root on that
+    # same host (a different app entirely) must be rejected, not queried
+    # against the configured root with its own repo/PR number.
+    gitea = types.SimpleNamespace(
+        provider="gitea", api_base="https://forge.example/gitea",
+    )
+    assert cleanup._pr_claim_target(
+        "https://forge.example/owner/project/pulls/12", gitea,
+    ) is None
+    assert cleanup._pr_claim_target(
+        "https://forge.example/other-app/owner/project/pulls/12", gitea,
+    ) is None
+    # Root-hosted Gitea (empty api_base path) is unaffected.
+    root_gitea = types.SimpleNamespace(
+        provider="gitea", api_base="https://forge.example",
+    )
+    assert cleanup._pr_claim_target(
+        "https://forge.example/owner/project/pulls/12", root_gitea,
+    ) == ("gitea", "owner/project", 12, "https://forge.example")
 
 
 def test_pr_claim_target_rejects_shorthand_for_non_github_providers():
