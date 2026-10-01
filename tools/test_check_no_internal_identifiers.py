@@ -234,6 +234,10 @@ def test_invalid_regex_fails_explicitly_without_printing_token(repo: Path):
         module._scan_text("example.txt", "anything", ["regex:(private-marker"], {})
     with pytest.raises(ValueError, match="empty regular expression match"):
         module._scan_text("example.txt", "anything", ["regex:(?=anything)"], {})
+    with pytest.raises(ValueError, match="invalid regular expression"):
+        module._scan([], ["regex:(private-marker"], {})
+    with pytest.raises(ValueError, match="empty regular expression match"):
+        module._scan([], ["regex:.*"], {})
 
 
 def test_load_paths_file_preserves_filename_whitespace(repo: Path):

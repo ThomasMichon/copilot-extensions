@@ -266,21 +266,31 @@ def _make_git_ref_loader(ref: str) -> Callable[[str], str | None]:
     return _read_git_ref_text
 
 
-def _scan_text(
-    rel: str,
-    text: str,
-    identifiers: list[str],
-    reasons: dict[str, str | None],
-) -> list[Violation]:
-    violations: list[Violation] = []
+def _compile_patterns(identifiers: list[str]) -> dict[str, re.Pattern[str]]:
     patterns: dict[str, re.Pattern[str]] = {}
     for ident in identifiers:
-        if not ident.startswith("regex:") or _allowed(ident, rel):
+        if not ident.startswith("regex:"):
             continue
         try:
             patterns[ident] = re.compile(ident[len("regex:"):], re.IGNORECASE)
         except re.error:
             raise ValueError("invalid regular expression in forbidden identifier list") from None
+        if patterns[ident].search("") is not None:
+            raise ValueError("empty regular expression match in forbidden identifier list")
+    return patterns
+
+
+def _scan_text(
+    rel: str,
+    text: str,
+    identifiers: list[str],
+    reasons: dict[str, str | None],
+    *,
+    patterns: dict[str, re.Pattern[str]] | None = None,
+) -> list[Violation]:
+    violations: list[Violation] = []
+    if patterns is None:
+        patterns = _compile_patterns(identifiers)
     if not patterns and not any(
         ident in text.lower() for ident in identifiers if not _allowed(ident, rel)
     ):
@@ -320,6 +330,7 @@ def _scan(
     *,
     text_loader: Callable[[str], str | None] | None = None,
 ) -> list[Violation]:
+    patterns = _compile_patterns(identifiers)
     loader = text_loader or _read_worktree_text
     violations: list[Violation] = []
     for rel in files:
@@ -328,7 +339,7 @@ def _scan(
         text = loader(rel)
         if text is None:
             continue
-        violations.extend(_scan_text(rel, text, identifiers, reasons))
+        violations.extend(_scan_text(rel, text, identifiers, reasons, patterns=patterns))
     return violations
 
 
