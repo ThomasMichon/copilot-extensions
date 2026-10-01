@@ -35,10 +35,23 @@ bake in a specific path. Resolve in this order, first match wins:
    one is available and documented for this environment (e.g. a harness's
    own machine-local config, a dotfiles-declared preference) -- prefer a
    mechanism already in scope over inventing a new one.
-3. **The OS temp directory**, under an `agent-scratch` subfolder of its own
-   (never loose at the temp root either, for the same reason as above):
-   `$env:TEMP\agent-scratch` on Windows, `${TMPDIR:-/tmp}/agent-scratch` on
-   POSIX.
+3. **The OS temp directory**, under a private, owner-only `agent-scratch`
+   subfolder of its own (never loose at the temp root either, for the same
+   reason as above): `$env:TEMP\agent-scratch` on Windows is already
+   per-user and needs no further hardening. On **POSIX**, `/tmp` (and any
+   `$TMPDIR` pointing at a shared, world-writable location) is a
+   multi-user directory -- a fixed, predictable name like `/tmp/agent-scratch`
+   there can be pre-created by another local user or replaced with a
+   symlink to redirect writes, and files created under a permissive umask
+   can be readable by other local users. On POSIX, use a **private
+   per-user** path instead of a bare shared name -- e.g.
+   `${TMPDIR:-/tmp}/agent-scratch-$(id -u)` -- and before writing into it:
+   create it with owner-only permissions (`mkdir -m 700`, or `chmod 700`
+   immediately after creation) if it doesn't already exist, and if it does
+   already exist, verify it is a real directory (not a symlink) owned by
+   the current user with mode `700` before trusting it; refuse to use it
+   and fall back to a fresh, uniquely-named directory (e.g. via `mktemp -d`)
+   if that check fails.
 
 Fall through silently -- don't ask the operator to configure something just
 to write one scratch file; only escalate if even the OS temp directory isn't
