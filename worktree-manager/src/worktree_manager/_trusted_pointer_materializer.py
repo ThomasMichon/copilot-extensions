@@ -26,9 +26,11 @@ only this trusted compatibility reader still carries is independently
 maintained here on purpose. This file's whole point is to NOT be kept in sync
 via dynamic loading, so no import-time or runtime mechanism enforces
 agreement. The shipped compatibility path is therefore covered directly by
-``worktree-manager/tests/test_trusted_pointer_materializer.py``,
-``test_trusted_materializer_parity.py``, and the higher-level
-``test_self_install.py`` scenarios whenever this file's behavior changes.
+``worktree-manager/tests/test_trusted_pointer_materializer.py`` and the
+higher-level ``test_self_install.py`` scenarios whenever the legacy
+directory-pointer behavior changes, while
+``test_trusted_materializer_parity.py`` continues to guard the still-shared
+`uv`-editable rewrite logic against drift from the repo tooling copy.
 """
 from __future__ import annotations
 
