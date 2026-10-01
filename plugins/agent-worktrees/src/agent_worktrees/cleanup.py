@@ -317,6 +317,20 @@ def _pr_claim_target(
         # ever changes, deleting an unrelated obligation.
         if configured_provider != "github":
             return None
+        # The shorthand carries NO authority of its own, so it is only safe
+        # to resolve against the CURRENT configured authority when that
+        # authority is unambiguously the implicit default public
+        # github.com -- i.e. no api_base configured AND no ambient GH_HOST
+        # override. A shorthand claim created under that default, then
+        # later re-queried after GH_HOST is pointed at a different (e.g.
+        # Enterprise) host, would otherwise confirm an unrelated PR there
+        # and silently remove the original obligation. Require a full,
+        # authority-bearing URL instead whenever any non-default authority
+        # is configured.
+        from .providers.github import GitHubProvider
+
+        if GitHubProvider().authority_endpoint(api_base) != "github.com":
+            return None
         return configured_provider, short.group(1), int(short.group(2)), api_base
 
     try:

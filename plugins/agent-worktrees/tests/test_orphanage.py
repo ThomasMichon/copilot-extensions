@@ -301,6 +301,31 @@ def test_pr_claim_target_rejects_shorthand_for_non_github_providers():
     assert cleanup._pr_claim_target("owner/project#34", ado) is None
 
 
+def test_pr_claim_target_rejects_shorthand_when_gh_host_is_non_default(
+    monkeypatch,
+):
+    # The owner/repo#N shorthand carries no authority of its own. If it was
+    # resolvable while GH_HOST pointed at an Enterprise host (or any
+    # non-default authority), it must be rejected once that authority no
+    # longer matches the implicit default public github.com -- the shape
+    # this guards against is the reverse of the test below: a shorthand
+    # claim re-queried after the ambient authority changed could confirm an
+    # unrelated PR under the new authority and silently drop the original
+    # obligation.
+    monkeypatch.setenv("GH_HOST", "github.example.com")
+    prcfg = types.SimpleNamespace(provider="github", api_base="")
+    assert cleanup._pr_claim_target("owner/project#12", prcfg) is None
+
+
+def test_pr_claim_target_rejects_shorthand_with_configured_enterprise_api():
+    # Same risk as the GH_HOST case above, but via a configured Enterprise
+    # api_base instead of the ambient env var.
+    prcfg = types.SimpleNamespace(
+        provider="github", api_base="https://github.example.com/api/v3",
+    )
+    assert cleanup._pr_claim_target("owner/project#12", prcfg) is None
+
+
 @pytest.mark.parametrize(
     ("provider", "api_base", "ref"),
     [
