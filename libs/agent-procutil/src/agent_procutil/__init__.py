@@ -316,12 +316,16 @@ async def spawn_in_kill_on_close_job(
     """Spawn a child already contained by a kill-on-close Job Object.
 
     On Windows the child is created with ``CREATE_SUSPENDED``, assigned to a
-    kill-on-close job, and then resumed. This closes the race where an owner can
-    die after ``CreateProcess`` succeeds but before a post-spawn
-    ``AssignProcessToJobObject`` call runs. If job creation or assignment fails,
-    the child is still resumed and returned with ``None`` so existing cleanup
-    paths remain in charge. Off Windows this is a plain
-    ``asyncio.create_subprocess_exec`` call returning ``(process, None)``.
+    kill-on-close job, and then resumed, with no ``await`` between creation and
+    assignment: the child can neither run nor start descendants outside the job.
+    One window remains by design: if the owner is hard-killed in the instant
+    between ``CreateProcess`` returning and the assignment, the child stays
+    suspended (it never runs, so it opens no connection). Closing that window
+    would need a hand-rolled ``CreateProcessW`` with ``PROC_THREAD_ATTRIBUTE_JOB_LIST``,
+    which ``asyncio``'s subprocess transport (pipes, overlapped I/O) can't use.
+    If job creation or assignment fails, the child is still resumed and returned
+    with ``None`` so existing cleanup paths remain in charge. Off Windows this is
+    a plain ``asyncio.create_subprocess_exec`` call returning ``(process, None)``.
     """
     if not _is_windows():
         process = await asyncio.create_subprocess_exec(*args, **kwargs)
