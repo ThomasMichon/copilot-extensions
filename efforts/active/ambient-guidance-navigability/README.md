@@ -679,6 +679,37 @@ _Pending._
     one paragraph away. Reworded to "Phase 7's **Plan** is complete,"
     explicitly naming the open Validation Plan item -- matching the PR
     description's own narrower framing, which was already correct.
+- **Review round 2 findings (PR #4809), both addressed in the same PR:**
+  - **Real concurrency race, introduced by round 1's own fix:** the
+    sessionStart resident server handles concurrent hook requests on its
+    own threads, so two callers can reach `_load_instruction_projections`
+    at once. Pre-registering in `sys.modules` before `exec_module` (round
+    1's fix, required for the dataclass self-lookup) opened a window where
+    a racing second caller's `cached = sys.modules.get(...)` early-return
+    could observe the *first* caller's module mid-`exec_module` --
+    partially initialized, `render_local_cache` not yet defined on it --
+    and silently skip its own refresh. Fixed by serializing the whole
+    check-and-load critical section behind a module-level
+    `threading.Lock`. Added a 4-thread concurrent-load regression test
+    (an artificial `time.sleep` inside the loaded module widens the race
+    window) asserting every thread gets back a fully-executed module.
+  - `discover_enabled_sources` was called without `agent_worktrees_command`,
+    so a repo whose marketplace declares an `agent-worktrees-repo` source
+    falls back to ambient `PATH` -- which could resolve a different
+    installation cell's `agent-worktrees` (or none), silently omitting that
+    source from the cache refresh. `reviewing-customizations/SKILL.md`'s
+    own contract requires passing the current cell's catalog-resolved
+    command. Added `_resolve_own_agent_worktrees_command()`, which resolves
+    this exact cell's own deployed binstub via `installer.bin_dir()` (the
+    same global-binstub location `installer.py`'s own deploy path writes
+    to) rather than shelling out or trusting ambient `PATH`; `None` when
+    this cell has no deployed binstub (unchanged fallback behavior).
+    Threaded through `refresh_local_cache`. Added three dedicated tests
+    (binstub present, absent, and `installer.bin_dir()` itself failing).
+  - Also caught and fixed in the same push: the new regression test's
+    docstring, and a code comment in `local_cache_refresh.py` itself, both
+    named the review history ("as this loader originally did") rather than
+    describing only the timeless invariant -- reworded both.
 
 ### 2026-10-01 -- Phase 7 slice 4: the repo-wide catch-all static projection
 - Picked up the next unstarted Plan item (slice 3's steer): `customizing-

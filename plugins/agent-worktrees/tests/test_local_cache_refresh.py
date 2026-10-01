@@ -8,6 +8,8 @@ coverage). See ``docs/patterns/worktree-scoped-dynamic-guidance.md`` and
 from __future__ import annotations
 
 import json
+import os
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -86,13 +88,11 @@ class TestLoadInstructionProjections:
     def test_loads_a_module_whose_classes_need_sys_modules_during_exec(
         self, tmp_path: Path
     ) -> None:
-        """Regression test: the real shipped ``instruction_projections.py``
-        declares postponed-annotation dataclasses, whose decorator looks up
-        ``sys.modules[cls.__module__]`` while the class body executes. The
-        module must be registered in ``sys.modules`` *before*
-        ``exec_module`` runs -- registering it only after (as this loader
-        originally did) makes that lookup fail, the ``AttributeError`` is
-        swallowed, and the module never loads at all."""
+        """The real shipped ``instruction_projections.py`` declares
+        postponed-annotation dataclasses, whose decorator looks up
+        ``sys.modules[cls.__module__]`` while the class body executes --
+        the module must be registered in ``sys.modules`` before
+        ``exec_module`` runs for that lookup to succeed."""
         scripts_dir = (
             tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions"
             / "customizing-copilot" / "skills" / "reviewing-customizations"
@@ -135,6 +135,79 @@ class TestLoadInstructionProjections:
         assert lcr._load_instruction_projections(tmp_path) is None
         assert lcr._MODULE_NAME not in sys.modules
 
+    def test_concurrent_loads_never_observe_a_partial_module(
+        self, tmp_path: Path
+    ) -> None:
+        """Two threads racing to load the same module must each get back a
+        fully-executed module (``render_local_cache`` defined), never a
+        partially initialized one -- the load is serialized."""
+        import sys
+
+        scripts_dir = (
+            tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions"
+            / "customizing-copilot" / "skills" / "reviewing-customizations"
+            / "scripts"
+        )
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "instruction_projections.py").write_text(
+            "import time\n"
+            "time.sleep(0.05)\n"
+            "def render_local_cache():\n"
+            "    return 'ok'\n",
+            encoding="utf-8",
+        )
+
+        results: list[object] = []
+
+        def _load():
+            results.append(lcr._load_instruction_projections(tmp_path))
+
+        try:
+            threads = [threading.Thread(target=_load) for _ in range(4)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=5)
+
+            assert len(results) == 4
+            for module in results:
+                assert module is not None
+                assert hasattr(module, "render_local_cache")
+        finally:
+            sys.modules.pop(lcr._MODULE_NAME, None)
+
+
+class TestResolveOwnAgentWorktreesCommand:
+    def test_returns_none_when_installer_has_no_binstub(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from agent_worktrees import installer
+
+        monkeypatch.setattr(installer, "bin_dir", lambda: tmp_path / "bin")
+        assert lcr._resolve_own_agent_worktrees_command() is None
+
+    def test_returns_the_cell_local_binstub_path_when_present(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from agent_worktrees import installer
+
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        name = "agent-worktrees.cmd" if os.name == "nt" else "agent-worktrees"
+        (bin_dir / name).write_text("", encoding="utf-8")
+        monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
+
+        assert lcr._resolve_own_agent_worktrees_command() == str(bin_dir / name)
+
+    def test_never_raises_when_installer_itself_fails(self, monkeypatch) -> None:
+        from agent_worktrees import installer
+
+        def _boom():
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(installer, "bin_dir", _boom)
+        assert lcr._resolve_own_agent_worktrees_command() is None
+
 
 class TestRefreshLocalCache:
     def test_never_raises_when_not_installed(self, tmp_path: Path) -> None:
@@ -158,6 +231,9 @@ class TestRefreshLocalCache:
     def test_calls_render_local_cache_with_discovered_sources(
         self, tmp_path: Path, monkeypatch
     ) -> None:
+        monkeypatch.setattr(
+            lcr, "_resolve_own_agent_worktrees_command", lambda: "/bin/agent-worktrees"
+        )
         calls = []
         discover_calls = []
 
@@ -165,8 +241,9 @@ class TestRefreshLocalCache:
             calls.append(root)
             discover_calls.append(list(discover_sources()))
 
-        def _discover_enabled_sources(root, *, require_trust):
+        def _discover_enabled_sources(root, *, require_trust, agent_worktrees_command):
             assert require_trust is False
+            assert agent_worktrees_command == "/bin/agent-worktrees"
             return ["a-source"]
 
         fake_module = SimpleNamespace(
