@@ -38,7 +38,10 @@ def materialize_into(
     *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path,
     dest_root: Path | None = None,
 ) -> list[str]:
-    manifest = lwar.load_manifest(source_consumer_dir)
+    try:
+        manifest = lwar.load_manifest(source_consumer_dir)
+    except ValueError as exc:
+        return [f"SKIP {source_consumer_dir}: {exc}"]
     if manifest is None:
         return []
 

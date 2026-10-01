@@ -2158,5 +2158,5 @@ def test_materialize_launch_wrapper_assets_into_refuses_escaping_source_dir(
         dest_root=root / "preview",
     )
 
-    assert any("escapes the canonical root" in line for line in log)
+    assert any("canonicalDir must be a non-empty string" in line for line in log)
     assert not (dest_plugin / "bin" / "launch-session.sh").exists()

@@ -572,6 +572,12 @@ class _FakeMaterializeMain:
         assert canonical_root == self._canonical_root
         return []
 
+    def materialize_launch_wrapper_assets_into(
+        self, *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path
+    ) -> list[str]:
+        assert canonical_root == self._canonical_root
+        return []
+
 
 def test_materialize_file_pointers_into_preview_writes_only_into_dest(
     isolated: Path, monkeypatch: pytest.MonkeyPatch,

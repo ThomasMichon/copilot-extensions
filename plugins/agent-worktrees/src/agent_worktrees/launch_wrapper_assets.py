@@ -30,6 +30,27 @@ class LaunchWrapperAssets:
         return repo_dir / Path(self.canonical_dir_raw)
 
 
+def _is_relative_subpath(value: str) -> bool:
+    path = Path(value)
+    return (
+        bool(value)
+        and not path.is_absolute()
+        and path.parts != ()
+        and all(part not in ("", ".", "..") for part in path.parts)
+    )
+
+
+def _is_plain_basename(value: str) -> bool:
+    path = Path(value)
+    return (
+        bool(value)
+        and value not in {".", ".."}
+        and path.name == value
+        and "/" not in value
+        and "\\" not in value
+    )
+
+
 def load_manifest(plugin_dir: Path) -> LaunchWrapperAssets:
     manifest_path = plugin_dir / MANIFEST
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -38,9 +59,10 @@ def load_manifest(plugin_dir: Path) -> LaunchWrapperAssets:
         data.get("schema") != SCHEMA
         or data.get("version") != VERSION
         or not isinstance(data.get("canonicalDir"), str)
-        or not data["canonicalDir"]
+        or not _is_relative_subpath(data["canonicalDir"])
         or not isinstance(files, list)
-        or any(not isinstance(name, str) or not name for name in files)
+        or not files
+        or any(not isinstance(name, str) or not _is_plain_basename(name) for name in files)
     ):
         raise ValueError(f"malformed launch-wrapper asset manifest: {manifest_path}")
     return LaunchWrapperAssets(

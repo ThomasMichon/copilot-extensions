@@ -394,7 +394,9 @@ worktree session, so your personal tmux config and any ad-hoc tmux sessions
 sharing the same server are left untouched. The single source of truth is the
 Worktree Manager-deployed `~/.worktree-manager/versions/<current>/bin/session-options.sh`
 (the interactive mux launch scripts relocated there in Phase 3b Sub-slice 2a
-Step 2; agent-worktrees no longer ships or deploys its own copy).
+Step 2; agent-worktrees' normal mux path no longer ships or deploys its own
+copy, aside from the packaged Python-only non-editable fallback installer's
+materialized self-contained copy set).
 
 Settings that **cannot** be session-scoped -- server-global `escape-time` and
 the keystroke-passthrough root key table -- are **not** applied automatically

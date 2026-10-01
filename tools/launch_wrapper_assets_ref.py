@@ -28,6 +28,27 @@ class LaunchWrapperAssets:
         return (plugin_dir or self.plugin_dir) / "bin"
 
 
+def _is_relative_subpath(value: str) -> bool:
+    path = Path(value)
+    return (
+        bool(value)
+        and not path.is_absolute()
+        and path.parts != ()
+        and all(part not in ("", ".", "..") for part in path.parts)
+    )
+
+
+def _is_plain_basename(value: str) -> bool:
+    path = Path(value)
+    return (
+        bool(value)
+        and value not in {".", ".."}
+        and path.name == value
+        and "/" not in value
+        and "\\" not in value
+    )
+
+
 def load_manifest(plugin_dir: Path) -> LaunchWrapperAssets | None:
     manifest_path = plugin_dir / MANIFEST_NAME
     if not manifest_path.is_file():
@@ -37,14 +58,14 @@ def load_manifest(plugin_dir: Path) -> LaunchWrapperAssets | None:
         raise ValueError(f"{manifest_path}: unsupported launch-wrapper-assets schema")
     canonical_dir = data.get("canonicalDir")
     files = data.get("files")
-    if not isinstance(canonical_dir, str) or not canonical_dir:
+    if not isinstance(canonical_dir, str) or not _is_relative_subpath(canonical_dir):
         raise ValueError(f"{manifest_path}: canonicalDir must be a non-empty string")
     if (
         not isinstance(files, list)
         or not files
-        or any(not isinstance(name, str) or not name for name in files)
+        or any(not isinstance(name, str) or not _is_plain_basename(name) for name in files)
     ):
-        raise ValueError(f"{manifest_path}: files must be a non-empty string list")
+        raise ValueError(f"{manifest_path}: files must be a non-empty basename-only string list")
     return LaunchWrapperAssets(
         manifest_path=manifest_path,
         canonical_dir_raw=canonical_dir,
