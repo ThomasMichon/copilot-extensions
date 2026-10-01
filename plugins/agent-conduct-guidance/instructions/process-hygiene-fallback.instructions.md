@@ -4,7 +4,7 @@ applyTo: "**"
 
 # Headless process-spawn fallback
 
-**Fallback policy `[owner: agent-conduct-guidance@0.1.1-dev1]`:** Every ad hoc
+**Fallback policy `[owner: agent-conduct-guidance@0.1.2-dev1]`:** Every ad hoc
 child process an agent starts to serve one turn -- a shell command, a helper
 script, a build/watch/dev-server launch, a self-authored scheduled task or
 service -- must not surface a visible console window or steal focus. On
