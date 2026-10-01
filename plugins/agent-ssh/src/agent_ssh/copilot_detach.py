@@ -29,7 +29,6 @@ from ssh_manager.forward_keeper import (
 from venue_copilot import (
     DEFAULT_TTL_SECONDS,
     VenueCopilotError,
-    bridge_probe_script,
     registration_credentials_script,
     read_seed,
     resolve_daemon_port,
@@ -331,11 +330,6 @@ def _keeper_route_active(target: str, daemon_port: int) -> bool:
     return _STORE.alive(_state_key(target))
 
 
-def _bridge_route_reachable(ssh_config: Any, daemon_port: int) -> bool:
-    rc, _out, _err = _remote(ssh_config, _bash(bridge_probe_script(daemon_port)), timeout=30.0)
-    return rc == 0
-
-
 def _write_keeper_state(target: str, payload: dict[str, Any]) -> None:
     current = read_keeper_state(target)
     token = payload.get("instance_token")
@@ -541,10 +535,7 @@ def cmd_attached(args: argparse.Namespace) -> int:
                 + (f" ({err.strip()})" if err.strip() else ""),
                 plan,
             )
-        if not (
-            _keeper_route_active(args.target, daemon_port)
-            or _bridge_route_reachable(ssh_config, daemon_port)
-        ):
+        if not _keeper_route_active(args.target, daemon_port):
             reverse_forwards.append(f"{daemon_port}:127.0.0.1:{daemon_port}")
     else:
         print(

@@ -196,6 +196,52 @@ def test_deploy_never_cuts_over_the_host_bridge(tmp_path, monkeypatch, capsys):
     assert "no local daemon to deploy" in capsys.readouterr().out
 
 
+def test_deploy_forward_skip_is_structured_json(tmp_path, monkeypatch, capsys):
+    _route(tmp_path, monkeypatch, FORWARD)
+    monkeypatch.setattr(m, "_service_is_running", lambda: False)
+    monkeypatch.setattr(m, "_reap_abandoned_passive", lambda *_a, **_k: {})
+    monkeypatch.setattr(m, "_json_out", lambda data: print(json.dumps(data)))
+
+    from agent_bridge import venue_cli
+    from agent_bridge import config as bridge_config
+
+    monkeypatch.setattr(bridge_config, "config_dir", lambda: tmp_path)
+    monkeypatch.setattr(bridge_config, "load_or_create_auth_token", lambda: "tok")
+
+    class _Cfg:
+        bind = "127.0.0.1"
+
+    monkeypatch.setattr(bridge_config, "load_config", lambda: _Cfg())
+
+    import zdd.breadcrumb
+
+    monkeypatch.setattr(zdd.breadcrumb, "read_breadcrumb", lambda _d: None)
+    monkeypatch.setattr(
+        zdd.breadcrumb,
+        "recover_stale_cutover",
+        lambda *_a, **_k: {"recovered": False, "reason": "clean"},
+    )
+
+    args = type(
+        "Args",
+        (),
+        {
+            "health_timeout": 1,
+            "drain_timeout": 1,
+            "force": False,
+            "json": True,
+            "recover": False,
+        },
+    )()
+    with pytest.raises(SystemExit) as exc:
+        venue_cli._cmd_deploy(args)
+    assert exc.value.code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["skipped"] is True
+    assert payload["ok"] is False
+    assert "no local daemon to deploy" in payload["error"]
+
+
 def test_deploy_rechecks_forward_inside_cutover(tmp_path, monkeypatch, capsys):
     _route(tmp_path, monkeypatch, DAEMON)
     monkeypatch.setattr(m, "_service_is_running", lambda: False)

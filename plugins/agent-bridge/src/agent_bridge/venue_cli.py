@@ -205,7 +205,7 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
         "there is no local daemon to deploy"
     )
     core = _core()
-    if core._active_endpoint_is_forward():
+    if core._active_endpoint_is_forward() and not getattr(args, "json", False):
         # The routed "old daemon" is the host's bridge, through the forward:
         # a cutover would take the route over, then drain and shut it down.
         print(

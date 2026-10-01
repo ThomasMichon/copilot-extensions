@@ -234,6 +234,26 @@ def test_without_refuse_old_a_stale_pidless_active_row_is_replaced(tmp_path: Pat
     assert routing.read_table(tmp_path)["active"]["port"] == 61002
 
 
+def test_refuse_old_allows_unchanged_stale_pidless_active_row(tmp_path: Path) -> None:
+    """The CAS compares against the raw row, not the live predecessor.
+
+    ``read_active_endpoint()`` with listener verification returns None for this
+    stale pid-less row, but the guarded publish must still recognize that the
+    raw row is unchanged instead of refusing it as a new active endpoint.
+    """
+    (tmp_path / "active.json").write_text(json.dumps(
+        {"active": {"bind": "127.0.0.1", "port": 61009}}), encoding="utf-8")
+    orch = CutoverOrchestrator(
+        tmp_path, bind="127.0.0.1", version="new", spawn_passive=lambda _p: _passive(),
+        health_check=lambda _h, _p: True, make_client=lambda _b: _Client(),
+        pick_free_port=lambda: 61002, sleep=lambda _s: None,
+        refuse_old=lambda _active: None,
+    )
+    res = orch.run(health_timeout=1, drain_timeout=1)
+    assert res.ok, res.error
+    assert routing.read_table(tmp_path)["active"]["port"] == 61002
+
+
 def test_refuse_old_with_a_routing_module_that_cant_guard_refuses(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
     routing.publish_active(tmp_path, bind="127.0.0.1", port=61001, pid=101, version="old")

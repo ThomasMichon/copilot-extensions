@@ -296,6 +296,9 @@ class CutoverOrchestrator:
             pass
         if self._refuse_current_old(result):
             return result
+        old_for_cas = self.routing.read_active_endpoint(
+            self.config_dir, verify_listener=False,
+        )
         old = self.routing.read_active_endpoint(self.config_dir)
         result.old_endpoint = old
 
@@ -387,7 +390,7 @@ class CutoverOrchestrator:
                     self.routing.publish_active_with_previous_guarded(
                         self.config_dir, bind=self.bind, port=new_port,
                         pid=getattr(handle, "pid", None), version=self.version,
-                        demote_existing=True, expected_active=old,
+                        demote_existing=True, expected_active=old_for_cas,
                         refuse_current=self.refuse_old,
                     )
             except (refused, _UnguardedRouting) as exc:
