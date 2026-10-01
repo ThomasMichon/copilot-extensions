@@ -147,12 +147,13 @@ def pr_merge_status(record: tracking.WorktreeRecord, repo) -> bool | None:
     pr = getattr(record, "pr", None)
     if not pr:
         return False
-    if getattr(pr, "state", "") == "merged":
+    head_sha = (getattr(pr, "head_sha", "") or "").strip()
+    if getattr(pr, "state", "") == "merged" and head_sha:
         return True
     number = getattr(pr, "number", None)
     slug = getattr(pr, "repo", "") or ""
     if not number and not slug:
-        return False
+        return None if getattr(pr, "state", "") == "merged" else False
     if not number or not slug:
         return None
     prcfg = repo.pr
@@ -164,7 +165,27 @@ def pr_merge_status(record: tracking.WorktreeRecord, repo) -> bool | None:
             slug, int(number),
             api_base=getattr(prcfg, "api_base", "") or "", token=token,
         )
-        return bool(getattr(result, "merged", False))
+        merged = bool(getattr(result, "merged", False)) or (
+            (getattr(result, "state", "") or "").strip().lower() == "merged"
+        )
+        if not merged:
+            return False
+        if not head_sha:
+            head_sha = (getattr(result, "head_sha", "") or "").strip()
+            if not head_sha:
+                try:
+                    observed = provider.observe_head(
+                        slug, int(number),
+                        api_base=getattr(prcfg, "api_base", "") or "",
+                        token=token,
+                    )
+                    head_sha = (getattr(observed, "head_sha", "") or "").strip()
+                except Exception:
+                    head_sha = ""
+            if head_sha:
+                pr.head_sha = head_sha
+        pr.state = "merged"
+        return True
     except Exception:
         return None
 
@@ -215,9 +236,14 @@ def upstream_match_is_trustworthy(
     pr = getattr(record, "pr", None)
     head_sha = (getattr(pr, "head_sha", "") or "").strip()
     if not head_sha:
-        if pr_merge_status(record, repo) is not False:
+        merge_status = pr_merge_status(record, repo)
+        head_sha = (getattr(pr, "head_sha", "") or "").strip()
+        if not head_sha and merge_status is not False:
             return False
-        return not other_pr_branches_unreachable_from_upstream(record, upstream, cwd=cwd)
+        if not head_sha:
+            return not other_pr_branches_unreachable_from_upstream(
+                record, upstream, cwd=cwd,
+            )
     return not content_exceeds_merged_head_any(record, content_ref, upstream, cwd=cwd)
 
 

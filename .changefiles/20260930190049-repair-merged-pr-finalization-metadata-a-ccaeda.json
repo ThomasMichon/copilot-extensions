@@ -1,0 +1,9 @@
+{
+  "comment": "Repair merged PR finalization metadata and reclaim confirmed-merged orphan PR claims",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

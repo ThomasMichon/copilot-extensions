@@ -14,7 +14,7 @@ import pytest
 
 import agent_worktrees.__main__ as m
 from agent_worktrees import config as cfg
-from agent_worktrees import finalize, tracking
+from agent_worktrees import cleanup, finalize, providers, tracking
 
 
 def _seed_project(tmp_path, monkeypatch, machine="m", project="p"):
@@ -27,7 +27,13 @@ def _claim(kind, ref, state="active", note=""):
 
 
 def _config(machine="m", project="p"):
-    return types.SimpleNamespace(machine=machine, repo_name=project)
+    return types.SimpleNamespace(
+        machine=machine,
+        repo_name=project,
+        default_repo=types.SimpleNamespace(
+            pr=types.SimpleNamespace(provider="github", api_base=""),
+        ),
+    )
 
 
 # ── rehome_abandoned_obligations / load_orphaned_obligations ─────────────────
@@ -141,6 +147,107 @@ def test_claims_orphans_empty_message(tmp_path, monkeypatch, capfd):
     rc = m.cmd_claims(argparse.Namespace(target=["orphans"], json=False))
     assert rc == 0
     assert "no re-homed obligations" in capfd.readouterr().out.lower()
+
+
+@pytest.mark.parametrize(
+    ("ref", "expected"),
+    [
+        (
+            "https://github.com/example/project/pull/42",
+            ("github", "example/project", 42, "github.com"),
+        ),
+        ("example/project#42", ("github", "example/project", 42, "")),
+    ],
+)
+def test_pr_claim_target_parses_github_references(ref, expected):
+    prcfg = types.SimpleNamespace(provider="github", api_base="")
+    assert cleanup._pr_claim_target(ref, prcfg) == expected
+
+
+def test_pr_claim_target_preserves_configured_github_enterprise_api():
+    prcfg = types.SimpleNamespace(
+        provider="github", api_base="https://github.example.com/api/v3",
+    )
+    assert cleanup._pr_claim_target(
+        "https://github.example.com/owner/project/pull/42", prcfg,
+    ) == ("github", "owner/project", 42, "https://github.example.com/api/v3")
+
+
+def test_pr_claim_target_rejects_unconfigured_github_enterprise_host():
+    prcfg = types.SimpleNamespace(provider="github", api_base="")
+    assert cleanup._pr_claim_target(
+        "https://untrusted.example/owner/project/pull/42", prcfg,
+    ) is None
+
+
+def test_pr_claim_target_rejects_unqualified_and_credentialed_urls():
+    prcfg = types.SimpleNamespace(provider="github", api_base="")
+    assert cleanup._pr_claim_target("#42", prcfg) is None
+    assert cleanup._pr_claim_target(
+        "https://user:password@example.com/owner/repo/pull/42", prcfg,
+    ) is None
+
+
+def test_pr_claim_target_resolves_configured_gitea_and_azure_devops():
+    gitea = types.SimpleNamespace(
+        provider="gitea", api_base="https://forge.example/gitea",
+    )
+    assert cleanup._pr_claim_target(
+        "https://forge.example/owner/project/pulls/12", gitea,
+    ) == ("gitea", "owner/project", 12, "https://forge.example/gitea")
+
+    ado = types.SimpleNamespace(provider="github", api_base="")
+    assert cleanup._pr_claim_target(
+        "https://dev.azure.com/acme/Project/_git/repo/pullrequest/34", ado,
+    ) == (
+        "azure-devops", "Project/repo", 34, "https://dev.azure.com/acme",
+    )
+
+
+def test_claims_cleanup_releases_only_provider_confirmed_merged_prs(
+        tmp_path, monkeypatch):
+    _seed_project(tmp_path, monkeypatch)
+    ref = "https://github.com/example/project/pull/42"
+    tracking.rehome_abandoned_obligations(
+        [_claim("pr", ref)], source_worktree="wt-owner", config=_config())
+
+    class Provider:
+        def get_pull(self, repo, number, **kwargs):
+            assert repo == "example/project"
+            assert number == 42
+            return types.SimpleNamespace(state="merged", merged=True)
+
+    monkeypatch.setattr(providers, "get_provider", lambda _name: Provider())
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_a, **_k: None)
+    config = _config()
+
+    preview = cleanup.cleanup_orphanage(config, apply=False)
+    assert preview[0]["status"] == "reclaimed"
+    assert "would release" in preview[0]["detail"]
+    assert len(tracking.load_orphaned_obligations()) == 1
+
+    applied = cleanup.cleanup_orphanage(config, apply=True)
+    assert applied[0]["status"] == "reclaimed"
+    assert tracking.load_orphaned_obligations() == []
+
+
+def test_claims_cleanup_keeps_unmerged_or_unqueryable_pr_claims(
+        tmp_path, monkeypatch):
+    _seed_project(tmp_path, monkeypatch)
+    ref = "https://github.com/example/project/pull/42"
+    tracking.rehome_abandoned_obligations(
+        [_claim("pr", ref)], source_worktree="wt-owner", config=_config())
+
+    class Provider:
+        def get_pull(self, repo, number, **kwargs):
+            return types.SimpleNamespace(state="closed", merged=False)
+
+    monkeypatch.setattr(providers, "get_provider", lambda _name: Provider())
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_a, **_k: None)
+
+    result = cleanup.cleanup_orphanage(_config(), apply=True)
+    assert result[0]["status"] == "skipped"
+    assert tracking.load_orphaned_obligations()[0]["ref"] == ref
 
 
 # ── finalize wiring: --abandon re-homes only unsettled, before releasing ─────

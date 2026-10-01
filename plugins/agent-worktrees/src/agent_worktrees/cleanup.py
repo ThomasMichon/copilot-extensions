@@ -29,10 +29,12 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 from agent_procutil import no_window_flags
 
@@ -259,11 +261,119 @@ def reclaim_worktree(
     return ReclaimResult("failed", f"finalize refused: {detail}")
 
 
+def _pr_claim_target(
+    ref: str, prcfg: cfg.PRConfig,
+) -> tuple[str, str, int, str] | None:
+    """Resolve a stored PR claim into provider, repo, number, and API base."""
+    configured_provider = (getattr(prcfg, "provider", "") or "").strip().lower()
+    api_base = (getattr(prcfg, "api_base", "") or "").strip()
+    short = re.fullmatch(
+        r"([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#([0-9]+)", (ref or "").strip(),
+    )
+    if short:
+        if not configured_provider:
+            return None
+        return configured_provider, short.group(1), int(short.group(2)), api_base
+
+    parsed = urlparse((ref or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+    if parsed.username or parsed.password:
+        return None
+    host = parsed.hostname.lower()
+    parts = [part for part in parsed.path.split("/") if part]
+
+    if host == "github.com" or (
+        configured_provider == "github"
+        and len(parts) >= 4
+        and parts[-2] == "pull"
+    ):
+        if len(parts) < 4 or parts[-2] != "pull" or not parts[-1].isdigit():
+            return None
+        repo_parts = parts[-4:-2]
+        if len(repo_parts) != 2:
+            return None
+        if api_base:
+            configured = urlparse(
+                api_base if "://" in api_base else f"//{api_base}"
+            )
+            if not configured.hostname or configured.hostname.lower() != host:
+                return None
+        elif host != "github.com":
+            return None
+        api_base = api_base or host
+        return "github", "/".join(repo_parts), int(parts[-1]), api_base
+
+    if host == "dev.azure.com" or host.endswith(".visualstudio.com"):
+        try:
+            pullrequest_at = parts.index("pullrequest")
+            git_at = parts.index("_git")
+            number = parts[pullrequest_at + 1]
+            project, name = parts[git_at - 1], parts[git_at + 1]
+        except (ValueError, IndexError):
+            return None
+        if not number.isdigit() or pullrequest_at + 1 != len(parts) - 1:
+            return None
+        if host == "dev.azure.com":
+            if not parts:
+                return None
+            api_base = f"{parsed.scheme}://{host}/{parts[0]}"
+        else:
+            api_base = f"{parsed.scheme}://{host}"
+        return "azure-devops", f"{project}/{name}", int(number), api_base
+
+    if configured_provider == "gitea":
+        if len(parts) < 4 or parts[-2] != "pulls" or not parts[-1].isdigit():
+            return None
+        configured = urlparse(
+            api_base if "://" in api_base else f"//{api_base}"
+        )
+        if not configured.hostname or configured.hostname.lower() != host:
+            return None
+        repo_parts = parts[-4:-2]
+        if len(repo_parts) != 2:
+            return None
+        return "gitea", "/".join(repo_parts), int(parts[-1]), api_base
+    return None
+
+
+def reclaim_pr(
+    ref: str, config: cfg.Config, *, apply: bool,
+) -> ReclaimResult:
+    """Release an orphaned PR claim only after the provider confirms it merged."""
+    prcfg = getattr(getattr(config, "default_repo", None), "pr", None)
+    if prcfg is None:
+        return ReclaimResult("failed", "PR provider configuration is unavailable")
+    target = _pr_claim_target(ref, prcfg)
+    if target is None:
+        return ReclaimResult("failed", "PR reference cannot be resolved safely")
+    provider_name, repo, number, api_base = target
+    try:
+        from . import providers
+
+        provider = providers.get_provider(provider_name)
+        token = providers.account_token_for_slug(repo, prcfg)
+        pull = provider.get_pull(
+            repo, number, api_base=api_base, token=token,
+        )
+    except Exception as exc:
+        return ReclaimResult("failed", f"PR provider lookup failed: {exc}")
+    merged = bool(getattr(pull, "merged", False)) or (
+        (getattr(pull, "state", "") or "").strip().lower() == "merged"
+    )
+    if not merged:
+        return ReclaimResult("skipped", "PR is not confirmed merged")
+    action = "would release" if not apply else "released"
+    return ReclaimResult("reclaimed", f"{action} confirmed merged PR {ref}")
+
+
 #: Kinds this consumer knows how to dispose of. Others are surfaced as
 #: ``unsupported`` (entry retained) until a reclaimer is wired.
 _RECLAIMERS = {
     "codespace": lambda ref, apply, config: reclaim_codespace(ref, apply=apply),
     "worktree": lambda ref, apply, config: reclaim_worktree(
+        ref, config, apply=apply),
+    "pr": lambda ref, apply, config: reclaim_pr(
         ref, config, apply=apply),
 }
 

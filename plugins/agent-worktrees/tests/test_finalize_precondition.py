@@ -135,6 +135,90 @@ def test_worktree_branch_prefers_tracked_host_branch():
     assert finalize._worktree_branch(None, "managed") == "worktree/managed"
 
 
+def test_precondition_refreshes_missing_head_for_provider_confirmed_merge(
+    refspec_worktree, monkeypatch,
+):
+    from agent_worktrees import providers
+    from agent_worktrees.providers.base import PullResult
+
+    env = refspec_worktree
+    head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
+    _land_on_master(env, squash=False)
+
+    class Provider:
+        def get_pull(self, repo, number, **kwargs):
+            return PullResult(state="merged", merged=True)
+
+        def observe_head(self, repo, number, **kwargs):
+            return PullResult(head_sha=head_sha)
+
+    monkeypatch.setattr(providers, "get_provider", lambda _name: Provider())
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_a, **_k: None)
+    pr = SimpleNamespace(
+        branch=env.slug, state="merged", head_sha="", number=7,
+        repo="owner/repo", provider="github",
+    )
+    record = SimpleNamespace(
+        worktree_id=env.worktree_id, pr=pr, prs=[pr], repo="owner/repo",
+    )
+    repo = SimpleNamespace(
+        remote="origin",
+        default_branch="master",
+        pr=SimpleNamespace(
+            enabled=True, branch=env.slug, provider="github", api_base="",
+        ),
+    )
+
+    ok, err = finalize._pr_finalize_precondition(
+        record, repo, str(env.clone), str(env.clone),
+    )
+
+    assert ok is True
+    assert err is None
+    assert pr.head_sha == head_sha
+
+
+def test_precondition_still_blocks_new_commits_after_refreshed_merged_head(
+    refspec_worktree, monkeypatch,
+):
+    from agent_worktrees import providers
+    from agent_worktrees.providers.base import PullResult
+
+    env = refspec_worktree
+    head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
+    _land_on_master(env, squash=False)
+    _commit(env.clone, "later.txt", "not part of the merged PR\n")
+
+    class Provider:
+        def get_pull(self, repo, number, **kwargs):
+            return PullResult(state="merged", merged=True, head_sha=head_sha)
+
+    monkeypatch.setattr(providers, "get_provider", lambda _name: Provider())
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_a, **_k: None)
+    pr = SimpleNamespace(
+        branch=env.slug, state="merged", head_sha="", number=7,
+        repo="owner/repo", provider="github",
+    )
+    record = SimpleNamespace(
+        worktree_id=env.worktree_id, pr=pr, prs=[pr], repo="owner/repo",
+    )
+    repo = SimpleNamespace(
+        remote="origin",
+        default_branch="master",
+        pr=SimpleNamespace(
+            enabled=True, branch=env.slug, provider="github", api_base="",
+        ),
+    )
+
+    ok, err = finalize._pr_finalize_precondition(
+        record, repo, str(env.clone), str(env.clone),
+    )
+
+    assert ok is False
+    assert err is not None
+    assert "further commits" in err
+
+
 # ---------------------------------------------------------------------------
 # _resolve_content_ref
 # ---------------------------------------------------------------------------
