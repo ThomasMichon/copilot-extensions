@@ -454,6 +454,21 @@ def test_active_local_forward_beacon_requires_live_matching_owner(store):
     assert olf.read_active_local_forwards() == {}
 
 
+def test_active_local_forward_beacon_uses_owner_liveness_threshold(store):
+    owner._write_liveness(300.0)
+    olf.write_active_local_forwards({"cs-1": {49152: 3000}})
+    raw = json.loads(olf.ACTIVE_LOCAL_FORWARDS_FILE.read_text(encoding="utf-8"))
+    now = time.time()
+
+    raw["heartbeat_at"] = now - 120.0
+    olf.ACTIVE_LOCAL_FORWARDS_FILE.write_text(json.dumps(raw), encoding="utf-8")
+    assert olf.read_active_local_forwards(now=now) == {"cs-1": {49152: 3000}}
+
+    raw["heartbeat_at"] = now - 901.0
+    olf.ACTIVE_LOCAL_FORWARDS_FILE.write_text(json.dumps(raw), encoding="utf-8")
+    assert olf.read_active_local_forwards(now=now) == {}
+
+
 async def test_dynamic_reassignment_stops_replacement_when_hold_was_released(store):
     channels = []
 

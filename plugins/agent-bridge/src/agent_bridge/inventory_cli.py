@@ -190,7 +190,11 @@ def _launch_cli_mode_session(
         except (json.JSONDecodeError, TypeError):
             embody_out = {}
             malformed_output = True
-    final = client.get_cli_mode_reservation(worktree_id) or reservation
+    try:
+        final = client.get_cli_mode_reservation(worktree_id) or reservation
+    except Exception:
+        _release_unclaimed_cli_mode_reservation(client, worktree_id, reservation)
+        raise
     session = embody_out.get("session")
     exit_code = getattr(result, "returncode", None)
     if exit_code != 0 or malformed_output or not session:

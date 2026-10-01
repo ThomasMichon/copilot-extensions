@@ -218,15 +218,23 @@ def test_os_lock_released_when_holder_process_dies(tmp_path):
         ),
         encoding="utf-8",
     )
+    env = {
+        **__import__("os").environ,
+        "PYTHONPATH": __import__("os").pathsep.join(sys.path),
+    }
     proc = subprocess.Popen(
-        [sys.executable, str(script), str(tmp_path)],
+        [sys.executable, "-u", str(script), str(tmp_path)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        env=env,
     )
     try:
         assert proc.stdout is not None
-        assert proc.stdout.readline().strip() == "READY"
+        line = proc.stdout.readline().strip()
+        if line != "READY":
+            stderr = proc.stderr.read() if proc.stderr is not None else ""
+            raise AssertionError(f"child did not acquire lock: stdout={line!r} stderr={stderr!r}")
         proc.kill()
         proc.wait(timeout=5)
         with _holds(tmp_path, lock_timeout=1.0, lock_poll=0.01).lock("repo-1"):
@@ -266,20 +274,33 @@ def test_two_process_contenders_never_both_hold_lock(tmp_path):
     active = tmp_path / "active"
     overlap = tmp_path / "overlap"
     procs: list[subprocess.Popen[str]] = []
+    env = {
+        **__import__("os").environ,
+        "PYTHONPATH": __import__("os").pathsep.join(sys.path),
+    }
     with _holds(tmp_path, lock_timeout=1.0, lock_poll=0.01).lock("repo-1"):
         for name in ("a", "b"):
             procs.append(
                 subprocess.Popen(
-                    [sys.executable, str(script), str(tmp_path), str(active), str(overlap), name],
+                    [
+                        sys.executable,
+                        "-u",
+                        str(script),
+                        str(tmp_path),
+                        str(active),
+                        str(overlap),
+                        name,
+                    ],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
+                    env=env,
                 )
             )
         time.sleep(0.25)
     outputs = [proc.communicate(timeout=10) for proc in procs]
 
-    assert [proc.returncode for proc in procs] == [0, 0]
+    assert [proc.returncode for proc in procs] == [0, 0], outputs
     assert not overlap.exists()
     assert sorted(line for out, _err in outputs for line in out.splitlines()) == [
         "ENTER a",

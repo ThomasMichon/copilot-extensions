@@ -465,25 +465,21 @@ def test_stop_keeper_os_error_does_not_skip_release_or_deregister(
     assert seams.deregister == ["sid-42"]
 
 
-def test_ensure_keeper_os_error_is_reported_without_traceback(monkeypatch, capsys):
+def test_ensure_keeper_os_error_fails_launch_without_starting_session(seams, monkeypatch, capsys):
     monkeypatch.setattr(
         forward_keeper,
         "ensure_running",
         lambda *a, **k: (_ for _ in ()).throw(PermissionError("pending delete")),
     )
-    adapter = detach._ContainerAdapter(
-        name="repo-1",
-        ssh_config=object(),
-        hold_id="anchor-repo@repo-1",
-        remote_env=None,
-        relay_port=None,
-        host_relay_port=None,
+
+    rc = detach.cmd_detach(
+        _args(), require_live_relay_port=lambda: 61234, relay_healthy=lambda p: True
     )
 
-    result = adapter.ensure_keeper(venue_port=41234, mux="wt-anchor-repo")
+    assert rc == 1
+    assert "pending delete" in capsys.readouterr().err
+    assert not any("agent-worktrees embody" in cmd for cmd in seams.run)
 
-    assert result == {"started": False, "state": {"error": "pending delete"}}
-    assert "[WARN] could not update the forward keeper" in capsys.readouterr().err
 
 
 def test_forward_keeper_holds_share_one_container_forward(tmp_path, monkeypatch):

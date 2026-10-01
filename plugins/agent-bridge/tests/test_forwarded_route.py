@@ -174,6 +174,26 @@ def test_service_stop_never_kills_the_forwards_listener(tmp_path, monkeypatch):
     assert m._service_pid() is None  # nor is it reported as the bridge
 
 
+def test_service_stop_treats_forwarded_route_as_local_service_down(
+    tmp_path, monkeypatch, capsys,
+):
+    _route(tmp_path, monkeypatch, FORWARD)
+    monkeypatch.setattr(m, "_systemd_available", lambda: True)
+    monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: None)
+    monkeypatch.setattr(m, "_read_pid_file", lambda: None)
+    monkeypatch.setattr(m, "_pid_from_lock", lambda port: 4242 if port == m._service_port() else None)
+    monkeypatch.setattr(m, "_pid_on_port", lambda _port: 4242)
+    monkeypatch.setattr(m, "_pid_is_agent_bridge", lambda _pid, *_a: False)
+    monkeypatch.setattr(m, "_kill_pid", lambda _pid: (_ for _ in ()).throw(AssertionError("no kill")))
+    monkeypatch.setattr(m, "_service_is_running", lambda: True)
+
+    m._service_stop()
+
+    output = capsys.readouterr()
+    assert "[OK] agent-bridge stopped" in output.out
+    assert "still responding" not in output.err
+
+
 def test_service_stop_kills_a_port_listener_only_if_it_is_a_bridge(tmp_path, monkeypatch):
     _route(tmp_path, monkeypatch, {"bind": "127.0.0.1", "port": 39881, "generation": 1})
     killed = []

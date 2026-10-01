@@ -35,10 +35,12 @@ class _FakeClient:
         reservation: dict[str, Any] | None = None,
         final_reservation: dict[str, Any] | None = None,
         create_error: BridgeClientError | None = None,
+        get_error: Exception | None = None,
     ) -> None:
         self._reservation = reservation or {}
         self._final_reservation = final_reservation
         self._create_error = create_error
+        self._get_error = get_error
         self.create_calls: list[tuple[str, float]] = []
         self.get_calls: list[str] = []
         self.release_calls: list[tuple[str, str | None, bool]] = []
@@ -53,6 +55,8 @@ class _FakeClient:
 
     def get_cli_mode_reservation(self, worktree_id: str) -> dict[str, Any]:
         self.get_calls.append(worktree_id)
+        if self._get_error is not None:
+            raise self._get_error
         if self._final_reservation is not None:
             return self._final_reservation
         return self._reservation
@@ -206,4 +210,19 @@ def test_launch_failure_releases_only_the_original_reservation_id() -> None:
         return _FakeCompletedProcess(3, stdout="")
 
     _launch_cli_mode_session(client, "wt-A", run=fake_run)
+    assert client.release_calls == [("wt-A", "r1", True)]
+
+
+def test_launch_releases_reservation_when_final_reservation_read_raises() -> None:
+    client = _FakeClient(
+        reservation={"reservation_id": "r1"},
+        get_error=RuntimeError("bridge unavailable"),
+    )
+
+    def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
+        return _FakeCompletedProcess(0, stdout=_embody_stdout())
+
+    with pytest.raises(RuntimeError, match="bridge unavailable"):
+        _launch_cli_mode_session(client, "wt-A", run=fake_run)
+
     assert client.release_calls == [("wt-A", "r1", True)]

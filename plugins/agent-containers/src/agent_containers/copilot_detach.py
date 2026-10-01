@@ -262,19 +262,15 @@ class _ContainerAdapter:
     def ensure_keeper(self, *, venue_port: int, mux: str) -> dict[str, Any]:
         from . import forward_keeper
 
-        try:
-            return forward_keeper.ensure_running(
-                self.name,
-                venue_port=venue_port,
-                mux=mux,
-                hold_id=self.hold_id,
-                relay_port=self.relay_port,
-                host_relay_port=self.host_relay_port,
-                mux_alive=lambda held_mux: forward_keeper._mux_exists(self.ssh_config, held_mux),
-            )
-        except (RuntimeError, OSError) as exc:
-            print(f"[WARN] could not update the forward keeper: {exc}", file=sys.stderr)
-            return {"started": False, "state": {"error": str(exc)}}
+        return forward_keeper.ensure_running(
+            self.name,
+            venue_port=venue_port,
+            mux=mux,
+            hold_id=self.hold_id,
+            relay_port=self.relay_port,
+            host_relay_port=self.host_relay_port,
+            mux_alive=lambda held_mux: forward_keeper._mux_exists(self.ssh_config, held_mux),
+        )
 
     def stop_keeper(self) -> bool:
         from . import forward_keeper

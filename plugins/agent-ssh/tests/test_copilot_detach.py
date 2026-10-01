@@ -674,6 +674,30 @@ def test_rejoin_reuses_keeper_and_does_not_stop_it(seams, monkeypatch, capsys):
     assert seams.stop_keeper == []
 
 
+def test_launch_failure_releases_reused_keeper_hold(seams, monkeypatch):
+    monkeypatch.setattr(
+        detach,
+        "ensure_keeper",
+        lambda *a, **k: {"started": False, "state": {"pid": 123}},
+    )
+    unseeded = json.dumps({"ok": True, "created": True, "seed_submitted": False})
+
+    def remote(_cfg, command, *, timeout=60.0):
+        seams.remote.append(command)
+        if "agent-worktrees embody" in command:
+            return 0, unseeded, ""
+        if "tmux kill-session" in command:
+            return 0, "STOPPED\n", ""
+        return 0, "", ""
+
+    monkeypatch.setattr(detach, "_remote", remote)
+
+    assert detach.cmd_detach(_args()) == 1
+
+    assert any("tmux kill-session" in command for command in seams.remote)
+    assert seams.stop_keeper == [("devbox", "anchor-repo@devbox")]
+
+
 def test_stop_kills_mux_stops_keeper_and_deregisters(seams, capsys):
     rc = detach.cmd_stop(_args(stop=True, detach=False))
     assert rc == 0

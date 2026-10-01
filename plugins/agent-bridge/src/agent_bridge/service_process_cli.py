@@ -736,10 +736,13 @@ def _service_stop() -> None:
         return
 
     for _ in range(10):
-        locks = {core._pid_from_lock(core._service_port()), core._pid_from_lock(0)}
+        forwarded = core._active_endpoint_is_forward()
+        lock_ports = {0} if forwarded else {core._service_port(), 0}
+        locks = {core._pid_from_lock(port) for port in lock_ports}
         locks.discard(None)
         live_victims = {victim for victim in victims if core._pid_is_agent_bridge(victim)}
-        if not core._service_is_running() and not locks and not live_victims:
+        local_service_down = forwarded or not core._service_is_running()
+        if local_service_down and not locks and not live_victims:
             print("[OK] agent-bridge stopped")
             return
         time.sleep(1)

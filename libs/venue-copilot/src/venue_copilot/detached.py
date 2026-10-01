@@ -147,7 +147,7 @@ def launch_detached(
 ) -> tuple[int, dict[str, Any]]:
     reservation: dict[str, Any] | None = None
     created = False
-    keeper_started = False
+    keeper_hold_acquired = False
     ok = False
     try:
         daemon_port = resolve_daemon_port()
@@ -182,7 +182,7 @@ def launch_detached(
             )
 
         keeper = adapter.ensure_keeper(venue_port=daemon_port, mux=plan["mux_session"])
-        keeper_started = bool(keeper.get("started"))
+        keeper_hold_acquired = True
         if not _bridge_path_ok(adapter, daemon_port):
             return 1, _payload(
                 False,
@@ -313,7 +313,7 @@ def launch_detached(
                 "stop": adapter.stop_command(plan),
             },
         )
-    except (RuntimeError, VenueCopilotError, subprocess.SubprocessError) as exc:
+    except (RuntimeError, OSError, VenueCopilotError, subprocess.SubprocessError) as exc:
         return 1, _payload(False, plan, error=str(exc))
     finally:
         if reservation:
@@ -322,7 +322,7 @@ def launch_detached(
             if created:
                 progress("cleanup", f"stopping the unrepresented session {plan['mux_session']}")
                 adapter.run(stop_script(plan["mux_session"], verify=False), timeout=60.0)
-            if keeper_started:
+            if keeper_hold_acquired:
                 adapter.stop_keeper()
 
 

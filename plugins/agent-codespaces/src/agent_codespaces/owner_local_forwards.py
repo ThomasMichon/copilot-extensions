@@ -10,7 +10,6 @@ from typing import Any
 from .config import RUNTIME_DIR, ensure_runtime_dir
 
 ACTIVE_LOCAL_FORWARDS_FILE = RUNTIME_DIR / "connection-owner.local-forwards.json"
-_ACTIVE_TTL = 60.0
 
 
 def _port_map(value: Any) -> dict[str, int]:
@@ -150,15 +149,16 @@ def read_active_local_forwards(*, now: float | None = None) -> dict[str, dict[in
         heartbeat = float(raw.get("heartbeat_at"))
     except (TypeError, ValueError):
         return {}
-    if (time.time() if now is None else now) - heartbeat > _ACTIVE_TTL:
-        return {}
     from . import connection_owner as owner
 
     live = owner.read_liveness()
+    if live is None or not live.is_fresh(now):
+        return {}
+    if (time.time() if now is None else now) - heartbeat > live.staleness_threshold():
+        return {}
     try:
         same_owner = (
-            live is not None and live.is_fresh(now)
-            and int(raw.get("pid", 0)) == live.pid
+            int(raw.get("pid", 0)) == live.pid
             and str(raw.get("host", "")) == live.host
             and float(raw.get("process_started_at", 0.0)) == live.process_started_at
         )
