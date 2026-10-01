@@ -286,11 +286,11 @@ def test_pr_claim_target_rejects_gitea_claim_under_different_root_path():
 
 
 def test_pr_claim_target_rejects_noncanonical_configured_github_enterprise_url():
-    # The strict "exactly owner/repo/pull/N, no query/fragment" grammar was
-    # previously only enforced for the UNCONFIGURED (public github.com)
-    # branch -- a configured GitHub Enterprise claim accepted any extra
-    # leading segments and silently stripped them via a trailing-four-parts
-    # slice, extracting the wrong repo identity from a noncanonical URL.
+    # A configured GitHub Enterprise claim must match the EXACT canonical
+    # owner/repo/pull/N shape (four path segments, no query/fragment) --
+    # extra leading segments, or a query/fragment suffix, must be rejected
+    # rather than silently stripped down to the trailing four segments,
+    # which would extract the wrong repo identity.
     ghe = types.SimpleNamespace(
         provider="github", api_base="https://github.example.com/api/v3",
     )
@@ -306,11 +306,11 @@ def test_pr_claim_target_rejects_noncanonical_configured_github_enterprise_url()
 
 
 def test_pr_claim_target_rejects_noncanonical_azure_devops_url():
-    # The previous parser located "pullrequest"/"_git" anywhere in the path
-    # via list.index(), tolerating an injected noncanonical segment (e.g.
-    # between the org and project) while still happening to extract a
-    # project/repo/number -- silently accepting a malformed URL as though
-    # it were the genuine canonical shape.
+    # An Azure DevOps claim must match the EXACT canonical
+    # org/project/_git/repo/pullrequest/N shape -- an injected noncanonical
+    # segment anywhere in the path (e.g. between the org and project), or a
+    # query/fragment suffix, must be rejected rather than extracting a
+    # project/repo/number from a malformed URL as though it were genuine.
     ado = types.SimpleNamespace(
         provider="azure-devops", api_base="https://dev.azure.com/acme",
     )
@@ -328,9 +328,10 @@ def test_pr_claim_target_rejects_noncanonical_azure_devops_url():
 
 
 def test_pr_claim_target_rejects_noncanonical_gitea_url():
-    # Previously "at least four trailing segments" (remaining[-4:-2])
-    # silently stripped any extra noncanonical segments ahead of the
-    # trailing owner/project/pulls/N -- require exactly four instead.
+    # A Gitea claim must have EXACTLY four remaining segments
+    # (owner/project/pulls/N) after the configured root is stripped --
+    # extra noncanonical segments ahead of that trailing four, or a
+    # query/fragment suffix, must be rejected.
     gitea = types.SimpleNamespace(
         provider="gitea", api_base="https://forge.example/gitea",
     )

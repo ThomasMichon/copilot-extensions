@@ -362,12 +362,10 @@ def _pr_claim_target(
         if host == expected_host or (len(parts) >= 4 and parts[-2] == "pull"):
             # Require the EXACT canonical ``owner/repo/pull/N`` shape (four
             # segments, no query/fragment) regardless of whether
-            # ``api_base`` is configured -- previously this strict check
-            # only ran in the unconfigured branch below, so a configured
-            # GitHub Enterprise claim accepted ANY extra leading segments
-            # (e.g. ``.../unrelated/owner/repo/pull/42``) and silently
-            # stripped them via ``parts[-4:-2]``, extracting the wrong
-            # repo identity from a noncanonical URL.
+            # ``api_base`` is configured -- an URL carrying extra leading
+            # segments (e.g. ``.../unrelated/owner/repo/pull/42``) is
+            # rejected rather than silently stripped down to its trailing
+            # four segments, which would extract the wrong repo identity.
             if (
                 len(parts) != 4
                 or parts[-2] != "pull"
@@ -401,13 +399,12 @@ def _pr_claim_target(
         # Require the EXACT canonical shape -- ``<org>/<project>/_git/<repo>
         # /pullrequest/<N>`` on ``dev.azure.com`` (6 segments), or
         # ``<project>/_git/<repo>/pullrequest/<N>`` on a classic
-        # ``*.visualstudio.com`` org host (5 segments) -- rather than
-        # locating "pullrequest"/"_git" anywhere in the path via
-        # ``list.index()``. The previous index-based search tolerated extra
-        # noncanonical segments threaded through the path (e.g. an injected
-        # segment between the org and project) while still happening to
-        # extract a project/repo/number, silently accepting a malformed URL
-        # as though it were the genuine canonical one.
+        # ``*.visualstudio.com`` org host (5 segments). A URL carrying an
+        # extra/noncanonical segment anywhere in the path (e.g. injected
+        # between the org and project) is rejected outright rather than
+        # located by searching for "pullrequest"/"_git" anywhere in the
+        # path, which would still happen to extract a project/repo/number
+        # from a malformed URL as though it were the genuine canonical one.
         expected_len = 6 if host == "dev.azure.com" else 5
         if (
             len(parts) != expected_len
@@ -448,10 +445,10 @@ def _pr_claim_target(
         if base_parts and parts[:len(base_parts)] != base_parts:
             return None
         remaining = parts[len(base_parts):]
-        # Require the EXACT canonical ``owner/project/pulls/N`` shape (four
-        # remaining segments) rather than merely "at least four" -- the
-        # latter silently accepted extra noncanonical segments ahead of the
-        # trailing four and stripped them via ``remaining[-4:-2]``.
+        # Require the EXACT canonical ``owner/project/pulls/N`` shape --
+        # exactly four remaining segments after the configured root is
+        # stripped. Any extra/noncanonical segment ahead of that trailing
+        # four is rejected rather than silently stripped off.
         if (
             len(remaining) != 4
             or remaining[-2] != "pulls"

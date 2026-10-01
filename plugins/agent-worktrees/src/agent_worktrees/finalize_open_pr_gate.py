@@ -36,19 +36,27 @@ from . import output, tracking
 from .config import Config
 
 
-def _authority_host(value: str) -> str:
-    """Normalize a provider ``authority_endpoint()`` result OR a tracked PR
-    URL down to a comparable ``host[:port]`` -- GitHub's endpoint is a bare
-    host, while Azure DevOps' and Gitea's is a full ``api_base`` URL.
+def _authority_origin(value: str) -> tuple[str, str, int] | None:
+    """Parse ``value`` (an ``authority_endpoint()`` result OR a tracked PR
+    URL) into a comparable ``(scheme, host, port)`` origin triple, or
+    ``None`` when it cannot be confidently parsed (no host). Port defaults
+    per-scheme (``http`` -> 80, ``https`` -> 443) when not explicit, so
+    ``http://host`` and ``http://host:80`` compare equal while
+    ``http://host`` and ``https://host`` -- a DIFFERENT origin entirely --
+    do not.
     """
     value = (value or "").strip()
     if not value:
-        return ""
+        return None
     parsed = urlparse(value if "://" in value else f"//{value}")
     host = (parsed.hostname or "").lower()
     if not host:
-        return ""
-    return f"{host}:{parsed.port}" if parsed.port else host
+        return None
+    scheme = (parsed.scheme or "https").lower()
+    port = parsed.port
+    if port is None:
+        port = {"http": 80, "https": 443}.get(scheme)
+    return scheme, host, port
 
 
 def _authority_path_parts(value: str) -> list[str]:
@@ -67,21 +75,29 @@ def _authority_path_parts(value: str) -> list[str]:
 
 def _authority_matches(tracked_url: str, expected_endpoint: str) -> bool:
     """True iff ``tracked_url``'s authority is consistent with the
-    configured provider's ``expected_endpoint`` -- host[:port] must match
-    exactly, AND when the expected endpoint itself carries a path (Azure
-    DevOps' organization, or a path-hosted Gitea instance's root), the
-    tracked URL's path must fall under that same root. Host/port equality
-    alone is not enough: ``_authority_host`` discards any path, so two
+    configured provider's ``expected_endpoint`` -- the full origin (scheme,
+    host, and effective port) must match exactly, AND when the expected
+    endpoint itself carries a path (Azure DevOps' organization, or a
+    path-hosted Gitea instance's root), the tracked URL's path must fall
+    under that same root.
+
+    Fails CLOSED (returns ``False``) whenever either side cannot be
+    confidently parsed into a definite origin -- the caller must then
+    treat the PR as indeterminate rather than silently skip the check.
+    Comparing host[:port] alone is not enough either: it collapses
+    ``http://`` and ``https://`` onto the same value, which would let a
+    tracked PR on one scheme be confirmed against a configured endpoint on
+    the OTHER scheme as though they were the same service. And two
     different Azure DevOps organizations -- or two different Gitea
     instances path-hosted on the same shared host -- would otherwise
     compare as the same authority, letting a stale tracked PR be re-queried
     against an unrelated org/instance and confirm the wrong merge.
     """
-    tracked_host = _authority_host(tracked_url)
-    expected_host = _authority_host(expected_endpoint)
-    if not tracked_host or not expected_host:
-        return True
-    if tracked_host != expected_host:
+    tracked_origin = _authority_origin(tracked_url)
+    expected_origin = _authority_origin(expected_endpoint)
+    if tracked_origin is None or expected_origin is None:
+        return False
+    if tracked_origin != expected_origin:
         return False
     base_parts = _authority_path_parts(expected_endpoint)
     if not base_parts:

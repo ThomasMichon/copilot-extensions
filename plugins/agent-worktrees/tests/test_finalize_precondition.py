@@ -1017,6 +1017,68 @@ class TestPrMergeStatusIndeterminateVsUnmerged:
             )
             assert finalize_open_pr_gate.pr_merge_status(record, repo) is None
 
+    def test_mismatched_gitea_scheme_is_indeterminate_not_queried(self):
+        # Same host and path root, but the tracked PR's own URL uses a
+        # DIFFERENT scheme (http) than the repo's currently configured
+        # https api_base. Comparing host[:port] alone would collapse these
+        # onto the same value and treat them as the same authority --
+        # querying the https instance with a PR identity tracked against
+        # a DIFFERENT (http) origin could confirm an unrelated merge there.
+        from agent_worktrees import providers
+        from agent_worktrees.providers.gitea import GiteaProvider
+
+        class _BoomOnQuery(GiteaProvider):
+            def get_pull(self, *_args, **_kwargs):
+                raise AssertionError(
+                    "must not query a provider across a scheme change",
+                )
+
+        with mock.patch.object(
+            providers, "get_provider", lambda _name: _BoomOnQuery(),
+        ):
+            pr = SimpleNamespace(
+                branch="pr/some-fix", repo="owner/project", number=12,
+                provider="gitea", state="open", head_sha="",
+                url="http://forge.example/gitea/owner/project/pulls/12",
+            )
+            record = SimpleNamespace(pr=pr)
+            repo = SimpleNamespace(
+                pr=SimpleNamespace(
+                    provider="gitea", api_base="https://forge.example/gitea",
+                ),
+            )
+            assert finalize_open_pr_gate.pr_merge_status(record, repo) is None
+
+    def test_unconfigured_gitea_authority_is_indeterminate_not_queried(self):
+        # Gitea's authority_endpoint() returns the bare (stripped) api_base
+        # verbatim -- an empty/unconfigured api_base yields an empty
+        # string, which must NOT be treated as "no authority to check,
+        # proceed anyway". An empty configured endpoint can never be
+        # proven to match the tracked PR's own origin, so this must fail
+        # closed (indeterminate) rather than silently skip validation and
+        # query an arbitrary tracked URL unchecked.
+        from agent_worktrees import providers
+        from agent_worktrees.providers.gitea import GiteaProvider
+
+        class _BoomOnQuery(GiteaProvider):
+            def get_pull(self, *_args, **_kwargs):
+                raise AssertionError(
+                    "must not query with an unconfigured/unverifiable authority",
+                )
+
+        with mock.patch.object(
+            providers, "get_provider", lambda _name: _BoomOnQuery(),
+        ):
+            pr = SimpleNamespace(
+                branch="pr/some-fix", repo="owner/project", number=12,
+                provider="gitea", state="open", head_sha="",
+                url="https://forge.example/gitea/owner/project/pulls/12",
+            )
+            record = SimpleNamespace(pr=pr)
+            repo = SimpleNamespace(
+                pr=SimpleNamespace(provider="gitea", api_base=""),
+            )
+            assert finalize_open_pr_gate.pr_merge_status(record, repo) is None
 
 
 
