@@ -148,6 +148,16 @@ def pytest_unconfigure(config):
 # patches, and running the suite (even concurrently with an install) can never
 # mutate the host. Tests that need finer control still layer their own patches
 # (e.g. ``monkeypatch_config``) on top of this safe default.
+#
+# This ALSO isolates ``copilot_launch_prefs.resolve_launch_pref_flags()`` from
+# the real ``~/.copilot/settings.json`` plugin-wide, including in test modules
+# that never import ``copilot_launch_prefs`` directly (e.g.
+# ``test_profile_assignment.py``'s exact-command assertions). That module's
+# ``from pathlib import Path`` is the identical ``pathlib.Path`` class patched
+# below -- patching the classmethod once here therefore covers every caller,
+# with no second patch of the same global attribute needed (a second autouse
+# fixture doing so would instead *conflict* with this one, each overwriting
+# the other's fake home for the duration of a test).
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True)

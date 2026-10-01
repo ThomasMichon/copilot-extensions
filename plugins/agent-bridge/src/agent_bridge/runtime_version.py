@@ -11,9 +11,35 @@ runtime's on-disk ``deploy-manifest.json``, which can match the payload while th
 the reconciler a truthful running-version signal.
 
 The file is distinct from ``deploy-manifest.json`` (installer-owned):
-``{"version", "pid", "started_at"}``. A reader treats a **dead pid** (or a missing
-file) as *no running version* and falls back to the on-disk manifest, so this is
-purely additive and safe.
+``{"version", "pid", "started_at"[, "generation_id"]}``. A reader treats a
+**dead pid** (or a missing file) as *no running version* and falls back to the
+on-disk manifest, so this is purely additive and safe.
+
+``generation_id``: the daemon's own
+:class:`~agent_bridge.session_manager.SessionManager` computes its true,
+opaque generation id (``zdd.claims.generation_id``, a
+``version-pid-started_at`` string with microsecond timestamp precision) once
+per process; independently recomputing it from outside the process isn't
+possible (the timestamp component is minted at an arbitrary instant during
+startup), so it must be read back from wherever the process itself recorded
+it. Deliberately NOT exposed via the ``/health`` HTTP endpoint: that endpoint
+is a registered wire-protocol contract
+(``plugins/agent-bridge/contract/registry.json``), and any field there needs
+a captured fixture tied to the exact commit it was captured from, which this
+local, non-contract, best-effort marker file has no such constraint on. It
+already exists for exactly this class of "truthful running-state signal"
+problem and is read locally, never over HTTP.
+
+A ``--passive`` ZDD-cutover successor complicates this: it must NOT write its
+own id straight into the shared canonical marker at boot, because it isn't
+promoted yet -- if the cutover then aborts, the marker would be left
+permanently pairing the surviving active daemon's own pid/version with an
+abandoned generation's id. Such a process instead stages its id in a
+separate, PID-keyed file (:func:`stage_pending_generation_id`); only
+``_reconcile_service_marker`` (called with a CONFIRMED-promoted pid) ever
+consumes a staged entry (:func:`consume_pending_generation_id`) into the
+canonical marker. An aborted/never-promoted passive's staged entry is simply
+never consumed and is pruned the next time anything stages a new one.
 """
 
 from __future__ import annotations
@@ -27,6 +53,7 @@ from . import __version__
 from .install_paths import effective_config_dir
 
 RUNNING_VERSION_FILE = "running-version.json"
+PENDING_GENERATION_IDS_FILE = "pending-generation-ids.json"
 
 
 def install_dir() -> Path:
@@ -39,6 +66,7 @@ def write_running_version(
     *,
     pid: int | None = None,
     version: str | None = None,
+    generation_id: str | None = None,
 ) -> None:
     """Record the running daemon's version + pid on boot (best-effort).
 
@@ -47,6 +75,16 @@ def write_running_version(
     them explicitly to point the marker at the freshly cut-over daemon, whose pid
     differs from the deploy process's and which -- being a relay-disabled passive
     -- never wrote its own marker (dotfiles #533 caveat #1).
+
+    ``generation_id`` is optional here because the caller that fires this on
+    the normal boot path (``app.py``'s ``lifespan()``) runs BEFORE the
+    ``SessionManager`` that actually computes it exists yet -- see
+    :func:`set_running_generation_id` for the follow-up call that adds it
+    once available, without re-stamping ``pid``/``version``/``started_at``.
+    The cutover-promotion caller (``_reconcile_service_marker``) instead
+    passes through whatever ``generation_id`` it consumed for the CONFIRMED
+    promoted pid (see :func:`consume_pending_generation_id`), so a full
+    rewrite here never silently drops it.
 
     Never raises: a write failure only degrades the reconciler's running-version
     signal (it falls back to the on-disk manifest), never the daemon.
@@ -59,8 +97,248 @@ def write_running_version(
             "pid": pid if pid is not None else os.getpid(),
             "started_at": datetime.now(timezone.utc).isoformat(),
         }
+        if generation_id is not None:
+            payload["generation_id"] = generation_id
         (d / RUNNING_VERSION_FILE).write_text(
             json.dumps(payload), encoding="utf-8"
         )
     except OSError:
         pass
+
+
+def set_running_generation_id(
+    generation_id: str, directory: Path | None = None
+) -> None:
+    """Merge the daemon's real ``generation_id`` into the marker written by
+    :func:`write_running_version`, once the owning ``SessionManager`` exists
+    and has actually computed it. Only ever called for a process that IS
+    (or is about to become) the canonical running daemon -- see
+    :func:`stage_pending_generation_id` for a not-yet-promoted passive.
+
+    A read-merge-write onto the EXISTING marker (preserving whatever
+    ``pid``/``version``/``started_at`` the earlier boot-time write recorded)
+    rather than a second full :func:`write_running_version` call, so this
+    never contradicts the earlier record -- BUT only when that record
+    already belongs to THIS process (``pid`` matches ``os.getpid()``). A
+    relay-disabled normal primary skips the earlier boot-time
+    ``write_running_version()`` call (same gate as the elevated sub-daemon,
+    for an unrelated reason), so on restart the marker on disk can still be
+    a PREVIOUS, now-dead daemon's own still-valid JSON object -- merging
+    onto that would attach this process's real id to someone else's stale
+    pid/version, an internally-inconsistent marker. Any mismatch (including
+    a missing/unreadable/non-object marker) resets fresh with this
+    process's own defaults instead. Still best-effort, never raises.
+    """
+    d = directory or install_dir()
+    path = d / RUNNING_VERSION_FILE
+    try:
+        payload = None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            pass
+        if not isinstance(payload, dict) or payload.get("pid") != os.getpid():
+            payload = {
+                "version": __version__,
+                "pid": os.getpid(),
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            }
+        payload["generation_id"] = generation_id
+        d.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def record_manager_generation_id(session_manager, directory: Path | None = None) -> None:
+    """``app.py``'s ``lifespan()`` call site for a NORMAL (non-passive) boot
+    -- reads the just-constructed ``SessionManager``'s own real
+    ``_generation_id`` and, if present, records it straight into the
+    canonical marker via :func:`set_running_generation_id`. Never raises.
+    """
+    gen_id = getattr(session_manager, "_generation_id", None)
+    if gen_id:
+        set_running_generation_id(gen_id, directory)
+
+
+def stage_manager_generation_id(session_manager, directory: Path | None = None) -> None:
+    """``app.py``'s ``lifespan()`` call site for a ``--passive`` ZDD-cutover
+    successor's boot -- stages the just-constructed ``SessionManager``'s own
+    real ``_generation_id`` under this process's own pid via
+    :func:`stage_pending_generation_id`, WITHOUT touching the canonical
+    marker (see that function's docstring for why). Never raises.
+    """
+    gen_id = getattr(session_manager, "_generation_id", None)
+    if gen_id:
+        stage_pending_generation_id(os.getpid(), gen_id, directory)
+
+
+def _load_pending(path: Path) -> dict[str, dict[str, str]]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _prune_dead_pids(pending: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
+    from .session_host.osutil import pid_alive
+
+    alive = {}
+    for pid_str, entry in pending.items():
+        try:
+            pid = int(pid_str)
+        except ValueError:
+            continue
+        if isinstance(entry, dict) and pid_alive(pid):
+            alive[pid_str] = entry
+    return alive
+
+
+def _with_pending_lock(directory: Path, fn) -> None:
+    """Run ``fn()`` (a read-modify-write against the pending-ids file) while
+    holding a dedicated, cross-process, cross-platform advisory lock scoped
+    ONLY to this file -- never :mod:`zdd.cutover_lock`'s own lock, which a
+    ``CutoverOrchestrator.run()`` call holds for its ENTIRE duration
+    (spawn -> health-gate -> flip -> drain -> retire); a passive successor's
+    own boot-time staging call happens INSIDE that same window, so reusing
+    that lock here would deadlock the very staging call this needs to let
+    through. This closes the unlocked-read-modify-write race between a
+    passive staging its id and a promotion consuming/pruning entries
+    concurrently, independently of the cutover lock's own scope.
+
+    Same primitive as :mod:`zdd.cutover_lock` (POSIX ``fcntl.flock``,
+    Windows ``msvcrt.locking``, both non-blocking under the hood), wrapped
+    in a short poll-retry loop for an effectively-blocking acquire. Best-
+    effort: on any lock-acquisition failure (contention past the short wait
+    budget, or an OSError), skips the write entirely rather than risk a
+    lost update -- generation_id recording is observability, never
+    load-bearing for the cutover itself.
+    """
+    import sys
+    import time
+
+    lock_file = directory / "pending-generation-ids.lock"
+    directory.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(lock_file), os.O_RDWR | os.O_CREAT, 0o644)
+    fh = os.fdopen(fd, "r+", encoding="ascii")
+    try:
+        deadline = time.monotonic() + 2.0
+        acquired = False
+        while time.monotonic() < deadline:
+            try:
+                if sys.platform == "win32":
+                    import msvcrt
+
+                    fh.seek(1 << 30)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+                    fh.seek(0)
+                else:
+                    import fcntl
+
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+                break
+            except OSError:
+                time.sleep(0.05)
+        if not acquired:
+            return
+        try:
+            fn()
+        finally:
+            try:
+                if sys.platform == "win32":
+                    import msvcrt
+
+                    fh.seek(1 << 30)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+    finally:
+        try:
+            fh.close()
+        except OSError:
+            pass
+
+
+def stage_pending_generation_id(
+    pid: int, generation_id: str, directory: Path | None = None
+) -> None:
+    """A ``--passive`` ZDD-cutover successor's own boot-time call: stage its
+    real ``generation_id`` keyed by its OWN pid, WITHOUT touching the shared
+    canonical ``running-version.json`` marker (it isn't promoted yet, and
+    may never be).
+
+    Each entry also records this process's own
+    :func:`zdd.diagnostics.process_start_time` identity token alongside the
+    id -- pid alone is NOT a safe key across time: an abandoned/never-
+    promoted passive's pid can be reused by a later, wholly unrelated
+    process (including an unrelated normal agent-bridge daemon), and a bare
+    pid-liveness check cannot tell that apart.
+    :func:`consume_pending_generation_id` re-verifies this token before
+    ever trusting an entry.
+
+    Opportunistically prunes entries for pids that are no longer alive (an
+    earlier aborted/retired passive) so this file never grows unbounded
+    across many cutover attempts. Never raises.
+    """
+    from zdd.diagnostics import process_start_time
+
+    d = directory or install_dir()
+    start_time = process_start_time(pid)
+
+    def _do() -> None:
+        pending = _prune_dead_pids(_load_pending(d / PENDING_GENERATION_IDS_FILE))
+        pending[str(pid)] = {
+            "generation_id": generation_id,
+            "start_time": start_time,
+        }
+        d.mkdir(parents=True, exist_ok=True)
+        (d / PENDING_GENERATION_IDS_FILE).write_text(
+            json.dumps(pending), encoding="utf-8"
+        )
+
+    try:
+        _with_pending_lock(d, _do)
+    except OSError:
+        pass
+
+
+def consume_pending_generation_id(
+    pid: int, directory: Path | None = None
+) -> str | None:
+    """``_reconcile_service_marker``'s call site, at CONFIRMED-promotion time:
+    pop (read once, then remove) the specific ``pid``'s staged generation id,
+    or ``None`` if nothing was ever staged for it. Consumed exactly once so a
+    stale/reused entry can never be replayed onto a later, unrelated pid --
+    and identity-VERIFIED: an entry whose recorded
+    :func:`zdd.diagnostics.process_start_time` no longer matches ``pid``'s
+    CURRENT one (the pid was recycled by an unrelated process since it was
+    staged) is discarded rather than trusted, even though it is still
+    removed here (cleanup either way). Never raises.
+    """
+    from zdd.diagnostics import process_start_time
+
+    d = directory or install_dir()
+    current_start_time = process_start_time(pid)
+    result: dict[str, str | None] = {"gen_id": None}
+
+    def _do() -> None:
+        pending = _load_pending(d / PENDING_GENERATION_IDS_FILE)
+        entry = pending.pop(str(pid), None)
+        if isinstance(entry, dict):
+            if current_start_time and entry.get("start_time") == current_start_time:
+                result["gen_id"] = entry.get("generation_id")
+            (d / PENDING_GENERATION_IDS_FILE).write_text(
+                json.dumps(pending), encoding="utf-8"
+            )
+
+    try:
+        _with_pending_lock(d, _do)
+    except OSError:
+        pass
+    return result["gen_id"]

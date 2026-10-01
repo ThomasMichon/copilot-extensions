@@ -29,10 +29,12 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import ParseResult, urlparse
 
 from agent_procutil import no_window_flags
 
@@ -259,11 +261,244 @@ def reclaim_worktree(
     return ReclaimResult("failed", f"finalize refused: {detail}")
 
 
+def _parse_provider_url(value: str) -> ParseResult | None:
+    try:
+        parsed = urlparse(value if "://" in value else f"//{value}")
+    except ValueError:
+        return None
+    if not parsed.hostname or parsed.username or parsed.password:
+        return None
+    return parsed
+
+
+def _same_provider_origin(
+    left: ParseResult, right: ParseResult, *, require_scheme: bool = True,
+) -> bool:
+    try:
+        left_port = left.port
+        if left_port is None:
+            left_port = {"http": 80, "https": 443}.get(
+                (left.scheme or "https").lower()
+            )
+        right_port = right.port
+        if right_port is None:
+            right_port = {"http": 80, "https": 443}.get(
+                (right.scheme or "https").lower()
+            )
+    except ValueError:
+        return False
+    return (
+        bool(left.hostname and right.hostname)
+        and left.hostname.casefold() == right.hostname.casefold()
+        and left_port == right_port
+        and (
+            not require_scheme
+            or (left.scheme or "https").casefold()
+            == (right.scheme or "https").casefold()
+        )
+    )
+
+
+def _pr_claim_target(
+    ref: str, prcfg: cfg.PRConfig,
+) -> tuple[str, str, int, str] | None:
+    """Resolve a stored PR claim into provider, repo, number, and API base."""
+    configured_provider = (getattr(prcfg, "provider", "") or "").strip().lower()
+    api_base = (getattr(prcfg, "api_base", "") or "").strip()
+    short = re.fullmatch(
+        r"([A-Za-z0-9._-]+/[A-Za-z0-9._-]+)#([0-9]+)", (ref or "").strip(),
+    )
+    if short:
+        # The authority-less `owner/repo#N` shorthand is GitHub-only (see
+        # sweep.py's _GH_PR_SHORT grammar comment) -- Gitea and Azure DevOps
+        # claims always carry a full authority-bearing URL. Recognizing the
+        # shorthand for those providers would let a legacy slug/number be
+        # re-queried against a different service if the configured provider
+        # ever changes, deleting an unrelated obligation.
+        if configured_provider != "github":
+            return None
+        # The shorthand carries NO authority of its own, so it is only safe
+        # to resolve against the CURRENT configured authority when that
+        # authority is unambiguously the implicit default public
+        # github.com -- i.e. no api_base configured AND no ambient GH_HOST
+        # override. A shorthand claim created under that default, then
+        # later re-queried after GH_HOST is pointed at a different (e.g.
+        # Enterprise) host, would otherwise confirm an unrelated PR there
+        # and silently remove the original obligation. Require a full,
+        # authority-bearing URL instead whenever any non-default authority
+        # is configured.
+        from .providers.github import GitHubProvider
+
+        if GitHubProvider().authority_endpoint(api_base) != "github.com":
+            return None
+        return configured_provider, short.group(1), int(short.group(2)), api_base
+
+    try:
+        parsed = urlparse((ref or "").strip())
+        parsed_host = parsed.hostname
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"} or not parsed_host:
+        return None
+    if parsed.username or parsed.password:
+        return None
+    # Preserve the port: a bare ``parsed.hostname`` drops it, so an ambient
+    # ``GH_HOST=host:port`` authority would pass validation here but then
+    # have its port silently dropped before being handed to get_pull() as
+    # ``api_base`` below.
+    host = parsed_host.lower()
+    if parsed.port is not None:
+        host = f"{host}:{parsed.port}"
+    parts = [part for part in parsed.path.split("/") if part]
+
+    if configured_provider == "github":
+        from .providers.github import GitHubProvider
+
+        # Honor the provider's own ambient authority (GH_HOST) rather than
+        # hardcoding the public host -- otherwise every valid full-URL claim
+        # on a GitHub Enterprise host configured through GH_HOST would be
+        # rejected as "unconfigured".
+        expected_host = GitHubProvider().authority_endpoint(api_base)
+        if host == expected_host or (len(parts) >= 4 and parts[-2] == "pull"):
+            # Require the EXACT canonical ``owner/repo/pull/N`` shape (four
+            # segments, no query/fragment) regardless of whether
+            # ``api_base`` is configured -- an URL carrying extra leading
+            # segments (e.g. ``.../unrelated/owner/repo/pull/42``) is
+            # rejected rather than silently stripped down to its trailing
+            # four segments, which would extract the wrong repo identity.
+            if (
+                len(parts) != 4
+                or parts[-2] != "pull"
+                or not parts[-1].isdigit()
+                or parsed.scheme != "https"
+                or parsed.query
+                or parsed.fragment
+            ):
+                return None
+            if not api_base and parsed.netloc.casefold() != expected_host:
+                return None
+            repo_parts = parts[-4:-2]
+            if len(repo_parts) != 2:
+                return None
+            if api_base:
+                configured = _parse_provider_url(api_base)
+                if not configured or not _same_provider_origin(
+                    parsed, configured, require_scheme=False,
+                ):
+                    return None
+            elif host != expected_host:
+                return None
+            api_base = api_base or host
+            return "github", "/".join(repo_parts), int(parts[-1]), api_base
+
+    if configured_provider == "azure-devops" and (
+        host == "dev.azure.com" or host.endswith(".visualstudio.com")
+    ):
+        if parsed.query or parsed.fragment:
+            return None
+        # Require the EXACT canonical shape -- ``<org>/<project>/_git/<repo>
+        # /pullrequest/<N>`` on ``dev.azure.com`` (6 segments), or
+        # ``<project>/_git/<repo>/pullrequest/<N>`` on a classic
+        # ``*.visualstudio.com`` org host (5 segments). A URL carrying an
+        # extra/noncanonical segment anywhere in the path (e.g. injected
+        # between the org and project) is rejected outright rather than
+        # located by searching for "pullrequest"/"_git" anywhere in the
+        # path, which would still happen to extract a project/repo/number
+        # from a malformed URL as though it were the genuine canonical one.
+        expected_len = 6 if host == "dev.azure.com" else 5
+        if (
+            len(parts) != expected_len
+            or parts[-2] != "pullrequest"
+            or parts[-4] != "_git"
+            or not parts[-1].isdigit()
+        ):
+            return None
+        number, name, project = parts[-1], parts[-3], parts[-5]
+        if host == "dev.azure.com":
+            url_org = parts[0]
+            configured = _parse_provider_url(api_base)
+            if not configured or not _same_provider_origin(parsed, configured):
+                return None
+            configured_org = next(
+                (part for part in configured.path.split("/") if part), "",
+            )
+            if configured_org.casefold() != url_org.casefold():
+                return None
+        else:
+            configured = _parse_provider_url(api_base)
+            if not configured or not _same_provider_origin(parsed, configured):
+                return None
+        return "azure-devops", f"{project}/{name}", int(number), api_base
+
+    if configured_provider == "gitea":
+        if parsed.query or parsed.fragment:
+            return None
+        configured = _parse_provider_url(api_base)
+        if not configured or not _same_provider_origin(parsed, configured):
+            return None
+        # A path-hosted Gitea instance's `api_base` includes its own root
+        # path (e.g. ".../gitea"); same-origin alone doesn't rule out a
+        # claim URL under a DIFFERENT root on that same host (a different
+        # app entirely). Require the claim URL's path to actually be under
+        # the configured root before stripping it and extracting the repo.
+        base_parts = [part for part in configured.path.split("/") if part]
+        if base_parts and parts[:len(base_parts)] != base_parts:
+            return None
+        remaining = parts[len(base_parts):]
+        # Require the EXACT canonical ``owner/project/pulls/N`` shape --
+        # exactly four remaining segments after the configured root is
+        # stripped. Any extra/noncanonical segment ahead of that trailing
+        # four is rejected rather than silently stripped off.
+        if (
+            len(remaining) != 4
+            or remaining[-2] != "pulls"
+            or not remaining[-1].isdigit()
+        ):
+            return None
+        repo_parts = remaining[-4:-2]
+        if len(repo_parts) != 2:
+            return None
+        return "gitea", "/".join(repo_parts), int(remaining[-1]), api_base
+    return None
+
+
+def reclaim_pr(
+    ref: str, config: cfg.Config, *, apply: bool,
+) -> ReclaimResult:
+    """Release an orphaned PR claim only after the provider confirms it merged."""
+    prcfg = getattr(getattr(config, "default_repo", None), "pr", None)
+    if prcfg is None:
+        return ReclaimResult("failed", "PR provider configuration is unavailable")
+    target = _pr_claim_target(ref, prcfg)
+    if target is None:
+        return ReclaimResult("failed", "PR reference cannot be resolved safely")
+    provider_name, repo, number, api_base = target
+    try:
+        from . import providers
+
+        provider = providers.get_provider(provider_name)
+        token = providers.account_token_for_slug(repo, prcfg)
+        pull = provider.get_pull(
+            repo, number, api_base=api_base, token=token,
+        )
+    except Exception as exc:
+        return ReclaimResult("failed", f"PR provider lookup failed: {exc}")
+    merged = bool(getattr(pull, "merged", False)) or (
+        (getattr(pull, "state", "") or "").strip().lower() == "merged"
+    )
+    if not merged:
+        return ReclaimResult("skipped", "PR is not confirmed merged")
+    action = "would release" if not apply else "released"
+    return ReclaimResult("reclaimed", f"{action} confirmed merged PR {ref}")
+
+
 #: Kinds this consumer knows how to dispose of. Others are surfaced as
 #: ``unsupported`` (entry retained) until a reclaimer is wired.
 _RECLAIMERS = {
     "codespace": lambda ref, apply, config: reclaim_codespace(ref, apply=apply),
     "worktree": lambda ref, apply, config: reclaim_worktree(
+        ref, config, apply=apply),
+    "pr": lambda ref, apply, config: reclaim_pr(
         ref, config, apply=apply),
 }
 

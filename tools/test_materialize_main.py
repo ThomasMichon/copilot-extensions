@@ -3,636 +3,46 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
 import sys
 from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import installer_engine_ref as ier
+import launch_wrapper_assets_ref as lwar
 import materialize_main as mm
 import uv_editable_ref as uer
 
 
-def _pointer(root: Path, plugin: str, lib: str) -> Path:
-    d = root / "plugins" / plugin / "libs" / lib
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "VENDOR_POINTER.json").write_text(
-        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
-                    "source": f"libs/{lib}"}) + "\n",
-        encoding="utf-8",
-    )
-    (d / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "0.0.0"\n',
-                                       encoding="utf-8")
-    return d
-
-
 def _canonical_lib(root: Path, lib: str, *, version: str, content: str) -> Path:
+    pkg = lib.replace("-", "_")
     d = root / "libs" / lib
-    (d / "src" / lib.replace("-", "_")).mkdir(parents=True, exist_ok=True)
-    (d / "src" / lib.replace("-", "_") / "__init__.py").write_text(content, encoding="utf-8")
-    (d / "pyproject.toml").write_text(f'[project]\nname = "x"\nversion = "{version}"\n',
-                                       encoding="utf-8")
+    (d / "src" / pkg).mkdir(parents=True, exist_ok=True)
+    (d / "src" / pkg / "__init__.py").write_text(content, encoding="utf-8")
+    (d / "pyproject.toml").write_text(
+        f'[project]\nname = "x"\nversion = "{version}"\n', encoding="utf-8"
+    )
     return d
 
 
-def test_materialize_expands_pointer_from_canonical(tmp_path: Path):
-    root = tmp_path / "repo"
-    _canonical_lib(root, "zdd", version="0.1.0-dev5", content="real = True\n")
-    _pointer(root, "agent-bridge", "zdd")
-
-    log = mm.materialize(root, canonical_root=root)
-
-    assert any(line.startswith("OK") for line in log)
-    copy_src = root / "plugins/agent-bridge/libs/zdd/src/zdd/__init__.py"
-    assert copy_src.read_text() == "real = True\n"
-    assert not (root / "plugins/agent-bridge/libs/zdd/VENDOR_POINTER.json").exists()
-    pp = (root / "plugins/agent-bridge/libs/zdd/pyproject.toml").read_text()
-    assert '"0.1.0-dev5"' in pp
-
-
-def test_materialize_refuses_a_stray_symlink_anywhere_in_the_pointer_copy(tmp_path: Path):
-    # The src/tests/pyproject.toml checks validate the pieces this
-    # function itself knows about, but a pointer copy directory can carry
-    # other, unrelated entries too (e.g. a stray docs/link) --
-    # pointer_path.unlink() would otherwise leave such a symlink sitting
-    # untouched in the promoted payload, making the resulting main
-    # snapshot not self-contained.
-    root = tmp_path / "repo"
-    _canonical_lib(root, "zdd", version="0.1.0-dev5", content="real = True\n")
-    pointer_dir = _pointer(root, "agent-bridge", "zdd")
-    outside = root.parent / "outside-stray-target"
-    outside.mkdir()
-    (pointer_dir / "docs").mkdir()
-    (pointer_dir / "docs" / "link").symlink_to(outside, target_is_directory=True)
-
-    log = mm.materialize(root, canonical_root=root)
-
-    assert any("SKIP" in line and "is a symlink" in line for line in log)
-    assert (pointer_dir / mm.POINTER_NAME).exists()
-    assert (pointer_dir / "docs" / "link").is_symlink()
-
-
-def test_materialize_expands_canonical_tests_alongside_src(tmp_path: Path):
-    # A pointer copy vendors tests/ from canonical too (--pointerize) --
-    # promotion-time expansion must refresh it the same way it refreshes
-    # src/, otherwise a canonical test change after pointerizing would ship
-    # a stale tests/ tree into main.
-    root = tmp_path / "repo"
-    canonical = _canonical_lib(root, "zdd", version="0.1.0-dev5", content="real = True\n")
-    (canonical / "tests").mkdir(parents=True)
-    (canonical / "tests" / "test_zdd.py").write_text("def test_it():\n    pass\n",
-                                                       encoding="utf-8")
-    pointer_dir = _pointer(root, "agent-bridge", "zdd")
-    # The pointer copy's own (now-stale) tests/ predates the canonical edit.
-    (pointer_dir / "tests").mkdir(parents=True)
-    (pointer_dir / "tests" / "test_zdd.py").write_text("def test_it():\n    assert False\n",
-                                                        encoding="utf-8")
-
-    mm.materialize(root, canonical_root=root)
-
-    refreshed = pointer_dir / "tests" / "test_zdd.py"
-    assert refreshed.read_text() == "def test_it():\n    pass\n"
-
-
-def test_materialize_never_introduces_tests_a_copy_never_vendored(tmp_path: Path):
-    # A pointer copy that deliberately never vendored tests/ (--pointerize
-    # chose not to, or a copy was pointerized before tests/ vendoring
-    # existed) must not gain one unilaterally just because canonical has
-    # one -- introducing new content beyond what a copy already committed
-    # to is out of scope for a refresh.
-    root = tmp_path / "repo"
-    canonical = _canonical_lib(root, "zdd", version="0.1.0-dev5", content="real = True\n")
-    (canonical / "tests").mkdir(parents=True)
-    (canonical / "tests" / "test_zdd.py").write_text("def test_it():\n    pass\n",
-                                                       encoding="utf-8")
-    pointer_dir = _pointer(root, "agent-bridge", "zdd")  # no local tests/ at all
-
-    mm.materialize(root, canonical_root=root)
-
-    assert not (pointer_dir / "tests").exists()
-
-
-def test_materialize_skips_missing_canonical(tmp_path: Path):
-    root = tmp_path / "repo"
-    _pointer(root, "agent-bridge", "ghost-lib")  # no libs/ghost-lib/ exists
-
-    log = mm.materialize(root, canonical_root=root)
-    assert any("SKIP" in line and "not found" in line for line in log)
-    # Pointer must be left in place since nothing was expanded.
-    assert (root / "plugins/agent-bridge/libs/ghost-lib/VENDOR_POINTER.json").exists()
-
-
-def test_materialize_refuses_a_symlinked_pointer_directory_pointing_inside_root(tmp_path: Path):
-    # A pointer directory symlinked to ANOTHER directory still inside
-    # checkout_root passes _escapes_root's resolved-path check (its target
-    # is legitimately within root) -- but expanding it would silently
-    # overwrite that OTHER directory's own content and unlink ITS pointer
-    # marker. The pointer directory itself being a symlink must be
-    # rejected outright.
-    root = tmp_path / "repo"
-    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="shared\n")
-    victim = _pointer(root, "victim-plugin", "zdd")
-    (victim / "innocent.txt").write_text("do not touch\n", encoding="utf-8")
-
-    attacker_dir = root / "plugins" / "agent-bridge" / "libs"
-    attacker_dir.mkdir(parents=True)
-    (attacker_dir / "zdd").symlink_to(victim, target_is_directory=True)
-
-    log = mm.materialize(root, canonical_root=root)
-    assert any("SKIP" in line and "symlink" in line for line in log)
-    # The victim's own content must be untouched (its own genuine pointer
-    # legitimately expands independently -- that's expected and fine).
-    assert (victim / "innocent.txt").read_text() == "do not touch\n"
-    # The attacker's symlink itself must remain untouched -- never expanded
-    # into a real copy that would duplicate/corrupt the victim's content.
-    assert (attacker_dir / "zdd").is_symlink()
-
-
-def test_materialize_refuses_a_symlinked_ancestor_directory(tmp_path: Path):
-    # Checking only lib_copy_dir itself misses a symlinked ANCESTOR (e.g.
-    # plugins/<plugin> or plugins/<plugin>/libs itself): find_pointers()'s
-    # own glob already follows such an intermediate symlink to discover
-    # the pointer file, and if it resolves to another directory still
-    # inside checkout_root, a resolved-path escape check alone would
-    # accept it too -- letting the src_sub removal/copy overwrite that
-    # OTHER directory's own content and unlink ITS marker.
-    root = tmp_path / "repo"
-    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="shared\n")
-    victim = _pointer(root, "victim-plugin", "zdd")
-    (victim / "innocent.txt").write_text("do not touch\n", encoding="utf-8")
-
-    # The attacker's OWN plugin dir (not just its libs/<lib> copy) is a
-    # symlink pointing at the victim's plugin dir.
-    (root / "plugins" / "attacker-plugin").symlink_to(
-        root / "plugins" / "victim-plugin", target_is_directory=True
-    )
-
-    log = mm.materialize(root, canonical_root=root)
-    assert any("SKIP" in line and "is a symlink" in line for line in log)
-    assert (victim / "innocent.txt").read_text() == "do not touch\n"
-    assert (root / "plugins" / "attacker-plugin").is_symlink()
-
-
-def test_materialize_refuses_an_ancestor_symlink_resolving_exactly_to_root(tmp_path: Path):
-    # Round-14 review finding: _find_symlinked_ancestor's is_symlink()
-    # check must run BEFORE the resolved-path termination test, not
-    # after -- a symlink whose target happens to resolve to `root` itself
-    # (e.g. plugins/evil -> ..) would otherwise short-circuit the walk as
-    # "reached root, nothing to check" without ever inspecting that
-    # symlink, letting the later replacement + pointer_path.unlink() write
-    # through to the checkout root itself.
-    root = tmp_path / "repo"
-    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="shared\n")
-    (root / "src").mkdir()  # something already at root/src, must survive
-    (root / "src" / "sentinel.txt").write_text("do not touch\n", encoding="utf-8")
-
-    # plugins/evil-plugin -> root itself (resolves exactly to root_r).
-    (root / "plugins").mkdir(parents=True, exist_ok=True)
-    (root / "plugins" / "evil-plugin").symlink_to(root, target_is_directory=True)
-    # "ghost" (not "zdd") -- through the symlink this literally aliases
-    # root/libs/ghost, which must not already exist (avoid colliding with
-    # the canonical zdd lib _canonical_lib() already created above).
-    libs_dir = root / "plugins" / "evil-plugin" / "libs" / "ghost"
-    libs_dir.mkdir(parents=True)
-    (libs_dir / mm.POINTER_NAME).write_text(
-        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
-                    "source": "libs/zdd"}) + "\n",
-        encoding="utf-8",
-    )
-
-    log = mm.materialize(root, canonical_root=root)
-    assert any("SKIP" in line and "is a symlink" in line for line in log)
-    # Nothing was written through to the checkout root itself.
-    assert (root / "src" / "sentinel.txt").read_text() == "do not touch\n"
-    assert not (root / "VENDOR_POINTER.json").exists()
-
-
-def test_materialize_refuses_a_symlinked_canonical_source_before_resolving(tmp_path: Path):
-    # _resolve_within() only validates that the RESOLVED candidate stays
-    # within canonical_root -- if canonical_root/source_rel (e.g.
-    # libs/<lib>) is ITSELF a symlink to ANOTHER directory still inside
-    # canonical_root, that check accepts it and returns the resolved
-    # (symlink-followed) target, so every later scan only ever examines
-    # the TARGET's own contents, never noticing the redirect. Must be
-    # checked BEFORE resolving, not after.
-    root = tmp_path / "repo"
-    victim = root / "libs" / "victim-lib"
-    (victim / "src" / "victim_lib").mkdir(parents=True)
-    (victim / "src" / "victim_lib" / "__init__.py").write_text(
-        "do not touch\n", encoding="utf-8"
-    )
-    (victim / "pyproject.toml").write_text(
-        '[project]\nname = "x"\nversion = "0.1.0-dev1"\n', encoding="utf-8"
-    )
-
-    # libs/evil-lib -> libs/victim-lib (still inside canonical_root == root).
-    (root / "libs" / "evil-lib").symlink_to(victim, target_is_directory=True)
-    _pointer(root, "agent-bridge", "evil-lib")
-
-    log = mm.materialize(root, canonical_root=root)
-    assert any("SKIP" in line and "is a symlink" in line for line in log)
-    assert (victim / "src" / "victim_lib" / "__init__.py").read_text() == "do not touch\n"
-
-
-def test_materialize_refuses_a_symlinked_pyproject_toml_before_version_sync(tmp_path: Path):
-    # canon_pp.is_file()/copy_pp.exists() both follow symlinks -- a
-    # pointer copy with pyproject.toml linked to another file (or
-    # canonical's own linked elsewhere) would make read_text()/
-    # write_text() follow the link, letting promotion silently read from
-    # or overwrite an arbitrary external target while updating the
-    # version. Must be preflighted BEFORE src/tests are mutated, not
-    # checked only right before the read/write (which would leave a
-    # mixed partial state: fresh src/, stale pyproject.toml, pointer
-    # marker still present).
-    root = tmp_path / "repo"
-    _canonical_lib(root, "zdd", version="0.1.0-dev5", content="fresh\n")
-    victim = root.parent / "outside-victim-pyproject.toml"
-    victim.write_text('[project]\nname = "victim"\nversion = "9.9.9"\n', encoding="utf-8")
-    (root / "libs" / "zdd" / "pyproject.toml").unlink()
-    (root / "libs" / "zdd" / "pyproject.toml").symlink_to(victim)
-
-    pointer_dir = _pointer(root, "agent-bridge", "zdd")
-    (pointer_dir / "src" / "zdd").mkdir(parents=True)
-    (pointer_dir / "src" / "zdd" / "__init__.py").write_text("stale stub\n", encoding="utf-8")
-
-    log = mm.materialize(root, canonical_root=root)
-    assert any("SKIP" in line and "is a symlink" in line for line in log)
-    # Nothing was mutated -- neither the copy's src/ nor the victim file.
-    assert (pointer_dir / "src" / "zdd" / "__init__.py").read_text() == "stale stub\n"
-    assert victim.read_text() == '[project]\nname = "victim"\nversion = "9.9.9"\n'
-    assert (pointer_dir / mm.POINTER_NAME).exists()
-
-
-def test_materialize_skips_a_canonical_lib_with_no_src_directory_at_all(tmp_path: Path):
-    # _find_symlink() returns None for a MISSING src/ too, not just "no
-    # symlink found inside it" -- an incomplete/malformed canonical lib
-    # must be refused here, before the copy's existing src/ gets deleted
-    # with nothing to replace it (which would publish a pointer-free
-    # copy with NO importable source at all).
-    root = tmp_path / "repo"
-    (root / "libs" / "zdd").mkdir(parents=True)  # no src/ subdirectory
-    (root / "libs" / "zdd" / "pyproject.toml").write_text(
-        '[project]\nname = "x"\nversion = "0.1.0-dev1"\n', encoding="utf-8"
-    )
-    pointer_dir = _pointer(root, "agent-bridge", "zdd")
-    (pointer_dir / "src" / "zdd").mkdir(parents=True)
-    (pointer_dir / "src" / "zdd" / "__init__.py").write_text("stub\n", encoding="utf-8")
-
-    log = mm.materialize(root, canonical_root=root)
-    assert any("SKIP" in line and "src not found" in line for line in log)
-    # The copy's existing (real) src/ must be untouched, and the pointer
-    # marker must still be present -- nothing was actually expanded.
-    assert (pointer_dir / "src" / "zdd" / "__init__.py").read_text() == "stub\n"
-    assert (pointer_dir / mm.POINTER_NAME).exists()
-
-
-
-def test_materialize_handles_multiple_pointers_for_same_lib(tmp_path: Path):
-    root = tmp_path / "repo"
-    _canonical_lib(root, "zdd", version="0.1.0-dev9", content="shared\n")
-    for plugin in ("agent-bridge", "agent-codespaces", "agent-mcp"):
-        _pointer(root, plugin, "zdd")
-
-    log = mm.materialize(root, canonical_root=root)
-    assert sum(1 for line in log if line.startswith("OK")) == 3
-    for plugin in ("agent-bridge", "agent-codespaces", "agent-mcp"):
-        assert (root / f"plugins/{plugin}/libs/zdd/src/zdd/__init__.py").read_text() == "shared\n"
-
-
-def test_build_snapshots_then_materializes(tmp_path: Path):
-    source = tmp_path / "source"
-    _canonical_lib(source, "zdd", version="0.1.0-dev1", content="original\n")
-    _pointer(source, "agent-bridge", "zdd")
-    (source / "README.md").write_text("hello\n", encoding="utf-8")
-
-    dest = tmp_path / "dest"
-    log = mm.build(dest, source_root=source)
-
-    assert any(line.startswith("OK") for line in log)
-    # The snapshot copied everything else too, untouched.
-    assert (dest / "README.md").read_text() == "hello\n"
-    assert (dest / "plugins/agent-bridge/libs/zdd/src/zdd/__init__.py").read_text() == "original\n"
-    # The source checkout itself must never be mutated by build().
-    assert (source / "plugins/agent-bridge/libs/zdd/VENDOR_POINTER.json").exists()
-
-
-def test_build_overwrites_a_stale_existing_dest(tmp_path: Path):
-    source = tmp_path / "source"
-    _canonical_lib(source, "zdd", version="0.1.0-dev1", content="fresh\n")
-    (source / "marker.txt").write_text("v2\n", encoding="utf-8")
-
-    dest = tmp_path / "dest"
-    dest.mkdir()
-    (dest / "stale-leftover.txt").write_text("old build\n", encoding="utf-8")
-
-    mm.build(dest, source_root=source)
-    assert not (dest / "stale-leftover.txt").exists()
-    assert (dest / "marker.txt").read_text() == "v2\n"
-
-
-def test_find_pointers_returns_sorted_paths(tmp_path: Path):
-    root = tmp_path / "repo"
-    _pointer(root, "zeta-plugin", "libA")
-    _pointer(root, "alpha-plugin", "libB")
-
-    found = mm.find_pointers(root)
-    assert [p.parent.parent.parent.name for p in found] == ["alpha-plugin", "zeta-plugin"]
-
-
-def _worktree_manager_pointer(root: Path, lib: str) -> Path:
-    """Create a directory pointer under the extra top-level
-    ``worktree-manager/libs/<lib>`` tree (mirrors ``sync-vendored-libs.py``'s
-    own extra-tree handling, not the ``plugins/*/libs/*`` shape)."""
-    d = root / "worktree-manager" / "libs" / lib
-    d.mkdir(parents=True, exist_ok=True)
-    (d / "VENDOR_POINTER.json").write_text(
-        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
-                    "source": f"libs/{lib}"}) + "\n",
-        encoding="utf-8",
-    )
-    (d / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "0.0.0"\n',
-                                       encoding="utf-8")
-    return d
-
-
-def test_find_pointers_includes_worktree_manager(tmp_path: Path):
-    root = tmp_path / "repo"
-    _pointer(root, "agent-bridge", "libA")
-    _worktree_manager_pointer(root, "libB")
-
-    found = mm.find_pointers(root)
-    assert len(found) == 2
-    assert any(p.parent.parent.parent.name == "worktree-manager" for p in found)
-
-
-def test_materialize_expands_worktree_manager_pointer(tmp_path: Path):
-    root = tmp_path / "repo"
-    _canonical_lib(root, "zdd", version="0.2.0-dev1", content="shared\n")
-    _worktree_manager_pointer(root, "zdd")
-
-    log = mm.materialize(root, canonical_root=root)
-
-    assert any(line.startswith("OK") for line in log)
-    copy_src = root / "worktree-manager/libs/zdd/src/zdd/__init__.py"
-    assert copy_src.read_text() == "shared\n"
-
-
-def test_find_pointers_in_libs_dir_finds_a_pointer_directly_under_libs(tmp_path: Path):
-    """The shape a copied-out payload has (e.g. a self-installed
-    worktree-manager slot's own <slot>/libs/*), unlike find_pointers()'s
-    fixed plugins/*/libs/* / worktree-manager/libs/* repo-root-relative
-    glob."""
-    libs_dir = tmp_path / "slot" / "libs"
-    d = libs_dir / "zdd"
-    d.mkdir(parents=True)
-    (d / mm.POINTER_NAME).write_text(
-        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
-                    "source": "libs/zdd"}) + "\n",
-        encoding="utf-8",
-    )
-    found = mm.find_pointers_in_libs_dir(libs_dir)
-    assert [p.parent.name for p in found] == ["zdd"]
-
-
-def test_find_pointers_in_libs_dir_empty_when_no_libs_dir(tmp_path: Path):
-    assert mm.find_pointers_in_libs_dir(tmp_path / "nope") == []
-
-
-def test_materialize_libs_dir_expands_a_pointer_from_canonical(tmp_path: Path):
-    """The case worktree_manager.self_install's _materialize_payload_pointers
-    needs: expanding a copied-out slot's own libs/<lib> directly (not a
-    whole repo-checkout-shaped tree)."""
-    root = tmp_path / "repo"
-    _canonical_lib(root, "zdd", version="0.3.0-dev1", content="from-canonical\n")
-
-    libs_dir = tmp_path / "slot" / "libs"
-    copy_dir = libs_dir / "zdd"
-    (copy_dir / "src" / "zdd").mkdir(parents=True)
-    (copy_dir / "src" / "zdd" / "__init__.py").write_text("stub\n", encoding="utf-8")
-    (copy_dir / mm.POINTER_NAME).write_text(
-        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
-                    "source": "libs/zdd"}) + "\n",
-        encoding="utf-8",
-    )
-
-    log = mm.materialize_libs_dir(libs_dir, canonical_root=root)
-
-    assert any(line.startswith("OK") for line in log)
-    assert not (copy_dir / mm.POINTER_NAME).exists()
-    assert (copy_dir / "src" / "zdd" / "__init__.py").read_text() == "from-canonical\n"
-
-
-def _pointer_with_source(root: Path, plugin: str, lib: str, *, source: str) -> Path:
-    """Like ``_pointer``, but with an arbitrary (possibly malicious) ``source``
-    value instead of the well-formed ``libs/<lib>`` default."""
+def _retired_pointer(root: Path, plugin: str, lib: str, *, source: str | None = None) -> Path:
     d = root / "plugins" / plugin / "libs" / lib
     d.mkdir(parents=True, exist_ok=True)
     (d / "VENDOR_POINTER.json").write_text(
-        json.dumps({"schema": "copilot-extensions.vendor-pointer", "version": 1,
-                    "source": source}) + "\n",
+        json.dumps(
+            {
+                "schema": "copilot-extensions.vendor-pointer",
+                "version": 1,
+                "source": source or f"libs/{lib}",
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
-    (d / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "0.0.0"\n',
-                                       encoding="utf-8")
     return d
-
-
-def test_materialize_refuses_absolute_source_path_for_directory_pointer(tmp_path: Path):
-    root = tmp_path / "repo"
-    secret = tmp_path / "outside-repo-secret"
-    (secret / "src" / "evil").mkdir(parents=True)
-    (secret / "src" / "evil" / "__init__.py").write_text("leak = True\n", encoding="utf-8")
-    pointer_dir = _pointer_with_source(root, "agent-bridge", "evil", source=str(secret))
-
-    log = mm.materialize(root, canonical_root=root)
-
-    assert any("SKIP" in line and "escapes the canonical root" in line for line in log)
-    assert (pointer_dir / "VENDOR_POINTER.json").exists()
-    assert not (pointer_dir / "src").exists()
-
-
-def test_materialize_refuses_traversal_source_path_for_directory_pointer(tmp_path: Path):
-    root = tmp_path / "repo"
-    secret = tmp_path / "outside-repo-secret"
-    (secret / "src" / "evil").mkdir(parents=True)
-    (secret / "src" / "evil" / "__init__.py").write_text("leak = True\n", encoding="utf-8")
-    pointer_dir = _pointer_with_source(
-        root, "agent-bridge", "evil", source="../outside-repo-secret"
-    )
-
-    log = mm.materialize(root, canonical_root=root)
-
-    assert any("SKIP" in line and "escapes the canonical root" in line for line in log)
-    assert (pointer_dir / "VENDOR_POINTER.json").exists()
-    assert not (pointer_dir / "src").exists()
-
-
-def test_materialize_refuses_an_escaping_symlink_within_canonical_src(tmp_path: Path):
-    # The pointer's own `source` (libs/zdd) is legitimately inside
-    # canonical_root, but the canonical directory's own src/ contains a
-    # symlink pointing outside it -- shutil.copytree would otherwise follow
-    # it and copy external content into the release snapshot.
-    root = tmp_path / "repo"
-    secret = tmp_path / "outside-repo-secret"
-    secret.mkdir()
-    (secret / "leaked.txt").write_text("do not leak\n", encoding="utf-8")
-    canonical = _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
-    (canonical / "src" / "evil-link").symlink_to(secret, target_is_directory=True)
-    pointer_dir = _pointer(root, "agent-bridge", "zdd")
-
-    log = mm.materialize(root, canonical_root=root)
-
-    assert any("SKIP" in line and "is a symlink" in line for line in log)
-    assert (pointer_dir / "VENDOR_POINTER.json").exists()
-    assert not (pointer_dir / "src").exists()
-
-
-def test_materialize_refuses_an_in_root_symlink_within_canonical_src(tmp_path: Path):
-    # Even a symlink that resolves *inside* canonical_root is refused --
-    # a legitimate vendored lib has no reason to contain any symlink.
-    root = tmp_path / "repo"
-    canonical = _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
-    other_lib = _canonical_lib(root, "other", version="0.1.0-dev1", content="other\n")
-    (canonical / "src" / "sneaky-link").symlink_to(other_lib, target_is_directory=True)
-    pointer_dir = _pointer(root, "agent-bridge", "zdd")
-
-    log = mm.materialize(root, canonical_root=root)
-
-    assert any("SKIP" in line and "is a symlink" in line for line in log)
-    assert (pointer_dir / "VENDOR_POINTER.json").exists()
-    assert not (pointer_dir / "src").exists()
-
-
-def test_materialize_refuses_a_symlinked_src_root(tmp_path: Path):
-    # `tree.is_dir()` follows a symlink, so a canonical lib whose `src`
-    # itself is a symlink (not merely containing one) would otherwise slip
-    # past a check that only scans descendants via rglob().
-    root = tmp_path / "repo"
-    secret = tmp_path / "outside-repo-secret"
-    secret.mkdir()
-    (secret / "leaked.txt").write_text("do not leak\n", encoding="utf-8")
-    lib_dir = root / "libs" / "zdd"
-    lib_dir.mkdir(parents=True)
-    (lib_dir / "pyproject.toml").write_text(
-        '[project]\nname = "x"\nversion = "0.1.0-dev1"\n', encoding="utf-8"
-    )
-    (lib_dir / "src").symlink_to(secret, target_is_directory=True)
-    pointer_dir = _pointer(root, "agent-bridge", "zdd")
-
-    log = mm.materialize(root, canonical_root=root)
-
-    assert any("SKIP" in line and "is a symlink" in line for line in log)
-    assert (pointer_dir / "VENDOR_POINTER.json").exists()
-    assert not (pointer_dir / "src").exists()
-
-
-def test_materialize_refuses_a_symlinked_tests_root(tmp_path: Path):
-    # The tests/ refresh added alongside src/ needs the same symlink
-    # containment guarantee -- a canonical lib whose tests/ is a symlink
-    # (or contains one) must not let shutil.copytree leak external content.
-    # The tests/ refresh only runs at all when the copy already vendors
-    # tests/ (see the "gated on the copy already having tests/" design), so
-    # this test seeds the copy with one before exercising the symlink path.
-    root = tmp_path / "repo"
-    secret = tmp_path / "outside-repo-secret-tests"
-    secret.mkdir()
-    (secret / "leaked.txt").write_text("do not leak\n", encoding="utf-8")
-    canonical = _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
-    (canonical / "tests").symlink_to(secret, target_is_directory=True)
-    pointer_dir = _pointer(root, "agent-bridge", "zdd")
-    (pointer_dir / "tests").mkdir(parents=True)
-    (pointer_dir / "tests" / "test_zdd.py").write_text("def test_it():\n    pass\n",
-                                                        encoding="utf-8")
-
-    log = mm.materialize(root, canonical_root=root)
-
-    assert any("SKIP" in line and "is a symlink" in line for line in log)
-    assert (pointer_dir / "VENDOR_POINTER.json").exists()
-    assert not (pointer_dir / "src").exists()
-
-
-def test_materialize_rejection_never_destroys_previous_tests_content(tmp_path: Path):
-    # The symlink check for tests/ must run BEFORE anything is deleted --
-    # a rejected refresh must leave the copy's previous, safe tests/
-    # content intact, not destroy it and leave nothing behind.
-    root = tmp_path / "repo"
-    secret = tmp_path / "outside-repo-secret-tests2"
-    secret.mkdir()
-    canonical = _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
-    (canonical / "tests").symlink_to(secret, target_is_directory=True)
-    pointer_dir = _pointer(root, "agent-bridge", "zdd")
-    original_tests = pointer_dir / "tests"
-    original_tests.mkdir(parents=True)
-    (original_tests / "test_zdd.py").write_text("def test_it():\n    pass\n", encoding="utf-8")
-
-    mm.materialize(root, canonical_root=root)
-
-    assert (original_tests / "test_zdd.py").read_text() == "def test_it():\n    pass\n"
-
-
-def test_materialize_catches_a_dangling_tests_symlink_at_the_destination(tmp_path: Path):
-    # A dangling (or non-directory-target) symlink at the copy's own
-    # tests/ has is_dir()==False, since is_dir() follows the link to a
-    # target that isn't there -- an is_dir()-only "does this copy have
-    # tests/" gate would silently ignore it, leaving it untouched in a
-    # materialized release.
-    root = tmp_path / "repo"
-    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
-    (root / "libs/zdd/tests").mkdir(parents=True)
-    (root / "libs/zdd/tests/test_zdd.py").write_text("def test_it():\n    pass\n",
-                                                       encoding="utf-8")
-    pointer_dir = _pointer(root, "agent-bridge", "zdd")
-    (pointer_dir / "tests").symlink_to(tmp_path / "does-not-exist", target_is_directory=True)
-
-    log = mm.materialize(root, canonical_root=root)
-
-    assert any("SKIP" in line and "destination" in line and "is a symlink" in line
-               for line in log)
-
-
-def test_materialize_refuses_a_pointer_dir_that_escapes_dest(tmp_path: Path):
-    # find_pointers() globs under dest, but a symlinked plugin (or libs)
-    # directory could still resolve outside dest -- rmtree()/copytree()
-    # must never write there even though the pointer glob "found" it.
-    root = tmp_path / "repo"
-    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
-    outside = tmp_path / "outside-plugin"
-    real_pointer_dir = _pointer(outside, "escaped-plugin", "zdd")
-    (root / "plugins").mkdir(parents=True, exist_ok=True)
-    (root / "plugins" / "escaped-plugin").symlink_to(
-        outside / "plugins" / "escaped-plugin", target_is_directory=True
-    )
-
-    log = mm.materialize(root, canonical_root=root)
-
-    assert any("SKIP" in line and "is a symlink" in line for line in log)
-    assert (real_pointer_dir / "VENDOR_POINTER.json").exists()
-    assert not (real_pointer_dir / "src").exists()
-
-
-def test_build_preserves_a_symlink_instead_of_dereferencing_its_content(tmp_path: Path):
-    # The default shutil.copytree(symlinks=False) would dereference ANY
-    # symlink under source_root during the initial whole-tree snapshot
-    # copy, embedding external content into dest before materialize()'s
-    # own per-pointer symlink check even runs. build() must preserve
-    # symlinks instead.
-    source_root = tmp_path / "repo"
-    secret = tmp_path / "outside-repo-secret"
-    secret.mkdir()
-    (secret / "leaked.txt").write_text("do not leak\n", encoding="utf-8")
-    (source_root / "some-dir").mkdir(parents=True)
-    (source_root / "some-dir" / "a-link").symlink_to(secret, target_is_directory=True)
-    (source_root / "README.md").write_text("hello\n", encoding="utf-8")
-    dest = tmp_path / "dest"
-
-    mm.build(dest, source_root=source_root)
-
-    copied_link = dest / "some-dir" / "a-link"
-    assert copied_link.is_symlink(), "a-link must be preserved as a symlink, not dereferenced"
-    # Confirm the symlink is a real symlink object -- not a directory that
-    # copytree(symlinks=False) would have created containing an embedded
-    # copy of the secret's own files.
-    assert os.readlink(copied_link) == str(secret)
 
 
 def _file_pointer(root: Path, plugin: str, rel: str, *, source: str) -> Path:
@@ -780,14 +190,68 @@ def test_build_materializes_file_pointers_end_to_end(tmp_path: Path):
 def test_main_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
     source = tmp_path / "source"
     _canonical_lib(source, "zdd", version="0.1.0-dev1", content="x\n")
-    _pointer(source, "agent-bridge", "zdd")
+    _uv_editable_consumer(source, "plugins/agent-bridge", "agent-zdd", "../../libs/zdd")
     monkeypatch.setattr(mm, "REPO", source)
 
     dest = tmp_path / "dest"
     code = mm.main(["--dest", str(dest)])
     assert code == 0
     out = capsys.readouterr().out
-    assert "Materialized 1 pointer(s)" in out
+    assert "Materialized 1 artifact(s)" in out
+
+
+def test_main_returns_nonzero_when_a_retired_pointer_marker_survives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+):
+    source = tmp_path / "source"
+    _retired_pointer(source, "agent-bridge", "zdd")
+    monkeypatch.setattr(mm, "REPO", source)
+
+    dest = tmp_path / "dest"
+    code = mm.main(["--dest", str(dest)])
+    assert code == 1
+    assert "retired directory-pointer kind still present" in capsys.readouterr().out
+
+
+def test_build_overwrites_a_stale_existing_dest(tmp_path: Path):
+    source = tmp_path / "source"
+    _canonical_lib(source, "zdd", version="0.1.0-dev1", content="fresh\n")
+    (source / "marker.txt").write_text("v2\n", encoding="utf-8")
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    (dest / "stale-leftover.txt").write_text("old build\n", encoding="utf-8")
+
+    mm.build(dest, source_root=source)
+    assert not (dest / "stale-leftover.txt").exists()
+    assert (dest / "marker.txt").read_text() == "v2\n"
+
+
+def test_build_preserves_a_symlink_instead_of_dereferencing_its_content(tmp_path: Path):
+    source_root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret"
+    secret.mkdir()
+    (secret / "leaked.txt").write_text("do not leak\n", encoding="utf-8")
+    (source_root / "some-dir").mkdir(parents=True)
+    (source_root / "some-dir" / "a-link").symlink_to(secret, target_is_directory=True)
+    (source_root / "README.md").write_text("hello\n", encoding="utf-8")
+    dest = tmp_path / "dest"
+
+    mm.build(dest, source_root=source_root)
+
+    copied_link = dest / "some-dir" / "a-link"
+    assert copied_link.is_symlink(), "a-link must be preserved as a symlink, not dereferenced"
+    assert os.readlink(copied_link) == str(secret)
+
+
+def test_materialize_refuses_a_retired_directory_pointer_marker(tmp_path: Path):
+    root = tmp_path / "repo"
+    pointer_dir = _retired_pointer(root, "agent-bridge", "zdd")
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("retired directory-pointer kind still present" in line for line in log)
+    assert (pointer_dir / "VENDOR_POINTER.json").exists()
 
 
 def _uv_editable_consumer(
@@ -807,6 +271,65 @@ def _uv_editable_consumer(
         encoding="utf-8",
     )
     return d
+
+
+def _rewrite_to_local_path(pyproject: Path, *, name: str, raw_path: str, lib: str) -> None:
+    text = pyproject.read_text(encoding="utf-8")
+    pattern = re.compile(
+        r'^([ \t]*(?:"' + re.escape(name) + r'"|\'' + re.escape(name) + r"'|" +
+        re.escape(name) + r')\s*=\s*)\{\s*(?:'
+        r'path\s*=\s*(?:"' + re.escape(raw_path) + r'"|\'' + re.escape(raw_path) + r"')"
+        r'\s*,\s*editable\s*=\s*true'
+        r'|editable\s*=\s*true\s*,\s*path\s*=\s*(?:"' + re.escape(raw_path) + r'"|\'' +
+        re.escape(raw_path) + r"'))\s*\}[ \t]*(?:#.*)?$",
+        re.MULTILINE,
+    )
+    text, count = pattern.subn(
+        lambda m: f'{m.group(1)}{{ path = "libs/{lib}" }}',
+        text,
+        count=1,
+    )
+    assert count == 1, f"{pyproject}: missing top-level entry for {name}"
+    pyproject.write_text(text, encoding="utf-8")
+
+
+def _rewrite_nested_path(pyproject: Path, *, name: str, raw_path: str) -> None:
+    text = pyproject.read_text(encoding="utf-8")
+    pattern = re.compile(
+        r'^([ \t]*(?:"' + re.escape(name) + r'"|\'' + re.escape(name) + r"'|" +
+        re.escape(name) + r')\s*=\s*)\{\s*(?:'
+        r'path\s*=\s*(?:"' + re.escape(raw_path) + r'"|\'' + re.escape(raw_path) + r"')"
+        r'\s*,\s*editable\s*=\s*true'
+        r'|editable\s*=\s*true\s*,\s*path\s*=\s*(?:"' + re.escape(raw_path) + r'"|\'' +
+        re.escape(raw_path) + r"'))\s*\}[ \t]*(?:#.*)?$",
+        re.MULTILINE,
+    )
+    text, count = pattern.subn(
+        lambda m: f'{m.group(1)}{{ path = "{raw_path}" }}',
+        text,
+        count=1,
+    )
+    assert count == 1, f"{pyproject}: missing nested entry for {name}"
+    pyproject.write_text(text, encoding="utf-8")
+
+
+def _build_expected_vendored_tree(dest_lib: Path, *, canonical_root: Path) -> None:
+    """Independently reconstruct the vendored tree from current canonical libs.
+
+    This intentionally does NOT call the production nested materializer: it
+    copies the canonical lib, rewrites nested source entries itself, and recurses
+    over nested canonical sibling deps so the expected manifests are an
+    independent oracle.
+    """
+
+    refs = uer.find_uv_editable_refs(dest_lib)
+    for name, raw_path, lib, editable in refs:
+        assert editable, f"{dest_lib}: expected editable nested ref for {name}"
+        nested_dest = dest_lib.parent.parent / "libs" / lib
+        if not nested_dest.exists():
+            shutil.copytree(canonical_root / "libs" / lib, nested_dest, ignore=mm._ignore)
+            _build_expected_vendored_tree(nested_dest, canonical_root=canonical_root)
+        _rewrite_nested_path(dest_lib / "pyproject.toml", name=name, raw_path=raw_path)
 
 
 def test_find_uv_editable_refs_only_returns_escaping_entries_regardless_of_editable(tmp_path: Path):
@@ -1076,6 +599,78 @@ def test_materialize_uv_editable_ref_into_refuses_an_unsafe_lib_name(tmp_path: P
         source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
     )
     assert any("not a safe lib name" in line for line in log)
+
+
+def test_real_repo_uv_editable_materialization_matches_current_canonical_trees(
+    tmp_path: Path,
+):
+    """Regression coverage for the real converted consumers.
+
+    A historical pre-conversion tree is NOT the faithful baseline once a
+    conversion PR also changed canonical README/tests content in the same commit.
+    The non-circular comparison is "promotion output now" vs. "what a byte-
+    vendored copy from the SAME current canonical lib would look like now" --
+    i.e. the materialized tree must match today's canonical ``libs/<lib>`` tree
+    byte-for-byte for every real `uv`-editable consumer reference.
+    """
+
+    repo = mm.REPO.resolve()
+    discovered: list[tuple[str, Path, list[tuple[str, str, str, bool]]]] = []
+    for consumer, consumer_dir in uer.iter_consumer_dirs():
+        refs = uer.find_uv_editable_refs(consumer_dir)
+        if refs:
+            discovered.append((consumer, consumer_dir, refs))
+
+    assert discovered, "expected at least one real uv-editable consumer"
+    checked: list[str] = []
+    actual_root = tmp_path / "actual"
+
+    def _consumer_snapshot_dir(root: Path, consumer: str) -> Path:
+        return root / consumer if consumer == "worktree-manager" else root / "plugins" / consumer
+
+    for consumer, consumer_dir, refs in discovered:
+        actual_consumer_dir = _consumer_snapshot_dir(actual_root, consumer)
+        expected_consumer_dir = _consumer_snapshot_dir(tmp_path / "expected", consumer)
+        actual_consumer_dir.mkdir(parents=True, exist_ok=True)
+        expected_consumer_dir.mkdir(parents=True, exist_ok=True)
+        pyproject_text = (consumer_dir / "pyproject.toml").read_text(encoding="utf-8")
+        (actual_consumer_dir / "pyproject.toml").write_text(
+            pyproject_text,
+            encoding="utf-8",
+        )
+        (expected_consumer_dir / "pyproject.toml").write_text(
+            pyproject_text,
+            encoding="utf-8",
+        )
+        for name, raw_path, lib, editable in refs:
+            assert editable, f"{consumer}: expected editable ref for {name}"
+            _rewrite_to_local_path(
+                expected_consumer_dir / "pyproject.toml", name=name, raw_path=raw_path, lib=lib
+            )
+
+    log = mm.materialize(actual_root, canonical_root=repo)
+    skips = [line for line in log if line.startswith("SKIP")]
+    assert not skips, "; ".join(skips)
+    for consumer, _consumer_dir, refs in discovered:
+        actual_consumer_dir = _consumer_snapshot_dir(actual_root, consumer)
+        expected_consumer_dir = _consumer_snapshot_dir(tmp_path / "expected", consumer)
+        assert (actual_consumer_dir / "pyproject.toml").read_text(encoding="utf-8") == (
+            expected_consumer_dir / "pyproject.toml"
+        ).read_text(encoding="utf-8")
+        for _name, _raw_path, lib, _editable in refs:
+            expected_lib = expected_consumer_dir / "libs" / lib
+            if not expected_lib.exists():
+                shutil.copytree(repo / "libs" / lib, expected_lib, ignore=mm._ignore)
+                _build_expected_vendored_tree(expected_lib, canonical_root=repo)
+
+            materialized = actual_consumer_dir / "libs" / lib
+            assert materialized.is_dir(), f"{consumer}: libs/{lib} was not materialized"
+            assert uer.lib_tree_matches(expected_lib, materialized), (
+                f"{consumer}: materialized libs/{lib} differs from the current vendored "
+                f"reconstruction built from canonical libs/{lib}"
+            )
+            checked.append(f"{consumer}:{lib}")
+    assert checked, "expected at least one materialized consumer/lib pair"
 
 
 def test_materialize_uv_editable_ref_into_refuses_a_malformed_manifest(tmp_path: Path):
@@ -1675,3 +1270,353 @@ def test_materialize_nested_uv_editable_refs_refuses_stale_mismatched_content(tm
     assert any("does not match canonical" in line for line in log), log
     # The stale content is untouched, not silently overwritten.
     assert (stale_dir / "__init__.py").read_text() == "stale = True\n"
+
+
+def test_materialize_installer_engine_ref_into_copies_and_rewrites(tmp_path: Path):
+    root = tmp_path / "repo"
+    engine = root / "libs" / "installer-engine"
+    engine.mkdir(parents=True)
+    (engine / "installer-engine.sh").write_text("# canonical sh\n", encoding="utf-8")
+    (engine / "installer-engine.ps1").write_text("# canonical ps1\n", encoding="utf-8")
+    consumer = root / "plugins" / "agent-pull-requests"
+    (consumer / "scripts").mkdir(parents=True)
+    (consumer / "scripts" / "install.sh").write_text(
+        '#!/usr/bin/env bash\n. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n',
+        encoding="utf-8",
+    )
+    (consumer / "scripts" / "install.ps1").write_text(
+        ". (Join-Path $PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')\n",
+        encoding="utf-8",
+    )
+
+    log = mm.materialize_installer_engine_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+
+    assert sum(1 for line in log if line.startswith("OK")) == 2
+    assert (consumer / "scripts" / "installer-engine.sh").read_text() == "# canonical sh\n"
+    assert (consumer / "scripts" / "installer-engine.ps1").read_text() == "# canonical ps1\n"
+    assert (consumer / "scripts" / "install.sh").read_text(encoding="utf-8").splitlines() == [
+        "#!/usr/bin/env bash",
+        '. "$SCRIPT_DIR/installer-engine.sh"',
+    ]
+    assert (consumer / "scripts" / "install.ps1").read_text(encoding="utf-8").splitlines() == [
+        ". (Join-Path $PSScriptRoot 'installer-engine.ps1')"
+    ]
+
+
+def test_materialize_installer_engine_ref_into_reports_missing_canonical(tmp_path: Path):
+    root = tmp_path / "repo"
+    consumer = root / "plugins" / "agent-pull-requests"
+    (consumer / "scripts").mkdir(parents=True)
+    (consumer / "scripts" / "install.sh").write_text(
+        '#!/usr/bin/env bash\n. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n',
+        encoding="utf-8",
+    )
+
+    log = mm.materialize_installer_engine_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+
+    assert any("canonical source missing" in line for line in log)
+    assert not (consumer / "scripts" / "installer-engine.sh").exists()
+
+
+def test_materialize_installer_engine_ref_into_refuses_an_escaping_reference(tmp_path: Path):
+    root = tmp_path / "repo"
+    engine = root / "libs" / "installer-engine"
+    engine.mkdir(parents=True)
+    (engine / "installer-engine.sh").write_text("# canonical sh\n", encoding="utf-8")
+    consumer = root / "plugins" / "agent-pull-requests"
+    (consumer / "scripts").mkdir(parents=True)
+    (consumer / "scripts" / "install.sh").write_text(
+        '#!/usr/bin/env bash\n. "$SCRIPT_DIR/../../../outside/installer-engine.sh"\n',
+        encoding="utf-8",
+    )
+    (root / "outside").mkdir()
+    (root / "outside" / "installer-engine.sh").write_text("# nope\n", encoding="utf-8")
+
+    log = mm.materialize_installer_engine_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+
+    assert any("is not libs/installer-engine/installer-engine.sh" in line for line in log)
+    assert not (consumer / "scripts" / "installer-engine.sh").exists()
+
+
+def test_materialize_installer_engine_ref_into_refuses_a_symlinked_canonical_ancestor(
+    tmp_path: Path,
+):
+    root = tmp_path / "repo"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    real_engine = outside / "installer-engine"
+    real_engine.mkdir()
+    (real_engine / "installer-engine.sh").write_text("# canonical sh\n", encoding="utf-8")
+    (real_engine / "installer-engine.ps1").write_text("# canonical ps1\n", encoding="utf-8")
+    (root / "libs").mkdir(parents=True)
+    (root / "libs" / "installer-engine").symlink_to(real_engine, target_is_directory=True)
+    consumer = root / "plugins" / "agent-pull-requests"
+    (consumer / "scripts").mkdir(parents=True)
+    (consumer / "scripts" / "install.sh").write_text(
+        '#!/usr/bin/env bash\n. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n',
+        encoding="utf-8",
+    )
+
+    log = mm.materialize_installer_engine_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+
+    assert any("is a symlink -- refusing" in line for line in log)
+    assert not (consumer / "scripts" / "installer-engine.sh").exists()
+
+
+def test_materialize_installer_engine_ref_into_refuses_duplicate_source_lines(tmp_path: Path):
+    root = tmp_path / "repo"
+    engine = root / "libs" / "installer-engine"
+    engine.mkdir(parents=True)
+    (engine / "installer-engine.sh").write_text("# canonical sh\n", encoding="utf-8")
+    consumer = root / "plugins" / "agent-pull-requests"
+    (consumer / "scripts").mkdir(parents=True)
+    (consumer / "scripts" / "install.sh").write_text(
+        '#!/usr/bin/env bash\n'
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n'
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n',
+        encoding="utf-8",
+    )
+
+    log = mm.materialize_installer_engine_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+
+    assert any("expected exactly one" in line for line in log)
+    assert not (consumer / "scripts" / "installer-engine.sh").exists()
+
+
+def test_rewrite_to_local_refuses_duplicate_source_lines(tmp_path: Path):
+    script = tmp_path / "install.sh"
+    script.write_text(
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n'
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n',
+        encoding="utf-8",
+    )
+
+    assert ier.rewrite_to_local(script, "sh") is False
+    assert script.read_text(encoding="utf-8").count("../../../libs/installer-engine") == 2
+
+
+def test_rewrite_to_local_preserves_following_comment_lines(tmp_path: Path):
+    sh_script = tmp_path / "install.sh"
+    sh_script.write_text(
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n'
+        "# keep me\n",
+        encoding="utf-8",
+    )
+    ps1_script = tmp_path / "install.ps1"
+    ps1_script.write_text(
+        ". (Join-Path $PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')\n"
+        "# keep me\n",
+        encoding="utf-8",
+    )
+
+    assert ier.rewrite_to_local(sh_script, "sh") is True
+    assert ier.rewrite_to_local(ps1_script, "ps1") is True
+    assert sh_script.read_text(encoding="utf-8").splitlines() == [
+        '. "$SCRIPT_DIR/installer-engine.sh"',
+        "# keep me",
+    ]
+    assert ps1_script.read_text(encoding="utf-8").splitlines() == [
+        ". (Join-Path $PSScriptRoot 'installer-engine.ps1')",
+        "# keep me",
+    ]
+
+
+def test_rewrite_to_local_preserves_trailing_same_line_comments(tmp_path: Path):
+    sh_script = tmp_path / "install.sh"
+    sh_script.write_text(
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh" # keep me\n',
+        encoding="utf-8",
+    )
+    ps1_script = tmp_path / "install.ps1"
+    ps1_script.write_text(
+        ". (Join-Path $PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1') # keep me\n",
+        encoding="utf-8",
+    )
+
+    assert ier.rewrite_to_local(sh_script, "sh") is True
+    assert ier.rewrite_to_local(ps1_script, "ps1") is True
+    assert sh_script.read_text(encoding="utf-8").splitlines() == [
+        '. "$SCRIPT_DIR/installer-engine.sh" # keep me'
+    ]
+    assert ps1_script.read_text(encoding="utf-8").splitlines() == [
+        ". (Join-Path $PSScriptRoot 'installer-engine.ps1') # keep me"
+    ]
+
+
+def test_materialize_installer_engine_ref_into_skips_malformed_local_reference_for_registered_adopter(
+    tmp_path: Path,
+):
+    root = tmp_path / "repo"
+    engine = root / "libs" / "installer-engine"
+    engine.mkdir(parents=True)
+    (engine / "installer-engine.sh").write_text("# canonical sh\n", encoding="utf-8")
+    consumer = root / "plugins" / "agent-pull-requests"
+    (consumer / "scripts").mkdir(parents=True)
+    (consumer / "scripts" / "install.sh").write_text(
+        '#!/usr/bin/env bash\n. "$SCRIPT_DIR/missing/installer-engine.sh"\n',
+        encoding="utf-8",
+    )
+
+    log = mm.materialize_installer_engine_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+
+    assert any("neither the exact local form" in line for line in log)
+    assert not (consumer / "scripts" / "installer-engine.sh").exists()
+
+
+def test_materialize_installer_engine_ref_into_preserves_following_comment_lines(tmp_path: Path):
+    root = tmp_path / "repo"
+    engine = root / "libs" / "installer-engine"
+    engine.mkdir(parents=True)
+    (engine / "installer-engine.sh").write_text("# canonical sh\n", encoding="utf-8")
+    (engine / "installer-engine.ps1").write_text("# canonical ps1\n", encoding="utf-8")
+    consumer = root / "plugins" / "agent-pull-requests"
+    (consumer / "scripts").mkdir(parents=True)
+    (consumer / "scripts" / "install.sh").write_text(
+        '#!/usr/bin/env bash\n'
+        '. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"\n'
+        "# keep me\n",
+        encoding="utf-8",
+    )
+    (consumer / "scripts" / "install.ps1").write_text(
+        ". (Join-Path $PSScriptRoot '..\\..\\..\\libs\\installer-engine\\installer-engine.ps1')\n"
+        "# keep me\n",
+        encoding="utf-8",
+    )
+
+    log = mm.materialize_installer_engine_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
+    )
+
+    assert sum(1 for line in log if line.startswith("OK")) == 2
+    assert (consumer / "scripts" / "install.sh").read_text(encoding="utf-8").splitlines() == [
+        "#!/usr/bin/env bash",
+        '. "$SCRIPT_DIR/installer-engine.sh"',
+        "# keep me",
+    ]
+    assert (consumer / "scripts" / "install.ps1").read_text(encoding="utf-8").splitlines() == [
+        ". (Join-Path $PSScriptRoot 'installer-engine.ps1')",
+        "# keep me",
+    ]
+
+
+def test_materialize_launch_wrapper_assets_into_copies_manifested_files(
+    tmp_path: Path,
+):
+    root = tmp_path / "repo"
+    source_dir = root / "worktree-manager" / "bin"
+    source_dir.mkdir(parents=True)
+    for name, content in {
+        "launch-session.sh": "#!/usr/bin/env bash\n",
+        "pane-wrapper.sh": "#!/usr/bin/env bash\n",
+        "session-options.sh": "session opts\n",
+    }.items():
+        (source_dir / name).write_text(content, encoding="utf-8")
+    plugin = root / "plugins" / "agent-worktrees"
+    plugin.mkdir(parents=True)
+    (plugin / lwar.MANIFEST_NAME).write_text(
+        json.dumps(
+            {
+                "schema": "copilot-extensions.launch-wrapper-assets",
+                "version": 1,
+                "canonicalDir": "worktree-manager/bin",
+                "files": ["launch-session.sh", "pane-wrapper.sh", "session-options.sh"],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dest_plugin = root / "preview" / "plugins" / "agent-worktrees"
+    dest_plugin.mkdir(parents=True)
+
+    log = mm.materialize_launch_wrapper_assets_into(
+        source_consumer_dir=plugin,
+        dest_consumer_dir=dest_plugin,
+        canonical_root=root,
+        dest_root=root / "preview",
+    )
+
+    assert sum(1 for line in log if line.startswith("OK")) == 3
+    assert (dest_plugin / "bin" / "launch-session.sh").read_text() == "#!/usr/bin/env bash\n"
+    assert (dest_plugin / "bin" / "pane-wrapper.sh").read_text() == "#!/usr/bin/env bash\n"
+    assert (dest_plugin / "bin" / "session-options.sh").read_text() == "session opts\n"
+
+
+def test_materialize_launch_wrapper_assets_into_reports_missing_canonical_file(
+    tmp_path: Path,
+):
+    root = tmp_path / "repo"
+    (root / "worktree-manager" / "bin").mkdir(parents=True)
+    plugin = root / "plugins" / "agent-worktrees"
+    plugin.mkdir(parents=True)
+    (plugin / lwar.MANIFEST_NAME).write_text(
+        json.dumps(
+            {
+                "schema": "copilot-extensions.launch-wrapper-assets",
+                "version": 1,
+                "canonicalDir": "worktree-manager/bin",
+                "files": ["launch-session.sh"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dest_plugin = root / "preview" / "plugins" / "agent-worktrees"
+    dest_plugin.mkdir(parents=True)
+
+    log = mm.materialize_launch_wrapper_assets_into(
+        source_consumer_dir=plugin,
+        dest_consumer_dir=dest_plugin,
+        canonical_root=root,
+        dest_root=root / "preview",
+    )
+
+    assert any("canonical source missing" in line for line in log)
+    assert not (dest_plugin / "bin" / "launch-session.sh").exists()
+
+
+def test_materialize_launch_wrapper_assets_into_refuses_escaping_source_dir(
+    tmp_path: Path,
+):
+    root = tmp_path / "repo"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "launch-session.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    plugin = root / "plugins" / "agent-worktrees"
+    plugin.mkdir(parents=True)
+    (plugin / lwar.MANIFEST_NAME).write_text(
+        json.dumps(
+            {
+                "schema": "copilot-extensions.launch-wrapper-assets",
+                "version": 1,
+                "canonicalDir": "../outside",
+                "files": ["launch-session.sh"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dest_plugin = root / "preview" / "plugins" / "agent-worktrees"
+    dest_plugin.mkdir(parents=True)
+
+    log = mm.materialize_launch_wrapper_assets_into(
+        source_consumer_dir=plugin,
+        dest_consumer_dir=dest_plugin,
+        canonical_root=root,
+        dest_root=root / "preview",
+    )
+
+    assert any("canonicalDir must be a non-empty string" in line for line in log)
+    assert not (dest_plugin / "bin" / "launch-session.sh").exists()

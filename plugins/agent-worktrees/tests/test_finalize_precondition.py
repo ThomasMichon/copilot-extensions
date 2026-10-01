@@ -13,9 +13,11 @@ already-merged PR.
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 
@@ -133,6 +135,142 @@ def test_worktree_branch_prefers_tracked_host_branch():
 
     assert finalize._worktree_branch(record, record.worktree_id) == "host/app-session"
     assert finalize._worktree_branch(None, "managed") == "worktree/managed"
+
+
+def test_precondition_refreshes_missing_head_for_provider_confirmed_merge(
+    refspec_worktree, monkeypatch,
+):
+    from agent_worktrees import providers
+    from agent_worktrees.providers.base import PullResult
+
+    env = refspec_worktree
+    head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
+    _land_on_master(env, squash=False)
+
+    class Provider:
+        def get_pull(self, repo, number, **kwargs):
+            return PullResult(state="merged", merged=True)
+
+        def observe_head(self, repo, number, **kwargs):
+            return PullResult(head_sha=head_sha)
+
+    monkeypatch.setattr(providers, "get_provider", lambda _name: Provider())
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_a, **_k: None)
+    pr = SimpleNamespace(
+        branch=env.slug, state="merged", head_sha="", number=7,
+        repo="owner/repo", provider="github",
+    )
+    record = SimpleNamespace(
+        worktree_id=env.worktree_id, pr=pr, prs=[pr], repo="owner/repo",
+    )
+    repo = SimpleNamespace(
+        remote="origin",
+        default_branch="master",
+        pr=SimpleNamespace(
+            enabled=True, branch=env.slug, provider="github", api_base="",
+        ),
+    )
+
+    ok, err = finalize._pr_finalize_precondition(
+        record, repo, str(env.clone), str(env.clone),
+    )
+
+    assert ok is True
+    assert err is None
+    assert pr.head_sha == head_sha
+
+
+def test_precondition_still_blocks_new_commits_after_refreshed_merged_head(
+    refspec_worktree, monkeypatch,
+):
+    from agent_worktrees import providers
+    from agent_worktrees.providers.base import PullResult
+
+    env = refspec_worktree
+    head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
+    _land_on_master(env, squash=False)
+    _commit(env.clone, "later.txt", "not part of the merged PR\n")
+
+    class Provider:
+        def get_pull(self, repo, number, **kwargs):
+            return PullResult(state="merged", merged=True, head_sha=head_sha)
+
+    monkeypatch.setattr(providers, "get_provider", lambda _name: Provider())
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_a, **_k: None)
+    pr = SimpleNamespace(
+        branch=env.slug, state="merged", head_sha="", number=7,
+        repo="owner/repo", provider="github",
+    )
+    record = SimpleNamespace(
+        worktree_id=env.worktree_id, pr=pr, prs=[pr], repo="owner/repo",
+    )
+    repo = SimpleNamespace(
+        remote="origin",
+        default_branch="master",
+        pr=SimpleNamespace(
+            enabled=True, branch=env.slug, provider="github", api_base="",
+        ),
+    )
+
+    ok, err = finalize._pr_finalize_precondition(
+        record, repo, str(env.clone), str(env.clone),
+    )
+
+    assert ok is False
+    assert err is not None
+    assert "further commits" in err
+
+
+def test_precondition_repairs_azure_merged_head_from_live_pr_metadata(
+        refspec_worktree, monkeypatch,
+):
+    from agent_worktrees import providers
+    from agent_worktrees.providers import azure_devops
+
+    env = refspec_worktree
+    head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
+    _land_on_master(env, squash=False)
+
+    monkeypatch.setattr(
+        azure_devops, "run_cli",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({
+                "status": "completed",
+                "lastMergeSourceCommit": {"commitId": head_sha},
+            }),
+            stderr="",
+        ),
+    )
+    monkeypatch.setattr(
+        providers, "get_provider", lambda _name: azure_devops.AzureDevOpsProvider(),
+    )
+    monkeypatch.setattr(
+        providers, "account_token_for_slug", lambda *_a, **_k: None,
+    )
+    pr = SimpleNamespace(
+        branch=env.slug, state="merged", head_sha="", number=7,
+        repo="Project/repo", provider="azure-devops",
+    )
+    record = SimpleNamespace(
+        worktree_id=env.worktree_id, pr=pr, prs=[pr], repo="Project/repo",
+    )
+    repo = SimpleNamespace(
+        remote="origin",
+        default_branch="master",
+        pr=SimpleNamespace(
+            enabled=True, branch=env.slug, provider="azure-devops",
+            api_base="https://dev.azure.com/acme",
+        ),
+    )
+
+    ok, err = finalize._pr_finalize_precondition(
+        record, repo, str(env.clone), str(env.clone),
+    )
+
+    assert ok is True
+    assert err is None
+    assert pr.head_sha == head_sha
 
 
 # ---------------------------------------------------------------------------
@@ -766,6 +904,293 @@ class TestPrMergeStatusIndeterminateVsUnmerged:
         )
         assert finalize_open_pr_gate.pr_merge_status(record, repo=None) is None
 
+    def test_mismatched_tracked_provider_is_indeterminate_not_queried(self):
+        # A legacy record can retain a different provider than the repo is
+        # now configured for. Querying the configured provider with the
+        # same slug/number could confirm an unrelated merged PR and hand
+        # back the wrong head -- fail closed instead of ever calling it.
+        pr = SimpleNamespace(
+            branch="pr/some-fix", repo="owner/repo", number=7,
+            provider="azure-devops", state="open", head_sha="",
+        )
+        record = SimpleNamespace(pr=pr)
+        repo = SimpleNamespace(
+            pr=SimpleNamespace(provider="github", api_base=""),
+        )
+        assert finalize_open_pr_gate.pr_merge_status(record, repo) is None
+
+    def test_mismatched_tracked_authority_is_indeterminate_not_queried(self):
+        # Same provider KIND, but the tracked PR's own URL names a host that
+        # no longer matches the repo's currently configured authority (e.g.
+        # the repo moved to a different GitHub Enterprise instance). Querying
+        # the NEW authority with the OLD slug/number could confirm an
+        # unrelated merged PR there and hand back the wrong head -- fail
+        # closed instead of ever calling get_pull().
+        from agent_worktrees import providers
+        from agent_worktrees.providers.github import GitHubProvider
+
+        class _BoomOnQuery(GitHubProvider):
+            def get_pull(self, *_args, **_kwargs):
+                raise AssertionError("must not query a provider across a host change")
+
+        with mock.patch.object(
+            providers, "get_provider", lambda _name: _BoomOnQuery(),
+        ):
+            pr = SimpleNamespace(
+                branch="pr/some-fix", repo="owner/repo", number=7,
+                provider="github", state="open", head_sha="",
+                url="https://old-host.example.com/owner/repo/pull/7",
+            )
+            record = SimpleNamespace(pr=pr)
+            repo = SimpleNamespace(
+                pr=SimpleNamespace(
+                    provider="github", api_base="https://new-host.example.com",
+                ),
+            )
+            assert finalize_open_pr_gate.pr_merge_status(record, repo) is None
+
+    def test_mismatched_azure_devops_organization_is_indeterminate_not_queried(self):
+        # Same host (``dev.azure.com``), but the tracked PR's own URL names
+        # a DIFFERENT organization segment than the repo's currently
+        # configured ``api_base``. Azure DevOps' ``authority_endpoint()``
+        # returns the full ``.../<org>`` URL -- host[:port] equality alone
+        # would miss this (two different orgs share the same host), letting
+        # a stale tracked PR be re-queried against the wrong org and
+        # confirm an unrelated merge there. Fail closed instead.
+        from agent_worktrees import providers
+        from agent_worktrees.providers.azure_devops import AzureDevOpsProvider
+
+        class _BoomOnQuery(AzureDevOpsProvider):
+            def get_pull(self, *_args, **_kwargs):
+                raise AssertionError("must not query a provider across an org change")
+
+        with mock.patch.object(
+            providers, "get_provider", lambda _name: _BoomOnQuery(),
+        ):
+            pr = SimpleNamespace(
+                branch="pr/some-fix", repo="project/repo", number=7,
+                provider="azure-devops", state="open", head_sha="",
+                url=(
+                    "https://dev.azure.com/old-org/project/_git/repo"
+                    "/pullrequest/7"
+                ),
+            )
+            record = SimpleNamespace(pr=pr)
+            repo = SimpleNamespace(
+                pr=SimpleNamespace(
+                    provider="azure-devops",
+                    api_base="https://dev.azure.com/new-org",
+                ),
+            )
+            assert finalize_open_pr_gate.pr_merge_status(record, repo) is None
+
+    def test_mismatched_gitea_root_path_is_indeterminate_not_queried(self):
+        # Same host, but the tracked PR's own URL sits under a DIFFERENT
+        # root path than the repo's currently configured path-hosted
+        # ``api_base`` (e.g. a different Gitea instance sharing the host).
+        # Host[:port] equality alone would miss this -- Gitea's
+        # ``authority_endpoint()`` returns the full ``api_base`` URL
+        # including its root path, which host-only comparison discards.
+        # Fail closed instead of querying across instances.
+        from agent_worktrees import providers
+        from agent_worktrees.providers.gitea import GiteaProvider
+
+        class _BoomOnQuery(GiteaProvider):
+            def get_pull(self, *_args, **_kwargs):
+                raise AssertionError(
+                    "must not query a provider across a root-path change",
+                )
+
+        with mock.patch.object(
+            providers, "get_provider", lambda _name: _BoomOnQuery(),
+        ):
+            pr = SimpleNamespace(
+                branch="pr/some-fix", repo="owner/project", number=12,
+                provider="gitea", state="open", head_sha="",
+                url="https://forge.example/other-app/owner/project/pulls/12",
+            )
+            record = SimpleNamespace(pr=pr)
+            repo = SimpleNamespace(
+                pr=SimpleNamespace(
+                    provider="gitea", api_base="https://forge.example/gitea",
+                ),
+            )
+            assert finalize_open_pr_gate.pr_merge_status(record, repo) is None
+
+    def test_mismatched_gitea_scheme_is_indeterminate_not_queried(self):
+        # Same host and path root, but the tracked PR's own URL uses a
+        # DIFFERENT scheme (http) than the repo's currently configured
+        # https api_base. Comparing host[:port] alone would collapse these
+        # onto the same value and treat them as the same authority --
+        # querying the https instance with a PR identity tracked against
+        # a DIFFERENT (http) origin could confirm an unrelated merge there.
+        from agent_worktrees import providers
+        from agent_worktrees.providers.gitea import GiteaProvider
+
+        class _BoomOnQuery(GiteaProvider):
+            def get_pull(self, *_args, **_kwargs):
+                raise AssertionError(
+                    "must not query a provider across a scheme change",
+                )
+
+        with mock.patch.object(
+            providers, "get_provider", lambda _name: _BoomOnQuery(),
+        ):
+            pr = SimpleNamespace(
+                branch="pr/some-fix", repo="owner/project", number=12,
+                provider="gitea", state="open", head_sha="",
+                url="http://forge.example/gitea/owner/project/pulls/12",
+            )
+            record = SimpleNamespace(pr=pr)
+            repo = SimpleNamespace(
+                pr=SimpleNamespace(
+                    provider="gitea", api_base="https://forge.example/gitea",
+                ),
+            )
+            assert finalize_open_pr_gate.pr_merge_status(record, repo) is None
+
+    def test_unconfigured_gitea_authority_is_indeterminate_not_queried(self):
+        # Gitea's authority_endpoint() returns the bare (stripped) api_base
+        # verbatim -- an empty/unconfigured api_base yields an empty
+        # string, which must NOT be treated as "no authority to check,
+        # proceed anyway". An empty configured endpoint can never be
+        # proven to match the tracked PR's own origin, so this must fail
+        # closed (indeterminate) rather than silently skip validation and
+        # query an arbitrary tracked URL unchecked.
+        from agent_worktrees import providers
+        from agent_worktrees.providers.gitea import GiteaProvider
+
+        class _BoomOnQuery(GiteaProvider):
+            def get_pull(self, *_args, **_kwargs):
+                raise AssertionError(
+                    "must not query with an unconfigured/unverifiable authority",
+                )
+
+        with mock.patch.object(
+            providers, "get_provider", lambda _name: _BoomOnQuery(),
+        ):
+            pr = SimpleNamespace(
+                branch="pr/some-fix", repo="owner/project", number=12,
+                provider="gitea", state="open", head_sha="",
+                url="https://forge.example/gitea/owner/project/pulls/12",
+            )
+            record = SimpleNamespace(pr=pr)
+            repo = SimpleNamespace(
+                pr=SimpleNamespace(provider="gitea", api_base=""),
+            )
+            assert finalize_open_pr_gate.pr_merge_status(record, repo) is None
+
+
+class TestRepairOtherTrackedPrHeads:
+    """#4751 round 12: content_exceeds_merged_head_any's per-branch check
+    (_cleanup_branch_refs) fails closed on ANY record.prs[*] entry missing
+    its own head_sha -- but only record.pr (the active entry) ever got a
+    repair attempt via pr_merge_status. A worktree carrying more than one
+    merged PR could never finalize even when every entry is confirmable and
+    repairable via the provider. repair_other_tracked_pr_heads (and its
+    wiring into content_exceeds_merged_head_any's optional `repo` param)
+    closes that gap.
+    """
+
+    def test_repairs_missing_head_sha_on_non_active_merged_pr(self):
+        from agent_worktrees import providers
+        from agent_worktrees.providers.github import GitHubProvider
+
+        class _Confirms(GitHubProvider):
+            def get_pull(self, repo_slug, number, *, api_base="", token=""):
+                assert (repo_slug, number) == ("owner/repo", 9)
+                return SimpleNamespace(
+                    merged=True, state="merged", head_sha="c" * 40,
+                )
+
+        active = SimpleNamespace(
+            branch="pr/active", repo="owner/repo", number=1,
+            provider="github", state="open", head_sha="a" * 40,
+        )
+        other = SimpleNamespace(
+            branch="pr/other", repo="owner/repo", number=9,
+            provider="github", state="open", head_sha="",
+        )
+        record = SimpleNamespace(pr=active, prs=[active, other])
+        repo = SimpleNamespace(pr=SimpleNamespace(provider="github", api_base=""))
+
+        with mock.patch.object(
+            providers, "get_provider", lambda _name: _Confirms(),
+        ):
+            finalize_open_pr_gate.repair_other_tracked_pr_heads(record, repo)
+
+        assert other.head_sha == "c" * 40
+        assert other.state == "merged"
+        # The active entry is untouched by this helper -- pr_merge_status
+        # (called separately by upstream_match_is_trustworthy) owns it.
+        assert active.head_sha == "a" * 40
+
+    def test_does_not_touch_entries_that_already_have_a_head_sha(self):
+        from agent_worktrees import providers
+        from agent_worktrees.providers.github import GitHubProvider
+
+        class _BoomOnQuery(GitHubProvider):
+            def get_pull(self, *_args, **_kwargs):
+                raise AssertionError("must not re-query an already-populated entry")
+
+        active = SimpleNamespace(
+            branch="pr/active", repo="owner/repo", number=1,
+            provider="github", state="open", head_sha="a" * 40,
+        )
+        other = SimpleNamespace(
+            branch="pr/other", repo="owner/repo", number=9,
+            provider="github", state="merged", head_sha="b" * 40,
+        )
+        record = SimpleNamespace(pr=active, prs=[active, other])
+        repo = SimpleNamespace(pr=SimpleNamespace(provider="github", api_base=""))
+
+        with mock.patch.object(
+            providers, "get_provider", lambda _name: _BoomOnQuery(),
+        ):
+            finalize_open_pr_gate.repair_other_tracked_pr_heads(record, repo)
+
+        assert other.head_sha == "b" * 40
+
+    def test_content_exceeds_merged_head_any_repairs_before_the_boundary_check(
+        self, refspec_worktree, monkeypatch,
+    ):
+        from agent_worktrees import providers
+        from agent_worktrees.providers.github import GitHubProvider
+
+        env = refspec_worktree
+        other_branch = "pr/other-parallel-fix"
+        _git("branch", other_branch, cwd=env.clone)
+        record, repo = _record_and_repo(env)
+        repo.pr.provider = "github"
+        repo.pr.api_base = ""
+        active_head_sha = "a" * 40
+        record.pr.head_sha = active_head_sha
+        record.pr.number = None
+        other = SimpleNamespace(
+            branch=other_branch, repo="owner/repo", number=9,
+            provider="github", state="open", head_sha="",
+        )
+        record.prs = [record.pr, other]
+
+        class _Confirms(GitHubProvider):
+            def get_pull(self, repo_slug, number, *, api_base="", token=""):
+                return SimpleNamespace(
+                    merged=True, state="merged", head_sha="b" * 40,
+                )
+
+        monkeypatch.setattr(
+            finalize_open_pr_gate, "content_exceeds_merged_head", lambda *a, **k: False,
+        )
+        with mock.patch.object(
+            providers, "get_provider", lambda _name: _Confirms(),
+        ):
+            content_ref = f"worktree/{env.worktree_id}"
+            finalize_open_pr_gate.content_exceeds_merged_head_any(
+                record, content_ref, "origin/master", cwd=str(env.clone), repo=repo,
+            )
+
+        assert other.head_sha == "b" * 40
+
 
 def test_content_exceeds_merged_head_any_checks_each_pr_branch_against_own_head(
     refspec_worktree, monkeypatch,
@@ -783,7 +1208,7 @@ def test_content_exceeds_merged_head_any_checks_each_pr_branch_against_own_head(
     active_head_sha = "a" * 40
     other_head_sha = "b" * 40
     record.pr.head_sha = active_head_sha
-    record.prs = [SimpleNamespace(branch=other_branch, head_sha=other_head_sha)]
+    record.prs = [SimpleNamespace(branch=other_branch, head_sha=other_head_sha, state="merged")]
 
     seen_calls: list[tuple[str, str]] = []
 
@@ -798,7 +1223,7 @@ def test_content_exceeds_merged_head_any_checks_each_pr_branch_against_own_head(
 
     content_ref = f"worktree/{env.worktree_id}"
     finalize_open_pr_gate.content_exceeds_merged_head_any(
-        record, content_ref, "origin/master", cwd=str(env.clone),
+        record, content_ref, "origin/master", cwd=str(env.clone), repo=repo,
     )
 
     other_calls = [(r, h) for r, h in seen_calls if r == other_branch]
@@ -806,6 +1231,212 @@ def test_content_exceeds_merged_head_any_checks_each_pr_branch_against_own_head(
     assert all(h == other_head_sha for _, h in other_calls), (
         f"other_branch must be checked against its OWN head_sha, got {other_calls}"
     )
+
+
+def test_cleanup_branch_refs_keeps_latest_entry_for_a_reused_branch_name():
+    # #4699: a legacy flow can reuse the SAME local branch name across
+    # sequential PRs on one long-lived worktree
+    # (`tracking._merge_pr_attribution_state` documents this exact reuse
+    # pattern for `pr_id`-less records). The live git ref for that name can
+    # only ever point at the MOST RECENT push -- never an earlier one -- so
+    # `_cleanup_branch_refs` must pair a reused branch with its LATEST
+    # `record.prs` entry, not the first one encountered in append order.
+    record = SimpleNamespace(
+        worktree_id="some-worktree",
+        branch="",
+        pr=SimpleNamespace(head_sha="active" * 8),
+        prs=[
+            SimpleNamespace(branch="reused-branch", head_sha="old-head-sha"),
+            SimpleNamespace(branch="reused-branch", head_sha="new-head-sha"),
+            SimpleNamespace(branch="unrelated-branch", head_sha="unrelated-sha"),
+        ],
+    )
+
+    pairs = finalize_open_pr_gate._cleanup_branch_refs(record)
+
+    assert ("reused-branch", "new-head-sha") in pairs
+    assert ("reused-branch", "old-head-sha") not in pairs
+    assert ("unrelated-branch", "unrelated-sha") in pairs
+    reused_count = sum(1 for ref, _ in pairs if ref == "reused-branch")
+    assert reused_count == 1, "a reused branch name must appear only once"
+
+
+def test_cleanup_branch_refs_uses_opened_at_recency_not_raw_list_order():
+    # #4699: `record.prs` is not guaranteed to be chronological --
+    # `tracking.WorktreeRecord.active_pr` defines recency by `opened_at`,
+    # only falling back to list position as a tie-breaker; concurrent-save
+    # reconciliation can append an OLDER unmatched on-disk entry after a
+    # NEWER in-memory one. A reused branch name must therefore be paired
+    # with whichever entry has the LATEST `opened_at`, never simply the
+    # last one in raw list order.
+    record = SimpleNamespace(
+        worktree_id="some-worktree",
+        branch="",
+        pr=SimpleNamespace(head_sha="active" * 8),
+        prs=[
+            # Chronologically LATER (opened_at), but appears FIRST in the
+            # list -- e.g. reconciliation appended the older entry after it.
+            SimpleNamespace(
+                branch="reused-branch", head_sha="new-head-sha",
+                opened_at="2026-02-01T00:00:00Z", state="merged",
+            ),
+            SimpleNamespace(
+                branch="reused-branch", head_sha="old-head-sha",
+                opened_at="2026-01-01T00:00:00Z", state="merged",
+            ),
+        ],
+    )
+
+    pairs = finalize_open_pr_gate._cleanup_branch_refs(record)
+
+    assert ("reused-branch", "new-head-sha") in pairs
+    assert ("reused-branch", "old-head-sha") not in pairs
+
+
+def test_cleanup_branch_refs_prefers_merged_entry_over_a_later_rejected_reuse():
+    # #4699: the LATEST tracked entry for a reused branch
+    # name is not necessarily the one that merged -- a rejected (closed)
+    # reuse can be the most recent. `_cleanup_branch_refs` must not let a
+    # confirmed-terminal-non-merge entry overwrite an earlier entry that
+    # could plausibly represent real landed work.
+    record = SimpleNamespace(
+        worktree_id="some-worktree",
+        branch="",
+        pr=SimpleNamespace(head_sha="active" * 8),
+        prs=[
+            SimpleNamespace(branch="reused-branch", head_sha="merged-sha", state="merged"),
+            SimpleNamespace(branch="reused-branch", head_sha="rejected-sha", state="closed"),
+        ],
+    )
+
+    pairs = finalize_open_pr_gate._cleanup_branch_refs(record)
+
+    assert ("reused-branch", "merged-sha") in pairs
+    assert ("reused-branch", "rejected-sha") not in pairs
+
+
+def test_cleanup_branch_refs_uses_a_later_merge_after_an_earlier_rejection():
+    # Counterpart: once a LATER reuse of the same branch name is itself
+    # merged, it must win over an earlier rejected attempt.
+    record = SimpleNamespace(
+        worktree_id="some-worktree",
+        branch="",
+        pr=SimpleNamespace(head_sha="active" * 8),
+        prs=[
+            SimpleNamespace(branch="reused-branch", head_sha="rejected-sha", state="closed"),
+            SimpleNamespace(branch="reused-branch", head_sha="merged-sha", state="merged"),
+        ],
+    )
+
+    pairs = finalize_open_pr_gate._cleanup_branch_refs(record)
+
+    assert ("reused-branch", "merged-sha") in pairs
+    assert ("reused-branch", "rejected-sha") not in pairs
+
+
+def test_precondition_passes_with_reused_branch_name_across_sequential_prs(
+    refspec_worktree,
+):
+    # #4699 end-to-end regression: a reused branch name must be paired with
+    # its LATEST (most recent) `record.prs` entry, never its FIRST -- the
+    # live git ref for a reused name can only ever point at the most recent
+    # push. Pairing it with an earlier, stale `head_sha` instead would read
+    # every commit made for a LATER reuse of that same branch name as
+    # "extra" commits beyond that stale boundary (a squash merge always
+    # breaks ancestry, so those later commits are never reachable from
+    # `upstream` by SHA either), falsely blocking finalize even though BOTH
+    # reuses had already landed on master via squash merge.
+    env = refspec_worktree
+    record, repo = _record_and_repo(env)
+    record.pr.state = "merged"
+    record.pr.head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
+
+    reused_branch = "legacy-reused-branch"
+    _git("branch", reused_branch, cwd=env.clone)
+    _git("checkout", reused_branch, cwd=env.clone)
+
+    # First reuse ("PR #1"): its own commit, squash-merged onto master.
+    _commit(env.clone, "legacy_v1.txt", "legacy reuse #1\n")
+    first_head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
+    _git("checkout", "master", cwd=env.seed)
+    (env.seed / "legacy_v1.txt").write_text("legacy reuse #1\n")
+    _git("add", "-A", cwd=env.seed)
+    _git("commit", "-m", "squashed legacy PR #1", cwd=env.seed)
+    _git("push", "origin", "master", cwd=env.seed)
+
+    # Second reuse ("PR #2"): the SAME local branch name advanced further
+    # with distinct content, ALSO squash-merged onto master.
+    _commit(env.clone, "legacy_v2.txt", "legacy reuse #2\n")
+    second_head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
+    (env.seed / "legacy_v2.txt").write_text("legacy reuse #2\n")
+    _git("add", "-A", cwd=env.seed)
+    _git("commit", "-m", "squashed legacy PR #2", cwd=env.seed)
+    _git("push", "origin", "master", cwd=env.seed)
+
+    _git("checkout", f"worktree/{env.worktree_id}", cwd=env.clone)
+    _git("fetch", "origin", cwd=env.clone)
+
+    record.prs = [
+        SimpleNamespace(branch=reused_branch, head_sha=first_head_sha, state="merged"),
+        SimpleNamespace(branch=reused_branch, head_sha=second_head_sha, state="merged"),
+    ]
+
+    ok, err = finalize._pr_finalize_precondition(
+        record, repo, str(env.clone), str(env.clone)
+    )
+    assert ok is True, f"expected no false-positive block, got: {err}"
+    assert err is None
+
+
+def test_precondition_blocks_reused_branch_whose_latest_entry_is_unmerged(
+    refspec_worktree,
+):
+    # #4699: the LATEST tracked entry for a reused branch
+    # name is not necessarily the one that merged. A sequence of a merged
+    # reuse followed by a REJECTED (closed, never merged) reuse of the SAME
+    # branch name leaves that rejected PR's own commit as the branch's
+    # current tip, with its own `head_sha` matching that tip exactly --
+    # trusting it unconditionally as a merge boundary would read "zero
+    # extra commits" and let cleanup force-delete a genuinely unmerged
+    # commit. Only a reused entry that is ITSELF independently confirmed
+    # merged may be trusted as a boundary.
+    env = refspec_worktree
+    record, repo = _record_and_repo(env)
+    record.pr.state = "merged"
+    record.pr.head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
+
+    reused_branch = "legacy-reused-branch-rejected-tail"
+    _git("branch", reused_branch, cwd=env.clone)
+    _git("checkout", reused_branch, cwd=env.clone)
+
+    # First reuse ("PR #1"): merged via squash.
+    _commit(env.clone, "merged_reuse.txt", "the part that merged\n")
+    first_head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
+    _git("checkout", "master", cwd=env.seed)
+    (env.seed / "merged_reuse.txt").write_text("the part that merged\n")
+    _git("add", "-A", cwd=env.seed)
+    _git("commit", "-m", "squashed merged reuse", cwd=env.seed)
+    _git("push", "origin", "master", cwd=env.seed)
+
+    # Second reuse ("PR #2"): the SAME branch name, rejected -- never merged,
+    # never pushed anywhere. Its own `head_sha` is the branch's current tip.
+    _git("checkout", reused_branch, cwd=env.clone)
+    _commit(env.clone, "rejected_reuse.txt", "never merged, never landed\n")
+    second_head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
+
+    _git("checkout", f"worktree/{env.worktree_id}", cwd=env.clone)
+    _git("fetch", "origin", cwd=env.clone)
+
+    record.prs = [
+        SimpleNamespace(branch=reused_branch, head_sha=first_head_sha, state="merged"),
+        SimpleNamespace(branch=reused_branch, head_sha=second_head_sha, state="closed"),
+    ]
+
+    ok, err = finalize._pr_finalize_precondition(
+        record, repo, str(env.clone), str(env.clone)
+    )
+    assert ok is False
+    assert err is not None
 
 
 def test_precondition_blocks_closed_pr_with_unmerged_commits_on_other_tracked_branch(
@@ -834,3 +1465,5 @@ def test_precondition_blocks_closed_pr_with_unmerged_commits_on_other_tracked_br
     )
     assert ok is False
     assert err is not None
+
+

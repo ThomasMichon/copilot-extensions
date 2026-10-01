@@ -59,6 +59,34 @@ enough that a diff-scoped subset is no longer a confident proxy for full
 risk (**coverage debt saturation** — many PRs landing between one baseline
 and the next). The fallback is a safety net, not a second-class citizen: it
 is itself a deliberately curated, evidence-backed set, not an afterthought.
+Curation is itself coverage-evidenced, not hand-picked: the same baseline
+that drives diff-scoped selection also names, per test, which lines/branches
+it covers and how long it costs to run, which makes choosing the fallback
+set an explicit **optimization**, not a guess — see coverage-efficient
+fallback curation below.
+
+### coverage-efficient fallback curation
+
+Given the baseline's own per-test coverage and cost data, the smoke
+fallback's membership is chosen to maximize the source coverage it carries
+per unit of total runtime it costs — the baseline already has everything
+needed to compute this (which lines/branches each test covers, how long
+each test takes) without any additional instrumentation. This is a
+**budget-bounded** choice, not a fixed-size one: the set is built by
+repeatedly adding whichever remaining test is cheapest per unit of
+*still-uncovered* baseline coverage, stopping as soon as either the
+coverage universe is fully covered **or** no remaining candidate both adds
+new coverage and still fits the leftover budget — whichever comes first.
+The budget is never treated as a quota to be spent in full: a test that
+adds no new coverage is never added merely because budget remains, and a
+test that would exceed the remaining budget is never force-added merely to
+guarantee a non-empty result. This is a classic weighted-set-cover-style
+greedy selection, not an exhaustive optimum, since the general problem is
+NP-hard and an approximate, auditable, periodically-recomputed set is the
+right shape for a safety net that must stay cheap to recompute as the
+baseline itself evolves. A repo may re-run the curation whenever its
+baseline changes meaningfully, rather than hand-maintaining the fallback
+set as a static list.
 
 ### baseline correlation
 
@@ -144,6 +172,14 @@ insufficient evidence, not as a green light.
 For any CI run that used coverage-guided selection, it is discoverable which
 baseline generation it selected against and why (fresh diff-scoped subset,
 or fallback and which trigger caused it).
+
+### the fallback set is recomputed, not hand-maintained
+
+The smoke tier's membership is a derived artifact of the current baseline
+(see coverage-efficient fallback curation), not a list a maintainer edits by
+hand as the suite grows. It is recomputed whenever the baseline is, so it
+stays an honest, currently-cheapest-per-coverage set rather than drifting
+stale the way a hand-picked list silently would.
 
 ### full/heavy validation remains independent
 
@@ -264,3 +300,15 @@ why.
   vendoring to any repo-specific trunk-gate transform. Also folded in the
   operator's point that the coverage-debt threshold should be a tunable
   dial, not a fixed constant.
+- **2026-10-01** — The operator, while sponsoring a downstream consumer
+  repository's own low-risk spike proving the diff-scoped-selection
+  primitive works with off-the-shelf `coverage.py` dynamic contexts, asked
+  that the smoke fallback's own membership ideally be "the set of tests
+  which together provide the best coverage set for the smallest amount of
+  total runtime" — i.e. an explicit optimization over the same baseline
+  data already in hand, rather than a hand-curated list. Folded in as
+  **coverage-efficient fallback curation** (a greedy, budget-bounded
+  weighted-set-cover-style selection) and **the fallback set is recomputed,
+  not hand-maintained** — generalizing Phase 3's existing "curate and
+  validate the fallback set itself" task into a concrete selection
+  criterion rather than leaving curation unspecified.

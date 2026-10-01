@@ -378,6 +378,18 @@ def test_slot_clean_reports_failure_instead_of_silently_downgrading_signed_venv(
     assert 'Write-ServiceErr "Runtime slot still in use after retries' in deploy_fn
 
 
+def test_deploy_venv_calls_uv_retry_helper():
+    """Deploy-Venv's uv fallback must go through the shared retry helper
+    (behavior is covered standalone by the Invoke-UvVenvWithRetry tests
+    below) rather than re-inlining its own ad hoc retry loop."""
+    installer = INSTALLER.read_text(encoding="utf-8")
+    deploy_fn = installer.split("function Deploy-Venv", 1)[1].split(
+        "function Deploy-Wrappers", 1
+    )[0]
+
+    assert "$uvResult = Invoke-UvVenvWithRetry -VenvDir $VenvDir" in deploy_fn
+
+
 def test_early_installer_utilities_are_powershell_51_safe_ascii():
     utilities = SERVICE_UTILS.read_text(encoding="utf-8")
 

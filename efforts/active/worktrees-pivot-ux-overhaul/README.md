@@ -1485,3 +1485,88 @@ discipline.
 - **Interactive claims navigation (stretch goal)** remains unstarted — not
   picked up this slice; still tracked above.
 
+### 2026-09-30 — Two operator-reported bugs: stale MUX→PROC render, and a 3x-slower-than-necessary Actions dialog
+
+Follow-up to the render-perf slice above (PR #4719). Operator reported two
+concrete symptoms while using the shipped Picker:
+
+1. "Most times, this column shows PROC, even for MUX sessions, suggesting
+   that the mux-detection isn't yet working."
+2. "The first Actions dialog takes so long to load."
+
+Both were profiled/reproduced before fixing, per this effort's standing
+discipline.
+
+**Bug 1 — stale LIVE glyph, not a detection bug.** Verified directly against
+`agent-worktrees picker-reconcile-local --json`: mux **detection** is
+correct — every currently-attached `psmux` session (cross-checked against
+`psmux list-sessions`) reports `mux_attached: true` accurately. The real bug
+is render **staleness**: the Picker's cache-only first paint renders before
+the async Group C mux reconcile lands, so a genuinely-live row starts out
+`PROC` (from `session_bound_live` alone, before mux status is known). Mux
+attachment doesn't change a row's derived `state` (both `PROC` and `MUX(n)`
+collapse to `ACTIVE`), and `_PickerNativeData._signature()`'s per-row
+fingerprint only tracked `(id, title, state, age_secs)` — NOT `sess` — so
+the later correction from `PROC` to `MUX(1)` never changed the fingerprint
+and never triggered a rebuild. The row stayed stuck on its stale first-paint
+glyph indefinitely. Reproduced directly: `derive.norm()` on the same raw
+record before/after adding `mux_attached=True` yields an IDENTICAL
+`(id, title, state, age_secs)` tuple despite `sess` flipping `PROC` →
+`MUX(1)`. **Fixed** by adding `sess` to the fingerprint tuple in
+`_signature()` (`engine_regions.py`) — confirmed the added regression test
+(`test_live_column_repaints_when_async_mux_reconcile_lands`,
+`test_picker_tui.py`) fails without the fix and passes with it.
+
+**Bug 2 — an unconditional, unnecessary `cfg.load_config()` call, not a
+first-vs-later cold-start effect.** Timed the real `agent-worktrees
+picker-reconcile-local --json --worktree-id <one>` invocation (the exact
+call the Picker's per-row Actions-dialog makes to refine its verb set,
+`engine_worktree_actions.py`'s `_open_submenu`/`_verify`): consistently
+7-11 seconds, EVERY call, not just the first — the "first dialog" framing
+is because the operator notices the ~8s refine lag most on their first
+open, not because later calls are actually faster. `cProfile`'d the real
+call end-to-end (`plugins/agent-worktrees`'s `picker_reconcile_cli.
+build_payload`): `cfg.load_config()` alone was ~6.7s of the ~14.5s total
+(1733 tracking records re-scanned via `_control_plane_related_pr_map`, plus
+~4.2s of plugin-activation resolution via `related.
+installed_plugin_related_anchors`) — called UNCONDITIONALLY, even though
+its result (`config`) is used ONLY inside a loop that reconciles a record's
+active PR, and is a complete no-op whenever the worktree(s) in scope have
+no PR or an already-terminal one (the overwhelming common case for a
+single-worktree Actions-dialog refine). **Fixed** in
+`plugins/agent-worktrees/src/agent_worktrees/picker_reconcile_cli.py`:
+precompute which records actually have a reconcilable (non-None,
+non-terminal) PR, and skip `cfg.load_config()` entirely when that list is
+empty. Verified live against the installed runtime (temporarily patched,
+then restored to its pristine pre-experiment state so the machine-local
+install isn't left drifted ahead of the real plugin-update mechanism):
+~8-11s → ~4.5-5.8s for the same single-worktree call — the `config`-load
+tax eliminated, leaving `reclaim.resolve_bound_copilots()`'s own cost
+(~4.8s) as the new floor.
+- **`resolve_bound_copilots()`'s own cost is a separate, deeper, DEFERRED
+  finding, not fixed this slice**: it already accepts a `worktree_id=`
+  filter kwarg, but `picker_reconcile_cli.build_payload()` never passes it,
+  AND the filter as currently written only narrows the RETURNED set — it
+  doesn't skip the expensive `_resolve_worktree_id_for_cwd()` resolution
+  (~3.6s across 12 bound Copilots on this machine) for candidates outside
+  the filter, since that resolution is what DETERMINES whether a candidate
+  matches in the first place. Fixing this safely means reordering
+  `resolve_bound_copilots()`'s own internal loop (a shared, session-binding-
+  sensitive function with its own test coverage in `agent-worktrees`) to
+  cheaply pre-filter session dirs by a tracking-level worktree-id lookup
+  before paying for cwd resolution — real, but riskier and out of scope for
+  this slice; tracked as a named follow-up rather than rushed.
+- **Regression tests added**: `test_live_column_repaints_when_async_mux_
+  reconcile_lands` (`worktree-manager/tests/production_picker/
+  test_picker_tui.py`) and `test_picker_reconcile_local_skips_load_config_
+  when_no_pr_to_reconcile` (`plugins/agent-worktrees/tests/
+  test_picker_reconcile_local.py`) — both confirmed to fail without their
+  respective fix and pass with it.
+- **Validation**: `test_picker_tui.py` full file green; `agent-worktrees`
+  `test_picker_reconcile_local.py` + `test_reclaim.py` green (54 tests, the
+  files directly touched/adjacent to this change — the plugin's full suite
+  is large enough that a blanket collection run exceeds a reasonable
+  session wait on this machine; the repo's own pre-push/CI gates re-run the
+  full suite before merge).
+
+

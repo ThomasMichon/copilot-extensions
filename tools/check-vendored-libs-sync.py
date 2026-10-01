@@ -19,12 +19,15 @@ agent-codespaces's copy, so a redeploy that reinstalled the sibling downgraded
 
 This check freezes the only invariant that keeps that safe:
 
-* every lib vendored in >=2 plugins must have a **byte-identical ``src/`` tree**
-  across all its copies (the importable surface -- the thing that actually gets
-  installed and imported), and
-* all copies must declare the **same version** (same name + same version + same
-  source => pip/uv can dedupe them and no "last writer wins on identical
-  version" skew is possible).
+* every lib with multiple *real* vendored copies must have a **byte-identical
+  ``src/`` tree** across those copies (the importable surface -- the thing that
+  actually gets installed and imported),
+* any real vendored copy that coexists with a DRY ``VENDOR_POINTER.json`` copy
+  must also stay byte-identical to the top-level canonical ``libs/<lib>``
+  source, because the pointer copy itself is not a shipped source tree, and
+* all compared trees must declare the **same version** (same name + same
+  version + same source => pip/uv can dedupe them and no "last writer wins on
+  identical version" skew is possible).
 
 Deliberately NOT compared: ``pyproject.toml`` build-dependency pins and
 ``README`` -- Dependabot bumps a single copy's build deps at a time and that is
@@ -46,6 +49,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
+LIBS_DIR = REPO / "libs"
+POINTER_NAME = "VENDOR_POINTER.json"
 
 # Subtrees under a lib copy that are build/artifact noise, never source of truth.
 _IGNORE_PARTS = {"build", ".venv", "__pycache__", "dist"}
@@ -79,6 +84,10 @@ def _lib_copies() -> dict[str, list[Path]]:
     return copies
 
 
+def _is_pointer_copy(lib_dir: Path) -> bool:
+    return (lib_dir / POINTER_NAME).is_file()
+
+
 def _src_files(lib_dir: Path) -> dict[str, str]:
     """Relative-path -> sha256 for every file under ``<lib>/src`` (artifacts skipped)."""
     src = lib_dir / "src"
@@ -110,12 +119,31 @@ def verify() -> list[str]:
     problems: list[str] = []
     base = PLUGINS_DIR.parent  # REPO in production; the tmp root under test
     for lib, paths in _lib_copies().items():
-        if len(paths) < 2:
+        pointer_paths = [p for p in paths if _is_pointer_copy(p)]
+        real_paths = [p for p in paths if not _is_pointer_copy(p)]
+        compare_paths = list(real_paths)
+        canonical = LIBS_DIR / lib
+        # Pointer copies never carry the real importable source tree; once a
+        # lib is mixed real+pointer, canonical becomes the only meaningful
+        # byte-identical reference for the real copies.
+        if pointer_paths and real_paths:
+            if canonical.is_dir():
+                compare_paths.insert(0, canonical)
+            else:
+                problems.append(
+                    f"{lib}: canonical libs/{lib} missing while real and pointer "
+                    "copies coexist -- cannot verify the real copy stays in sync"
+                )
+                continue
+        if len(compare_paths) < 2:
             continue
-        rel_names = [str(p.relative_to(base)) for p in paths]
+        rel_names = [
+            f"libs/{lib}" if p == canonical else str(p.relative_to(base))
+            for p in compare_paths
+        ]
 
         # 1) src/ trees must be byte-identical across all copies.
-        maps = [_src_files(p) for p in paths]
+        maps = [_src_files(p) for p in compare_paths]
         ref_map, ref_name = maps[0], rel_names[0]
         for other_map, other_name in zip(maps[1:], rel_names[1:], strict=True):
             all_rel = set(ref_map) | set(other_map)
@@ -137,8 +165,19 @@ def verify() -> list[str]:
                         "-- re-sync the vendored copies"
                     )
 
-        # 2) declared versions must all match.
-        versions = {rel_names[i]: _declared_version(paths[i]) for i in range(len(paths))}
+        # 2) declared versions must all match. Pointer copies are excluded
+        # from the src/ byte comparison above, but their declared versions
+        # still matter: a mixed real+pointer set that publishes the same
+        # distribution under different versions is still install-order skew.
+        version_paths = list(compare_paths)
+        if pointer_paths:
+            version_paths.extend(pointer_paths)
+        versions = {
+            (
+                f"libs/{lib}" if p == canonical else str(p.relative_to(base))
+            ): _declared_version(p)
+            for p in version_paths
+        }
         distinct = {v for v in versions.values() if v is not None}
         if len(distinct) > 1:
             detail = ", ".join(f"{n}={v}" for n, v in versions.items())
@@ -155,12 +194,24 @@ def verify() -> list[str]:
 def _print_list() -> None:
     base = PLUGINS_DIR.parent
     for lib, paths in sorted(_lib_copies().items()):
-        if len(paths) < 2:
+        pointer_paths = [p for p in paths if _is_pointer_copy(p)]
+        real_paths = [p for p in paths if not _is_pointer_copy(p)]
+        if len(real_paths) < 2 and not (pointer_paths and real_paths):
             continue
-        ver = _declared_version(paths[0]) or "?"
-        print(f"{lib}  (v{ver}, {len(paths)} copies):")
-        for p in paths:
+        compare_root = real_paths[0] if real_paths else paths[0]
+        ver = _declared_version(compare_root) or "?"
+        extras = []
+        if real_paths:
+            extras.append(f"{len(real_paths)} real")
+        if pointer_paths:
+            extras.append(f"{len(pointer_paths)} pointer")
+        print(f"{lib}  (v{ver}, {', '.join(extras)}):")
+        for p in real_paths:
             print(f"    {p.relative_to(base)}")
+        if pointer_paths:
+            print("    [pointer copies excluded from byte-identity comparison]")
+            for p in pointer_paths:
+                print(f"    {p.relative_to(base)}")
 
 
 def main() -> int:
@@ -183,7 +234,12 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    shared = {k: v for k, v in _lib_copies().items() if len(v) >= 2}
+    shared = {}
+    for lib, paths in _lib_copies().items():
+        pointer_paths = [p for p in paths if _is_pointer_copy(p)]
+        real_paths = [p for p in paths if not _is_pointer_copy(p)]
+        if len(real_paths) >= 2 or (pointer_paths and real_paths):
+            shared[lib] = paths
     print(f"check-vendored-libs-sync: OK ({len(shared)} shared libs in sync).")
     return 0
 

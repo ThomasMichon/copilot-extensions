@@ -1452,6 +1452,96 @@ class TestSetPRAndStatus:
         assert st["url"] == "https://example/pulls/7"
         assert st["number"] == 7
 
+    def test_set_pr_derives_repo_slug_from_github_url(self, pr_repo):
+        """Regression test: `set-pr --url ...` (the documented manual-
+        registration path for a PR opened outside create-pr's own flow) must
+        populate `pr.repo` with the hosting `owner/repo` slug parsed from the
+        URL -- without it, every downstream operation needing that slug
+        (e.g. pr-nudge's requested_reviewers call) silently fell back to the
+        worktree's generic local project name instead, a real 404 whenever
+        the PR's actual host repo has a different name/owner than the local
+        project."""
+        _config, wid, _wt_path, _ = pr_repo
+        res = pr_ops.set_pr(
+            wid,
+            url="https://github.com/SomeOwner/some-other-repo/pull/42",
+            number=42,
+            provider="github",
+        )
+        assert res["success"] is True
+        assert res["repo"] == "SomeOwner/some-other-repo"
+        st = pr_ops.pr_status(wid)
+        assert st["repo"] == "SomeOwner/some-other-repo"
+
+    def test_set_pr_derives_repo_slug_from_path_hosted_gitea_url(self, pr_repo):
+        """A self-hosted Gitea instance's `api_base` can carry an arbitrary
+        path prefix (`providers/gitea.py`'s own `create_pull` produces URLs
+        like `https://h/gitea/o/r/pulls/42`) -- a third path segment between
+        host and `owner/repo` the plain host-relative pattern never matches.
+        Stripping the configured `api_base` as a prefix first must still
+        resolve the correct slug."""
+        config, wid, _wt_path, _ = pr_repo
+        import dataclasses
+        repo = config.repos["ext"]
+        pr_cfg = dataclasses.replace(repo.pr, api_base="https://h/gitea")
+        config = dataclasses.replace(
+            config, repos={"ext": dataclasses.replace(repo, pr=pr_cfg)},
+        )
+        res = pr_ops.set_pr(
+            wid,
+            url="https://h/gitea/o/r/pulls/42",
+            number=42,
+            provider="gitea",
+            config=config,
+        )
+        assert res["success"] is True
+        assert res["repo"] == "o/r"
+
+    def test_set_pr_repo_change_clears_attribution_evidence(self, pr_repo):
+        """A parsed repo change (not just a number/provider change) must
+        also clear stale attribution/observation evidence -- the create/
+        reuse path already does this for an explicit --repo change:
+        without it, `refresh_source_attribution` can incorrectly
+        short-circuit as already published against the OLD repo's merge
+        evidence."""
+        _config, wid, _wt_path, _ = pr_repo
+        pr_ops.set_pr(
+            wid, url="https://github.com/OwnerA/repo-a/pull/1", number=1,
+            provider="github",
+        )
+        rec_path = cfg.tracking_dir() / f"{wid}.yaml"
+        rec = tracking.load_record(rec_path)
+        rec.active_pr().attribution_head = "deadbeef"
+        rec.active_pr().head_observed_at = "2026-01-01T00:00:00Z"
+        rec.active_pr().head_observed_api_base = "https://old-base"
+        tracking.save_record(rec)
+
+        res = pr_ops.set_pr(
+            wid, url="https://github.com/OwnerB/repo-b/pull/1", number=1,
+            provider="github",
+        )
+        assert res["success"] is True
+        assert res["repo"] == "OwnerB/repo-b"
+        rec = tracking.load_record(rec_path)
+        pr = rec.active_pr()
+        assert pr.attribution_head == ""
+        assert pr.head_observed_at == ""
+        assert pr.head_observed_api_base == ""
+
+    def test_set_pr_leaves_repo_unset_for_an_unparseable_url(self, pr_repo):
+        """An ADO-shaped (or any otherwise-unrecognized) URL has no `owner/
+        repo` concept this parser can extract -- `pr.repo` must stay unset
+        (not raise, not silently guess), same as before this field existed."""
+        _config, wid, _wt_path, _ = pr_repo
+        res = pr_ops.set_pr(
+            wid,
+            url="https://dev.azure.com/org/project/_git/repo/pullrequest/123",
+            number=123,
+            provider="azure_devops",
+        )
+        assert res["success"] is True
+        assert res.get("repo") == ""
+
     def test_set_pr_freezes_attribution_and_stamps_pr_id(self, pr_repo):
         # codename-attribution-by-default (round-27 finding): manual set-pr
         # is a fresh-construction site too -- the shared stamping helper

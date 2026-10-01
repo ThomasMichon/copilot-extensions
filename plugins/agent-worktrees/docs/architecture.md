@@ -987,9 +987,13 @@ an unfamiliar PR that isn't its own author.
 The interactive mux launch scripts and their per-session terminal-integration
 scripts relocated to Worktree Manager's `bin/` in Phase 3b Sub-slice 2a Step 2
 (efforts/active/worktree-manager-control-plane/phase-3b-mux-relocation.md).
-agent-worktrees' `cmd_launch` resolves that install live and no longer ships
-or deploys its own copies; a `tabby-template.yaml` profile is the only file
-remaining here.
+agent-worktrees' **normal mux path** resolves that install live and no longer
+ships or deploys its own copies there; the only packaged exception is the
+Python-only non-editable fallback installer, whose release/preview payload
+materializes a small manifest-declared copy set under `plugins/agent-worktrees/bin/`
+so `deploy_wrappers()` stays self-contained when Worktree Manager is absent.
+A `tabby-template.yaml` profile is the only always-deployed file remaining
+here outside that packaged fallback.
 
 | File | Platform | Description |
 |------|----------|-------------|

@@ -157,17 +157,33 @@ class AzureDevOpsProvider:
         status = str(data.get("status", "active")).lower()
         merged = (status == "completed")
         state = {"completed": "merged", "abandoned": "closed"}.get(status, "open")
+        merge_source = data.get("lastMergeSourceCommit")
+        head_sha = (
+            str(merge_source.get("commitId", "") or "")
+            if isinstance(merge_source, dict) else ""
+        )
         return PullResult(
             url=self._web_url(api_base, project, name, number),
             number=number,
             state=state,
             merged=merged,
+            head_sha=head_sha,
         )
 
     def observe_head(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> PullResult:
-        """Azure DevOps has no server-clock head observation implementation."""
+        """Azure DevOps has no server-clock head observation implementation.
+
+        Unlike GitHub's HTTP ``Date`` header or Gitea's server timestamp,
+        there is no authoritative provider-clock value to attach here --
+        returning ``get_pull()``'s result without one would silently violate
+        the ``observe_head`` contract (``observed_at`` required) that generic
+        callers such as ``pr_ops.py``'s post-push observation rely on to
+        confirm a live read. Stay explicitly unsupported; merged-head repair
+        instead uses ``get_pull()``'s own ``head_sha`` directly (see
+        ``finalize_open_pr_gate.py``).
+        """
         _ = (repo, number, api_base, token)
         raise ProviderError(
             "Azure DevOps does not support authoritative PR-head observation."

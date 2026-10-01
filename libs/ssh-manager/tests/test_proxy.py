@@ -111,23 +111,62 @@ def test_windows_proxy_command_preserves_quoted_arguments():
 
 @pytest.mark.asyncio
 async def test_no_proxy_preserves_existing_subprocess_contract(monkeypatch):
-    spawn = AsyncMock(return_value=object())
-    monkeypatch.setattr(proxy.asyncio, "create_subprocess_exec", spawn)
+    process = object()
+    spawn = AsyncMock(return_value=(process, None))
+    monkeypatch.setattr(proxy, "spawn_in_kill_on_close_job", spawn)
     config = SSHConfig(host_alias="example")
     result = await proxy.create_ssh_subprocess(
         "ssh", "example", config=config, stdin=asyncio.subprocess.DEVNULL,
     )
-    assert result is spawn.return_value
+    assert result is process
     assert spawn.await_args.args == ("ssh", "example")
     assert spawn.await_args.kwargs["stdin"] == asyncio.subprocess.DEVNULL
     assert "config" not in spawn.await_args.kwargs
 
 
 @pytest.mark.asyncio
+async def test_create_ssh_subprocess_binds_root_to_owner_job(monkeypatch):
+    class FakeProcess:
+        pid = 12345
+
+        def __init__(self):
+            self.released = asyncio.Event()
+
+        async def wait(self):
+            await self.released.wait()
+            return 0
+
+    class FakeJobHandle:
+        def __init__(self):
+            self.closed = 0
+
+        def close(self):
+            self.closed += 1
+
+    fake_process = FakeProcess()
+    job_handle = FakeJobHandle()
+    monkeypatch.setattr(
+        proxy, "spawn_in_kill_on_close_job", AsyncMock(return_value=(fake_process, job_handle))
+    )
+
+    result = await proxy.create_ssh_subprocess("ssh", "example", config=SSHConfig("example"))
+
+    assert result is fake_process
+    assert proxy._OWNER_JOBS[id(fake_process)] is job_handle
+    fake_process.released.set()
+    for _ in range(10):
+        await asyncio.sleep(0)
+        if job_handle.closed:
+            break
+    assert job_handle.closed == 1
+    assert id(fake_process) not in proxy._OWNER_JOBS
+
+
+@pytest.mark.asyncio
 async def test_non_windows_proxy_keeps_native_ssh_routing(monkeypatch):
     monkeypatch.setattr(proxy, "_is_windows", lambda: False)
-    spawn = AsyncMock(return_value=object())
-    monkeypatch.setattr(proxy.asyncio, "create_subprocess_exec", spawn)
+    spawn = AsyncMock(return_value=(object(), None))
+    monkeypatch.setattr(proxy, "spawn_in_kill_on_close_job", spawn)
     config = SSHConfig(host_alias="example", proxy_command="some-proxy")
     await proxy.create_ssh_subprocess("ssh", "example", config=config)
     assert spawn.await_args.args == ("ssh", "example")
@@ -143,7 +182,7 @@ async def test_ssh_spawn_failure_closes_broker(monkeypatch, error):
     broker = SimpleNamespace(start=AsyncMock(return_value=34567), close=AsyncMock())
     monkeypatch.setattr(proxy, "_ProxyBroker", lambda command, env, **kwargs: broker)
     monkeypatch.setattr(
-        proxy.asyncio, "create_subprocess_exec", AsyncMock(side_effect=error),
+        proxy, "spawn_in_kill_on_close_job", AsyncMock(side_effect=error),
     )
     with pytest.raises(type(error)):
         await proxy.create_ssh_subprocess(
@@ -185,9 +224,9 @@ async def test_proxy_preserves_binary_stream_and_reaps_on_close(monkeypatch):
     async def record(*args, **kwargs):
         process = await spawn(*args, **kwargs)
         processes.append(process)
-        return process
+        return process, None
 
-    monkeypatch.setattr(proxy.asyncio, "create_subprocess_exec", record)
+    monkeypatch.setattr(proxy, "spawn_in_kill_on_close_job", record)
     script = (
         "import sys\n"
         "while data := sys.stdin.buffer.read1(65536):\n"
@@ -219,9 +258,9 @@ async def test_proxy_cancellation_reaps_hung_child(monkeypatch):
     async def record(*args, **kwargs):
         process = await spawn(*args, **kwargs)
         processes.append(process)
-        return process
+        return process, None
 
-    monkeypatch.setattr(proxy.asyncio, "create_subprocess_exec", record)
+    monkeypatch.setattr(proxy, "spawn_in_kill_on_close_job", record)
     script = (
         "import sys,time; sys.stdout.buffer.write(b'ready\\n'); "
         "sys.stdout.buffer.flush(); time.sleep(60)"
@@ -239,6 +278,47 @@ async def test_proxy_cancellation_reaps_hung_child(monkeypatch):
     finally:
         writer.close()
         await writer.wait_closed()
+        await broker.close()
+
+
+@pytest.mark.asyncio
+async def test_proxy_binds_spawned_child_to_kill_on_close_job(monkeypatch):
+    class FakeJobHandle:
+        def __init__(self):
+            self.closed = 0
+
+        def close(self):
+            self.closed += 1
+
+    spawn = asyncio.create_subprocess_exec
+    processes = []
+    handles = []
+
+    async def record(*args, **kwargs):
+        process = await spawn(*args, **kwargs)
+        processes.append(process)
+        handle = FakeJobHandle()
+        handles.append(handle)
+        return process, handle
+
+    monkeypatch.setattr(proxy, "spawn_in_kill_on_close_job", record)
+    script = (
+        "import sys,time; sys.stdout.buffer.write(b'ready\\n'); "
+        "sys.stdout.buffer.flush(); time.sleep(60)"
+    )
+    broker = proxy._ProxyBroker([sys.executable, "-u", "-c", script], None)
+    port = await broker.start()
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    try:
+        writer.write(broker.capability.encode("ascii"))
+        await writer.drain()
+        assert await asyncio.wait_for(reader.readline(), timeout=5) == b"ready\n"
+        await asyncio.wait_for(broker.close(), timeout=5)
+        assert len(processes) == 1
+        assert handles[0].closed == 1
+        assert not broker._child_jobs
+    finally:
+        writer.close()
         await broker.close()
 
 
@@ -284,7 +364,7 @@ async def test_broker_close_waits_for_already_started_cleanup(monkeypatch):
 @pytest.mark.asyncio
 async def test_invalid_capability_does_not_spawn_proxy(monkeypatch):
     spawn = AsyncMock()
-    monkeypatch.setattr(proxy.asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(proxy, "spawn_in_kill_on_close_job", spawn)
     broker = proxy._ProxyBroker(["unused"], None)
     port = await broker.start()
     reader, writer = await asyncio.open_connection("127.0.0.1", port)

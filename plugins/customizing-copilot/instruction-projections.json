@@ -1,0 +1,15 @@
+{
+  "schema": "copilot-extensions.instruction-projections",
+  "version": 1,
+  "projections": [
+    {
+      "id": "local-cache-catchall",
+      "template": "instructions/local-cache-catchall.instructions.md",
+      "destination": ".github/instructions/customizing-copilot/local-cache-catchall.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": [],
+      "skipLocalCache": true
+    }
+  ]
+}

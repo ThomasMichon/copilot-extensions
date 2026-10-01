@@ -530,16 +530,7 @@ def cmd_doctor(args) -> int:
         orphaned = health.find_orphaned_handoffs(records)
         if apply:
             for orphan in orphaned:
-                entry = orphan.record.session_entry(orphan.session_id)
-                if entry is not None and entry.state == "handed-off":
-                    entry.state = "active"
-                    tracking.set_head_session(
-                        orphan.record,
-                        orphan.session_id,
-                        save=False,
-                    )
-                    tracking.save_record(orphan.record)
-                    orphan.reactivated = True
+                if health.reactivate_orphaned_handoff(orphan):
                     orphaned_fixed += 1
 
     bare_orphans = reclaim.find_bare_orphans()

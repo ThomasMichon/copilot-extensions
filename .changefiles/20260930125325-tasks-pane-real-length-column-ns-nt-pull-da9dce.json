@@ -1,9 +1,0 @@
-{
-  "comment": "Tasks pane: real LENGTH column (Ns Nt) pulled from the claiming worktree's relayed session length",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

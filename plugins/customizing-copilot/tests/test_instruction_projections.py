@@ -172,6 +172,54 @@ def test_render_is_deterministic_and_marker_carries_complete_provenance(
     assert b"Keep this static fallback useful." in without_marker
 
 
+def test_render_projection_includes_prefer_local_preamble(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    result = projections.Result(operation="test")
+    specs, _unknown = projections._load_specs(repo, [source], result)
+
+    rendered = projections.render_projection(specs[0])
+    text = rendered.content.decode("utf-8")
+
+    # The preamble names this destination's own local-cache sibling, and
+    # sits ahead of the template's own body (docs/patterns/
+    # worktree-scoped-dynamic-guidance.md §2) -- never a hardcoded
+    # "<sourceId>.local.instructions.md" assumption, since source_id and the
+    # declared destination filename are independent in the schema.
+    expected_name = Path(
+        projections.local_sibling_destination(specs[0].destination)
+    ).name
+    assert expected_name == "fallback.local.instructions.md"
+    preamble_marker = f"If `{expected_name}` exists"
+    assert preamble_marker in text
+    assert text.index(preamble_marker) < text.index(
+        "Keep this static fallback useful."
+    )
+
+
+def test_render_projection_omits_preamble_for_local_cache_rendering(
+    tmp_path: Path,
+) -> None:
+    """The local cache file is itself the fresher content -- it must never
+    carry a preamble pointing at its own sibling (``render_local_cache``
+    always renders with ``include_prefer_local=False``; a regression here
+    would make every local cache file self-referential)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    specs, _unknown = projections._load_specs(
+        repo, [source], projections.Result(operation="test")
+    )
+
+    rendered = projections.render_projection(specs[0], include_prefer_local=False)
+    text = rendered.content.decode("utf-8")
+
+    assert "If `" not in text
+    assert "prefer it" not in text
+    assert "Keep this static fallback useful." in text
+
+
 def test_local_sibling_destination_naming() -> None:
     assert (
         projections.local_sibling_destination(
@@ -214,13 +262,16 @@ def test_render_local_cache_writes_sibling_without_touching_checked_in_or_lock(
     assert not _projection(repo, "policy").exists()
     assert not (repo / ".github" / "copilot" / "context-projections.json").exists()
 
-    # Content matches what the checked-in sync would have rendered (same
-    # render_projection call, just a different destination).
+    # Content matches a render_projection call for the same spec, minus the
+    # prefer-local preamble (the local cache file is the fresher content
+    # itself, so it must never point at its own sibling -- see
+    # render_projection's own docstring).
     specs, _unknown = projections._load_specs(
         repo, [source], projections.Result(operation="test")
     )
-    expected = projections.render_projection(specs[0])
+    expected = projections.render_projection(specs[0], include_prefer_local=False)
     assert local_path.read_bytes() == expected.content
+    assert b"prefer it" not in local_path.read_bytes()
 
 
 def test_render_local_cache_never_touches_git_and_is_idempotent(
@@ -907,13 +958,15 @@ def test_render_local_cache_never_deletes_a_git_tracked_stale_sibling(
         / "fallback.local.instructions.md"
     )
     local_path.parent.mkdir(parents=True)
-    # A real render's own bytes (owned marker), but this copy got
-    # committed -- the reconciliation pass must never delete a git-tracked
-    # file, even one it can otherwise prove it owns.
+    # A real local-cache render's own bytes (owned marker, no
+    # self-referential preamble -- see render_projection's docstring), but
+    # this copy got committed -- the reconciliation pass must never delete
+    # a git-tracked file, even one it can otherwise prove it owns.
     rendered = projections.render_projection(
         projections._load_specs(repo, [source], projections.Result(operation="t"))[0][
             0
-        ]
+        ],
+        include_prefer_local=False,
     )
     local_path.write_bytes(rendered.content)
     _git_commit_all(repo, "accidentally commit a genuine-looking local cache")
@@ -999,6 +1052,164 @@ def test_render_local_cache_files_excluded_from_checked_in_orphan_scan(
         finding.check == "projection-orphan-file" for finding in scan_result.findings
     )
     assert lock["projections"]
+
+
+def test_orphan_scan_still_excludes_local_cache_file_in_an_untracked_git_repo(
+    tmp_path: Path,
+) -> None:
+    """The exclusion must still hold once a repo *does* have git, so long as
+    the ``.local.instructions.md`` file itself is genuinely untracked (the
+    adopted-the-convention case this mechanism is built for)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    assert projections.sync_repository(repo, [source]).blocking == 0
+    _git_commit_all(repo, "commit the checked-in projection")
+
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+    local_path.write_bytes(_projection(repo).read_bytes())
+    # Deliberately left untracked (no git add/commit) -- this is the
+    # adopted-the-convention case the suffix exclusion exists for.
+
+    scan_result = projections.scan_repository(repo)
+
+    assert not any(
+        finding.check == "projection-orphan-file" for finding in scan_result.findings
+    )
+
+
+def test_orphan_scan_flags_a_git_tracked_local_cache_file_instead_of_hiding_it(
+    tmp_path: Path,
+) -> None:
+    """A stray ``*.local.instructions.md`` file committed before (or
+    without) the ``.gitignore`` convention being adopted must never be
+    silently excluded from the orphan scan merely because of its suffix."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    assert projections.sync_repository(repo, [source]).blocking == 0
+    _git_commit_all(repo, "commit the checked-in projection")
+
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+    local_path.write_bytes(_projection(repo).read_bytes())
+    _git_commit_all(repo, "accidentally commit a local cache file")
+
+    scan_result = projections.scan_repository(repo)
+
+    assert any(
+        finding.check == "projection-orphan-file" for finding in scan_result.findings
+    )
+
+
+def test_orphan_scan_treats_inconclusive_git_check_as_not_excludable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    assert projections.sync_repository(repo, [source]).blocking == 0
+    _git_commit_all(repo, "commit the checked-in projection")
+
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+    local_path.write_bytes(_projection(repo).read_bytes())
+    # Left untracked -- an inconclusive check must never be treated as
+    # "confirmed untracked" merely because it also happens to be true here.
+
+    def broken_run(*args, **kwargs):
+        if "rev-parse" in args[0]:
+            return subprocess.CompletedProcess(args[0], 0, stdout=b"true\n", stderr=b"")
+        raise subprocess.TimeoutExpired(cmd="git", timeout=5)
+
+    monkeypatch.setattr(projections.subprocess, "run", broken_run)
+
+    scan_result = projections.scan_repository(repo)
+
+    assert any(
+        finding.check == "projection-orphan-file" for finding in scan_result.findings
+    )
+
+
+def test_orphan_scan_distinguishes_a_failed_probe_from_a_confirmed_non_repo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real git working tree whose ``rev-parse`` probe itself fails to
+    complete (timeout, transient subprocess error) must never be treated
+    like a confirmed plain, non-git directory -- that would silently hide
+    a tracked local-cache file from the orphan scan. Only a *completed*
+    probe reporting "not a work tree", or a genuinely missing ``git``
+    binary (``FileNotFoundError``), may be treated that way."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    assert projections.sync_repository(repo, [source]).blocking == 0
+    _git_commit_all(repo, "commit the checked-in projection")
+
+    local_path = (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    )
+    local_path.write_bytes(_projection(repo).read_bytes())
+    _git_commit_all(repo, "accidentally commit a local cache file")
+
+    def broken_rev_parse(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="git", timeout=5)
+
+    monkeypatch.setattr(projections.subprocess, "run", broken_rev_parse)
+
+    scan_result = projections.scan_repository(repo)
+
+    assert any(
+        finding.check == "projection-orphan-file" for finding in scan_result.findings
+    )
+
+
+def test_resolve_git_tracked_paths_treats_missing_git_binary_as_not_applicable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A genuinely missing ``git`` binary is the one case kept as "not
+    applicable" (``inconclusive=False``, matching the plain-directory
+    case) rather than inconclusive -- it can never itself be a transient
+    failure *of* an existing repository."""
+
+    def missing_git(*args, **kwargs):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(projections.subprocess, "run", missing_git)
+
+    tracked, inconclusive = projections._resolve_git_tracked_paths(
+        tmp_path, ["some/file.local.instructions.md"]
+    )
+
+    assert tracked == set()
+    assert inconclusive is False
 
 
 def test_sync_safely_creates_then_updates_projection_and_lock(
@@ -2317,3 +2528,138 @@ def test_context_handoff_handoff_fallback_projection_is_valid() -> None:
     )
     rendered = projections.render_projection(handoff_fallback)
     assert rendered.byte_count <= projections.MAX_PROJECTION_BYTES
+
+
+@pytest.mark.guard
+def test_customizing_copilot_ships_the_repo_wide_local_cache_catchall() -> None:
+    """``customizing-copilot`` -- the projection mechanism's own home -- ships
+    the single repo-wide catch-all this effort's Phase 7 Plan calls for
+    (``docs/patterns/worktree-scoped-dynamic-guidance.md`` §3): the one
+    thing every launch path loads unconditionally, closing the gap the
+    per-file preamble (slice 3) cannot -- a source that has never synced in
+    yet has no checked-in file to carry a preamble at all.
+    """
+    sources = [
+        _source(
+            REPO / "plugins" / "customizing-copilot",
+            "copilot-extensions",
+            "customizing-copilot",
+        ),
+    ]
+    result = projections.Result(operation="test")
+
+    specs, _unknown = projections._load_specs(REPO, sources, result)
+
+    assert result.blocking == 0
+    assert {spec.source_id for spec in specs} == {"local-cache-catchall"}
+    spec = specs[0]
+    assert spec.apply_to == "**"
+    # Opted out of its own local cache (skipLocalCache: true in the
+    # declaration) -- otherwise its *.local.instructions.md sibling would
+    # match its own "check every *.local.instructions.md" glob and get
+    # read back, pointlessly repeating the same directive.
+    assert spec.skip_local_cache is True
+    rendered = projections.render_projection(spec)
+    assert rendered.byte_count <= projections.MAX_PROJECTION_BYTES
+    text = rendered.content.decode("utf-8")
+    assert ".github/instructions/**/*.local.instructions.md" in text
+    assert "Their absence is not an error." in text
+
+
+def test_render_local_cache_honors_skip_local_cache(tmp_path: Path) -> None:
+    """A source declared with ``skipLocalCache: true`` never gets a
+    ``*.local.instructions.md`` sibling -- the repo-wide catch-all's own
+    opt-out (see ``test_customizing_copilot_ships_the_repo_wide_local_cache_
+    catchall``), proven generically here rather than only against the real
+    shipped declaration."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(
+        tmp_path,
+        "market",
+        "policy",
+        entries=[
+            {
+                "id": "fallback",
+                "template": "instructions/fallback.instructions.md",
+                "destination": ".github/instructions/policy/fallback.instructions.md",
+                "customizationKind": "instructions",
+                "applyTo": "**",
+                "legacyMarkers": [],
+                "skipLocalCache": True,
+            }
+        ],
+    )
+
+    result = projections.render_local_cache(repo, lambda: [source])
+
+    assert result.blocking == 0
+    assert result.changed == []
+    assert not (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    ).exists()
+
+
+def test_skip_local_cache_must_be_boolean(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(
+        tmp_path,
+        "market",
+        "policy",
+        entries=[
+            {
+                "id": "fallback",
+                "template": "instructions/fallback.instructions.md",
+                "destination": ".github/instructions/policy/fallback.instructions.md",
+                "customizationKind": "instructions",
+                "applyTo": "**",
+                "legacyMarkers": [],
+                "skipLocalCache": "yes",
+            }
+        ],
+    )
+    result = projections.Result(operation="test")
+
+    specs, _unknown = projections._load_specs(repo, [source], result)
+
+    assert specs == []
+    assert any(
+        "skipLocalCache must be a boolean" in finding.message
+        for finding in result.findings
+    )
+
+
+def test_unrelated_extra_key_is_rejected(tmp_path: Path) -> None:
+    """A declaration entry with any key outside the required/optional union
+    is rejected -- an unrelated extra key must never silently pass."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(
+        tmp_path,
+        "market",
+        "policy",
+        entries=[
+            {
+                "id": "fallback",
+                "template": "instructions/fallback.instructions.md",
+                "destination": ".github/instructions/policy/fallback.instructions.md",
+                "customizationKind": "instructions",
+                "applyTo": "**",
+                "legacyMarkers": [],
+                "someUnrelatedKey": True,
+            }
+        ],
+    )
+    result = projections.Result(operation="test")
+
+    specs, _unknown = projections._load_specs(repo, [source], result)
+
+    assert specs == []
+    assert any(
+        "unknown or missing keys" in finding.message for finding in result.findings
+    )

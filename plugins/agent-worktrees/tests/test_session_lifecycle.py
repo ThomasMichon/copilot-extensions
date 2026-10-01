@@ -208,6 +208,64 @@ class TestTransitions:
         with pytest.raises(SessionLifecycleError):
             link_succession(rec, "ghost", "old")
 
+    def test_link_succession_concluded_predecessor_activates_successor(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        """aperture-labs#7824 regression: the ``predecessor_state="concluded"``
+        branch (a predecessor with no real history, e.g. a manual repair) must
+        activate the successor exactly like the default ``"handed-off"``
+        branch does -- otherwise the freshly-written head transition is
+        immediately self-invalidating (``resolved_head_session`` stays None
+        because the "successor" was never actually marked eligible)."""
+        rec = _rec(tmp_tracking_dir, sessions=[
+            SessionEntry("old", "t"), SessionEntry("new", "t"),
+        ])
+        rec.head_session = "old"
+        save_record(rec)
+        link_succession(rec, "old", "new", predecessor_state="concluded")
+        r = load_record(rec.yaml_path)
+        old, new = r.session_entry("old"), r.session_entry("new")
+        assert old.state == "concluded" and old.successor == "new"
+        assert new.predecessor == "old" and new.state == "active"
+        assert r.resolved_head_session == "new"
+
+    def test_link_succession_concluded_cancels_yielded_successors_own_handoff(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        """aperture-labs#7824 regression: a successor that is itself
+        ``"yielded"`` (it opened its own handoff intent, never linked) is not
+        terminal, so it still passes the terminal-successor guard above and
+        gets activated -- but the pending handoff that made it yielded must
+        not survive becoming head here, or an active head would still
+        report one pending."""
+        rec = _rec(tmp_tracking_dir, sessions=[
+            SessionEntry("old", "t"), SessionEntry("new", "t"),
+        ])
+        tracking.open_handoff(rec, "new", "tok")
+        assert rec.session_entry("new").state == "yielded"
+        link_succession(rec, "old", "new", predecessor_state="concluded")
+        r = load_record(rec.yaml_path)
+        assert r.session_entry("new").state == "active"
+        assert r.handoffs[0].state == "cancelled"
+        assert r.resolved_head_session == "new"
+
+    def test_link_succession_concluded_rejects_terminal_successor(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        """aperture-labs#7824 regression: the ``else`` branch must mirror
+        ``link_handoff``'s terminal-successor guard -- never resurrect an
+        explicitly ``"handed-off"``/``"concluded"`` successor and hand it
+        head just because a manual-repair caller named it."""
+        rec = _rec(tmp_tracking_dir, sessions=[
+            SessionEntry("old", "t"),
+            SessionEntry("new", "t", state="concluded"),
+        ])
+        with pytest.raises(SessionLifecycleError):
+            link_succession(rec, "old", "new", predecessor_state="concluded")
+        r = load_record(rec.yaml_path)
+        assert r.session_entry("new").state == "concluded"
+        assert r.session_entry("old").successor is None
+
     def test_save_false_batches(self, tmp_tracking_dir: Path, monkeypatch_config):
         rec = _rec(tmp_tracking_dir, sessions=[
             SessionEntry("s1", "t"), SessionEntry("s2", "t"),
@@ -392,6 +450,70 @@ class TestExactHandoffLedger:
         rec = load_record(tmp_tracking_dir / "wt-1.yaml")
         assert rec.resolved_head_session == "new"
         assert rec.replayed_head_transition.reason == "rebind"
+
+    def test_yielded_session_can_reclaim_its_own_head_via_bind(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        """aperture-labs#7824 regression: a session whose own handoff intent
+        was never formally linked to a successor ("yielded" -- itself a
+        normal, expected state) must be able to reclaim its own head by
+        rebinding itself, with no supported CLI path required beforehand."""
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.open_handoff(rec, "old", "tok")
+        assert rec.session_entry("old").state == "yielded"
+        assert rec.resolved_head_session is None
+        tracking.register_session("wt-1", "old", source="bind")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.session_entry("old").state == "active"
+        assert rec.resolved_head_session == "old"
+        assert rec.handoffs[0].state == "cancelled"
+        assert rec.replayed_head_transition.reason == "rebind"
+
+    def test_yielded_session_cannot_be_reclaimed_by_a_different_session(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        """The self-reclaim fix must stay scoped to the yielded session
+        reclaiming itself -- an unrelated session registering must not flip
+        someone else's yielded entry back to active."""
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.open_handoff(rec, "old", "tok")
+        tracking.register_session("wt-1", "other", source="bind")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.session_entry("old").state == "yielded"
+        assert rec.resolved_head_session == "other"
+
+    def test_older_yielded_session_cannot_steal_head_from_newer_yielded_lineage(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        """aperture-labs#7824 regression: mirrors `cancel_handoff`'s
+        `predecessor_is_latest_head` guard. `resolved_head_session` hides
+        EVERY yielded session, so without checking the raw latest head
+        transition, an older yielded session could rebind and silently steal
+        head back from a genuinely newer yielded lineage: old yields, new
+        claims head and later yields its own handoff too (both now read as
+        "no head"), but old must NOT be allowed to reclaim in that case."""
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.open_handoff(rec, "old", "tok-old")
+        # "new" claims head (the next session to register is free to, per
+        # `resolved_head_session`'s own docstring).
+        tracking.register_session("wt-1", "new")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.resolved_head_session == "new"
+        # "new" now yields its own handoff -- the lineage has moved on.
+        tracking.open_handoff(rec, "new", "tok-new")
+        assert rec.resolved_head_session is None
+        # "old" must not be able to reclaim: it is no longer the latest head.
+        tracking.register_session("wt-1", "old", source="bind")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.session_entry("old").state == "yielded"
+        assert rec.session_entry("new").state == "yielded"
+        assert rec.resolved_head_session is None
 
     def test_token_selects_one_of_multiple_pending_handoffs(
         self, tmp_tracking_dir: Path, monkeypatch_config

@@ -348,7 +348,7 @@ _git_info() {
 }
 
 # shellcheck source=/dev/null
-. "$SCRIPT_DIR/installer-engine.sh"
+. "$SCRIPT_DIR/../../../libs/installer-engine/installer-engine.sh"
 
 _install_hook_files() {
     local bin_hook_dir="$INSTALL_DIR/bin"

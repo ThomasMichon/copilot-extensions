@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agent_worktrees import config as cfg
+from agent_worktrees import copilot_launch_prefs as launch_prefs
 from agent_worktrees import installer as inst
 from agent_worktrees import repos
 
@@ -23,6 +24,14 @@ def test_home_is_redirected_under_tmp():
     # home is a fresh tmp dir named ``aw-home*`` (tmp_path_factory adds a counter).
     assert home.name.startswith("aw-home")
     assert cfg._home() == home
+
+
+def test_copilot_launch_prefs_shares_the_same_isolated_home():
+    """copilot_launch_prefs.Path is the identical pathlib.Path class patched
+    above, so it is isolated from the real ~/.copilot/settings.json for free
+    -- no second, conflicting patch of the same global attribute needed."""
+    assert launch_prefs.Path.home() == Path.home()
+    assert not (Path.home() / ".copilot" / "settings.json").exists()
 
 
 def test_projects_registry_writes_under_isolated_home():

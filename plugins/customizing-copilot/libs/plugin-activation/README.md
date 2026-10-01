@@ -32,3 +32,18 @@ an installed payload to shadow a project-local directory that the host loads
 live. It retains prior values when registry or source evidence is indeterminate
 and returns structured findings for missing, mismatched, or ambiguous evidence.
 Consumers decide how often to refresh and how to render findings.
+
+**In dev**, most consumers' `pyproject.toml` reference this library through a
+`uv`-editable canonical pointer (`vendor-pointer-generalization` effort,
+Phase 1), so there is no per-plugin dev copy to keep in sync. The two
+deliberate exceptions keep this full local copy instead:
+
+- `agent-worktrees`, so a staged non-editable install never depends on a
+  throwaway passthrough source tree; and
+- `customizing-copilot`, whose standalone `installing-plugins` skill script
+  resolves `state.py` directly by file path and has no consuming
+  `pyproject.toml` surface the `uv`-editable form could target.
+
+**At release**, `tools/materialize_main.py` rewrites any `uv`-editable
+consumers into the same real, promoted copy shape present here -- non-editable,
+so every published plugin installs a self-contained source tree.

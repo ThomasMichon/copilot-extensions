@@ -144,7 +144,7 @@
     },
     {
       "name": "agent-conduct-guidance",
-      "description": "Consolidated, generally-good agent conduct guidance for Copilot CLI: one plugin hosting multiple independent ambient modules, each a concise checked-in instruction projection plus a paired on-demand skill. First module: process-spawn hygiene -- reminds an agent to spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly, especially on Windows, where a naive spawn allocates a visible, focus-stealing console window per invocation. Ships the spawning-headless-processes skill with the per-language/per-OS routes.",
+      "description": "Consolidated, generally-good agent conduct guidance for Copilot CLI: one plugin hosting multiple independent ambient modules, each a concise checked-in instruction projection plus a paired on-demand skill. Modules: process-spawn hygiene (spawn every ad hoc CMD/PowerShell/Python/Node/etc. child process headlessly, especially on Windows), coordinator-first delegation (route broad separable research, comparisons, evaluations, domain-tool calls, and disjoint bulk edits into bounded sub-agent contexts while the coordinator retains synthesis, integration, and completion), and scratch-space hygiene (resolve a portable scratch root and a timestamped per-task subfolder before writing an ad hoc working file outside a repository, instead of littering a drive root with undated loose files). Designed to absorb further similarly-scoped conduct guidance as its own module rather than proliferating single-purpose plugins.",
       "version": "0.1.0-dev1",
       "source": "plugins/agent-conduct-guidance"
     }

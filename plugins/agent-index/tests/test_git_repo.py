@@ -164,3 +164,45 @@ def test_source_name_is_stable_across_worktrees(tmp_path: Path) -> None:
 
     assert GitRepoConnector(repo_path=anchor).source_name == "git:canonical"
     assert GitRepoConnector(repo_path=worktree).source_name == "git:canonical"
+
+
+def test_git_invocations_suppress_console_window(tmp_path: Path, monkeypatch) -> None:
+    """Every ``git`` subprocess the connector spawns must pass
+    ``no_window_kwargs()`` (``creationflags=CREATE_NO_WINDOW`` on Windows, ``{}``
+    elsewhere). A headless (``pythonw.exe``) parent process has no console to
+    attach a console-subsystem child to, so each git invocation WITHOUT this
+    flag pops its own new, visible console window -- and this connector spawns
+    one ``git`` process **per indexed file**, so a real crawl of a large repo
+    can flash hundreds of windows in a burst (observed: 5-10/s for 10+ minutes
+    indexing a production corpus). Regression guard, not exercising a real
+    window."""
+    from agent_index.sources import git_repo as git_repo_module
+
+    repo = tmp_path / "sample-repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "dev@example.test")
+    _git(repo, "config", "user.name", "Dev User")
+    (repo / "README.md").write_text("# Hello\n", encoding="utf-8")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "Initial commit")
+
+    observed_kwargs: list[dict] = []
+    real_run = subprocess.run
+
+    def _spying_run(*args, **kwargs):
+        observed_kwargs.append(kwargs)
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(git_repo_module.subprocess, "run", _spying_run)
+
+    connector = GitRepoConnector(repo_path=repo)
+    connector.discover()
+
+    expected = git_repo_module.no_window_kwargs()
+    assert observed_kwargs, "expected at least one git subprocess invocation"
+    for kwargs in observed_kwargs:
+        for key, value in expected.items():
+            assert kwargs.get(key) == value, (
+                f"git subprocess call missing no_window_kwargs() entry {key!r}: {kwargs}"
+            )

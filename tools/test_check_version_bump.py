@@ -18,6 +18,7 @@ import pytest
 
 SCRIPT = Path(__file__).resolve().parent / "check-version-bump.py"
 UV_EDITABLE_REF = Path(__file__).resolve().parent / "uv_editable_ref.py"
+INSTALLER_ENGINE_REF = Path(__file__).resolve().parent / "installer_engine_ref.py"
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -99,6 +100,7 @@ def repo(tmp_path: Path) -> Path:
     (r / "tools").mkdir(parents=True)
     (r / "tools" / SCRIPT.name).write_bytes(SCRIPT.read_bytes())
     (r / "tools" / UV_EDITABLE_REF.name).write_bytes(UV_EDITABLE_REF.read_bytes())
+    (r / "tools" / INSTALLER_ENGINE_REF.name).write_bytes(INSTALLER_ENGINE_REF.read_bytes())
 
     _git(r, "init", "-q")
     _git(r, "config", "user.email", "t@example.com")
@@ -175,6 +177,17 @@ def test_shared_lib_change_passes_when_all_consumers_bump(repo: Path):
     _git(repo, "commit", "-qm", "shared lib + both bumps")
     result = _run(repo)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_installer_engine_change_charges_registered_adopters(repo: Path):
+    """A canonical installer-engine change must charge every registered adopter
+    even when the diff touches only `libs/installer-engine/*`."""
+    _write(repo, "libs/installer-engine/installer-engine.sh", "echo shared\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "installer engine change, no adopter bumps")
+    result = _run(repo)
+    assert result.returncode == 1
+    assert "agent-pull-requests" in result.stderr
 
 
 def test_unreadable_manifest_fails_closed_instead_of_dropping_consumer(repo: Path):

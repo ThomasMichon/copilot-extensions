@@ -1,9 +1,0 @@
-{
-  "comment": "Phase 7 slice 1: render_local_cache() -- a permissionless, git-free worktree-local instruction-projection cache render (docs/patterns/worktree-scoped-dynamic-guidance.md)",
-  "changes": [
-    {
-      "plugin": "customizing-copilot",
-      "type": "patch"
-    }
-  ]
-}

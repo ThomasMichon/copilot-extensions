@@ -142,6 +142,7 @@ class ProjectionSpec:
     customization_kind: str
     apply_to: str
     legacy_markers: tuple[str, ...]
+    skip_local_cache: bool = False
 
     @property
     def source_key(self) -> str:
@@ -661,14 +662,20 @@ def _load_specs(
         for index, entry in enumerate(declaration["projections"]):
             entry_path = f"{declaration_path.as_posix()}#projections[{index}]"
             try:
-                if not isinstance(entry, dict) or set(entry) != {
+                _required_keys = {
                     "id",
                     "template",
                     "destination",
                     "customizationKind",
                     "applyTo",
                     "legacyMarkers",
-                }:
+                }
+                _optional_keys = {"skipLocalCache"}
+                if (
+                    not isinstance(entry, dict)
+                    or not _required_keys <= set(entry)
+                    or not set(entry) - _required_keys <= _optional_keys
+                ):
                     raise ValueError("projection entry has unknown or missing keys")
                 source_id = entry["id"]
                 if not isinstance(source_id, str) or not IDENTIFIER.fullmatch(source_id):
@@ -728,6 +735,9 @@ def _load_specs(
                     or len(set(markers)) != len(markers)
                 ):
                     raise ValueError("legacyMarkers is invalid")
+                skip_local_cache = entry.get("skipLocalCache", False)
+                if not isinstance(skip_local_cache, bool):
+                    raise ValueError("skipLocalCache must be a boolean")
                 template_path = _safe_existing_file(payload_root, template_rel)
                 template_raw = _canonical_template_bytes(
                     _read_bounded_regular(template_path, MAX_TEMPLATE_BYTES)
@@ -765,6 +775,7 @@ def _load_specs(
                     customization_kind=kind,
                     apply_to=apply_to,
                     legacy_markers=tuple(markers),
+                    skip_local_cache=skip_local_cache,
                 )
             )
     _find_spec_conflicts(specs, result)
@@ -819,13 +830,33 @@ def _find_spec_conflicts(specs: list[ProjectionSpec], result: Result) -> None:
                 )
 
 
-def render_projection(spec: ProjectionSpec) -> RenderedProjection:
-    """Render one deterministic UTF-8/LF projection."""
+def render_projection(
+    spec: ProjectionSpec, *, include_prefer_local: bool = True
+) -> RenderedProjection:
+    """Render one deterministic UTF-8/LF projection.
+
+    When ``include_prefer_local`` (default), the body gains a short
+    preamble preferring its own gitignored ``*.local.instructions.md``
+    sibling when present (``docs/patterns/worktree-scoped-dynamic-
+    guidance.md`` §2). ``render_local_cache`` passes ``False`` here when
+    rendering the sibling's *own* content -- it must never point at itself.
+    """
     text = spec.template_content.decode("utf-8")
     lines = text.splitlines(keepends=True)
     closing = lines.index("---\n", 1)
     header = "".join(lines[: closing + 1])
     body = "".join(lines[closing + 1 :])
+    if include_prefer_local:
+        local_cache_name = PurePosixPath(
+            local_sibling_destination(spec.destination)
+        ).name
+        preamble = (
+            f"\n> If `{local_cache_name}` exists here, prefer it -- it reflects\n"
+            "> the currently installed payload; this file reflects the last\n"
+            "> synced-and-reviewed state.\n"
+        )
+    else:
+        preamble = ""
     marker: dict[str, object] = {
         "schema": PROJECTION_SCHEMA,
         "version": PROJECTION_VERSION,
@@ -853,7 +884,7 @@ def render_projection(spec: ProjectionSpec) -> RenderedProjection:
             + MARKER_SUFFIX
             + "\n"
         )
-        content = (header + marker_line + body).encode("utf-8")
+        content = (header + marker_line + preamble + body).encode("utf-8")
         if marker["renderedBytes"] == len(content):
             break
         marker["renderedBytes"] = len(content)
@@ -1071,6 +1102,13 @@ def _render_local_cache_locked(
     for spec in specs:
         if spec.source_key in duplicate_source_keys:
             continue
+        if spec.skip_local_cache:
+            # Opted out (``skipLocalCache: true``) -- a source whose own
+            # rendered body already directs the agent to scan for every
+            # *.local.instructions.md sibling (the repo-wide catch-all) must
+            # never gain one of its own: it would match its own scan glob
+            # and get read back, pointlessly repeating the same directive.
+            continue
         try:
             local_destination = local_sibling_destination(spec.destination)
         except ValueError as exc:
@@ -1093,7 +1131,8 @@ def _render_local_cache_locked(
             continue
         local_destination, spec = entries[0]
         try:
-            rendered = render_projection(spec)
+            # Never self-referential (see render_projection's docstring).
+            rendered = render_projection(spec, include_prefer_local=False)
         except ValueError as exc:
             result.add(BLOCKING, "projection-local-cache", spec.destination, str(exc))
             continue
@@ -1314,26 +1353,24 @@ def _resolve_git_tracked_paths(
 
     Returns ``(tracked, inconclusive)``:
 
-    * ``inconclusive`` is ``False`` and ``tracked`` is empty when ``root``
-      is not (as far as this can tell) a git working tree at all -- no
-      ``git`` binary, or genuinely not a repository. This is the documented
-      plain-directory case (the render-only path is proven to work with no
-      ``.git`` present at all) and must keep behaving exactly as if no
-      tracking concept applied.
-    * ``inconclusive`` is ``True`` when ``root`` *is* a git working tree but
-      the actual tracked-files query itself failed (timeout, a corrupted
-      index, any other subprocess failure) -- the caller must then treat
-      *every* path in this batch as un-confirmable and refuse to write or
-      delete any of them, never assume "untracked" merely because the
-      check itself broke.
+    * ``inconclusive`` is ``False`` and ``tracked`` is empty only when
+      ``root`` is *confirmed* not a git working tree: no ``git`` binary
+      (``FileNotFoundError``), or a completed ``rev-parse`` probe reporting
+      so. This is the documented plain-directory case (the render-only
+      path works with no ``.git`` at all) and behaves as if no tracking
+      concept applied.
+    * ``inconclusive`` is ``True`` whenever that can't be confirmed either
+      way: the ``rev-parse`` probe itself failed to complete (timeout, any
+      other subprocess error besides a missing binary), or ``root`` *is* a
+      confirmed git working tree but the tracked-files query failed. The
+      caller must treat every path in the batch as un-confirmable -- never
+      assume "untracked"/"not applicable" merely because a check broke.
     * Otherwise ``tracked`` is the exact subset of ``relatives`` git
       currently tracks.
 
-    Uses ``--literal-pathspecs`` so a filename containing pathspec magic
-    characters (``[``, ``]``, ``*``, ``?``, ...) is matched literally, never
-    interpreted as a glob, and a git-isolated environment
-    (:func:`_git_isolated_env`) so an inherited ``GIT_DIR``/``GIT_INDEX_FILE``
-    can never redirect the query at an unrelated repository or index.
+    Uses ``--literal-pathspecs`` (never glob-interprets pathspec magic
+    characters) and a git-isolated environment (:func:`_git_isolated_env`,
+    so an inherited ``GIT_DIR``/``GIT_INDEX_FILE`` can't redirect the query).
     """
     if not relatives:
         return set(), False
@@ -1345,8 +1382,10 @@ def _resolve_git_tracked_paths(
             timeout=5,
             env=env,
         )
-    except (OSError, subprocess.SubprocessError):
+    except FileNotFoundError:
         return set(), False
+    except (OSError, subprocess.SubprocessError):
+        return set(), True
     if probe.returncode != 0 or probe.stdout.strip() != b"true":
         return set(), False
     # From here on, root IS a git working tree -- any further failure is
@@ -1760,30 +1799,30 @@ def _validate_projection_file(
 
 
 def _iter_projection_files(repo_root: Path) -> Iterable[Path]:
+    """Yield checked-in ``*.instructions.md`` files for the orphan scan. A
+    ``*.local.instructions.md`` file is excluded unless
+    :func:`_resolve_git_tracked_paths` reports it tracked or inconclusive,
+    including the plain-directory case where tracking is inapplicable."""
     instructions = repo_root / ".github" / "instructions"
     if not instructions.is_dir() or _is_indirection(instructions):
         return ()
     found: list[Path] = []
+    local_cache: dict[str, Path] = {}
     for dirpath, dirnames, filenames in os.walk(instructions):
-        safe_dirs: list[str] = []
-        for name in dirnames:
-            candidate = Path(dirpath) / name
-            if not _is_indirection(candidate):
-                safe_dirs.append(name)
-        dirnames[:] = safe_dirs
+        dirnames[:] = [d for d in dirnames if not _is_indirection(Path(dirpath) / d)]
         for name in filenames:
-            # Local-cache siblings (docs/patterns/worktree-scoped-dynamic-
-            # guidance.md) are deliberately never locked -- they'd otherwise
-            # surface here as a false projection-orphan-file finding, which
-            # projection_reflect.classify_findings() routes to conflict-
-            # dispatch by default (it isn't in PLAIN_DRIFT_CHECKS). Excluding
-            # them keeps the checked-in scan scoped to what it actually
-            # governs.
-            if name.endswith(".instructions.md") and not name.endswith(
-                _LOCAL_CACHE_SUFFIX
-            ):
-                found.append(Path(dirpath) / name)
-    return found
+            if not name.endswith(_INSTRUCTIONS_SUFFIX):
+                continue
+            path = Path(dirpath) / name
+            if not name.endswith(_LOCAL_CACHE_SUFFIX):
+                found.append(path)
+                continue
+            try:
+                local_cache[path.relative_to(repo_root).as_posix()] = path
+            except ValueError:
+                pass
+    tracked, inconclusive = _resolve_git_tracked_paths(repo_root, list(local_cache))
+    return found + [p for r, p in local_cache.items() if inconclusive or r in tracked]
 
 
 def _scan_orphan_files(

@@ -480,6 +480,19 @@ evaluator owns the follow-through. Direct **propose + queue** with no emitter st
 available; that simply keeps the lifecycle responsibility with the caller
 (*emitter-tasks-are-evaluated-mine-are-tracked*).
 
+### emitter-command-receipts
+Authoring a task through an emitter is **not a one-way shout into the queue**: the
+domain's own backing state (a carved reservation, a tracked work item) often needs
+to know *which* dispatch task its own emitted description became, so it can close
+its own transaction (link an id, stop re-offering the same work). An emitter
+command-emitter gets **durable receipts** for exactly the tasks it caused to be
+created — keyed by the same `dedup_key` it emitted — readable on a **later**
+invocation, not just observed in the instant of creation and then lost. This is
+what makes *emitters-and-evaluators* a genuine two-way seam for a domain data
+source: the domain polls in (discovers and emits), and the layer hands back what
+became of it, so the domain never has to invent its own per-domain
+polling-by-dedup-key reconciliation just to learn an id it itself caused to exist.
+
 ### bounded-concurrency-wide-charters
 The pool of concurrently embodied workers is **capped** — a deliberate ceiling
 that protects the compute/token budget — and throughput scales by giving each
@@ -1044,9 +1057,34 @@ does **not** quietly undo it.
 - Realization effort:
   [`efforts/active/declarative-dispatch-engine-generalization/`](../../../efforts/active/declarative-dispatch-engine-generalization/)
   owns *concise-event-then-charter-pull* and *preloaded-dispatch-supplement*.
+- Realization effort:
+  [`efforts/active/agent-dispatch-worker-operating-procedures/`](../../../efforts/active/agent-dispatch-worker-operating-procedures/)
+  realizes *status-through-tool-calls-not-prose*,
+  *every-turn-ends-terminal-steered-or-waited*,
+  *fail-fast-on-control-plane-failure*,
+  *declared-safety-exceptions-not-improvised*, and
+  *reachability-tiered-charter-delivery* — the operating-procedures charter;
+  the shrunk event-descriptor seeds for the CLI-capable and interactive
+  tiers, each pointing at the charter rather than inlining it; the no-CLI
+  tier's full operating procedure and task charter inlined directly instead
+  (it cannot pull what it has no reach to fetch — the tiered-delivery
+  contract itself, not a shrunk seed); and a clean-room Tier-E behavioral
+  proof (`agent-dispatch-worker-lifecycle-eval` / `-cpfail`) that a fresh agent
+  actually honors the mechanical, tool-call-only completion contract and the
+  fail-fast-on-control-plane-failure posture under literal mode.
 
 ## Provenance
 
+- **2026-09-30** — Added *emitter-command-receipts*: a command-emitter that
+  authors tasks via `task_output=json` already computes the created-task
+  list (dedup_key -> real task id) every tick, but it was never durably
+  delivered back to the domain command on a later invocation. Surfaced by a
+  cross-repo motivating consumer (aperture-labs' Permanent Record,
+  migrating off a bespoke push+poll dispatch mechanism onto this layer's
+  emitter/evaluator primitives) that needs to link a discovered work item to
+  the dispatch task it caused to exist. Tracked by
+  `efforts/active/agent-dispatch-emitter-receipts`; implementation not yet
+  landed by this revision.
 - **2026-09-26** — Added *status-through-tool-calls-not-prose*,
   *every-turn-ends-terminal-steered-or-waited*,
   *fail-fast-on-control-plane-failure*, *declared-safety-exceptions-not-improvised*,

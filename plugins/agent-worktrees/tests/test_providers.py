@@ -1232,13 +1232,35 @@ class TestGitHubProvider:
     def test_get_pull_merged_state_sets_flag(self, monkeypatch):
         # gh reports a merged PR as state MERGED.
         from agent_worktrees.providers import github
+        captured = {}
         body = json.dumps({"url": "https://github.com/o/r/pull/7",
-                           "number": 7, "state": "MERGED"})
-        monkeypatch.setattr(github, "run_cli",
-                            lambda args, **kw: _proc(stdout=body))
+                           "number": 7, "state": "MERGED", "headRefOid": "deadbeef"})
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: (captured.__setitem__("args", args), _proc(stdout=body))[1],
+        )
         res = github.GitHubProvider().get_pull("o/r", 7)
         assert res.merged is True
         assert res.state == "merged"
+        # #4699: finalize's historical-head recovery relies on this field
+        # coming back from the SAME single lightweight call -- a CLI-field
+        # typo/regression here must not silently restore its false
+        # positive.
+        assert res.head_sha == "deadbeef"
+        assert "headRefOid" in captured["args"][captured["args"].index("--json") + 1]
+
+    def test_get_pull_null_head_ref_oid_normalizes_to_empty_string(self, monkeypatch):
+        # headRefOid is nullable (e.g. GitHub can no longer resolve the head
+        # ref) -- str(None) would otherwise produce the truthy string
+        # "None", letting an invalid boundary silently pass as a real head
+        # SHA to callers that only check truthiness.
+        from agent_worktrees.providers import github
+        body = json.dumps({"url": "https://github.com/o/r/pull/7",
+                           "number": 7, "state": "MERGED", "headRefOid": None})
+        monkeypatch.setattr(github, "run_cli",
+                            lambda args, **kw: _proc(stdout=body))
+        res = github.GitHubProvider().get_pull("o/r", 7)
+        assert res.head_sha == ""
 
     def test_get_pull_closed_is_not_merged(self, monkeypatch):
         from agent_worktrees.providers import github
@@ -1907,13 +1929,31 @@ class TestAzureDevOpsProvider:
     def test_get_pull_completed_is_merged(self, monkeypatch):
         # Azure status "completed" == merged; canonicalize state to "merged".
         from agent_worktrees.providers import azure_devops as azure
-        body = json.dumps({"status": "completed"})
+        body = json.dumps({
+            "status": "completed",
+            "lastMergeSourceCommit": {"commitId": "merged-head"},
+        })
         monkeypatch.setattr(azure, "run_cli",
                             lambda args, **kw: _proc(stdout=body))
         res = azure.AzureDevOpsProvider().get_pull(
             "proj/repo", 5, api_base="https://dev.azure.com/org")
         assert res.merged is True
         assert res.state == "merged"
+        assert res.head_sha == "merged-head"
+
+    def test_observe_head_remains_unsupported(self, monkeypatch):
+        # Azure has no separate server-clock observation endpoint; delegating
+        # to get_pull() would silently violate observe_head's observed_at
+        # contract for generic callers (pr_ops.py's post-push observation
+        # rejects a result with no server timestamp) -- stay explicitly
+        # unsupported instead. Merged-head repair uses get_pull()'s own
+        # head_sha directly (see finalize_open_pr_gate.py).
+        from agent_worktrees.providers import azure_devops as azure
+        from agent_worktrees.providers.base import ProviderError
+
+        with pytest.raises(ProviderError):
+            azure.AzureDevOpsProvider().observe_head(
+                "proj/repo", 5, api_base="https://dev.azure.com/org")
 
     def test_get_pull_abandoned_and_active(self, monkeypatch):
         from agent_worktrees.providers import azure_devops as azure

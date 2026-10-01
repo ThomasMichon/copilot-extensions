@@ -13,6 +13,33 @@ name: Identifier leak guard
 # then reads the PR head's changed file contents as inert git data (`git show`)
 # before running the trusted scanner and reporting a custom Check Run on the PR
 # head SHA.
+#
+# --- Repository-secret administration ---
+# This check is a no-op (`neutral` Check Run, "not yet configured") until at
+# least one of these two repository secrets is set:
+#   - FORBIDDEN_IDS_FACILITY
+#   - FORBIDDEN_IDS_WORK
+# Format (identical for both): newline- or `;`-separated `token|reason`
+# entries, e.g. `some-private-name|Private org codename -- use a generic
+# placeholder instead`. Blank lines are skipped; `#`-prefixed comment lines
+# are NOT skipped (they become literal tokens) -- never paste a commented
+# source file directly into the secret value, strip comments/blank lines
+# first. See `tools/check-no-internal-identifiers.py`'s own docstring
+# (`_load_ci_identifiers`) for the exact parser this feeds.
+# Tokens are case-insensitive literal substrings by default. For a bounded
+# match, prefix a Python regular expression with `regex:` (e.g.
+# `regex:\bexample\b|Use a generic placeholder`). Semicolons/newlines
+# delimit entries and cannot appear inside a pattern or reason. Double
+# alternation pipes (`||`) inside a regex; the first single `|` separates
+# its reason.
+# Provision/rotate a secret with (never a bare `gh`; route through this
+# repo's resolved account):
+#   agent-worktrees repos gh ThomasMichon/copilot-extensions -- \
+#     secret set FORBIDDEN_IDS_FACILITY --repo ThomasMichon/copilot-extensions \
+#     < path/to/clean-token-reason-list.txt
+# Both secrets are additive (their contents are concatenated before
+# scanning) and assembled/owned independently by each private context they
+# protect -- neither harness needs visibility into the other's source list.
 on:
   workflow_run:
     workflows: ["CI"]
@@ -216,12 +243,30 @@ jobs:
               title = `${details.length} forbidden identifier(s) found`;
               summary =
                 "Trusted scan found forbidden identifiers in the PR head's changed file contents.";
-              const rendered = details.slice(0, 50).map((item) => {
+              // Check Run `output.text` has a documented 65535-character cap.
+              // Include every finding that fits under a safe budget (rather
+              // than an arbitrary item count) so this stays the complete,
+              // sole relied-upon delivery channel -- the PR comment above is
+              // best-effort only and may not post at all.
+              const MAX_TEXT_CHARS = 60000;
+              const allLines = details.map((item) => {
                 const reason = item.reason ? ` — ${item.reason}` : "";
                 return `- ${item.file}:${item.line}:${item.col} — \`${item.identifier}\`${reason}`;
               });
-              if (details.length > rendered.length) {
-                rendered.push(`- ...and ${details.length - rendered.length} more.`);
+              const rendered = [];
+              let used = 0;
+              let shown = 0;
+              for (const line of allLines) {
+                const cost = line.length + 1;
+                if (used + cost > MAX_TEXT_CHARS) {
+                  break;
+                }
+                rendered.push(line);
+                used += cost;
+                shown += 1;
+              }
+              if (shown < details.length) {
+                rendered.push(`- ...and ${details.length - shown} more.`);
               }
               text = rendered.join("\n");
             } else if (failingSteps.length > 0 || scanOutcome !== "success") {
@@ -272,31 +317,52 @@ jobs:
               "Please replace each matched value with a generic/public-safe equivalent.",
             ].join("\n");
 
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner,
-              repo,
-              issue_number: prNumber,
-              per_page: 100,
-            });
-            const existing = comments.find(
-              (comment) =>
-                comment.user?.login === "github-actions[bot]" &&
-                typeof comment.body === "string" &&
-                comment.body.includes(marker),
-            );
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner,
-                repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
+            // Best-effort only: a workflow_run-triggered GITHUB_TOKEN cannot
+            // reliably post/update Issues-API comments even with `issues:
+            // write` declared above -- GitHub applies an additional
+            // anti-privilege-escalation restriction to workflow_run tokens
+            // specifically for the Issues/PR-comment surface, distinct from
+            // the Checks API (`checks.create` above is not subject to it).
+            // The Check Run's own `output.text` (set above, already emitted
+            // unconditionally) already carries the full match/reason/file/
+            // line/col detail via the Checks API rather than a masked log
+            // line, which is the actual design requirement -- so a failure
+            // here never leaves findings undiscoverable, only less
+            // prominently surfaced. Never let this best-effort duplicate
+            // channel turn a correctly-reported `failure` Check Run into an
+            // unhandled workflow error.
+            try {
+              const comments = await github.paginate(github.rest.issues.listComments, {
                 owner,
                 repo,
                 issue_number: prNumber,
-                body,
+                per_page: 100,
               });
+              const existing = comments.find(
+                (comment) =>
+                  comment.user?.login === "github-actions[bot]" &&
+                  typeof comment.body === "string" &&
+                  comment.body.includes(marker),
+              );
+
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner,
+                  repo,
+                  comment_id: existing.id,
+                  body,
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: prNumber,
+                  body,
+                });
+              }
+            } catch (error) {
+              core.warning(
+                `identifier-leak-guard: could not post PR feedback comment (${error.message}). ` +
+                  "The Check Run's own output already carries the full finding detail.",
+              );
             }

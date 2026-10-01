@@ -34,6 +34,7 @@ from . import (
     activity,
     codename_tracking,
     git_ops,
+    local_cache_refresh,
     obligations,
     permissions,
     profile_assignment,
@@ -494,6 +495,7 @@ def _create_worktree_core(
     recovery: bool = False,
     bound_agent: str | None = None,
     no_pair: bool = False,
+    pending_seed: str | None = None,
 ) -> dict:
     """Create a new worktree and return a dict with worktree info + launch plan.
 
@@ -510,6 +512,11 @@ def _create_worktree_core(
     bound knowledge repo to give every worker (e.g. a portable pool). It is
     a narrower, per-call sibling of the blunt whole-host
     ``AGENT_WORKTREES_NO_PAIR`` env var; either one skips the carve.
+
+    ``pending_seed`` persists an optional first-turn prompt onto the new
+    record -- this function never launches Copilot, so it can only be
+    stored here; `agent-worktrees embody`/`copilot` deliver and clear it
+    on the first attach.
 
     Raises ``RuntimeError`` on failure.
     """
@@ -760,6 +767,7 @@ def _create_worktree_core(
                 # an explicit --owner-ref). Absent = unclaimed.
                 owner_ref=owner_ref or None,
                 bound_agent=bound_agent or None,
+                pending_seed=pending_seed or None,
             )
         finally:
             if owner_guard is not None:
@@ -784,6 +792,14 @@ def _create_worktree_core(
     # necessarily present to answer (github/copilot-agent-runtime#22266).
     if permissions.ensure_extension_permission_approvals(worktree_path):
         print("Pre-approved facility extension permissions for worktree path.", file=sys.stderr)
+
+    # Worktree-scoped dynamic guidance (docs/patterns/worktree-scoped-
+    # dynamic-guidance.md): refresh every enabled source's gitignored
+    # *.local.instructions.md sibling now, before the first session here
+    # even starts, so a directory-scanning harness may pick it up with no
+    # reliance on the repo-wide catch-all. Best-effort and silent -- see
+    # local_cache_refresh's own docstring.
+    local_cache_refresh.refresh_local_cache(worktree_path)
 
     # citadel paired -harness/-knowledge worktree lifecycle (#957): when this is
     # a stateless harness bound to a knowledge repo, carve/stamp the knowledge

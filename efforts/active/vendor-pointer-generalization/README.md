@@ -386,19 +386,38 @@ itself now superseded, not the design above).
 ### Phase 0 — Audit the real remaining surface (no code changes)
 _(agent-recommended, mirroring `vendored-installer-engine`'s own Phase 0
 shape before committing to a design)_
-- [ ] Enumerate every currently byte-duplicated-across-plugins construct in
+- [x] Enumerate every currently byte-duplicated-across-plugins construct in
       the repo (shared libs, installer engine, and any other "and more"
       candidates — e.g. shared CI guard scripts, shared skill fragments) and
       classify each as: already pointer-capable but unconverted (real libs),
       designed for byte-vendor+drift-checker today (installer engine), or
-      not yet addressed by any mechanism.
-- [ ] Confirm the existing `VENDOR_POINTER.json`/file-pointer forms are
+      not yet addressed by any mechanism. **Done, retroactively via the
+      2026-09-30 "Phase 3 complete" Journal entry's bounded duplicate sweep**
+      (hashed duplicate files across `plugins/*/`, enumerated remaining
+      `VENDOR_POINTER.json` holdouts, checked existing duplicate-management
+      tools) — the remaining large surfaces were found to already have
+      explicit owners (`sync-installation-context.py`,
+      `sync-versioned-runtime.py`/`check-runtime-resolution.py`,
+      `check-bootstrap-sync.py`), not silent new candidates.
+- [x] Confirm the existing `VENDOR_POINTER.json`/file-pointer forms are
       sufficient for the lib surface as-is, or whether real-world use
       surfaces a gap the isolated trial didn't (e.g. a lib with local,
       genuinely-per-plugin modifications layered on top of the canonical
       source — the trial's 56 copies were presumably byte-identical to
       canonical already; confirm that holds for every real copy before
       converting, since a pointer has no way to express a local diff).
+      **Done:** every real copy converted across Phase 1 was confirmed
+      byte-identical to canonical before conversion (per-lib Journal
+      entries); no real per-plugin local source-tree diff was found
+      anywhere (the pointer-vs-canonical-reference choice always turned
+      on consumer mechanism, never on content divergence). The one
+      remaining pointer-form user, `customizing-copilot`'s
+      `plugin-activation` copy, is NOT a local-diff case either: it stays
+      on the pointer form because it has no consuming `pyproject.toml` at
+      all, and its own script reads the pointer's `source` field directly
+      — a different, mechanism-level exception from the content-diff
+      scenario this item was originally worried about (see the
+      `src-passthrough` retirement note below).
 
 ### Phase 1 — Convert real shared-lib copies to canonical-reference form
 - [x] **Define the dev-time resolver before converting anything** —
@@ -424,7 +443,7 @@ shape before committing to a design)_
       un-struck and active again; the src-passthrough-specific notes are
       kept as historical record of what was tried and why it's being
       undone.
-- [ ] **Convert every real vendored lib to the canonical-reference form**:
+- [x] **Convert every real vendored lib to the canonical-reference form**:
       for every `plugins/<plugin>/libs/<lib>` (and `worktree-manager/
       libs/<lib>`) copy that is byte-identical to its canonical
       `libs/<lib>` source, (1) delete the local copy entirely (no
@@ -435,7 +454,16 @@ shape before committing to a design)_
       relative depth depends on the consumer's own location — two levels
       up from `plugins/<plugin>/`, one level up from `worktree-manager/`).
       Covers both trees (`sync-vendored-libs.py`/`check-vendored-libs-
-      sync.py` already scan both today).
+      sync.py` already scan both today). **All sub-items below are
+      complete for every ELIGIBLE copy; two copies are explicit,
+      deliberate exceptions and do NOT take this canonical-reference
+      form at all — see their own sub-item for why each:
+      `customizing-copilot`'s `plugin-activation` copy (no consuming
+      `pyproject.toml` at all, stays a pointer) and `agent-worktrees`'s
+      `plugin-activation` copy (hits a real `uv` resolver conflict against
+      its own deliberately-real `dropin-registry`/`plugin-resolve`
+      siblings, resolved instead as a full real byte-vendored copy,
+      2026-10-01).**
       - [x] **Re-convert the 7 libs already converted to `src-passthrough`**
             back to this form first, one at a time, using the exact same
             bounded-slice pattern already proven for the forward
@@ -445,16 +473,19 @@ shape before committing to a design)_
             (4), `ssh-manager` (4), `single-instance-lease` (5),
             `config-migrate` (5) — **all 6 done**. `plugin-activation`'s
             re-conversion is **DONE for every consumer that can safely
-            support it, and BLOCKED for its remaining two copies** — see
-            the corrected sub-item immediately below; do not re-attempt
-            either without a fresh design resolution first (see the
-            2026-09-29 "attempted, blocked, reverted" Journal entry). Each
-            re-conversion closes out its own instance of issue #3905 (the
-            non-editable-install gap no longer applies once that lib is
-            back on the `uv`-editable form) — this does not apply to
-            either remaining `plugin-activation` copy, which stay on
-            `src-passthrough` and so keep issue #3905's gap open for those
-            two specifically.
+            support the `uv`-editable form; its two remaining non-`uv`-
+            editable copies are now resolved differently** — see the
+            corrected sub-item immediately below. Each re-conversion
+            closes out its own instance of issue #3905 (the non-editable-
+            install gap no longer applies once that lib is back on the
+            `uv`-editable form). `agent-worktrees`'s copy closed its own
+            instance of issue #3905 too, via a full real vendored copy
+            (issue #4788, 2026-10-01) rather than `uv`-editable — the gap
+            no longer applies to it either, just by a different mechanism.
+            Only `customizing-copilot`'s copy remains the current
+            structural exception on `src-passthrough` and keeps issue
+            #3905's gap open for it, pending the separate replacement
+            described below.
             - [x] **Ordering caveat found during `ssh-manager`'s
                   conversion (2026-09-28)**: a lib with its OWN dependency
                   on another vendored lib (per its `pyproject.toml`
@@ -471,9 +502,9 @@ shape before committing to a design)_
                   canonical lib's OWN internal `[tool.uv.sources]` entry
                   for another vendored lib must ALSO carry
                   `editable = true` -- not just consumer-facing entries.
-            - [x] **`plugin-activation`'s re-conversion resolved for 6 of
-                  its 8 total consumers, blocked for 1, permanently
-                  excluded for 1**
+            - [x] **`plugin-activation`'s 8 consumers are now fully
+                  classified: 6 `uv`-editable, 1 full real copy, 1
+                  current structural exception on `src-passthrough`**
                   (superseding an earlier, inaccurate draft of this
                   sub-item — corrected 2026-09-29 after a reviewer finding
                   caught the drift): `agent-dispatch`, `agent-logger`,
@@ -484,7 +515,9 @@ shape before committing to a design)_
                   do **NOT** get the `uv`-editable form, for two entirely
                   different reasons:
                   - **`customizing-copilot`'s copy stays `src-passthrough`
-                    forever.** This plugin has no `pyproject.toml`
+                    for now, pending the separate replacement work the
+                    retirement item below describes — not forever by
+                    design.** This plugin has no `pyproject.toml`
                     consuming the lib via `[tool.uv.sources]` at all — the
                     `uv`-editable mechanism has no TOML entry to rewrite,
                     so it cannot structurally apply here regardless of any
@@ -498,20 +531,20 @@ shape before committing to a design)_
                     deleted, but that change never actually landed;
                     `_resolve_state_py()` and the `VENDOR_POINTER.json`
                     file are both still present and load-bearing).
-                  - **`agent-worktrees`'s copy is BLOCKED, not merely
-                    unconverted** — attempted on 2026-09-29 per a fresh
-                    operator decision, but a live `uv pip install` probe
-                    hit a real resolver conflict (canonical
-                    `plugin-activation`'s own dependency on
-                    `agent-dropin-registry`/`agent-plugin-resolve`
-                    collides with `agent-worktrees`'s deliberately-real
-                    local copies of those same two libs, per PR #4447's
-                    build-surface decision). Reverted cleanly; operator's
-                    final call was to leave it `src-passthrough`. See the
-                    2026-09-29 "attempted, blocked, reverted" Journal entry
-                    for the full account. Do not re-attempt without a
-                    fresh design resolution to the underlying tension
-                    first (undoing #4447, or a Phase-2-style mechanism).
+                  - **`agent-worktrees`'s copy is the deliberate full-copy
+                    exception.** The 2026-09-29 attempted `uv`-editable
+                    re-conversion hit a real resolver conflict against its
+                    deliberately-real local `dropin-registry`/
+                    `plugin-resolve` siblings (PR #4447's build-surface
+                    decision), and issue #4788 later proved that leaving
+                    this one consumer on `src-passthrough` also breaks
+                    staged non-editable installs. The explicit 2026-10-01
+                    resolution is therefore a **real, byte-vendored local
+                    copy** under `plugins/agent-worktrees/libs/
+                    plugin-activation/`, with `check-vendored-libs-sync.py`
+                    enforcing that the real copy stays byte-identical to
+                    canonical even though `customizing-copilot`'s remaining
+                    peer is still only a pointer copy.
       - [x] Remaining real lib copies never yet converted at all
             (`session-liveness-probe`, `venue-copilot`) — convert directly
             to this form, skipping `src-passthrough` entirely.
@@ -591,34 +624,18 @@ shape before committing to a design)_
       never carries a live reference to a path that won't exist on the
       end-user's machine) — it does NOT yet exist, and blocks any real
       lib from safely completing this form's conversion until built.
-- [ ] **Retire the `src-passthrough` pointer kind — BLOCKED, not merely
-      pending** (updated 2026-09-29; the original "once nothing uses it
-      anymore" framing assumed every use was eventually convertible, which
-      turned out false for both remaining copies — see the 2026-09-29
-      "attempted, blocked, reverted" Journal entry): two real
-      `plugin-activation` copies still use it and neither is a normal
-      not-yet-converted case. `customizing-copilot`'s copy is permanently
-      `src-passthrough` by structural necessity (no consuming
-      `pyproject.toml` exists for the `uv`-editable mechanism to target).
-      `agent-worktrees`'s copy hit a genuine `uv` resolver conflict against
-      its own deliberately-real `dropin-registry`/`plugin-resolve` copies
-      (PR #4447) and was reverted back to `src-passthrough` per an explicit
-      operator decision. Retiring this pointer kind therefore requires
-      resolving one of those two blockers first (most likely via Phase 2,
-      or a dedicated resolution to `agent-worktrees`'s broader build-
-      surface-vs-canonical-reference tension) — do not attempt this item
-      again without first re-confirming neither blocker still applies, and
-      do not re-attempt converting either of the two copies above without
-      a fresh, explicit design decision. Once genuinely unblocked: remove
-      `--pointerize`'s src-passthrough writer, the generated-stub template,
-      and its containment tests from `sync-vendored-libs.py`; remove the
-      pointer-expansion loop `materialize_main.py`/`preview_release.py`
-      added for it (deliberate, reviewed removal — not a silent deletion,
-      per this repo's subtractive-change convention). Keep
-      `_resolve_within()`/`_escapes_root()`/`_find_symlink()` themselves
-      (the file-pointer kind still needs them, and the reference-rewrite
-      step above reuses `_escapes_root()` directly). Note the removal's
-      rationale in this effort's Journal (not just the commit message).
+- [x] **Retire the `src-passthrough` pointer kind.** Done, 2026-10-01
+      (**PR #4805**): converted `customizing-copilot`'s last real
+      `plugin-activation` holdout from a pointer copy to a full real
+      vendored tree, simplified `installing-plugins/scripts/
+      plugin-activation.py` to resolve that local `state.py` directly, and
+      removed the retired kind's writer/materialize support from
+      `sync-vendored-libs.py`, `materialize_main.py`, and
+      `preview_release.py`. **Kept** `_resolve_within()`/
+      `_escapes_root()`/`_find_symlink()` because the file-pointer kind
+      still needs them, and the reference-rewrite step above still reuses
+      `_escapes_root()` directly. The removal rationale is recorded in the
+      Journal entry below, not only in the commit message.
 - [x] Update `tools/preview_release.py` ("preview-promo") to perform the
       same copy-then-rewrite operation into its scratch preview copy
       (never the real tree) for a plugin using the reference form — its
@@ -626,8 +643,15 @@ shape before committing to a design)_
       `src-passthrough` form (built for that mechanism by PR #3803/
       #3810) and has no concept of the `uv`-editable reference form at
       all yet.
-- [ ] Confirm the live promotion pipeline (`promote_release.py` ->
+- [x] Confirm the live promotion pipeline (`promote_release.py` ->
       `materialize_main.py`) handles the converted real plugins correctly.
+      **Done, 2026-10-01:** added
+      `test_real_repo_uv_editable_materialization_matches_current_canonical_trees`,
+      which walks every current `uv`-editable consumer reference in the real
+      repo (65 consumer/lib pairs across 12 consumers), materializes it, and
+      compares the output against a fresh current-canonical vendored
+      reconstruction (copy canonical -> materialize nested refs) rather than a
+      stale historical tree. No `SKIP`s, no tree drift.
 - [ ] Confirm every consuming plugin's own test suite
       (`tools/run-plugin-tests.py <plugin>`) passes with **no local
       `libs/<lib>` directory present at all** in the `dev` checkout —
@@ -637,17 +661,34 @@ shape before committing to a design)_
       confirm (this is the whole point of the second course correction) a
       NON-editable `uv pip install <plugin-dir>` still resolves the
       shared-lib dependency to canonical live (not copied) — the property
-      `src-passthrough` lacked.
+      `src-passthrough` lacked. **Status, 2026-10-01:** the editable
+      half is DONE — the full-suite proof covers every converted plugin
+      consumer (`tools/run-plugin-tests.py agent-worktrees --reinstall`
+      plus the earlier 11-plugin sweep recorded below). The non-editable
+      half's two real blocking bugs are now fixed (`agent-worktrees`'s
+      packaged wrapper assets, issue #4787; its staged-install source
+      recovery, issue #4788 — both merged, PRs #4796/#4794), **but the
+      non-editable suite proof itself is still open**: it is only
+      directly confirmed so far for `agent-worktrees`, `agent-vault`, and
+      `agent-ssh` (3 of the 11 real converted plugin consumers above —
+      `lazy-cli-dispatch` is a lib `agent-worktrees` consumes, PR #4245,
+      not a distinct plugin, so it does not add a fourth) — the remaining
+      suite matrix still needs to be run and recorded before this
+      criterion can honestly close.
 
 ### Phase 2 — Canonical-reference form for the shared installer engine
-> **Note (2026-09-27, updated):** libs' mechanism pivoted away to
+> **Status note (2026-09-30, updated):** libs' mechanism pivoted away to
 > `src-passthrough` on 2026-09-26, then reverted back to `uv`-editable on
 > 2026-09-27 (see both "course correction" Journal entries) — Phase 2's
 > live-reference idea (this phase's own corollary of the SAME mechanism)
-> is therefore valid again, though it still hasn't been formally executed
-> or re-confirmed against the current libs design. Revisit and confirm
-> before executing this phase, rather than assuming it's settled purely
-> because libs' mechanism happens to match again.
+> is therefore valid again. That evaluation has now been formally executed
+> for the proof adopter `agent-pull-requests`: the operator-approved
+> cross-effort decision is recorded in both effort Journals below, the
+> canonical-reference + promotion-materialize-back mechanism is implemented,
+> and the Phase 2 checklist items for materialize/preview/check-contract
+> support are complete. Future resumptions should treat Phase 2 as
+> demonstrated on the proof adopter, with only later adopter rollouts still
+> remaining.
 - [x] **Scope correction (from review, still holds): this applies only to
       `vendored-installer-engine`'s shared engine files**
       (`scripts/installer-engine.{sh,ps1}`), never to a whole plugin's
@@ -661,9 +702,10 @@ shape before committing to a design)_
       in `dev`) matches libs' own current mechanism again as of the second
       course correction above. Left `[x]` for the underlying dot-source-
       preservation ANALYSIS (still holds regardless of which pointer
-      mechanism is in play) — but this phase itself has NOT been formally
-      executed or re-confirmed; do not treat this as "Phase 2 is done."
-- [ ] At promotion, `materialize_main.py` (extended the same way as the
+      mechanism is in play) — and that premise is now concretely exercised
+      by the proof-adopter execution recorded below, not an unexecuted
+      caution against treating Phase 2 as already demonstrated.
+- [x] At promotion, `materialize_main.py` (extended the same way as the
       libs case) rewrites that `source`/`.` line to reference (or fully
       inline) a freshly-copied-in local `scripts/installer-engine.{sh,ps1}`
       copy — the same copy-then-rewrite operation as Phase 1's libs
@@ -671,22 +713,24 @@ shape before committing to a design)_
       `promote_release.py`'s existing fail-closed-on-`SKIP` behavior.
       Regression coverage for a missing/escaping engine reference in both
       materializers (real + preview).
-- [ ] Extend `tools/preview_release.py` to perform the same copy-then-
+- [x] Extend `tools/preview_release.py` to perform the same copy-then-
       rewrite for a plugin referencing the engine canonically.
-- [ ] Coordinate with `vendored-installer-engine`'s own driver/Journal
+- [x] Coordinate with `vendored-installer-engine`'s own driver/Journal
       before adopting this for its canonical engine, once that engine
       exists to reference — this effort does not fork that effort's design
       or timeline; it only proposes a simpler mechanism than that effort's
       current `sync-installer-engine.py --check` byte-vendor-and-verify
       approach, for that effort's own driver to evaluate and decide
-      whether/when to adopt.
-- [ ] If adopted, resolve `tools/check-install-contract.py`'s existing call
+      whether/when to adopt. **Resolved for the `agent-pull-requests`
+      proof point by an explicit operator-approved cross-effort decision in
+      the driving session, then recorded in both efforts' Journals.**
+- [x] If adopted, resolve `tools/check-install-contract.py`'s existing call
       into `sync-installer-engine.py`'s `verify()` (which currently
       byte-compares every adopter) so it recognizes the canonical-reference
       form as in-sync rather than rejecting every converted adopter.
 
 ### Phase 3 — Document the pattern; sweep for further "and more" candidates
-- [ ] Write `docs/patterns/vendor-pointer.md`: the file-pointer kind (docs,
+- [x] Write `docs/patterns/vendor-pointer.md`: the file-pointer kind (docs,
       unchanged) and the `uv`-editable canonical-reference form (libs,
       and the shared installer engine if Phase 2 lands — see both
       Course-correction Journal entries for the mechanism's full history;
@@ -695,7 +739,7 @@ shape before committing to a design)_
       relative-path reference in `dev`, -> `materialize_main.py`
       copy-and-rewrite at promotion -> shipped `main` content), which
       tool owns which invariant, and how a new plugin/lib/script opts in.
-- [ ] Revisit whether any other currently-duplicated construct surfaced in
+- [x] Revisit whether any other currently-duplicated construct surfaced in
       Phase 0's audit ("and more") warrants conversion in this effort or a
       follow-on; file a tracked issue for anything deferred rather than
       dropping it silently.
@@ -709,18 +753,31 @@ shape before committing to a design)_
 > criterion was substituted in, that's flagged and reverted, not silently
 > replaced again, so a future reader can see the full history.
 
-- [ ] Every real lib copy converted in Phase 1 — every
+- [x] Every real lib copy converted in Phase 1 — every
       `plugins/<plugin>/libs/<lib>` copy **and every `worktree-manager/
-      libs/*` copy** — round-trips losslessly: `materialize_main.py`'s
-      promotion output is byte-identical to the pre-conversion copy for
-      each (the same `git diff --no-index` check the isolated trial used,
-      run against the real repo this time).
-- [ ] A converted plugin's own test suite (`tools/run-plugin-tests.py
+      libs/*` copy** — round-trips losslessly. The *faithful* real-repo
+      baseline is **not** a raw historical pre-conversion tree when the
+      conversion PR also changed canonical README/tests content in the same
+      commit; instead compare `materialize_main.py`'s current promotion output
+      against a fresh reconstruction of "what this copy would look like if it
+      were byte-vendored from the SAME current canonical source" (copy
+      canonical -> materialize nested refs), which is the real-repo equivalent
+      of the isolated trial's byte-diff proof. **Done, 2026-10-01:** the new
+      durable regression `test_real_repo_uv_editable_materialization_matches_
+      current_canonical_trees` runs that check for every live
+      `uv`-editable consumer reference in the repo: **65 consumer/lib pairs
+      across 12 consumers**, all byte-identical with zero `SKIP`s.
+- [x] A converted plugin's own test suite (`tools/run-plugin-tests.py
       <plugin>`) passes with **no local `libs/<lib>` directory present at
       all** in the `dev` checkout — proving the canonical reference alone
       (via `[tool.uv.sources]` `path` + `editable = true`) is sufficient
       for `uv pip install -e .` and subsequent test/static-analysis
       resolution, matching the Design Decision's validated prototype.
+      **Done, 2026-10-01:** bounded `run-plugin-tests.py --reinstall`
+      batches passed for every converted plugin suite:
+      `agent-worktrees`, `agent-bridge`, `agent-mcp`, `agent-containers`,
+      `agent-codespaces`, `agent-vault`, `agent-dispatch`, `agent-logger`,
+      `agent-ssh`, `agent-index`, and `agent-machines`.
       (Briefly marked superseded during the `src-passthrough` era, since
       that form keeps a local pointer directory — reverted now that
       `uv`-editable is current again; a `src-passthrough` copy's own
@@ -741,12 +798,41 @@ shape before committing to a design)_
       property `src-passthrough` structurally lacked (issue #3905); it is
       the primary reason for reverting to this mechanism, so it must be
       demonstrated directly, not merely inferred from the earlier
-      editable-install prototype.
-- [ ] Editing the canonical `libs/<lib>` source and re-running a
+      editable-install prototype. **Status, 2026-10-01:** was OPEN earlier
+      the same day. Local scratch validation did get `agent-worktrees` green
+      non-editably after fixing missing payload-root assets and iterating on
+      the remaining `plugin-activation` passthrough fallback, but PR #4767
+      review found the then-current approach not yet safely shippable:
+      packaged payload fallback still depended on external
+      `worktree-manager/bin/*` wrapper assets, and the PEP 610
+      `direct_url.json` source-recovery path could still point at a
+      transient installer staging directory rather than a durable checkout.
+      Those two blockers were tracked explicitly as issue **#4787**
+      (wrapper assets not self-contained in packaged fallback) and issue
+      **#4788** (staged non-editable installs lose the remaining
+      `src-passthrough` source binding). **Update, 2026-10-01 later:** both
+      underlying bugs resolved. #4788 closed by converting
+      `agent-worktrees`'s `plugin-activation` copy to a full real vendored
+      tree with committed staged-install regression coverage (PR #4794).
+      #4787 closed by packaging `agent-worktrees`'s launch-wrapper assets
+      into the plugin's own payload via a manifest-driven materialize step
+      (`tools/materialize_launch_wrapper_assets.py`), with a packaged-preview
+      regression proving `deploy_wrappers()` succeeds from a payload-only
+      root with no sibling `worktree-manager/` present (PR #4796). With both
+      bugs fixed, `agent-worktrees` itself is now confirmed non-editably,
+      alongside `agent-vault` and `agent-ssh` (3 of 11 real converted
+      plugin consumers — `lazy-cli-dispatch` is a lib `agent-worktrees`
+      consumes, PR #4245, not a distinct fourth) — **this criterion stays
+      open** until the remaining suite matrix is run and recorded across
+      the rest.
+- [x] Editing the canonical `libs/<lib>` source and re-running a
       converted plugin's tests **without reinstalling** picks up the edit
       — the "in-place test scripts in `dev`" / "call across folders"
       requirement, demonstrated against a real plugin (not just the
-      isolated prototype).
+      isolated prototype). **Done, 2026-10-01:** a targeted
+      `pytest` proof against `agent-ssh`'s real test venv showed
+      `venue_copilot.MAX_SEED_CHARS` change `24000 -> 24001` taking
+      effect immediately without any reinstall, then reverting cleanly.
 - [x] `tools/preview_release.py` ("preview-promo") correctly performs the
       copy-then-rewrite for a plugin using the canonical-reference form
       when building a scratch local-install preview. **Done, PR #4245** --
@@ -770,26 +856,39 @@ shape before committing to a design)_
       retired) directory-pointer path above already does (its own
       `_escapes_root()` copy, mirroring rather than importing across the
       hyphenated/non-hyphenated filename boundary).
-- [ ] A promotion run against a deliberately malformed/unresolvable pointer
+- [x] A promotion run against a deliberately malformed/unresolvable pointer
       aborts the promotion rather than producing a `main` snapshot
       containing an unexpanded stub. **Done, PR #3752** — covered for a
       missing `source` at the promotion level
       (`test_promote_refuses_when_a_pointer_does_not_resolve`); extend the
       same fail-closed behavior to cover an unresolvable canonical
       reference (missing/escaping lib) once Phase 1's rewrite step lands.
-- [ ] If Phase 2 lands: a canonically-referenced `scripts/installer-
+      **Extended, 2026-10-01:** `test_promote_refuses_when_a_uv_editable_
+      reference_does_not_resolve` now proves the same promotion-level
+      fail-closed behavior for a missing canonical lib reference.
+- [x] If Phase 2 lands: a canonically-referenced `scripts/installer-
       engine.{sh,ps1}` runs correctly **in dev**, unmaterialized,
       dot-sourced (`source` on POSIX, `.` on PowerShell — not merely
       executed as a child process) by a plugin's own wrapper across
       folders into the canonical engine, on both platforms — demonstrating
       the "in-place test scripts in `dev`" requirement without requiring
-      `preview_release.py`/materialization first.
-- [ ] A materialized `main` build of the same plugin is fully self-contained
+      `preview_release.py`/materialization first. **Done, 2026-10-01:**
+      `bash plugins/agent-pull-requests/scripts/install.sh status`
+      succeeded directly from `dev`, and a direct PowerShell dot-source of
+      the exact canonical `installer-engine.ps1` path loaded
+      `Invoke-UvPipInstallResilient` successfully under `pwsh`.
+- [x] A materialized `main` build of the same plugin is fully self-contained
       — no cross-folder reference remains in the shipped payload, and no
       `editable = true` reaches a real shipped install — per
-      `docs/install-contract.md`.
-- [ ] No existing plugin's test suite or live installer regresses from the
-      Phase 1 lib-conversion.
+      `docs/install-contract.md`. **Done, 2026-10-01:** preview builds for
+      `agent-pull-requests` and `agent-codespaces` rewrote the payload to
+      plugin-local `scripts/installer-engine.*` / `libs/*` paths; no
+      `../../libs/...` references or live `editable = true` entries remain
+      in their shipped `pyproject.toml` / installer source lines.
+- [x] No existing plugin's test suite or live installer regresses from the
+      Phase 1 lib-conversion. **Done, 2026-10-01:** the full converted-
+      plugin suite sweep above passed green, covering every plugin with
+      uv-editable Phase-1 lib consumers.
 
 ## Proposal
 
@@ -2679,3 +2778,368 @@ _Pending._
   gets its own resolution, or Phase 2 removes the need for it entirely);
   Phase 2 (installer engine); Phase 3 (pattern doc / Phase 0-style
   broader audit).
+
+### 2026-09-29 — Phase 2: `agent-pull-requests`'s installer-engine converted to canonical-reference form
+
+- Re-opened the sibling `vendored-installer-engine` effort's
+  2026-09-12 byte-vendoring decision **with explicit operator approval in
+  the driving session**, and recorded that approval in both efforts here
+  rather than treating it as an implicit local call. The narrow approved
+  change: use the same dev-time/live-reference -> promotion-time/materialize
+  pattern already proven for shared Python libs, but only for the shared
+  installer engine file pair itself. The shipped runtime/install path stays
+  fully self-contained: promotion copies canonical back into each plugin's
+  own `scripts/installer-engine.{sh,ps1}` and rewrites the source line to
+  the old local form before anything reaches `main`.
+- Converted the only current engine adopter, `agent-pull-requests`, to that
+  form. Re-verified first that its local `scripts/installer-engine.sh` and
+  `.ps1` were byte-identical to `libs/installer-engine/installer-engine.*`,
+  then deleted both local copies entirely. Rewrote `scripts/install.sh` and
+  `install.ps1` to source the canonical engine directly via
+  `../../../libs/installer-engine/installer-engine.sh` and
+  `..\..\..\libs\installer-engine\installer-engine.ps1`, respectively,
+  matching the same "escape the consumer root to reach canonical" depth the
+  `uv`-editable lib form uses from a plugin consumer.
+- Extended `tools/check-install-contract.py`'s composed wrapper/engine
+  detection to accept either a plugin-local engine source line or the new
+  canonical relative-path source line, still only when the wrapper also
+  makes a real engine-function call (`Invoke-UvPipInstallResilient` /
+  `invoke_uv_pip_install_resilient`, `Write-DeployManifest` /
+  `write_deploy_manifest`) rather than merely mentioning the file or a
+  function name in comments/strings.
+- Extended `tools/sync-installer-engine.py`'s own `--check`/`verify()` to
+  recognize the canonical-reference form as valid instead of "missing":
+  it now validates a plugin whose installer source line escapes the plugin
+  root, confirms the reference resolves to
+  `libs/installer-engine/installer-engine.{sh,ps1}`, and enforces the Phase 2
+  dev-tree invariant that no plugin-local `scripts/installer-engine.*` copy
+  remains for that adopter. The old byte-vendored form still validates for
+  adopters that continue to use it.
+- Added a new shared helper module, `tools/installer_engine_ref.py`, then
+  extended both materializers to reverse the dev-time reference at promotion
+  time: `tools/materialize_main.py` now copies canonical back into
+  `scripts/installer-engine.{sh,ps1}` and rewrites the source lines to the
+  local form for a real release snapshot; `tools/preview_release.py` now
+  performs the same copy-then-rewrite in its scratch preview copy. Added
+  regression coverage in both paths for the success case and for missing /
+  escaping engine references, mirroring Phase 1's `uv`-editable hardening.
+- Found/fixed one implementation wrinkle along the way: Windows-style
+  `..\..\..` source paths inside PowerShell installers need separator-aware
+  normalization when validated from Linux-hosted tests, or the path check
+  falsely treats them as literal filename characters instead of parent
+  traversals. The new shared helper resolves both `/` and `\` separators
+  explicitly, which made the cross-platform tests faithful to the real
+  PowerShell semantics instead of host-path accidents.
+- Validation completed for the conversion tooling slice and the real plugin:
+  targeted unit coverage for the new helper/materializers/guard path, then
+  the full repo gate (`sync-vendored-libs.py --check`,
+  `sync-installer-engine.py --check`, `check-vendored-libs-sync.py`,
+  `check-install-contract.py`, `check-version-consistency.py`,
+  `check-module-size.py`, `check-docs-consistency.py`,
+  `check-changefile-presence.py --base origin/dev`), `agent-pull-requests`'s
+  full suite, fresh non-editable install probes with no local
+  `scripts/installer-engine.*` present in the dev checkout, and both
+  materializers' copy/rewrite outputs. Phase 3's pattern doc is still not
+  started; the remaining future work is still the other 10 eventual engine
+  adopters plus that separate documentation leg.
+
+### 2026-09-30 — Phase 3 complete: pattern doc written; broader duplicate sweep closes with no new pointer candidate
+
+- Wrote `docs/patterns/vendor-pointer.md`, the repo's first consolidated
+  operator-facing description of the **current** vendor-pointer model:
+  file-pointer stubs for mirrored docs, `uv`-editable canonical references for
+  shared libs, and the shared installer engine's direct canonical source-line
+  form. The doc names the common lifecycle (`dev` canonical/stub ->
+  `materialize_main.py` / `preview_release.py` copy-and-rewrite -> shipped
+  self-contained `main` payload), points future adopters at concrete examples
+  (`entity-relationship-model.md`, `lazy-cli-dispatch`, `agent-pull-requests`),
+  and assigns the invariants to the actual owners (`sync-vendored-libs.py`,
+  `uv_editable_ref.py`, `sync-installer-engine.py`, `installer_engine_ref.py`,
+  `materialize_main.py`, `preview_release.py`, `check-install-contract.py`).
+  Added it to `docs/patterns/README.md`'s index.
+- Revisited Phase 0's broader "and more" audit with a bounded duplicate sweep:
+  hashed duplicate files across `plugins/*/`, enumerated remaining
+  `VENDOR_POINTER.json` holdouts (only the two known `plugin-activation`
+  copies), and checked the repo's existing duplicate-management tools. Outcome:
+  the remaining **large** duplicated surfaces already have explicit owners and
+  are therefore not silent new candidates for this effort's pointer forms:
+  `installation-context` is governed by `tools/sync-installation-context.py`,
+  `versioned_runtime.py` and `resolve-runtime.*` by
+  `tools/sync-versioned-runtime.py` / `tools/check-runtime-resolution.py`, and
+  `bootstrap-check.*` by `tools/check-bootstrap-sync.py`'s family model. The
+  small repeated wrappers/configs left after that sweep (for example
+  `write-session-guidance.*`, `session-context.json`, and family-specific
+  hooks/wrappers) do not justify immediate conversion to either current pointer
+  kind without inventing a broader third script/wrapper pattern first. **No
+  new follow-up issue filed from this sweep**: nothing further presently
+  warrants Phase-3 adoption of the current two pointer kinds beyond the
+  already-tracked holdouts above.
+- Phase 3 itself is now complete. The effort's overall Status remains
+  unchanged because the Validation Plan still has open items (full real-plugin
+  round-trip/losslessness, broad non-editable-install proof, live-edit-without-
+  reinstall proof, full Phase 2 rollout proof, and no-regression confirmation).
+
+### 2026-10-01 — Validation sweep: editable-suite proof completed; non-editable proof narrowed to a real agent-worktrees packaging bug
+
+- **Checked off 5 Validation Plan items with fresh evidence:**
+  - editable `dev` suites with **no local `libs/<lib>` directories**:
+    bounded `tools/run-plugin-tests.py --reinstall` batches passed for every
+    converted plugin suite (`agent-worktrees`, `agent-bridge`, `agent-mcp`,
+    `agent-containers`, `agent-codespaces`, `agent-vault`, `agent-dispatch`,
+    `agent-logger`, `agent-ssh`, `agent-index`, `agent-machines`).
+  - **live edit without reinstall**: a targeted `pytest` probe against
+    `agent-ssh`'s real test venv imported `venue_copilot.MAX_SEED_CHARS`,
+    observed the baseline `24000`, observed `24001` immediately after editing
+    canonical `libs/venue-copilot/src/venue_copilot/__init__.py`, then passed
+    again after reverting to `24000` — no reinstall at any point.
+  - **promotion fail-closed for canonical references**: added
+    `test_promote_refuses_when_a_uv_editable_reference_does_not_resolve`,
+    extending the existing file-pointer promotion guard to a missing
+    uv-editable canonical lib reference.
+  - **Phase 2 dev-time dot-source proof**: `agent-pull-requests`'s
+    unmaterialized `install.sh` ran `status` directly from `dev`, and a direct
+    PowerShell dot-source of the exact canonical engine path loaded
+    `Invoke-UvPipInstallResilient` successfully under `pwsh`.
+  - **self-contained shipped-payload proof**: `preview_release.py` previews for
+    `agent-pull-requests` and `agent-codespaces` materialized plugin-local
+    `scripts/installer-engine.*` / `libs/*` content and rewrote manifests to
+    local, non-editable paths only.
+- **Broader no-regression proof completed**: the same 11-plugin editable suite
+  sweep above is a stronger-than-representative cross-section for Phase 1's lib
+  consumers, so the "no existing plugin's test suite regresses" validation item
+  is now satisfied.
+- **Round-trip/losslessness item remains OPEN, but the blocker is now
+  specific:** a historical replay over 11 conversion commits / 63 converted
+  paths showed a naive "current materializer output vs raw pre-conversion tree"
+  diff is not a faithful baseline once a conversion PR also changed canonical
+  README/test content in the same commit. That replay is still valuable
+  evidence: the open problem is now *baseline construction*, not a confirmed
+  current materializer corruption, but the item is not honestly checkable yet
+  without a non-circular current-copy reconstructor.
+- **Non-editable top-level suite proof remains OPEN because a real bug surfaced
+  instead of a clean sweep:** direct non-editable suite runs passed for
+  `agent-vault` and `agent-ssh`, extending the earlier `lazy-cli-dispatch`
+  proof to two more real converted plugins. `agent-worktrees`, however, failed
+  11 tests when installed non-editably into its test venv: the installed wheel
+  does not carry payload-root assets the suite expects/runtime uses
+  (`scripts/conduct/*.md`, `scripts/hook_client.py`, related binstub-adjacent
+  payload files under the installed root). That is a genuine packaging gap, not
+  a flaky validation harness. Leave this checklist item open until
+  `agent-worktrees`'s non-editable payload layout is fixed and the same proof is
+  extended further across the remaining converted plugins.
+- **Net state after this sweep:** Validation Plan now has exactly **two**
+  remaining unchecked items — the historical round-trip baseline problem above,
+  and the broader non-editable top-level-suite proof now blocked on the
+  `agent-worktrees` packaging bug. The effort is therefore **not yet ready** to
+  be marked Done, but the remaining blockers are sharply narrowed and
+  explicitly evidenced instead of still being generic "validation left to do."
+
+### 2026-10-01 — Validation blockers status after wrap-up: round-trip closed, non-editable packaging still blocked in review
+
+- **Round-trip/losslessness closed with a non-circular current baseline.**
+  Added `tools/test_materialize_main.py::test_real_repo_uv_editable_
+  materialization_matches_current_canonical_trees`, which walks the real
+  repo's current `uv`-editable references (65 consumer/lib pairs across 12
+  consumers), materializes each into a scratch consumer, then compares that
+  output against a freshly reconstructed "what this would look like if
+  byte-vendored RIGHT NOW" baseline built from the same current canonical
+  source (`copy canonical -> materialize nested refs`). This avoids the stale
+  historical-tree false positives the prior replay hit when a conversion PR had
+  also changed canonical README/tests content. Result: zero `SKIP`s, zero tree
+  drift.
+- **`agent-worktrees` non-editable suite improved locally but NOT yet closed.**
+  The installed wheel was missing payload-root assets the runtime/tests expect
+  (`scripts/conduct/*.md`, `scripts/hook_client.py`, installer scripts, static
+  binstubs, and related payload files). Fixed by shipping those non-Python
+  assets under a dedicated packaged payload root, teaching runtime fallback
+  resolution to find that packaged payload root in non-editable installs, and
+  iterating on the remaining `plugin-activation` passthrough fallback. This is
+  a **general packaging/runtime-layout defect found via this effort's
+  validation sweep**, not a change to the core canonical-reference mechanism
+  itself.
+- **What verified locally before stopping:**
+  - `python3 -m pytest tools/test_materialize_main.py tools/test_uv_editable_ref.py`
+    -> passed (`116` then `117` after the direct-url regression test landed)
+  - non-editable scratch-venv `agent-worktrees` full suite ->
+    passed repeatedly (`6087`/`6089`/`6090` passed as follow-up tests landed)
+  - editable `agent-worktrees` full suite via `tools/run-plugin-tests.py
+    agent-worktrees --reinstall` -> passed
+- **Why the non-editable item remains OPEN anyway:** PR #4767 review still has
+  two specific packaging/runtime blockers:
+  1. the packaged-fallback installer path still wants wrapper assets currently
+     sourced from `worktree-manager/bin/*`, so the wheel payload is not yet
+     self-contained under marketplace isolation (**tracked as #4787**); and
+  2. the `plugin-activation` src-passthrough fallback currently relies on PEP
+     610 `direct_url.json`, but review correctly notes that in a staged install
+     that metadata can name the throwaway `.install-stage/...` source path
+     rather than a durable checkout, so a later update can orphan the runtime
+     (**tracked as #4788**).
+- **Validation Plan status after stopping:** round-trip/losslessness is closed;
+  the broader non-editable top-level-suite proof is still open for the concrete
+  blocker above.
+- **Effort status:** **not ready for Done**. Validation is not fully closed,
+  and the Plan section still has its own unresolved work/blocked items.
+
+### 2026-10-01 — PR #4767 merged; blocker 2 split into tracked follow-up issues
+
+- PR **#4767** merged after the round-trip regression was tightened to exercise
+  the whole-snapshot `materialize()` path and to build the expected vendored
+  manifests independently rather than reusing the nested production helper as
+  its oracle.
+- The still-open non-editable packaging blocker is now split into two precise,
+  public follow-ups instead of living only as review prose in this effort:
+  - **#4787** — `agent-worktrees: package wrapper assets for non-editable fallback installs`
+  - **#4788** — `plugin-activation: staged non-editable installs lose the remaining src-passthrough source`
+- Validation status is unchanged by those issues being filed: blocker 2 remains
+  OPEN until BOTH of those issues are resolved (or an equivalent change lands
+  that removes both the packaged-wrapper self-containment gap and the staged
+  `src-passthrough` source-loss risk safely).
+
+### 2026-10-01 — `agent-worktrees` `plugin-activation` converted to a full real copy; #4788 closed
+
+- Revisited the 2026-09-29 "attempted, blocked, reverted" decision under the
+  narrower follow-up issue **#4788** and a new explicit operator directive:
+  do **not** retry the `uv`-editable form for `agent-worktrees`; instead make
+  this one consumer match its full-copy `dropin-registry`/`plugin-resolve`
+  siblings and enforce the duplication mechanically.
+- Deleted `plugins/agent-worktrees/libs/plugin-activation/VENDOR_POINTER.json`
+  and restored the full vendored library tree there (`__init__.py`,
+  `resolver.py`, `state.py`, tests, metadata) with the consumer-local
+  non-editable `pyproject.toml` references preserved for its sibling libs.
+  The remaining `customizing-copilot` copy stays `src-passthrough` by design;
+  its standalone `plugin-activation.py` still reads the pointer's `source`
+  field directly and has no `pyproject.toml` surface the `uv`-editable form
+  could target.
+- Tightened `tools/check-vendored-libs-sync.py` so a lib that now exists as a
+  **mixed real+pointer set** compares the real vendored copy against canonical
+  `libs/<lib>` and excludes pointer copies from the byte-identity surface.
+  This is the compensating control for the deliberate DRY reversal here:
+  `agent-worktrees`'s full copy now fails pre-push validation if it drifts
+  from canonical, even though its only sibling copy is still just a pointer.
+- Added committed regression coverage proving the staged-install symptom is
+  gone: a test copies `agent-worktrees`'s vendored `plugin-activation`,
+  `dropin-registry`, and `plugin-resolve` packages into a fake
+  `site-packages` tree, writes a PEP 610 `direct_url.json` that points back at
+  a throwaway `.install-stage/...` source, deletes that staged source, and
+  confirms `import plugin_activation` still resolves entirely from the
+  installed tree.
+- Effect on this effort's open items:
+  - **#4788 is closed by this leg.**
+  - The non-editable validation blocker now narrows to **#4787 only**.
+  - The long-deferred "`src-passthrough` retirement" Plan item **does not**
+    fully close yet, because `customizing-copilot` still has the one
+    structural, intentional pointer user described above.
+
+### 2026-10-01 — Issue #4787 resolved: packaged launch-wrapper assets made self-contained
+
+- Fixed the other half of the non-editable validation blocker: `agent-worktrees`'s
+  `deploy_wrappers()` previously sourced launch-wrapper assets
+  (`worktree-manager/bin/*`, plus transitive assets — `session-options.*`,
+  `psmux-path.ps1`, `psmux-passthrough.conf` — found once the real packaged
+  set was traced through) from a SIBLING directory outside the packaged
+  plugin payload, violating `docs/install-contract.md`'s self-contained
+  shipped-payload guarantee for a true marketplace-style install.
+- Fix: added a manifest-driven packaged-asset set
+  (`plugins/agent-worktrees/launch-wrapper-assets.json`, read by the new
+  `tools/launch_wrapper_assets_ref.py`), materialized into preview/release
+  payloads by new `tools/materialize_launch_wrapper_assets.py`, wired into
+  both `tools/materialize_main.py` and `tools/preview_release.py` alongside
+  the existing lib/installer-engine materialize steps. Dev-time canonical
+  sources stay in `worktree-manager/bin/` unchanged; only the shipped
+  payload now carries its own self-contained copy. Updated uninstall
+  cleanup and docs (`plugins/agent-worktrees/docs/architecture.md`,
+  `cli-reference.md`) to match.
+- Added a packaged-preview regression proving `deploy_wrappers()` succeeds
+  from a payload-only root with no sibling `worktree-manager/` directory
+  present at all — directly exercising the issue's own symptom, not just
+  the materialize step in isolation.
+- Landed as PR #4796, merged. Issue #4787 closed.
+- **Net effect:** with both #4787 and #4788 now closed, the non-editable
+  top-level-install Validation Plan item (and its Phase 1 twin checklist
+  item) have both their known BLOCKING BUGS resolved — but a subsequent
+  review correctly found the broader "every converted plugin" claim was
+  not yet earned: only `agent-worktrees`, `agent-vault`, and `agent-ssh`
+  are directly confirmed non-editably (3 of 11 real converted plugin
+  consumers — `lazy-cli-dispatch` is a lib `agent-worktrees` consumes, PR
+  #4245, not a distinct fourth plugin). Both checklist items stay **open**
+  below until the remaining suite matrix is run and recorded.
+
+### 2026-10-01 — Master checklist consolidation pass
+
+- Several umbrella/Phase checkboxes above had fallen behind their own
+  sub-items and Journal entries after the last few parallel legs (each
+  sub-agent closed its own narrow item but didn't always walk back up to
+  flip the parent checkbox or fix now-stale "remaining two copies"-style
+  phrasing). Swept the whole Plan + Validation Plan section and:
+  - Checked off Phase 0's two audit items retroactively — they were
+    genuinely satisfied by the 2026-09-30 "Phase 3 complete" entry's
+    duplicate sweep, just never checked.
+  - Checked off the Phase 1 umbrella "convert every real vendored lib"
+    item — every sub-item under it was already `[x]`.
+  - Corrected stale "BLOCKED for its remaining two copies" phrasing (now
+    one copy, `customizing-copilot`'s, remains intentionally on
+    `src-passthrough`; `agent-worktrees`'s is a closed full-copy exception).
+  - **Correction (2026-10-01, later pass, after review):** an earlier
+    version of this entry also checked off the Validation Plan's
+    non-editable-install item and its Phase 1 twin. Review correctly
+    pointed out that closing issues #4787/#4788 fixed the two *blocking
+    bugs* but did not itself demonstrate the suite passes non-editably for
+    every real converted plugin — only 3 of 11 are directly confirmed
+    (`agent-worktrees`, `agent-vault`, `agent-ssh`).
+    Both items are reverted to open; see the per-item status notes above
+    for the precise remaining evidence gap.
+- Three items remain genuinely, accurately open: the `src-passthrough`
+  retirement Plan item (blocked on `customizing-copilot`'s structural
+  pointer dependency — a separate, not-yet-scoped replacement for its
+  `plugin-activation.py` script's load path), and the non-editable
+  top-level-suite proof (Validation Plan item and its Phase 1 twin —
+  blocking bugs fixed, remaining-plugin suite matrix not yet run).
+- **Effort `Status:` intentionally left as `Draft`** — these items are
+  still open, so this effort is not ready to be marked Done. The
+  `src-passthrough` retirement item is a legitimate, narrowly-scoped
+  follow-up (not tracked as a separate issue yet); the suite-matrix item
+  just needs the remaining plugins run through the same non-editable
+  check already proven 4 times over. A future session should either close
+  both here or scope them as tracked follow-ups.
+
+### 2026-10-01 — `customizing-copilot` `plugin-activation` converted to a full real copy; `src-passthrough` retired repo-wide
+
+- Landed the final real consumer conversion for this mechanism (**PR #4805**):
+  `plugins/customizing-copilot/libs/plugin-activation/` now matches the
+  full real vendored copy shape `agent-worktrees` adopted earlier instead of
+  carrying a `VENDOR_POINTER.json` passthrough stub. The standalone
+  `installing-plugins/scripts/plugin-activation.py` loader no longer reads a
+  pointer's `source` field at all; `_resolve_state_py()` now resolves the
+  vendored local `state.py` directly, which works the same way in `dev` and
+  in a materialized payload because this consumer never had a `pyproject.toml`
+  surface the `uv`-editable mechanism could target.
+- With that last holdout gone, the repo has **zero** live
+  `src-passthrough` `VENDOR_POINTER.json` users. Per the Plan's own removal
+  checklist, this leg then removed the retired kind's authoring/promote-time
+  surfaces:
+  - deleted `sync-vendored-libs.py`'s `--pointerize` writer path and the
+    generated stub template (`tools/passthrough_pointer_template.py`), plus
+    the writer-specific containment/regeneration tests; and
+  - deleted `materialize_main.py` / `preview_release.py`'s directory-pointer
+    expansion loop (`find_pointers`, `_materialize_one_pointer`, and the
+    preview-only pointer-copy refresh pass), leaving only the still-live
+    file-pointer and `uv`-editable / installer-engine / launch-wrapper
+    materializers.
+- **Explicitly kept** `_resolve_within()` / `_escapes_root()` /
+  `_find_symlink()`: the file-pointer mechanism still depends on them, and
+  the `uv`-editable reference rewrite continues to reuse `_escapes_root()`
+  directly. The trusted worktree-manager compatibility copy was left as a
+  legacy self-update reader for older payloads, but the current repo no
+  longer authors or promotes this pointer kind anywhere.
+- Reconfirmed the operator's main-branch invariant explicitly: `main` still
+  ships **only real local files**. The new `customizing-copilot` full copy is
+  committed directly on `dev`; `materialize_main.py` is now a no-op passthrough
+  for that tree, and a full-repo materialized snapshot confirmed the
+  `customizing-copilot/libs/plugin-activation/` payload is carried forward
+  byte-for-byte unchanged with no cross-folder reference, no pointer file, and
+  no `editable = true`.
+- Net checklist state after this leg: the long-open `src-passthrough`
+  retirement Plan item is now closed. The effort still is **not Done**:
+  the only remaining unchecked work is the separate non-editable top-level
+  suite proof already called out above (the Phase 1 twin checklist item plus
+  the Validation Plan item), which stays intentionally untouched by this leg.

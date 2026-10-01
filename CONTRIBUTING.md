@@ -150,7 +150,16 @@ explicit admin escalation).** This is enforced on four layers that agree:
      exists rather than naming dynamic matrix jobs directly) apply to
      everyone with no bypass, including every Maintainer.
 4. **Workflow/CODEOWNERS lockdown** — `.github/workflows/`, `.github/actions/`,
-   and `.github/CODEOWNERS` itself are locked to **ThomasMichon alone**, not
+   and `.github/CODEOWNERS` itself are locked to **this repo's owner alone**
+   (`ThomasMichon` here, derived from the immutable `github.repository_owner`
+   context value rather than a repository secret/variable -- a repository
+   *variable* is writable via the API/CLI by ordinary Write access, the same
+   Maintainer tier this lockdown restricts, which would let a Maintainer
+   defeat it by simply re-pointing the value, so a user-owned fork's own
+   owner is protected automatically with zero configuration instead --
+   this policy is scoped to user-owned repos only; an organization-owned
+   fork needs its own authorization mechanism, since no individual PR
+   author can ever equal an org login), not
    the wider Maintainer group (workflow changes can exfiltrate secrets/PATs,
    a materially different risk than an ordinary code change). A Maintainer's
    review-bypass above does *not* cover this: a required status check
@@ -158,7 +167,8 @@ explicit admin escalation).** This is enforced on four layers that agree:
    run via `pull_request_target` so a PR can't neuter its own trusted
    definition) in its own ruleset ("dev branch policy: workflow/CODEOWNERS
    lockdown") fails whenever a protected path is touched unless the **PR's
-   registered author** (`pull_request.user.login`) is ThomasMichon. This
+   registered author** (`pull_request.user.login`) matches
+   `github.repository_owner` (`ThomasMichon` on this repo). This
    deliberately checks the PR's submitter, not individual commit metadata:
    per-commit `author`/`committer` login is just GitHub's resolution of the
    commit's plain-text git identity (name + email) against an account, not

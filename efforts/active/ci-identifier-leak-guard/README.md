@@ -60,11 +60,15 @@ follow-on phases:
    of generic replacement to use.
 2. **Masking/logging boundary:** the script must never print a matched token to
    stdout or any workflow log line. The trusted scan step's log reports only a count
-   (for example `3 forbidden identifier(s) found — see PR review comments for details`)
-   and fails the job. The actual matched value, reason, file, line, and column
-   are delivered through GitHub API-posted PR feedback (review comment or issue
-   comment) from the trusted workflow, because Actions log masking would make
-   log-line findings unusable.
+   (for example `3 forbidden identifier(s) found — see the 'identifier leak
+   guard' Check Run output for details`) and fails the job. The actual matched
+   value, reason, file, line, and column are delivered through the custom
+   Check Run's own `output.text` (API-delivered, not a masked log line) --
+   *(revised 2026-09-30, see Journal)*: a duplicate Issues-API PR comment was
+   originally planned as well, but a `workflow_run`-triggered `GITHUB_TOKEN`
+   cannot reliably post one regardless of declared permissions, so that path
+   is now best-effort only and the Check Run output is the sole relied-upon
+   delivery channel.
 3. **Fork-safe trusted follow-up:** keep the existing lightweight
    `pull_request` CI workflow for fast no-secrets validation only; do **not**
    attempt identifier scanning there, because fork PRs receive no repository
@@ -98,11 +102,11 @@ an untrusted findings artifact at all.
 
 ### Phase 0 - Land the reviewed effort plan
 
-- [ ] Update and cross-link the public umbrella issue after this plan PR
+- [x] Update and cross-link the public umbrella issue after this plan PR
   merges. _(agent-recommended as an explicit planning/review-gate phase before
   implementation starts.)_
-- [ ] Author this effort README and add it to the active-effort index.
-- [ ] Submit the effort itself as a PR, give the advisory Copilot review a
+- [x] Author this effort README and add it to the active-effort index.
+- [x] Submit the effort itself as a PR, give the advisory Copilot review a
   bounded window, address anything substantively useful, and self-merge.
 
 ### Phase 1 - Extend the local guard for CI artifact output
@@ -141,7 +145,7 @@ an untrusted findings artifact at all.
 - [x] Validate the merged trigger chain end-to-end on a scratch PR: CI runs
   first, then the trusted `workflow_run` workflow, then the custom Check Run
   appears on the PR head SHA.
-- [ ] If the repository secrets are present, validate the failure path with a
+- [x] If the repository secrets are present, validate the failure path with a
   fabricated placeholder test token; otherwise validate the success/plumbing
   path only and record that full failure-path validation remains blocked on
   Phase 4 secret provisioning.
@@ -167,7 +171,7 @@ see the Journal entry below. Both are agent-assembled/pushed instead of
   assemble the separate `FORBIDDEN_IDS_WORK` list from a source list the
   operator keeps on their work OneDrive, and push it to the repository secret
   via `gh secret set`.
-- [ ] Document the expected secret format and repository-administration step
+- [x] Document the expected secret format and repository-administration step
   near the workflow/tooling docs touched by the implementation.
 
 ## Validation Plan
@@ -175,16 +179,16 @@ see the Journal entry below. Both are agent-assembled/pushed instead of
 - [x] Open a clean scratch PR and confirm the ordinary `CI` workflow runs
   first, then the trusted `workflow_run` follow-up runs, and then a custom
   Check Run named `identifier leak guard` appears on the PR head SHA.
-- [ ] If `FORBIDDEN_IDS_FACILITY` / `FORBIDDEN_IDS_WORK` exist, open a scratch
+- [x] If `FORBIDDEN_IDS_FACILITY` / `FORBIDDEN_IDS_WORK` exist, open a scratch
   PR that deliberately reintroduces a known-safe fabricated placeholder test
-  token and confirm the trusted Check Run reports `failure` plus API-posted PR
-  feedback naming the matched value and reason. If the secrets are absent,
+  token and confirm the trusted Check Run reports `failure` naming the
+  matched value and reason in its own output. If the secrets are absent,
   record that this failure-path validation remains blocked on Phase 4 secret
   provisioning.
 - [x] Confirm the clean scratch PR's **misconfiguration** path produces no
   identifier-feedback comment and logs only the configuration gap (not any raw
   matched value).
-- [ ] Once the denylist secrets exist, confirm a genuinely clean denylist-backed
+- [x] Once the denylist secrets exist, confirm a genuinely clean denylist-backed
   scan produces no raw matched values in the workflow log and no failure
   feedback comment.
 - [x] Inspect the branch-protection/ruleset configuration for `main` and `dev`
@@ -350,3 +354,60 @@ _Pending._
   [#4675](https://github.com/ThomasMichon/copilot-extensions/issues/4675)
   rather than folded into this effort's scope, and not enumerated here per
   this same repo's own leak-guard purpose.
+
+### 2026-09-30 - Failure-path validated for real; a genuine bug found and fixed
+
+- With `FORBIDDEN_IDS_FACILITY` now present, the two remaining
+  secret-gated Validation Plan items could finally be exercised for real
+  (`configured` becomes `true` from either secret alone -- the workflow
+  concatenates both when present, so neither item needed
+  `FORBIDDEN_IDS_WORK` to be actionable). Added a synthetic, non-real
+  canary token to the denylist specifically so this validation (and any
+  future re-validation) never needs to risk a real identifier.
+- A scratch PR reintroducing that canary confirmed the Check Run correctly
+  reports `failure` with the exact match/reason/file/line/col in its
+  `output.text` -- but also surfaced that the trusted `workflow_run` token
+  cannot post or update an Issues-API PR comment even with `issues: write`
+  declared (`403 Resource not accessible by integration`), while the
+  identical token's `checks.create` call succeeds. This had never been
+  exercised before now, because every prior validation ran on the
+  `configured=false` (neutral/misconfigured) branch, which returns before
+  reaching the comment-posting code at all.
+- Fixed by wrapping the comment-posting step in try/catch: a failure there
+  now degrades to a warning instead of an unhandled workflow error, since
+  the Check Run's own `output.text` (API-delivered, not a masked log line)
+  already satisfies this mechanism's actual design requirement on its own.
+  Also corrected the local scanner's own CI-mode message, which pointed
+  users at "PR review comments" that may not exist.
+- A same-day review correction on the fix above: the Check Run `output.text`
+  was itself capped at 50 rendered findings ("...and N more"), with the
+  (now best-effort) PR comment as the only channel that ever carried the
+  complete list. Since the comment can no longer be relied upon, a PR
+  reintroducing more than 50 forbidden identifiers at once would have lost
+  match/reason/file/line/column detail for the rest. Replaced the fixed
+  50-item cap with a byte-budget-aware truncation against the Check Run
+  API's documented 65535-character limit, so the sole relied-upon channel
+  stays complete for any realistic finding count.
+- Closes Phase 4's last checkbox: the workflow file now documents the
+  secret format and the exact provisioning/rotation command directly in
+  its own header, and the scanner's docstring documents the CI-mode
+  loader's non-comment-skipping behavior.
+- Remaining: `FORBIDDEN_IDS_WORK` provisioning is still the operator's
+  work-context harness agent's own task, unchanged from the 2026-09-27
+  entry above.
+
+### 2026-09-30 - `FORBIDDEN_IDS_WORK` now actively being built by the work-context harness agent
+
+- Operator confirmed a work-context harness agent is actively building the
+  `FORBIDDEN_IDS_WORK` denylist and will push it to the repository secret the
+  same way `FORBIDDEN_IDS_FACILITY` landed. This is genuinely out of reach
+  for this repo's own facility/public-repo session: that harness isn't part
+  of any reachable machine mesh or agent-bridge roster here, so it is tracked
+  as an external, in-flight handoff rather than driven from this side.
+- With this confirmation, the facility/public-repo side of this effort is
+  fully complete -- every other Plan and Validation Plan item is already
+  checked (see Phase 0-4 and the Validation Plan above). The only remaining
+  open item is `FORBIDDEN_IDS_WORK` provisioning itself, owned entirely by
+  that external agent; this effort stays **Active** (not yet `Done`) until
+  that secret lands and the Validation Plan's denylist-backed-scan item can
+  be reconfirmed with both secrets present.

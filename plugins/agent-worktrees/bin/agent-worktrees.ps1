@@ -55,6 +55,20 @@ if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) {
         Where-Object { $_.FullName -match '[\\/]agent-worktrees[\\/]scripts[\\/]install\.ps1$' } |
         Select-Object -First 1 -ExpandProperty FullName
 }
+if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) {
+    # A `copilot plugin install <repo>:<path>` direct (non-marketplace)
+    # install has no nested `agent-worktrees\` segment: it lands at
+    # `installed-plugins\_direct\<owner>--<repo>--<subpath-with-dashes>\`,
+    # which the marketplace-shaped match above never matches. Anchored on
+    # the directory name *ending* in `-agent-worktrees` (the subpath's own
+    # final segment, always `agent-worktrees` for this plugin) rather than
+    # matching the substring anywhere, so an unrelated direct-installed
+    # plugin whose name merely contains "agent-worktrees" elsewhere can
+    # never be selected.
+    $_inst = Get-ChildItem (Join-Path $env:USERPROFILE '.copilot\installed-plugins\_direct') -Recurse -Filter 'install.ps1' -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match '[\\/]_direct[\\/][^\\/]*-agent-worktrees[\\/]scripts[\\/]install\.ps1$' } |
+        Select-Object -First 1 -ExpandProperty FullName
+}
 if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-worktrees] cannot self-provision: installer not found. Re-enable the plugin, then retry.'); exit 127 }
 [Console]::Error.WriteLine('[agent-worktrees] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
 [Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-worktrees eta_seconds=120 reason=first-use')

@@ -66,8 +66,8 @@ jobs:
     # (1) the promotion pipeline's own PR (a release/promote-<run id> branch,
     #     opened via the APERTURE_RELEASE_TOKEN PAT -- a personal fine-grained
     #     token minted under the maintainer's own account, this repo having no
-    #     separate bot identity, so the PR author is ThomasMichon, not
-    #     github-actions[bot]); or
+    #     separate bot identity, so the PR author is this repo's owner
+    #     (`github.repository_owner`), not github-actions[bot]); or
     # (2) a workflow-file-ONLY bootstrap PR by the repo owner: workflow_run-
     #     triggered workflows (validate-and-promote.yml itself) always resolve
     #     their own YAML from `main`, never the branch that triggered them, so
@@ -76,7 +76,7 @@ jobs:
     #     own not-yet-working promotion path otherwise; or
     # (3) module-size-baseline-widen.yml's own automated PR (fixed branch
     #     name `automation/module-size-baseline-widen`, also opened via the
-    #     APERTURE_RELEASE_TOKEN PAT so it's PR_AUTHOR == ThomasMichon too,
+    #     APERTURE_RELEASE_TOKEN PAT so it's PR_AUTHOR == the repo owner too,
     #     and whose diff is never anything but the one generated baseline
     #     JSON file).
     #
@@ -101,14 +101,32 @@ jobs:
         env:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          # `github.repository_owner` -- an immutable, platform-controlled
+          # context value (the account that literally owns this repo/fork),
+          # never a repository secret/variable. Repository *variables* are
+          # writable via the API/CLI by anyone with ordinary Write access --
+          # the same Maintainer tier this gate exists to restrict -- so using
+          # one here would let a Maintainer defeat the gate by simply
+          # re-pointing it at their own login, with no file-path change for
+          # workflow-lockdown-guard to ever catch. This automatically tracks
+          # a fork's own owner with zero configuration -- for a USER-owned
+          # fork. KNOWN LIMITATION: in an ORGANIZATION-owned fork,
+          # `github.repository_owner` is the org login, which no individual
+          # PR author (`pull_request.user.login`) can ever equal, so this
+          # gate and workflow-lockdown-guard's equivalent check permanently
+          # reject every PR there -- this policy is scoped to user-owned
+          # repos only; an org-owned fork needs its own explicit
+          # authorization mechanism (e.g. a trusted team), not addressed
+          # here.
+          REPO_OWNER: ${{ github.repository_owner }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          if [[ "$HEAD_REF" == release/promote-* && "$PR_AUTHOR" == "ThomasMichon" ]]; then
+          if [[ "$HEAD_REF" == release/promote-* && "$PR_AUTHOR" == "$REPO_OWNER" ]]; then
             echo "Legitimate promotion-pipeline PR -- OK."
             exit 0
           fi
-          if [ "$PR_AUTHOR" != "ThomasMichon" ]; then
+          if [ "$PR_AUTHOR" != "$REPO_OWNER" ]; then
             echo "::error::This PR targets 'main' and is not the promotion pipeline's own PR. main only ever moves via a release/promote-* PR, or (rarely) a workflow-file-only bootstrap PR by the repo owner. Please retarget this PR's base branch to 'dev' -- see CONTRIBUTING.md > Release & Versioning."
             exit 1
           fi
@@ -120,12 +138,13 @@ jobs:
           # Third legitimate shape: module-size-baseline-widen.yml's own
           # automated, purely-mechanical PR (see that workflow) -- it opens
           # from a fixed branch name, authored under this same PAT (hence
-          # PR_AUTHOR == ThomasMichon, checked above), and its diff is never
-          # anything but the one generated baseline file. Checked by exact
-          # branch name AND single-file diff content together (not one
-          # alone) so this narrow exception can't be widened by pushing
-          # unrelated content onto that branch name, or by a real PR simply
-          # touching that one file.
+          # PR_AUTHOR == REPO_OWNER, checked above; the PAT's owning account
+          # MUST equal this repo's owner or this gate rejects the PR), and
+          # its diff is never anything but the one generated baseline file.
+          # Checked by exact branch name AND single-file diff content
+          # together (not one alone) so this narrow exception can't be
+          # widened by pushing unrelated content onto that branch name, or
+          # by a real PR simply touching that one file.
           if [[ "$HEAD_REF" == "automation/module-size-baseline-widen" \
                 && "$changed" == "tools/module-size-baseline.json" ]]; then
             echo "Automated module-size-baseline-widen PR -- OK. Files:"
@@ -336,7 +355,9 @@ jobs:
           python -m pytest -q libs/session-liveness-probe/tests &&
           python -m pytest -q libs/venue-copilot/tests
       - name: Vendored library synchronization
-        run: python tools/check-vendored-libs-sync.py
+        run: >-
+          python tools/check-vendored-libs-sync.py &&
+          python -m pytest -q tools/test_check_vendored_libs_sync.py
       - name: Windows headless launch invariants
         run: >-
           python tools/check-headless-launch.py &&
@@ -380,6 +401,15 @@ jobs:
         # builtin TimeoutError without asyncio.TimeoutError, so the class of bug
         # behind dotfiles#1549 cannot recur unseen (dev-box/CI are 3.11/3.12).
         run: python tools/check-asyncio-timeout-handlers.py
+      - name: Coverage-guided-ci selection prototype tests (Phase 0 pilot)
+        # tools/coverage_guided_selection/'s own synthetic unit tests (fast,
+        # pure stdlib). The one real-suite integration test in this same
+        # file self-skips unless CGS_RUN_INTEGRATION_TEST=1 (set only by the
+        # separate, workflow_dispatch-only
+        # 'coverage-guided-selection-integration' job below): it spawns a
+        # real 'uv run --with coverage ...' subprocess against a real
+        # plugin's suite, which doesn't belong in this fast, always-on lane.
+        run: python -m pytest -q tools/test_coverage_guided_selection.py
       # Internal-identifier enforcement moved out of this untrusted PR lane.
       # Fork PRs receive no repository secrets on `pull_request`, and repo
       # `vars.*` would be plain-text/public, so this workflow can never hold the
@@ -664,6 +694,31 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Full suite - ${{ matrix.plugin }}
         run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
+
+  coverage-guided-selection-integration:
+    name: coverage-guided-ci selection prototype (real-suite integration)
+    # The two real-subprocess integration tests in
+    # tools/test_coverage_guided_selection.py self-skip unless
+    # CGS_RUN_INTEGRATION_TEST=1 -- deliberately opt-in/manual (this phase 0
+    # pilot's own effort Journal), not part of required PR CI, since they
+    # spawn a real 'uv run --with coverage --with pytest-cov --with
+    # pytest-json-report' subprocess against a real plugin's suite (or a
+    # constructed throwaway one).
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Real-suite round-trip + fixture-phase integration tests
+        env:
+          CGS_RUN_INTEGRATION_TEST: "1"
+        run: >-
+          uv run --with pytest python -m pytest -q
+          tools/test_coverage_guided_selection.py
 
   pr-gate:
     name: PR gate (required check)

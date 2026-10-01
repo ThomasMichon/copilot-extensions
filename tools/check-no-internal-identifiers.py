@@ -10,7 +10,27 @@ A denylist that *named* those strings would itself leak them, so the list is
   2. ``~/.agent-codespaces/forbidden-identifiers.txt`` (one per line; blank
      lines and ``#`` comments ignored), and
   3. env ``COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI`` (newline- or ``;``-separated
-     ``token|reason`` entries for CI/trusted-workflow use).
+     ``token|reason`` entries for CI/trusted-workflow use -- backed in
+     production by the ``FORBIDDEN_IDS_FACILITY`` / ``FORBIDDEN_IDS_WORK``
+     repository secrets consumed by
+     ``.github/workflows/identifier-leak-guard.yml``, which documents the
+     exact provisioning command).
+
+CI entries are case-insensitive literal substrings by default. Prefix a token
+with ``regex:`` to match a Python regular expression instead (for example
+``regex:\\bexample\\b|Standalone name -- use a generic placeholder``). The
+prefix is a matching mode, not part of the reported match. Double a regex
+alternation pipe (``||``) in the secret to distinguish it from the first
+single ``|`` separating the reason; reasons may contain pipes. Regex entries
+cannot contain semicolons or newlines, which delimit entries.
+
+**Gotcha specific to source 3:** unlike source 2's local loader, the CI-mode
+loader (``_load_ci_identifiers``) skips blank entries but does **not** skip
+``#``-prefixed comment lines -- every non-empty line becomes a literal
+token, including a bare ``#`` on its own line, which matches almost any
+Markdown heading. Never paste a commented source file straight into
+``COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI`` (or the secrets above) -- strip
+comments and blank lines first (e.g. ``grep -vE '^\\s*#|^\\s*$' file``).
 
 With neither configured (a fresh clone / CI) there is nothing to enforce and
 the check is a no-op (exit 0) -- so it is safe to ship in the public repo. On
@@ -42,6 +62,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable
@@ -97,10 +118,31 @@ def _load_ci_identifiers(raw: str) -> list[tuple[str, str | None]]:
         entry = chunk.strip()
         if not entry:
             continue
-        token, sep, reason = entry.partition("|")
-        low = token.strip().lower()
-        if not low:
+        if entry.lower().startswith("regex:"):
+            parts: list[str] = []
+            offset = 0
+            while offset < len(entry):
+                if entry.startswith("||", offset):
+                    parts.append("|")
+                    offset += 2
+                elif entry[offset] == "|":
+                    break
+                else:
+                    parts.append(entry[offset])
+                    offset += 1
+            token = "".join(parts)
+            sep = "|" if offset < len(entry) else ""
+            reason = entry[offset + 1:] if sep else ""
+        else:
+            token, sep, reason = entry.partition("|")
+        parsed_token = token.strip()
+        if not parsed_token:
             continue
+        low = (
+            "regex:" + parsed_token[len("regex:"):]
+            if parsed_token.lower().startswith("regex:")
+            else parsed_token.lower()
+        )
         parsed_reason = reason.strip() if sep and reason.strip() else None
         pairs.append((low, parsed_reason))
     return pairs
@@ -121,12 +163,12 @@ def _load_identifier_data() -> tuple[list[str], dict[str, str | None]]:
     for ident, reason in _load_ci_identifiers(os.environ.get(CI_LIST_ENV, "")):
         ids.append(ident)
         ci_reasons.setdefault(ident, reason)
-    # De-dupe, drop empties, lowercase for case-insensitive matching.
+    # De-dupe literals case-insensitively without changing regex escapes.
     seen: dict[str, None] = {}
     for i in ids:
-        low = i.lower()
-        if low:
-            seen.setdefault(low, None)
+        token = "regex:" + i[6:] if i.lower().startswith("regex:") else i.lower()
+        if token:
+            seen.setdefault(token, None)
     return list(seen), ci_reasons
 
 
@@ -224,22 +266,49 @@ def _make_git_ref_loader(ref: str) -> Callable[[str], str | None]:
     return _read_git_ref_text
 
 
+def _compile_patterns(identifiers: list[str]) -> dict[str, re.Pattern[str]]:
+    patterns: dict[str, re.Pattern[str]] = {}
+    for ident in identifiers:
+        if not ident.startswith("regex:"):
+            continue
+        try:
+            patterns[ident] = re.compile(ident[len("regex:"):], re.IGNORECASE)
+        except re.error:
+            raise ValueError("invalid regular expression in forbidden identifier list") from None
+        if patterns[ident].search("") is not None:
+            raise ValueError("empty regular expression match in forbidden identifier list")
+    return patterns
+
+
 def _scan_text(
     rel: str,
     text: str,
     identifiers: list[str],
     reasons: dict[str, str | None],
+    *,
+    patterns: dict[str, re.Pattern[str]] | None = None,
 ) -> list[Violation]:
     violations: list[Violation] = []
-    lower = text.lower()
-    if not any(ident in lower for ident in identifiers if not _allowed(ident, rel)):
+    if patterns is None:
+        patterns = _compile_patterns(identifiers)
+    if not patterns and not any(
+        ident in text.lower() for ident in identifiers if not _allowed(ident, rel)
+    ):
         return violations
     for lineno, line in enumerate(text.splitlines(), start=1):
         ll = line.lower()
         for ident in identifiers:
             if _allowed(ident, rel):
                 continue
-            col = ll.find(ident)
+            if ident.startswith("regex:"):
+                match = patterns[ident].search(line)
+                if match is not None and not match.group():
+                    raise ValueError("empty regular expression match in forbidden identifier list")
+                col = match.start() if match else -1
+                matched = match.group() if match else ident
+            else:
+                col = ll.find(ident)
+                matched = ident
             if col == -1:
                 continue
             violations.append(
@@ -247,7 +316,7 @@ def _scan_text(
                     path=rel,
                     line=lineno,
                     col=col + 1,
-                    identifier=ident,
+                    identifier=matched,
                     reason=reasons.get(ident),
                 )
             )
@@ -261,6 +330,7 @@ def _scan(
     *,
     text_loader: Callable[[str], str | None] | None = None,
 ) -> list[Violation]:
+    patterns = _compile_patterns(identifiers)
     loader = text_loader or _read_worktree_text
     violations: list[Violation] = []
     for rel in files:
@@ -269,7 +339,7 @@ def _scan(
         text = loader(rel)
         if text is None:
             continue
-        violations.extend(_scan_text(rel, text, identifiers, reasons))
+        violations.extend(_scan_text(rel, text, identifiers, reasons, patterns=patterns))
     return violations
 
 
@@ -385,7 +455,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.ci:
             print(
                 f"{len(violations)} forbidden identifier(s) found -- "
-                "see PR review comments for details."
+                "see the 'identifier leak guard' Check Run output for details."
             )
         else:
             print("Internal-identifier guard FAILED -- remove these before pushing:")

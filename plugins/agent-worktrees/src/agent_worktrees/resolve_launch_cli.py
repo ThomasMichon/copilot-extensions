@@ -10,7 +10,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from . import activity, codename_tracking, git_ops, output, profile_assignment, sessions, tracking
+from . import activity, codename_tracking, git_ops, local_cache_refresh, output, profile_assignment, sessions, tracking
 from . import config as cfg
 
 
@@ -431,6 +431,14 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         elif ff.reason in ("ahead", "diverged"):
             print(f"   ⚠ Local commits present -- skipping auto-update ({ff.reason})")
 
+    if not args.dry_run:
+        # Worktree-scoped dynamic guidance (docs/patterns/worktree-scoped-
+        # dynamic-guidance.md): refresh every enabled source's gitignored
+        # *.local.instructions.md sibling now -- a fast-forward just above
+        # may have changed the installed payload this worktree sees.
+        # Best-effort and silent -- see local_cache_refresh's own docstring.
+        local_cache_refresh.refresh_local_cache(record.worktree_path)
+
     resume_target = None
     if not getattr(args, "no_resume", False):
         resume_target = sessions.resolve_resume_target(record)
@@ -618,6 +626,7 @@ def _resolve_new_context(context: ResolveLaunchContext) -> int:
             owner_ref=getattr(args, "owner_ref", None),
             launch_preflight=launch_preflight,
             recovery=getattr(args, "recovery", False),
+            pending_seed=getattr(args, "seed", None),
         )
     except _coordination_failure_type() as exc:
         _emit_coordination_rejection(exc.readiness, json_out=False)

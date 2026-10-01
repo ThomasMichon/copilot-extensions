@@ -4403,7 +4403,78 @@ def test_new_worktree_decision_exits():
         assert app.result["options"] == {
             "anchor": False, "bare": False,
             "no_mux": False, "ahp": False, "local_model": False,
+            "seed_prompt": "",
         }
+
+    asyncio.run(run())
+
+
+def test_new_worktree_bare_skips_seed_prompt(monkeypatch):
+    """#4778-ish (picker-new-session-prompt-and-composer Phase A item 3): a
+    Bare worktree gets no Copilot bootstrap at all -- nothing to seed -- so
+    confirming Create with Bare selected must go straight to the launch
+    decision, never opening SeedPromptScreen. Exercises the integration with
+    ``_SEED_PROMPT_ENABLED`` forced on (off by default until the Picker's own
+    delivery seam is complete -- see the effort's Journal)."""
+    from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
+    monkeypatch.setattr(ema, "_SEED_PROMPT_ENABLED", True)
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 0
+            scr.btn_idx = 0
+            scr.sel = ("BTN", 0)
+            scr._activate()
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            labels = [o["label"] for o in dlg._dlg["opts"]]
+            bare = labels.index("Bare")
+            await pilot.press("tab")
+            for _ in range(bare):
+                await pilot.press("down")
+            await pilot.press("space")          # toggle Bare on
+            await pilot.press("tab")
+            await pilot.press("enter")          # confirm Create
+            await pilot.pause()
+        assert app.result is not None
+        assert app.result["action"] == "new"
+        assert app.result["options"]["bare"] is True
+        assert app.result["options"]["seed_prompt"] == ""
+
+    asyncio.run(run())
+
+
+def test_new_worktree_seed_prompt_carries_through(monkeypatch):
+    """A typed prompt in the SeedPromptScreen that follows Create reaches the
+    launch decision's ``options["seed_prompt"]`` (``_SEED_PROMPT_ENABLED``
+    forced on -- see ``test_new_worktree_bare_skips_seed_prompt``)."""
+    from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
+    monkeypatch.setattr(ema, "_SEED_PROMPT_ENABLED", True)
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 0
+            scr.btn_idx = 0
+            scr.sel = ("BTN", 0)
+            scr._activate()
+            await pilot.pause()
+            await pilot.press("enter")          # confirm Create, no options
+            await pilot.pause()
+            from worktree_manager.production_picker.picker_tui.engine import SeedPromptScreen
+            seed_screen = app.screen
+            assert isinstance(seed_screen, SeedPromptScreen)
+            seed_screen._rec["primary"].text = "fix the flaky test"
+            await pilot.press("enter")          # textarea -> button row (Launch)
+            await pilot.press("enter")          # activate Launch
+            await pilot.pause()
+        assert app.result["action"] == "new"
+        assert app.result["options"]["seed_prompt"] == "fix the flaky test"
 
     asyncio.run(run())
 
@@ -6744,6 +6815,70 @@ def test_native_list_mouse_wheel_scroll_survives_pulse_tick_while_cursor_unmoved
             nl.refresh_data()
             await pilot.pause()
             assert int(getattr(nl.scroll_offset, "y", 0) or 0) == wheeled_y
+
+    asyncio.run(run())
+
+
+def test_live_column_repaints_when_async_mux_reconcile_lands():
+    """Render-perf follow-up (#3307, 2026-09-30 operator report): "this column
+    shows PROC, even for MUX sessions, suggesting mux-detection isn't
+    working". Root cause was never mux *detection* (the reconcile CLI already
+    reports ``mux_attached`` correctly) but STALENESS: the cache-only first
+    paint renders before the async Group C mux reconcile lands, so a
+    genuinely-live row starts out ``PROC`` (from ``session_bound_live`` alone)
+    and, since mux attachment doesn't change ``state`` (both collapse to
+    ACTIVE) or any other field ``_PickerNativeData._signature()`` fingerprinted,
+    the later correction to ``MUX(1)`` never triggered a rebuild -- the row
+    stayed stuck on its stale first-paint glyph indefinitely. Fixed by adding
+    ``sess`` itself to the per-row fingerprint."""
+    import datetime
+    import types
+
+    from worktree_manager.production_picker.picker_tui import derive
+
+    def _src(raws):
+        derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)
+        local = ("anomalous-potato", "Win")
+        s = types.SimpleNamespace()
+        s.LOCAL = local
+        s.LOCAL_LABEL = "lc"
+        s.machines = lambda: [("anomalous-potato Win", "anomalous-potato", "Win", True)]
+        s.bucket = derive.bucket
+        s.for_machine = derive.for_machine
+        s.load = lambda: [derive.norm(w, *local) for w in raws]
+        return s
+
+    raw = {"id": "anomalous-potato-win-live1", "title": "Live row",
+           "status": "active", "started_at": "2026-06-27T17:00:00",
+           "turn_count": 4, "state": "wip", "session_bound_live": True}
+
+    async def run():
+        # First paint: the mux reconcile hasn't landed yet -- bound-live only.
+        app = PickerApp(_src([dict(raw)]), live=False)
+        async with app.run_test(size=(118, 20)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            await pilot.pause()
+            recs = scr.list_records()
+            assert len(recs) == 1
+            assert recs[0]["sess"] == "PROC"
+            nl = scr.query_one("#nf-body-data")
+            idx, _rec, _li = nl._l_rows[recs[0]["selection_id"]]
+            assert "PROC" in str(nl.get_option_at_index(idx).prompt)
+
+            # The async Group C reconcile lands: mux_attached flips true, with
+            # id/title/state/age_secs all UNCHANGED -- exactly what a real
+            # in-place data refresh looks like.
+            live_raw = dict(raw, mux_attached=True, mux_clients=1)
+            scr.data = [derive.norm(live_raw, *scr.src.LOCAL)]
+            scr.refresh()
+            await pilot.pause()
+
+            recs = scr.list_records()
+            assert recs[0]["sess"] == "MUX(1)"
+            idx, _rec, _li = nl._l_rows[recs[0]["selection_id"]]
+            assert "MUX(1)" in str(nl.get_option_at_index(idx).prompt)
+            assert "PROC" not in str(nl.get_option_at_index(idx).prompt)
 
     asyncio.run(run())
 

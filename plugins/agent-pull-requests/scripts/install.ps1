@@ -180,7 +180,7 @@ function Write-Fail    { param([string]$Msg) Write-Host "  [FAIL] $Msg" -Foregro
 function Write-Warn    { param([string]$Msg) Write-Host "  [WARN] $Msg" -ForegroundColor Yellow }
 function Write-Step    { param([string]$Msg) Write-Host "  ...    $Msg" -ForegroundColor DarkGray }
 
-$PluginDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$PluginDir = (Get-Item (Join-Path $PSScriptRoot '..')).FullName
 $PkgSrcDir = Join-Path $PluginDir 'src\agent_pull_requests'
 if (-not $InstallDir) {
     $InstallDir = Join-Path $env:USERPROFILE '.agent-pull-requests'
@@ -382,7 +382,7 @@ function Get-GitInfo {
     }
 }
 
-. (Join-Path $PSScriptRoot 'installer-engine.ps1')
+. (Join-Path $PSScriptRoot '..\..\..\libs\installer-engine\installer-engine.ps1')
 
 function Install-HookFiles {
     $BinHookDir = Join-Path $InstallDir 'bin'

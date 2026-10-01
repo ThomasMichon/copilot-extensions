@@ -56,8 +56,13 @@ worktree lifecycle boundaries rather than every session start.
 
 Every checked-in projection destination
 `.github/instructions/<plugin>/<sourceId>.instructions.md` gains a gitignored
-sibling at `.github/instructions/<plugin>/<sourceId>.local.instructions.md`.
-The consumer repo's `.github/instructions/.gitignore` (or an equivalent
+sibling at `.github/instructions/<plugin>/<sourceId>.local.instructions.md`,
+**except** a source that opts out via its own declaration's
+`skipLocalCache: true` (the repo-wide catch-all in step 3 is the one shipped
+example: its own sibling would match its own
+`**/*.local.instructions.md` scan glob and get read back, repeating the
+identical directive for no benefit). The consumer repo's
+`.github/instructions/.gitignore` (or an equivalent
 recursive rule) covers the whole tree:
 
 ```gitignore
@@ -118,7 +123,36 @@ resume** -- before the first (or next) session in that worktree even starts,
 so the harness's own directory scan (if it reads live files rather than a git
 index) may pick it up with zero reliance on the catch-all at all. This
 mirrors the existing manual "an anchor-repo user restarts to pick up a
-freshly-synced set" behavior, made automatic and moved earlier.
+freshly-synced set" behavior, made automatic and moved earlier. **Landed**:
+`agent_worktrees.local_cache_refresh.refresh_local_cache()` locates
+`customizing-copilot`'s installed, declared `render-local-cache` CLI
+operation (`manage-instruction-projections.py`) and invokes it as a
+bounded-timeout subprocess (via `push_timeout.run_bounded`, which kills the
+invoked CLI's whole process tree on a stall, not just its direct child) --
+never importing that plugin's Python package directly, per
+[`a-la-carte-independence.md`](a-la-carte-independence.md)'s "no
+cross-plugin reach-around" rule. The sibling's root is resolved through
+`plugin_activation.resolve_active_plugins()` -- the same identity-verified
+active-plugin evidence `claim_providers.py` uses for its own sibling
+callbacks -- rather than trusting a directory merely because it
+self-declares the expected name in a `plugin.json`, per
+[`marketplace-installation-cells.md`](marketplace-installation-cells.md)'s
+"plugin name alone never selects a runtime" invariant; only the plugin's
+**global** activation scope is trusted (never a project-scoped override,
+which could otherwise let one repo's local dev override of
+customizing-copilot execute against an unrelated repo's worktree), and
+missing or ambiguous provenance (zero, or more than one, matching active
+plugin) fails closed. This resolution step itself runs in its own
+bounded subprocess (`python -m agent_worktrees.local_cache_refresh
+<home>`) rather than in-process or on a bare thread, since the resolver
+can spawn Git child processes verifying registered projects that only a
+real process-tree kill can guarantee don't outlive a timeout.
+`worktree_creation._create_worktree_core` and
+`resolve_launch_cli._resolve_resume_context` (skipped on `--dry-run`) both
+call it at exactly the point described above. Fully best-effort: customizing-
+copilot not being installed, the repo not yet being trusted, a subprocess
+timeout, or any other render failure are all silently absorbed, never
+gating create/resume itself.
 
 The plugin's `sessionStart` hook repeats the same render as a backup, to
 catch payload drift accrued between a worktree's creation/resume and the
@@ -126,7 +160,18 @@ current session's own start. Because the render is a pure side effect (never
 `additionalContext`), the timing race that makes hook-written content
 unreliable for *this* session's preloaded instructions does not apply here:
 the catch-all instruction from step 3 drives an explicit, first-turn tool
-read, which always executes strictly after the hook has finished.
+read, which always executes strictly after the hook has finished -- a
+guarantee that depends on this backup refresh running **synchronously**
+within the hook's own request handling, never dispatched to a background
+thread. **Landed**: `agent_worktrees.__main__._run_session_lifecycle` (the
+real `sessionStart` handler `hook_client.py`'s thin client dispatches to)
+calls `local_cache_refresh.sessionstart_diagnostic()` as this synchronous
+backup step, alongside its existing anchor-hygiene and provisioning
+diagnostics. Its subprocess call is bounded by a timeout derived from the
+hook's own remaining decision-deadline budget (capped at
+`local_cache_refresh.SESSIONSTART_MAX_TIMEOUT_S`), and skipped entirely once
+too little budget remains -- so it can never itself cause the resident hook
+server to miss its own response deadline.
 
 ### 5. The checked-in copy remains the unconditional floor
 
@@ -163,9 +208,14 @@ attempt a privileged sync merely to see current guidance.
 pattern's render side, landed as part of
 `efforts/active/ambient-guidance-navigability` Phase 7
 ([ThomasMichon/copilot-extensions#4674](https://github.com/ThomasMichon/copilot-extensions/issues/4674)).
-The per-file "prefer local" preamble, the repo-wide catch-all projection,
-and the `agent-worktrees` create/resume + `sessionStart` wiring remain open
-Plan items in that same phase.
+The per-file "prefer local" preamble (step 2), the repo-wide catch-all
+projection (step 3, opted out of its own local cache per step 1's
+exception), and the `agent-worktrees` create/resume + `sessionStart` wiring
+(step 4, via `agent_worktrees.local_cache_refresh`) have all landed --
+Phase 7's **Plan** is complete. Its Validation Plan is not: a clean-room,
+agent-driven proof that the preamble/catch-all actually drive an agent to
+the fresher content remains open (see the effort README's own Journal and
+Validation Plan).
 
 ## See Also
 

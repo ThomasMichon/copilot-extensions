@@ -16,11 +16,14 @@ from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widget import Widget
-from textual.widgets import (
-    RadioSet,
-    SelectionList,
-    Static,
-    TextArea,
+from textual.widgets import Static
+
+from .field_widgets import (
+    _AutoExpandTextArea,  # noqa: F401 -- re-export (engine.py, tests)
+    _OTHER_LABEL,  # noqa: F401 -- re-export (engine.py, tests)
+    _OTHER_SENTINEL,  # noqa: F401 -- re-export (engine.py, tests)
+    _SteerRadioSet,  # noqa: F401 -- re-export (engine.py, tests)
+    _SteerSelectionList,  # noqa: F401 -- re-export (engine.py, tests)
 )
 
 from .engine_focus import FocusGroup
@@ -187,9 +190,6 @@ class PivotCardScreen(ModalScreen[None]):
 
 #: Env override for the steer-draft directory (tests / operator escape hatch).
 _STEER_DRAFTS_ENV = "AGENT_WORKTREES_STEER_DRAFTS"
-#: Internal sentinels for the "Other…" affordance (never a real option value).
-_OTHER_SENTINEL = "\x00other"
-_OTHER_LABEL = "Other…"
 
 
 def _steer_drafts_dir() -> Path:
@@ -204,114 +204,6 @@ def _steer_draft_path(task_id: str) -> Path | None:
     ``None`` when the task id has no filesystem-safe characters."""
     tid = "".join(c for c in str(task_id) if c.isalnum() or c in "-_")
     return _steer_drafts_dir() / f"{tid}.json" if tid else None
-
-
-class _AutoExpandTextArea(TextArea):
-    """A docked steer input that grows with its content and follows the
-    Copilot-CLI editing mechanic.
-
-    * Height is CSS ``auto`` (bounded by ``min_height``/``max_height``), so the
-      box grows one row per line of content and caps out (then scrolls) -- no
-      manual line math, no off-by-one.
-    * **Enter accepts + advances** focus to the next field (or the button row on
-      the last one); **Shift+Enter inserts a newline** (grow the box) -- matching
-      the operator's Copilot-CLI muscle memory. Windows Terminal emits ``ESC``+
-      ``CR`` for Shift+Enter (not the Kitty ``\\x1b[13;2u`` form), which Textual
-      would otherwise collapse to a plain ``enter``; ``_register_shift_enter_key``
-      (module scope) restores the distinct ``shift+enter`` key. **Alt+Enter** and
-      **Ctrl+J** remain wired as newline fallbacks for terminals that report those
-      distinctly instead.
-    * **Ctrl+Left / Ctrl+Right switch tabs** even while the box has focus: a
-      ``TextArea`` natively binds these to cursor word-movement, which would
-      otherwise swallow them before the screen's tab bindings fire, so we forward
-      them to the screen's ``next_tab`` / ``prev_tab`` actions here."""
-
-    def __init__(self, *args, min_height: int = 3, max_height: int = 12, **kw) -> None:
-        super().__init__(*args, **kw)
-        self._min_height = min_height
-        self._max_height = max_height
-
-    def on_mount(self) -> None:
-        self.styles.height = "auto"
-        self.styles.min_height = self._min_height
-        self.styles.max_height = self._max_height
-
-    def autosize(self) -> None:
-        # Back-compat no-op: CSS ``height: auto`` now does the growing.
-        return
-
-    def on_key(self, event) -> None:
-        key = event.key
-        if key in ("ctrl+left", "ctrl+right"):
-            # Tab-switching wins over the TextArea's native word-movement while a
-            # box is focused (operator request): the TextArea would otherwise
-            # consume these as cursor_word_left/right and the screen's ctrl+←/→
-            # tab bindings would never fire. Forward to the screen's tab actions.
-            event.prevent_default()
-            event.stop()
-            action = "action_next_tab" if key == "ctrl+right" else "action_prev_tab"
-            fn = getattr(self.screen, action, None)
-            if callable(fn):
-                fn()
-        elif key in ("shift+enter", "alt+enter", "ctrl+j"):
-            # Insert a newline (grow the box). ``shift+enter`` is the primary
-            # mechanic, but a mux (psmux) or a terminal without the enhanced
-            # keyboard protocol collapses it to a bare ``enter`` -- so ``alt+enter``
-            # and ``ctrl+j`` (LF, distinct from CR/enter in Textual) are wired as
-            # always-distinguishable, mux-safe fallbacks.
-            event.prevent_default()
-            event.stop()
-            self.insert("\n")
-        elif key == "enter":
-            # Accept + advance (Copilot-CLI mechanic) -- do NOT insert a newline.
-            # Using the public on_key handler (not the private _on_key) keeps this
-            # robust across Textual upgrades.
-            event.prevent_default()
-            event.stop()
-            adv = getattr(self.screen, "_advance_focus", None)
-            if callable(adv):
-                adv(self)
-
-
-class _SteerRadioSet(RadioSet):
-    """A single-select that keeps ``Space`` = toggle-and-stay but makes ``Enter``
-    = toggle-**and-advance** (the steer form's keyboard flow). Enter that lands on
-    "Other…" focuses the revealed free-text box instead of advancing."""
-
-    BINDINGS = [
-        Binding("enter", "toggle_and_advance", show=False),
-        Binding("space", "toggle_button", show=False),
-    ]
-
-    def action_toggle_and_advance(self) -> None:
-        self.action_toggle_button()
-        # The selection settles asynchronously (pressed_index updates after the
-        # button's Changed message), so defer the advance until after refresh.
-        self.call_after_refresh(self._notify_advance)
-
-    def _notify_advance(self) -> None:
-        adv = getattr(self.screen, "_advance_after_choice", None)
-        if callable(adv):
-            adv(self)
-
-
-class _SteerSelectionList(SelectionList):
-    """A multi-select where ``Space`` toggles-and-stays (pick several) and
-    ``Enter`` toggles the highlighted option **and advances**. Enter that toggles
-    "Other…" on focuses the revealed free-text box."""
-
-    BINDINGS = [
-        Binding("enter", "toggle_and_advance", show=False),
-    ]
-
-    def action_toggle_and_advance(self) -> None:
-        self.action_select()
-        self.call_after_refresh(self._notify_advance)
-
-    def _notify_advance(self) -> None:
-        adv = getattr(self.screen, "_advance_after_choice", None)
-        if callable(adv):
-            adv(self)
 
 
 class SteerButtonRow(Widget):

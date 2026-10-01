@@ -63,3 +63,11 @@ note="invoke_uv_pip_install_resilient"
 
     assert checker._uses_installer_engine(sh, "sh") is True
     assert checker._uses_engine_uv_install(sh, "sh") is False
+
+
+def test_engine_usage_accepts_trailing_comment_same_as_shared_parser() -> None:
+    sh = '. "$SCRIPT_DIR/installer-engine.sh" # load helpers\n'
+    ps1 = ". (Join-Path $PSScriptRoot 'installer-engine.ps1') # load helpers\n"
+
+    assert checker._uses_installer_engine(sh, "sh") is True
+    assert checker._uses_installer_engine(ps1, "ps1") is True
