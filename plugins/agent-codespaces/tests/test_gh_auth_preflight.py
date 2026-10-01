@@ -54,7 +54,7 @@ def test_parse_gh_account_scopes():
 def test_preflight_flags_mapped_account_missing_codespace_scope():
     with patch("subprocess.run") as run, \
          patch("agent_codespaces.auth_preflight.codespace_scope_accounts",
-               return_value=("alice", "bob")):
+               return_value=(("alice", "bob"), False)):
         run.return_value = MagicMock(returncode=0, stdout=_STATUS, stderr="")
         msgs = m._gh_auth_preflight()
     joined = "\n".join(msgs)
@@ -66,7 +66,7 @@ def test_preflight_flags_mapped_account_missing_codespace_scope():
 def test_preflight_flags_missing_mapped_account():
     with patch("subprocess.run") as run, \
          patch("agent_codespaces.auth_preflight.codespace_scope_accounts",
-               return_value=("ghost",)), \
+               return_value=(("ghost",), False)), \
          patch("agent_codespaces.__main__._account_login_remedy",
                return_value="run: gh auth login"):
         run.return_value = MagicMock(returncode=0, stdout=_STATUS, stderr="")
@@ -81,7 +81,7 @@ def test_preflight_clean_when_all_scoped():
     )
     with patch("subprocess.run") as run, \
          patch("agent_codespaces.auth_preflight.codespace_scope_accounts",
-               return_value=("alice", "bob")):
+               return_value=(("alice", "bob"), False)):
         run.return_value = MagicMock(returncode=0, stdout=status, stderr="")
         msgs = m._gh_auth_preflight()
     assert msgs == []
@@ -127,7 +127,29 @@ def test_preflight_checks_active_account_when_no_codespace_accounts():
 """
     with patch("subprocess.run") as run, \
          patch("agent_codespaces.auth_preflight.codespace_scope_accounts",
-               return_value=()), \
+               return_value=((), False)), \
+         patch("agent_codespaces.gh_account.active_account",
+               return_value="alice"):
+        run.return_value = MagicMock(returncode=0, stdout=status, stderr="")
+        msgs = m._gh_auth_preflight()
+    joined = "\n".join(msgs)
+    assert "alice" in joined and "codespace" in joined
+    assert "bob" not in joined
+
+
+def test_preflight_checks_active_account_when_config_mix_includes_ambient():
+    status = """github.com
+  x Logged in to github.com account alice (keyring)
+  - Active account: true
+  - Token scopes: 'gist', 'repo'
+
+  x Logged in to github.com account bob (keyring)
+  - Active account: false
+  - Token scopes: 'codespace', 'gist', 'repo'
+"""
+    with patch("subprocess.run") as run, \
+         patch("agent_codespaces.auth_preflight.codespace_scope_accounts",
+               return_value=(("bob",), True)), \
          patch("agent_codespaces.gh_account.active_account",
                return_value="alice"):
         run.return_value = MagicMock(returncode=0, stdout=status, stderr="")

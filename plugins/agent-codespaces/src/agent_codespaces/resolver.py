@@ -420,6 +420,13 @@ class CodespaceResolver:
                 ) from None
             raise RuntimeError(f"Codespace '{name}' not found") from None
         if cs.state in ("Available", "Shutdown"):
+            if getattr(cs, "account", ""):
+                try:
+                    from . import account_binding
+
+                    account_binding.bind(cs.name, cs.account, cs.repository)
+                except Exception:
+                    pass
             return
         raise RuntimeError(
             f"Codespace '{cs.name}' is '{cs.state}' (not in a connectable state)."

@@ -60,9 +60,10 @@ def parse_gh_account_scopes(status_text: str) -> dict[str, set[str]]:
     return accounts
 
 
-def codespace_scope_accounts() -> tuple[str, ...]:
-    """Accounts that actually back configured/bound CodeSpace operations."""
+def codespace_scope_accounts() -> tuple[tuple[str, ...], bool]:
+    """``(explicit_accounts, uses_ambient)`` for CodeSpace operations."""
     accounts: list[str] = []
+    uses_ambient = False
     try:
         from . import account_binding
 
@@ -78,13 +79,35 @@ def codespace_scope_accounts() -> tuple[str, ...]:
             account = gh_account.account_for_repo(repo)
             if account:
                 accounts.append(account)
+            else:
+                uses_ambient = True
     except Exception:
         log.debug("could not resolve configured CodeSpace repo accounts", exc_info=True)
     seen: list[str] = []
     for account in accounts:
         if account and account not in seen:
             seen.append(account)
-    return tuple(seen)
+    return tuple(seen), uses_ambient
+
+
+def _active_scope_findings(
+    lowered: dict[str, set[str]], combined: str
+) -> list[str]:
+    from . import gh_account
+
+    active = gh_account.active_account()
+    scopes = lowered.get(active.casefold()) if active else None
+    if active and "codespace" not in {scope.casefold() for scope in (scopes or set())}:
+        return [
+            f"active gh account '{active}' is missing the 'codespace' scope "
+            f"-- run: gh auth refresh -h github.com -u {active} -s codespace"
+        ]
+    if not active and "codespace" not in combined.lower():
+        return [
+            "gh token is missing the 'codespace' scope (needed for CodeSpace "
+            "operations) -- run: gh auth refresh -h github.com -s codespace"
+        ]
+    return []
 
 
 def gh_auth_preflight(status_func, account_login_remedy) -> list[str]:
@@ -100,23 +123,12 @@ def gh_auth_preflight(status_func, account_login_remedy) -> list[str]:
 
     per_account = parse_gh_account_scopes(combined)
     lowered = {login.casefold(): scopes for login, scopes in per_account.items()}
-    accounts = codespace_scope_accounts()
+    accounts, uses_ambient = codespace_scope_accounts()
     if not accounts:
-        from . import gh_account
-
-        active = gh_account.active_account()
-        scopes = lowered.get(active.casefold()) if active else None
-        if active and "codespace" not in {scope.casefold() for scope in (scopes or set())}:
-            msgs.append(
-                f"active gh account '{active}' is missing the 'codespace' scope "
-                f"-- run: gh auth refresh -h github.com -u {active} -s codespace"
-            )
-        elif not active and "codespace" not in combined.lower():
-            msgs.append(
-                "gh token is missing the 'codespace' scope (needed for CodeSpace "
-                "operations) -- run: gh auth refresh -h github.com -s codespace"
-            )
+        msgs.extend(_active_scope_findings(lowered, combined))
         return msgs
+    if uses_ambient:
+        msgs.extend(_active_scope_findings(lowered, combined))
     for login in accounts:
         scopes = lowered.get(login.casefold())
         if scopes is None:
