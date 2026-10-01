@@ -50,6 +50,27 @@ def test_quote_round_trips_yaml_reserved_scalars_and_multiline_notes():
     assert raw.count("owner/repo") == 1
 
 
+def test_quote_escapes_arbitrary_control_characters():
+    """A raw C0 control character (e.g. ESC, as in an ANSI escape sequence
+    a repo/account/notes value could carry) left unescaped makes the
+    double-quoted YAML scalar invalid -- read_registry then silently
+    returns an EMPTY catalog, and the very next write would overwrite every
+    previously stored confirmation with just the new one. Both the
+    control-character value itself AND an unrelated, previously-stored
+    confirmation must survive the round trip."""
+    fork_pr.record_confirmation("owner/unrelated-repo", "someone")
+    fork_pr.record_confirmation(
+        "owner/repo", "alice", notes="prefix\x1b[31mred\x1b[0msuffix\x07bell",
+    )
+
+    e = fork_pr.find_fork("owner/repo")
+    assert e.notes == "prefix\x1b[31mred\x1b[0msuffix\x07bell"
+    # The unrelated, previously-stored confirmation must still be readable
+    # -- an unescaped control character corrupting the file would have
+    # silently dropped it on the very next write.
+    assert fork_pr.is_confirmed("owner/unrelated-repo") is True
+
+
 def test_record_and_read_round_trip():
     fork_pr.record_confirmation(
         "octo-org/widgets", "octocat", remote="fork",
@@ -366,12 +387,13 @@ class TestResolveLiveForkOwner:
 
 class TestNonDefaultAuthority:
     """pr.fork's durable registry isn't scoped by GitHub authority, so it
-    must refuse to operate at all when the EFFECTIVE authority (an explicit
-    pr.api_base, else ambient GH_HOST, else github.com -- the SAME
+    must refuse to operate at all when EITHER the resolved authority (an
+    explicit pr.api_base, else ambient GH_HOST, else github.com -- the SAME
     precedence GitHubProvider.authority_endpoint uses for every other call)
-    is non-default -- rather than risk a confirmation recorded under
-    github.com silently authorizing a fork/push against an unrelated
-    same-named repo on a GitHub Enterprise instance."""
+    OR a differing ambient GH_HOST on its own is non-default -- rather than
+    risk a confirmation recorded under github.com silently authorizing a
+    fork/push against an unrelated same-named repo on a GitHub Enterprise
+    instance."""
 
     def _cfg(self, provider="github", api_base=""):
         import dataclasses
@@ -393,21 +415,26 @@ class TestNonDefaultAuthority:
     def test_explicit_api_base_enterprise_is_non_default_even_without_gh_host(
         self, monkeypatch,
     ):
-        """The exact gap this helper used to miss: pr.api_base alone (no
-        GH_HOST at all) must still be caught as a non-default authority."""
+        """pr.api_base alone (no GH_HOST at all) must still be caught as a
+        non-default authority."""
         monkeypatch.delenv("GH_HOST", raising=False)
         assert fork_pr._non_default_authority(
             self._cfg(api_base="https://github.example.com/api/v3"),
         ) == "github.example.com"
 
-    def test_explicit_api_base_github_com_overrides_differing_ambient_gh_host(
+    def test_explicit_api_base_github_com_does_not_override_differing_ambient_gh_host(
         self, monkeypatch,
     ):
-        """pr.api_base takes priority over ambient GH_HOST (matching
-        authority_endpoint's own precedence) -- an explicit github.com
-        override must resolve to the default even if GH_HOST differs."""
+        """The exact gap a resolved-authority-only check missed: fork
+        creation honors pr.api_base, but GitHub PR creation itself
+        (`gh pr create`, no --hostname override) still reads ambient
+        GH_HOST -- so an explicit api_base=github.com override must NOT
+        clear a differing ambient GH_HOST; the branch could still land on
+        one host while the PR opens against (or fails against) another."""
         monkeypatch.setenv("GH_HOST", "github.example.com")
-        assert fork_pr._non_default_authority(self._cfg(api_base="github.com")) == ""
+        assert fork_pr._non_default_authority(
+            self._cfg(api_base="github.com"),
+        ) == "github.example.com"
 
     def test_provider_error_is_swallowed_to_empty(self, monkeypatch):
         from agent_worktrees import providers

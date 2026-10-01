@@ -38,16 +38,32 @@ from . import registry_paths
 
 def _quote(value: str) -> str:
     """Render *value* as an always-safe YAML double-quoted scalar -- never
-    misparsed as a bool/null/number, and an embedded newline/tab can never
-    corrupt this hand-written line-based file by splitting unescaped."""
-    escaped = (
-        value.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")
-    )
-    return f'"{escaped}"'
+    misparsed as a bool/null/number, and every character YAML's own
+    double-quoted-scalar grammar requires escaping (backslash, double quote,
+    and EVERY C0 control character -- not just newline/tab/carriage-return)
+    is escaped, so a value containing e.g. an embedded ESC (``\\x1b``, as in
+    an ANSI escape sequence passed via ``--notes``) can never corrupt the
+    hand-written file or make it unparsable. An unparsable file would make
+    ``read_registry`` return an EMPTY catalog, silently losing every
+    previously stored confirmation on the very next write.
+    """
+    out = []
+    for ch in value:
+        if ch == "\\":
+            out.append("\\\\")
+        elif ch == '"':
+            out.append('\\"')
+        elif ch == "\n":
+            out.append("\\n")
+        elif ch == "\r":
+            out.append("\\r")
+        elif ch == "\t":
+            out.append("\\t")
+        elif ord(ch) < 0x20 or ord(ch) == 0x7F:
+            out.append(f"\\x{ord(ch):02x}")
+        else:
+            out.append(ch)
+    return '"' + "".join(out) + '"'
 
 
 _LOCK_ACQUIRE_TIMEOUT_S = 10.0
@@ -376,27 +392,40 @@ def _resolve_live_fork_owner(prcfg, token: str | None) -> str | None:
 
 
 def _non_default_authority(prcfg) -> str:
-    """The effective GitHub authority (host) this repo's fork operations
-    would actually run against -- honoring BOTH an explicit ``pr.api_base``
-    and ambient ``GH_HOST``, with the SAME precedence
-    ``GitHubProvider.authority_endpoint`` uses for every other provider
-    call -- or ``""`` when that authority is the default github.com. This
-    registry is keyed by repo+account only, not by authority, so the same
-    ``owner/repo`` slug could otherwise identify two unrelated repositories
-    (github.com vs. a GitHub Enterprise host) and silently reuse a
-    confirmation across that boundary; until the registry is
-    authority-scoped, this refuses ``pr.fork`` entirely against anything
-    but the default host.
+    """A non-default GitHub authority (host) that ANY part of the fork-PR
+    flow could actually run against -- the resolved ``authority_endpoint``
+    (the same ``pr.api_base``-then-``GH_HOST``-then-``github.com``
+    precedence every other provider call uses) OR a differing ambient
+    ``GH_HOST`` on its own -- or ``""`` only when BOTH are the default
+    github.com.
+
+    Rejecting on the resolved authority alone is not enough: an explicit
+    ``pr.api_base=github.com`` overriding a non-default ambient ``GH_HOST``
+    makes fork creation target github.com, but GitHub PR creation itself
+    (``gh pr create --repo <slug>``, no ``--hostname`` override) still
+    reads ambient ``GH_HOST`` and would target the Enterprise host instead
+    -- leaving the branch pushed to one host while the PR opens against
+    (or fails against) an unrelated same-named repo on another. Until that
+    full path uniformly honors ``api_base``, a non-default ambient
+    ``GH_HOST`` is rejected even when ``api_base`` overrides it back to the
+    default, since this registry is keyed by repo+account only, not by
+    authority, and the same ``owner/repo`` slug could otherwise identify
+    two unrelated repositories across that boundary.
     """
     if getattr(prcfg, "provider", "") != "github":
         return ""
+    import os
     from . import providers
     try:
         provider = providers.get_provider(prcfg.provider)
-        host = provider.authority_endpoint(getattr(prcfg, "api_base", "") or "")
+        resolved = provider.authority_endpoint(getattr(prcfg, "api_base", "") or "")
     except (providers.ProviderError, OSError):
-        return ""
-    return host if host and host != "github.com" else ""
+        resolved = ""
+    ambient = (os.environ.get("GH_HOST") or "").strip().lower()
+    for host in (resolved, ambient):
+        if host and host != "github.com":
+            return host
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -551,11 +580,32 @@ def resolve_fork_publish(
     if fork_setup.get("error"):
         return {"error": fork_setup["error"]}
     fork_owner = fork_setup["owner"]
-    result = {"publish_remote": prcfg.fork.remote, "fork_owner": fork_owner}
-    # Re-persist whenever this is the first confirmation OR the real
-    # resolved owner just changed (the explicit-reconfirm self-heal path
-    # for a stale entry the pre-check above caught on a PRIOR call).
+    # The non-mutating pre-check above and this mutating bootstrap are two
+    # SEPARATE calls -- with ambient `gh` auth (token=None), a concurrent
+    # identity switch between them (another process re-authenticating) can
+    # make them resolve to two DIFFERENT real owners, even though the
+    # pre-check itself passed moments earlier. Treat that divergence as
+    # itself requiring a fresh, EXPLICIT confirm_fork=True this call -- a
+    # silent skip (already_confirmed, no confirm_fork) must never let such
+    # a race silently re-point the stored approval at an owner nobody
+    # actually confirmed this call.
     owner_changed = confirmed_entry is not None and confirmed_entry.owner != fork_owner
+    if owner_changed and already_confirmed and not confirm_fork:
+        return {"error": (
+            f"The fork owner for '{default_pr_repo}' resolved to "
+            f"'{fork_owner}' during setup, which no longer matches the "
+            f"previously confirmed owner ('{confirmed_entry.owner}') -- "
+            f"likely a concurrent identity change. The fork/remote may "
+            f"already be set up for '{fork_owner}'; re-run create-pr with "
+            f"--confirm-fork (or confirm_fork=True) to approve recording "
+            f"that as the new confirmed owner."
+        )}
+    result = {"publish_remote": prcfg.fork.remote, "fork_owner": fork_owner}
+    # Re-persist whenever this is the first confirmation OR an EXPLICIT
+    # confirm_fork=True call's result differs from what was stored (the
+    # self-heal path for a stale entry the pre-check above caught on a
+    # PRIOR call) -- never on a silent skip, which the check above already
+    # guards against reaching here with owner_changed still True.
     if (not already_confirmed or owner_changed) and effective_account:
         try:
             record_confirmation(

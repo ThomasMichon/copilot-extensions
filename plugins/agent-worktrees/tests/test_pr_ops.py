@@ -1136,6 +1136,62 @@ class TestCreatePRForkFlow:
         assert res["needs_confirmation"] == "fork_setup", res
         assert not git_ops.has_remote("fork", cwd=str(_wt_path))
 
+    def test_concurrent_identity_switch_between_precheck_and_bootstrap_fails_closed(
+        self, pr_repo, tmp_path, monkeypatch,
+    ):
+        """A TOCTOU gap with ambient `gh` auth (token=None): the non-mutating
+        pre-check and the mutating fork bootstrap are two SEPARATE calls, so
+        if another process switches the active `gh` identity between them,
+        the pre-check can validate the OLD (stored) owner while bootstrap
+        actually creates/repoints the fork for a NEW, different owner. That
+        divergence must error out rather than silently re-persist the new
+        owner under the old (unconfirmed-this-call) approval."""
+        config, wid, _wt_path, _remote_dir = pr_repo
+        config = self._fork_config(config, tmp_path)  # no owner override
+
+        fork_dir = tmp_path / "fork-race.git"
+        git_ops.git("init", "--bare", "-b", "master", str(fork_dir))
+        # The pre-check (_resolve_live_fork_owner) and the actual bootstrap
+        # (_ensure_fork_and_remote -> provider.ensure_fork) both go through
+        # this SAME fake provider -- but resolve to DIFFERENT owners,
+        # simulating the identity having switched in between.
+        race_fake = self._fake_provider("race-condition-owner", str(fork_dir))
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: race_fake,
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.providers.account_token_for_slug",
+            lambda *a, **k: None,
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.fork_pr._resolve_fork_credential",
+            lambda slug, prcfg: (None, "race-login"),
+        )
+
+        from agent_worktrees import fork_pr
+        repo = "acme/race-condition-repo"
+        fork_pr.record_confirmation(repo, "original-owner", account="race-login")
+        # Pre-check reports the ORIGINAL (stored) owner still matches --
+        # a silent skip is about to be granted...
+        monkeypatch.setattr(
+            "agent_worktrees.fork_pr._resolve_live_fork_owner",
+            lambda prcfg, token: "original-owner",
+        )
+
+        res = pr_ops.create_pr(
+            wid, config, target_repo=repo,
+        )  # no confirm_fork -- the pre-check alone must not be trusted if
+        # the actual bootstrap below disagrees with it
+
+        assert res["success"] is False, res
+        assert "race-condition-owner" in res["error"]
+        assert "original-owner" in res["error"]
+        # The stored entry must still name the ORIGINAL owner -- the
+        # race-resolved owner must never be silently persisted without an
+        # explicit confirm_fork=True.
+        entry = fork_pr.find_fork(repo, "race-login")
+        assert entry.owner == "original-owner"
+
     def test_forks_set_default_scope_matches_create_pr_gate(
         self, pr_repo, tmp_path, monkeypatch,
     ):
