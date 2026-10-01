@@ -764,10 +764,14 @@ def create_pr(
     )
 
     # --- Role-aware PR flow resolution + fork-publish confirmation gate ----
-    # (efforts/active/role-aware-fork-pr-flow, Phase 2b, GitHub-only). Only
-    # touches anything when the repo opts in via `pr.roles` and/or
-    # `pr.fork.enabled`; an unconfigured repo's `prcfg`/`publish_remote` are
-    # unchanged from here on -- byte-for-byte today's behavior.
+    # (efforts/2026/09/26 role-aware-fork-pr-flow/README.md, Phase 2b,
+    # GitHub-only). Only touches anything when the repo opts in via
+    # `pr.roles` and/or `pr.fork.enabled`; an unconfigured repo's
+    # `prcfg`/`publish_remote` are unchanged from here on -- byte-for-byte
+    # today's behavior. The gate itself (identity/credential resolution,
+    # the durable confirmation check, and the fork/remote bootstrap) lives
+    # in fork_pr.py -- see resolve_fork_publish's docstring for its
+    # contract.
     publish_remote = remote
     fork_owner = ""
     if prcfg.roles:
@@ -783,32 +787,17 @@ def create_pr(
     if prcfg.fork.enabled:
         from . import fork_pr
 
-        prior_consent = fork_pr.fork_consent_for(default_pr_repo)
-        if not confirm_fork and not prior_consent:
-            return {
-                **base, "success": False,
-                "needs_confirmation": "fork_setup",
-                "repo": default_pr_repo,
-                "fork_remote": prcfg.fork.remote,
-                "message": (
-                    f"This repo's resolved PR flow publishes through a "
-                    f"personal fork of '{default_pr_repo}' rather than a "
-                    f"direct push. Ask the user to confirm forking it to "
-                    f"their own GitHub account and pushing the branch "
-                    f"there, then re-run create-pr with --confirm-fork "
-                    f"(or confirm_fork=True) once they agree. This is "
-                    f"asked only once per repo -- once confirmed, future "
-                    f"create-pr calls for '{default_pr_repo}' won't ask "
-                    f"again."
-                ),
-            }
-        fork_setup = fork_pr.ensure_fork_and_remote(worktree_path, default_pr_repo, prcfg)
-        if fork_setup.get("error"):
-            return {**base, "error": fork_setup["error"]}
-        publish_remote = prcfg.fork.remote
-        fork_owner = fork_setup["owner"]
-        if confirm_fork and not prior_consent:
-            fork_pr.record_fork_consent(default_pr_repo, prcfg.fork.remote, fork_owner)
+        fork_result = fork_pr.resolve_fork_publish(
+            worktree_path, default_pr_repo, prcfg, confirm_fork=confirm_fork,
+        )
+        if fork_result.get("needs_confirmation"):
+            return {**base, "success": False, **fork_result}
+        if fork_result.get("error"):
+            return {**base, "error": fork_result["error"]}
+        publish_remote = fork_result["publish_remote"]
+        fork_owner = fork_result["fork_owner"]
+        if fork_result.get("warning"):
+            base.setdefault("warnings", []).append(fork_result["warning"])
 
     if not git_ops.is_clean(cwd=worktree_path):
         return {**base, "error": (

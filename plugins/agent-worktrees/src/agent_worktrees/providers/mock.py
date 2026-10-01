@@ -262,7 +262,7 @@ class MockPRProvider:
         return None
 
     def ensure_fork(
-        self, repo: str, *, token: str | None = None,
+        self, repo: str, *, api_base: str = "", token: str | None = None,
     ) -> tuple[str, str] | None:
         if repo in self._forks:
             return self._forks[repo]
@@ -273,6 +273,11 @@ class MockPRProvider:
         clone_url = f"https://mock.local/{owner}/{name}.git"
         self._forks[repo] = (owner, clone_url)
         return owner, clone_url
+
+    def resolve_fork_owner(self, *, api_base: str = "", token: str | None = None) -> str | None:
+        """Non-mutating counterpart to :meth:`ensure_fork` -- the mock
+        always resolves to the same fixed login regardless of ``repo``."""
+        return "mock-owner"
 
     def get_comment_threads(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None

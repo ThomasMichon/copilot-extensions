@@ -286,19 +286,15 @@ class GitHubProvider:
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> PRSnapshot:
         """Fetch the full review/mergeability/lifecycle snapshot for pr-watch.
-
-        Mirrors the gitea provider over GitHub's REST API (whose ``pulls`` shape
-        is near-identical): one read of the PR object (state, merged, mergeable,
-        head sha, base ref, author, title, draft, labels) plus the paginated
-        reviews list -- the REST ``/pulls/{n}/reviews`` endpoint, so each review
-        carries the **numeric** ``id`` the watch cursor keys off (``gh pr view``
-        only exposes GraphQL node ids). ``checks_state`` folds together GitHub's
-        two independent signals -- legacy commit *statuses* and Actions
-        *check-runs* -- into the provider-neutral vocabulary.
-
-        ``api_base`` may identify a GitHub Enterprise host; otherwise the
-        ambient ``GH_HOST`` or ``github.com`` is resolved once and passed
-        explicitly to every snapshot read.
+        Mirrors the gitea provider over GitHub's REST API (near-identical
+        ``pulls`` shape): one read of the PR object plus the paginated
+        reviews list -- REST ``/pulls/{n}/reviews``, so each review carries
+        the **numeric** ``id`` the watch cursor keys off (``gh pr view`` only
+        exposes GraphQL node ids). ``checks_state`` folds GitHub's two
+        independent signals (legacy commit statuses + Actions check-runs)
+        into the provider-neutral vocabulary. ``api_base`` may identify a
+        GitHub Enterprise host; otherwise ambient ``GH_HOST``/``github.com``
+        is resolved once and passed explicitly to every read.
         """
         host = self.authority_endpoint(api_base)
         proc = run_cli(
@@ -776,14 +772,13 @@ class GitHubProvider:
         """Read GitHub repo settings + branch protection into a ``RepoPolicy``.
 
         Two reads: ``gh api repos/<repo>`` (merge methods, native auto-merge,
-        delete-branch-on-merge) and, best-effort, the default branch's protection
-        (required approving reviews, required status checks). Both explicitly
-        target ``authority_endpoint(api_base)`` (GitHub Enterprise host, ambient
-        ``GH_HOST``, or ``github.com``) rather than gh's ambient default host --
-        required for ``viewer_permission`` to actually describe the acting
-        identity's access on *this* repo's real host, not whichever host `gh`
-        would otherwise fall back to. Never raises: a failed settings read
-        yields ``RepoPolicy(supported=False, error=...)``; an unreadable/absent
+        delete-branch-on-merge) and, best-effort, the default branch's
+        protection (required approving reviews, required status checks).
+        Both explicitly target ``authority_endpoint(api_base)`` rather than
+        gh's ambient default host -- required for ``viewer_permission`` to
+        describe the acting identity's access on *this* repo's real host.
+        Never raises: a failed settings read yields
+        ``RepoPolicy(supported=False, error=...)``; an unreadable/absent
         protection leaves those fields ``None``.
         """
         from ..pr_contract import RepoPolicy
@@ -854,25 +849,33 @@ class GitHubProvider:
         _ = (repo, base, head_sha, api_base, token)
         return None
 
-    def ensure_fork(
-        self, repo: str, *, token: str | None = None,
-    ) -> tuple[str, str] | None:
-        """Create (or read, if it already exists) the caller's fork via
-        ``POST /repos/<repo>/forks`` -- idempotent on GitHub's own API.
-
-        Resolves the caller's login first (``gh api user``) purely for the
-        returned ``owner`` -- the actual fork-owner is whoever the token
-        belongs to regardless. Returns ``None`` on any failure: no ``gh``
-        auth, a non-2xx API response, or a payload missing ``clone_url``.
-        """
-        who = run_cli(["gh", "api", "user", "--jq", ".login"], env=self._env(token))
+    def resolve_fork_owner(
+        self, *, api_base: str = "", token: str | None = None,
+    ) -> str | None:
+        """Read-only ``gh api user`` half of :meth:`ensure_fork`; ``api_base``
+        pins the host like every other call (:meth:`authority_endpoint`)."""
+        host = self.authority_endpoint(api_base)
+        who = run_cli(
+            ["gh", "api", "--hostname", host, "user", "--jq", ".login"],
+            env=self._env(token),
+        )
         if who.returncode != 0:
             return None
-        owner = who.stdout.strip()
+        return who.stdout.strip() or None
+
+    def ensure_fork(
+        self, repo: str, *, api_base: str = "", token: str | None = None,
+    ) -> tuple[str, str] | None:
+        """Create (or read, if it already exists) the caller's fork via
+        ``POST /repos/<repo>/forks``. Owner from :meth:`resolve_fork_owner`;
+        ``api_base`` resolved once so both calls hit the SAME host. ``None``
+        on any failure: no ``gh`` auth, non-2xx, or a missing ``clone_url``."""
+        owner = self.resolve_fork_owner(api_base=api_base, token=token)
         if not owner:
             return None
+        host = self.authority_endpoint(api_base)
         proc = run_cli(
-            ["gh", "api", "-X", "POST", f"repos/{repo}/forks"],
+            ["gh", "api", "--hostname", host, "-X", "POST", f"repos/{repo}/forks"],
             env=self._env(token),
         )
         if proc.returncode != 0:
@@ -972,12 +975,9 @@ class GitHubProvider:
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
         thread_ids: tuple[int, ...] = (),
     ) -> str:
-        """Resolve all active review threads via GraphQL.
-
-        GitHub thread ids are opaque node ids, so ``thread_ids`` (display
-        indices) cannot target individually; this resolves every currently
-        unresolved thread (the "addressed all feedback" case).
-        """
+        """Resolve all active review threads via GraphQL. GitHub thread ids
+        are opaque node ids, so ``thread_ids`` can't target individually;
+        this resolves every currently unresolved thread instead."""
         _ = (api_base, thread_ids)
         owner, name = self._split_owner_name(repo)
         data, err = self._graphql(

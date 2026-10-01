@@ -231,6 +231,7 @@ _NO_PROJECT_COMMANDS = {
     "-h",
     "repos",
     "accounts",
+    "forks",
     "copilot-identity",
     "related",
     "install",
@@ -305,6 +306,7 @@ _PROJECT_IRRELEVANT_COMMANDS = frozenset(
     {
         "repos",
         "accounts",
+        "forks",
         "picker",
         "--version",
         "-V",

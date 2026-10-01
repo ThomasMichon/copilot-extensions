@@ -435,23 +435,90 @@ in-repo overlay (below); the in-repo version wins when both are present.
 | `delete_source_branch` | bool | `true` | Auto-complete completion option (Azure DevOps): delete the source branch on merge. |
 | `bypass_policy` | bool | `false` | Complete the PR **past** branch policies when requesting auto-complete (Azure DevOps). Needed for a default branch whose policy never auto-satisfies for our own PRs (e.g. a central governance **status** policy). Only set true where we are authorized to self-complete. |
 | `bypass_reason` | string | *(empty)* | Reason recorded on the policy bypass. |
-| `fork` | object | *(disabled)* | Role-aware fork-PR flow (see `efforts/active/role-aware-fork-pr-flow`, GitHub-only). `{enabled, remote, owner}` — repo-wide default for whether `create-pr` publishes through a personal fork instead of a direct push. `enabled` (bool, default `false`); `remote` (string, default `"fork"`) — the local git remote name pointed at the fork; `owner` (string, default `""`) — override the fork-owner login used to build the `<owner>:<branch>` PR head (default: whoever the resolved token belongs to). Disabled by default — an unconfigured repo's push/PR flow is unchanged. |
+| `fork` | object | *(disabled)* | Role-aware fork-PR flow (see `efforts/2026/09/26 role-aware-fork-pr-flow/README.md`, GitHub-only). `{enabled, remote, owner}` — repo-wide default for whether `create-pr` publishes through a personal fork instead of a direct push. `enabled` (bool, default `false`); `remote` (string, default `"fork"`) — the local git remote name pointed at the fork; `owner` (string, default `""`) — override the fork-owner login used to build the `<owner>:<branch>` PR head (default: whoever the resolved token belongs to). Disabled by default — an unconfigured repo's push/PR flow is unchanged. |
 | `roles` | map | `{}` | Per-**live-permission-level** overrides layered onto this `PRConfig`, keyed by one of `read` / `triage` / `write` / `maintain` / `admin` (GitHub's permission vocabulary). Each entry may set any of `reviewer`, `review_blocking`, `self_approve`, `merge_actor`, `fork` — omitted fields inherit the base `PRConfig` unchanged. Networked actor-specific surfaces (`create-pr`, `pr-status`, `pr-watch wait`, and `pr-merge`) resolve the caller's live GitHub permission and layer the matching role before classifying or acting. Empty (the default) keeps the single configured flow. Example: a conservative base can omit `merge_actor`, while `maintain` adds `merge_actor: submitter-direct`; conversely, a `write` override can explicitly clear an inherited self-merge actor. |
 | `notes` | string | *(empty)* | Free-text, repo-specific guidance surfaced as an extra `Note:` line on every `pr_reminder()` (the "Reminder [...]" text every `pr-*` verb and `push-changes` already print). Exists because an agent interacts with PR config through `agent-worktrees repos get`/the `pr-*` verbs, not by reading this file's own comments — a comment explaining a non-obvious repo choice (e.g. why a bypass mode is `pull_request` and not `always`/`exempt`) never reaches a calling agent unless it rides along through a command's own output. Keep it short — one or two sentences. |
 
 > **`pr.fork`/`pr.roles` confirmation gate.** When the resolved flow for a
 > `create-pr` call needs a fork, it does **not** silently fork anything or
-> push to an unexpected remote on the caller's first try. It returns
-> `needs_confirmation: "fork_setup"` with a human-readable `message` — the
-> calling agent relays this to the user, then re-runs `create-pr
-> --confirm-fork` (or `confirm_fork=True`) once they agree. Only that
+> push to an unexpected remote on the caller's first try for that repo+login.
+> It returns `needs_confirmation: "fork_setup"` with a human-readable
+> `message` — the calling agent relays this to the user, then re-runs
+> `create-pr --confirm-fork` (or `confirm_fork=True`) once they agree. That
 > confirmed call creates/verifies the fork (idempotent — a caller who already
-> has one is untouched) and points the local `fork` remote at it. This
-> confirmation is asked **once per (operator, repo)**: a successful confirmed
-> call durably records the fork target in the machine-local
-> `fork_consent.yaml` registry (keyed by `owner/repo` slug), and every later
-> `create-pr` for that same repo skips straight to verifying/wiring the fork
-> remote — no `--confirm-fork` needed again, even in a brand-new worktree.
+> has one is untouched) and points the local `fork` remote at it.
+>
+> **This confirmation is durable, not per-call — but it is scoped to the
+> login that actually authenticates, not merely the repo.** A successful
+> confirmed call records the approval in the machine-local `forks.yaml`
+> registry (see `fork_pr.py`), keyed by repo **and** the effective login
+> (`fork_pr._resolve_fork_credential`, resolved **once** and reused for both
+> the confirmation scope and the actual fork operation: an explicit
+> `pr.token_command`/`token_env` binding first, else the repo's resolved
+> account mapping only when a token can actually be minted for it, else the
+> active `gh` account; an identity that cannot be resolved at all fails
+> closed — never persisted or trusted). Every later `create-pr` call for
+> that same repo **under the same resolved login** — any worktree, any
+> session, on this machine — skips the gate automatically, since the
+> underlying GitHub fork is a durable, account-scoped resource, not a
+> per-worktree one. If the account mapping changes, ambient `gh` auth
+> switches users, or a configured token rotates, the next call re-prompts
+> instead of silently authorizing a different identity's fork/push.
+>
+> **`pr.fork` only supports the default GitHub authority (github.com)
+> today.** The durable registry is keyed by repo+account, not by GitHub
+> authority/host — so the same `owner/repo` slug could otherwise identify
+> two unrelated repositories on github.com vs. a GitHub Enterprise host
+> (whether pinned via an explicit `pr.api_base` or ambient `GH_HOST`), and
+> reusing a confirmation across that boundary would silently authorize a
+> fork/push against a different real repository. `create-pr` refuses
+> `pr.fork` entirely whenever the EFFECTIVE authority (the same
+> `pr.api_base`-then-`GH_HOST`-then-`github.com` precedence every other
+> provider call uses) isn't the default host — before any registry lookup,
+> so a confirmation recorded under github.com can never be silently reused
+> once the effective authority later points elsewhere.
+>
+> **A repo can carry more than one confirmed account at once.** The registry
+> key is `(repo, account)`, not repo alone — confirming under a second
+> account (an operator switching which identity publishes a repo's PRs) adds
+> a separate durable entry rather than overwriting the first, so switching
+> back to the original account later does not re-trigger the gate either.
+> Separately, when `pr.fork.owner` is explicitly configured, it
+> deterministically overrides the owner login used to build the PR head
+> (`<owner>:<branch>`) regardless of identity — `_ensure_fork_and_remote`
+> still obtains the actual fork/remote (`clone_url`) from the authenticated
+> provider first; the override only changes which login names the PR head,
+> not which repository is actually forked/pushed to. If a stored
+> confirmation's owner doesn't match that configured override, the gate
+> treats it as a *different* approval and re-prompts rather than silently
+> publishing under the newly-configured owner; a successful re-confirmation
+> then updates the stored entry to the new owner. The same re-validation
+> also applies with **no** `pr.fork.owner` override configured at all: if a
+> stored confirmation's owner diverges from the fork owner the provider
+> actually resolves live (a typo at `forks set` time, or a genuine upstream
+> change), a silent skip re-prompts rather than trusting the stale stored
+> value — only an explicit `--confirm-fork` this call proceeds regardless,
+> and self-heals the stored entry to the real owner it resolved. A FAILED or
+> inconclusive live owner lookup (e.g. a transient API error) ALSO fails
+> closed, exactly like a genuine mismatch. The approved local **remote
+> name** (`pr.fork.remote`) is likewise part of what was approved: if it
+> later changes (including to an existing remote such as `origin`), the old
+> approval is not reused either.
+>
+> A repo can also be pre-approved once, ahead of any `create-pr` call — e.g.
+> during machine/harness setup — with `agent-worktrees forks set
+> <owner>/<repo> --owner <login>` (its `--account` defaults to the same
+> resolver for the common account-mapping/ambient-auth case; a repo whose
+> real config binds `pr.token_command`/`token_env` instead needs
+> **`--token-stdin`** — piping that same token's value on stdin (never as a
+> bare argv value, to keep it out of shell history and process listings) —
+> so the pre-seeded entry's scope is derived from the token's own value,
+> matching exactly what `create-pr`'s gate will compute for it; `--account`
+> alone cannot reproduce that scope for an opaque token). Manage the catalog
+> with `forks list` / `forks show <repo> [--account A]` / `forks remove
+> <repo> [--account A]` (omitting `--account` on `remove` forgets every
+> account confirmed for that repo; the gate asks again on that repo's/
+> account's next call).
 
 > **Configured profile vs. effective actor profile.** The base `PRConfig`
 > always has a pure, network-free **configured profile**. `get pr-profile`
