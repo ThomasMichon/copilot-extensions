@@ -494,16 +494,73 @@ def _cleanup_branch_refs(record: tracking.WorktreeRecord) -> list[tuple[str, str
     ``head_sha``, never the active one's: a historical/parallel PR's branch
     can carry a commit that is an ancestor of the ACTIVE PR's head (and so
     invisible to a shared boundary) yet never actually reached upstream.
+
+    A legacy flow can reuse the SAME local branch name across sequential
+    PRs on one long-lived worktree (``tracking._merge_pr_attribution_state``
+    documents this exact reuse pattern for ``pr_id``-less records) -- the
+    live git ref for that name can only ever point at the MOST RECENT push,
+    never an earlier one. ``record.prs`` is NOT guaranteed to be
+    chronological though (``tracking.WorktreeRecord.active_pr`` defines
+    recency by ``opened_at``, only falling back to list position as a
+    tie-breaker -- concurrent-save reconciliation can append an older
+    unmatched on-disk entry after a newer in-memory one, #4699): iterating
+    raw list order for a reused name can select an older SHA and recreate
+    the exact false positive this fix exists to close. Entries for a
+    reused name are therefore processed in the SAME recency order
+    ``active_pr`` itself uses (``opened_at``, then original list index) --
+    an already-advanced branch tip paired against a stale, superseded
+    ``head_sha`` from an earlier reuse read every commit made for a LATER
+    reuse of that name as "extra" commits beyond that stale boundary,
+    falsely blocking finalize on content that had already landed.
+    Processing in recency order and overwriting on each repeat occurrence
+    keeps whichever entry is chronologically LAST for any reused branch
+    name.
+
+    The LATEST tracked entry for a reused name is not necessarily the one
+    that actually merged either (#4699): a REJECTED (closed, never merged)
+    reuse can be the most recent, with its own unmerged commit as the
+    branch's current tip -- pairing it unconditionally would read "zero
+    extra commits" and certify that unmerged commit safe. A
+    confirmed-terminal-non-merge entry (``tracking._pr_is_terminal`` true,
+    ``state`` not ``"merged"``) therefore never overwrites an existing
+    pairing that ISN'T itself such a rejection; only a later entry that
+    could plausibly represent real landed work (merged, or still open/
+    unresolved) replaces it.
     """
+    def _confirmed_rejected(pr) -> bool:
+        state = (getattr(pr, "state", "") or "").strip()
+        return state not in tracking._PR_NON_TERMINAL and state != "merged"
+
     active_head_sha = (getattr(record.pr, "head_sha", "") or "").strip()
     tracked = (getattr(record, "branch", "") or "").strip() or f"worktree/{record.worktree_id}"
-    pairs = [(tracked, active_head_sha)]
-    seen = {tracked}
-    for pr in getattr(record, "prs", None) or []:
+    pairs: list[tuple[str, str]] = [(tracked, active_head_sha)]
+    index_by_branch = {tracked: 0}
+    rejected_by_index = {0: False}
+    all_prs = list(getattr(record, "prs", None) or [])
+    # Same recency ordering as tracking.WorktreeRecord.active_pr: oldest
+    # opened_at (missing -> "") first, original list position as the
+    # tie-breaker -- never raw append order, which concurrent-save
+    # reconciliation does not guarantee is chronological.
+    ordered_prs = sorted(
+        enumerate(all_prs),
+        key=lambda item: ((getattr(item[1], "opened_at", "") or ""), item[0]),
+    )
+    for _original_index, pr in ordered_prs:
         branch = (getattr(pr, "branch", "") or "").strip()
-        if branch and branch not in seen:
-            seen.add(branch)
-            pairs.append((branch, (getattr(pr, "head_sha", "") or "").strip()))
+        if not branch:
+            continue
+        head_sha = (getattr(pr, "head_sha", "") or "").strip()
+        rejected = _confirmed_rejected(pr)
+        if branch in index_by_branch:
+            idx = index_by_branch[branch]
+            if rejected and not rejected_by_index[idx]:
+                continue
+            pairs[idx] = (branch, head_sha)
+            rejected_by_index[idx] = rejected
+        else:
+            index_by_branch[branch] = len(pairs)
+            rejected_by_index[len(pairs)] = rejected
+            pairs.append((branch, head_sha))
     return pairs
 
 

@@ -1208,7 +1208,7 @@ def test_content_exceeds_merged_head_any_checks_each_pr_branch_against_own_head(
     active_head_sha = "a" * 40
     other_head_sha = "b" * 40
     record.pr.head_sha = active_head_sha
-    record.prs = [SimpleNamespace(branch=other_branch, head_sha=other_head_sha)]
+    record.prs = [SimpleNamespace(branch=other_branch, head_sha=other_head_sha, state="merged")]
 
     seen_calls: list[tuple[str, str]] = []
 
@@ -1223,7 +1223,7 @@ def test_content_exceeds_merged_head_any_checks_each_pr_branch_against_own_head(
 
     content_ref = f"worktree/{env.worktree_id}"
     finalize_open_pr_gate.content_exceeds_merged_head_any(
-        record, content_ref, "origin/master", cwd=str(env.clone),
+        record, content_ref, "origin/master", cwd=str(env.clone), repo=repo,
     )
 
     other_calls = [(r, h) for r, h in seen_calls if r == other_branch]
@@ -1231,6 +1231,212 @@ def test_content_exceeds_merged_head_any_checks_each_pr_branch_against_own_head(
     assert all(h == other_head_sha for _, h in other_calls), (
         f"other_branch must be checked against its OWN head_sha, got {other_calls}"
     )
+
+
+def test_cleanup_branch_refs_keeps_latest_entry_for_a_reused_branch_name():
+    # #4699: a legacy flow can reuse the SAME local branch name across
+    # sequential PRs on one long-lived worktree
+    # (`tracking._merge_pr_attribution_state` documents this exact reuse
+    # pattern for `pr_id`-less records). The live git ref for that name can
+    # only ever point at the MOST RECENT push -- never an earlier one -- so
+    # `_cleanup_branch_refs` must pair a reused branch with its LATEST
+    # `record.prs` entry, not the first one encountered in append order.
+    record = SimpleNamespace(
+        worktree_id="some-worktree",
+        branch="",
+        pr=SimpleNamespace(head_sha="active" * 8),
+        prs=[
+            SimpleNamespace(branch="reused-branch", head_sha="old-head-sha"),
+            SimpleNamespace(branch="reused-branch", head_sha="new-head-sha"),
+            SimpleNamespace(branch="unrelated-branch", head_sha="unrelated-sha"),
+        ],
+    )
+
+    pairs = finalize_open_pr_gate._cleanup_branch_refs(record)
+
+    assert ("reused-branch", "new-head-sha") in pairs
+    assert ("reused-branch", "old-head-sha") not in pairs
+    assert ("unrelated-branch", "unrelated-sha") in pairs
+    reused_count = sum(1 for ref, _ in pairs if ref == "reused-branch")
+    assert reused_count == 1, "a reused branch name must appear only once"
+
+
+def test_cleanup_branch_refs_uses_opened_at_recency_not_raw_list_order():
+    # #4699: `record.prs` is not guaranteed to be chronological --
+    # `tracking.WorktreeRecord.active_pr` defines recency by `opened_at`,
+    # only falling back to list position as a tie-breaker; concurrent-save
+    # reconciliation can append an OLDER unmatched on-disk entry after a
+    # NEWER in-memory one. A reused branch name must therefore be paired
+    # with whichever entry has the LATEST `opened_at`, never simply the
+    # last one in raw list order.
+    record = SimpleNamespace(
+        worktree_id="some-worktree",
+        branch="",
+        pr=SimpleNamespace(head_sha="active" * 8),
+        prs=[
+            # Chronologically LATER (opened_at), but appears FIRST in the
+            # list -- e.g. reconciliation appended the older entry after it.
+            SimpleNamespace(
+                branch="reused-branch", head_sha="new-head-sha",
+                opened_at="2026-02-01T00:00:00Z", state="merged",
+            ),
+            SimpleNamespace(
+                branch="reused-branch", head_sha="old-head-sha",
+                opened_at="2026-01-01T00:00:00Z", state="merged",
+            ),
+        ],
+    )
+
+    pairs = finalize_open_pr_gate._cleanup_branch_refs(record)
+
+    assert ("reused-branch", "new-head-sha") in pairs
+    assert ("reused-branch", "old-head-sha") not in pairs
+
+
+def test_cleanup_branch_refs_prefers_merged_entry_over_a_later_rejected_reuse():
+    # #4699: the LATEST tracked entry for a reused branch
+    # name is not necessarily the one that merged -- a rejected (closed)
+    # reuse can be the most recent. `_cleanup_branch_refs` must not let a
+    # confirmed-terminal-non-merge entry overwrite an earlier entry that
+    # could plausibly represent real landed work.
+    record = SimpleNamespace(
+        worktree_id="some-worktree",
+        branch="",
+        pr=SimpleNamespace(head_sha="active" * 8),
+        prs=[
+            SimpleNamespace(branch="reused-branch", head_sha="merged-sha", state="merged"),
+            SimpleNamespace(branch="reused-branch", head_sha="rejected-sha", state="closed"),
+        ],
+    )
+
+    pairs = finalize_open_pr_gate._cleanup_branch_refs(record)
+
+    assert ("reused-branch", "merged-sha") in pairs
+    assert ("reused-branch", "rejected-sha") not in pairs
+
+
+def test_cleanup_branch_refs_uses_a_later_merge_after_an_earlier_rejection():
+    # Counterpart: once a LATER reuse of the same branch name is itself
+    # merged, it must win over an earlier rejected attempt.
+    record = SimpleNamespace(
+        worktree_id="some-worktree",
+        branch="",
+        pr=SimpleNamespace(head_sha="active" * 8),
+        prs=[
+            SimpleNamespace(branch="reused-branch", head_sha="rejected-sha", state="closed"),
+            SimpleNamespace(branch="reused-branch", head_sha="merged-sha", state="merged"),
+        ],
+    )
+
+    pairs = finalize_open_pr_gate._cleanup_branch_refs(record)
+
+    assert ("reused-branch", "merged-sha") in pairs
+    assert ("reused-branch", "rejected-sha") not in pairs
+
+
+def test_precondition_passes_with_reused_branch_name_across_sequential_prs(
+    refspec_worktree,
+):
+    # #4699 end-to-end regression: a reused branch name must be paired with
+    # its LATEST (most recent) `record.prs` entry, never its FIRST -- the
+    # live git ref for a reused name can only ever point at the most recent
+    # push. Pairing it with an earlier, stale `head_sha` instead would read
+    # every commit made for a LATER reuse of that same branch name as
+    # "extra" commits beyond that stale boundary (a squash merge always
+    # breaks ancestry, so those later commits are never reachable from
+    # `upstream` by SHA either), falsely blocking finalize even though BOTH
+    # reuses had already landed on master via squash merge.
+    env = refspec_worktree
+    record, repo = _record_and_repo(env)
+    record.pr.state = "merged"
+    record.pr.head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
+
+    reused_branch = "legacy-reused-branch"
+    _git("branch", reused_branch, cwd=env.clone)
+    _git("checkout", reused_branch, cwd=env.clone)
+
+    # First reuse ("PR #1"): its own commit, squash-merged onto master.
+    _commit(env.clone, "legacy_v1.txt", "legacy reuse #1\n")
+    first_head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
+    _git("checkout", "master", cwd=env.seed)
+    (env.seed / "legacy_v1.txt").write_text("legacy reuse #1\n")
+    _git("add", "-A", cwd=env.seed)
+    _git("commit", "-m", "squashed legacy PR #1", cwd=env.seed)
+    _git("push", "origin", "master", cwd=env.seed)
+
+    # Second reuse ("PR #2"): the SAME local branch name advanced further
+    # with distinct content, ALSO squash-merged onto master.
+    _commit(env.clone, "legacy_v2.txt", "legacy reuse #2\n")
+    second_head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
+    (env.seed / "legacy_v2.txt").write_text("legacy reuse #2\n")
+    _git("add", "-A", cwd=env.seed)
+    _git("commit", "-m", "squashed legacy PR #2", cwd=env.seed)
+    _git("push", "origin", "master", cwd=env.seed)
+
+    _git("checkout", f"worktree/{env.worktree_id}", cwd=env.clone)
+    _git("fetch", "origin", cwd=env.clone)
+
+    record.prs = [
+        SimpleNamespace(branch=reused_branch, head_sha=first_head_sha, state="merged"),
+        SimpleNamespace(branch=reused_branch, head_sha=second_head_sha, state="merged"),
+    ]
+
+    ok, err = finalize._pr_finalize_precondition(
+        record, repo, str(env.clone), str(env.clone)
+    )
+    assert ok is True, f"expected no false-positive block, got: {err}"
+    assert err is None
+
+
+def test_precondition_blocks_reused_branch_whose_latest_entry_is_unmerged(
+    refspec_worktree,
+):
+    # #4699: the LATEST tracked entry for a reused branch
+    # name is not necessarily the one that merged. A sequence of a merged
+    # reuse followed by a REJECTED (closed, never merged) reuse of the SAME
+    # branch name leaves that rejected PR's own commit as the branch's
+    # current tip, with its own `head_sha` matching that tip exactly --
+    # trusting it unconditionally as a merge boundary would read "zero
+    # extra commits" and let cleanup force-delete a genuinely unmerged
+    # commit. Only a reused entry that is ITSELF independently confirmed
+    # merged may be trusted as a boundary.
+    env = refspec_worktree
+    record, repo = _record_and_repo(env)
+    record.pr.state = "merged"
+    record.pr.head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
+
+    reused_branch = "legacy-reused-branch-rejected-tail"
+    _git("branch", reused_branch, cwd=env.clone)
+    _git("checkout", reused_branch, cwd=env.clone)
+
+    # First reuse ("PR #1"): merged via squash.
+    _commit(env.clone, "merged_reuse.txt", "the part that merged\n")
+    first_head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
+    _git("checkout", "master", cwd=env.seed)
+    (env.seed / "merged_reuse.txt").write_text("the part that merged\n")
+    _git("add", "-A", cwd=env.seed)
+    _git("commit", "-m", "squashed merged reuse", cwd=env.seed)
+    _git("push", "origin", "master", cwd=env.seed)
+
+    # Second reuse ("PR #2"): the SAME branch name, rejected -- never merged,
+    # never pushed anywhere. Its own `head_sha` is the branch's current tip.
+    _git("checkout", reused_branch, cwd=env.clone)
+    _commit(env.clone, "rejected_reuse.txt", "never merged, never landed\n")
+    second_head_sha = _git("rev-parse", "HEAD", cwd=env.clone)
+
+    _git("checkout", f"worktree/{env.worktree_id}", cwd=env.clone)
+    _git("fetch", "origin", cwd=env.clone)
+
+    record.prs = [
+        SimpleNamespace(branch=reused_branch, head_sha=first_head_sha, state="merged"),
+        SimpleNamespace(branch=reused_branch, head_sha=second_head_sha, state="closed"),
+    ]
+
+    ok, err = finalize._pr_finalize_precondition(
+        record, repo, str(env.clone), str(env.clone)
+    )
+    assert ok is False
+    assert err is not None
 
 
 def test_precondition_blocks_closed_pr_with_unmerged_commits_on_other_tracked_branch(
@@ -1259,3 +1465,5 @@ def test_precondition_blocks_closed_pr_with_unmerged_commits_on_other_tracked_br
     )
     assert ok is False
     assert err is not None
+
+
