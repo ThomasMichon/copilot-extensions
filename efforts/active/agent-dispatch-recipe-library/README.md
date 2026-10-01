@@ -224,12 +224,17 @@ not new engines either. The `extends:` model (Phase 3) and provider adapters
       implements `ForgeProvider`, and `"azure-devops"` is already in
       `_SUPPORTED_FORGE_PROVIDERS`. Landed by a different effort before this
       one reached Phase 2; no new code needed here beyond this finding.
-- [ ] Add a Gitea backlog-provider adapter, same surface. **Blocked on an
-      operator decision** — see Journal entry below: no existing convention
-      in this repo for talking to Gitea (no CLI analog to `gh`/`az` is
-      currently vendored or assumed), and no live Gitea instance is
-      available in this session to validate against per this repo's own
-      "validate beyond unit tests" policy.
+- [x] Add a Gitea backlog-provider adapter, same surface. **Deferred to
+      `ThomasMichon/copilot-extensions#4825`**: per operator direction, a
+      structural `GiteaProvider` stub landed (implements `ForgeProvider`;
+      `_forge_provider_for` can route to it), but every method raises
+      `NotImplementedError` pointing at the tracking issue, and
+      `validate_config` deliberately still **rejects** `forge.provider:
+      gitea` (accepting it would validate cleanly then fail forever on the
+      first tick) until a real adapter lands — real implementation is left
+      to a future agent/session with Gitea access and expertise, since no
+      integration approach was chosen and no live instance is available
+      here to validate against.
 - [ ] Add the equivalent forge adapters for the **reviewer** recipe's
       provider-neutral review capability (author/reviewer relationships,
       verdict posting, merge/close state) for Azure DevOps and Gitea.
@@ -450,3 +455,74 @@ _Pending review._
   integration approach and name an available Gitea instance (or confirm
   none is available and the adapter should be built unit-tested-only with
   that limitation explicitly recorded) before this item can proceed.
+
+### 2026-09-30 (same day) — Gitea backlog adapter: operator decision, stub landed
+- Operator direction: leave the real Gitea integration to a future
+  agent/session with Gitea access and expertise rather than deciding the
+  approach now; no live Gitea instance is available in this environment.
+- Landed a structural `GiteaProvider` stub (its own `gitea_provider_stub.py`
+  module): implements the `ForgeProvider` protocol shape and
+  `_forge_provider_for` can construct it directly, but every method
+  (`list_open_issues`/`reserve`/`claim`/`release`) raises
+  `NotImplementedError` naming the tracking issue. `validate_config` keeps
+  rejecting `forge.provider: gitea` (unchanged — see the Phase 2 checklist
+  above), so no real declaration can ever reach this stub; it only
+  scaffolds direct provider selection for when `#4825` lands.
+- Filed `ThomasMichon/copilot-extensions#4825` to track the real
+  implementation (integration approach: Gitea REST API vs. the `tea` CLI;
+  validation against a real instance).
+- Full `agent-dispatch` suite run: the targeted `test_repository_issue_loops.py`
+  suite passes clean (75 tests, including the new Gitea stub coverage). The
+  broader suite surfaced 4 pre-existing failures in
+  `test_procutil.py::test_namespaced_sibling_resolution_stays_in_active_marketplace_cell`
+  (a Windows long-path/unicode temp-dir issue) — confirmed via `git stash`
+  that these reproduce identically with none of this session's changes
+  applied, so they are unrelated pre-existing environmental flakiness, not a
+  regression from this change.
+- `repository_issue_loops.py` was already at its grandfathered module-size
+  ceiling (1810 lines); the stub pushed it over. Extracted `GiteaProvider`
+  into its own `gitea_provider_stub.py` module (re-imported back for
+  backward-compatible access) rather than widening the ceiling.
+
+### 2026-09-30 (same day) — Review feedback: keep `gitea` rejected at validation; fix a provider-routing bug
+- Automated PR review on the Gitea-stub PR caught two real issues before
+  merge, both fixed:
+  1. **High**: my first version accepted `forge.provider: gitea` in
+     `validate_config`, which would let a declaration validate cleanly and
+     then fail forever on its first tick (`NotImplementedError`), leaving a
+     resident serve loop stuck retrying indefinitely with no way to tell
+     that apart from a transient failure. Fixed: `"gitea"` stays **out** of
+     `_SUPPORTED_FORGE_PROVIDERS` (declarations still reject it exactly as
+     before this effort), while `_forge_provider_for` can still route to the
+     stub directly (useful groundwork, and exercised by its own test) —
+     re-add `"gitea"` to `_SUPPORTED_FORGE_PROVIDERS` once `#4825` ships a
+     real adapter.
+  2. **Medium**: `loop_commands.py`'s interactive `status`/`doctor`/
+     `discover` paths hardcoded `GitHubProvider(...)` regardless of a
+     declaration's configured provider — a **pre-existing bug also affecting
+     Azure DevOps declarations today**, surfaced by this review because it
+     would have let an (incorrectly-accepted) Gitea declaration silently
+     query GitHub instead of hitting the stub. Fixed properly for every
+     provider: both call sites now route through `_forge_provider_for`
+     instead of hardcoding GitHub. A follow-up review round correctly noted
+     the existing GitHub-configured fixtures (in
+     `test_repository_issue_loop_cli.py`, not `test_loop_commands.py` — that
+     file is only an import guard) don't prove the hardcoding is actually
+     gone; added two dedicated regression tests there
+     (`test_discover_routes_through_the_configured_azure_devops_provider`,
+     `test_status_routes_forge_reservations_through_the_configured_azure_devops_provider`)
+     that monkeypatch only `AzureDevOpsProvider` and would fail loud (a real
+     failed `gh` call) if either call site regressed back to hardcoding
+     GitHub.
+- Both fixes are tightly coupled to this change (the first is this PR's own
+  config-acceptance choice; the second was only reachable via this PR's new
+  Gitea path, even though it's a real latent bug for ADO too) and are landed
+  in the same PR rather than filed separately.
+- Phase 2's backlog-adapter scope is settled: ADO backlog done
+  (pre-existing), Gitea backlog deferred with a stub. The reviewer-recipe
+  ADO/Gitea adapter item (and its Tests item) remain genuinely open and
+  unstarted — **not** transferred or resolved, still unchecked above.
+  Moving to Phase 3 (the `extends:` registrar unification) next, since the
+  reviewer-recipe delta (Phase 4) depends on it and the named recipes
+  (Phases 5-8) build on both; Phase 2's remaining item stays tracked here
+  and gets picked up alongside Phase 4.
