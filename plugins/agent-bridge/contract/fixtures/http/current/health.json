@@ -1,11 +1,11 @@
 {
   "captured_from": {
-    "commit": "4313805d12a1c70f379321bae6af51be7b4a3696",
+    "commit": "e4fa49fe5b3fe3f16043ddf8f77d606432a630d6",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 20,
     "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
-    "source_git_blob": "597419228aa8d66fc18d954aa8e889c303ecec86",
-    "source_sha256": "79e82a170d622cfee1ea52d1aee4c43da39dd7581433fb7a802d616d4c47e099"
+    "source_git_blob": "366c8900d9b7823a48c1012ea754deeb2492b51d",
+    "source_sha256": "df5f2392d27d20be304fc978c86a16a6f6f7fd8d47062e2f95f4770d921c9727"
   },
   "request": {
     "method": "GET",

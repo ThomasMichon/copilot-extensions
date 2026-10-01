@@ -68,8 +68,8 @@
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
           "sha256": "80ae2fd5e9c2d7ae739fd123e91812236acdf538814fe76e3c1710072efc232e",
-          "semantic": false,
-          "non_semantic_reason": "Protocol constants are validated directly against production by the contract checker; this PR updates the working tree before an immutable commit provenance record exists."
+          "semantic": true,
+          "non_semantic_reason": null
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
@@ -105,7 +105,7 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
-          "sha256": "6daf935d8e4d69bfff5bb23fd2a3d48235eeb06882829bf98d1a391434ccc36d",
+          "sha256": "df80aa9df7d3a14876a4df7dd59b8a675f669f1d3778be1205d34aca1004b03b",
           "role": "current health response",
           "generation": 20
         },
@@ -135,9 +135,9 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-response.json",
-          "sha256": "65f0eb259d4869eb692b7fa26249565cfbb92f9f15265e16520bb549b602f5eb",
+          "sha256": "1cf0cc2d4fc2328a450755995c11e55472083d7fba0321a5b06669719329a371",
           "role": "current session-create response",
-          "generation": 19
+          "generation": 20
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
@@ -165,9 +165,9 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/protocol-constants.json",
-          "sha256": "dd015a091ccc873486ac7333fe409c7a09101df0aa420e39bb017d97099cc181",
+          "sha256": "f4b207bca02d6f36518a64ef555f59401275367bee0e2d7c803a81067ca28e61",
           "role": "current HTTP range and capability constants",
-          "generation": 19
+          "generation": 20
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-command.json",
@@ -202,12 +202,28 @@
       ],
       "provenance": [
         {
-          "commit": "4313805d12a1c70f379321bae6af51be7b4a3696",
+          "commit": "e4fa49fe5b3fe3f16043ddf8f77d606432a630d6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 20,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "87aaa0e16e53d45e0ecad51c1ec73fcd4148744f",
+          "capture_method": "Read production constants from the pushed head revision; HTTP_PROTOCOL_VERSION is 20 and cli_mode_unclaimed_release is introduced at generation 20."
+        },
+        {
+          "commit": "e4fa49fe5b3fe3f16043ddf8f77d606432a630d6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 20,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "ca098768745ddfebc4e0cf8b5f0161c99091ac58",
+          "capture_method": "Serialize StartSessionResponse from the pushed head revision; its protocol_version default follows HTTP generation 20."
+        },
+        {
+          "commit": "e4fa49fe5b3fe3f16043ddf8f77d606432a630d6",
           "plugin_version": "0.4.1-dev3",
           "generation": 20,
           "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
-          "source_git_blob": "597419228aa8d66fc18d954aa8e889c303ecec86",
-          "capture_method": "Re-attested for HTTP generation 20 after adding the CLI-mode unclaimed-release capability; the health route source is unchanged and serializes the current protocol constant."
+          "source_git_blob": "366c8900d9b7823a48c1012ea754deeb2492b51d",
+          "capture_method": "Invoke the health route shape from the pushed head revision with controlled empty runtime state; the response advertises HTTP generation 20."
         },
         {
           "commit": "851dfca5a0982a97eff672865648f9cbf0318229",
