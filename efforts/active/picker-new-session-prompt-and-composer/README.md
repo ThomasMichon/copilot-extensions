@@ -204,17 +204,34 @@ real code, not assumption:
       New-worktree confirm tests updated for the extra screen hop (each now
       needs 2 Enter presses: textarea->buttons, then activate Launch); 2 new
       tests cover the Bare-skips-the-screen path and a typed prompt carrying
-      through to the decision. Full suite: 847 passed, 1 skipped.
-- [~] Thread the collected prompt through `_confirm_new_worktree()`'s
-      decision dict -> `picker_app.LaunchRequest` -> `_run_relocated_mux_launch()`'s
-      `args` list -> `launch-session.{ps1,sh}` -- a NEW optional argument
-      (name TBD at implementation time, e.g. `--seed-prompt`) that the
-      script forwards to whatever it ultimately execs. **Redesigned +
-      mostly implemented 2026-09-30 (see this session's Journal for the
-      full reasoning):** the operator's own question ("can this not be a
-      standard part of `agent-worktrees create`?") led to a cleaner design
-      than Picker-specific argument-threading -- see Journal for what's done
-      vs. the one remaining piece (launch-session.{ps1,sh} wiring).
+      through to the decision. Full suite: 847 passed, 1 skipped. **The
+      screen is currently gated OFF the live flow**
+      (`_SEED_PROMPT_ENABLED = False` in `engine_maintenance_actions.py`)
+      until the two seams in the next item are complete -- see there and
+      the Journal for why.
+- [~] **Persist the prompt at creation time; deliver it on first attach**
+      (current design, replacing the Picker-specific launch-script argument
+      chain originally planned here -- see the Journal for the full
+      redesign history). `agent-worktrees create`/`resolve --new` gained
+      `--seed`, persisting it as `WorktreeRecord.pending_seed` (both
+      creation call sites that matter locally; a remote `--machine` target
+      explicitly rejects the combination rather than relay it unsafely).
+      `agent-worktrees embody`/`copilot` discover and deliver a
+      `pending_seed` on the first real attach -- both when THEY create the
+      mux pane, and when some other caller (the Picker's own
+      `launch-session.{ps1,sh}`) already did, via embody's resume branch --
+      claiming (clearing) it under a race-safe write-guard immediately
+      before delivery, restoring it only on an unconfirmed delivery, and an
+      explicit `--seed` supersedes/clears any stale pending one too.
+      **Two seams still incomplete, tracked here, not elsewhere:**
+      (1) the Picker's OWN live flow never calls `resolve --new --seed`
+      (`engine_client.resolve_launch_plan()` has no `--seed` kwarg --
+      blocked on its own module-size hard cap; this is why item 2's screen
+      stays gated off), and (2) `launch-session.{ps1,sh}` itself never
+      calls `agent-worktrees embody` after creating a worktree's pane, so
+      nothing ever triggers delivery for a Picker-originated creation even
+      once seam (1) lands. Direct `agent-worktrees create --seed`/`embody`
+      usage (bypassing the Picker entirely) already works end-to-end today.
 - [ ] Confirm the end-to-end behavior matches `agent-worktrees copilot
       --seed`'s own documented contract ("Seed prompt injected as the
       session's first interactive turn once Copilot is ready") -- the

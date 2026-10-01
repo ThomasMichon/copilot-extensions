@@ -1,10 +1,8 @@
 """Submit-semantics-agnostic field-spec -> widget rendering.
 
-Mechanical extraction from ``steering.py``/``PivotFormScreen._compose_one``
-(``steering_form.py``): moved verbatim, no behavior change. This module is
-intentionally a dependency-free base layer (no import of ``.steering`` or
+A dependency-free base layer (no import of ``.steering`` or
 ``.steering_form``, which both import *from* here) -- ``PivotFormScreen``
-(the Steer surface) and any future field-spec-driven form (e.g. a plain
+(the Steer surface) and any field-spec-driven form (e.g. a plain
 creation-prompt screen that has no Confirm/Save/Reset/draft semantics at
 all) both call :func:`compose_field` to turn one field spec (``{"name",
 "type", "options", "allow_other", ...}``) into the widget(s) a caller yields

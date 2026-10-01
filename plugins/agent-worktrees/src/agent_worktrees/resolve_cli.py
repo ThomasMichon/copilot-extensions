@@ -348,6 +348,24 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     except _ResolveEarlyExit as exc:
         return exc.exit_code
 
+    if state.use_new and state.requested_machine and getattr(state.args, "seed", None):
+        # Validated here, before the JSON/non-JSON split: the non-JSON
+        # dispatcher checks state.use_new before state.requested_machine
+        # (below) and would otherwise silently create a LOCAL seeded
+        # worktree instead of honoring (or rejecting) --machine -- a
+        # confusing result regardless of --seed. The JSON path's own
+        # reason still applies too: its remote dispatch relays a naively
+        # space-joined command string with zero shell quoting, unsafe for
+        # an arbitrary --seed value.
+        message = (
+            "--seed is not yet supported for a remote --machine target; "
+            "use --seed on this machine only, or omit --machine."
+        )
+        if state.use_json:
+            return _json_error(message)
+        output.err(message)
+        return 2
+
     if (
         state.use_new
         and not state.use_json
@@ -450,14 +468,6 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         return _json_error(str(exc))
 
     if state.requested_machine:
-        if state.use_new and getattr(state.args, "seed", None):
-            return _json_error(
-                "--seed is not yet supported for a remote --machine target "
-                "(its command line is relayed as a plain space-joined "
-                "string, unsafe for a value that can contain arbitrary "
-                "text/shell metacharacters); use --seed on this machine "
-                "only, or omit --machine."
-            )
         remote_args: list[str] = []
         if state.use_base:
             remote_args.append("--base")

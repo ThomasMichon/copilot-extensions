@@ -1,6 +1,7 @@
-"""``pending_seed`` claim/restore primitives -- mechanical extraction from
-``handoff_cli.py`` purely to control its module size. Moved verbatim, no
-behavior change.
+"""Race-safe claim/restore primitives for a worktree record's
+``pending_seed`` -- the first-turn prompt persisted at creation time
+(``agent-worktrees create``/``resolve --new --seed``) and delivered by
+whichever path first attaches a live Copilot session to that worktree.
 """
 
 from __future__ import annotations
