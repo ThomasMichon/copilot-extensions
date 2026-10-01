@@ -155,7 +155,7 @@ session in the background, seeds it with the prompt, waits until it is
 registered with this bridge, and prints a JSON handle. Supported venue targets
 are `codespace:<name>`, trusted `container:<name>` (restricted containers
 deliberately refuse CLI-mode session hosting), and `ssh:<name>` where `<name>`
-is the SSH host alias accepted by `agent-ssh copilot <name>`.
+is the SSH host alias that agent-ssh's `copilot` verb accepts.
 
 ```bash
 <agent-bridge catalog argv[0]> create codespace:<name> --cli --detach \

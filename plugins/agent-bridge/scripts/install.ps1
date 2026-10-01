@@ -1203,7 +1203,7 @@ function Test-ActiveIsForward {
         if ($p -le 0) { return $false }
         if ($active.forwarded -eq $true) { return $true }
         $names = @($active.PSObject.Properties.Name)
-        return (($names -notcontains 'pid') -and ($names -notcontains 'generation'))
+        return (($names -notcontains 'pid') -and ($names -notcontains 'generation') -and ($names -notcontains 'bind'))
     } catch {
         return $false
     }

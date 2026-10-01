@@ -29,6 +29,7 @@ def _route(tmp_path, monkeypatch, active):
 
 FORWARD = {"bind": "127.0.0.1", "port": 62254, "forwarded": True}
 LEGACY_FORWARD = {"port": 62254}  # what launchers wrote before "bind"/"forwarded"
+BOUND_PIDLESS = {"bind": "127.0.0.1", "port": 62254}
 DAEMON = {"bind": "127.0.0.1", "port": 39881, "pid": 350677, "version": "0.4.4", "generation": 1}
 
 
@@ -41,6 +42,8 @@ def test_a_forwarded_route_is_recognized_and_resolved(tmp_path, monkeypatch):
 
 def test_a_daemon_published_route_is_not_a_forward(tmp_path, monkeypatch):
     _route(tmp_path, monkeypatch, DAEMON)
+    assert not m._active_endpoint_is_forward()
+    _route(tmp_path, monkeypatch, BOUND_PIDLESS)
     assert not m._active_endpoint_is_forward()
     (tmp_path / "active.json").unlink()
     assert not m._active_endpoint_is_forward()
@@ -77,7 +80,7 @@ def test_ensure_rides_out_a_blip_on_the_forward(tmp_path, monkeypatch):
 
 
 def test_ensure_still_boots_a_local_daemon_without_a_forward(tmp_path, monkeypatch):
-    _route(tmp_path, monkeypatch, DAEMON)
+    _route(tmp_path, monkeypatch, BOUND_PIDLESS)
     spawned = _ensure_setup(monkeypatch, tmp_path, answers=[False, False, True])
     monkeypatch.setattr(m, "_reconcile_live_dynamic_daemon", lambda: False)
     monkeypatch.setattr(m, "_service_process_is_live", lambda: False)
@@ -292,6 +295,35 @@ def test_direct_start_skips_instead_of_publishing_over_a_forward(tmp_path, monke
 
 
 _INSTALL_SH = Path(__file__).resolve().parents[1] / "scripts" / "install.sh"
+
+
+def _install_sh_active_is_forward(active: dict, tmp_path: Path) -> bool:
+    install_dir = tmp_path / "agent-bridge"
+    install_dir.mkdir()
+    (install_dir / "active.json").write_text(json.dumps({"active": active}))
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    fn = text.split("_active_is_forward() {", 1)[1].split("\n}\n\n_active_host", 1)[0]
+    script = (
+        f"INSTALL_DIR={install_dir!s}; VENV_DIR={tmp_path!s}/missing\n"
+        "_active_is_forward() {"
+        + fn
+        + "\n}\n_active_is_forward\n"
+    )
+    result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    return result.returncode == 0
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a POSIX bash environment is needed")
+@pytest.mark.parametrize(
+    ("active", "expected"),
+    [
+        (FORWARD, True),
+        (LEGACY_FORWARD, True),
+        (BOUND_PIDLESS, False),
+    ],
+)
+def test_install_sh_forward_classifier(active, expected, tmp_path):
+    assert _install_sh_active_is_forward(active, tmp_path) is expected
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a POSIX bash environment is needed")

@@ -69,6 +69,43 @@ def test_normal_start_publishes_bound_port_before_resolver_init(
     assert table["previous"]["port"] == 41001
 
 
+def test_normal_start_replaces_bound_pidless_route(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv(
+        "AGENT_WORKTREES_PROJECTS_YAML",
+        str(tmp_path / "nonexistent-projects.yaml"),
+    )
+    (tmp_path / "active.json").write_text(
+        '{"active":{"bind":"127.0.0.1","port":41011}}',
+        encoding="utf-8",
+    )
+
+    original_resolver = app_module.daemon_resolver
+    observed = {}
+
+    def resolver(cfg):
+        observed["table"] = routing.read_table(tmp_path)
+        return original_resolver(cfg)
+
+    monkeypatch.setattr(app_module, "daemon_resolver", resolver)
+
+    app = create_app(config=_config(tmp_path), token="test-token")
+    app.state.bound_port = 41012
+    app.state.publish_on_ready = True
+    app.state.supersession_client_factory = lambda _ep: SimpleNamespace(
+        drain=lambda **_kwargs: {"drained": True},
+        shutdown=lambda: {"shutting_down": True},
+        undrain=lambda: {"draining": False},
+    )
+
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+
+    table = observed["table"]
+    assert table["active"]["port"] == 41012
+    assert table["previous"]["port"] == 41011
+
+
 def test_passive_start_does_not_publish_before_resolver_init(
     tmp_path, monkeypatch
 ):

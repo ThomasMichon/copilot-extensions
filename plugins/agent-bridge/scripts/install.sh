@@ -658,7 +658,7 @@ PYEOF
 _active_is_forward() {
     # Whether the routing table points at a host bridge this machine only
     # forwards to (a venue launcher wrote it): marked "forwarded", or the older
-    # launcher form with a port but no daemon pid/generation. Never start a
+    # launcher form with a port but no bind/daemon pid/generation. Never start a
     # local daemon over it -- it would take the route over from the host.
     local aj="$INSTALL_DIR/active.json" py=""
     [[ -f "$aj" ]] || return 1
@@ -672,7 +672,10 @@ try:
     port = int(a.get("port") or 0)
 except Exception:
     sys.exit(1)
-fwd = a.get("forwarded") is True or (a.get("pid") is None and "generation" not in a)
+fwd = (
+    a.get("forwarded") is True
+    or (a.get("pid") is None and "generation" not in a and "bind" not in a)
+)
 sys.exit(0 if port > 0 and fwd else 1)
 PYEOF
 }

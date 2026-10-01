@@ -142,7 +142,7 @@ detached session and releases its keeper. Windows SSH targets are not supported
 yet; run the orchestrator on that machine and embody the session there locally.
 
 The remote checkout is resolved fail-closed: explicit `--workspace`, then the
-agent-ssh-owned per-host config written by
+per-host config this plugin owns, written by
 `<catalog argv[0]> copilot-config set <ssh-target> --workspace /path/to/checkout`
 (`~/.agent-ssh/copilot-hosts.json`). It does not scan the remote machine for a
 checkout. If no workspace resolves, pass `--workspace` or set the per-host

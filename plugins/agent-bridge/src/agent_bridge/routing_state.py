@@ -35,7 +35,11 @@ def active_route_is_forward(active: dict[str, Any] | None) -> bool:
         return False
     if active.get("forwarded") is True:
         return True
-    return active.get("pid") is None and "generation" not in active
+    return (
+        active.get("pid") is None
+        and "generation" not in active
+        and "bind" not in active
+    )
 
 
 def _client_host(bind: Any) -> str:

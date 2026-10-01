@@ -74,20 +74,23 @@ def _run_harness(tmp_path: Path, functions: list[str], extra: str) -> subprocess
 
 
 @pytest.mark.parametrize(
-    "active",
+    ("active", "expected"),
     [
-        {"bind": "127.0.0.1", "port": 62254, "forwarded": True},
-        {"port": 62254},
+        ({"bind": "127.0.0.1", "port": 62254, "forwarded": True}, True),
+        ({"port": 62254}, True),
+        ({"bind": "127.0.0.1", "port": 62254}, False),
     ],
 )
-def test_install_ps1_recognizes_forwarded_active_routes(tmp_path: Path, active: dict) -> None:
+def test_install_ps1_recognizes_forwarded_active_routes(
+    tmp_path: Path, active: dict, expected: bool,
+) -> None:
     _write_forward(tmp_path, active)
     result = _run_harness(
         tmp_path,
         ["Test-ActiveIsForward"],
         "Write-Host \"FORWARD=$(Test-ActiveIsForward)\"",
     )
-    assert "FORWARD=True" in result.stdout
+    assert f"FORWARD={expected}" in result.stdout
 
 
 def test_get_running_process_never_returns_forward_listener(tmp_path: Path) -> None:
