@@ -1081,6 +1081,116 @@ class TestPrMergeStatusIndeterminateVsUnmerged:
             assert finalize_open_pr_gate.pr_merge_status(record, repo) is None
 
 
+class TestRepairOtherTrackedPrHeads:
+    """#4751 round 12: content_exceeds_merged_head_any's per-branch check
+    (_cleanup_branch_refs) fails closed on ANY record.prs[*] entry missing
+    its own head_sha -- but only record.pr (the active entry) ever got a
+    repair attempt via pr_merge_status. A worktree carrying more than one
+    merged PR could never finalize even when every entry is confirmable and
+    repairable via the provider. repair_other_tracked_pr_heads (and its
+    wiring into content_exceeds_merged_head_any's optional `repo` param)
+    closes that gap.
+    """
+
+    def test_repairs_missing_head_sha_on_non_active_merged_pr(self):
+        from agent_worktrees import providers
+        from agent_worktrees.providers.github import GitHubProvider
+
+        class _Confirms(GitHubProvider):
+            def get_pull(self, repo_slug, number, *, api_base="", token=""):
+                assert (repo_slug, number) == ("owner/repo", 9)
+                return SimpleNamespace(
+                    merged=True, state="merged", head_sha="c" * 40,
+                )
+
+        active = SimpleNamespace(
+            branch="pr/active", repo="owner/repo", number=1,
+            provider="github", state="open", head_sha="a" * 40,
+        )
+        other = SimpleNamespace(
+            branch="pr/other", repo="owner/repo", number=9,
+            provider="github", state="open", head_sha="",
+        )
+        record = SimpleNamespace(pr=active, prs=[active, other])
+        repo = SimpleNamespace(pr=SimpleNamespace(provider="github", api_base=""))
+
+        with mock.patch.object(
+            providers, "get_provider", lambda _name: _Confirms(),
+        ):
+            finalize_open_pr_gate.repair_other_tracked_pr_heads(record, repo)
+
+        assert other.head_sha == "c" * 40
+        assert other.state == "merged"
+        # The active entry is untouched by this helper -- pr_merge_status
+        # (called separately by upstream_match_is_trustworthy) owns it.
+        assert active.head_sha == "a" * 40
+
+    def test_does_not_touch_entries_that_already_have_a_head_sha(self):
+        from agent_worktrees import providers
+        from agent_worktrees.providers.github import GitHubProvider
+
+        class _BoomOnQuery(GitHubProvider):
+            def get_pull(self, *_args, **_kwargs):
+                raise AssertionError("must not re-query an already-populated entry")
+
+        active = SimpleNamespace(
+            branch="pr/active", repo="owner/repo", number=1,
+            provider="github", state="open", head_sha="a" * 40,
+        )
+        other = SimpleNamespace(
+            branch="pr/other", repo="owner/repo", number=9,
+            provider="github", state="merged", head_sha="b" * 40,
+        )
+        record = SimpleNamespace(pr=active, prs=[active, other])
+        repo = SimpleNamespace(pr=SimpleNamespace(provider="github", api_base=""))
+
+        with mock.patch.object(
+            providers, "get_provider", lambda _name: _BoomOnQuery(),
+        ):
+            finalize_open_pr_gate.repair_other_tracked_pr_heads(record, repo)
+
+        assert other.head_sha == "b" * 40
+
+    def test_content_exceeds_merged_head_any_repairs_before_the_boundary_check(
+        self, refspec_worktree, monkeypatch,
+    ):
+        from agent_worktrees import providers
+        from agent_worktrees.providers.github import GitHubProvider
+
+        env = refspec_worktree
+        other_branch = "pr/other-parallel-fix"
+        _git("branch", other_branch, cwd=env.clone)
+        record, repo = _record_and_repo(env)
+        repo.pr.provider = "github"
+        repo.pr.api_base = ""
+        active_head_sha = "a" * 40
+        record.pr.head_sha = active_head_sha
+        record.pr.number = None
+        other = SimpleNamespace(
+            branch=other_branch, repo="owner/repo", number=9,
+            provider="github", state="open", head_sha="",
+        )
+        record.prs = [record.pr, other]
+
+        class _Confirms(GitHubProvider):
+            def get_pull(self, repo_slug, number, *, api_base="", token=""):
+                return SimpleNamespace(
+                    merged=True, state="merged", head_sha="b" * 40,
+                )
+
+        monkeypatch.setattr(
+            finalize_open_pr_gate, "content_exceeds_merged_head", lambda *a, **k: False,
+        )
+        with mock.patch.object(
+            providers, "get_provider", lambda _name: _Confirms(),
+        ):
+            content_ref = f"worktree/{env.worktree_id}"
+            finalize_open_pr_gate.content_exceeds_merged_head_any(
+                record, content_ref, "origin/master", cwd=str(env.clone), repo=repo,
+            )
+
+        assert other.head_sha == "b" * 40
+
 
 def test_content_exceeds_merged_head_any_checks_each_pr_branch_against_own_head(
     refspec_worktree, monkeypatch,

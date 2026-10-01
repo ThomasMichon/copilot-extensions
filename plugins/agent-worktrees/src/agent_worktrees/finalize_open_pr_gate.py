@@ -197,13 +197,45 @@ def _tracked_branch_ahead(
 
 
 def pr_merge_status(record: tracking.WorktreeRecord, repo) -> bool | None:
-    """Tri-state merge lookup: ``True`` (confirmed merged), ``False``
-    (confirmed NOT merged -- no ``pr`` at all, or NEITHER ``number`` nor
-    ``repo`` recorded, meaning a PR was never even opened -- nothing that
-    could have merged), ``None`` (indeterminate: a PR record exists with
-    identifying fields but is otherwise unqueryable -- exactly ONE of
-    ``number``/``repo`` present, or a provider/network error, #4400 rounds
-    13-14).
+    """Tri-state merge lookup for ``record.pr`` (the ACTIVE tracked PR) --
+    see :func:`_pr_entry_merge_status` for the full contract. ``False`` when
+    there is no ``pr`` at all (nothing that could have merged); otherwise
+    delegates to the entry-level lookup, which also repairs ``pr.head_sha``
+    in place on a confirmed merge.
+
+    Also best-effort repairs every OTHER tracked PR's own missing
+    ``head_sha`` (:func:`repair_other_tracked_pr_heads`) -- this is the ONE
+    call site every finalize path reaches unconditionally (``finalize.py``'s
+    ``_pr_is_merged`` always calls it before the per-branch boundary check
+    runs), so piggybacking the repair here, rather than requiring every
+    caller to remember it separately, closes the gap for all of them.
+    """
+    pr = getattr(record, "pr", None)
+    if not pr:
+        return False
+    try:
+        repair_other_tracked_pr_heads(record, repo)
+    except Exception:
+        pass
+    return _pr_entry_merge_status(pr, repo)
+
+
+def _pr_entry_merge_status(pr, repo) -> bool | None:
+    """Tri-state merge lookup for a single tracked PR entry: ``True``
+    (confirmed merged), ``False`` (confirmed NOT merged -- neither
+    ``number`` nor ``repo`` recorded, meaning a PR was never even opened --
+    nothing that could have merged), ``None`` (indeterminate: a PR record
+    exists with identifying fields but is otherwise unqueryable -- exactly
+    ONE of ``number``/``repo`` present, or a provider/network error, #4400
+    rounds 13-14).
+
+    Generalized out of :func:`pr_merge_status` (which calls this for
+    ``record.pr``, the active PR) so :func:`repair_other_tracked_pr_heads`
+    can apply the SAME authority-validated repair to every OTHER tracked PR
+    entry too -- a worktree can carry more than one tracked
+    :class:`~agent_worktrees.tracking.PRRecord` (``record.prs``), and each
+    one's own merged ``head_sha`` is needed independently by
+    ``content_exceeds_merged_head_any``'s per-branch boundary check.
 
     ``finalize._pr_is_merged`` collapses ``None`` into ``False`` for ITS OWN
     fail-closed purpose (never certify unmerged-or-unknown work safe to
@@ -216,9 +248,6 @@ def pr_merge_status(record: tracking.WorktreeRecord, repo) -> bool | None:
     unmerged would let a tree-only upstream match certify and prune a
     record whose merge boundary genuinely can't be checked.
     """
-    pr = getattr(record, "pr", None)
-    if not pr:
-        return False
     head_sha = (getattr(pr, "head_sha", "") or "").strip()
     if getattr(pr, "state", "") == "merged" and head_sha:
         return True
@@ -290,6 +319,40 @@ def pr_merge_status(record: tracking.WorktreeRecord, repo) -> bool | None:
         return None
 
 
+def repair_other_tracked_pr_heads(record: tracking.WorktreeRecord, repo) -> None:
+    """Best-effort, authority-validated repair of every OTHER tracked PR's
+    missing ``head_sha`` -- not just ``record.pr`` (the active entry).
+
+    ``upstream_match_is_trustworthy`` only ever repairs ``record.pr`` before
+    delegating to :func:`content_exceeds_merged_head_any`, which also
+    inspects every ``record.prs[*]`` branch finalize's cleanup will
+    force-delete and fails CLOSED when any such branch's own tracked PR is
+    missing ``head_sha`` (:func:`_cleanup_branch_refs`). A legacy worktree
+    carrying more than one merged PR could therefore never finalize even
+    when every one of them is confirmable and repairable via the provider --
+    only the active entry ever got the repair attempt. Call this before the
+    boundary check so each OTHER entry gets the same chance.
+
+    Mutates each repairable entry's ``head_sha``/``state`` in place via
+    :func:`_pr_entry_merge_status` (same authority validation, same
+    provider/network error handling). Never raises; a per-entry failure
+    just leaves that entry's local state untouched, to be caught by the
+    existing fail-closed boundary check.
+    """
+    active = getattr(record, "pr", None)
+    for entry in getattr(record, "prs", None) or []:
+        if entry is active:
+            continue
+        if (getattr(entry, "head_sha", "") or "").strip():
+            continue
+        if not getattr(entry, "number", None) or not (getattr(entry, "repo", "") or ""):
+            continue
+        try:
+            _pr_entry_merge_status(entry, repo)
+        except Exception:
+            pass
+
+
 def upstream_match_is_trustworthy(
     record: tracking.WorktreeRecord, content_ref: str | None, upstream: str, *, cwd: str, repo,
 ) -> bool:
@@ -344,7 +407,9 @@ def upstream_match_is_trustworthy(
             return not other_pr_branches_unreachable_from_upstream(
                 record, upstream, cwd=cwd,
             )
-    return not content_exceeds_merged_head_any(record, content_ref, upstream, cwd=cwd)
+    return not content_exceeds_merged_head_any(
+        record, content_ref, upstream, cwd=cwd, repo=repo,
+    )
 
 
 def other_pr_branches_unreachable_from_upstream(
@@ -496,7 +561,8 @@ def content_exceeds_merged_head(
 
 
 def content_exceeds_merged_head_any(
-    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str, *, cwd: str,
+    record: tracking.WorktreeRecord, content_ref: str | None, upstream: str, *,
+    cwd: str, repo=None,
 ) -> bool:
     """True iff ``content_ref`` OR any branch finalize's cleanup will
     force-delete carries commits beyond ITS OWN corresponding PR's merged
@@ -512,10 +578,22 @@ def content_exceeds_merged_head_any(
     THAT PR's own ``head_sha`` (never the active PR's, round 14) -- sharing
     one boundary across unrelated PRs can mask real content via unrelated
     ancestry. A tracked branch with no ``head_sha`` to validate against
-    fails closed.
+    fails closed -- UNLESS that missing ``head_sha`` can itself be repaired
+    first: when ``repo`` is supplied, :func:`repair_other_tracked_pr_heads`
+    attempts a provider-confirmed repair of every OTHER tracked PR's
+    missing ``head_sha`` before the per-branch check runs, so a worktree
+    carrying more than one merged PR isn't permanently blocked here just
+    because a non-active entry's cached head was never populated.
+    ``repo`` is optional (defaults to ``None``, skipping the repair) so
+    callers that already know no repair is possible/needed can omit it.
     """
     if content_ref is None:
         return True
+    if repo is not None:
+        try:
+            repair_other_tracked_pr_heads(record, repo)
+        except Exception:
+            pass
     if content_exceeds_merged_head(record, content_ref, upstream, cwd=cwd):
         return True
     from . import git_ops
