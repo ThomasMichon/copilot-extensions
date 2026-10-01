@@ -334,6 +334,14 @@ def _pr_claim_target(
     ):
         if len(parts) < 4 or parts[-2] != "pull" or not parts[-1].isdigit():
             return None
+        if not api_base and host == "github.com" and (
+            parsed.scheme != "https"
+            or parsed.netloc.casefold() != "github.com"
+            or len(parts) != 4
+            or parsed.query
+            or parsed.fragment
+        ):
+            return None
         repo_parts = parts[-4:-2]
         if len(repo_parts) != 2:
             return None

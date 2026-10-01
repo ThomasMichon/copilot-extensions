@@ -183,6 +183,22 @@ def test_pr_claim_target_rejects_unconfigured_github_enterprise_host():
     ) is None
 
 
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "https://github.com:8443/owner/project/pull/42",
+        "https://github.com/prefix/owner/project/pull/42",
+        "https://github.com/owner/project/pull/42/extra",
+        "http://github.com/owner/project/pull/42",
+        "https://github.com/owner/project/pull/42?redirect=elsewhere",
+        "https://github.com/owner/project/pull/42#comment",
+    ],
+)
+def test_pr_claim_target_rejects_noncanonical_public_github_urls(ref):
+    prcfg = types.SimpleNamespace(provider="github", api_base="")
+    assert cleanup._pr_claim_target(ref, prcfg) is None
+
+
 def test_pr_claim_target_rejects_unqualified_and_credentialed_urls():
     prcfg = types.SimpleNamespace(provider="github", api_base="")
     assert cleanup._pr_claim_target("#42", prcfg) is None
