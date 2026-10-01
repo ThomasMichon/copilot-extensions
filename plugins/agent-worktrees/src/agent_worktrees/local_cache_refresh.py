@@ -20,9 +20,24 @@ alone never selects a runtime" invariant, the sibling's root is resolved
 through ``plugin_activation.resolve_active_plugins()`` -- the same
 identity-verified active-plugin evidence ``claim_providers.py`` uses for
 its own sibling callbacks -- never by trusting a directory merely because
-it contains a ``plugin.json`` self-declaring the expected name. Missing or
-ambiguous provenance fails closed: no script is resolved, and the refresh
-is silently skipped for that round.
+it contains a ``plugin.json`` self-declaring the expected name. Only the
+plugin's **global** activation scope is ever trusted -- never a project-
+scoped override, which the resolver aggregates from every agent-worktrees-
+registered project and could otherwise supply an unrelated project's
+locally-overridden copy of customizing-copilot to a session in a
+different repo entirely. Missing or ambiguous provenance (zero, or more
+than one, matching active plugin) fails closed: no script is resolved,
+and the refresh is silently skipped for that round.
+
+That resolution call itself runs in its own bounded subprocess (``python
+-m agent_worktrees.local_cache_refresh <home>``, this module's own
+entry point below) -- never in-process, and never on a bare Python
+thread -- because ``resolve_active_plugins()`` can spawn Git child
+processes verifying registered projects; only a real process-tree kill
+(``push_timeout.run_bounded``, the same mechanism the render step uses)
+can guarantee those descendants don't outlive a timeout. A thread's own
+``join(timeout)`` cannot cancel work already in flight inside it, so it
+can only abandon the wait, never the underlying Git children.
 
 Every entry point here is deliberately best-effort and silent: customizing-
 copilot not being installed, the repo not yet being a trusted folder, a
@@ -58,7 +73,9 @@ SESSIONSTART_MAX_TIMEOUT_S = 5.0
 # push_timeout.run_bounded's own timeout path kills the whole process tree,
 # then waits up to this much longer for the pipes to drain before giving up
 # (see push_timeout.py) -- wall-clock on top of the subprocess timeout
-# itself that a deadline-derived budget must also reserve.
+# itself that a deadline-derived budget must also reserve. refresh_local_
+# cache runs TWO such bounded subprocesses in sequence (resolution, then
+# render), so a deadline-derived budget must reserve this grace TWICE.
 _RUN_BOUNDED_CLEANUP_GRACE_S = 5.0
 # resolve_active_plugins() verifies every agent-worktrees-registered
 # project with its own pair of Git calls (each up to a 10s timeout) before
@@ -71,7 +88,34 @@ _RESOLUTION_TIMEOUT_S = 2.0
 _GLOBAL_SCOPE = "global"
 
 
-def _resolve_cli_script(home: Path, *, timeout: float | None = None) -> Path | None:
+def _select_global_root(home: Path) -> Path | None:
+    """Return the identity-verified, global-scope-only root for
+    ``_SIBLING_PLUGIN_NAME``, or ``None`` when zero or more than one
+    active plugin matches -- failing closed on missing or ambiguous
+    provenance, never picking one arbitrarily. Runs in-process: this
+    function is only ever invoked from this module's own bounded
+    subprocess entry point (``__main__`` below), never directly from a
+    deadline-bound caller, since ``resolve_active_plugins()`` can itself
+    block on registered-project Git verification with no bound of its
+    own.
+    """
+    try:
+        from plugin_activation import resolve_active_plugins
+
+        report = resolve_active_plugins(home=home)
+    except Exception:
+        return None
+    candidate_roots = [
+        root
+        for plugin in report.active.values()
+        if plugin.name == _SIBLING_PLUGIN_NAME
+        for root in [plugin.root_for_scope(_GLOBAL_SCOPE)]
+        if root is not None
+    ]
+    return candidate_roots[0] if len(candidate_roots) == 1 else None
+
+
+def _resolve_cli_script(home: Path, *, timeout: float) -> Path | None:
     """Resolve customizing-copilot's ``render-local-cache`` CLI script
     through identity-verified active-plugin evidence, never a bare
     directory scan: a self-declared ``plugin.json`` name alone is not
@@ -79,57 +123,26 @@ def _resolve_cli_script(home: Path, *, timeout: float | None = None) -> Path | N
     cells.md``), so a stale or unrelated directory must never be trusted
     to supply code this module goes on to execute.
 
-    Only the plugin's **global** activation scope is ever trusted here --
-    never a project-scoped override, which `resolve_active_plugins()`
-    aggregates from every agent-worktrees-registered project and can
-    otherwise supply an unrelated project's locally-overridden copy of
-    customizing-copilot (a real cross-repo contamination risk: this
-    refresh must only ever run the one machine-wide install, regardless
-    of which repo it's invoked for). Returns ``None`` -- failing closed --
-    when customizing-copilot isn't resolved as an active plugin at that
-    scope, when more than one active plugin claims the name (an ambiguous
-    identity resolution picking one would be unsafe to trust), its script
-    isn't present at the reported root, or resolution itself doesn't
-    complete within ``timeout`` (when given).
+    Runs ``_select_global_root`` in its own bounded subprocess (see the
+    module docstring for why) rather than calling it in-process. Returns
+    ``None`` -- failing closed -- when customizing-copilot isn't resolved
+    at the global scope (or is ambiguous -- see ``_select_global_root``),
+    its script isn't present at the reported root, or resolution itself
+    doesn't complete within ``timeout``.
     """
     try:
-        from plugin_activation import resolve_active_plugins
+        from . import push_timeout
+
+        result = push_timeout.run_bounded(
+            [sys.executable, "-m", "agent_worktrees.local_cache_refresh", str(home)],
+            cwd=None, env=dict(os.environ), timeout=timeout,
+        )
     except Exception:
         return None
-
-    if timeout is None:
-        try:
-            report = resolve_active_plugins(home=home)
-        except Exception:
-            return None
-    else:
-        import threading
-
-        outcome: list = [None, None]  # [report, exception]
-
-        def _resolve() -> None:
-            try:
-                outcome[0] = resolve_active_plugins(home=home)
-            except Exception as exc:  # noqa: BLE001 -- captured, re-raised never
-                outcome[1] = exc
-
-        thread = threading.Thread(target=_resolve, daemon=True)
-        thread.start()
-        thread.join(timeout)
-        if thread.is_alive() or outcome[1] is not None or outcome[0] is None:
-            return None
-        report = outcome[0]
-
-    candidate_roots: list[Path] = []
-    for plugin in report.active.values():
-        if plugin.name != _SIBLING_PLUGIN_NAME:
-            continue
-        root = plugin.root_for_scope(_GLOBAL_SCOPE)
-        if root is not None:
-            candidate_roots.append(root)
-    if len(candidate_roots) != 1:
+    output = (result.stdout or "").strip()
+    if not output:
         return None
-    script = candidate_roots[0] / _SIBLING_RELATIVE_SCRIPT
+    script = Path(output) / _SIBLING_RELATIVE_SCRIPT
     return script if script.is_file() else None
 
 
@@ -174,18 +187,19 @@ def refresh_local_cache(
     ``sessionStart``) -- never conditionally skip it on the caller's own
     error-handling grounds; let this function's own internal absorption
     handle every failure mode. ``timeout`` is the hard, enforced ceiling
-    on this call's **entire** cost, split between two bounded steps:
-    resolving the sibling's CLI script (capped at
-    ``_RESOLUTION_TIMEOUT_S``, since ``resolve_active_plugins()`` can
-    itself block on registered-project Git verification) and invoking it
-    as a subprocess for whatever of ``timeout`` remains. Run via
+    on this call's **own** cost (not counting ``push_timeout.run_
+    bounded``'s own cleanup grace -- see ``_RUN_BOUNDED_CLEANUP_GRACE_S``),
+    split between two sequential bounded subprocesses: resolving the
+    sibling's CLI script (capped at ``_RESOLUTION_TIMEOUT_S``) and
+    invoking it for whatever of ``timeout`` remains. Both run via
     ``push_timeout.run_bounded`` rather than a plain ``subprocess.run(
-    timeout=...)``, which only terminates its direct child -- the CLI can
-    itself spawn descendants (an ``agent-worktrees`` lookup, git probes),
-    which a bare ``timeout=`` would leave running past a stall.
-    ``run_bounded`` kills the whole process tree instead. A timeout (or
-    any other failure) at either step simply means the refresh doesn't
-    complete this round -- never worse than not calling it at all.
+    timeout=...)``, which only terminates its direct child -- both the
+    resolver and the CLI can spawn descendants (Git child processes, an
+    ``agent-worktrees`` lookup), which a bare ``timeout=`` would leave
+    running past a stall. ``run_bounded`` kills each whole process tree
+    instead. A timeout (or any other failure) at either step simply means
+    the refresh doesn't complete this round -- never worse than not
+    calling it at all.
     """
     home = home or Path.home()
     try:
@@ -238,19 +252,34 @@ def sessionstart_diagnostic(cwd: str, *, deadline: float | None) -> None:
     lifecycle response to miss the resident hook server's deadline --
     skipped entirely once too little budget remains to be worth
     attempting. The reserved margin also covers
-    ``_RUN_BOUNDED_CLEANUP_GRACE_S``, the extra wall-clock
-    ``push_timeout.run_bounded`` itself can spend past its own ``timeout``
-    draining a killed process's pipes -- not just the subprocess timeout
-    passed to it.
+    ``_RUN_BOUNDED_CLEANUP_GRACE_S`` **twice** -- once for each of the two
+    sequential bounded subprocesses ``refresh_local_cache`` runs
+    (resolution, then render), since either one can independently spend
+    that much extra wall-clock past its own ``timeout`` draining a killed
+    process's pipes.
     """
     try:
         if deadline is None:
             timeout = SESSIONSTART_MAX_TIMEOUT_S
         else:
-            budget = deadline - time.time() - _RUN_BOUNDED_CLEANUP_GRACE_S - 1.0
+            budget = (
+                deadline - time.time() - (2 * _RUN_BOUNDED_CLEANUP_GRACE_S) - 1.0
+            )
             if budget < 2.0:
                 return
             timeout = min(budget, SESSIONSTART_MAX_TIMEOUT_S)
         refresh_local_cache(cwd, timeout=timeout)
     except Exception:
         pass
+
+
+if __name__ == "__main__":
+    # Subprocess entry point for `_resolve_cli_script` (``python -m
+    # agent_worktrees.local_cache_refresh <home>``): print the resolved
+    # root, or an empty line when none (or ambiguously many) resolve.
+    # Deliberately minimal and crash-free -- a bare `print('')` on any
+    # unexpected argv shape, never a traceback a caller would need to
+    # parse out of stderr.
+    _home = Path(sys.argv[1]) if len(sys.argv) > 1 else Path.home()
+    _root = _select_global_root(_home)
+    print(str(_root) if _root is not None else "")

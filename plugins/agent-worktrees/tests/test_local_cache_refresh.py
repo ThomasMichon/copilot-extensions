@@ -25,9 +25,13 @@ from agent_worktrees import local_cache_refresh as lcr
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
-class TestResolveCliScript:
+class TestSelectGlobalRoot:
+    """Direct, in-process tests of the pure resolution/filtering logic
+    ``_resolve_cli_script``'s subprocess entry point calls. See
+    ``TestResolveCliScript`` for the subprocess-wiring coverage."""
+
     def test_returns_none_when_not_installed(self, tmp_path: Path) -> None:
-        assert lcr._resolve_cli_script(tmp_path) is None
+        assert lcr._select_global_root(tmp_path) is None
 
     def _fake_plugin(self, name: str, *, global_root: Path | None = None) -> SimpleNamespace:
         def _root_for_scope(scope: str) -> Path | None:
@@ -35,24 +39,15 @@ class TestResolveCliScript:
 
         return SimpleNamespace(name=name, root_for_scope=_root_for_scope)
 
-    def test_finds_the_script_at_an_identity_verified_global_root(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
+    def test_finds_the_global_scope_root(self, tmp_path: Path, monkeypatch) -> None:
         plugin_root = tmp_path / "customizing-copilot"
-        scripts_dir = (
-            plugin_root / "skills" / "reviewing-customizations" / "scripts"
-        )
-        scripts_dir.mkdir(parents=True)
-        script = scripts_dir / "manage-instruction-projections.py"
-        script.write_text("", encoding="utf-8")
-
         fake_plugin = self._fake_plugin("customizing-copilot", global_root=plugin_root)
         fake_report = SimpleNamespace(active={"customizing-copilot@local": fake_plugin})
         monkeypatch.setattr(
             "plugin_activation.resolve_active_plugins", lambda **k: fake_report
         )
 
-        assert lcr._resolve_cli_script(tmp_path) == script
+        assert lcr._select_global_root(tmp_path) == plugin_root
 
     def test_ignores_an_active_plugin_with_a_different_name(
         self, tmp_path: Path, monkeypatch
@@ -63,7 +58,7 @@ class TestResolveCliScript:
             "plugin_activation.resolve_active_plugins", lambda **k: fake_report
         )
 
-        assert lcr._resolve_cli_script(tmp_path) is None
+        assert lcr._select_global_root(tmp_path) is None
 
     def test_ignores_a_project_scoped_override_never_trusting_non_global_roots(
         self, tmp_path: Path, monkeypatch
@@ -81,7 +76,7 @@ class TestResolveCliScript:
             "plugin_activation.resolve_active_plugins", lambda **k: fake_report
         )
 
-        assert lcr._resolve_cli_script(tmp_path) is None
+        assert lcr._select_global_root(tmp_path) is None
 
     def test_fails_closed_when_multiple_active_plugins_share_the_name(
         self, tmp_path: Path, monkeypatch
@@ -105,21 +100,7 @@ class TestResolveCliScript:
             "plugin_activation.resolve_active_plugins", lambda **k: fake_report
         )
 
-        assert lcr._resolve_cli_script(tmp_path) is None
-
-    def test_fails_closed_when_the_reported_root_has_no_script(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
-        """An active-plugin match whose reported root doesn't actually
-        contain the expected script (a stale or mismatched report) must
-        never fall back to trusting anything else -- fail closed."""
-        fake_plugin = self._fake_plugin("customizing-copilot", global_root=tmp_path)
-        fake_report = SimpleNamespace(active={"customizing-copilot@local": fake_plugin})
-        monkeypatch.setattr(
-            "plugin_activation.resolve_active_plugins", lambda **k: fake_report
-        )
-
-        assert lcr._resolve_cli_script(tmp_path) is None
+        assert lcr._select_global_root(tmp_path) is None
 
     def test_never_raises_when_resolution_itself_fails(
         self, tmp_path: Path, monkeypatch
@@ -129,29 +110,102 @@ class TestResolveCliScript:
 
         monkeypatch.setattr("plugin_activation.resolve_active_plugins", _boom)
 
-        assert lcr._resolve_cli_script(tmp_path) is None
+        assert lcr._select_global_root(tmp_path) is None
 
-    def test_fails_closed_when_resolution_exceeds_the_given_timeout(
+
+class TestResolveCliScript:
+    """Subprocess-wiring tests for ``_resolve_cli_script``: it runs
+    ``_select_global_root`` out-of-process (see the module docstring for
+    why), so these tests mock ``push_timeout.run_bounded`` rather than
+    ``plugin_activation.resolve_active_plugins`` directly -- that logic
+    has its own direct coverage in ``TestSelectGlobalRoot``."""
+
+    def test_finds_the_script_when_the_subprocess_reports_a_root(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        """``resolve_active_plugins()`` can itself block on registered-
-        project Git verification; a bound that's exceeded must fail
-        closed rather than wait indefinitely for a slow or unreachable
-        registered project."""
-        import threading
+        plugin_root = tmp_path / "customizing-copilot"
+        scripts_dir = (
+            plugin_root / "skills" / "reviewing-customizations" / "scripts"
+        )
+        scripts_dir.mkdir(parents=True)
+        script = scripts_dir / "manage-instruction-projections.py"
+        script.write_text("", encoding="utf-8")
 
-        release = threading.Event()
+        from agent_worktrees import push_timeout
 
-        def _slow(**k):
-            release.wait(10)
-            return SimpleNamespace(active={})
+        monkeypatch.setattr(
+            push_timeout, "run_bounded",
+            lambda *a, **k: SimpleNamespace(stdout=f"{plugin_root}\n"),
+        )
 
-        monkeypatch.setattr("plugin_activation.resolve_active_plugins", _slow)
+        assert lcr._resolve_cli_script(tmp_path, timeout=5.0) == script
 
-        try:
-            assert lcr._resolve_cli_script(tmp_path, timeout=0.1) is None
-        finally:
-            release.set()
+    def test_fails_closed_when_the_subprocess_reports_nothing(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from agent_worktrees import push_timeout
+
+        monkeypatch.setattr(
+            push_timeout, "run_bounded", lambda *a, **k: SimpleNamespace(stdout="\n"),
+        )
+
+        assert lcr._resolve_cli_script(tmp_path, timeout=5.0) is None
+
+    def test_fails_closed_when_the_reported_root_has_no_script(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """A reported root that doesn't actually contain the expected
+        script (a stale or mismatched report) must never fall back to
+        trusting anything else -- fail closed."""
+        from agent_worktrees import push_timeout
+
+        monkeypatch.setattr(
+            push_timeout, "run_bounded",
+            lambda *a, **k: SimpleNamespace(stdout=f"{tmp_path}\n"),
+        )
+
+        assert lcr._resolve_cli_script(tmp_path, timeout=5.0) is None
+
+    def test_never_raises_when_the_subprocess_call_fails(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from agent_worktrees import push_timeout
+
+        def _boom(*a, **k):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(push_timeout, "run_bounded", _boom)
+
+        assert lcr._resolve_cli_script(tmp_path, timeout=5.0) is None
+
+    def test_fails_closed_on_a_resolution_timeout(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """A resolution subprocess that exceeds its own bound must fail
+        closed -- ``push_timeout.run_bounded`` already kills the whole
+        process tree on a stall, so this only needs to prove the raised
+        ``TimeoutExpired`` is absorbed, never surfaced."""
+        import subprocess
+
+        from agent_worktrees import push_timeout
+
+        def _timeout(*a, **k):
+            raise subprocess.TimeoutExpired(cmd="x", timeout=1)
+
+        monkeypatch.setattr(push_timeout, "run_bounded", _timeout)
+
+        assert lcr._resolve_cli_script(tmp_path, timeout=0.1) is None
+
+    def test_real_subprocess_round_trip_against_an_empty_home(
+        self, tmp_path: Path
+    ) -> None:
+        """Real, non-mocked round trip through ``push_timeout.run_
+        bounded`` and the actual ``python -m agent_worktrees.local_cache_
+        refresh`` subprocess entry point, proving the module is genuinely
+        importable and runnable that way (not just as a library) -- an
+        empty home with nothing installed resolves to nothing."""
+        assert lcr._resolve_cli_script(tmp_path, timeout=30.0) is None
+
 
 
 class TestResolveOwnAgentWorktreesCommand:
@@ -480,9 +534,10 @@ class TestSessionstartDiagnostic:
     ) -> None:
         """Less deadline budget than the max timeout shrinks the bound to
         what actually remains -- after reserving margin for
-        ``push_timeout.run_bounded``'s own post-kill cleanup wait, not
-        just the subprocess timeout itself -- rather than risking the
-        shared lifecycle deadline."""
+        ``push_timeout.run_bounded``'s own post-kill cleanup wait TWICE
+        (once per sequential bounded subprocess), not just the subprocess
+        timeout itself -- rather than risking the shared lifecycle
+        deadline."""
         import time
 
         calls = []
@@ -492,7 +547,7 @@ class TestSessionstartDiagnostic:
             lambda repo_root, **k: calls.append(k.get("timeout")),
         )
 
-        lcr.sessionstart_diagnostic(str(tmp_path), deadline=time.time() + 9.0)
+        lcr.sessionstart_diagnostic(str(tmp_path), deadline=time.time() + 14.0)
 
         assert len(calls) == 1
         assert 2.0 <= calls[0] < lcr.SESSIONSTART_MAX_TIMEOUT_S

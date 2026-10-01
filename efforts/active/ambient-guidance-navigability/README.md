@@ -923,6 +923,41 @@ _Pending._
     `test_paired_carve.py`, `test_launch_project_scoping.py`,
     `test_git_ops.py`): 222 passed, 4 skipped. `tools/check-module-
     size.py` and `tools/check-docs-consistency.py` both clean.
+- **Review round 9 finding (PR #4809):** round 8's own daemon-thread fix
+  was itself wrong, for the same class of reason round 4's daemon-thread
+  fix was wrong. `thread.join(timeout)` only stops *waiting*; it never
+  cancels the thread's own in-flight work, so a slow `resolve_active_
+  plugins()` call keeps running its Git child processes to completion
+  regardless, and the resident hook server accepts concurrent requests
+  on separate threads -- so repeated `sessionStart` calls could
+  accumulate abandoned resolver threads and orphaned Git children
+  indefinitely, long after their own 2-second budgets had expired.
+  `daemon=True` only changes process-*shutdown* behavior, not whether the
+  thread's own children get reaped mid-session. Fixed by retiring the
+  threading approach entirely: resolution now runs in its own bounded
+  subprocess via `push_timeout.run_bounded` (the exact mechanism the
+  render step already used), invoked as `python -m agent_worktrees.
+  local_cache_refresh <home>` -- a real self-contained subprocess entry
+  point this module now exposes, printing the resolved root (or nothing)
+  to stdout. A timeout here hits the same process-tree kill the render
+  step's own timeout does, so no orphaned Git child can outlive it. The
+  pure selection/filtering logic (global-scope-only trust, exactly-one-
+  match requirement) was extracted into a directly unit-testable
+  `_select_global_root()`, keeping the previous round's fast logic-level
+  tests intact while `_resolve_cli_script`'s own tests now mock
+  `push_timeout.run_bounded` instead of `plugin_activation.resolve_
+  active_plugins` directly (plus one real, non-mocked subprocess round
+  trip proving the new entry point actually runs). `sessionstart_
+  diagnostic`'s deadline budget now reserves `_RUN_BOUNDED_CLEANUP_
+  GRACE_S` **twice** (once per sequential bounded subprocess -- resolution,
+  then render -- since either can independently overrun its own timeout
+  during cleanup), not once. No explicit coalescing lock was added for
+  concurrent calls: unlike the thread-based approach, each call's
+  resolution subprocess is now independently bounded and guaranteed
+  torn down by the OS-level tree-kill at its own timeout, so there is no
+  unbounded accumulation left to coalesce against. Targeted suite:
+  226 passed, 4 skipped. `tools/check-module-size.py` and `tools/check-
+  docs-consistency.py` both clean.
 
 ### 2026-10-01 -- Phase 7 slice 4: the repo-wide catch-all static projection
 - Picked up the next unstarted Plan item (slice 3's steer): `customizing-

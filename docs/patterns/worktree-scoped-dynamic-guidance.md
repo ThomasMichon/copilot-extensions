@@ -137,8 +137,16 @@ active-plugin evidence `claim_providers.py` uses for its own sibling
 callbacks -- rather than trusting a directory merely because it
 self-declares the expected name in a `plugin.json`, per
 [`marketplace-installation-cells.md`](marketplace-installation-cells.md)'s
-"plugin name alone never selects a runtime" invariant; missing or
-ambiguous provenance fails closed.
+"plugin name alone never selects a runtime" invariant; only the plugin's
+**global** activation scope is trusted (never a project-scoped override,
+which could otherwise let one repo's local dev override of
+customizing-copilot execute against an unrelated repo's worktree), and
+missing or ambiguous provenance (zero, or more than one, matching active
+plugin) fails closed. This resolution step itself runs in its own
+bounded subprocess (`python -m agent_worktrees.local_cache_refresh
+<home>`) rather than in-process or on a bare thread, since the resolver
+can spawn Git child processes verifying registered projects that only a
+real process-tree kill can guarantee don't outlive a timeout.
 `worktree_creation._create_worktree_core` and
 `resolve_launch_cli._resolve_resume_context` (skipped on `--dry-run`) both
 call it at exactly the point described above. Fully best-effort: customizing-
