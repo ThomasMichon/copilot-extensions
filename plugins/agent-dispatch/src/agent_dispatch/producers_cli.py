@@ -188,6 +188,8 @@ def _cmd_schedule(args: argparse.Namespace) -> int:
 def _cmd_emitter(args: argparse.Namespace) -> int:
     from .producers import emitter
 
+    if args.emitter_command == "receipts":
+        return _emit(emitter.read_receipts(args.emitter_id, since=args.since))
     if args.emitter_command == "side-load":
         try:
             with _client(args) as client:
@@ -405,6 +407,18 @@ def register_producer_commands(subparsers: Any) -> None:
     ep.add_argument(
         "--env",
         help="registration environment (default: AGENT_DISPATCH_ENV or 'default')",
+    )
+    ep.set_defaults(func=_cmd_emitter)
+    ep = emitter_sub.add_parser(
+        "receipts",
+        help="read durable receipts (dedup_key -> created task id) for one emitter id",
+    )
+    ep.add_argument("emitter_id", help="the emitter's declared 'id'")
+    ep.add_argument(
+        "--since",
+        type=int,
+        default=0,
+        help="cursor from a prior read; only receipts with a higher seq are returned",
     )
     ep.set_defaults(func=_cmd_emitter)
 

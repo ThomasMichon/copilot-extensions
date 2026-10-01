@@ -177,6 +177,108 @@ def _author_tasks(
     return created
 
 
+# Receipts: a durable, per-emitter record of every task a command-emitter
+# caused to be created (keyed by the same ``dedup_key`` it emitted), so the
+# domain's own command can learn the resulting dispatch task id on a LATER
+# invocation -- `_author_tasks`'s ``created`` list otherwise exists for
+# exactly one tick and is then gone (see the `agent-dispatch-emitter-receipts`
+# effort). Keyed by the emitter's declared ``id`` under the shared install
+# root (``install_dir()``) rather than a path next to its spec FILE: a
+# side-loaded emitter's spec lives only inside a coordinator registration,
+# with no local file to sit beside, so an id-keyed location is the one sink
+# both the ``tick``/``serve`` and ``side-load`` paths can share.
+
+
+def _sanitized_emitter_id(emitter_id: str) -> str:
+    """A filesystem-safe directory name for one emitter id."""
+    return "".join(c if c.isalnum() or c in "-_." else "_" for c in emitter_id)
+
+
+def receipts_path(emitter_id: str) -> Path:
+    """Return the durable receipts sidecar path for one emitter id."""
+    from ..install_paths import install_dir
+
+    return (
+        install_dir() / "emitters" / _sanitized_emitter_id(emitter_id) / "receipts.jsonl"
+    )
+
+
+DEFAULT_MAX_RECEIPTS = 2000
+
+
+def _read_receipt_lines(path: Path) -> list[str]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return []
+    return [line for line in text.splitlines() if line.strip()]
+
+
+def _append_receipts(
+    emitter_id: str,
+    created: list[dict[str, Any]],
+    *,
+    tick_id: str | None = None,
+    clock: Callable[[], float] = time.time,
+    max_receipts: int = DEFAULT_MAX_RECEIPTS,
+) -> None:
+    """Append one durable receipt per created task, then bound the log.
+
+    Each receipt carries a strictly-increasing ``seq`` so a reader's cursor
+    stays valid across a later trim (a trim only drops already-old records;
+    it never renumbers the ones that remain) -- unlike a line-position
+    cursor, which a trim would silently invalidate.
+    """
+    if not created:
+        return
+    path = receipts_path(emitter_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = _read_receipt_lines(path)
+    next_seq = json.loads(existing[-1])["seq"] + 1 if existing else 1
+    now = clock()
+    new_lines = []
+    for task in created:
+        record = {
+            "seq": next_seq,
+            "ts": now,
+            "tick_id": tick_id,
+            "dedup_key": task.get("dedup_key"),
+            "task_id": task.get("id"),
+            "status": task.get("status"),
+        }
+        new_lines.append(json.dumps(record, separators=(",", ":"), sort_keys=True))
+        next_seq += 1
+    all_lines = existing + new_lines
+    if len(all_lines) > max_receipts:
+        all_lines = all_lines[-max_receipts:]
+    path.write_text("\n".join(all_lines) + "\n", encoding="utf-8")
+
+
+def read_receipts(
+    emitter_id: str,
+    *,
+    since: int = 0,
+) -> dict[str, Any]:
+    """Return receipts with ``seq > since`` and the cursor for the next read.
+
+    ``since`` defaults to 0 (read everything recorded so far). The returned
+    ``cursor`` is the highest ``seq`` seen -- pass it back as ``since`` on the
+    next call to read only new receipts. A cursor is stable even if the log
+    has since been trimmed: trimming only drops already-consumed low-``seq``
+    records, it never reuses or shifts a ``seq`` value.
+    """
+    path = receipts_path(emitter_id)
+    lines = _read_receipt_lines(path)
+    records = [json.loads(line) for line in lines]
+    new_records = [r for r in records if int(r.get("seq") or 0) > since]
+    cursor = max((int(r.get("seq") or 0) for r in records), default=since)
+    return {"receipts": new_records, "cursor": cursor}
+
+
+
+RECEIPTS_PATH_ENV = "AGENT_DISPATCH_EMITTER_RECEIPTS_PATH"
+
+
 def run_side_load(
     client: DispatchClient,
     registration: dict[str, Any],
@@ -209,7 +311,11 @@ def run_side_load(
     completed = runner(
         _render_command(side_load["command"], change_ref=change_ref),
         cwd=spec.get("cwd"),
-        env={**os.environ, **(spec.get("env") or {})},
+        env={
+            **os.environ,
+            **(spec.get("env") or {}),
+            RECEIPTS_PATH_ENV: str(receipts_path(spec["id"])),
+        },
         timeout=spec.get("timeout_seconds"),
         check=False,
         capture_output=True,
@@ -222,6 +328,7 @@ def run_side_load(
             f"{str(completed.stderr or '').strip()}"
         )
     created = _author_tasks(client, spec, str(completed.stdout or ""))
+    _append_receipts(spec["id"], created, tick_id=f"side-load:{change_ref}")
     return {
         "registration_id": registration.get("id"),
         "emitter_id": spec["id"],
@@ -255,9 +362,11 @@ def run_tick(
             "created": [],
         }
 
-    env = None
-    if spec.get("env"):
-        env = {**os.environ, **spec["env"]}
+    env = {
+        **os.environ,
+        **(spec.get("env") or {}),
+        RECEIPTS_PATH_ENV: str(receipts_path(spec["id"])),
+    }
     started_at = clock()
     try:
         if spec.get("repository_issue_loop") is not None:
@@ -309,6 +418,7 @@ def run_tick(
             if returncode == 0 and task_output_json
             else []
         )
+        _append_receipts(spec["id"], created, tick_id=f"{holder}:{started_at}", clock=clock)
     except subprocess.TimeoutExpired as exc:
         returncode = None
         error = f"timed out after {exc.timeout}s"
