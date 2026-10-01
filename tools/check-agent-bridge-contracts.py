@@ -75,6 +75,7 @@ _HTTP_CAPABILITY_CONSTANTS = {
     "remote_operations": "REMOTE_OPERATIONS_PROTOCOL_VERSION",
     "conditional_idle_end": "CONDITIONAL_IDLE_END_PROTOCOL_VERSION",
     "dispatch_task_session": "DISPATCH_TASK_SESSION_PROTOCOL_VERSION",
+    "cli_mode_unclaimed_release": "CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION",
 }
 _FETCH_RECOVERY_ATTEMPTED = False
 _MAIN_REFSPEC = "+refs/heads/main:refs/remotes/origin/main"

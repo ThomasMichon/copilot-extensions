@@ -9,7 +9,7 @@
   },
   "declared_range": {
     "minimum": 1,
-    "current": 19
+    "current": 20
   },
   "capability_versions": {
     "relay_interrupt": 2,
@@ -28,6 +28,7 @@
     "dispatch_task_session": 15,
     "bare_session_transcript": 17,
     "remote_session_copilot_args": 18,
-    "live_session_mode": 19
+    "live_session_mode": 19,
+    "cli_mode_unclaimed_release": 20
   }
 }

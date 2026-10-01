@@ -167,7 +167,19 @@ def registration_credentials_script(token: str, port: int) -> str:
         "if command -v flock >/dev/null 2>&1; then "
         "touch \"$d/active.lock\"; flock \"$d/active.lock\" sh -c 'mv \"$1\" \"$2\" && mv \"$3\" \"$4\"' sh "
         "\"$auth_tmp\" \"$d/auth.yaml\" \"$active_tmp\" \"$d/active.json\"; "
-        "else commit_forward_route; fi"  # marketplace-isolation: allow agent-bridge-management
+        "else "
+        "py=$(command -v python3 || command -v python || true); "
+        "test -n \"$py\" || { echo 'agent-bridge: cannot lock active.json: flock and python are unavailable' >&2; exit 1; }; "
+        "\"$py\" - \"$d/active.lock\" \"$auth_tmp\" \"$d/auth.yaml\" \"$active_tmp\" \"$d/active.json\" <<'PYLOCK'\n"
+        "import fcntl, os, sys\n"
+        "lock, auth_tmp, auth_dst, active_tmp, active_dst = sys.argv[1:]\n"
+        "os.makedirs(os.path.dirname(lock), exist_ok=True)\n"
+        "with open(lock, 'a+b') as handle:\n"
+        "    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)\n"
+        "    os.replace(auth_tmp, auth_dst)\n"
+        "    os.replace(active_tmp, active_dst)\n"
+        "PYLOCK\n"
+        "fi"  # marketplace-isolation: allow agent-bridge-management
     )
 
 

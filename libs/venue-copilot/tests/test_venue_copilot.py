@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -753,16 +754,72 @@ def _bash() -> str | None:
 
 @pytest.mark.skipif(_bash() is None, reason="needs bash")
 def test_registration_credentials_write_a_complete_forwarded_route(tmp_path):
-    import subprocess
-
     env = {**os.environ, "HOME": str(tmp_path)}
-    subprocess.run([_bash(), "-c", registration_credentials_script("tok-1", 62254)],
-                   env=env, check=True)
+    script = (
+        'flock() { touch "$1"; shift; "$@"; }; '
+        + registration_credentials_script("tok-1", 62254)
+    )
+    subprocess.run([_bash(), "-c", script], env=env, check=True)
     route = json.loads((tmp_path / ".agent-bridge" / "active.json").read_text())
     # A "bind" lets the venue's agent-bridge CLI parse the route (without it,
     # it fell back to its default port and started a local daemon over it).
     assert route == {"active": {"bind": "127.0.0.1", "port": 62254, "forwarded": True}}
     assert (tmp_path / ".agent-bridge" / "auth.yaml").read_text() == "token: tok-1\n"
     assert not list((tmp_path / ".agent-bridge").glob("*.XXXXXX"))
-    if subprocess.run([_bash(), "-c", "command -v flock >/dev/null 2>&1"]).returncode == 0:
-        assert (tmp_path / ".agent-bridge" / "active.lock").exists()
+    assert (tmp_path / ".agent-bridge" / "active.lock").exists()
+
+
+def _bash_supports_python_fcntl() -> bool:
+    bash = _bash()
+    if bash is None:
+        return False
+    return (
+        subprocess.run(
+            [
+                bash,
+                "-c",
+                "py=$(command -v python3 || command -v python || true); "
+                'test -n "$py" && "$py" -c "import fcntl"',
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode
+        == 0
+    )
+
+
+@pytest.mark.skipif(not _bash_supports_python_fcntl(), reason="needs bash + python fcntl")
+def test_registration_credentials_fallback_locks_with_python_fcntl(tmp_path):
+    env = {**os.environ, "HOME": str(tmp_path)}
+    script = (
+        "command() { "
+        "if [ \"$1\" = -v ] && [ \"$2\" = flock ]; then return 1; fi; "
+        "builtin command \"$@\"; "
+        "}; "
+        + registration_credentials_script("tok-2", 62255)
+    )
+    subprocess.run([_bash(), "-c", script], env=env, check=True)
+    bridge = tmp_path / ".agent-bridge"
+    assert json.loads((bridge / "active.json").read_text()) == {
+        "active": {"bind": "127.0.0.1", "port": 62255, "forwarded": True}
+    }
+    assert (bridge / "auth.yaml").read_text() == "token: tok-2\n"
+    assert (bridge / "active.lock").exists()
+
+
+@pytest.mark.skipif(_bash() is None, reason="needs bash")
+def test_registration_credentials_fails_without_locking_tool(tmp_path):
+    env = {**os.environ, "HOME": str(tmp_path)}
+    script = (
+        "command() { "
+        "if [ \"$1\" = -v ] && { [ \"$2\" = flock ] || [ \"$2\" = python3 ] || [ \"$2\" = python ]; }; "
+        "then return 1; fi; "
+        "builtin command \"$@\"; "
+        "}; "
+        + registration_credentials_script("tok-3", 62256)
+    )
+    result = subprocess.run([_bash(), "-c", script], env=env, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "cannot lock active.json" in result.stderr
+    assert not (tmp_path / ".agent-bridge" / "active.json").exists()

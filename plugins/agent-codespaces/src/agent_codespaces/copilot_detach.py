@@ -318,14 +318,19 @@ def _reported_local_forwards(
     of pre-picking a port itself, avoiding the caller-side TOCTOU race.
     """
     wanted = dict(requested) if requested else _int_port_map(fallback)
-    dynamic_venues = set(_int_port_map(fallback_assigned or {}).values())
+    assigned_fallback = _int_port_map(fallback_assigned or {})
+    dynamic_hosts = {
+        host for host, venue in assigned_fallback.items()
+        if wanted.get(host) == venue
+    }
+    dynamic_venues = {assigned_fallback[host] for host in dynamic_hosts}
     if not wanted:
         return wanted
     if 0 not in wanted and not dynamic_venues:
         return wanted
     fixed = {
         host: venue for host, venue in wanted.items()
-        if host != 0 and venue not in dynamic_venues
+        if host != 0 and host not in dynamic_hosts
     }
     dynamic_venues.update([wanted[0]] if 0 in wanted else [])
     from . import connection_owner as owner
@@ -366,19 +371,28 @@ def _local_forwards_ready(
     requested: dict[int, int],
     assigned: dict[str, int] | None = None,
 ) -> dict[int, bool]:
-    dynamic_venues = set(_int_port_map(assigned or {}).values())
+    assigned_map = _int_port_map(assigned or {})
+    dynamic_hosts = {
+        host for host, venue in assigned_map.items()
+        if reported.get(host) == venue
+    }
+    dynamic_venues = {assigned_map[host] for host in dynamic_hosts}
     if 0 in requested:
         dynamic_venues.add(requested[0])
-    fixed = [host for host, venue in reported.items() if venue not in dynamic_venues]
+        dynamic_hosts.update(host for host, venue in reported.items() if venue == requested[0])
+    elif not requested and assigned_map:
+        dynamic_venues.update(assigned_map.values())
+        dynamic_hosts.update(host for host, venue in reported.items() if venue in dynamic_venues)
+    fixed = [host for host in reported if host not in dynamic_hosts]
     ready = _host_ports_listening(sorted(fixed)) if fixed else {}
-    if dynamic_venues:
+    if dynamic_hosts:
         from .owner_local_forwards import read_active_local_forwards
 
         active = read_active_local_forwards().get(codespace, {})
         ready.update({
             host: active.get(host) == venue
             for host, venue in reported.items()
-            if venue in dynamic_venues
+            if host in dynamic_hosts
         })
     return ready
 

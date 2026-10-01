@@ -668,6 +668,36 @@ def test_rejoin_reports_current_reassigned_dynamic_local_forward(seams, monkeypa
     assert out["local_forwards_ready"] == {"49153": True}
 
 
+def test_fixed_local_forward_same_venue_as_prior_dynamic_reports_without_assignment_wait(
+    seams, monkeypatch, capsys,
+):
+    prior = types.SimpleNamespace(
+        sessions={"cli:anchor-example-web@cs-1": {
+            "mux_session": "wt-anchor-example-web", "confirmed": True,
+        }},
+        reverse_forwards={},
+        local_forwards={"49152": 3000},
+        assigned_local_forwards={"49152": 3000},
+    )
+    monkeypatch.setattr(owner, "get_hold", lambda *a, **k: prior)
+    monkeypatch.setattr(detach, "_host_ports_listening", lambda ports: {p: True for p in ports})
+    monkeypatch.setattr(
+        owner_local_forwards,
+        "read_active_local_forwards",
+        lambda: (_ for _ in ()).throw(AssertionError("fixed request must not consult Owner-owned readiness")),
+    )
+
+    rc = detach.cmd_detach(
+        _args(local_forwards=["8080:3000"]), ssh_session=_ssh(seams, stdout=_CREATED),
+    )
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["local_forwards"] == {"8080": 3000}
+    assert out["local_forwards_ready"] == {"8080": True}
+    assert "local_forwards_pending" not in out
+
+
 def test_dynamic_local_forward_assignment_timeout_reports_pending_success(seams, capsys):
     rc = detach.cmd_detach(_args(local_forwards=["0:3000"]), ssh_session=_ssh(seams, stdout=_CREATED))
 

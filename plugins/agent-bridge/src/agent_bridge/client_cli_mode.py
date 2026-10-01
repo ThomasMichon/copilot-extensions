@@ -59,6 +59,20 @@ class CliModeClientMixin(_Base):
         ``reservation_id`` compare-deletes one exact reservation; ``unclaimed_only``
         additionally refuses to delete a reservation a session already claimed.
         """
+        if unclaimed_only:
+            from .client import BridgeClientError
+            from .protocol import CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION
+
+            if not self.daemon_supports(CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION):
+                version, _minimum = self.daemon_protocol()
+                raise BridgeClientError(
+                    426,
+                    "Unclaimed-only CLI-mode reservation release requires "
+                    "agent-bridge HTTP protocol "
+                    f"v{CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION}; the daemon "
+                    f"advertises v{version}. Skipping DELETE so the reservation "
+                    "can expire instead of risking removal of a claimed session.",
+                )
         params = {}
         if reservation_id:
             params["reservation_id"] = reservation_id
