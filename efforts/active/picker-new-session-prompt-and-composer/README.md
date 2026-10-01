@@ -740,8 +740,8 @@ fixed rather than dismissed:
 - **LOW fixes:** added this "Documentation impact" section (above) and a
   patch changefile for each touched plugin (`agent-worktrees`,
   `worktree-manager`, via `tools/changefile.py add`); replaced a personal
-  machine-name alias (`tmichon-cloud1`) in a new test with a neutral
-  `example-host` placeholder.
+  machine-name alias in a new test with a neutral `example-host`
+  placeholder.
 
 Also found and fixed two leftover duplicate/stale Plan checkboxes in this
 README from an earlier editing pass (a duplicated, unchecked "build a new
