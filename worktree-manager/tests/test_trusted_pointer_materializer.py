@@ -121,6 +121,43 @@ def test_materialize_libs_dir_refreshes_a_stale_canonical_tests_directory(tmp_pa
     assert refreshed.read_text() == "def test_it():\n    pass\n"
 
 
+def test_materialize_libs_dir_refuses_a_symlinked_pointer_copy_directory(tmp_path: Path):
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+    target = tmp_path / "real-copy" / "zdd"
+    target.mkdir(parents=True)
+    (target / mat.POINTER_NAME).write_text(
+        json.dumps(
+            {"schema": "copilot-extensions.vendor-pointer", "version": 1, "source": "libs/zdd"}
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    libs_dir = tmp_path / "slot" / "libs"
+    libs_dir.mkdir(parents=True)
+    (libs_dir / "zdd").symlink_to(target, target_is_directory=True)
+
+    log = mat.materialize_libs_dir(libs_dir, canonical_root=root)
+
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+
+
+def test_materialize_libs_dir_refuses_a_stray_symlink_anywhere_in_the_pointer_copy(tmp_path: Path):
+    root = tmp_path / "repo"
+    _canonical_lib(root, "zdd", version="0.1.0-dev1", content="real\n")
+    libs_dir = tmp_path / "slot" / "libs"
+    pointer_dir = _pointer(libs_dir, "zdd")
+    outside = tmp_path / "outside-stray-target"
+    outside.mkdir(parents=True)
+    (pointer_dir / "docs").mkdir()
+    (pointer_dir / "docs" / "link").symlink_to(outside, target_is_directory=True)
+
+    log = mat.materialize_libs_dir(libs_dir, canonical_root=root)
+
+    assert any("SKIP" in line and "is a symlink" in line for line in log)
+    assert (pointer_dir / mat.POINTER_NAME).exists()
+
+
 def test_find_pointers_in_libs_dir_empty_when_no_libs_dir(tmp_path: Path):
     assert mat.find_pointers_in_libs_dir(tmp_path / "nope") == []
 

@@ -664,8 +664,9 @@ def main(argv: list[str] | None = None) -> int:
     for line in log:
         print(line)
     ok = sum(1 for line in log if line.startswith("OK"))
+    skipped = any(line.startswith("SKIP") for line in log)
     print(f"\nMaterialized {ok} artifact(s) into {args.dest}")
-    return 0
+    return 1 if skipped else 0
 
 
 if __name__ == "__main__":

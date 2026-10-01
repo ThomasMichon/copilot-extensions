@@ -200,6 +200,19 @@ def test_main_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
     assert "Materialized 1 artifact(s)" in out
 
 
+def test_main_returns_nonzero_when_a_retired_pointer_marker_survives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+):
+    source = tmp_path / "source"
+    _retired_pointer(source, "agent-bridge", "zdd")
+    monkeypatch.setattr(mm, "REPO", source)
+
+    dest = tmp_path / "dest"
+    code = mm.main(["--dest", str(dest)])
+    assert code == 1
+    assert "retired directory-pointer kind still present" in capsys.readouterr().out
+
+
 def test_build_overwrites_a_stale_existing_dest(tmp_path: Path):
     source = tmp_path / "source"
     _canonical_lib(source, "zdd", version="0.1.0-dev1", content="fresh\n")

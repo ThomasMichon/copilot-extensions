@@ -87,6 +87,26 @@ def test_main_missing_plugin_reports_error(isolated: Path, capsys):
     assert "no such plugin" in capsys.readouterr().err
 
 
+def test_build_refuses_a_retired_directory_pointer(isolated: Path):
+    plugin = _plugin(isolated, "agent-worktrees", "1.0.0")
+    pointer_dir = plugin / "libs" / "shared-lib"
+    pointer_dir.mkdir(parents=True)
+    (pointer_dir / "VENDOR_POINTER.json").write_text(
+        json.dumps(
+            {
+                "schema": "copilot-extensions.vendor-pointer",
+                "version": 1,
+                "source": "libs/shared-lib",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RuntimeError, match="retired directory-pointer kind still present"):
+        preview_release.build("agent-worktrees", isolated / "work")
+
+
 class _FakeMaterializeMain:
     """Stands in for the real (importlib-loaded) module so the
     file-pointer-materialize-into-preview wiring can be tested without

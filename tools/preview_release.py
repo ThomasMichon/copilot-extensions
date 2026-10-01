@@ -121,6 +121,14 @@ def _materialize_launch_wrapper_assets_into_preview(dest: Path, plugin: str) -> 
     )
 
 
+def _retired_pointer_log(dest: Path) -> list[str]:
+    mm = _load_materialize_main()
+    return [
+        f"SKIP {pointer_path}: retired directory-pointer kind still present -- refusing"
+        for pointer_path in mm.find_retired_directory_pointers(dest)
+    ]
+
+
 def build(plugin: str, workdir: Path) -> Path:
     src = PLUGINS_DIR / plugin
     if not src.is_dir():
@@ -130,6 +138,10 @@ def build(plugin: str, workdir: Path) -> Path:
     if dest.exists():
         shutil.rmtree(dest)
     shutil.copytree(src, dest, ignore=_ignore)
+
+    retired_pointer_log = _retired_pointer_log(dest)
+    if retired_pointer_log:
+        raise RuntimeError("\n".join(retired_pointer_log))
 
     file_pointer_log = _materialize_file_pointers_into_preview(dest)
     uv_editable_log = _materialize_uv_editable_refs_into_preview(dest, plugin)
@@ -151,6 +163,7 @@ def build(plugin: str, workdir: Path) -> Path:
         "hypothetical_version": hypothetical_version,
         "has_pending_changefiles": pending,
         "source_commit": _git_head(),
+        "retired_directory_pointer_log": retired_pointer_log,
         "vendored_file_pointers_materialize_log": file_pointer_log,
         "vendored_uv_editable_refs_materialize_log": uv_editable_log,
         "vendored_installer_engine_materialize_log": installer_engine_log,
@@ -172,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     workdir.mkdir(parents=True, exist_ok=True)
     try:
         dest = build(args.plugin, workdir)
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, RuntimeError) as exc:
         print(f"preview-release: {exc}", file=sys.stderr)
         return 1
     print(f"Preview built at {dest}")
