@@ -493,15 +493,14 @@ All requests pass through a policy gate before reaching any source:
 - **Host allowlist** -- fnmatch-style patterns per source
 - **Resource allowlist** -- exact-match for Azure resources (az-login)
 
-GitHub order is: inject the CodeSpace's bound account as `username=<account>`
-for `github.com`, call non-interactive GCM, then fall back to `gh-auth` for the
-same account only if GCM still cannot serve it. If no account is bound and
-multiple GitHub accounts are available, the relay reports
-`github-credential-ambiguous` and refuses to guess. Remedy: run the CodeSpace
-operation under the intended account so the existing binding/account-map path
-can select it, or refresh that account on the host with
-`gh auth refresh -h github.com -u <account>`. The fallback only serves
-credential `get`/`fill`; it never stores or erases the `gh` token in GCM.
+GitHub order is per connection: inject the bound CodeSpace account, or the
+active `gh` account for ambient-owned CodeSpaces, as `username=<account>` for
+`github.com`; call non-interactive GCM; then fall back to `gh-auth` for the same
+username only if GCM still cannot serve it. The relay profile is account-free.
+Missing or ambiguous GitHub credentials are warnings for connect/detach (ADO-only
+or interactive work can still proceed) but remain doctor findings. The fallback
+only serves credential `get`/`fill`; it never stores or erases the `gh` token in
+GCM.
 
 ## Agent-Bridge Integration
 

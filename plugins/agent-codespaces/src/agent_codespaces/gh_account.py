@@ -30,6 +30,7 @@ import logging
 import os
 import shutil
 import subprocess
+import time
 
 from agent_procutil import no_window_flags
 
@@ -127,14 +128,17 @@ def env_for_repo(slug: str | None, base: dict | None = None) -> dict:
     return env_for_account(account_for_repo(slug), base)
 
 
-def active_account(host: str = "github.com") -> str | None:
+def active_account(host: str = "github.com", *, timeout: float = 10.0) -> str | None:
     """Return gh's active account for ``host`` without changing global auth."""
     try:
         result = subprocess.run(
-            ["gh", "auth", "status", "--hostname", host, "--json", "hosts"],
+            [
+                "gh", "auth", "status", "--active",
+                "--hostname", host, "--json", "hosts",
+            ],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=timeout,
             creationflags=_creation_flags(),
         )
     except Exception:
@@ -170,6 +174,23 @@ def credential_account_for_codespace(name: str) -> str | None:
     except Exception:
         account = None
     return account or active_account()
+
+
+def fast_credential_account_for_codespace(
+    name: str, *, timeout: float = 3.0
+) -> str | None:
+    """Fast account for launch env: binding only, then bounded active gh."""
+    deadline = time.monotonic() + max(0.1, timeout)
+    try:
+        from . import account_binding
+
+        account = account_binding.bound_account(name)
+    except Exception:
+        account = None
+    if account:
+        return account
+    remaining = max(0.1, deadline - time.monotonic())
+    return active_account(timeout=remaining)
 
 
 def mapped_accounts() -> tuple[str, ...]:

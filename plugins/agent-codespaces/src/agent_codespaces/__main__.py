@@ -2952,8 +2952,9 @@ def _cmd_doctor(*, json_output: bool = False) -> int:
     """Check gh auth, relay credential readiness, and provider hygiene."""
     auth_findings = _gh_auth_preflight()
     from .auth_preflight import emit_github_credential_doctor, run_github_credential_preflight
+    from .gh_account import active_account
 
-    github_credential = run_github_credential_preflight()
+    github_credential = run_github_credential_preflight(active_account())
     provider_reports = scan_config_providers()
     has_findings = bool(auth_findings or provider_reports.findings or not github_credential.ok)
 

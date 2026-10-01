@@ -1,5 +1,5 @@
 {
-  "comment": "Pass the bound GitHub account into github.com credential relay requests and fail fast on ambiguity.",
+  "comment": "Pass the per-connection GitHub account into github.com relay requests and warn on launch preflight failures.",
   "changes": [
     {
       "plugin": "agent-codespaces",

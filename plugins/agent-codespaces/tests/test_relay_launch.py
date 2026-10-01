@@ -248,7 +248,7 @@ def test_build_relay_launch_env(monkeypatch, tmp_path):
                         lambda *a, **k: _Cfg())
     monkeypatch.setattr("agent_codespaces.relay_token.token_for",
                         lambda name, **kw: "minted-tok")
-    monkeypatch.setattr("agent_codespaces.lifecycle.account_for_codespace",
+    monkeypatch.setattr("agent_codespaces.gh_account.fast_credential_account_for_codespace",
                         lambda name: "bound-user")
     env, port = rl.build_relay_launch_env("cs-foo")
     assert port == 9999

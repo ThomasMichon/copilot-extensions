@@ -364,9 +364,9 @@ def build_relay_launch_env(
 
     cfg = load_merged_config(include_cwd=False)
     try:
-        from .gh_account import credential_account_for_codespace
+        from .gh_account import fast_credential_account_for_codespace
 
-        github_account = credential_account_for_codespace(codespace_name)
+        github_account = fast_credential_account_for_codespace(codespace_name)
     except Exception:
         github_account = None
     if relay_port is not None:

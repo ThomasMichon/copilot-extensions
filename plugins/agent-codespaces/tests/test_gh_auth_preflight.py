@@ -122,7 +122,7 @@ def test_credential_account_for_ambient_codespace_uses_active_gh_account(monkeyp
         "agent_codespaces.lifecycle.account_for_codespace",
         lambda name: None,
     )
-    monkeypatch.setattr(gh_account, "active_account", lambda: "active-user")
+    monkeypatch.setattr(gh_account, "active_account", lambda **_kw: "active-user")
 
     assert gh_account.credential_account_for_codespace("ambient-cs") == "active-user"
 
@@ -139,6 +139,35 @@ def test_active_account_reads_gh_json(monkeypatch):
     with patch("subprocess.run") as run:
         run.return_value = MagicMock(returncode=0, stdout=payload, stderr="")
         assert gh_account.active_account() == "active-user"
+    assert "--active" in run.call_args.args[0]
+
+
+def test_fast_credential_account_uses_binding_without_active_probe(monkeypatch):
+    from agent_codespaces import gh_account
+
+    monkeypatch.setattr(
+        "agent_codespaces.account_binding.bound_account",
+        lambda name: "bound-user",
+    )
+    monkeypatch.setattr(
+        gh_account,
+        "active_account",
+        lambda **_kw: (_ for _ in ()).throw(AssertionError("must not call active")),
+    )
+
+    assert gh_account.fast_credential_account_for_codespace("cs-1") == "bound-user"
+
+
+def test_fast_credential_account_falls_back_to_active(monkeypatch):
+    from agent_codespaces import gh_account
+
+    monkeypatch.setattr(
+        "agent_codespaces.account_binding.bound_account",
+        lambda name: None,
+    )
+    monkeypatch.setattr(gh_account, "active_account", lambda **_kw: "active-user")
+
+    assert gh_account.fast_credential_account_for_codespace("cs-1") == "active-user"
 
 
 # --- _ambient_codespace_scope (focused ambient gate check, #980) ---------
