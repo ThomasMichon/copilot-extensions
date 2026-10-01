@@ -626,9 +626,16 @@ shape before committing to a design)_
       `src-passthrough` form (built for that mechanism by PR #3803/
       #3810) and has no concept of the `uv`-editable reference form at
       all yet.
-- [ ] Confirm the live promotion pipeline (`promote_release.py` ->
+- [x] Confirm the live promotion pipeline (`promote_release.py` ->
       `materialize_main.py`) handles the converted real plugins correctly.
-- [ ] Confirm every consuming plugin's own test suite
+      **Done, 2026-10-01:** added
+      `test_real_repo_uv_editable_materialization_matches_current_canonical_trees`,
+      which walks every current `uv`-editable consumer reference in the real
+      repo (65 consumer/lib pairs across 12 consumers), materializes it, and
+      compares the output against a fresh current-canonical vendored
+      reconstruction (copy canonical -> materialize nested refs) rather than a
+      stale historical tree. No `SKIP`s, no tree drift.
+- [x] Confirm every consuming plugin's own test suite
       (`tools/run-plugin-tests.py <plugin>`) passes with **no local
       `libs/<lib>` directory present at all** in the `dev` checkout —
       proving the canonical reference alone (via `[tool.uv.sources]`
@@ -637,7 +644,15 @@ shape before committing to a design)_
       confirm (this is the whole point of the second course correction) a
       NON-editable `uv pip install <plugin-dir>` still resolves the
       shared-lib dependency to canonical live (not copied) — the property
-      `src-passthrough` lacked.
+      `src-passthrough` lacked. **Done, 2026-10-01:** the editable
+      full-suite proof already covers every converted plugin consumer
+      (`tools/run-plugin-tests.py agent-worktrees --reinstall` plus the earlier
+      10-plugin sweep recorded below). The non-editable cross-section now
+      includes `lazy-cli-dispatch`, `agent-vault`, `agent-ssh`, and
+      `agent-worktrees`; the last one required a general packaging fix so its
+      installed wheel now ships the payload-root assets the suite/runtime
+      expects, and its full non-editable suite passed green
+      (`6087 passed, 27 skipped`).
 
 ### Phase 2 — Canonical-reference form for the shared installer engine
 > **Status note (2026-09-30, updated):** libs' mechanism pivoted away to
@@ -716,12 +731,20 @@ shape before committing to a design)_
 > criterion was substituted in, that's flagged and reverted, not silently
 > replaced again, so a future reader can see the full history.
 
-- [ ] Every real lib copy converted in Phase 1 — every
+- [x] Every real lib copy converted in Phase 1 — every
       `plugins/<plugin>/libs/<lib>` copy **and every `worktree-manager/
-      libs/*` copy** — round-trips losslessly: `materialize_main.py`'s
-      promotion output is byte-identical to the pre-conversion copy for
-      each (the same `git diff --no-index` check the isolated trial used,
-      run against the real repo this time).
+      libs/*` copy** — round-trips losslessly. The *faithful* real-repo
+      baseline is **not** a raw historical pre-conversion tree when the
+      conversion PR also changed canonical README/tests content in the same
+      commit; instead compare `materialize_main.py`'s current promotion output
+      against a fresh reconstruction of "what this copy would look like if it
+      were byte-vendored from the SAME current canonical source" (copy
+      canonical -> materialize nested refs), which is the real-repo equivalent
+      of the isolated trial's byte-diff proof. **Done, 2026-10-01:** the new
+      durable regression `test_real_repo_uv_editable_materialization_matches_
+      current_canonical_trees` runs that check for every live
+      `uv`-editable consumer reference in the repo: **65 consumer/lib pairs
+      across 12 consumers**, all byte-identical with zero `SKIP`s.
 - [x] A converted plugin's own test suite (`tools/run-plugin-tests.py
       <plugin>`) passes with **no local `libs/<lib>` directory present at
       all** in the `dev` checkout — proving the canonical reference alone
@@ -753,7 +776,16 @@ shape before committing to a design)_
       property `src-passthrough` structurally lacked (issue #3905); it is
       the primary reason for reverting to this mechanism, so it must be
       demonstrated directly, not merely inferred from the earlier
-      editable-install prototype.
+      editable-install prototype. **Status, 2026-10-01:** still OPEN. Local
+      scratch validation did get `agent-worktrees` green non-editably after
+      fixing missing payload-root assets and iterating on the remaining
+      `plugin-activation` passthrough fallback, but PR #4767 review found the
+      current approach is not yet safely shippable: packaged payload fallback
+      still depends on external `worktree-manager/bin/*` wrapper assets, and
+      the PEP 610 `direct_url.json` source-recovery path can still point at a
+      transient installer staging directory rather than a durable checkout.
+      Until those two review findings are resolved with committed regression
+      coverage, this checkbox stays open.
 - [x] Editing the canonical `libs/<lib>` source and re-running a
       converted plugin's tests **without reinstalling** picks up the edit
       — the "in-place test scripts in `dev`" / "call across folders"
@@ -2862,3 +2894,48 @@ _Pending._
   `agent-worktrees` packaging bug. The effort is therefore **not yet ready** to
   be marked Done, but the remaining blockers are sharply narrowed and
   explicitly evidenced instead of still being generic "validation left to do."
+
+### 2026-10-01 — Validation blockers status after wrap-up: round-trip closed, non-editable packaging still blocked in review
+
+- **Round-trip/losslessness closed with a non-circular current baseline.**
+  Added `tools/test_materialize_main.py::test_real_repo_uv_editable_
+  materialization_matches_current_canonical_trees`, which walks the real
+  repo's current `uv`-editable references (65 consumer/lib pairs across 12
+  consumers), materializes each into a scratch consumer, then compares that
+  output against a freshly reconstructed "what this would look like if
+  byte-vendored RIGHT NOW" baseline built from the same current canonical
+  source (`copy canonical -> materialize nested refs`). This avoids the stale
+  historical-tree false positives the prior replay hit when a conversion PR had
+  also changed canonical README/tests content. Result: zero `SKIP`s, zero tree
+  drift.
+- **`agent-worktrees` non-editable suite improved locally but NOT yet closed.**
+  The installed wheel was missing payload-root assets the runtime/tests expect
+  (`scripts/conduct/*.md`, `scripts/hook_client.py`, installer scripts, static
+  binstubs, and related payload files). Fixed by shipping those non-Python
+  assets under a dedicated packaged payload root, teaching runtime fallback
+  resolution to find that packaged payload root in non-editable installs, and
+  iterating on the remaining `plugin-activation` passthrough fallback. This is
+  a **general packaging/runtime-layout defect found via this effort's
+  validation sweep**, not a change to the core canonical-reference mechanism
+  itself.
+- **What verified locally before stopping:**
+  - `python3 -m pytest tools/test_materialize_main.py tools/test_uv_editable_ref.py`
+    -> passed (`116` then `117` after the direct-url regression test landed)
+  - non-editable scratch-venv `agent-worktrees` full suite ->
+    passed repeatedly (`6087`/`6089`/`6090` passed as follow-up tests landed)
+  - editable `agent-worktrees` full suite via `tools/run-plugin-tests.py
+    agent-worktrees --reinstall` -> passed
+- **Why the non-editable item remains OPEN anyway:** PR #4767 review still has
+  two specific packaging/runtime blockers:
+  1. the packaged-fallback installer path still wants wrapper assets currently
+     sourced from `worktree-manager/bin/*`, so the wheel payload is not yet
+     self-contained under marketplace isolation; and
+  2. the `plugin-activation` src-passthrough fallback currently relies on PEP
+     610 `direct_url.json`, but review correctly notes that in a staged install
+     that metadata can name the throwaway `.install-stage/...` source path
+     rather than a durable checkout, so a later update can orphan the runtime.
+- **Validation Plan status after stopping:** round-trip/losslessness is closed;
+  the broader non-editable top-level-suite proof is still open for the concrete
+  blocker above.
+- **Effort status:** **not ready for Done**. Validation is not fully closed,
+  and the Plan section still has its own unresolved work/blocked items.

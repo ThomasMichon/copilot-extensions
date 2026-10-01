@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -1077,6 +1078,74 @@ def test_materialize_uv_editable_ref_into_refuses_an_unsafe_lib_name(tmp_path: P
         source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
     )
     assert any("not a safe lib name" in line for line in log)
+
+
+def test_real_repo_uv_editable_materialization_matches_current_canonical_trees(
+    tmp_path: Path,
+):
+    """Regression coverage for the real converted consumers.
+
+    A historical pre-conversion tree is NOT the faithful baseline once a
+    conversion PR also changed canonical README/tests content in the same commit.
+    The non-circular comparison is "promotion output now" vs. "what a byte-
+    vendored copy from the SAME current canonical lib would look like now" --
+    i.e. the materialized tree must match today's canonical ``libs/<lib>`` tree
+    byte-for-byte for every real `uv`-editable consumer reference.
+    """
+
+    repo = mm.REPO.resolve()
+    discovered: list[tuple[str, Path, list[tuple[str, str, str, bool]]]] = []
+    for consumer, consumer_dir in uer.iter_consumer_dirs():
+        refs = uer.find_uv_editable_refs(consumer_dir)
+        if refs:
+            discovered.append((consumer, consumer_dir, refs))
+
+    assert discovered, "expected at least one real uv-editable consumer"
+    checked: list[str] = []
+    for consumer, consumer_dir, refs in discovered:
+        actual_consumer_dir = tmp_path / "actual" / consumer
+        expected_consumer_dir = tmp_path / "expected" / consumer
+        actual_consumer_dir.mkdir(parents=True, exist_ok=True)
+        expected_consumer_dir.mkdir(parents=True, exist_ok=True)
+        pyproject_text = (consumer_dir / "pyproject.toml").read_text(encoding="utf-8")
+        (actual_consumer_dir / "pyproject.toml").write_text(
+            pyproject_text,
+            encoding="utf-8",
+        )
+        (expected_consumer_dir / "pyproject.toml").write_text(
+            pyproject_text,
+            encoding="utf-8",
+        )
+
+        log = mm.materialize_uv_editable_ref_into(
+            source_consumer_dir=consumer_dir,
+            dest_consumer_dir=actual_consumer_dir,
+            canonical_root=repo,
+        )
+        skips = [line for line in log if line.startswith("SKIP")]
+        assert not skips, f"{consumer}: {'; '.join(skips)}"
+
+        for _name, _raw_path, lib, _editable in refs:
+            expected_lib = expected_consumer_dir / "libs" / lib
+            if not expected_lib.exists():
+                shutil.copytree(repo / "libs" / lib, expected_lib, ignore=mm._ignore)
+            nested_log, _ = mm.nuer.materialize_nested_uv_editable_refs(
+                expected_lib,
+                canonical_root=repo,
+                dest_root=expected_consumer_dir,
+            )
+            nested_skips = [line for line in nested_log if line.startswith("SKIP")]
+            assert not nested_skips, f"{consumer}: {'; '.join(nested_skips)}"
+
+            materialized = actual_consumer_dir / "libs" / lib
+            assert materialized.is_dir(), f"{consumer}: libs/{lib} was not materialized"
+            assert uer.lib_tree_matches(expected_lib, materialized), (
+                f"{consumer}: materialized libs/{lib} differs from the current vendored "
+                f"reconstruction built from canonical libs/{lib}"
+            )
+            checked.append(f"{consumer}:{lib}")
+
+    assert checked, "expected at least one materialized consumer/lib pair"
 
 
 def test_materialize_uv_editable_ref_into_refuses_a_malformed_manifest(tmp_path: Path):
