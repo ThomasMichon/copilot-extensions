@@ -5,6 +5,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.guard
+
 _PLUGIN = Path(__file__).resolve().parents[1]
 _DECLARATION = _PLUGIN / "instruction-projections.json"
 _TEMPLATE = _PLUGIN / "instructions" / "scratch-space-fallback.instructions.md"

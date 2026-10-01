@@ -3,7 +3,7 @@
   "changes": [
     {
       "plugin": "agent-conduct-guidance",
-      "type": "dev"
+      "type": "patch"
     }
   ]
 }

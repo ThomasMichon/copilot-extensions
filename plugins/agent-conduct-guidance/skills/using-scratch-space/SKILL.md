@@ -42,25 +42,46 @@ bake in a specific path. Resolve in this order, first match wins:
    (what `$env:TEMP` resolves to on Windows, `${TMPDIR:-/tmp}` on POSIX) --
    the default when neither of the above is configured. Use a private,
    owner-only `agent-scratch` subfolder of that location (never loose at
-   the temp root either, for the same reason as above): `$env:TEMP\agent-scratch`
-   on Windows is already per-user and needs no further hardening. On
-   **POSIX**, `/tmp` (and any `$TMPDIR` pointing at a shared,
-   world-writable location) is a multi-user directory -- a fixed,
-   predictable name like `/tmp/agent-scratch` there can be pre-created by
-   another local user or replaced with a symlink to redirect writes, and
-   files created under a permissive umask can be readable by other local
-   users. On POSIX, use a **private per-user** path instead of a bare
-   shared name -- e.g. `${TMPDIR:-/tmp}/agent-scratch-$(id -u)` -- and
-   before writing into it: create it with owner-only permissions (`mkdir -m
-   700`, or `chmod 700` immediately after creation) if it doesn't already
-   exist, and if it does already exist, verify it is a real directory (not
-   a symlink) owned by the current user with mode `700` before trusting
-   it; refuse to use it and fall back to a fresh, uniquely-named directory
-   (e.g. via `mktemp -d`) if that check fails.
+   the temp root either, for the same reason as above), and verify its
+   privacy before trusting it with anything sensitive (a draft containing
+   PII, secrets, or other sensitive output) rather than assuming either
+   platform's temp directory is private by default:
+   - **Create the subfolder atomically with restrictive permissions in the
+     same operation**, never a separate create-then-restrict step (a
+     `mkdir` followed by a later `chmod`/ACL-tightening call leaves a
+     window where another local user can populate or replace the
+     directory before it's locked down).
+     - **POSIX**: call the platform's atomic "create with mode" primitive
+       (e.g. Python's `os.mkdir(path, 0o700)` with the process umask
+       temporarily cleared via `os.umask(0)` for that call, restoring the
+       prior umask immediately after -- the mode argument alone is
+       masked by umask and silently loosened otherwise), under
+       `${TMPDIR:-/tmp}/agent-scratch-$(id -u)` (a private, per-user name,
+       not a bare shared `/tmp/agent-scratch`). If the path already
+       exists, verify before trusting it: a real directory (not a
+       symlink), owned by the current user, with mode exactly `0700`.
+       Treat a failed check, or an `EEXIST` creation race against another
+       process, as "not trustworthy" and fall back to a fresh
+       unpredictable directory via `mkdtemp` instead of reusing it.
+     - **Windows**: `%TEMP%` is conventionally per-user but its ACL is not
+       guaranteed private by the platform and the standard temp-path APIs
+       don't validate it -- don't assume privacy by default. Before
+       writing anything sensitive there, verify the resolved directory's
+       effective ACL grants access only to the current user (and
+       Administrators), for example via `icacls <path>` showing no
+       inherited broad grant; if it doesn't already, create the
+       `agent-scratch` subfolder with an explicit restrictive ACL in the
+       same step (e.g. `New-Item` followed immediately by
+       `icacls <path> /inheritance:r /grant:r "$($env:USERNAME):(OI)(CI)F"`
+       before anything is written into it, not after). If privacy can't
+       be verified or established, don't write sensitive data there --
+       fall back to an operator-configured default (step 2) or escalate
+       to the operator instead.
 
 Fall through silently -- don't ask the operator to configure something just
 to write one scratch file; only escalate if even the operating system's
-temporary-folder system isn't writable.
+temporary-folder system isn't writable, or (for sensitive content) its
+privacy can't be verified or established.
 
 ## One timestamped subfolder per task
 
@@ -72,12 +93,37 @@ writing anything into it:
 ```
 
 - `<task-slug>` -- short, human-recognizable (`pr-review`, `cargo-debug`,
-  `issue-21042`), not a generic name like `tmp` or `out` that collides across
-  tasks.
+  `issue-21042`), not a generic name like `tmp` or `out` that collides
+  across tasks. Keep it to a **portable, platform-safe grammar**: lowercase
+  ASCII letters, digits, and single hyphens only (`[a-z0-9]+(-[a-z0-9]+)*`),
+  no path separators, no leading/trailing/doubled hyphens, no bare `.`/`..`
+  segments, and not a Windows reserved device name (`CON`, `PRN`, `AUX`,
+  `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`, case-insensitive) or a name that
+  differs from one only by an extension. Sanitize a natural task
+  description into this grammar (lowercase it, replace any disallowed
+  character with `-`, collapse repeats, trim leading/trailing hyphens,
+  cap the length around 40 characters) rather than using it verbatim; if
+  nothing recognizable survives sanitization, fall back to a short generic
+  word (e.g. `task`) and rely on the uniqueness suffix below to disambiguate.
 - `<YYYYMMDD-HHMMSS>` -- the subfolder's own creation time, local or UTC
   (either is fine; be consistent within one environment). This is what makes
   staleness legible at a glance -- a folder from weeks ago is obviously safe
   to sweep, one from the current session obviously isn't.
+
+**Create the subfolder with an exclusive/atomic operation** (one that fails
+if the exact name already exists -- e.g. a plain `mkdir` without a
+`-p`/`-Force`/"ignore if exists" flag) rather than checking for existence
+first and creating afterward, which races against a concurrent task.
+Second-resolution timestamps do not guarantee uniqueness by themselves: two
+concurrent tasks that happen to share a slug and the same second (e.g. two
+`pr-review` tasks started together) would otherwise resolve to, and write
+into, the same folder. If the exclusive create fails because the name is
+already taken, treat that as a genuine collision -- not the "already
+exists and was set up by an earlier turn of this same task" case covered
+under Reuse below, which only applies to a folder this task itself
+created -- and retry with a short, unpredictable suffix appended (e.g. a
+few random hex characters) until an exclusive create succeeds, so unrelated
+tasks' artifacts never land in the same folder.
 
 Write every file for that task inside its own subfolder -- never back out to
 the shared scratch root for individual files, which just recreates the exact
