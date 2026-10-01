@@ -97,6 +97,9 @@ def test_reconcile_service_marker_consumes_staged_generation_id_for_confirmed_pi
     # The being-PROMOTED daemon's own boot already staged its real
     # generation_id under its own (now CONFIRMED) pid -- the pid/version
     # rewrite here must consume and carry it through, not drop it.
+    import zdd.diagnostics as diag
+
+    monkeypatch.setattr(diag, "process_start_time", lambda pid: f"faketime-{pid}")
     monkeypatch.setattr(runtime_version, "install_dir", lambda: tmp_path)
     runtime_version.stage_pending_generation_id(222, "9.9.9-222-456.789", tmp_path)
     pid_file = tmp_path / "agent-bridge.pid"
@@ -118,6 +121,9 @@ def test_reconcile_service_marker_ignores_a_different_pids_staged_id(
     # An aborted/never-promoted passive's staged entry (a DIFFERENT pid than
     # the one actually confirmed) must never leak into the promoted
     # daemon's own record.
+    import zdd.diagnostics as diag
+
+    monkeypatch.setattr(diag, "process_start_time", lambda pid: f"faketime-{pid}")
     monkeypatch.setattr(runtime_version, "install_dir", lambda: tmp_path)
     runtime_version.stage_pending_generation_id(
         111, "abandoned-passive-gen", tmp_path
@@ -132,8 +138,10 @@ def test_reconcile_service_marker_ignores_a_different_pids_staged_id(
     )
     assert data["pid"] == 222
     assert "generation_id" not in data
-    # The abandoned entry is untouched -- still available if 111 is ever
-    # (implausibly) confirmed later, but never silently discarded either.
+    # 111's own entry is untouched by the 222 reconcile above -- still
+    # available (and still identity-verified) if 111 is ever (implausibly)
+    # confirmed later, but never silently discarded by an unrelated pid's
+    # reconcile either.
     assert runtime_version.consume_pending_generation_id(111, tmp_path) == (
         "abandoned-passive-gen"
     )

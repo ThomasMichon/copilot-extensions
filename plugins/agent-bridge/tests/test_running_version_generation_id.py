@@ -93,7 +93,7 @@ def test_lifespan_stages_generation_id_for_a_passive_successor(
 
         pending_path = runtime_dir / PENDING_GENERATION_IDS_FILE
         pending = json.loads(pending_path.read_text(encoding="utf-8"))
-        assert pending[str(os.getpid())] == real_generation_id
+        assert pending[str(os.getpid())]["generation_id"] == real_generation_id
 
         c.get("/ui")
 

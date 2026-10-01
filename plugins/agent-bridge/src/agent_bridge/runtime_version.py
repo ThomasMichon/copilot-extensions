@@ -118,10 +118,16 @@ def set_running_generation_id(
     A read-merge-write onto the EXISTING marker (preserving whatever
     ``pid``/``version``/``started_at`` the earlier boot-time write recorded)
     rather than a second full :func:`write_running_version` call, so this
-    never contradicts the earlier record. If the marker doesn't exist yet,
-    is unreadable, or isn't even a JSON object (a malformed/legacy/partial
-    write), starts a fresh one with this process's own defaults instead of
-    raising on the merge -- still best-effort, never raises.
+    never contradicts the earlier record -- BUT only when that record
+    already belongs to THIS process (``pid`` matches ``os.getpid()``). A
+    relay-disabled normal primary skips the earlier boot-time
+    ``write_running_version()`` call (same gate as the elevated sub-daemon,
+    for an unrelated reason), so on restart the marker on disk can still be
+    a PREVIOUS, now-dead daemon's own still-valid JSON object -- merging
+    onto that would attach this process's real id to someone else's stale
+    pid/version, an internally-inconsistent marker. Any mismatch (including
+    a missing/unreadable/non-object marker) resets fresh with this
+    process's own defaults instead. Still best-effort, never raises.
     """
     d = directory or install_dir()
     path = d / RUNNING_VERSION_FILE
@@ -131,7 +137,7 @@ def set_running_generation_id(
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             pass
-        if not isinstance(payload, dict):
+        if not isinstance(payload, dict) or payload.get("pid") != os.getpid():
             payload = {
                 "version": __version__,
                 "pid": os.getpid(),
@@ -167,7 +173,7 @@ def stage_manager_generation_id(session_manager, directory: Path | None = None) 
         stage_pending_generation_id(os.getpid(), gen_id, directory)
 
 
-def _load_pending(path: Path) -> dict[str, str]:
+def _load_pending(path: Path) -> dict[str, dict[str, str]]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -175,17 +181,17 @@ def _load_pending(path: Path) -> dict[str, str]:
     return data if isinstance(data, dict) else {}
 
 
-def _prune_dead_pids(pending: dict[str, str]) -> dict[str, str]:
+def _prune_dead_pids(pending: dict[str, dict[str, str]]) -> dict[str, dict[str, str]]:
     from .session_host.osutil import pid_alive
 
     alive = {}
-    for pid_str, gen_id in pending.items():
+    for pid_str, entry in pending.items():
         try:
             pid = int(pid_str)
         except ValueError:
             continue
-        if pid_alive(pid):
-            alive[pid_str] = gen_id
+        if isinstance(entry, dict) and pid_alive(pid):
+            alive[pid_str] = entry
     return alive
 
 
@@ -265,15 +271,32 @@ def stage_pending_generation_id(
     """A ``--passive`` ZDD-cutover successor's own boot-time call: stage its
     real ``generation_id`` keyed by its OWN pid, WITHOUT touching the shared
     canonical ``running-version.json`` marker (it isn't promoted yet, and
-    may never be). Opportunistically prunes entries for pids that are no
-    longer alive (an earlier aborted/retired passive) so this file never
-    grows unbounded across many cutover attempts. Never raises.
+    may never be).
+
+    Each entry also records this process's own
+    :func:`zdd.diagnostics.process_start_time` identity token alongside the
+    id -- pid alone is NOT a safe key across time: an abandoned/never-
+    promoted passive's pid can be reused by a later, wholly unrelated
+    process (including an unrelated normal agent-bridge daemon), and a bare
+    pid-liveness check cannot tell that apart.
+    :func:`consume_pending_generation_id` re-verifies this token before
+    ever trusting an entry.
+
+    Opportunistically prunes entries for pids that are no longer alive (an
+    earlier aborted/retired passive) so this file never grows unbounded
+    across many cutover attempts. Never raises.
     """
+    from zdd.diagnostics import process_start_time
+
     d = directory or install_dir()
+    start_time = process_start_time(pid)
 
     def _do() -> None:
         pending = _prune_dead_pids(_load_pending(d / PENDING_GENERATION_IDS_FILE))
-        pending[str(pid)] = generation_id
+        pending[str(pid)] = {
+            "generation_id": generation_id,
+            "start_time": start_time,
+        }
         d.mkdir(parents=True, exist_ok=True)
         (d / PENDING_GENERATION_IDS_FILE).write_text(
             json.dumps(pending), encoding="utf-8"
@@ -291,16 +314,25 @@ def consume_pending_generation_id(
     """``_reconcile_service_marker``'s call site, at CONFIRMED-promotion time:
     pop (read once, then remove) the specific ``pid``'s staged generation id,
     or ``None`` if nothing was ever staged for it. Consumed exactly once so a
-    stale/reused entry can never be replayed onto a later, unrelated pid.
-    Never raises.
+    stale/reused entry can never be replayed onto a later, unrelated pid --
+    and identity-VERIFIED: an entry whose recorded
+    :func:`zdd.diagnostics.process_start_time` no longer matches ``pid``'s
+    CURRENT one (the pid was recycled by an unrelated process since it was
+    staged) is discarded rather than trusted, even though it is still
+    removed here (cleanup either way). Never raises.
     """
+    from zdd.diagnostics import process_start_time
+
     d = directory or install_dir()
+    current_start_time = process_start_time(pid)
     result: dict[str, str | None] = {"gen_id": None}
 
     def _do() -> None:
         pending = _load_pending(d / PENDING_GENERATION_IDS_FILE)
-        result["gen_id"] = pending.pop(str(pid), None)
-        if result["gen_id"] is not None:
+        entry = pending.pop(str(pid), None)
+        if isinstance(entry, dict):
+            if current_start_time and entry.get("start_time") == current_start_time:
+                result["gen_id"] = entry.get("generation_id")
             (d / PENDING_GENERATION_IDS_FILE).write_text(
                 json.dumps(pending), encoding="utf-8"
             )
