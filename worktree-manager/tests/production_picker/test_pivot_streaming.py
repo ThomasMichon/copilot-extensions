@@ -210,7 +210,7 @@ def test_subscribe_live_delta_then_close_tears_down(tmp_path):
 
 
 def test_subscribe_reconnects_after_unexpected_eof(tmp_path, monkeypatch):
-    """Phase 0 (render-perf follow-up, #3307/pivot-streaming-transport,
+    """Phase 0 (render-perf follow-up, #4762,
     2026-10-01): a held ``subscribe`` channel whose producer exits right after
     delivering real rows -- no ``done``/``error`` frame, just EOF -- must
     reconnect rather than being silently accepted as a normal finish forever.
@@ -245,13 +245,23 @@ def test_subscribe_reconnects_after_unexpected_eof(tmp_path, monkeypatch):
     state, rows, _err = rt.get(None)
     assert state == "ready"
     assert [r["id"] for r in rows] == ["a"]
-    # Still considered live (a recovering channel never exhausts the budget).
-    assert rt._subscribe_live.get(None) is True
+    # Prove the budget keeps resetting (never exhausts) by observing FURTHER
+    # invocations beyond the count already seen -- never sample
+    # ``_subscribe_live`` directly here: the implementation deliberately holds
+    # it False during every backoff window, so a single read after the Nth
+    # invocation can land on either value and would make this assertion
+    # timing-dependent.
+    seen_so_far = len(invocations)
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and len(invocations) <= seen_so_far:
+        time.sleep(0.02)
+    assert len(invocations) > seen_so_far, (
+        "a recovering channel must keep reconnecting, never settle exhausted")
     rt.close()
 
 
 def test_subscribe_exhausts_and_falls_back_to_repoll(tmp_path, monkeypatch):
-    """Phase 0 (render-perf follow-up, #3307/pivot-streaming-transport,
+    """Phase 0 (render-perf follow-up, #4762,
     2026-10-01): a ``subscribe`` channel that drops with ZERO rows delivered
     every time (a bare/early ``done``) must exhaust its reconnect budget and
     then stop freezing ``repoll()`` out forever -- confirming the asymmetry

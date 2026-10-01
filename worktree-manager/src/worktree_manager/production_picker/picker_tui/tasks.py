@@ -43,7 +43,7 @@ from .pivots import RegisteredPivot, format_template, parse_list_payload
 LIST_TIMEOUT = 20.0
 ACTION_TIMEOUT = 30.0
 
-#: Phase 0 (render-perf follow-up, #3307/pivot-streaming-transport, 2026-10-01):
+#: Phase 0 (render-perf follow-up, #4762, 2026-10-01):
 #: a held ``subscribe`` stream's producer can exit (crash, or a plain EOF with
 #: no ``done``/``error`` frame) without that ever being distinguished from a
 #: genuinely-still-live channel -- ``repoll()`` used to no-op unconditionally
@@ -315,7 +315,7 @@ class RegisteredPivotRuntime:
         live (``_subscribe_live``) -- its held child channel applies deltas in
         place, so a forced refetch would spawn a redundant second channel. Once
         that channel has dropped and exhausted its own reconnect attempts (Phase
-        0, #3307/pivot-streaming-transport), ``_subscribe_live`` clears and this
+        0, #4762), ``_subscribe_live`` clears and this
         resumes normal one-shot repolling -- a ``subscribe`` pivot's manifest
         declaration alone no longer freezes it forever. A one-shot ``stream``
         pivot (streams once then exits) is NOT already-live, so it is repolled
@@ -430,7 +430,7 @@ class RegisteredPivotRuntime:
 
         For a ``subscribe`` pivot, any termination of this stream -- an
         explicit ``error`` frame, a plain EOF with no ``done``/``error`` (the
-        gap Phase 0, #3307/pivot-streaming-transport, closes), or even an
+        gap Phase 0, #4762, closes), or even an
         unexpected ``done`` -- is treated as the held channel dropping, not as
         a normal finish: :meth:`_handle_subscribe_drop` decides whether to
         reconnect (bounded retries + backoff, keeping current rows visible) or
@@ -580,7 +580,7 @@ class RegisteredPivotRuntime:
         had_rows: bool,
     ) -> None:
         """Common tail for :meth:`_run_list_stream` (Phase 0,
-        #3307/pivot-streaming-transport, 2026-10-01): publish the terminal
+        #4762, 2026-10-01): publish the terminal
         result, then -- only for a ``subscribe`` pivot, whose channel is
         supposed to stay open until the picker exits -- decide whether this
         termination (an ``error`` frame, a plain EOF, or even an unexpected
