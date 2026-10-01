@@ -1,0 +1,9 @@
+{
+  "comment": "Add 'claims transitive' discovery query: everything a worktree's whole subtree still owes, in one read",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}

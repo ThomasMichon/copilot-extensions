@@ -12,6 +12,7 @@ from . import (
     claims_find_cli,
     claims_handoff_cli,
     claims_owner,
+    claims_transitive_cli,
     obligations,
     output,
     tracking,
@@ -70,7 +71,11 @@ def add_parsers(sub) -> None:
         "--apply to act), OR 'fleet-audit' for a read-only obligation "
         "inventory, OR 'find pr --repo <owner/name> [--state ...] "
         "[--live]' to sweep every registered project's worktrees for "
-        "one holding a claim on a PR there",
+        "one holding a claim on a PR there, OR 'transitive [worktree_id]' "
+        "to list every unsettled obligation anywhere in a worktree's whole "
+        "subtree (itself + every worktree it created, transitively) -- "
+        "a diagnostic convenience, never a substitute for the per-hop "
+        "finalize gate",
     )
     p.add_argument(
         "--remove",
@@ -284,6 +289,8 @@ def cmd_claims(args: argparse.Namespace) -> int:
         return fleet_audit_cli.cmd_fleet_audit(args)
     if target and target[0] == "find":
         return claims_find_cli.cmd_claims_find(args, target[1:])
+    if target and target[0] == "transitive":
+        return _claims_transitive(args, target[1] if len(target) > 1 else None)
     worktree_id = target[0] if target else None
     return _claims_show(args, worktree_id)
 def _require_coordination_readiness(
@@ -961,3 +968,15 @@ def _claims_show(args: argparse.Namespace, worktree_id: str | None) -> int:
         else:
             print("    (none)")
     return 0
+
+
+def _claims_transitive(args: argparse.Namespace, worktree_id: str | None) -> int:
+    """``claims transitive [worktree_id]`` -- delegates to
+    ``claims_transitive_cli`` (kept a separate module for the module-size
+    cap; see that module's docstring for the full design rationale)."""
+    return claims_transitive_cli.cmd_claims_transitive(
+        args, worktree_id,
+        infer_worktree_id=_infer_worktree_id,
+        json_error=_json_error,
+        json_output=_json_output,
+    )
