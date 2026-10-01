@@ -161,10 +161,15 @@ order.
       conditions: today `worktrees-smoke` only has `--collect-only` (no real
       execution) plus the always-run structural `--guards` step, neither of
       which is a genuine "run a safe, evidence-backed subset" fallback the
-      vision requires. Define what the smoke tier actually *executes* when
-      triggered, and validate that curated set carries real assurance (per
-      `test-portfolio`'s own evidence-bearing-family bar), not just that it
-      exists.
+      vision requires. Curate it per the vision's **coverage-efficient
+      fallback curation** Concept: a greedy, budget-bounded weighted-set-cover
+      selection over the baseline's own per-test coverage + runtime-cost
+      data (repeatedly add whichever remaining test is cheapest per unit of
+      still-uncovered baseline coverage, stop at a tunable runtime budget) —
+      not a hand-picked list — and recompute it whenever the baseline
+      changes meaningfully. Validate that curated set carries real assurance
+      (per `test-portfolio`'s own evidence-bearing-family bar), not just that
+      it exists.
 - [ ] Wire the smoke-fallback trigger: missing baseline, stale baseline,
       unresolvable/invalidated attribution for a touched file, a changed
       line or module with **no attribution even where its own file has
@@ -252,6 +257,72 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-01 — Phase 0 kickoff: pilot-first sequencing + fallback-curation refinement
+- Operator (via an aperture-labs session that had just proven the
+  diff-scoped-selection primitive with a low-risk `coverage.py` spike against
+  one of *that* repo's small plugins) asked to drive this effort for real,
+  incrementally, "one project or sub-component at a time, until we know it
+  works effectively" — rather than Phase 1's current framing of
+  instrumenting `validate-and-promote.yml`'s full-repo promotion gate in one
+  shot. Adopting a **pilot-first** reading of Phase 0: prove the mechanism
+  (coverage collection -> baseline -> diff-scoped selection -> curated
+  fallback) end-to-end against one small, fast plugin's own suite first,
+  before wiring anything into the real promotion gate or targeting
+  `agent-worktrees` (Phase 4's actual target, but its 268-test-file suite is
+  the wrong place to debug the mechanism itself). This doesn't change the
+  Plan's phase content, only its rollout order within Phase 0 — see this
+  entry's own sub-bullets for what was actually run.
+- Operator also asked that the smoke/fallback tier's membership be chosen to
+  maximize coverage per unit of runtime it costs, not hand-picked. Folded
+  into the vision as **coverage-efficient fallback curation** (a greedy,
+  budget-bounded weighted-set-cover selection) and into this effort's own
+  Phase 3 fallback-curation bullet — see `visions/coverage-guided-ci`'s own
+  Provenance entry for the full reasoning.
+- Picked `ai-attribution` (2 test files, no vendored path deps) as the pilot
+  plugin: small enough to iterate on the selection mechanism itself in
+  seconds, not minutes, before applying it anywhere that matters.
+- Confirmed the coverage mechanism: `coverage.py` dynamic contexts
+  (`--cov-context=test`) via `pytest-cov`, run directly with `uv run` rather
+  than through `tools/run-plugin-tests.py` for this design-spike stage —
+  the runner's sub-suite/venv-reuse model (25-file chunks, non-editable
+  cached venvs) has no native coverage-context pass-through yet, and
+  retrofitting it is Phase 1's job (instrumenting the real gate), not
+  Phase 0's (proving the mechanism works at all). See
+  `tools/coverage_guided_selection/` (added this phase) for the resulting
+  prototype: `baseline.py` (collect a `.coverage` baseline + emit a portable
+  JSON of test -> covered-lines + per-test wall-clock cost), `select.py`
+  (diff-scoped selection: changed lines -> covering tests, with an explicit
+  no-attribution fallback trigger), and `fallback.py` (the greedy
+  coverage-efficient curation described above).
+- Validated end-to-end against `ai-attribution`'s real suite (69 tests, 1
+  in-process-covered script, 131 attributed source lines): a real changed
+  line selected exactly the 1 test exercising it; an uncovered line and an
+  unknown file both correctly tripped the fallback trigger (not a silent
+  empty selection); and the greedy fallback set reached **100% coverage of
+  the 131-line universe using 12 of 69 tests at 0.06s total runtime**,
+  versus 49.28s for the full suite — roughly **800x** cheaper at full
+  measured coverage, a concrete instance of "best coverage set for the
+  smallest amount of total runtime." Full numbers and the real-suite
+  integration test are in `tools/test_coverage_guided_selection.py`
+  (`test_collect_baseline_round_trips_against_a_real_plugin_suite`), which
+  re-derives and asserts them on every run rather than only reporting a
+  one-off result.
+- Phase 0's first checklist item (pick the coverage mechanism) is
+  substantiated by this pilot; its other two items — the baseline's durable
+  storage/correlation location, and spiking collection inside
+  `validate-and-promote.yml`'s real jobs — are repo-CI-architecture
+  decisions deliberately **not** made by this pilot and remain open for the
+  next increment, since this pilot's own standalone ephemeral-venv approach
+  (not `tools/run-plugin-tests.py`'s cached `.test-venvs`, which has no
+  coverage-context pass-through yet) was itself a deliberate scope
+  narrowing — see this entry's own sequencing note above.
+- Next increments, in order: (1) get this pilot's own PR reviewed and
+  merged; (2) decide Phase 0's remaining two items (storage/correlation
+  location; instrumenting `validate-and-promote.yml` for real) against a
+  second, still-small pilot or directly against `agent-worktrees`'
+  `worktrees-smoke` job, per operator direction; (3) only then begin Phase 1
+  for real.
 
 ### 2026-09-28 — Kickoff
 - Effort created from a five-round operator/agent conversation (see
