@@ -2953,5 +2953,6 @@ _Pending._
   - **#4787** — `agent-worktrees: package wrapper assets for non-editable fallback installs`
   - **#4788** — `plugin-activation: staged non-editable installs lose the remaining src-passthrough source`
 - Validation status is unchanged by those issues being filed: blocker 2 remains
-  OPEN until one of those issues lands a real fix (or otherwise removes the
-  remaining `src-passthrough` holdout safely).
+  OPEN until BOTH of those issues are resolved (or an equivalent change lands
+  that removes both the packaged-wrapper self-containment gap and the staged
+  `src-passthrough` source-loss risk safely).
