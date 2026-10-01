@@ -138,6 +138,39 @@ def run_maintenance(worker: Any, *, runner=subprocess.run) -> dict[str, Any]:
             f"engine_started={engine_started}"
         ),
     )
+    # `agent-index index` writes directly/unserialized -- it does not itself
+    # guard against a concurrent writer. The live service tracks its own
+    # in-flight indexing (e.g. a queued full reindex via POST /reindex) in
+    # `status.indexing.running`; racing that with this tick's own raw CLI
+    # index call is a real concurrent-writer hazard against the same store,
+    # not merely wasted work (observed in production: this tick's own `index`
+    # subprocess running at the same time as a service-tracked reindex task).
+    # Re-check status fresh (service_status above may already be stale by the
+    # time we get here, after a possible restart/engine-start round trip) and
+    # skip this tick's own index step entirely when one is already running,
+    # rather than contend for the same write path.
+    _completed, pre_index_status = _run_agent_index(["status"], expect_json=True, runner=runner)
+    if bool((pre_index_status.get("indexing") or {}).get("running")):
+        worker.progress(
+            phase="reindex-skipped",
+            summary="service already has an indexing task in flight; skipping this tick's own index to avoid a concurrent-writer race",
+        )
+        return {
+            "summary": (
+                f"reindex skipped (already running); "
+                f"service_recovered={service_recovered}; engine_started={engine_started}"
+            ),
+            "chunks_total": None,
+            "sources_failed": 0,
+            "sources_purged": [],
+            "reindex_skipped": True,
+            "service_recovered": service_recovered,
+            "engine_started": engine_started,
+            "engine_pid_before": engine_pid_before,
+            "engine_pid_after": engine_status.get("pid"),
+            "service_state": service_status.get("state"),
+        }
+
     worker.progress(
         phase="reindex-started",
         summary="running incremental agent-index index",
@@ -171,6 +204,7 @@ def run_maintenance(worker: Any, *, runner=subprocess.run) -> dict[str, Any]:
         "chunks_total": chunks_total,
         "sources_failed": len(failed_sources),
         "sources_purged": purged_sources,
+        "reindex_skipped": False,
         "service_recovered": service_recovered,
         "engine_started": engine_started,
         "engine_pid_before": engine_pid_before,

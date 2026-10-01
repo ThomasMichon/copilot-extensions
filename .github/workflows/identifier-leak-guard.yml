@@ -26,6 +26,12 @@ name: Identifier leak guard
 # source file directly into the secret value, strip comments/blank lines
 # first. See `tools/check-no-internal-identifiers.py`'s own docstring
 # (`_load_ci_identifiers`) for the exact parser this feeds.
+# Tokens are case-insensitive literal substrings by default. For a bounded
+# match, prefix a Python regular expression with `regex:` (e.g.
+# `regex:\bexample\b|Use a generic placeholder`). Semicolons/newlines
+# delimit entries and cannot appear inside a pattern or reason. Double
+# alternation pipes (`||`) inside a regex; the first single `|` separates
+# its reason.
 # Provision/rotate a secret with (never a bare `gh`; route through this
 # repo's resolved account):
 #   agent-worktrees repos gh ThomasMichon/copilot-extensions -- \
