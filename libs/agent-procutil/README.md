@@ -43,6 +43,20 @@ ownership. Runtime code with an additional in-process survival step can use
 instead of using `DETACHED_PROCESS`, so console-subsystem grandchildren do not
 allocate a visible console.
 
+A child that must never outlive the process that spawned it -- even a hard
+kill of that process -- can be bound to a kill-on-close Windows Job Object:
+
+```python
+proc = subprocess.Popen(cmd, **no_window_kwargs())
+job = bind_to_kill_on_close_job(proc.pid)  # JobHandle | None
+```
+
+Keep the returned `JobHandle` referenced for as long as the child should live:
+when it is closed (explicitly, or when the owning process exits for any reason)
+Windows terminates every process still in the job. It is best-effort: it returns
+`None` off Windows or when the binding fails, and never raises. Do not use it for
+children meant to outlive their launcher (detached daemons, keepers).
+
 ## Vendoring
 
 **In dev**, most consumers' `pyproject.toml` reference this library through

@@ -46,7 +46,12 @@ pseudoconsole wrapper around an opaque protocol stream. Move that descendant
 behind an owned loopback broker instead, pump bytes without decoding them, and
 apply the normal captured-child launch primitive at the point that creates it.
 The shared SSH launcher owns this broker in-process for the lifetime of one SSH
-root; normal exit, timeout, and cancellation close its listener and proxy child.
+root; normal exit, timeout, and cancellation close its listener and proxy child,
+and both the proxy child and the SSH root are bound to a kill-on-close Job
+Object owned by the spawning process (`agent_procutil.bind_to_kill_on_close_job`),
+so they also die when that process exits for any reason, a hard kill included --
+a short-lived CLI that exits before its background cleanup finishes no longer
+orphans a `gh cs ssh --stdio` proxy.
 Its narrow `pythonw.exe` client duplicates OpenSSH's inherited OS pipe handles
 as binary streams; it must not depend on Python's GUI-mode `sys.stdin/stdout`.
 Do not rewrite SSH's HostName or Port: credential and known-hosts paths may
