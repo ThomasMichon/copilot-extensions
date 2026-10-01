@@ -322,6 +322,8 @@ async def _watch_process(process: asyncio.subprocess.Process) -> None:
 
 
 _WATCHERS: set[asyncio.Task] = set()
+_OWNER_JOB_WATCHERS: set[asyncio.Task] = set()
+_OWNER_JOBS: dict[int, JobHandle] = {}
 
 
 def _watcher_done(task: asyncio.Task) -> None:
@@ -333,6 +335,39 @@ def _watcher_done(task: asyncio.Task) -> None:
         )
 
 
+async def _close_owner_job_when_process_ends(
+    process: asyncio.subprocess.Process,
+    job_handle: JobHandle,
+) -> None:
+    try:
+        await process.wait()
+    finally:
+        job_handle.close()
+        _OWNER_JOBS.pop(id(process), None)
+
+
+def _job_watcher_done(task: asyncio.Task) -> None:
+    _OWNER_JOB_WATCHERS.discard(task)
+    if not task.cancelled() and (error := task.exception()) is not None:
+        log.debug(
+            "SSH owner job watcher failed",
+            exc_info=(type(error), error, error.__traceback__),
+        )
+
+
+def _bind_process_to_owner_job(process: asyncio.subprocess.Process) -> None:
+    pid = getattr(process, "pid", None)
+    if not isinstance(pid, int):
+        return
+    job_handle = bind_to_kill_on_close_job(pid)
+    if job_handle is None:
+        return
+    _OWNER_JOBS[id(process)] = job_handle
+    watcher = asyncio.create_task(_close_owner_job_when_process_ends(process, job_handle))
+    _OWNER_JOB_WATCHERS.add(watcher)
+    watcher.add_done_callback(_job_watcher_done)
+
+
 async def create_ssh_subprocess(
     *args: str, config: SSHConfig, **kwargs: Any,
 ) -> asyncio.subprocess.Process:
@@ -341,7 +376,9 @@ async def create_ssh_subprocess(
     if not proxy and isinstance(config, SSHConfig):
         proxy = _option(config, "proxycommand")
     if not _is_windows() or not proxy or proxy.casefold() == "none":
-        return await asyncio.create_subprocess_exec(*args, **ssh_subprocess_kwargs(**kwargs))
+        process = await asyncio.create_subprocess_exec(*args, **ssh_subprocess_kwargs(**kwargs))
+        _bind_process_to_owner_job(process)
+        return process
     shell = await _resolve_shell(kwargs.get("executable") or args[0])
     expanded = _expand_tokens(proxy, config)
     command = [shell, "-c", expanded] if shell else _split_windows_command(expanded)
@@ -357,6 +394,7 @@ async def create_ssh_subprocess(
             *_broker_args(args, _client_command(port, capability, shell=shell is not None)),
             **ssh_subprocess_kwargs(**kwargs),
         )
+        _bind_process_to_owner_job(process)
     except BaseException:
         await broker.close()
         raise

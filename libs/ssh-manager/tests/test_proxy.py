@@ -124,6 +124,45 @@ async def test_no_proxy_preserves_existing_subprocess_contract(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_create_ssh_subprocess_binds_root_to_owner_job(monkeypatch):
+    class FakeProcess:
+        pid = 12345
+
+        def __init__(self):
+            self.released = asyncio.Event()
+
+        async def wait(self):
+            await self.released.wait()
+            return 0
+
+    class FakeJobHandle:
+        def __init__(self):
+            self.closed = 0
+
+        def close(self):
+            self.closed += 1
+
+    fake_process = FakeProcess()
+    job_handle = FakeJobHandle()
+    monkeypatch.setattr(
+        proxy.asyncio, "create_subprocess_exec", AsyncMock(return_value=fake_process)
+    )
+    monkeypatch.setattr(proxy, "bind_to_kill_on_close_job", lambda pid: job_handle)
+
+    result = await proxy.create_ssh_subprocess("ssh", "example", config=SSHConfig("example"))
+
+    assert result is fake_process
+    assert proxy._OWNER_JOBS[id(fake_process)] is job_handle
+    fake_process.released.set()
+    for _ in range(10):
+        await asyncio.sleep(0)
+        if job_handle.closed:
+            break
+    assert job_handle.closed == 1
+    assert id(fake_process) not in proxy._OWNER_JOBS
+
+
+@pytest.mark.asyncio
 async def test_non_windows_proxy_keeps_native_ssh_routing(monkeypatch):
     monkeypatch.setattr(proxy, "_is_windows", lambda: False)
     spawn = AsyncMock(return_value=object())
