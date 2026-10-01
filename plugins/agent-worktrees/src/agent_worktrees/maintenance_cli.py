@@ -533,6 +533,10 @@ def cmd_doctor(args) -> int:
                 entry = orphan.record.session_entry(orphan.session_id)
                 if entry is not None and entry.state in ("handed-off", "yielded"):
                     entry.state = "active"
+                    # Cancels the pending handoff that produced this orphaned
+                    # state (mirrors the bind-reclaim rebind path's own call)
+                    # so an active head never still reports one pending.
+                    tracking._cancel_pending_handoffs(orphan.record)
                     tracking.set_head_session(
                         orphan.record,
                         orphan.session_id,

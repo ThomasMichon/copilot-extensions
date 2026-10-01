@@ -10,8 +10,8 @@ from types import SimpleNamespace
 
 import yaml
 
-from agent_worktrees import health
-from agent_worktrees.tracking import HeadTransition, SessionEntry, WorktreeRecord
+from agent_worktrees import health, tracking
+from agent_worktrees.tracking import HeadTransition, SessionEntry, SessionHandoff, WorktreeRecord
 
 # --------------------------------------------------------------------------- #
 # YAML integrity
@@ -460,6 +460,36 @@ class TestOrphanedHandoffs:
         e.state = "active"
         o.record.head_session = o.session_id
         assert rec.resolved_head_session == "s1"  # resumable again
+
+    def test_yielded_tail_reactivation_cancels_its_stale_pending_handoff(self):
+        """The pending handoff that produced a yielded orphan's state must
+        not survive its repair -- an active head that still reports a
+        pending handoff blocks terminal cleanup and could let a later token
+        consumer link a handoff the repair already superseded. Mirrors the
+        orchestrator's own mutate (maintenance_cli.py), which calls
+        `tracking._cancel_pending_handoffs` alongside the reactivation."""
+        entry = SessionEntry(session_id="s1", started_at="2026-01-01T00:00:00",
+                             state="yielded")
+        rec = WorktreeRecord(
+            worktree_id="wt-1", branch="worktree/wt-1", worktree_path="/tmp/wt-1",
+            repo="test-repo", machine="test", platform="wsl",
+            started_at="2026-01-01T00:00:00", last_resumed_at="2026-01-01T00:00:00",
+            resume_count=0, title=None, status="active", completed_at=None,
+            sessions=[entry],
+            handoffs=[
+                SessionHandoff(ordinal=1, token="tok", predecessor="s1",
+                               state="pending", opened_at="2026-01-01T00:00:00"),
+            ],
+        )
+        orphans = health.find_orphaned_handoffs([rec])
+        assert len(orphans) == 1
+        o = orphans[0]
+        e = o.record.session_entry(o.session_id)
+        e.state = "active"
+        tracking._cancel_pending_handoffs(o.record)
+        o.record.head_session = o.session_id
+        assert rec.resolved_head_session == "s1"
+        assert rec.handoffs[0].state == "cancelled"
 
     def test_detects_yielded_tail_despite_an_older_active_session(self):
         """aperture-labs#7824 regression: an older session left
