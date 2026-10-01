@@ -30,8 +30,25 @@ live.
 
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from . import output, tracking
 from .config import Config
+
+
+def _authority_host(value: str) -> str:
+    """Normalize a provider ``authority_endpoint()`` result OR a tracked PR
+    URL down to a comparable ``host[:port]`` -- GitHub's endpoint is a bare
+    host, while Azure DevOps' and Gitea's is a full ``api_base`` URL.
+    """
+    value = (value or "").strip()
+    if not value:
+        return ""
+    parsed = urlparse(value if "://" in value else f"//{value}")
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return ""
+    return f"{host}:{parsed.port}" if parsed.port else host
 
 
 def dirty_worktree_error(worktree_path: str, *, wt_exists: bool) -> str | None:
@@ -168,6 +185,18 @@ def pr_merge_status(record: tracking.WorktreeRecord, repo) -> bool | None:
     try:
         from . import providers
         provider = providers.get_provider(prcfg.provider)
+        tracked_url = (getattr(pr, "url", "") or "").strip()
+        if tracked_url:
+            tracked_host = _authority_host(tracked_url)
+            expected_host = _authority_host(
+                provider.authority_endpoint(getattr(prcfg, "api_base", "") or ""),
+            )
+            if tracked_host and expected_host and tracked_host != expected_host:
+                # Same provider kind, but the configured host/authority has
+                # since changed (e.g. the repo moved to a different GitHub
+                # Enterprise instance); querying the NEW authority with the
+                # OLD slug/number can confirm an unrelated merged PR there.
+                return None
         token = providers.account_token_for_slug(slug, prcfg)
         result = provider.get_pull(
             slug, int(number),

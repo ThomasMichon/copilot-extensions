@@ -17,6 +17,7 @@ import json
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 
@@ -917,6 +918,38 @@ class TestPrMergeStatusIndeterminateVsUnmerged:
             pr=SimpleNamespace(provider="github", api_base=""),
         )
         assert finalize_open_pr_gate.pr_merge_status(record, repo) is None
+
+    def test_mismatched_tracked_authority_is_indeterminate_not_queried(self):
+        # Same provider KIND, but the tracked PR's own URL names a host that
+        # no longer matches the repo's currently configured authority (e.g.
+        # the repo moved to a different GitHub Enterprise instance). Querying
+        # the NEW authority with the OLD slug/number could confirm an
+        # unrelated merged PR there and hand back the wrong head -- fail
+        # closed instead of ever calling get_pull().
+        from agent_worktrees import providers
+        from agent_worktrees.providers.github import GitHubProvider
+
+        class _BoomOnQuery(GitHubProvider):
+            def get_pull(self, *_args, **_kwargs):
+                raise AssertionError("must not query a provider across a host change")
+
+        with mock.patch.object(
+            providers, "get_provider", lambda _name: _BoomOnQuery(),
+        ):
+            pr = SimpleNamespace(
+                branch="pr/some-fix", repo="owner/repo", number=7,
+                provider="github", state="open", head_sha="",
+                url="https://old-host.example.com/owner/repo/pull/7",
+            )
+            record = SimpleNamespace(pr=pr)
+            repo = SimpleNamespace(
+                pr=SimpleNamespace(
+                    provider="github", api_base="https://new-host.example.com",
+                ),
+            )
+            assert finalize_open_pr_gate.pr_merge_status(record, repo) is None
+
+
 
 
 def test_content_exceeds_merged_head_any_checks_each_pr_branch_against_own_head(

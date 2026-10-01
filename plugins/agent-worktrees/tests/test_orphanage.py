@@ -199,6 +199,23 @@ def test_pr_claim_target_honors_gh_host_ambient_authority(monkeypatch):
     ) is None
 
 
+def test_pr_claim_target_preserves_gh_host_port(monkeypatch):
+    # An ambient GH_HOST authority carrying a port must survive into the
+    # resolved api_base -- a bare `parsed.hostname` drops the port, which
+    # would silently make get_pull() query the default port instead of the
+    # configured one.
+    monkeypatch.setenv("GH_HOST", "github.example.com:8443")
+    prcfg = types.SimpleNamespace(provider="github", api_base="")
+    assert cleanup._pr_claim_target(
+        "https://github.example.com:8443/owner/project/pull/42", prcfg,
+    ) == ("github", "owner/project", 42, "github.example.com:8443")
+    # A request to the same host but the wrong (default) port must still be
+    # rejected as a different authority.
+    assert cleanup._pr_claim_target(
+        "https://github.example.com/owner/project/pull/42", prcfg,
+    ) is None
+
+
 @pytest.mark.parametrize(
     "ref",
     [

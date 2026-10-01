@@ -328,7 +328,13 @@ def _pr_claim_target(
         return None
     if parsed.username or parsed.password:
         return None
+    # Preserve the port: a bare ``parsed.hostname`` drops it, so an ambient
+    # ``GH_HOST=host:port`` authority would pass validation here but then
+    # have its port silently dropped before being handed to get_pull() as
+    # ``api_base`` below.
     host = parsed_host.lower()
+    if parsed.port is not None:
+        host = f"{host}:{parsed.port}"
     parts = [part for part in parsed.path.split("/") if part]
 
     if configured_provider == "github":
