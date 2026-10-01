@@ -722,12 +722,17 @@ shape before committing to a design)_
       promotion output is byte-identical to the pre-conversion copy for
       each (the same `git diff --no-index` check the isolated trial used,
       run against the real repo this time).
-- [ ] A converted plugin's own test suite (`tools/run-plugin-tests.py
+- [x] A converted plugin's own test suite (`tools/run-plugin-tests.py
       <plugin>`) passes with **no local `libs/<lib>` directory present at
       all** in the `dev` checkout — proving the canonical reference alone
       (via `[tool.uv.sources]` `path` + `editable = true`) is sufficient
       for `uv pip install -e .` and subsequent test/static-analysis
       resolution, matching the Design Decision's validated prototype.
+      **Done, 2026-10-01:** bounded `run-plugin-tests.py --reinstall`
+      batches passed for every converted plugin suite:
+      `agent-worktrees`, `agent-bridge`, `agent-mcp`, `agent-containers`,
+      `agent-codespaces`, `agent-vault`, `agent-dispatch`, `agent-logger`,
+      `agent-ssh`, `agent-index`, and `agent-machines`.
       (Briefly marked superseded during the `src-passthrough` era, since
       that form keeps a local pointer directory — reverted now that
       `uv`-editable is current again; a `src-passthrough` copy's own
@@ -749,11 +754,14 @@ shape before committing to a design)_
       the primary reason for reverting to this mechanism, so it must be
       demonstrated directly, not merely inferred from the earlier
       editable-install prototype.
-- [ ] Editing the canonical `libs/<lib>` source and re-running a
+- [x] Editing the canonical `libs/<lib>` source and re-running a
       converted plugin's tests **without reinstalling** picks up the edit
       — the "in-place test scripts in `dev`" / "call across folders"
       requirement, demonstrated against a real plugin (not just the
-      isolated prototype).
+      isolated prototype). **Done, 2026-10-01:** a targeted
+      `pytest` proof against `agent-ssh`'s real test venv showed
+      `venue_copilot.MAX_SEED_CHARS` change `24000 -> 24001` taking
+      effect immediately without any reinstall, then reverting cleanly.
 - [x] `tools/preview_release.py` ("preview-promo") correctly performs the
       copy-then-rewrite for a plugin using the canonical-reference form
       when building a scratch local-install preview. **Done, PR #4245** --
@@ -777,26 +785,39 @@ shape before committing to a design)_
       retired) directory-pointer path above already does (its own
       `_escapes_root()` copy, mirroring rather than importing across the
       hyphenated/non-hyphenated filename boundary).
-- [ ] A promotion run against a deliberately malformed/unresolvable pointer
+- [x] A promotion run against a deliberately malformed/unresolvable pointer
       aborts the promotion rather than producing a `main` snapshot
       containing an unexpanded stub. **Done, PR #3752** — covered for a
       missing `source` at the promotion level
       (`test_promote_refuses_when_a_pointer_does_not_resolve`); extend the
       same fail-closed behavior to cover an unresolvable canonical
       reference (missing/escaping lib) once Phase 1's rewrite step lands.
-- [ ] If Phase 2 lands: a canonically-referenced `scripts/installer-
+      **Extended, 2026-10-01:** `test_promote_refuses_when_a_uv_editable_
+      reference_does_not_resolve` now proves the same promotion-level
+      fail-closed behavior for a missing canonical lib reference.
+- [x] If Phase 2 lands: a canonically-referenced `scripts/installer-
       engine.{sh,ps1}` runs correctly **in dev**, unmaterialized,
       dot-sourced (`source` on POSIX, `.` on PowerShell — not merely
       executed as a child process) by a plugin's own wrapper across
       folders into the canonical engine, on both platforms — demonstrating
       the "in-place test scripts in `dev`" requirement without requiring
-      `preview_release.py`/materialization first.
-- [ ] A materialized `main` build of the same plugin is fully self-contained
+      `preview_release.py`/materialization first. **Done, 2026-10-01:**
+      `bash plugins/agent-pull-requests/scripts/install.sh status`
+      succeeded directly from `dev`, and a direct PowerShell dot-source of
+      the exact canonical `installer-engine.ps1` path loaded
+      `Invoke-UvPipInstallResilient` successfully under `pwsh`.
+- [x] A materialized `main` build of the same plugin is fully self-contained
       — no cross-folder reference remains in the shipped payload, and no
       `editable = true` reaches a real shipped install — per
-      `docs/install-contract.md`.
-- [ ] No existing plugin's test suite or live installer regresses from the
-      Phase 1 lib-conversion.
+      `docs/install-contract.md`. **Done, 2026-10-01:** preview builds for
+      `agent-pull-requests` and `agent-codespaces` rewrote the payload to
+      plugin-local `scripts/installer-engine.*` / `libs/*` paths; no
+      `../../libs/...` references or live `editable = true` entries remain
+      in their shipped `pyproject.toml` / installer source lines.
+- [x] No existing plugin's test suite or live installer regresses from the
+      Phase 1 lib-conversion. **Done, 2026-10-01:** the full converted-
+      plugin suite sweep above passed green, covering every plugin with
+      uv-editable Phase-1 lib consumers.
 
 ## Proposal
 
@@ -2786,3 +2807,58 @@ _Pending._
   unchanged because the Validation Plan still has open items (full real-plugin
   round-trip/losslessness, broad non-editable-install proof, live-edit-without-
   reinstall proof, full Phase 2 rollout proof, and no-regression confirmation).
+
+### 2026-10-01 — Validation sweep: editable-suite proof completed; non-editable proof narrowed to a real agent-worktrees packaging bug
+
+- **Checked off 5 Validation Plan items with fresh evidence:**
+  - editable `dev` suites with **no local `libs/<lib>` directories**:
+    bounded `tools/run-plugin-tests.py --reinstall` batches passed for every
+    converted plugin suite (`agent-worktrees`, `agent-bridge`, `agent-mcp`,
+    `agent-containers`, `agent-codespaces`, `agent-vault`, `agent-dispatch`,
+    `agent-logger`, `agent-ssh`, `agent-index`, `agent-machines`).
+  - **live edit without reinstall**: a targeted `pytest` probe against
+    `agent-ssh`'s real test venv imported `venue_copilot.MAX_SEED_CHARS`,
+    observed the baseline `24000`, observed `24001` immediately after editing
+    canonical `libs/venue-copilot/src/venue_copilot/__init__.py`, then passed
+    again after reverting to `24000` — no reinstall at any point.
+  - **promotion fail-closed for canonical references**: added
+    `test_promote_refuses_when_a_uv_editable_reference_does_not_resolve`,
+    extending the existing file-pointer promotion guard to a missing
+    uv-editable canonical lib reference.
+  - **Phase 2 dev-time dot-source proof**: `agent-pull-requests`'s
+    unmaterialized `install.sh` ran `status` directly from `dev`, and a direct
+    PowerShell dot-source of the exact canonical engine path loaded
+    `Invoke-UvPipInstallResilient` successfully under `pwsh`.
+  - **self-contained shipped-payload proof**: `preview_release.py` previews for
+    `agent-pull-requests` and `agent-codespaces` materialized plugin-local
+    `scripts/installer-engine.*` / `libs/*` content and rewrote manifests to
+    local, non-editable paths only.
+- **Broader no-regression proof completed**: the same 11-plugin editable suite
+  sweep above is a stronger-than-representative cross-section for Phase 1's lib
+  consumers, so the "no existing plugin's test suite regresses" validation item
+  is now satisfied.
+- **Round-trip/losslessness item remains OPEN, but the blocker is now
+  specific:** a historical replay over 11 conversion commits / 63 converted
+  paths showed a naive "current materializer output vs raw pre-conversion tree"
+  diff is not a faithful baseline once a conversion PR also changed canonical
+  README/test content in the same commit. That replay is still valuable
+  evidence: the open problem is now *baseline construction*, not a confirmed
+  current materializer corruption, but the item is not honestly checkable yet
+  without a non-circular current-copy reconstructor.
+- **Non-editable top-level suite proof remains OPEN because a real bug surfaced
+  instead of a clean sweep:** direct non-editable suite runs passed for
+  `agent-vault` and `agent-ssh`, extending the earlier `lazy-cli-dispatch`
+  proof to two more real converted plugins. `agent-worktrees`, however, failed
+  11 tests when installed non-editably into its test venv: the installed wheel
+  does not carry payload-root assets the suite expects/runtime uses
+  (`scripts/conduct/*.md`, `scripts/hook_client.py`, related binstub-adjacent
+  payload files under the installed root). That is a genuine packaging gap, not
+  a flaky validation harness. Leave this checklist item open until
+  `agent-worktrees`'s non-editable payload layout is fixed and the same proof is
+  extended further across the remaining converted plugins.
+- **Net state after this sweep:** Validation Plan now has exactly **two**
+  remaining unchecked items — the historical round-trip baseline problem above,
+  and the broader non-editable top-level-suite proof now blocked on the
+  `agent-worktrees` packaging bug. The effort is therefore **not yet ready** to
+  be marked Done, but the remaining blockers are sharply narrowed and
+  explicitly evidenced instead of still being generic "validation left to do."
