@@ -88,8 +88,11 @@ def test_uv_venv_retry_succeeds_without_retrying_on_first_try():
 
 
 def test_uv_venv_retry_recovers_after_transient_access_denied():
-    """A transient Access Denied on the first attempt must be retried and
-    succeed on the second -- the whole update must not abort on one hit."""
+    """Both `uv` calls in the first retry iteration (the version-constrained
+    attempt and its unconstrained fallback) must fail transiently, and the
+    loop must actually advance to -- and succeed on -- the second iteration.
+    (A mock that lets the first iteration's own fallback succeed would pass
+    without ever exercising the retry/backoff loop itself.)"""
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
@@ -100,7 +103,7 @@ def test_uv_venv_retry_recovers_after_transient_access_denied():
             Path(tmp),
             """
             $script:callCount++
-            if ($script:callCount -eq 1) {
+            if ($script:callCount -le 2) {
                 [pscustomobject]@{ ExitCode = 1; Output = 'failed to persist temporary file: Access is denied. (os error 5)' }
             } else {
                 [pscustomobject]@{ ExitCode = 0; Output = '' }
@@ -110,7 +113,7 @@ def test_uv_venv_retry_recovers_after_transient_access_denied():
     assert proc.returncode == 0, proc.stderr
     exit_code, call_count = proc.stdout.strip().split("|")
     assert exit_code == "0"
-    assert call_count == "2"
+    assert call_count == "3"
 
 
 def test_uv_venv_retry_gives_up_after_three_attempts_on_persistent_transient_failure():

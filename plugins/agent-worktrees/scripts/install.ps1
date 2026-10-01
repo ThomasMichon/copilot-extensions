@@ -2048,7 +2048,7 @@ function Invoke-UvVenvWithRetry {
         if ($uvResult.ExitCode -eq 0) { break }
         if ($uvResult.Output -notmatch $transientPattern) { break }
         if ($i -lt 2) {
-            Write-ServiceWarn "uv venv creation hit a transient file-lock error -- retrying ($($i + 1)/3)..."
+            Write-ServiceWarn "uv venv creation hit a transient file-lock error -- retrying (attempt $($i + 2) of 3)..."
             Start-Sleep -Milliseconds 750
         }
     }
