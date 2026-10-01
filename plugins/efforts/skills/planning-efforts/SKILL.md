@@ -212,8 +212,12 @@ reads as authoritative.
   that intent doesn't depend on. This applies equally to the sidecar
   transcript: a verbatim exchange that necessarily contains such content is
   captured in full in a private knowledge repo's own sidecar instead of the
-  public repo's `inception-transcript.md`, with the public README linking to
-  it generically rather than reproducing it.
+  public repo's `inception-transcript.md`. The public README notes generically
+  that a fuller private record exists elsewhere, in prose, without a
+  resolvable link — the one-way linking rule (private links to the canonical
+  public effort, never the reverse; see *Cross-repo efforts* below) still
+  applies, and even a "generic" link can expose the private repo's existence
+  or location.
 
 ## Plan an effort
 
@@ -300,10 +304,11 @@ The README is the shared contract — keep it **ahead of the conversation**. But
 
 An effort's Journal is a natural place to record *how* a decision was reached
 — what was investigated, what broke, what the fix was. When the effort's own
-repo is a **public or externally-shareable** one (no private, closed-circuit
-relationship to the systems being discussed), that narrative can't carry the
-same level of concrete detail a private knowledge repo's effort would: a real
-**private/internal** repo or system name, a **private** cross-organization
+repo is **public or externally-shareable**, that narrative can't carry the
+same level of concrete detail a private knowledge repo's effort would — this
+holds regardless of any private relationship between that repo and the
+systems being discussed; what matters is that the repo itself is public. A
+real **private/internal** repo or system name, a **private** cross-organization
 issue reference, device or account naming conventions, or a blow-by-blow
 internal-investigation narrative is exactly the kind of content that leaks
 when it's committed to a public tree, even inside an effort folder that
@@ -324,8 +329,12 @@ repo, system, or organization's existence or internals.
 - **Route the un-abstracted record to where it belongs.** If a precise,
   unabstracted account is genuinely useful to keep somewhere, that record
   belongs in a private knowledge repo (per that repo's own conventions), not
-  in the public effort — link to it generically ("see the private incident
-  record") rather than reproducing it.
+  in the public effort — note generically, in prose, that a fuller private
+  record exists ("see the private incident record") rather than reproducing
+  it **or linking to it**: the one-way linking rule (private links to the
+  canonical public effort, never the reverse) applies here too, and even a
+  "generic" resolvable link can expose the private repo's existence or
+  location to a public reader.
 - **This isn't unique to Journal entries.** The same bar applies to Context,
   Request capture, and any sub-doc the effort links out to — anywhere an
   agent might be tempted to paste a real cross-repo reference, an internal
