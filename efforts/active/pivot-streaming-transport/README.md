@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** per-phase `pr/<slug>` worktrees → landed to `dev`
 - **Created:** 2026-09-30
-- **Status:** Draft <!-- Draft | Active | Blocked | Done -->
+- **Status:** Active <!-- Draft | Active | Blocked | Done -->
 - **Vision:** [`visions/picker`](../../../visions/picker/README.md) —
   §Behaviors/`live-not-snapshot`, `graceful-capability-scaling`;
   §Non-Goals/*Not in-process with the engine — it sits on top of the CLI*:
@@ -190,17 +190,27 @@ consumption code, not just this plan's assumption about it — confirmed
 against `tasks.py:395` and the `subscribe` timeout-skip logic: today, nothing
 distinguishes "the channel is genuinely still open" from "the producer exited
 and we're silently frozen on its last snapshot.")_
-- [ ] Define an explicit contract: a `subscribe` pivot's stream process exiting
+- [x] Define an explicit contract: a `subscribe` pivot's stream process exiting
       (EOF on stdout) must be treated as the channel dropping, not as
       "finished successfully." On EOF, either (a) reconnect by re-invoking the
       `list --stream` command after a short backoff, keeping the last-known
       rows visible in the interim (never blank the pivot on a transient drop),
       or (b) fall back to repolling via the plain one-shot path if reconnect
-      attempts are exhausted.
-- [ ] Add regression coverage: a `subscribe` pivot whose process exits
+      attempts are exhausted. **Done 2026-10-01**: added `_subscribe_live`/
+      `_subscribe_retries` tracking + `_handle_subscribe_drop()`
+      (`tasks.py`) — bounded reconnect with backoff
+      (`SUBSCRIBE_MAX_RECONNECT_ATTEMPTS`/`SUBSCRIBE_RECONNECT_BACKOFF_SECS`),
+      resetting the retry budget on any successful row delivery so a
+      genuinely-flaky-but-working channel reconnects indefinitely, while a
+      channel that never delivers anything exhausts and hands control back to
+      `repoll()`.
+- [x] Add regression coverage: a `subscribe` pivot whose process exits
       mid-session must resume updating (via reconnect or fallback), never
-      silently freeze on stale rows forever.
-- [ ] This is a `worktree-manager`-owned fix (the consuming runtime), landed
+      silently freeze on stale rows forever. **Done**:
+      `test_subscribe_reconnects_after_unexpected_eof` (recovering case) and
+      `test_subscribe_exhausts_and_falls_back_to_repoll` (exhaustion case),
+      `test_pivot_streaming.py`.
+- [x] This is a `worktree-manager`-owned fix (the consuming runtime), landed
       and verified **before** Phase 1 flips any real plugin's manifest to
       `subscribe: true` — flipping the flag today would durably freeze that
       pivot the first time its CLI process exits for any reason.
@@ -208,7 +218,7 @@ and we're silently frozen on its last snapshot.")_
 ### Phase 1 — Adopt `stream`/`subscribe` for agent-dispatch's pivot
 _(agent-recommended ordering: lowest-risk, highest-signal first adopter —
 agent-dispatch's CLI already emits SSE-sourced JSON lines for `watch`, so this
-is closest to a manifest-only change. Depends on Phase 0.)_
+is closest to a manifest-only change. Depends on Phase 0 — now unblocked.)_
 - [ ] Confirm `agent-dispatch-board --machine {machine}` (the pivot's current
       `list` command) can emit the `stream`/`subscribe` NDJSON envelope shape
       `tasks.py` expects (`begin`/`row`/`delta`/`removed`/`summary`/`done`), or
@@ -417,3 +427,32 @@ plan itself rather than dismissed:
    Phase 0's reconnect concern for the daemon-backed case specifically: the
    CLI process, which already owns its own daemon's lifecycle, owns
    reconnecting to it too.
+
+### 2026-10-01 — Phase 0 landed: the subscribe EOF/reconnect contract
+Implemented in `worktree-manager/src/worktree_manager/production_picker/
+picker_tui/tasks.py`'s `RegisteredPivotRuntime`:
+- Added `_subscribe_live`/`_subscribe_retries` (per-machine) tracking and a new
+  `_handle_subscribe_drop()` method, the common tail every `_run_list_stream`
+  termination path now routes through (an `error` frame, a plain EOF with no
+  `done`/`error`, or an unexpected bare `done`).
+- A `subscribe` pivot's channel dropping schedules a reconnect
+  (`SUBSCRIBE_RECONNECT_BACKOFF_SECS` backoff, re-invoking `_run_list_stream`)
+  up to `SUBSCRIBE_MAX_RECONNECT_ATTEMPTS` times; the budget resets to 0 on any
+  termination that delivered at least one real row, so a flaky-but-working
+  channel reconnects indefinitely while one that never produces anything
+  genuinely exhausts.
+- `repoll()`'s gate changed from trusting the **static** `pivot.subscribe`
+  manifest flag forever to reading the **dynamic** `_subscribe_live` state,
+  defaulting to "treat as live" (no-op, matching prior behavior) until a
+  channel has actually been observed and explicitly exhausted — so an
+  exhausted `subscribe` pivot falls back to ordinary one-shot repolling
+  instead of freezing on stale rows for the rest of the session.
+- Regression tests (`test_pivot_streaming.py`): a recovering-channel case
+  (`subscribe_row_then_drop` — delivers a row, drops, reconnects repeatedly,
+  never exhausts) and an exhausting case (`subscribe_empty_done` — never
+  delivers a row, exhausts after the configured attempts, hands control back
+  to `repoll()`). Both needed care around timing races in test assertions
+  (`_subscribe_live` reads `False` transiently during every backoff window,
+  not only the terminal one) — settled on waiting for a *stable* reading
+  rather than the first sighting.
+- Full `test_picker_tui.py` + `test_pivot_streaming.py`: 289 passed.

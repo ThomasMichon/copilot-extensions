@@ -32,6 +32,7 @@ import shutil
 import signal
 import subprocess
 import threading
+import time
 from collections.abc import Mapping, Sequence
 
 from agent_procutil import no_window_flags
@@ -41,6 +42,18 @@ from .pivots import RegisteredPivot, format_template, parse_list_payload
 #: Hard cap on how long a pivot's ``list``/action command may run.
 LIST_TIMEOUT = 20.0
 ACTION_TIMEOUT = 30.0
+
+#: Phase 0 (render-perf follow-up, #3307/pivot-streaming-transport, 2026-10-01):
+#: a held ``subscribe`` stream's producer can exit (crash, or a plain EOF with
+#: no ``done``/``error`` frame) without that ever being distinguished from a
+#: genuinely-still-live channel -- ``repoll()`` used to no-op unconditionally
+#: whenever ``pivot.subscribe`` was set, trusting the channel was still open
+#: forever. These bound the reconnect policy: how many times
+#: :meth:`RegisteredPivotRuntime._run_list_stream` re-spawns a dropped
+#: ``subscribe`` channel before giving up and falling back to ordinary
+#: one-shot repolling, and the backoff between attempts.
+SUBSCRIBE_MAX_RECONNECT_ATTEMPTS = 5
+SUBSCRIBE_RECONNECT_BACKOFF_SECS = 2.0
 
 #: Plugin-identity env vars that must never leak from the picker's own process
 #: into a *different* plugin's CLI. Mirrors ``reconcile._RUNTIME_ENV_UNSET``
@@ -229,6 +242,15 @@ class RegisteredPivotRuntime:
         self._procs: list[subprocess.Popen] = []
         self._procs_lock = threading.Lock()
         self._closed = threading.Event()
+        # Phase 0: whether a ``subscribe`` pivot's held channel is CURRENTLY
+        # believed live for a given machine -- distinct from ``pivot.subscribe``
+        # (the manifest's static declaration), which never reflects whether the
+        # channel actually dropped. ``repoll()`` only skips a machine while this
+        # is True; a dropped/exhausted channel clears it so normal repolling
+        # resumes. ``_subscribe_retries`` counts consecutive reconnect attempts
+        # since the last successful ``ready`` frame, reset on success.
+        self._subscribe_live: dict[object, bool] = {}
+        self._subscribe_retries: dict[object, int] = {}
 
     # -- listing -------------------------------------------------------------
 
@@ -289,12 +311,25 @@ class RegisteredPivotRuntime:
         Tasks pivot pick up tasks/cards created by *another* session (e.g. a
         claimer posting a steer card) without a manual reload or a restart.
 
-        No-op only for a ``subscribe`` pivot -- its held child channel is already
-        live (it applies deltas in place), so a forced refetch would spawn a
-        redundant second channel. A one-shot ``stream`` pivot (streams once then
-        exits) is NOT already-live, so it is repolled like any other -- the
-        streaming runner re-runs and swaps rows in via :meth:`_finish`."""
-        if self._closed.is_set() or self.pivot.subscribe:
+        No-op only while a ``subscribe`` pivot's channel is CURRENTLY believed
+        live (``_subscribe_live``) -- its held child channel applies deltas in
+        place, so a forced refetch would spawn a redundant second channel. Once
+        that channel has dropped and exhausted its own reconnect attempts (Phase
+        0, #3307/pivot-streaming-transport), ``_subscribe_live`` clears and this
+        resumes normal one-shot repolling -- a ``subscribe`` pivot's manifest
+        declaration alone no longer freezes it forever. A one-shot ``stream``
+        pivot (streams once then exits) is NOT already-live, so it is repolled
+        like any other -- the streaming runner re-runs and swaps rows in via
+        :meth:`_finish`."""
+        if self._closed.is_set():
+            return
+        # Default to "treat as live" (no-op) when a subscribe pivot hasn't
+        # recorded anything yet -- e.g. repoll() called before its first
+        # ensure() -- matching the manifest's own declared intent until a
+        # fetch has actually run and proven otherwise. Only an EXPLICIT
+        # ``False`` (recorded by a genuinely exhausted reconnect budget, Phase
+        # 0) clears this no-op.
+        if self.pivot.subscribe and self._subscribe_live.get(machine, True):
             return
         with self._lock:
             if machine in self._inflight:
@@ -391,17 +426,30 @@ class RegisteredPivotRuntime:
 
         Falls back to the one-shot :meth:`_exec_list` when the provider's
         argparse rejects ``--stream`` (an older CLI) or emits a plain JSON array
-        with no envelope, so ``stream: true`` is always safe to declare."""
+        with no envelope, so ``stream: true`` is always safe to declare.
+
+        For a ``subscribe`` pivot, any termination of this stream -- an
+        explicit ``error`` frame, a plain EOF with no ``done``/``error`` (the
+        gap Phase 0, #3307/pivot-streaming-transport, closes), or even an
+        unexpected ``done`` -- is treated as the held channel dropping, not as
+        a normal finish: :meth:`_handle_subscribe_drop` decides whether to
+        reconnect (bounded retries + backoff, keeping current rows visible) or
+        demote the pivot back to ordinary repolling."""
+        if self.pivot.subscribe:
+            self._subscribe_live[machine] = True
         argv = _resolve_argv((*self.pivot.list_cmd, "--stream"), ctx)
         if not argv:
+            self._subscribe_live[machine] = False
             self._finish(machine, ("error", [], "empty list command"), {})
             return
         try:
             proc = self._spawn_stream(argv)
         except FileNotFoundError:
+            self._subscribe_live[machine] = False
             self._finish(machine, ("error", [], f"{argv[0]} not found on PATH"), {})
             return
         except Exception as exc:
+            self._subscribe_live[machine] = False
             self._finish(machine, ("error", [], str(exc)[:200]), {})
             return
 
@@ -495,25 +543,86 @@ class RegisteredPivotRuntime:
             self._untrack(proc)
 
         if err_frame:
-            self._finish(machine, ("error", [], err_frame[:200]), {})
+            self._handle_subscribe_drop(
+                machine, ctx, ("error", [], err_frame[:200]), {}, had_rows=ready
+            )
             return
         if ready or done:
             # Fully or partially resolved (empty roster included) -- keep rows.
-            self._finish(
-                machine,
+            self._handle_subscribe_drop(
+                machine, ctx,
                 ("ready", [by_id[i] for i in order], ""),
-                dict(summary),
+                dict(summary), had_rows=ready,
             )
             return
         # No envelope was spoken. Fall back to the one-shot list: an old CLI
         # rejects ``--stream`` (argparse), or the provider emitted a plain array.
+        # A permanent demotion (the CLI doesn't understand --stream at all), not
+        # a transient drop -- never worth a subscribe reconnect attempt.
         if _is_stream_unsupported(stderr) or not saw_envelope:
+            self._subscribe_live[machine] = False
             state, rows, err, one_summary = self._exec_list(ctx)
             self._finish(machine, (state, rows, err), one_summary)
             return
         detail = (stderr or "").strip().splitlines()
         msg = detail[-1] if detail else f"exit {proc.returncode}"
-        self._finish(machine, ("error", [], msg[:200]), {})
+        self._handle_subscribe_drop(
+            machine, ctx, ("error", [], msg[:200]), {}, had_rows=ready
+        )
+
+    def _handle_subscribe_drop(
+        self,
+        machine: object,
+        ctx: Mapping[str, object],
+        result: tuple[str, list, str],
+        summary: dict,
+        *,
+        had_rows: bool,
+    ) -> None:
+        """Common tail for :meth:`_run_list_stream` (Phase 0,
+        #3307/pivot-streaming-transport, 2026-10-01): publish the terminal
+        result, then -- only for a ``subscribe`` pivot, whose channel is
+        supposed to stay open until the picker exits -- decide whether this
+        termination (an ``error`` frame, a plain EOF, or even an unexpected
+        ``done``) is a transient drop worth reconnecting, or whether the
+        reconnect budget is exhausted and the pivot should fall back to
+        ordinary repolling instead of silently freezing on stale rows forever.
+
+        A non-``subscribe`` pivot (one-shot ``stream``) just finishes
+        normally -- EOF ending its lifecycle is the designed, not an
+        exceptional, outcome."""
+        self._finish(machine, result, summary)
+        if not self.pivot.subscribe:
+            return
+        if had_rows:
+            # Having delivered at least one real row this session resets the
+            # budget -- only CONSECUTIVE drops with zero rows delivered (a
+            # bare/early ``done``, an immediate crash, a repeated ``error``
+            # with nothing ever produced) count toward exhaustion.
+            self._subscribe_retries[machine] = 0
+        attempts = self._subscribe_retries.get(machine, 0)
+        if self._closed.is_set() or attempts >= SUBSCRIBE_MAX_RECONNECT_ATTEMPTS:
+            # Exhausted (or shutting down): stop pretending this channel is
+            # live so repoll() resumes ordinary one-shot polling instead of
+            # trusting a dead subscribe forever.
+            self._subscribe_live[machine] = False
+            return
+        self._subscribe_retries[machine] = attempts + 1
+        self._subscribe_live[machine] = False  # not live during the backoff
+        # Claim in-flight NOW (not inside the backoff thread) so a concurrent
+        # ensure()/repoll() can't race a duplicate fetch while we wait.
+        with self._lock:
+            self._inflight.add(machine)
+
+        def _reconnect() -> None:
+            time.sleep(SUBSCRIBE_RECONNECT_BACKOFF_SECS)
+            if self._closed.is_set():
+                with self._lock:
+                    self._inflight.discard(machine)
+                return
+            self._run_list_stream(machine, ctx)
+
+        threading.Thread(target=_reconnect, daemon=True).start()
 
     def _finish(
         self,

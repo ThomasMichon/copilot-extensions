@@ -1,0 +1,9 @@
+{
+  "comment": "Picker registered-pivot subscribe mode: reconnect on unexpected channel drop instead of silently freezing (pivot-streaming-transport effort, Phase 0)",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "minor"
+    }
+  ]
+}

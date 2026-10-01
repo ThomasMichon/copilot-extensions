@@ -57,6 +57,15 @@ elif mode == "subscribe":
     # Hold the channel open (bounded so a failed teardown still dies).
     for _ in range(300):
         time.sleep(0.1)
+elif mode == "subscribe_row_then_drop":
+    # Simulates a held channel whose producer crashes/exits right after
+    # delivering real data -- no done/error frame, just EOF.
+    emit({"type": "row", "entry": {"id": "a", "title": "A"}})
+elif mode == "subscribe_empty_done":
+    # Simulates a producer that connects but never delivers a single row
+    # before ending (an early/bare ``done``) -- every reconnect behaves
+    # identically, so this exercises the reconnect budget actually exhausting.
+    emit({"type": "done"})
 '''
 
 
@@ -198,6 +207,97 @@ def test_subscribe_live_delta_then_close_tears_down(tmp_path):
     # Teardown kills the held child promptly and leaves nothing tracked.
     rt.close()
     assert rt._procs == []
+
+
+def test_subscribe_reconnects_after_unexpected_eof(tmp_path, monkeypatch):
+    """Phase 0 (render-perf follow-up, #3307/pivot-streaming-transport,
+    2026-10-01): a held ``subscribe`` channel whose producer exits right after
+    delivering real rows -- no ``done``/``error`` frame, just EOF -- must
+    reconnect rather than being silently accepted as a normal finish forever.
+    Each reconnect in this fixture re-delivers the same row, so this also
+    proves a transient-but-recovering channel never exhausts its budget (its
+    retry counter resets to 0 on every successful row delivery, by design)."""
+    monkeypatch.setattr(tasks, "SUBSCRIBE_RECONNECT_BACKOFF_SECS", 0.02)
+    rt = tasks.RegisteredPivotRuntime(
+        _make_pivot(tmp_path, "subscribe_row_then_drop", subscribe=True))
+
+    invocations: list[object] = []
+    orig_run_list_stream = rt._run_list_stream
+
+    def _tracking_run_list_stream(machine, ctx):
+        invocations.append(machine)
+        orig_run_list_stream(machine, ctx)
+
+    monkeypatch.setattr(rt, "_run_list_stream", _tracking_run_list_stream)
+    rt.ensure(None)
+    _wait_ready(rt, None)
+
+    # Each invocation drops right after one row -- real reconnects, not a
+    # single finish, show up as repeated calls over a short wall-clock window.
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and len(invocations) < 3:
+        time.sleep(0.02)
+    assert len(invocations) >= 3, (
+        "runtime should have reconnected (re-invoked the stream) repeatedly")
+
+    # Rows from the last successful delivery stay visible throughout --
+    # never blanked while reconnect attempts are in flight.
+    state, rows, _err = rt.get(None)
+    assert state == "ready"
+    assert [r["id"] for r in rows] == ["a"]
+    # Still considered live (a recovering channel never exhausts the budget).
+    assert rt._subscribe_live.get(None) is True
+    rt.close()
+
+
+def test_subscribe_exhausts_and_falls_back_to_repoll(tmp_path, monkeypatch):
+    """Phase 0 (render-perf follow-up, #3307/pivot-streaming-transport,
+    2026-10-01): a ``subscribe`` channel that drops with ZERO rows delivered
+    every time (a bare/early ``done``) must exhaust its reconnect budget and
+    then stop freezing ``repoll()`` out forever -- confirming the asymmetry
+    with the recovering-channel case above (that one never exhausts because it
+    DOES deliver rows each attempt)."""
+    monkeypatch.setattr(tasks, "SUBSCRIBE_RECONNECT_BACKOFF_SECS", 0.02)
+    monkeypatch.setattr(tasks, "SUBSCRIBE_MAX_RECONNECT_ATTEMPTS", 2)
+    rt = tasks.RegisteredPivotRuntime(
+        _make_pivot(tmp_path, "subscribe_empty_done", subscribe=True))
+    rt.ensure(None)
+
+    # The retry counter only proves drops are happening; ``_subscribe_live``
+    # also reads False transiently during EVERY backoff window, not just the
+    # terminal one, so poll for a STABLE False (never flips back to True for a
+    # full settle window) rather than the first momentary sighting.
+    overall_deadline = time.monotonic() + 8.0
+    settled = False
+    while time.monotonic() < overall_deadline and not settled:
+        if rt._subscribe_live.get(None) is False:
+            settle_until = time.monotonic() + 0.3
+            settled = True
+            while time.monotonic() < settle_until:
+                if rt._subscribe_live.get(None) is not False:
+                    settled = False
+                    break
+                time.sleep(0.03)
+        else:
+            time.sleep(0.03)
+    assert settled, "reconnect budget should have exhausted by now"
+    assert rt._subscribe_live.get(None) is False
+
+    # repoll() must no longer no-op once the channel is no longer live.
+    repolled: list[object] = []
+    orig_run_list = rt._run_list
+
+    def _tracking_run_list(machine, gen=None):
+        repolled.append(machine)
+        orig_run_list(machine, gen)
+
+    monkeypatch.setattr(rt, "_run_list", _tracking_run_list)
+    rt.repoll(None)
+    deadline = time.monotonic() + 2.0
+    while time.monotonic() < deadline and not repolled:
+        time.sleep(0.02)
+    assert repolled == [None]
+    rt.close()
 
 
 # A one-shot provider whose output GROWS between calls (keyed off a counter
