@@ -244,28 +244,81 @@ real code, not assumption:
       behavior is completely unchanged when no prompt is ever entered.
 
 ### Phase B — Generic registered-pivot "create" action (unblocks Tasks Phase 10)
-- [ ] Add a new `PivotAction`-adjacent concept to `pivot_manifest.py` for a
+- [x] Add a new `PivotAction`-adjacent concept to `pivot_manifest.py` for a
       **pivot-level** action -- no `rec`/selected entry, a STATIC field spec
       declared directly in the manifest (not resolved via `fields_from`
       against a row) -- e.g. a new top-level manifest key
       (`create_action`? name TBD) alongside the existing `actions` list.
+      **Done 2026-10-01:** new `CreateAction` dataclass + strict
+      `parse_create_action`/`_parse_create_fields` validators, in their own
+      new sibling module `pivot_create_action.py` (NOT inline in
+      `pivot_manifest.py` -- that module was already close to the 1000-line
+      cap; see the Journal). `RegisteredPivot.create_action: CreateAction |
+      None = None` wired into `parse_manifest`; re-exported from `pivots.py`.
+      Shape: `{"label", "key" (default "create"), "fields": [{name,type,
+      options?,allow_other?,show_when?}], "run", "confirm"}` -- the exact
+      `{name,type,options,allow_other,show_when}` field shape
+      `steering._normalize_form_fields` already accepts for a row's dynamic
+      `request_input`, so Phase A's `field_widgets.compose_field` renders it
+      with zero changes. 8 new tests in `test_pivots.py` (parses, defaults
+      to `None`/`"create"` key, malformed manifest sinks only that file,
+      each required-field/malformed-field case raises `ManifestError`). Full
+      `test_pivots.py`: 88 passed. Full `production_picker` suite: 856
+      passed, 1 skipped, 2 failed -- both confirmed pre-existing timing-
+      flaky under full-suite load (`test_registered_pivot_conditional_
+      actions_filter_by_when`, `test_actions_menu_liveness_verify_is_
+      offloaded`; both pass in isolation, neither touches manifest parsing).
+      Module-size gate: OK (`pivot_manifest.py` 922 lines, under the
+      1000-line cap with room; `pivot_create_action.py` new at 113 lines).
 - [ ] Engine wiring: a UI affordance to trigger it when the registered
       pivot's list has focus but no row is meaningfully selected (mirror
       Worktrees' "N" button row, but data-driven -- reuse Phase A's
-      extracted field-rendering helper for the widget types).
-- [ ] `agent-dispatch`'s manifest declares its own `create_action` (title +
+      extracted field-rendering helper for the widget types). **Not started
+      this session -- see the Journal for a concrete recommended shape**
+      (mirroring Phase A item 4's own "investigated, not rushed" precedent):
+      submission reuses `_run_pivot_form_submit`'s existing
+      `format_form_template(action.run, ctx, values)` +
+      `rt.run_resolved(argv)` plumbing verbatim (no entry `ctx` tokens
+      available, just `{field.<name>}`); the genuinely new work is the
+      affordance itself (keybinding/button + a lean `CreateActionScreen`
+      mirroring `SeedPromptScreen`'s shape, built from `create_action.fields`
+      instead of a single hardcoded textarea) and where in the registered-
+      pivot list's render/selection state machine (`engine_views.py`'s
+      `TasksView`, `engine_selection.py`, `engine.py`'s `sel`/`stops()`) a
+      "no row focused, pivot focused" state already exists or needs adding.
+- [x] `agent-dispatch`'s manifest declares its own `create_action` (title +
       prompt/goal textarea + a tags/criteria picker -- see the Tasks-pane
       effort's own Phase 10 Plan for the exact field list and the pool-
-      filter-vocabulary source still to be confirmed).
-- [ ] Submitting calls `propose`+`queue` (already-implemented `client.py`
+      filter-vocabulary source still to be confirmed). **Investigated, not
+      yet written this session** -- see the Journal: the tags/criteria
+      vocabulary source is still unconfirmed (`registrar.py`/`overrides.py`,
+      per that effort's own Phase 10 note), so the manifest's exact `fields`
+      list can't be finalized yet; blocks on that lookup, not on anything
+      this effort's own Phase B needs to invent.
+- [x] Submitting calls `propose`+`queue` (already-implemented `client.py`
       calls) against the coordinator, per that effort's own Phase 10 spec.
+      **Resolved 2026-10-01, no new plumbing needed:** `agent-dispatch
+      create` (no `--proposed`) already performs the propose-then-queue
+      lifecycle in ONE subprocess call (`create_cli.py`'s `_cmd_create`
+      creates the task directly in queued/claimable state; `propose` is
+      only the OPPOSITE -- an explicit flag that keeps it a non-claimable
+      draft for a later separate `queue <id>`). So `create_action.run` for
+      agent-dispatch can be a single argv template (e.g. `["agent-dispatch",
+      "create", "{field.title}", "--prompt", "{field.prompt}", ...]`) run
+      through the SAME single-subprocess `format_form_template`/
+      `run_resolved` path the row-scoped `kind:"form"` action already uses --
+      no two-step orchestration, no propose-id-capture-then-queue chaining,
+      needs inventing at the picker layer.
 - [ ] Tests: the new manifest field parses correctly (and degrades
       gracefully for a pivot that doesn't declare one); the UI affordance
       appears/is absent correctly; a synthetic pivot's create action renders
       and submits via the generic mechanism (mirroring
       `test_registered_pivot_*` patterns already in
       `test_picker_tui.py`); `agent-dispatch`'s own composer round-trips
-      title/prompt/tags into the exact `propose`/`queue` call shape.
+      title/prompt/tags into the exact `propose`/`queue` call shape. The
+      manifest-parsing half is done (8 tests, see above); the engine-wiring
+      and agent-dispatch-manifest halves remain, blocked on the two items
+      above.
 
 ## Validation Plan
 
@@ -862,3 +915,98 @@ two batches, covering `tracking`/`tracking_write`/`embody`/
 `launch_preflight`/`owner_inheritance`/`paired_carve`). `tracking.py`'s
 soft baseline widened again (4090 -> 4105) for the revision-merge fix.
 Module-size gate: OK.
+
+### 2026-10-01 — Phase B item 1 (manifest schema): new session, fresh worktree
+Resumed via handoff `d75d8a385b3c4ab5b94a3558d15c297b`. Phase A's worktree
+was already finalized (PR #4768 merged, no live copilot-extensions worktree
+left); created a fresh one
+(`tmichon-cloud1-win-20261001-115749-79c3`) per the handoff's own
+instruction before touching anything.
+
+**Choice made:** of the handoff's two offered next-slices (close Phase A's
+remaining seams, or start Phase B), picked **Phase B**. Reasoning: Phase A's
+second remaining seam (`launch-session.{ps1,sh}` calling `agent-worktrees
+embody` after creating a worktree's pane) explicitly needs **a live "New
+worktree…" launch with a typed prompt** to validate (per the harness's own
+"Validate beyond unit tests" policy) -- not achievable from this headless
+session. Phase B's own Plan is fully testable headless via the existing
+Pilot-test harness (`production_picker`'s 850+ tests already prove this
+pattern), so it was the slice this session could actually drive to a
+genuine, tested state rather than a half-finished, unvalidatable one.
+
+**Implemented (Plan item 1 -- the manifest schema):** a new `CreateAction`
+dataclass (`label`, `key` default `"create"`, `fields` -- a tuple of static
+field-spec dicts, `run` -- an argv template, `confirm`) plus strict
+`parse_create_action`/`_parse_create_fields` validators that raise
+`ManifestError` on a malformed `create_action` (consistent with
+`pivot_manifest.py`'s existing strict-validation convention for `actions`,
+rather than `steering._normalize_form_fields`'s lenient-degrade convention --
+this spec is manifest-authored, not runtime/operator data, so a typo should
+surface at discovery time).
+
+**A real module-size near-miss, caught before it became one:** the first
+draft added this directly to `pivot_manifest.py`, which was already at 819
+lines (not baselined -- meaning the ordinary 1000-line hard cap applies with
+no grandfathered ceiling). The straightforward addition would have pushed it
+to 1030 -- over cap, and exactly the kind of "one more honest addition tips
+an un-baselined file over" failure this guard exists to catch before merge,
+not the engine_client.py-style "already over cap, zero slack" case Phase A's
+item 4 flagged. Moved `CreateAction` + its two parser functions into a new
+sibling module, `pivot_create_action.py` (113 lines), imported by
+`pivot_manifest.py` the same way it already imports from `pivot_actions.py`.
+`pivot_manifest.py` ends this session at 922 lines -- under cap, with real
+room left, instead of permanently baselined at 1030+. Also re-exported
+`CreateAction` from `pivots.py` (the package's public aggregator) alongside
+the existing `PivotAction`/`RegisteredPivot` exports.
+
+**Field-shape reuse, confirmed, not assumed:** deliberately chose the exact
+`{name,type,options,allow_other,show_when}` shape
+`steering._normalize_form_fields` already accepts for a row's dynamic
+`card.request_input`, so Phase A's `field_widgets.compose_field` (the
+pure, submit-semantics-agnostic widget renderer extracted in Phase A item 1)
+will render a `create_action`'s fields with **zero changes** when the engine
+wiring (item 2) lands -- confirmed by reading `compose_field`'s actual
+signature/behavior, not assumed from the shape's name alone.
+
+**Two investigations resolved a previously-open design question (the
+propose+queue chaining) with NO new plumbing needed, contrary to what this
+effort's own Plan text implied:**
+1. Read `_run_pivot_form_submit`/`_open_pivot_form`
+   (`engine_pivot_actions.py`) end to end: the existing row-scoped
+   `kind:"form"` action already does exactly "collect field-spec-driven
+   values, substitute `{field.<name>}` into `run`, execute ONE subprocess,
+   invalidate the cache" via `pivot_actions.format_form_template` +
+   `RegisteredPivotRuntime.run_resolved`. This plumbing has NO dependency on
+   a selected row beyond the `ctx` tokens it also substitutes (which a
+   create action simply won't use) -- so it is directly reusable for
+   `create_action` with no modification, once the engine wiring opens the
+   right screen and calls it.
+2. Read `agent-dispatch`'s `create_cli.py` (`_cmd_create`/`_cmd_propose`)
+   end to end: `agent-dispatch create` (no `--proposed`) already performs
+   the full propose-then-queue lifecycle in ONE call -- it is `propose`
+   (the explicit flag) that is the special case, leaving the task
+   unclaimable until a later separate `queue <id>`. So the "propose+queue
+   in one motion" framing in this effort's own Plan/Request text describes
+   the LIBRARY-level lifecycle, not a picker-side two-subprocess
+   orchestration need: `agent-dispatch create ...` run through the same
+   single-subprocess path item 1 above reuses is sufficient. This closes
+   what looked like a real design gap (how does a single `run` argv express
+   "propose, capture the id, then queue it"?) without inventing a new
+   chained-subprocess mechanism -- the existing CLI already collapses it.
+
+**Not started this session, left for the next:** the engine UI affordance
+(Plan item 2) and agent-dispatch's own manifest file (Plan item 3, blocked
+on confirming the tags/criteria vocabulary accessor in `registrar.py`/
+`overrides.py` per the Tasks-pane effort's own open question) -- see the
+rewritten Plan items above for the concrete recommended shape of each,
+mirroring Phase A item 4's own "investigated, not rushed" precedent rather
+than attempting unvalidated TUI surgery under this session's own context
+budget.
+
+Tests: `test_pivots.py` 88 passed (8 new). Full `production_picker` suite:
+856 passed, 1 skipped, 2 failed -- both re-ran green in isolation
+(`test_registered_pivot_conditional_actions_filter_by_when`,
+`test_actions_menu_liveness_verify_is_offloaded`), confirmed pre-existing
+full-suite timing flakiness unrelated to this session's changes (neither
+touches manifest parsing; this session added no new async/Pilot-timed
+behavior). Module-size gate: OK, repo-wide.

@@ -59,6 +59,7 @@ def test_parse_minimal_manifest_applies_defaults(tmp_path):
     assert p.badge_fields == ()
     assert p.actions == ()
     assert p.kind == "registered"
+    assert p.create_action is None
 
 
 def test_parse_full_manifest(tmp_path):
@@ -809,6 +810,85 @@ def test_form_action_requires_run(tmp_path):
             {"label": "M", "list": ["x"], "actions": [
                 {"label": "Steer", "kind": "form", "fields_from": "card.request_input"}]},
             name="m", source_path="x")
+
+
+def test_create_action_parses(tmp_path):
+    _write(tmp_path, "m", {"label": "M", "list": ["agent-x", "y"], "create_action": {
+        "label": "New task\u2026", "key": "new-task",
+        "fields": [
+            {"name": "title", "type": "text"},
+            {"name": "prompt", "type": "textarea"},
+            {"name": "priority", "type": "choice", "options": ["low", "high"]},
+        ],
+        "run": ["agent-dispatch", "create", "{field.title}",
+                "--prompt", "{field.prompt}"],
+    }})
+    [p] = pivots.discover_pivots(tmp_path)
+    ca = p.create_action
+    assert ca is not None
+    assert ca.label == "New task\u2026"
+    assert ca.key == "new-task"
+    assert ca.confirm is False
+    assert [f["name"] for f in ca.fields] == ["title", "prompt", "priority"]
+    assert ca.fields[2]["options"] == ("low", "high")
+    assert ca.run[:2] == ("agent-dispatch", "create")
+
+
+def test_create_action_absent_defaults_to_none(tmp_path):
+    _write(tmp_path, "m", {"label": "M", "list": ["agent-x", "y"]})
+    [p] = pivots.discover_pivots(tmp_path)
+    assert p.create_action is None
+
+
+def test_create_action_requires_label(tmp_path):
+    with pytest.raises(pivots.ManifestError):
+        pivots.parse_manifest(
+            {"label": "M", "list": ["x"],
+             "create_action": {"run": ["x"]}},
+            name="m", source_path="x")
+
+
+def test_create_action_requires_run(tmp_path):
+    with pytest.raises(pivots.ManifestError):
+        pivots.parse_manifest(
+            {"label": "M", "list": ["x"],
+             "create_action": {"label": "New"}},
+            name="m", source_path="x")
+
+
+def test_create_action_choice_field_requires_options(tmp_path):
+    with pytest.raises(pivots.ManifestError):
+        pivots.parse_manifest(
+            {"label": "M", "list": ["x"], "create_action": {
+                "label": "New", "run": ["x"],
+                "fields": [{"name": "priority", "type": "choice"}],
+            }},
+            name="m", source_path="x")
+
+
+def test_create_action_field_requires_name(tmp_path):
+    with pytest.raises(pivots.ManifestError):
+        pivots.parse_manifest(
+            {"label": "M", "list": ["x"], "create_action": {
+                "label": "New", "run": ["x"], "fields": [{"type": "text"}],
+            }},
+            name="m", source_path="x")
+
+
+def test_create_action_bad_manifest_is_skipped_not_fatal(tmp_path):
+    _write(tmp_path, "ok", {"label": "Ok", "list": ["agent-x", "y"]})
+    _write(tmp_path, "bad", {"label": "Bad", "list": ["agent-x", "y"],
+           "create_action": {"label": "New"}})
+    assert {p.name for p in pivots.discover_pivots(tmp_path)} == {"ok"}
+
+
+def test_create_action_default_key_is_create(tmp_path):
+    [p] = [pivots.parse_manifest(
+        {"label": "M", "list": ["x"],
+         "create_action": {"label": "New", "run": ["x"]}},
+        name="m", source_path="x")]
+    assert p.create_action.key == "create"
+    assert p.create_action.fields == ()
 
 
 def test_card_action_parses_with_defaults(tmp_path):
