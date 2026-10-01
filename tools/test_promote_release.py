@@ -165,6 +165,29 @@ def test_promote_refuses_when_a_pointer_does_not_resolve(repo: Path):
     assert worktrees.count("\n") == 0 or len(worktrees.splitlines()) == 1
 
 
+def test_promote_refuses_when_a_uv_editable_reference_does_not_resolve(repo: Path):
+    # A malformed/unresolvable uv-editable canonical reference on dev must
+    # abort promotion the same way a dangling VENDOR_POINTER.json does.
+    _git(["checkout", "-q", "dev"], repo)
+    plugin_dir = repo / "plugins" / "demo-plugin"
+    (plugin_dir / "pyproject.toml").write_text(
+        '[project]\nname = "demo-plugin"\nversion = "0.1.0-dev1"\n'
+        "[tool.uv.sources]\n"
+        'agent-ghost = { path = "../../libs/ghost-lib", editable = true }\n',
+        encoding="utf-8",
+    )
+    _commit(repo, "demo-plugin: add a dangling uv-editable reference")
+    _git(["checkout", "-q", "main"], repo)
+    main_before = _git(["rev-parse", "main"], repo)
+
+    with pytest.raises(pr.PromotionError, match="did not resolve"):
+        pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+
+    assert _git(["rev-parse", "main"], repo) == main_before
+    worktrees = _git(["worktree", "list"], repo)
+    assert worktrees.count("\n") == 0 or len(worktrees.splitlines()) == 1
+
+
 def test_promote_push_moves_main_and_pushes_tag(tmp_path: Path, repo: Path):
     origin = tmp_path / "origin.git"
     _git(["init", "-q", "--bare", str(origin)], tmp_path)
