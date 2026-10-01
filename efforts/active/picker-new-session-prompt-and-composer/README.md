@@ -260,16 +260,16 @@ real code, not assumption:
       `{name,type,options,allow_other,show_when}` field shape
       `steering._normalize_form_fields` already accepts for a row's dynamic
       `request_input`, so Phase A's `field_widgets.compose_field` renders it
-      with zero changes. 8 new tests in `test_pivots.py` (parses, defaults
-      to `None`/`"create"` key, malformed manifest sinks only that file,
-      each required-field/malformed-field case raises `ManifestError`). Full
-      `test_pivots.py`: 88 passed. Full `production_picker` suite: 856
-      passed, 1 skipped, 2 failed -- both confirmed pre-existing timing-
-      flaky under full-suite load (`test_registered_pivot_conditional_
-      actions_filter_by_when`, `test_actions_menu_liveness_verify_is_
-      offloaded`; both pass in isolation, neither touches manifest parsing).
-      Module-size gate: OK (`pivot_manifest.py` 922 lines, under the
-      1000-line cap with room; `pivot_create_action.py` new at 113 lines).
+      with zero changes. 18 tests across `test_pivots.py`/
+      `test_pivot_registry.py` (schema parsing/defaults, malformed-manifest
+      isolation, each required/malformed-field case, `show_when`
+      cross-validation, blank/non-string option rejection,
+      `create_action.run` command resolution + malformed-argv/invalid-path
+      isolation -- added across 6 Copilot-review rounds on PR #4831, see
+      the Journal). Full `production_picker` suite: 867 passed, 1 skipped
+      (re-ran clean after every review round). Module-size gate: OK
+      (`pivot_manifest.py` 922 lines, under the 1000-line cap with room;
+      `pivot_create_action.py` 163 lines).
 - [ ] Engine wiring: a UI affordance to trigger it when the registered
       pivot's list has focus but no row is meaningfully selected (mirror
       Worktrees' "N" button row, but data-driven -- reuse Phase A's
@@ -316,7 +316,7 @@ real code, not assumption:
       `test_registered_pivot_*` patterns already in
       `test_picker_tui.py`); `agent-dispatch`'s own composer round-trips
       title/prompt/tags into the exact `propose`/`queue` call shape. The
-      manifest-parsing half is done (8 tests, see above); the engine-wiring
+      manifest-parsing half is done (18 tests, see above); the engine-wiring
       and agent-dispatch-manifest halves remain, blocked on the two items
       above.
 
@@ -1009,3 +1009,76 @@ Tests: `test_pivots.py` 88 passed (8 new). Full `production_picker` suite:
 full-suite timing flakiness unrelated to this session's changes (neither
 touches manifest parsing; this session added no new async/Pilot-timed
 behavior). Module-size gate: OK, repo-wide.
+
+### 2026-10-01 (later same day) — PR #4831 opened, driven through 6 rounds of real Copilot review findings, merged
+Opened PR #4831 for Phase B item 1 (the `create_action` manifest schema
+alone -- items 2/3 stayed deliberately out of scope, per the rewritten Plan
+above). Like Phase A's own PR #4768, every review round found genuine,
+fixable issues -- none dismissed:
+
+- **Round 1** (3 code findings + 1 identifier-neutrality finding from CI's
+  separate `identifier leak guard` check, caught on the same push):
+  duplicate field names silently overwritten after whitespace
+  normalization; a non-string `type` (JSON array/object) raising an
+  uncaught `TypeError` instead of `ManifestError` (would have aborted
+  discovery for every pivot, not just the bad manifest); a non-boolean
+  `allow_other` silently coerced truthy; a raw personal
+  worktree/machine-alias identifier in this same Journal's own prose,
+  violating REVIEW.md/AGENTS.md's identifier-neutral requirement for public
+  artifacts -- scrubbed to a generic description.
+- **Round 2** (1 finding): `show_when` was shape-checked but never
+  cross-validated against the completed field list -- a predicate could
+  name a non-`choice` controller, an unknown field, itself, a chained
+  conditional, or an `equals` value absent from the controller's own
+  options, permanently hiding the dependent field once UI wiring consumes
+  this schema. Added a second validation pass once every field is known.
+  (Also: missing `@pytest.mark.guard` on the new tests, an unauthorized
+  `minor` changefile bump, and a Plan checkbox marked done while its own
+  text said otherwise -- all fixed.)
+- **Round 3** (2 findings): blank `choice`/`multichoice` options accepted;
+  `create_action.run` never reached `pivot_registry_materialization`'s
+  command rewriter at all, so registry scans left it unresolved and
+  accepted a nonexistent executable even with `require_targets=True` --
+  extended the rewriter to cover it, matching every other action's `run`.
+- **Round 4** (1 finding): the rewriter now resolved `create_action.run`,
+  but didn't validate its argv SHAPE first -- `run: 42` raised an uncaught
+  `TypeError` inside `_resolve_command`, aborting the whole scan. Validated
+  with `_as_argv` before resolving.
+- **Round 5** (1 finding, after a docs-only push surfaced it): the
+  blank-options guard coerced every entry with `str()` first, so a
+  non-string entry (JSON `null`, an int) silently became a choice named
+  `"None"`/`"1"` instead of being rejected -- the producer contract
+  requires strings. Rejected non-string entries outright.
+- **Round 6** (2 findings, HIGH + medium): an argv head with an embedded
+  null byte passed shape validation but raised a bare `ValueError` inside
+  `Path()` construction, uncaught -- converted to the existing
+  `TargetUnusableError` (already caught everywhere), carefully excluding
+  `ManifestError` (itself technically a `ValueError` subclass) from that
+  conversion so its own always-propagating `invalid-entry` handling stayed
+  intact -- confirmed by an existing regression
+  (`test_invalid_plugin_template_does_not_block_valid_peer`) this fix's
+  first draft actually broke, then fixed properly. Also: `allow_other` was
+  only type-checked for choice/multichoice fields, silently discarding a
+  malformed value on a text/textarea field -- now validated for every
+  field type.
+- Also addressed two low-severity documentation findings between rounds:
+  added the PR description's required **Documentation impact** statement,
+  and documented `create_action`'s full shape/defaults/`show_when`
+  restrictions in `worktree-manager/docs/plugin-contribution-contract.md`
+  (the producer-facing manifest contract), explicit that this PR ships
+  parsing/command-resolution only, no live Picker UI yet.
+
+**Merged** (APPROVED verdict, all required checks green). Final state: 18
+new tests across `test_pivots.py`/`test_pivot_registry.py`; full
+`production_picker` suite 867 passed, 1 skipped (re-ran clean after every
+round, including once at 867/1 directly before merge); module-size gate OK
+repo-wide (`pivot_manifest.py` 922 lines, `pivot_create_action.py` 163
+lines, both comfortably under the 1000-line cap).
+
+**Not started this leg, for whoever picks this up next:** Phase B's
+remaining Plan items -- the engine UI affordance (item 2) and
+`agent-dispatch`'s own `create_action` manifest (item 3, blocked on
+confirming the tags/criteria vocabulary accessor in `registrar.py`/
+`overrides.py`) -- plus Phase A's still-gated final seams (`engine_client.py`
+module split + `launch-session.{ps1,sh}` embody call). See the rewritten
+Plan items above for the concrete recommended shape of each.
