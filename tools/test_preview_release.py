@@ -572,6 +572,12 @@ class _FakeMaterializeMain:
         assert canonical_root == self._canonical_root
         return []
 
+    def materialize_launch_wrapper_assets_into(
+        self, *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path
+    ) -> list[str]:
+        assert canonical_root == self._canonical_root
+        return []
+
 
 def test_materialize_file_pointers_into_preview_writes_only_into_dest(
     isolated: Path, monkeypatch: pytest.MonkeyPatch,
@@ -714,4 +720,46 @@ def test_build_preview_reports_escaping_installer_engine_reference(isolated: Pat
     assert any(
         "is not libs/installer-engine/installer-engine.sh" in line
         for line in manifest["vendored_installer_engine_materialize_log"]
+    )
+
+
+def test_build_materializes_packaged_launch_wrapper_assets_into_the_preview(
+    isolated: Path,
+):
+    plugin_dir = _plugin(isolated, "agent-worktrees", "1.0.0")
+    (plugin_dir / "launch-wrapper-assets.json").write_text(
+        json.dumps(
+            {
+                "schema": "copilot-extensions.launch-wrapper-assets",
+                "version": 1,
+                "canonicalDir": "worktree-manager/bin",
+                "files": [
+                    "launch-session.sh",
+                    "pane-wrapper.sh",
+                    "session-options.sh",
+                ],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    source_dir = isolated / "worktree-manager" / "bin"
+    source_dir.mkdir(parents=True)
+    for name, content in {
+        "launch-session.sh": "#!/usr/bin/env bash\n",
+        "pane-wrapper.sh": "#!/usr/bin/env bash\n",
+        "session-options.sh": "session opts\n",
+    }.items():
+        (source_dir / name).write_text(content, encoding="utf-8")
+
+    dest = preview_release.build("agent-worktrees", isolated / "work")
+
+    assert (dest / "bin" / "launch-session.sh").read_text() == "#!/usr/bin/env bash\n"
+    assert (dest / "bin" / "pane-wrapper.sh").read_text() == "#!/usr/bin/env bash\n"
+    assert (dest / "bin" / "session-options.sh").read_text() == "session opts\n"
+    manifest = json.loads((dest / "PREVIEW.json").read_text())
+    assert any(
+        line.startswith("OK")
+        for line in manifest["vendored_launch_wrapper_assets_materialize_log"]
     )

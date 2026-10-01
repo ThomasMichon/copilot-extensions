@@ -1856,6 +1856,13 @@ check also fails closed if a plugin references or carries installer-engine
 content without being registered in the tool's `ADOPTERS` tuple, so a
 hand-added adopter cannot drift silently forever.
 
+`agent-worktrees`' packaged non-editable launch fallback follows the same
+contract: the authoritative launch-wrapper scripts live under
+`worktree-manager/bin/` on `dev`, but release/preview materialization copies the
+manifest-declared wrapper set into `plugins/agent-worktrees/bin/` before ship,
+so `deploy_wrappers()` in a packaged payload never depends on a sibling
+checkout being present.
+
 The engine deliberately does **not** cover per-service concerns that
 genuinely differ across plugins — scheduled-task/service lifecycle,
 sibling-plugin installs, or any bespoke per-service config — those stay in

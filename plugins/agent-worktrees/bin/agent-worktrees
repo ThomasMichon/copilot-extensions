@@ -44,13 +44,29 @@ if [ -z "${AGENT_WORKTREES_NO_SELFPROVISION:-}" ]; then
   _awstatus="$_awroot/.provision-status"
   _awinstall="$(cat "$_awroot/payload-dir" 2>/dev/null)/scripts/install.sh"
   [ -f "$_awinstall" ] || _awinstall="$(ls "$HOME"/.copilot/installed-plugins/*/agent-worktrees/scripts/install.sh 2>/dev/null | head -n1)"
+  # A `copilot plugin install <repo>:<path>` direct (non-marketplace) install
+  # has no nested `agent-worktrees/` segment: it lands at
+  # `installed-plugins/_direct/<owner>--<repo>--<subpath-with-dashes>/`, which
+  # the marketplace-shaped glob above never matches. Anchored on the
+  # directory name *ending* in `-agent-worktrees` (the subpath's own final
+  # segment, always `agent-worktrees` for this plugin) rather than matching
+  # the substring anywhere, so an unrelated direct-installed plugin whose
+  # name merely contains "agent-worktrees" elsewhere can never be selected.
+  [ -f "$_awinstall" ] || _awinstall="$(ls "$HOME"/.copilot/installed-plugins/_direct/*-agent-worktrees/scripts/install.sh 2>/dev/null | head -n1)"
   if [ -f "$_awinstall" ]; then
     printf '%s\n' "[agent-worktrees] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
     printf '::agent-provisioning:: plugin=agent-worktrees eta_seconds=120 reason=first-use status=%s\n' "$_awstatus" >&2
     # Serialize concurrent first calls where flock is available (POSIX boxes);
     # on git-sh/Windows (no flock) provisioning is idempotent enough to race.
     if command -v flock >/dev/null 2>&1; then
-      exec 9>"$_awroot/.provision.lock" 2>/dev/null || true
+      # `exec 9>file 2>/dev/null` with no command is a BARE exec: every
+      # listed redirection (including `2>/dev/null`) becomes permanent for
+      # the rest of this shell, silently nulling all subsequent stderr --
+      # every provisioning/failure message below this point, every time
+      # `flock` is available. Scoping the redirection to a `{ ...; }` group
+      # restores stderr once the group ends while fd 9 (needed by `flock 9`
+      # right after) stays open, same as a bare exec.
+      { exec 9>"$_awroot/.provision.lock"; } 2>/dev/null || true
       flock 9 2>/dev/null || true
       # Re-resolve after acquiring the lock: another process may have finished.
       _aw_exec_resolved "$@"

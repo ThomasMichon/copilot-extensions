@@ -355,7 +355,9 @@ jobs:
           python -m pytest -q libs/session-liveness-probe/tests &&
           python -m pytest -q libs/venue-copilot/tests
       - name: Vendored library synchronization
-        run: python tools/check-vendored-libs-sync.py
+        run: >-
+          python tools/check-vendored-libs-sync.py &&
+          python -m pytest -q tools/test_check_vendored_libs_sync.py
       - name: Windows headless launch invariants
         run: >-
           python tools/check-headless-launch.py &&

@@ -142,6 +142,7 @@ class ProjectionSpec:
     customization_kind: str
     apply_to: str
     legacy_markers: tuple[str, ...]
+    skip_local_cache: bool = False
 
     @property
     def source_key(self) -> str:
@@ -661,14 +662,20 @@ def _load_specs(
         for index, entry in enumerate(declaration["projections"]):
             entry_path = f"{declaration_path.as_posix()}#projections[{index}]"
             try:
-                if not isinstance(entry, dict) or set(entry) != {
+                _required_keys = {
                     "id",
                     "template",
                     "destination",
                     "customizationKind",
                     "applyTo",
                     "legacyMarkers",
-                }:
+                }
+                _optional_keys = {"skipLocalCache"}
+                if (
+                    not isinstance(entry, dict)
+                    or not _required_keys <= set(entry)
+                    or not set(entry) - _required_keys <= _optional_keys
+                ):
                     raise ValueError("projection entry has unknown or missing keys")
                 source_id = entry["id"]
                 if not isinstance(source_id, str) or not IDENTIFIER.fullmatch(source_id):
@@ -728,6 +735,9 @@ def _load_specs(
                     or len(set(markers)) != len(markers)
                 ):
                     raise ValueError("legacyMarkers is invalid")
+                skip_local_cache = entry.get("skipLocalCache", False)
+                if not isinstance(skip_local_cache, bool):
+                    raise ValueError("skipLocalCache must be a boolean")
                 template_path = _safe_existing_file(payload_root, template_rel)
                 template_raw = _canonical_template_bytes(
                     _read_bounded_regular(template_path, MAX_TEMPLATE_BYTES)
@@ -765,6 +775,7 @@ def _load_specs(
                     customization_kind=kind,
                     apply_to=apply_to,
                     legacy_markers=tuple(markers),
+                    skip_local_cache=skip_local_cache,
                 )
             )
     _find_spec_conflicts(specs, result)
@@ -819,13 +830,33 @@ def _find_spec_conflicts(specs: list[ProjectionSpec], result: Result) -> None:
                 )
 
 
-def render_projection(spec: ProjectionSpec) -> RenderedProjection:
-    """Render one deterministic UTF-8/LF projection."""
+def render_projection(
+    spec: ProjectionSpec, *, include_prefer_local: bool = True
+) -> RenderedProjection:
+    """Render one deterministic UTF-8/LF projection.
+
+    When ``include_prefer_local`` (default), the body gains a short
+    preamble preferring its own gitignored ``*.local.instructions.md``
+    sibling when present (``docs/patterns/worktree-scoped-dynamic-
+    guidance.md`` §2). ``render_local_cache`` passes ``False`` here when
+    rendering the sibling's *own* content -- it must never point at itself.
+    """
     text = spec.template_content.decode("utf-8")
     lines = text.splitlines(keepends=True)
     closing = lines.index("---\n", 1)
     header = "".join(lines[: closing + 1])
     body = "".join(lines[closing + 1 :])
+    if include_prefer_local:
+        local_cache_name = PurePosixPath(
+            local_sibling_destination(spec.destination)
+        ).name
+        preamble = (
+            f"\n> If `{local_cache_name}` exists here, prefer it -- it reflects\n"
+            "> the currently installed payload; this file reflects the last\n"
+            "> synced-and-reviewed state.\n"
+        )
+    else:
+        preamble = ""
     marker: dict[str, object] = {
         "schema": PROJECTION_SCHEMA,
         "version": PROJECTION_VERSION,
@@ -853,7 +884,7 @@ def render_projection(spec: ProjectionSpec) -> RenderedProjection:
             + MARKER_SUFFIX
             + "\n"
         )
-        content = (header + marker_line + body).encode("utf-8")
+        content = (header + marker_line + preamble + body).encode("utf-8")
         if marker["renderedBytes"] == len(content):
             break
         marker["renderedBytes"] = len(content)
@@ -1071,6 +1102,13 @@ def _render_local_cache_locked(
     for spec in specs:
         if spec.source_key in duplicate_source_keys:
             continue
+        if spec.skip_local_cache:
+            # Opted out (``skipLocalCache: true``) -- a source whose own
+            # rendered body already directs the agent to scan for every
+            # *.local.instructions.md sibling (the repo-wide catch-all) must
+            # never gain one of its own: it would match its own scan glob
+            # and get read back, pointlessly repeating the same directive.
+            continue
         try:
             local_destination = local_sibling_destination(spec.destination)
         except ValueError as exc:
@@ -1093,7 +1131,8 @@ def _render_local_cache_locked(
             continue
         local_destination, spec = entries[0]
         try:
-            rendered = render_projection(spec)
+            # Never self-referential (see render_projection's docstring).
+            rendered = render_projection(spec, include_prefer_local=False)
         except ValueError as exc:
             result.add(BLOCKING, "projection-local-cache", spec.destination, str(exc))
             continue

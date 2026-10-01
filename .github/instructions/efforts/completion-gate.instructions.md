@@ -1,7 +1,11 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/efforts/completion-gate.instructions.md","plugin":"efforts@copilot-extensions","pluginVersion":"0.1.2-dev1","renderedBytes":2146,"schema":"copilot-extensions.instruction-projection","sourceId":"completion-gate","template":"instructions/completion-gate.instructions.md","templateBytes":1622,"templateSha256":"1d21db769b0c1b1b16b4044d2ae878556d69cd6ed8da06f457dd5944718a8066","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/efforts/completion-gate.instructions.md","plugin":"efforts@copilot-extensions","pluginVersion":"0.1.2-dev1","renderedBytes":2322,"schema":"copilot-extensions.instruction-projection","sourceId":"completion-gate","template":"instructions/completion-gate.instructions.md","templateBytes":1622,"templateSha256":"1d21db769b0c1b1b16b4044d2ae878556d69cd6ed8da06f457dd5944718a8066","version":1} -->
+
+> If `completion-gate.local.instructions.md` exists here, prefer it -- it reflects
+> the currently installed payload; this file reflects the last
+> synced-and-reviewed state.
 
 # Effort completion fallback
 

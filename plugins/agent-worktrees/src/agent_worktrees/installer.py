@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import config as cfg
+from . import launch_wrapper_assets as lwa
 from . import project_state, registry_paths
 from . import output
 
@@ -34,7 +35,6 @@ from . import output
 def install_dir() -> Path:
     """~/.agent-worktrees (shared runtime)"""
     return cfg.install_dir()
-
 def lib_dir() -> Path:
     """~/.agent-worktrees/lib -- deployed Python package source."""
     return install_dir() / "lib"
@@ -47,8 +47,6 @@ def venv_dir() -> Path:
 def bin_dir() -> Path:
     """~/.agent-worktrees/bin"""
     return install_dir() / "bin"
-
-
 def local_bin() -> Path:
     """~/.local/bin"""
     return cfg._home() / ".local" / "bin"
@@ -340,32 +338,33 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
     bd = bin_dir()
     bd.mkdir(parents=True, exist_ok=True)
 
-    assets = Path(repo_dir) / "plugins" / "agent-worktrees" / "bin"
+    plugin_dir = Path(repo_dir) / "plugins" / "agent-worktrees"
+    try:
+        manifest = lwa.load_manifest(plugin_dir)
+    except FileNotFoundError:
+        output.err(f"Wrapper asset manifest not found at {plugin_dir / lwa.MANIFEST}")
+        return False
+    except (json.JSONDecodeError, ValueError) as exc:
+        output.err(str(exc))
+        return False
+
+    assets = lwa.resolve_source_dir(Path(repo_dir), manifest)
+
     if not assets.exists():
         output.err(f"Wrapper assets not found at {assets}")
         return False
 
-    scripts = Path(repo_dir) / "plugins" / "agent-worktrees" / "scripts"
+    scripts = plugin_dir / "scripts"
 
-    if platform.system() == "Windows":
-        for name in (
-            "launch-session.cmd", "launch-session.ps1", "pane-wrapper.ps1",
-        ):
-            src = assets / name
-            if not src.exists():
-                output.err(f"{name} not found in {assets}")
-                return False
-            shutil.copy2(src, bd / name)
-            output.ok(f"Wrapper: {bd / name}")
-    else:
-        for name in ("launch-session.sh", "pane-wrapper.sh"):
-            src = assets / name
-            if not src.exists():
-                output.err(f"{name} not found in {assets}")
-                return False
-            shutil.copy2(src, bd / name)
+    for name in manifest.files:
+        src = assets / name
+        if not src.exists():
+            output.err(f"{name} not found in {assets}")
+            return False
+        shutil.copy2(src, bd / name)
+        if platform.system() != "Windows" and name.endswith(".sh"):
             (bd / name).chmod(0o755)
-            output.ok(f"Wrapper: {bd / name}")
+        output.ok(f"Wrapper: {bd / name}")
 
     # Deploy bootstrap-check scripts (called by sessionStart hook) + the
     # session-conduct injector (sessionStart additionalContext) + the preToolUse

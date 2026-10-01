@@ -56,8 +56,13 @@ worktree lifecycle boundaries rather than every session start.
 
 Every checked-in projection destination
 `.github/instructions/<plugin>/<sourceId>.instructions.md` gains a gitignored
-sibling at `.github/instructions/<plugin>/<sourceId>.local.instructions.md`.
-The consumer repo's `.github/instructions/.gitignore` (or an equivalent
+sibling at `.github/instructions/<plugin>/<sourceId>.local.instructions.md`,
+**except** a source that opts out via its own declaration's
+`skipLocalCache: true` (the repo-wide catch-all in step 3 is the one shipped
+example: its own sibling would match its own
+`**/*.local.instructions.md` scan glob and get read back, repeating the
+identical directive for no benefit). The consumer repo's
+`.github/instructions/.gitignore` (or an equivalent
 recursive rule) covers the whole tree:
 
 ```gitignore
@@ -163,9 +168,11 @@ attempt a privileged sync merely to see current guidance.
 pattern's render side, landed as part of
 `efforts/active/ambient-guidance-navigability` Phase 7
 ([ThomasMichon/copilot-extensions#4674](https://github.com/ThomasMichon/copilot-extensions/issues/4674)).
-The per-file "prefer local" preamble, the repo-wide catch-all projection,
-and the `agent-worktrees` create/resume + `sessionStart` wiring remain open
-Plan items in that same phase.
+The per-file "prefer local" preamble (step 2) and the repo-wide catch-all
+projection (step 3, opted out of its own local cache per step 1's
+exception) have both landed; the `agent-worktrees` create/resume +
+`sessionStart` wiring (step 4) remains the one open Plan item in that same
+phase.
 
 ## See Also
 

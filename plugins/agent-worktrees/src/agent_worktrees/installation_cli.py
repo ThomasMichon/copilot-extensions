@@ -8,7 +8,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from . import git_ops, installer as inst, output, picker_profiles_cli
+from . import git_ops, installer as inst, launch_wrapper_assets as lwa, output, picker_profiles_cli
 from . import config as cfg
 from . import repos_cli, status_bar_cli
 
@@ -832,7 +832,7 @@ def cmd_uninstall(args: argparse.Namespace) -> int:
 
     # Remove wrappers
     bd = inst.bin_dir()
-    for name in ("launch-session.cmd", "launch-session.ps1", "launch-session.sh"):
+    for name in lwa.WRAPPER_FILES:
         p = bd / name
         if p.exists():
             p.unlink()
@@ -906,5 +906,4 @@ def cmd_unregister(args: argparse.Namespace) -> int:
     from . import unregister_cli
 
     return unregister_cli.cmd_unregister(args)
-
 

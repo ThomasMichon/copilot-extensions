@@ -12,6 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import installer_engine_ref as ier
+import launch_wrapper_assets_ref as lwar
 import materialize_main as mm
 import uv_editable_ref as uer
 
@@ -2048,3 +2049,114 @@ def test_materialize_installer_engine_ref_into_preserves_following_comment_lines
         ". (Join-Path $PSScriptRoot 'installer-engine.ps1')",
         "# keep me",
     ]
+
+
+def test_materialize_launch_wrapper_assets_into_copies_manifested_files(
+    tmp_path: Path,
+):
+    root = tmp_path / "repo"
+    source_dir = root / "worktree-manager" / "bin"
+    source_dir.mkdir(parents=True)
+    for name, content in {
+        "launch-session.sh": "#!/usr/bin/env bash\n",
+        "pane-wrapper.sh": "#!/usr/bin/env bash\n",
+        "session-options.sh": "session opts\n",
+    }.items():
+        (source_dir / name).write_text(content, encoding="utf-8")
+    plugin = root / "plugins" / "agent-worktrees"
+    plugin.mkdir(parents=True)
+    (plugin / lwar.MANIFEST_NAME).write_text(
+        json.dumps(
+            {
+                "schema": "copilot-extensions.launch-wrapper-assets",
+                "version": 1,
+                "canonicalDir": "worktree-manager/bin",
+                "files": ["launch-session.sh", "pane-wrapper.sh", "session-options.sh"],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dest_plugin = root / "preview" / "plugins" / "agent-worktrees"
+    dest_plugin.mkdir(parents=True)
+
+    log = mm.materialize_launch_wrapper_assets_into(
+        source_consumer_dir=plugin,
+        dest_consumer_dir=dest_plugin,
+        canonical_root=root,
+        dest_root=root / "preview",
+    )
+
+    assert sum(1 for line in log if line.startswith("OK")) == 3
+    assert (dest_plugin / "bin" / "launch-session.sh").read_text() == "#!/usr/bin/env bash\n"
+    assert (dest_plugin / "bin" / "pane-wrapper.sh").read_text() == "#!/usr/bin/env bash\n"
+    assert (dest_plugin / "bin" / "session-options.sh").read_text() == "session opts\n"
+
+
+def test_materialize_launch_wrapper_assets_into_reports_missing_canonical_file(
+    tmp_path: Path,
+):
+    root = tmp_path / "repo"
+    (root / "worktree-manager" / "bin").mkdir(parents=True)
+    plugin = root / "plugins" / "agent-worktrees"
+    plugin.mkdir(parents=True)
+    (plugin / lwar.MANIFEST_NAME).write_text(
+        json.dumps(
+            {
+                "schema": "copilot-extensions.launch-wrapper-assets",
+                "version": 1,
+                "canonicalDir": "worktree-manager/bin",
+                "files": ["launch-session.sh"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dest_plugin = root / "preview" / "plugins" / "agent-worktrees"
+    dest_plugin.mkdir(parents=True)
+
+    log = mm.materialize_launch_wrapper_assets_into(
+        source_consumer_dir=plugin,
+        dest_consumer_dir=dest_plugin,
+        canonical_root=root,
+        dest_root=root / "preview",
+    )
+
+    assert any("canonical source missing" in line for line in log)
+    assert not (dest_plugin / "bin" / "launch-session.sh").exists()
+
+
+def test_materialize_launch_wrapper_assets_into_refuses_escaping_source_dir(
+    tmp_path: Path,
+):
+    root = tmp_path / "repo"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "launch-session.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    plugin = root / "plugins" / "agent-worktrees"
+    plugin.mkdir(parents=True)
+    (plugin / lwar.MANIFEST_NAME).write_text(
+        json.dumps(
+            {
+                "schema": "copilot-extensions.launch-wrapper-assets",
+                "version": 1,
+                "canonicalDir": "../outside",
+                "files": ["launch-session.sh"],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    dest_plugin = root / "preview" / "plugins" / "agent-worktrees"
+    dest_plugin.mkdir(parents=True)
+
+    log = mm.materialize_launch_wrapper_assets_into(
+        source_consumer_dir=plugin,
+        dest_consumer_dir=dest_plugin,
+        canonical_root=root,
+        dest_root=root / "preview",
+    )
+
+    assert any("canonicalDir must be a non-empty string" in line for line in log)
+    assert not (dest_plugin / "bin" / "launch-session.sh").exists()

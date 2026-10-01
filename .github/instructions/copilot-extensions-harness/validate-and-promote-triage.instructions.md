@@ -1,7 +1,11 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/copilot-extensions-harness/validate-and-promote-triage.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.5-dev2","renderedBytes":2049,"schema":"copilot-extensions.instruction-projection","sourceId":"validate-and-promote-triage","template":"instructions/validate-and-promote-triage.instructions.md","templateBytes":1451,"templateSha256":"89bebb09582d19588a2e7d2635b2bd2e8db911aef71d2728a333e2e8d02a86bd","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","customizationKind":"instructions","destination":".github/instructions/copilot-extensions-harness/validate-and-promote-triage.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.5-dev2","renderedBytes":2237,"schema":"copilot-extensions.instruction-projection","sourceId":"validate-and-promote-triage","template":"instructions/validate-and-promote-triage.instructions.md","templateBytes":1451,"templateSha256":"89bebb09582d19588a2e7d2635b2bd2e8db911aef71d2728a333e2e8d02a86bd","version":1} -->
+
+> If `validate-and-promote-triage.local.instructions.md` exists here, prefer it -- it reflects
+> the currently installed payload; this file reflects the last
+> synced-and-reviewed state.
 
 # `validate-and-promote` failure triage fallback
 

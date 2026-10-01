@@ -19,6 +19,7 @@ import argparse
 import pytest
 
 from agent_worktrees import installation_cli as installation_cli_mod
+from agent_worktrees import launch_wrapper_assets as lwa
 from agent_worktrees import repos as repos_mod
 from agent_worktrees import unregister_cli as unregister_cli_mod
 
@@ -104,6 +105,19 @@ def test_uninstall_without_remove_config_never_touches_shared_registry(fake_runt
     assert rc == 0
     assert (shared / "repos.yaml").exists()
     assert not (shared / "deploy-manifest.json").exists()
+
+
+def test_uninstall_removes_all_owned_wrapper_assets(fake_runtime):
+    shared = fake_runtime["shared"]
+    bindir = shared / "bin"
+    bindir.mkdir(parents=True)
+    for name in lwa.WRAPPER_FILES:
+        (bindir / name).write_text("wrapper\n")
+
+    rc = installation_cli_mod.cmd_uninstall(_uninstall_args(remove_config=False))
+
+    assert rc == 0
+    assert all(not (bindir / name).exists() for name in lwa.WRAPPER_FILES)
 
 
 # ── unregister ────────────────────────────────────────────────────────────

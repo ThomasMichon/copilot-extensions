@@ -98,6 +98,114 @@ def test_posix_binstub_resolves_only_active_or_complete_slots() -> None:
     assert '_aw_exec_resolved "$@"' in sh
 
 
+def _stub_direct_install(home: Path, dir_name: str, sentinel: str) -> Path:
+    """Write a stub install.sh under a `_direct` installed-plugins layout
+    (``<owner>--<repo>--<subpath-with-dashes>``, no nested agent-worktrees/
+    segment) that echoes a caller-chosen sentinel, so a test can prove the
+    binstub's own glob resolution located and invoked THIS specific file,
+    not merely *some* install.sh."""
+    scripts = home / ".copilot" / "installed-plugins" / "_direct" / dir_name / "scripts"
+    scripts.mkdir(parents=True)
+    install = scripts / "install.sh"
+    install.write_text(f"#!/bin/sh\necho {sentinel}\nexit 0\n", encoding="utf-8")
+    install.chmod(install.stat().st_mode | stat.S_IEXEC)
+    return install
+
+
+def test_posix_binstub_self_provisions_from_a_direct_install_layout(tmp_path: Path) -> None:
+    """Regression test for a direct (non-marketplace) `copilot plugin
+    install <repo>:<path>` install, whose `_direct/<owner>--<repo>--
+    <subpath>/` layout has no nested `agent-worktrees/` path segment --
+    the marketplace-shaped glob never matches it (copilot-extensions
+    issue: agent-worktrees self-provisioning binstub fails on a `_direct`
+    install), silently skipping self-provisioning and falling through to a
+    guaranteed-to-fail `python -m agent_worktrees` last resort."""
+    home = tmp_path / "home"
+    home.mkdir()
+    _stub_direct_install(
+        home, "SomeOwner--some-repo--plugins-agent-worktrees", "DIRECT_INSTALL_SENTINEL"
+    )
+    # An unrelated direct-installed plugin whose name merely contains the
+    # substring "agent-worktrees" (but doesn't end with it) must never be
+    # selected instead -- the glob is anchored on the trailing path segment.
+    # A DISTINCT sentinel (never asserted true) proves the real installer
+    # won, not merely that *some* install.sh ran.
+    _stub_direct_install(
+        home, "SomeOrg--agent-worktrees-extra-tool--plugins-foo", "DECOY_SENTINEL_MUST_NOT_RUN"
+    )
+
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env["AGENT_WORKTREES_NO_SELFPROVISION"] = ""
+    env.pop("AGENT_RT_ROOT", None)
+
+    proc = subprocess.run(
+        ["sh", str(PLUGIN / "bin" / "agent-worktrees"), "--version"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    # install.sh's own stdout is redirected to the parent's stderr
+    # (`bash "$_awinstall" provision >&2`).
+    assert "DIRECT_INSTALL_SENTINEL" in proc.stderr, proc.stderr
+    assert "DECOY_SENTINEL_MUST_NOT_RUN" not in proc.stderr, proc.stderr
+
+
+_PWSH = shutil.which("pwsh") or shutil.which("powershell")
+
+
+@pytest.mark.skipif(_PWSH is None, reason="pwsh/powershell not available")
+def test_windows_binstub_self_provisions_from_a_direct_install_layout(tmp_path: Path) -> None:
+    """PowerShell counterpart of the POSIX regression test above: the
+    `.ps1` binstub's own `_direct` discovery must select the intended
+    installer (ending in `-agent-worktrees`) over an adjacent,
+    false-positive-shaped decoy, by actually executing both discovery
+    AND the selected install.ps1 -- not merely asserting a regex literal
+    is present in the source."""
+    home = tmp_path / "home"
+    home.mkdir()
+
+    def _stub(dir_name: str, sentinel: str) -> None:
+        scripts = home / ".copilot" / "installed-plugins" / "_direct" / dir_name / "scripts"
+        scripts.mkdir(parents=True)
+        (scripts / "install.ps1").write_text(
+            f"Write-Output '{sentinel}'\n", encoding="utf-8"
+        )
+
+    _stub("SomeOwner--some-repo--plugins-agent-worktrees", "DIRECT_INSTALL_SENTINEL")
+    _stub("SomeOrg--agent-worktrees-extra-tool--plugins-foo", "DECOY_SENTINEL_MUST_NOT_RUN")
+
+    harness = tmp_path / "harness.ps1"
+    harness.write_text(
+        (PLUGIN / "bin" / "agent-worktrees.ps1")
+        .read_text(encoding="utf-8")
+        # Exercise only the _direct discovery + invocation, never the real
+        # provisioning/mutex/uv machinery below it. `& $_inst` runs the
+        # selected install.ps1 directly in the CURRENT PowerShell host --
+        # whichever one (pwsh or Windows PowerShell) actually invoked this
+        # harness -- rather than hardcoding a `pwsh` child process that
+        # would fail on a host where only `powershell.exe` is available.
+        .split("if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error", 1)[0]
+        + "if ($_inst) { & $_inst } else { Write-Output 'NO_INSTALLER_FOUND' }\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["USERPROFILE"] = str(home)
+    env["AGENT_WORKTREES_NO_SELFPROVISION"] = ""
+
+    proc = subprocess.run(
+        [_PWSH, "-NoProfile", "-File", str(harness)],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert "DIRECT_INSTALL_SENTINEL" in proc.stdout, proc.stderr
+    assert "DECOY_SENTINEL_MUST_NOT_RUN" not in proc.stdout, proc.stderr
+
+
 def test_direct_posix_payload_entrypoints_are_tracked_executable() -> None:
     repo = PLUGIN.parents[1]
     paths = (
