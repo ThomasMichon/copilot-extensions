@@ -1,16 +1,17 @@
-"""End-to-end proof of the operator's transitive-finalize scenario
-(``efforts/active/worktree-claims-transitive-finalization``, Plan Phase 1).
+"""End-to-end proof that transitive worktree-finalization safety holds.
 
-Nothing here walks the claim graph by hand -- every assertion is the
-observed return value of a real ``finalize.validate_and_finalize`` call, the
-same entry point ``agent-worktrees finalize`` itself uses. The safety
-guarantee under test is the **already-shipped** bottom-up propagation
-(``finalize._settle_parent_obligation``, "the recursion-collapse"): a
-worktree that created another worktree carries a ``worktree``-kind
+A worktree that creates another worktree carries a ``worktree``-kind
 :class:`~agent_worktrees.tracking.ResourceClaim` on it, which only clears
-when the child itself finalizes -- transitively, however deep the chain.
+when the child itself finalizes (``finalize._settle_parent_obligation``,
+the bottom-up "recursion-collapse"). Every scenario below drives that
+guarantee through real ``finalize.validate_and_finalize`` calls -- the same
+entry point ``agent-worktrees finalize`` itself uses -- rather than reading
+the claim graph by hand; the one exception is the cross-machine case, which
+also inspects the parent record directly to confirm it was left untouched,
+since "nothing changed" has no observable `finalize` return-value signal of
+its own.
 
-Operator's scenario (``README.md``'s "Guiding Intent", reformatted):
+Scenario walked by the single- and multi-hop tests below:
 
     Worktree A is created.
     Worktree A creates PR 1. A --> 1
