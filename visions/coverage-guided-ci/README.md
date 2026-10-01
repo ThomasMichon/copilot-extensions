@@ -294,15 +294,15 @@ why.
   vendoring to any repo-specific trunk-gate transform. Also folded in the
   operator's point that the coverage-debt threshold should be a tunable
   dial, not a fixed constant.
-- **2026-10-01** — The operator, while sponsoring an aperture-labs session's
-  low-risk spike proving the diff-scoped-selection primitive works with
-  off-the-shelf `coverage.py` dynamic contexts, asked that the smoke
-  fallback's own membership ideally be "the set of tests which together
-  provide the best coverage set for the smallest amount of total runtime" —
-  i.e. an explicit optimization over the same baseline data already in
-  hand, rather than a hand-curated list. Folded in as **coverage-efficient
-  fallback curation** (a greedy, budget-bounded weighted-set-cover-style
-  selection) and **the fallback set is recomputed, not hand-maintained**
-  — generalizing Phase 3's existing "curate and validate the fallback set
-  itself" task into a concrete selection criterion rather than leaving
-  curation unspecified.
+- **2026-10-01** — The operator, while sponsoring a downstream consumer
+  repository's own low-risk spike proving the diff-scoped-selection
+  primitive works with off-the-shelf `coverage.py` dynamic contexts, asked
+  that the smoke fallback's own membership ideally be "the set of tests
+  which together provide the best coverage set for the smallest amount of
+  total runtime" — i.e. an explicit optimization over the same baseline
+  data already in hand, rather than a hand-curated list. Folded in as
+  **coverage-efficient fallback curation** (a greedy, budget-bounded
+  weighted-set-cover-style selection) and **the fallback set is recomputed,
+  not hand-maintained** — generalizing Phase 3's existing "curate and
+  validate the fallback set itself" task into a concrete selection
+  criterion rather than leaving curation unspecified.

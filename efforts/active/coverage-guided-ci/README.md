@@ -259,9 +259,10 @@ _Pending review of this plan._
 ## Journal
 
 ### 2026-10-01 — Phase 0 kickoff: pilot-first sequencing + fallback-curation refinement
-- Operator (via an aperture-labs session that had just proven the
-  diff-scoped-selection primitive with a low-risk `coverage.py` spike against
-  one of *that* repo's small plugins) asked to drive this effort for real,
+- Operator (via a downstream consumer repository's session that had just
+  proven the diff-scoped-selection primitive with a low-risk `coverage.py`
+  spike against one of *that* repo's small plugins) asked to drive this
+  effort for real,
   incrementally, "one project or sub-component at a time, until we know it
   works effectively" — rather than Phase 1's current framing of
   instrumenting `validate-and-promote.yml`'s full-repo promotion gate in one
@@ -295,19 +296,22 @@ _Pending review of this plan._
   (diff-scoped selection: changed lines -> covering tests, with an explicit
   no-attribution fallback trigger), and `fallback.py` (the greedy
   coverage-efficient curation described above).
-- Validated end-to-end against `ai-attribution`'s real suite (69 tests, 1
+- Validated end-to-end against `ai-attribution`'s real suite (104 tests, 1
   in-process-covered script, 131 attributed source lines): a real changed
   line selected exactly the 1 test exercising it; an uncovered line and an
   unknown file both correctly tripped the fallback trigger (not a silent
   empty selection); and the greedy fallback set reached **100% coverage of
-  the 131-line universe using 12 of 69 tests at 0.06s total runtime**,
-  versus 49.28s for the full suite — roughly **800x** cheaper at full
+  the 131-line universe using 11 of 104 tests at ~0.08s total runtime**,
+  versus ~60.2s for the full suite — roughly **750x** cheaper at full
   measured coverage, a concrete instance of "best coverage set for the
-  smallest amount of total runtime." Full numbers and the real-suite
-  integration test are in `tools/test_coverage_guided_selection.py`
-  (`test_collect_baseline_round_trips_against_a_real_plugin_suite`), which
-  re-derives and asserts them on every run rather than only reporting a
-  one-off result.
+  smallest amount of total runtime." These are this run's own observed
+  figures, recorded here for context -- the real-suite integration test in
+  `tools/test_coverage_guided_selection.py`
+  (`test_collect_baseline_round_trips_against_a_real_plugin_suite`)
+  deliberately asserts only durable *bounds* (non-empty coverage/selection,
+  and that the curated fallback costs strictly less than the full suite),
+  not these exact numbers, since a real subprocess run's precise timings are
+  expected to vary slightly run to run.
 - Phase 0's first checklist item (pick the coverage mechanism) is
   substantiated by this pilot; its other two items — the baseline's durable
   storage/correlation location, and spiking collection inside

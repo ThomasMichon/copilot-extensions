@@ -133,6 +133,103 @@ class TestComputeFallbackSet:
         assert fb.covered_fraction == 1.0
         assert fb.universe_size == 0
 
+    def test_eligible_tests_restriction_excludes_ineligible_candidates(self) -> None:
+        # Restricting to {test_a, test_c} must exclude test_b's lines from
+        # the universe entirely (not just from the selection), since
+        # test_b's own unique line (other.py#10) is never reachable by an
+        # eligible test.
+        fb = fallback.compute_fallback_set(
+            _synthetic_baseline(),
+            runtime_budget_s=10.0,
+            eligible_tests=frozenset({"test_a", "test_c"}),
+        )
+        assert "test_b" not in fb.selected_tests
+        assert fb.universe_size == 3  # file.py#1, file.py#2, other.py#11
+        assert fb.covered_fraction == 1.0
+
+    def test_missing_or_invalid_duration_excludes_a_test_as_ineligible(self) -> None:
+        # test_bad is the *only* test covering file.py#2; a missing duration
+        # must exclude it as a candidate (never price it as free/near-zero),
+        # so that line becomes unreachable by this curation rather than
+        # test_bad being selected purely because its cost looks attractive.
+        baseline = {
+            "tests": {
+                "test_a": {"duration_s": 0.1},
+                "test_bad": {},  # no duration_s at all
+                "test_c": {"duration_s": 0.2},
+            },
+            "coverage": {
+                "file.py": {
+                    "1": ["test_a"],
+                    "2": ["test_bad"],
+                    "3": ["test_c"],
+                },
+            },
+        }
+        fb = fallback.compute_fallback_set(baseline, runtime_budget_s=10.0)
+        assert "test_bad" not in fb.selected_tests
+        assert fb.universe_size == 3
+        assert fb.covered_fraction < 1.0  # file.py#2 is unreachably excluded
+
+    def test_negative_or_non_finite_duration_is_also_excluded(self) -> None:
+        baseline = {
+            "tests": {
+                "test_a": {"duration_s": 0.1},
+                "test_neg": {"duration_s": -1.0},
+                "test_nan": {"duration_s": float("nan")},
+            },
+            "coverage": {
+                "file.py": {
+                    "1": ["test_a"],
+                    "2": ["test_neg"],
+                    "3": ["test_nan"],
+                },
+            },
+        }
+        fb = fallback.compute_fallback_set(baseline, runtime_budget_s=10.0)
+        assert "test_neg" not in fb.selected_tests
+        assert "test_nan" not in fb.selected_tests
+        assert fb.covered_fraction == pytest.approx(1 / 3)
+
+    def test_skips_an_unaffordable_higher_scoring_candidate_for_a_cheaper_one(
+        self,
+    ) -> None:
+        # Regression test for "skip unaffordable candidates instead of
+        # stopping": after picking test1 (cost 1.0), the highest-scoring
+        # remaining candidate (test2, cost 1.0) no longer fits a 1.9s
+        # budget, but a lower-scoring, cheaper candidate (test3, cost 0.8)
+        # still does and must still be picked rather than ending the pass.
+        baseline = {
+            "tests": {
+                "test1": {"duration_s": 1.0},
+                "test2": {"duration_s": 1.0},
+                "test3": {"duration_s": 0.8},
+            },
+            "coverage": {
+                "file.py": {
+                    "1": ["test1"],
+                    "2": ["test1"],
+                    "3": ["test2"],
+                    "4": ["test2"],
+                    "5": ["test3"],
+                },
+            },
+        }
+        fb = fallback.compute_fallback_set(baseline, runtime_budget_s=1.9)
+        assert fb.selected_tests == ("test1", "test3")
+        assert "test2" not in fb.selected_tests
+        assert fb.total_runtime_s == pytest.approx(1.8)
+        assert fb.covered_fraction == pytest.approx(0.6)
+
+    def test_curation_is_deterministic_across_repeated_runs(self) -> None:
+        # Two tests tied on coverage-per-cost score must still produce an
+        # identical result run after run (stable tie-break), not one that
+        # varies with set/hash iteration order.
+        baseline = _synthetic_baseline()
+        first = fallback.compute_fallback_set(baseline, runtime_budget_s=0.35)
+        second = fallback.compute_fallback_set(baseline, runtime_budget_s=0.35)
+        assert first.selected_tests == second.selected_tests
+
 
 def test_collect_baseline_round_trips_against_a_real_plugin_suite() -> None:
     # `collect_baseline`'s own `timeout_s` bounds the ephemeral subprocess;
