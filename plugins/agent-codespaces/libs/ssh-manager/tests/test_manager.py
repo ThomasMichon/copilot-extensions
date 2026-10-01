@@ -295,8 +295,8 @@ class TestConnectionManagerExec:
         await manager.ensure_connected("test-host", source)
 
         mock_proc = AsyncMock()
-        with patch("ssh_manager.manager.asyncio.create_subprocess_exec",
-                    return_value=mock_proc) as mock_exec:
+        with patch("ssh_manager.proxy.spawn_in_kill_on_close_job",
+                    return_value=(mock_proc, None)) as mock_exec:
             result = await manager.open_stdio_channel("test-host", "copilot --acp --stdio")
 
         assert result is mock_proc
@@ -313,8 +313,8 @@ class TestConnectionManagerExec:
         mock_proc.communicate = AsyncMock(return_value=(b"output\n", b""))
         mock_proc.returncode = 0
 
-        with patch("ssh_manager.manager.asyncio.create_subprocess_exec",
-                    return_value=mock_proc) as mock_exec:
+        with patch("ssh_manager.proxy.spawn_in_kill_on_close_job",
+                    return_value=(mock_proc, None)) as mock_exec:
             result = await manager.exec_command("test-host", "uname -a")
 
         assert result.ok
@@ -370,8 +370,8 @@ class TestConnectionManagerExec:
 
         with (
             patch(
-                "ssh_manager.manager.asyncio.create_subprocess_exec",
-                return_value=graceful,
+                "ssh_manager.proxy.spawn_in_kill_on_close_job",
+                return_value=(graceful, None),
             ),
             patch(
                 "ssh_manager.manager._terminate_process_tree",

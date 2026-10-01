@@ -115,8 +115,10 @@ def test_terminate_pid_reaps_posix_process_group(monkeypatch):
 
     monkeypatch.setattr(fk.sys, "platform", "linux")
     monkeypatch.setattr(fk, "pid_alive", lambda pid: next(alive))
-    monkeypatch.setattr(fk.os, "getpgid", lambda pid: 123)
-    monkeypatch.setattr(fk.os, "killpg", lambda pgid, sig: calls.append((pgid, sig)))
+    monkeypatch.setattr(fk.os, "getpgid", lambda pid: 123, raising=False)
+    monkeypatch.setattr(
+        fk.os, "killpg", lambda pgid, sig: calls.append((pgid, sig)), raising=False
+    )
     monkeypatch.setattr(fk.time, "sleep", lambda delay: None)
     monkeypatch.setattr(fk.time, "monotonic", lambda: 0.0)
 

@@ -44,9 +44,13 @@ this package's own ``README.md`` § Vendoring for the mechanism, and
 
 from __future__ import annotations
 
+import asyncio
+import ctypes
+import logging
 import os
 import subprocess
 import sys
+from typing import Any
 
 # Win32 process-creation flags. Read from ``subprocess`` when present (Windows)
 # and fall back to the stable ABI literals so this module imports cleanly off
@@ -55,12 +59,23 @@ _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 _DETACHED_PROCESS = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
 _CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
 _CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+_CREATE_SUSPENDED = 0x00000004
 _CONTAINED_TEST_ENV = "COPILOT_EXTENSIONS_TEST_CONTAINED"
+_JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
+_JobObjectExtendedLimitInformation = 9
+_PROCESS_SET_QUOTA = 0x0100
+_PROCESS_TERMINATE = 0x0001
+_PROCESS_SUSPEND_RESUME = 0x0800
+_ERROR_ACCESS_DENIED = 5
+
+log = logging.getLogger("agent-procutil")
 
 __all__ = [
     "contained_test_mode",
     "no_window_flags",
     "no_window_kwargs",
+    "JobHandle",
+    "spawn_in_kill_on_close_job",
     "detached_kwargs",
     "windowless_daemon_kwargs",
     "windowless_python",
@@ -75,6 +90,277 @@ def contained_test_mode() -> bool:
 
 def _is_windows() -> bool:
     return os.name == "nt"
+
+
+class JobHandle:
+    """Owned Windows Job Object handle.
+
+    Keep an instance alive as long as its assigned child process should be
+    tied to this owner. Closing it releases the handle; with
+    ``JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`` that also terminates any process
+    still assigned to the job. Off Windows callers never receive one.
+    """
+
+    def __init__(self, handle: Any) -> None:
+        self._handle = handle
+
+    @property
+    def handle(self) -> Any:
+        return self._handle
+
+    def close(self) -> None:
+        handle = self._handle
+        if not handle:
+            return
+        self._handle = None
+        try:
+            _kernel32().CloseHandle(handle)
+        except Exception:
+            log.debug("CloseHandle(job) failed", exc_info=True)
+
+    def __enter__(self) -> "JobHandle":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        self.close()
+
+
+def _kernel32() -> Any:
+    return ctypes.WinDLL("kernel32", use_last_error=True)
+
+
+def _ntdll() -> Any:
+    return ctypes.WinDLL("ntdll", use_last_error=True)
+
+
+def _build_job_extended_limit_info() -> type[ctypes.Structure]:
+    from ctypes import wintypes
+
+    ulong_ptr = ctypes.c_size_t
+
+    class _BasicLimit(ctypes.Structure):
+        _fields_ = [
+            ("PerProcessUserTimeLimit", wintypes.LARGE_INTEGER),
+            ("PerJobUserTimeLimit", wintypes.LARGE_INTEGER),
+            ("LimitFlags", wintypes.DWORD),
+            ("MinimumWorkingSetSize", ctypes.c_size_t),
+            ("MaximumWorkingSetSize", ctypes.c_size_t),
+            ("ActiveProcessLimit", wintypes.DWORD),
+            ("Affinity", ulong_ptr),
+            ("PriorityClass", wintypes.DWORD),
+            ("SchedulingClass", wintypes.DWORD),
+        ]
+
+    class _IoCounters(ctypes.Structure):
+        _fields_ = [
+            ("ReadOperationCount", ctypes.c_ulonglong),
+            ("WriteOperationCount", ctypes.c_ulonglong),
+            ("OtherOperationCount", ctypes.c_ulonglong),
+            ("ReadTransferCount", ctypes.c_ulonglong),
+            ("WriteTransferCount", ctypes.c_ulonglong),
+            ("OtherTransferCount", ctypes.c_ulonglong),
+        ]
+
+    class _ExtendedLimit(ctypes.Structure):
+        _fields_ = [
+            ("BasicLimitInformation", _BasicLimit),
+            ("IoInfo", _IoCounters),
+            ("ProcessMemoryLimit", ctypes.c_size_t),
+            ("JobMemoryLimit", ctypes.c_size_t),
+            ("PeakProcessMemoryUsed", ctypes.c_size_t),
+            ("PeakJobMemoryUsed", ctypes.c_size_t),
+        ]
+
+    return _ExtendedLimit
+
+
+def _configure_job_api(kernel32: Any) -> None:
+    from ctypes import wintypes
+
+    kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+    kernel32.SetInformationJobObject.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+    ]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+
+def _configure_resume_api(kernel32: Any, ntdll: Any) -> None:
+    from ctypes import wintypes
+
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
+    ntdll.NtResumeProcess.restype = ctypes.c_long
+
+
+def _log_job_failure(operation: str) -> None:
+    error = ctypes.get_last_error()
+    if error == _ERROR_ACCESS_DENIED:
+        log.debug("%s failed with access denied; child job binding skipped", operation)
+    else:
+        log.debug("%s failed with Windows error %d; child job binding skipped", operation, error)
+
+
+def _assign_suspended_to_kill_on_close_job(pid: int) -> JobHandle | None:
+    """Assign a newly-created suspended ``pid`` to this owner's kill-on-close Job.
+
+    The returned :class:`JobHandle` owns the Job Object handle. Hold it for the
+    child process lifetime; close it once ordinary cleanup has finished.
+    Private to :func:`spawn_in_kill_on_close_job`: using a bare PID is safe only
+    while the child is still suspended and cannot have exited or spawned
+    descendants before assignment.
+    """
+    if not _is_windows():
+        return None
+    if pid <= 0:
+        log.debug("invalid pid %r; child job binding skipped", pid)
+        return None
+
+    job = None
+    process = None
+    try:
+        kernel32 = _kernel32()
+        _configure_job_api(kernel32)
+
+        job = kernel32.CreateJobObjectW(None, None)
+        if not job:
+            _log_job_failure("CreateJobObjectW")
+            return None
+
+        limit_info = _build_job_extended_limit_info()()
+        limit_info.BasicLimitInformation.LimitFlags = _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        if not kernel32.SetInformationJobObject(
+            job,
+            _JobObjectExtendedLimitInformation,
+            ctypes.byref(limit_info),
+            ctypes.sizeof(limit_info),
+        ):
+            _log_job_failure("SetInformationJobObject")
+            return None
+
+        process = kernel32.OpenProcess(
+            _PROCESS_SET_QUOTA | _PROCESS_TERMINATE,
+            False,
+            int(pid),
+        )
+        if not process:
+            _log_job_failure("OpenProcess")
+            return None
+
+        if not kernel32.AssignProcessToJobObject(job, process):
+            _log_job_failure("AssignProcessToJobObject")
+            return None
+
+        owned = JobHandle(job)
+        job = None
+        return owned
+    except Exception:
+        log.debug("failed to bind pid %s to a kill-on-close job", pid, exc_info=True)
+        return None
+    finally:
+        try:
+            if process:
+                _kernel32().CloseHandle(process)
+        except Exception:
+            log.debug("CloseHandle(process) failed", exc_info=True)
+        try:
+            if job:
+                _kernel32().CloseHandle(job)
+        except Exception:
+            log.debug("CloseHandle(job) failed", exc_info=True)
+
+
+def _resume_suspended_process(pid: int) -> bool:
+    if not _is_windows():
+        return True
+    process = None
+    try:
+        kernel32 = _kernel32()
+        ntdll = _ntdll()
+        _configure_resume_api(kernel32, ntdll)
+        process = kernel32.OpenProcess(_PROCESS_SUSPEND_RESUME, False, int(pid))
+        if not process:
+            _log_job_failure("OpenProcess(PROCESS_SUSPEND_RESUME)")
+            return False
+        status = ntdll.NtResumeProcess(process)
+        if status != 0:
+            log.debug("NtResumeProcess failed with NTSTATUS %#x", status)
+            return False
+        return True
+    except Exception:
+        log.debug("failed to resume suspended pid %s", pid, exc_info=True)
+        return False
+    finally:
+        try:
+            if process:
+                _kernel32().CloseHandle(process)
+        except Exception:
+            log.debug("CloseHandle(process) failed", exc_info=True)
+
+
+async def spawn_in_kill_on_close_job(
+    *args: str,
+    **kwargs: Any,
+) -> tuple[asyncio.subprocess.Process, JobHandle | None]:
+    """Spawn a child already contained by a kill-on-close Job Object.
+
+    On Windows the child is created with ``CREATE_SUSPENDED``, assigned to a
+    kill-on-close job, and then resumed, with no ``await`` between creation and
+    assignment: the child can neither run nor start descendants outside the job.
+    One window remains by design: if the owner is hard-killed in the instant
+    between ``CreateProcess`` returning and the assignment, the child stays
+    suspended (it never runs, so it opens no connection). Closing that window
+    would need a hand-rolled ``CreateProcessW`` with ``PROC_THREAD_ATTRIBUTE_JOB_LIST``,
+    which ``asyncio``'s subprocess transport (pipes, overlapped I/O) can't use.
+    If job creation or assignment fails, the child is still resumed and returned
+    with ``None`` so existing cleanup paths remain in charge. Off Windows this is
+    a plain ``asyncio.create_subprocess_exec`` call returning ``(process, None)``.
+    """
+    if not _is_windows():
+        process = await asyncio.create_subprocess_exec(*args, **kwargs)
+        return process, None
+
+    spawn_kwargs = dict(kwargs)
+    spawn_kwargs["creationflags"] = (
+        int(spawn_kwargs.get("creationflags", 0)) | _CREATE_SUSPENDED
+    )
+    process = await asyncio.create_subprocess_exec(*args, **spawn_kwargs)
+    job_handle: JobHandle | None = None
+    try:
+        pid = getattr(process, "pid", None)
+        if not isinstance(pid, int):
+            log.debug("spawned process has no integer pid; cannot assign owner job")
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            raise RuntimeError("spawned suspended process has no integer pid")
+        job_handle = _assign_suspended_to_kill_on_close_job(pid)
+        if not _resume_suspended_process(pid):
+            log.debug("killing pid %s because suspended-start resume failed", pid)
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            if job_handle is not None:
+                job_handle.close()
+            raise RuntimeError(f"failed to resume suspended process {pid}")
+    except BaseException:
+        if job_handle is not None:
+            job_handle.close()
+        raise
+    return process, job_handle
 
 
 def _venv_home_pythonw(python: str) -> str | None:

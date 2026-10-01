@@ -122,9 +122,9 @@ class TestLocalForwardLifecycle:
         proc = _FakeProc(returncode=None)
 
         async def fake_spawn(*a, **k):
-            return proc
+            return proc, None
 
-        monkeypatch.setattr("ssh_manager.forward.asyncio.create_subprocess_exec",
+        monkeypatch.setattr("ssh_manager.proxy.spawn_in_kill_on_close_job",
                             fake_spawn)
         monkeypatch.setattr(LocalForward, "_port_accepts",
                             staticmethod(lambda port: _true()))
@@ -142,7 +142,7 @@ class TestLocalForwardLifecycle:
         async def fake_spawn(*a, **k):
             p = procs[calls["n"]]
             calls["n"] += 1
-            return p
+            return p, None
 
         accepts = {"n": 0}
 
@@ -151,7 +151,7 @@ class TestLocalForwardLifecycle:
             accepts["n"] += 1
             return calls["n"] == 2
 
-        monkeypatch.setattr("ssh_manager.forward.asyncio.create_subprocess_exec",
+        monkeypatch.setattr("ssh_manager.proxy.spawn_in_kill_on_close_job",
                             fake_spawn)
         monkeypatch.setattr(LocalForward, "_port_accepts",
                             staticmethod(fake_accept))
@@ -165,12 +165,12 @@ class TestLocalForwardLifecycle:
 
     async def test_establish_raises_when_never_ready(self, monkeypatch) -> None:
         async def fake_spawn(*a, **k):
-            return _FakeProc(returncode=None)
+            return _FakeProc(returncode=None), None
 
         async def never(port):
             return False
 
-        monkeypatch.setattr("ssh_manager.forward.asyncio.create_subprocess_exec",
+        monkeypatch.setattr("ssh_manager.proxy.spawn_in_kill_on_close_job",
                             fake_spawn)
         monkeypatch.setattr(LocalForward, "_port_accepts", staticmethod(never))
         monkeypatch.setattr(LocalForward, "_drain_stderr",
@@ -183,9 +183,9 @@ class TestLocalForwardLifecycle:
 
     async def test_refresh_reuses_port(self, monkeypatch) -> None:
         async def fake_spawn(*a, **k):
-            return _FakeProc(returncode=None)
+            return _FakeProc(returncode=None), None
 
-        monkeypatch.setattr("ssh_manager.forward.asyncio.create_subprocess_exec",
+        monkeypatch.setattr("ssh_manager.proxy.spawn_in_kill_on_close_job",
                             fake_spawn)
         monkeypatch.setattr(LocalForward, "_port_accepts",
                             staticmethod(lambda port: _true()))
@@ -197,9 +197,9 @@ class TestLocalForwardLifecycle:
 
     async def test_cancel_idempotent(self, monkeypatch) -> None:
         async def fake_spawn(*a, **k):
-            return _FakeProc(returncode=None)
+            return _FakeProc(returncode=None), None
 
-        monkeypatch.setattr("ssh_manager.forward.asyncio.create_subprocess_exec",
+        monkeypatch.setattr("ssh_manager.proxy.spawn_in_kill_on_close_job",
                             fake_spawn)
         monkeypatch.setattr(LocalForward, "_port_accepts",
                             staticmethod(lambda port: _true()))

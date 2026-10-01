@@ -20,7 +20,12 @@ import shlex
 import shutil
 from typing import Any
 
-from agent_procutil import no_window_kwargs, windowless_python
+from agent_procutil import (
+    JobHandle,
+    no_window_kwargs,
+    spawn_in_kill_on_close_job,
+    windowless_python,
+)
 
 from .config_sources import SSHConfig
 from .process import (
@@ -160,6 +165,7 @@ class _ProxyBroker:
         self._server: asyncio.Server | None = None
         self._clients: set[asyncio.Task] = set()
         self._cleanups: set[asyncio.Task] = set()
+        self._child_jobs: set[JobHandle] = set()
         self._used = False
         self._close_task: asyncio.Task | None = None
 
@@ -181,6 +187,7 @@ class _ProxyBroker:
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter,
     ) -> None:
         process = None
+        child_job = None
         tasks: list[asyncio.Task] = []
         stderr_tail = bytearray()
 
@@ -198,7 +205,7 @@ class _ProxyBroker:
             ):
                 raise RuntimeError("Invalid SSH proxy connection capability")
             self._used = True
-            process = await asyncio.create_subprocess_exec(
+            process, child_job = await spawn_in_kill_on_close_job(
                 *self._command,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
@@ -207,6 +214,8 @@ class _ProxyBroker:
                 cwd=self._cwd,
                 **(no_window_kwargs() if _is_windows() else ssh_subprocess_kwargs()),
             )
+            if child_job is not None:
+                self._child_jobs.add(child_job)
             if process.stdin is None or process.stdout is None or process.stderr is None:
                 raise RuntimeError("SSH proxy did not receive its redirected streams")
             inbound = asyncio.create_task(_pump(reader, process.stdin))
@@ -244,19 +253,26 @@ class _ProxyBroker:
         except (OSError, ConnectionError, RuntimeError):
             log.warning("SSH proxy connection failed", exc_info=True)
         finally:
-            cleanup = asyncio.create_task(self._cleanup_connection(process, tasks, writer))
+            cleanup = asyncio.create_task(
+                self._cleanup_connection(process, tasks, writer, child_job)
+            )
             self._cleanups.add(cleanup)
             cleanup.add_done_callback(self._cleanups.discard)
             await asyncio.shield(cleanup)
 
     async def _cleanup_connection(
         self, process: asyncio.subprocess.Process | None,
-        tasks: list[asyncio.Task], writer: asyncio.StreamWriter,
+        tasks: list[asyncio.Task],
+        writer: asyncio.StreamWriter,
+        child_job: JobHandle | None,
     ) -> None:
         try:
             if process is not None:
                 await terminate_ssh_process_tree(process)
         finally:
+            if child_job is not None:
+                child_job.close()
+                self._child_jobs.discard(child_job)
             for task in tasks:
                 task.cancel()
             if tasks:
@@ -303,6 +319,8 @@ async def _watch_process(process: asyncio.subprocess.Process) -> None:
 
 
 _WATCHERS: set[asyncio.Task] = set()
+_OWNER_JOB_WATCHERS: set[asyncio.Task] = set()
+_OWNER_JOBS: dict[int, JobHandle] = {}
 
 
 def _watcher_done(task: asyncio.Task) -> None:
@@ -314,6 +332,38 @@ def _watcher_done(task: asyncio.Task) -> None:
         )
 
 
+async def _close_owner_job_when_process_ends(
+    process: asyncio.subprocess.Process,
+    job_handle: JobHandle,
+) -> None:
+    try:
+        await process.wait()
+    finally:
+        job_handle.close()
+        _OWNER_JOBS.pop(id(process), None)
+
+
+def _job_watcher_done(task: asyncio.Task) -> None:
+    _OWNER_JOB_WATCHERS.discard(task)
+    if not task.cancelled() and (error := task.exception()) is not None:
+        log.debug(
+            "SSH owner job watcher failed",
+            exc_info=(type(error), error, error.__traceback__),
+        )
+
+
+def _track_owner_job(
+    process: asyncio.subprocess.Process,
+    job_handle: JobHandle | None,
+) -> None:
+    if job_handle is None:
+        return
+    _OWNER_JOBS[id(process)] = job_handle
+    watcher = asyncio.create_task(_close_owner_job_when_process_ends(process, job_handle))
+    _OWNER_JOB_WATCHERS.add(watcher)
+    watcher.add_done_callback(_job_watcher_done)
+
+
 async def create_ssh_subprocess(
     *args: str, config: SSHConfig, **kwargs: Any,
 ) -> asyncio.subprocess.Process:
@@ -322,7 +372,11 @@ async def create_ssh_subprocess(
     if not proxy and isinstance(config, SSHConfig):
         proxy = _option(config, "proxycommand")
     if not _is_windows() or not proxy or proxy.casefold() == "none":
-        return await asyncio.create_subprocess_exec(*args, **ssh_subprocess_kwargs(**kwargs))
+        process, job_handle = await spawn_in_kill_on_close_job(
+            *args, **ssh_subprocess_kwargs(**kwargs)
+        )
+        _track_owner_job(process, job_handle)
+        return process
     shell = await _resolve_shell(kwargs.get("executable") or args[0])
     expanded = _expand_tokens(proxy, config)
     command = [shell, "-c", expanded] if shell else _split_windows_command(expanded)
@@ -334,10 +388,11 @@ async def create_ssh_subprocess(
     )
     try:
         port = await broker.start()
-        process = await asyncio.create_subprocess_exec(
+        process, job_handle = await spawn_in_kill_on_close_job(
             *_broker_args(args, _client_command(port, capability, shell=shell is not None)),
             **ssh_subprocess_kwargs(**kwargs),
         )
+        _track_owner_job(process, job_handle)
     except BaseException:
         await broker.close()
         raise

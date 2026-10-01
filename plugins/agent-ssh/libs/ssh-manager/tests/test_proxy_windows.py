@@ -37,6 +37,14 @@ def test_native_proxy_stays_windowless_across_two_cycles(tmp_path, ssh_kind):
     assert result.returncode == 0, result.stderr
     evidence = json.loads(result.stdout)
     assert evidence["parent_console_handle"] == 0
+    assert len(evidence["procutil_cycles"]) == 4
+    assert {cycle["kind"] for cycle in evidence["procutil_cycles"]} == {
+        "detached", "no-window",
+    }
+    assert all(
+        not any(cycle["console_handles"])
+        for cycle in evidence["procutil_cycles"]
+    )
     assert len(evidence["cycles"]) == 2
     assert all(
         not any(cycle["proxy_console_handles"])

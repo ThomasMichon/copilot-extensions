@@ -86,7 +86,7 @@ class TestProcessIdentity:
         monkeypatch.setattr(locks_mod.sys, "platform", "linux")
         monkeypatch.setattr(locks_mod, "pid_alive", lambda pid: True)
         def read_text(self, encoding="ascii"):
-            if str(self) == "/proc/sys/kernel/random/boot_id":
+            if str(self).replace("\\", "/") == "/proc/sys/kernel/random/boot_id":
                 return "boot-123\n"
             return f"123 (python) {' '.join(tokens)}"
         monkeypatch.setattr(locks_mod.Path, "read_text", read_text)
@@ -97,7 +97,7 @@ class TestProcessIdentity:
         monkeypatch.setattr(locks_mod.sys, "platform", "linux")
         monkeypatch.setattr(locks_mod, "pid_alive", lambda pid: True)
         def read_text(self, encoding="ascii"):
-            if str(self) == "/proc/sys/kernel/random/boot_id":
+            if str(self).replace("\\", "/") == "/proc/sys/kernel/random/boot_id":
                 return "boot-123\n"
             return f"123 (python) {' '.join(tokens)}"
         monkeypatch.setattr(locks_mod.Path, "read_text", read_text)

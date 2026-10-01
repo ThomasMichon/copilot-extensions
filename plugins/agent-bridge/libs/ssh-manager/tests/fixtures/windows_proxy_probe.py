@@ -70,6 +70,46 @@ def serve_proxy(marker: Path) -> None:
     marker.write_text(json.dumps(samples), encoding="utf-8")
 
 
+async def drive_procutil_spawn(
+    directory: Path,
+    *,
+    cycle: int,
+    flag_name: str,
+    creationflags: int,
+) -> dict:
+    from agent_procutil import spawn_in_kill_on_close_job
+
+    marker = directory / f"procutil-{flag_name}-{cycle}.json"
+    process, job = await spawn_in_kill_on_close_job(
+        sys._base_executable,
+        str(Path(__file__).resolve()),
+        "--proxy",
+        str(marker),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        creationflags=creationflags,
+    )
+    try:
+        _output, error = await asyncio.wait_for(process.communicate(), timeout=8)
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+        if job is not None:
+            job.close()
+    if not marker.is_file():
+        raise RuntimeError(
+            f"The synthetic {flag_name} child did not execute: "
+            + error.decode(errors="replace")
+        )
+    return {
+        "kind": flag_name,
+        "console_handles": json.loads(marker.read_text(encoding="utf-8")),
+        "returncode": process.returncode,
+    }
+
+
 async def drive(directory: Path) -> dict:
     from ssh_manager import SSHConfig
     from ssh_manager.process import run_process_cleanup, terminate_ssh_process_tree
@@ -91,8 +131,25 @@ async def drive(directory: Path) -> dict:
 
     watcher = asyncio.create_task(monitor())
     cycles = []
+    procutil_cycles = []
     try:
         for cycle in range(2):
+            procutil_cycles.append(
+                await drive_procutil_spawn(
+                    directory,
+                    cycle=cycle,
+                    flag_name="detached",
+                    creationflags=getattr(subprocess, "DETACHED_PROCESS", 0x00000008),
+                )
+            )
+            procutil_cycles.append(
+                await drive_procutil_spawn(
+                    directory,
+                    cycle=cycle,
+                    flag_name="no-window",
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+                )
+            )
             marker = directory / f"proxy-{cycle}.json"
             proxy_args = [
                 sys._base_executable, str(Path(__file__).resolve()), "--proxy", str(marker),
@@ -139,6 +196,7 @@ async def drive(directory: Path) -> dict:
         await watcher
     return {
         "parent_console_handle": console_window(),
+        "procutil_cycles": procutil_cycles,
         "cycles": cycles,
         "new_visible_terminal_windows": len(observed),
         "new_terminal_took_foreground": any(observed.values()),
