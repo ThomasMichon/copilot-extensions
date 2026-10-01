@@ -200,6 +200,27 @@ def _breadcrumb_path(python, env):
     return (r.stdout or "").strip()
 
 
+def _read_generation_id(root, timeout=20.0):
+    """Poll ``running-version.json`` for the real ``generation_id`` a live
+    daemon's ``SessionManager`` stamps in once it boots
+    (``runtime_version.set_running_generation_id``) -- written AFTER the
+    earlier boot-time ``write_running_version()`` call, so this can briefly
+    lag ``c.active()`` succeeding; poll rather than assume it's already
+    present.
+    """
+    path = os.path.join(root, "running-version.json")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            gen = json.loads(open(path, encoding="utf-8").read()).get("generation_id")
+            if gen:
+                return gen
+        except Exception:
+            pass
+        time.sleep(0.25)
+    return None
+
+
 class Result:
     def __init__(self, name):
         self.name = name
@@ -354,21 +375,19 @@ def check_abrupt_kill_recovery(python):
     REAL fresh daemon's own real startup reattach scan, not just the
     pure-function unit tests in ``libs/zdd/tests/test_claims.py``.
 
-    **Honest scope note (review-caught).** The claim below is stamped with a
-    test-chosen generation *label*, not the killed daemon's own real
-    ``_generation_id`` (``session_core.py`` computes that once per process
-    from ``version+pid+started_at`` -- not independently reproducible from
-    outside the process, and there is no API surface exposing it; adding one
-    would be its own production change, deliberately out of scope for a
-    clean-room-only PR). This means the drill demonstrates the underlying
-    dead-pid-recovery PRIMITIVE against a genuinely killed real process --
-    NOT that the killed daemon's own real exit-contract release path
-    (``release_all(self._generation_id)``) was interrupted, since that path
-    would never have matched an arbitrary label even on a graceful exit.
-    That narrower, already-thoroughly-unit-tested claim
-    (``test_admin_routes_phase3.py``) is a smaller, orthogonal fact this
-    Tier-P drill does not need to re-prove; what it adds is the *dead-pid
-    detection* against a real OS process a unit test cannot exercise.
+    **Real generation id.** The claim below is stamped with the killed
+    daemon's own REAL ``_generation_id`` -- read back from
+    ``running-version.json``, the local marker file
+    ``runtime_version.set_running_generation_id()`` writes once the
+    daemon's ``SessionManager`` computes it at boot (see that module's own
+    docstring for why this file rather than ``/health``). This still does
+    NOT exercise the graceful exit-contract release path
+    (``release_all(self._generation_id)``) -- that path never runs on an
+    abrupt SIGKILL by design, which is the entire point of this drill (see
+    ``test_admin_routes_phase3.py`` for that narrower, already-unit-tested
+    graceful-release claim). What this drill adds is *dead-pid detection*
+    against a real OS process, now stamped with the SAME generation id the
+    live daemon itself would have used, a real unit test cannot exercise.
 
     Two synchronization hazards a naive version of this check gets wrong
     (both review-caught in earlier revisions -- kept documented here so they
@@ -485,6 +504,17 @@ def check_abrupt_kill_recovery(python):
         old_port = a["port"]
         r.check(_listening(old_port), f"generation to be killed is listening on :{old_port}")
 
+        # This daemon's own REAL generation id (not a test-chosen label --
+        # see the docstring's "Real generation id" note), read back from the
+        # marker file its SessionManager stamps in at boot.
+        real_generation_id = _read_generation_id(c.root)
+        if not r.check(
+            bool(real_generation_id),
+            "read the killed generation's own real generation_id from "
+            "running-version.json",
+        ):
+            return r
+
         # Poll until the sentinel is gone -- the real, observable signal
         # that this generation's one-shot startup reattach scan has actually
         # run to completion (never a fixed sleep guess). A read FAILURE
@@ -533,23 +563,23 @@ def check_abrupt_kill_recovery(python):
         # real daemon (invoked directly here since making the real daemon
         # discover and claim an ad hoc record with no live session-host
         # child of its own needs a full session-host implementation, out of
-        # reach for a stdlib-only probe). `owner_generation` below is a
-        # TEST-CHOSEN label, not the daemon's own real `_generation_id` --
-        # see the docstring's "Honest scope note" for exactly what this
-        # does and does not prove.
+        # reach for a stdlib-only probe). `owner_generation` below is now
+        # this daemon's OWN real `_generation_id` (read back above), not a
+        # test-chosen label -- see the docstring's "Real generation id" note.
         claim1_snip = (
             "from agent_bridge.session_host.host_index import HostIndex\n"
             "from agent_bridge.session_host.osutil import pid_alive\n"
             f"idx = HostIndex({index_path!r})\n"
-            f"idx.claim({session_id!r}, generation='test-label-gen-1', "
+            f"idx.claim({session_id!r}, generation={real_generation_id!r}, "
             f"owner_pid={proc.pid}, pid_alive=pid_alive)\n"
             f"print(idx.get({session_id!r}).owner_generation)\n"
         )
         claim1 = _run_snip(claim1_snip)
         r.check(
-            claim1.returncode == 0 and claim1.stdout.strip() == "test-label-gen-1",
-            f"the live process (real pid {proc.pid}) claimed the record for "
-            f"itself (rc={claim1.returncode}, stdout={claim1.stdout.strip()!r}, "
+            claim1.returncode == 0 and claim1.stdout.strip() == real_generation_id,
+            f"the live process (real pid {proc.pid}) claimed the record under "
+            f"its OWN real generation id {real_generation_id!r} "
+            f"(rc={claim1.returncode}, stdout={claim1.stdout.strip()!r}, "
             f"stderr={claim1.stderr.strip()[:160]})",
         )
         try:

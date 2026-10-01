@@ -370,6 +370,20 @@ async def lifespan(app: FastAPI):
 
     mgr = session_manager_from_config(db, cfg)
     app.state.session_manager = mgr
+    # Record/stage this process's real generation_id -- see
+    # runtime_version.py's own module docstring for the full rationale (why
+    # this file not /health, and why a passive successor stages rather than
+    # writes the canonical marker directly). Role signal is_subdaemon(), NOT
+    # enable_credential_relay -- the latter is user-configurable persisted
+    # config, so a relay-disabled NORMAL primary must still record directly.
+    from .elevated import is_subdaemon
+    from .runtime_version import record_manager_generation_id, stage_manager_generation_id
+    if is_subdaemon():
+        pass  # shares the primary's runtime dir, never promoted -- skip.
+    elif getattr(app.state, "passive", False):
+        stage_manager_generation_id(mgr)
+    else:
+        record_manager_generation_id(mgr)
     governance = LoopGovernance()
     app.state.resolver = AgentResolver({}, {})
     mgr.set_resolver(app.state.resolver)

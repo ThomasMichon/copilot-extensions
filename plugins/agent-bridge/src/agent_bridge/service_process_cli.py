@@ -114,7 +114,7 @@ def _format_reconcile_age(at: str) -> str | None:
 def _reconcile_service_marker(pid: int, version: str | None) -> None:
     """Point the service-management side files at the post-cutover active daemon."""
     core = _core()
-    from .runtime_version import write_running_version
+    from .runtime_version import consume_pending_generation_id, write_running_version
 
     try:
         with open(core._PID_FILE, "w", encoding="utf-8") as fh:
@@ -122,7 +122,15 @@ def _reconcile_service_marker(pid: int, version: str | None) -> None:
     except OSError:
         pass
     if version:
-        write_running_version(pid=pid, version=version)
+        # The being-PROMOTED daemon's own boot already staged its real
+        # generation_id under its own pid (it must be health-gated, hence
+        # already running, before promotion ever reaches here) -- consume
+        # that staged entry for this CONFIRMED pid (never an abandoned
+        # never-promoted passive's) and pass it straight through so this
+        # full-payload rewrite carries it rather than dropping it.
+        write_running_version(
+            pid=pid, version=version, generation_id=consume_pending_generation_id(pid)
+        )
 
 
 def _pid_on_port(port: int) -> int | None:
