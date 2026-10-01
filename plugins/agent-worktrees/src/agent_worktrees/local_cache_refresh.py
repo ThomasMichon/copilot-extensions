@@ -101,20 +101,26 @@ def _resolve_own_agent_worktrees_command() -> str | None:
     binstub path, per ``reviewing-customizations/SKILL.md``'s own
     ``agent-worktrees-repo`` marketplace-source contract: a caller-supplied,
     catalog-resolved command, never ambient ``PATH`` (which could select a
-    different installation cell's command entirely). ``None`` when this
-    cell has no deployed binstub -- ``discover_enabled_sources`` then falls
-    back to its own ambient resolution, unchanged from before this existed.
+    different installation cell's command, or none). The global
+    ``~/.local/bin/agent-worktrees`` shim is not cell-pinned; the
+    cell-pinned command lives under the owning payload's own
+    ``bin/payload/`` (the same path every project binstub execs into --
+    see ``installer._project_binstub_specs``), resolved via
+    ``installer._payload_root()``. ``None`` when that payload command isn't
+    deployed, or the payload root itself can't be resolved --
+    ``discover_enabled_sources`` then falls back to its own ambient
+    resolution, unchanged from before this existed.
     """
     try:
         from . import installer
     except Exception:
         return None
     try:
-        bin_dir = installer.bin_dir()
+        payload = installer._payload_root()
     except Exception:
         return None
     name = "agent-worktrees.cmd" if os.name == "nt" else "agent-worktrees"
-    candidate = bin_dir / name
+    candidate = payload / "bin" / "payload" / name
     return str(candidate) if candidate.is_file() else None
 
 

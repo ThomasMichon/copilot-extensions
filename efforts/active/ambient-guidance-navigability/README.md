@@ -710,6 +710,22 @@ _Pending._
     docstring, and a code comment in `local_cache_refresh.py` itself, both
     named the review history ("as this loader originally did") rather than
     describing only the timeless invariant -- reworded both.
+- **Review round 3 finding (PR #4809):** round 2's own `agent_worktrees_
+  command` fix was itself wrong -- `installer.bin_dir()` resolves
+  `install_dir()/"bin"` (the runtime-helper directory holding
+  `resolve-runtime.*`/hook scripts), not any deployed binstub; the actual
+  global shim lives in `installer.local_bin()` (`~/.local/bin`), which
+  isn't reliably cell-pinned either, since it can be shared/overwritten
+  across installs. The genuinely cell-pinned command is the owning
+  payload's own `bin/payload/agent-worktrees[.cmd]` -- the exact path
+  every project binstub `installer._project_binstub_specs` generates execs
+  into -- resolved via `installer._payload_root()`. Fixed
+  `_resolve_own_agent_worktrees_command` to use that instead. Replaced the
+  three unit tests (which had exercised the wrong function) and added a
+  fourth against a realistic deployed-plugin directory layout
+  (`plugins/agent-worktrees/{plugin.json,src/agent_worktrees/,
+  bin/payload/agent-worktrees}`), per the reviewer's explicit ask for a
+  real-layout regression test rather than only a monkeypatched stand-in.
 
 ### 2026-10-01 -- Phase 7 slice 4: the repo-wide catch-all static projection
 - Picked up the next unstarted Plan item (slice 3's steer): `customizing-

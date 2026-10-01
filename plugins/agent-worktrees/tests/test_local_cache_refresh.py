@@ -178,35 +178,63 @@ class TestLoadInstructionProjections:
 
 
 class TestResolveOwnAgentWorktreesCommand:
-    def test_returns_none_when_installer_has_no_binstub(
+    def test_returns_none_when_no_payload_command_deployed(
         self, tmp_path: Path, monkeypatch
     ) -> None:
         from agent_worktrees import installer
 
-        monkeypatch.setattr(installer, "bin_dir", lambda: tmp_path / "bin")
+        monkeypatch.setattr(installer, "_payload_root", lambda: tmp_path / "payload")
         assert lcr._resolve_own_agent_worktrees_command() is None
 
-    def test_returns_the_cell_local_binstub_path_when_present(
+    def test_returns_the_payload_pinned_command_when_present(
         self, tmp_path: Path, monkeypatch
     ) -> None:
         from agent_worktrees import installer
 
-        bin_dir = tmp_path / "bin"
-        bin_dir.mkdir()
+        payload = tmp_path / "payload"
+        payload_bin = payload / "bin" / "payload"
+        payload_bin.mkdir(parents=True)
         name = "agent-worktrees.cmd" if os.name == "nt" else "agent-worktrees"
-        (bin_dir / name).write_text("", encoding="utf-8")
-        monkeypatch.setattr(installer, "bin_dir", lambda: bin_dir)
+        (payload_bin / name).write_text("", encoding="utf-8")
+        monkeypatch.setattr(installer, "_payload_root", lambda: payload)
 
-        assert lcr._resolve_own_agent_worktrees_command() == str(bin_dir / name)
+        assert lcr._resolve_own_agent_worktrees_command() == str(payload_bin / name)
 
-    def test_never_raises_when_installer_itself_fails(self, monkeypatch) -> None:
+    def test_never_raises_when_payload_root_itself_fails(self, monkeypatch) -> None:
         from agent_worktrees import installer
 
         def _boom():
             raise RuntimeError("boom")
 
-        monkeypatch.setattr(installer, "bin_dir", _boom)
+        monkeypatch.setattr(installer, "_payload_root", _boom)
         assert lcr._resolve_own_agent_worktrees_command() is None
+
+    def test_resolves_against_a_real_deployed_plugin_layout(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """End-to-end against the real layout ``installer.deploy_binstubs``
+        itself writes a project binstub to exec into -- not just a
+        monkeypatched ``_payload_root`` stand-in."""
+        from agent_worktrees import installer
+
+        plugin_root = tmp_path / "plugins" / "agent-worktrees"
+        (plugin_root / "src" / "agent_worktrees").mkdir(parents=True)
+        (plugin_root / "plugin.json").write_text(
+            '{"name": "agent-worktrees", "version": "1.0.0"}', encoding="utf-8"
+        )
+        payload_bin = plugin_root / "bin" / "payload"
+        payload_bin.mkdir(parents=True)
+        name = "agent-worktrees.cmd" if os.name == "nt" else "agent-worktrees"
+        (payload_bin / name).write_text("", encoding="utf-8")
+        monkeypatch.delenv("AGENT_WORKTREES_PAYLOAD_ROOT", raising=False)
+        original_payload_root = installer._payload_root
+        monkeypatch.setattr(
+            installer, "_payload_root", lambda: original_payload_root(tmp_path)
+        )
+
+        resolved = lcr._resolve_own_agent_worktrees_command()
+
+        assert resolved == str(payload_bin / name)
 
 
 class TestRefreshLocalCache:
