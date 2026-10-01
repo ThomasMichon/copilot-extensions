@@ -435,6 +435,13 @@ def link_succession(
         handoff = open_handoff(record, predecessor_id, token, save=False)
         link_handoff(record, handoff.token, successor_id, save=False)
     else:
+        if succ.state in tracking._CONCLUDED_SESSION_STATES:
+            # Mirrors `link_handoff`'s equivalent guard: a terminal successor
+            # (explicitly handed-off or concluded) must never be resurrected
+            # and handed head just because a manual-repair caller named it.
+            raise SessionLifecycleError(
+                f"successor {successor_id} is already {succ.state}"
+            )
         pred.successor = successor_id
         pred.state = predecessor_state
         succ.predecessor = predecessor_id

@@ -156,7 +156,16 @@ def apply_session_register(args: dict) -> dict:
             if (
                 not candidate_token
                 and record.resolved_head_session is None
-                and entry.state in ("active", "yielded")
+                and (
+                    entry.state == "active"
+                    or (
+                        entry.state == "yielded"
+                        and (
+                            not record.head_transitions
+                            or record.head_transitions[-1].session_id == session_id
+                        )
+                    )
+                )
                 and (
                     source == "bind"
                     or tracking._pending_handoffs_all_from_yielded(record)
@@ -169,7 +178,13 @@ def apply_session_register(args: dict) -> dict:
                 # handoff(s). This loop only ever reaches the entry matching
                 # `session_id` (the registering session itself), so this can
                 # never let an unrelated session reclaim another session's
-                # yielded state.
+                # yielded state. The raw-latest-head-transition check mirrors
+                # `cancel_handoff`'s `predecessor_is_latest_head` guard: without
+                # it, an OLDER yielded session could steal head back from a
+                # NEWER yielded lineage -- `resolved_head_session` deliberately
+                # hides every yielded session, so a genuinely newer head that
+                # has since yielded its own handoff would also read as "no
+                # head" here.
                 if entry.state == "yielded":
                     entry.state = "active"
                 tracking._cancel_pending_handoffs(record)

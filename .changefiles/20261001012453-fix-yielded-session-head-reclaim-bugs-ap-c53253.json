@@ -1,0 +1,9 @@
+{
+  "comment": "Fix yielded-session head-reclaim bugs (aperture-labs#7824): link_succession's concluded-predecessor branch now rejects terminal successors and activates eligible ones; register_session lets a session reclaim its own yielded head with a latest-transition ordering guard; doctor/health detect and repair orphaned yielded tails.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -293,6 +293,10 @@ def _session(sid="s1", state="handed-off", successor=None):
                            started_at=None, ended_at=None)
 
 
+def _handoff(predecessor="s1", opened_at=None):
+    return SimpleNamespace(predecessor=predecessor, opened_at=opened_at)
+
+
 def _oh_rec(**over):
     base = dict(
         worktree_id="wt", status="active",
@@ -300,6 +304,7 @@ def _oh_rec(**over):
         last_resumed_at=_STALE, started_at=None, session_state_at=None,
         mux_live_at=None, bound_live_at=None,
         sessions=[_session()],
+        handoffs=[],
     )
     base.update(over)
     return SimpleNamespace(**base)
@@ -356,6 +361,20 @@ class TestOrphanedHandoffs:
 
     def test_skips_when_yielded_tail_has_linked_successor(self):
         rec = _oh_rec(sessions=[_session("old", "yielded", successor="new")])
+        assert health.find_orphaned_handoffs([rec], now=_NOW) == []
+
+    def test_skips_freshly_yielded_handoff_despite_stale_record_timestamps(self):
+        """Review follow-up: `open_handoff()` only ever runs on an *active*
+        session, so a handoff it opened moments ago is itself fresh activity
+        -- a long-dormant `last_resumed_at` must never outrank it. Without
+        folding `SessionHandoff.opened_at` into the activity calculation, a
+        record with stale legacy timestamps but a handoff opened seconds ago
+        would be misjudged stale and `doctor --fix` would undo an in-flight
+        handoff."""
+        rec = _oh_rec(
+            sessions=[_session(state="yielded")],
+            handoffs=[_handoff(predecessor="s1", opened_at=_FRESH)],
+        )
         assert health.find_orphaned_handoffs([rec], now=_NOW) == []
 
     def test_skips_completed_succession(self):

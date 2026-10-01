@@ -611,6 +611,15 @@ def _record_last_activity(record) -> float | None:
         tail = sessions[-1]
         stamps.append(getattr(tail, "ended_at", None))
         stamps.append(getattr(tail, "started_at", None))
+        # A "yielded" tail's own handoff-open time is its most recent asserted
+        # activity -- `open_handoff()` only runs on an *active* session, so a
+        # long-dormant `last_resumed_at` must never outrank a handoff this
+        # tail opened moments ago (the orphan-handoff detector would otherwise
+        # misjudge a freshly yielded, still-in-flight handoff as stale).
+        tail_id = getattr(tail, "session_id", None)
+        for handoff in getattr(record, "handoffs", None) or ():
+            if getattr(handoff, "predecessor", None) == tail_id:
+                stamps.append(getattr(handoff, "opened_at", None))
     epochs = [e for e in (_parse_iso_epoch(s) for s in stamps) if e is not None]
     return max(epochs) if epochs else None
 
