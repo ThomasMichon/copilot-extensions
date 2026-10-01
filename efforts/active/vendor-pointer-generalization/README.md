@@ -693,7 +693,7 @@ shape before committing to a design)_
       form as in-sync rather than rejecting every converted adopter.
 
 ### Phase 3 — Document the pattern; sweep for further "and more" candidates
-- [ ] Write `docs/patterns/vendor-pointer.md`: the file-pointer kind (docs,
+- [x] Write `docs/patterns/vendor-pointer.md`: the file-pointer kind (docs,
       unchanged) and the `uv`-editable canonical-reference form (libs,
       and the shared installer engine if Phase 2 lands — see both
       Course-correction Journal entries for the mechanism's full history;
@@ -702,7 +702,7 @@ shape before committing to a design)_
       relative-path reference in `dev`, -> `materialize_main.py`
       copy-and-rewrite at promotion -> shipped `main` content), which
       tool owns which invariant, and how a new plugin/lib/script opts in.
-- [ ] Revisit whether any other currently-duplicated construct surfaced in
+- [x] Revisit whether any other currently-duplicated construct surfaced in
       Phase 0's audit ("and more") warrants conversion in this effort or a
       follow-on; file a tracked issue for anything deferred rather than
       dropping it silently.
@@ -2750,3 +2750,39 @@ _Pending._
   materializers' copy/rewrite outputs. Phase 3's pattern doc is still not
   started; the remaining future work is still the other 10 eventual engine
   adopters plus that separate documentation leg.
+
+### 2026-09-30 — Phase 3 complete: pattern doc written; broader duplicate sweep closes with no new pointer candidate
+
+- Wrote `docs/patterns/vendor-pointer.md`, the repo's first consolidated
+  operator-facing description of the **current** vendor-pointer model:
+  file-pointer stubs for mirrored docs, `uv`-editable canonical references for
+  shared libs, and the shared installer engine's direct canonical source-line
+  form. The doc names the common lifecycle (`dev` canonical/stub ->
+  `materialize_main.py` / `preview_release.py` copy-and-rewrite -> shipped
+  self-contained `main` payload), points future adopters at concrete examples
+  (`entity-relationship-model.md`, `lazy-cli-dispatch`, `agent-pull-requests`),
+  and assigns the invariants to the actual owners (`sync-vendored-libs.py`,
+  `uv_editable_ref.py`, `sync-installer-engine.py`, `installer_engine_ref.py`,
+  `materialize_main.py`, `preview_release.py`, `check-install-contract.py`).
+  Added it to `docs/patterns/README.md`'s index.
+- Revisited Phase 0's broader "and more" audit with a bounded duplicate sweep:
+  hashed duplicate files across `plugins/*/`, enumerated remaining
+  `VENDOR_POINTER.json` holdouts (only the two known `plugin-activation`
+  copies), and checked the repo's existing duplicate-management tools. Outcome:
+  the remaining **large** duplicated surfaces already have explicit owners and
+  are therefore not silent new candidates for this effort's pointer forms:
+  `installation-context` is governed by `tools/sync-installation-context.py`,
+  `versioned_runtime.py` and `resolve-runtime.*` by
+  `tools/sync-versioned-runtime.py` / `tools/check-runtime-resolution.py`, and
+  `bootstrap-check.*` by `tools/check-bootstrap-sync.py`'s family model. The
+  small repeated wrappers/configs left after that sweep (for example
+  `write-session-guidance.*`, `session-context.json`, and family-specific
+  hooks/wrappers) do not justify immediate conversion to either current pointer
+  kind without inventing a broader third script/wrapper pattern first. **No
+  new follow-up issue filed from this sweep**: nothing further presently
+  warrants Phase-3 adoption of the current two pointer kinds beyond the
+  already-tracked holdouts above.
+- Phase 3 itself is now complete. The effort's overall Status remains
+  unchanged because the Validation Plan still has open items (full real-plugin
+  round-trip/losslessness, broad non-editable-install proof, live-edit-without-
+  reinstall proof, full Phase 2 rollout proof, and no-regression confirmation).
