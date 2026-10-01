@@ -58,6 +58,7 @@ def _isolate_discovery(monkeypatch, tmp_path):
     monkeypatch.delenv("AGENT_DISPATCH_SHARED_TOKEN", raising=False)
     monkeypatch.delenv("AGENT_DISPATCH_SHARED_TOKEN_COMMAND", raising=False)
     monkeypatch.delenv("AGENT_DISPATCH_CONTROL_TOKEN", raising=False)
+    monkeypatch.delenv("AGENT_DISPATCH_CONTROL_TOKEN_COMMAND", raising=False)
     monkeypatch.delenv("AGENT_DISPATCH_SHARED_CONTROL_TOKEN", raising=False)
     monkeypatch.delenv(
         "AGENT_DISPATCH_SHARED_CONTROL_TOKEN_COMMAND", raising=False
@@ -117,6 +118,73 @@ def test_control_tokens_are_separate_from_ordinary_client_tokens(monkeypatch):
     assert load_config().control_token == "control"
     assert client_control_token() == "control"
     assert shared_control_token() == "shared-control"
+
+
+def test_load_config_never_runs_the_control_token_command(monkeypatch):
+    """Regression: load_config() must stay side-effect-free. client_url()
+    calls load_config() purely for host/port, and client_control_token() is
+    a separate, dedicated call site -- if load_config() itself ran the fetch
+    command, a default-path CLI invocation would shell out to (and
+    potentially re-prompt) a vault/credential command twice per run,
+    discarding the first result."""
+    calls: list[str] = []
+    monkeypatch.setattr(
+        config_mod, "_run_token_command", lambda cmd: calls.append(cmd) or "should-not-surface"
+    )
+    monkeypatch.setenv("AGENT_DISPATCH_CONTROL_TOKEN_COMMAND", "printf unused")
+    assert load_config().control_token is None
+    assert calls == []
+
+
+@_needs_printf
+def test_build_app_default_cfg_resolves_control_token_via_command(monkeypatch, tmp_path):
+    """``build_app()``'s own ``cfg=None`` default -- used by any caller that
+    doesn't go through ``coordinator_cli._cmd_serve`` -- must also resolve
+    the command-fetched control token, not just the explicit ``_cmd_serve``
+    construction path."""
+    from agent_dispatch import server as server_mod
+
+    monkeypatch.delenv("AGENT_DISPATCH_CONTROL_TOKEN", raising=False)
+    monkeypatch.setenv("AGENT_DISPATCH_CONTROL_TOKEN_COMMAND", "printf fetched-ctl")
+    monkeypatch.setenv("AGENT_DISPATCH_DB", str(tmp_path / "tasks.db"))
+
+    seen = {}
+    real_create_app = server_mod.create_app
+
+    def spy_create_app(*args, **kwargs):
+        seen["control_token"] = kwargs.get("control_token")
+        return real_create_app(*args, **kwargs)
+
+    monkeypatch.setattr(server_mod, "create_app", spy_create_app)
+    server_mod.build_app()
+    assert seen["control_token"] == "fetched-ctl"
+
+
+def test_control_token_direct_env_wins(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_CONTROL_TOKEN", "direct-ctl")
+    monkeypatch.setenv("AGENT_DISPATCH_CONTROL_TOKEN_COMMAND", "printf should-not-run")
+    assert client_control_token() == "direct-ctl"
+    assert load_config().control_token == "direct-ctl"
+
+
+@_needs_printf
+def test_control_token_from_command(monkeypatch):
+    # shlex-split, no shell; quoted args (e.g. a vault entry name with spaces) work.
+    monkeypatch.setenv("AGENT_DISPATCH_CONTROL_TOKEN_COMMAND", "printf '%s' fetched-ctl")
+    assert client_control_token() == "fetched-ctl"
+    # load_config() never shells out (see resolve_control_token's docstring):
+    # its own control_token field is the raw env value only.
+    assert load_config().control_token is None
+
+
+def test_control_token_none_when_unset(monkeypatch):
+    assert client_control_token() is None
+    assert load_config().control_token is None
+
+
+def test_control_token_command_failure_returns_none(monkeypatch):
+    monkeypatch.setenv("AGENT_DISPATCH_CONTROL_TOKEN_COMMAND", "false")
+    assert client_control_token() is None
 
 
 # -- client_url resolution (coordinator inversion) --------------------------

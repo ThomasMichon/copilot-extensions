@@ -452,8 +452,12 @@ Scope transitions require the coordinator's separate
 does not authorize them. The control token is intentionally a **superset queue
 credential**: it can authenticate ordinary queue operations and additionally
 authorize scope transitions, so it is not a least-privilege producer
-credential. Keep it out of process arguments; prefer the control-token
-environment setting, or the shared token-command setting where configured. A
+credential. Keep it out of process arguments; set it directly, or resolve it
+**on demand** via `AGENT_DISPATCH_CONTROL_TOKEN_COMMAND` (or
+`AGENT_DISPATCH_SHARED_CONTROL_TOKEN_COMMAND` for `--shared`) -- a fetch
+command (e.g. a credential/vault CLI) so the secret need not persist in the
+environment, mirroring `AGENT_DISPATCH_SHARED_TOKEN_COMMAND`'s pattern for the
+ordinary shared bearer. A
 tokenless local coordinator still refuses to manage scopes until a control
 token is explicitly configured. Each successful new transition mints a
 high-entropy `producer_capability`, stores only its SHA-256 hash, and returns
@@ -1593,8 +1597,10 @@ agent.
 Configuration (all optional): `AGENT_DISPATCH_HOST`, `AGENT_DISPATCH_PORT`
 (server bind pin; omitted means OS-assigned port), `AGENT_DISPATCH_DB`,
 `AGENT_DISPATCH_TOKEN` (ordinary bearer auth),
-`AGENT_DISPATCH_CONTROL_TOKEN` (superset queue credential with
-managed-producer transition authority),
+`AGENT_DISPATCH_CONTROL_TOKEN` / `AGENT_DISPATCH_CONTROL_TOKEN_COMMAND`
+(superset queue credential with managed-producer transition authority;
+required-but-unset also gates evaluator registrations, not just scope
+transitions -- see Evaluator below),
 `AGENT_DISPATCH_PRODUCER_CAPABILITY_COMMAND` (preferred on-demand capability
 fetch) / `AGENT_DISPATCH_PRODUCER_CAPABILITY` (raw fallback; applied only with
 the rest of the fence tuple),

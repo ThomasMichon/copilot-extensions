@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
 import time
 
 import pytest
@@ -14,6 +15,14 @@ from agent_dispatch.__main__ import (
     _resolve_client_target,
     build_parser,
     main,
+)
+
+# `printf` is not available as a standalone executable on Windows; skip the
+# one test below that shells out to it (no-shell subprocess, shlex-split) on
+# platforms where it's absent.
+_needs_printf = pytest.mark.skipif(
+    shutil.which("printf") is None,
+    reason="`printf` is not available as a standalone command on this platform",
 )
 
 
@@ -1763,6 +1772,34 @@ def test_cmd_serve_reroots_cwd_to_runtime_dir(monkeypatch, tmp_path):
     assert seen["cwd"] == runtime
     assert seen["cwd"] != start
     assert runtime.is_dir()
+
+
+@_needs_printf
+def test_cmd_serve_resolves_control_token_via_command(monkeypatch, tmp_path):
+    """The coordinator's actual serve path must receive a command-fetched
+    control token, not just the client-side ``client_control_token()``
+    helper -- ``_cmd_serve`` constructs ``Config`` directly rather than
+    calling it."""
+    import argparse
+
+    from agent_dispatch import __main__, runtime_version, server
+
+    monkeypatch.setattr(runtime_version, "install_dir", lambda: tmp_path / "runtime")
+    monkeypatch.delenv("AGENT_DISPATCH_CONTROL_TOKEN", raising=False)
+    monkeypatch.setenv("AGENT_DISPATCH_CONTROL_TOKEN_COMMAND", "printf fetched-ctl")
+
+    seen = {}
+
+    def fake_serve(cfg, *, passive=False, force=False):
+        seen["cfg"] = cfg
+
+    monkeypatch.setattr(server, "serve", fake_serve)
+    args = argparse.Namespace(
+        host="127.0.0.1", port=None, db=None, token=None, passive=False
+    )
+
+    assert __main__._cmd_serve(args) == 0
+    assert seen["cfg"].control_token == "fetched-ctl"
 
 
 def test_cmd_serve_runtime_dir_resolution_failure_is_nonfatal(
