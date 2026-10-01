@@ -33,29 +33,34 @@ bake in a specific path. Resolve in this order, first match wins:
    yet; don't second-guess its location).
 2. **A machine-local convention the current context already resolves**, if
    one is available and documented for this environment (e.g. a harness's
-   own machine-local config, a dotfiles-declared preference) -- prefer a
-   mechanism already in scope over inventing a new one.
-3. **The OS temp directory**, under a private, owner-only `agent-scratch`
-   subfolder of its own (never loose at the temp root either, for the same
-   reason as above): `$env:TEMP\agent-scratch` on Windows is already
-   per-user and needs no further hardening. On **POSIX**, `/tmp` (and any
-   `$TMPDIR` pointing at a shared, world-writable location) is a
-   multi-user directory -- a fixed, predictable name like `/tmp/agent-scratch`
-   there can be pre-created by another local user or replaced with a
-   symlink to redirect writes, and files created under a permissive umask
-   can be readable by other local users. On POSIX, use a **private
-   per-user** path instead of a bare shared name -- e.g.
-   `${TMPDIR:-/tmp}/agent-scratch-$(id -u)` -- and before writing into it:
-   create it with owner-only permissions (`mkdir -m 700`, or `chmod 700`
-   immediately after creation) if it doesn't already exist, and if it does
-   already exist, verify it is a real directory (not a symlink) owned by
-   the current user with mode `700` before trusting it; refuse to use it
-   and fall back to a fresh, uniquely-named directory (e.g. via `mktemp -d`)
-   if that check fails.
+   own machine-local config declaring a preferred scratch root, the same
+   way it might declare a preferred source-checkout root) -- prefer a
+   mechanism already in scope over inventing a new one. This is how an
+   operator configures a durable *default* scratch root, instead of relying
+   on an ad hoc per-invocation environment variable every time.
+3. **The operating system's preferred/standard temporary-folder system**
+   (what `$env:TEMP` resolves to on Windows, `${TMPDIR:-/tmp}` on POSIX) --
+   the default when neither of the above is configured. Use a private,
+   owner-only `agent-scratch` subfolder of that location (never loose at
+   the temp root either, for the same reason as above): `$env:TEMP\agent-scratch`
+   on Windows is already per-user and needs no further hardening. On
+   **POSIX**, `/tmp` (and any `$TMPDIR` pointing at a shared,
+   world-writable location) is a multi-user directory -- a fixed,
+   predictable name like `/tmp/agent-scratch` there can be pre-created by
+   another local user or replaced with a symlink to redirect writes, and
+   files created under a permissive umask can be readable by other local
+   users. On POSIX, use a **private per-user** path instead of a bare
+   shared name -- e.g. `${TMPDIR:-/tmp}/agent-scratch-$(id -u)` -- and
+   before writing into it: create it with owner-only permissions (`mkdir -m
+   700`, or `chmod 700` immediately after creation) if it doesn't already
+   exist, and if it does already exist, verify it is a real directory (not
+   a symlink) owned by the current user with mode `700` before trusting
+   it; refuse to use it and fall back to a fresh, uniquely-named directory
+   (e.g. via `mktemp -d`) if that check fails.
 
 Fall through silently -- don't ask the operator to configure something just
-to write one scratch file; only escalate if even the OS temp directory isn't
-writable.
+to write one scratch file; only escalate if even the operating system's
+temporary-folder system isn't writable.
 
 ## One timestamped subfolder per task
 
@@ -88,13 +93,35 @@ timestamped subfolder, even under the same root.
 
 ## Cleanup
 
-Once a task's scratch output has been consumed -- posted, committed
-elsewhere, or otherwise no longer needed -- remove that task's own subfolder
+Scratch output is the agent's own responsibility to clear, not something a
+later sweep is expected to discover and judge. At the end of a session (or
+once a task's scratch output has been consumed -- posted, committed
+elsewhere, or otherwise no longer needed), remove that task's own subfolder
 rather than leaving it indefinitely. If the content might still be useful
 pending follow-up (e.g. draft PR comments that may need another round),
 leave it and say so rather than silently deleting or silently leaving it
 with no note; the timestamp in the folder name is exactly what lets a later
-cleanup pass judge it safe to remove even without that note.
+cleanup pass judge it safe to remove even without that note. Scratch space
+is never the right home for anything meant to last: a durable artifact --
+a plan, a decision record, a finding worth keeping -- gets filed through
+whatever mechanism the operator's own environment already defines for that
+(an effort, a tracked issue, a committed doc), or by asking the operator
+on demand when no such mechanism is established; it does not get left
+behind in a scratch subfolder because the session ended.
+
+## Never stage checkouts, builds, or sensitive data in session state
+
+A session-state folder (wherever the active session/extension framework
+keeps its own managed state) is not a general-purpose scratch root. Do not
+clone or check out a repository into it, run a build inside it, or extract
+PII, secrets, or other sensitive data into it -- those belong in an
+approved scratch location (resolved above) instead. If a task genuinely
+needs an ongoing, reusable checkout of another repository, that is a sign
+it should become a tracked, registered repository rather than a disposable
+scratch artifact: ask the operator to register it as a related repository
+checked out under their normal source-checkout root, where it can later be
+promoted to a full worktree project if the work continues -- rather than
+quietly growing a throwaway checkout inside session state.
 
 ## Boundaries
 

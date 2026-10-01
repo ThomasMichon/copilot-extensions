@@ -78,10 +78,11 @@ implementation and completion decision, per the delegation skill. Or:
 > somewhere so I can review it before you post.
 
 The agent should resolve a scratch root (an `AGENT_SCRATCH_ROOT` override, an
-in-scope machine-local convention, or the OS temp directory as a last
-resort) and write the draft into a fresh, timestamped per-task subfolder
-there -- never as a loose file at a drive root -- per the scratch-space
-skill.
+operator-configured default, or the operating system's own preferred
+temporary-folder system as the final fallback) and write the draft into a
+fresh, timestamped per-task subfolder there -- never as a loose file at a
+drive root, and never inside a session-managed state folder -- per the
+scratch-space skill.
 
 ## Model-routing configuration (delegation module)
 
@@ -132,9 +133,12 @@ example model IDs are intentionally synthetic.
   demonstrated/candidate/held/failed model eligibility guidance; deterministic
   ordinary, fallback, explicit-trial, and no-route decisions;
 - (scratch-space module) a portable scratch-root resolution order (explicit
-  override, in-scope machine-local convention, OS temp directory), a
-  timestamped per-task subfolder naming convention, and reuse/cleanup
-  guidance — with no hardcoded path for any operator or machine.
+  override, operator-configured default, falling back to the operating
+  system's own preferred temporary-folder system), a timestamped per-task
+  subfolder naming convention, a boundary against using session-managed
+  state folders as a checkout/build/sensitive-data scratch root, and
+  reuse/cleanup/durable-filing guidance — with no hardcoded path for any
+  operator or machine.
 
 **Does NOT provide**
 
