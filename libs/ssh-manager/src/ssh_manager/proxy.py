@@ -22,8 +22,8 @@ from typing import Any
 
 from agent_procutil import (
     JobHandle,
-    bind_to_kill_on_close_job,
     no_window_kwargs,
+    spawn_in_kill_on_close_job,
     windowless_python,
 )
 
@@ -205,7 +205,7 @@ class _ProxyBroker:
             ):
                 raise RuntimeError("Invalid SSH proxy connection capability")
             self._used = True
-            process = await asyncio.create_subprocess_exec(
+            process, child_job = await spawn_in_kill_on_close_job(
                 *self._command,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
@@ -214,11 +214,8 @@ class _ProxyBroker:
                 cwd=self._cwd,
                 **(no_window_kwargs() if _is_windows() else ssh_subprocess_kwargs()),
             )
-            pid = getattr(process, "pid", None)
-            if isinstance(pid, int):
-                child_job = bind_to_kill_on_close_job(pid)
-                if child_job is not None:
-                    self._child_jobs.add(child_job)
+            if child_job is not None:
+                self._child_jobs.add(child_job)
             if process.stdin is None or process.stdout is None or process.stderr is None:
                 raise RuntimeError("SSH proxy did not receive its redirected streams")
             inbound = asyncio.create_task(_pump(reader, process.stdin))
@@ -355,11 +352,10 @@ def _job_watcher_done(task: asyncio.Task) -> None:
         )
 
 
-def _bind_process_to_owner_job(process: asyncio.subprocess.Process) -> None:
-    pid = getattr(process, "pid", None)
-    if not isinstance(pid, int):
-        return
-    job_handle = bind_to_kill_on_close_job(pid)
+def _track_owner_job(
+    process: asyncio.subprocess.Process,
+    job_handle: JobHandle | None,
+) -> None:
     if job_handle is None:
         return
     _OWNER_JOBS[id(process)] = job_handle
@@ -376,8 +372,10 @@ async def create_ssh_subprocess(
     if not proxy and isinstance(config, SSHConfig):
         proxy = _option(config, "proxycommand")
     if not _is_windows() or not proxy or proxy.casefold() == "none":
-        process = await asyncio.create_subprocess_exec(*args, **ssh_subprocess_kwargs(**kwargs))
-        _bind_process_to_owner_job(process)
+        process, job_handle = await spawn_in_kill_on_close_job(
+            *args, **ssh_subprocess_kwargs(**kwargs)
+        )
+        _track_owner_job(process, job_handle)
         return process
     shell = await _resolve_shell(kwargs.get("executable") or args[0])
     expanded = _expand_tokens(proxy, config)
@@ -390,11 +388,11 @@ async def create_ssh_subprocess(
     )
     try:
         port = await broker.start()
-        process = await asyncio.create_subprocess_exec(
+        process, job_handle = await spawn_in_kill_on_close_job(
             *_broker_args(args, _client_command(port, capability, shell=shell is not None)),
             **ssh_subprocess_kwargs(**kwargs),
         )
-        _bind_process_to_owner_job(process)
+        _track_owner_job(process, job_handle)
     except BaseException:
         await broker.close()
         raise

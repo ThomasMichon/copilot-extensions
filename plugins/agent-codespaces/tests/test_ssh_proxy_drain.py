@@ -50,12 +50,12 @@ def test_cancel_mid_drain_leaves_no_unretrieved_future(monkeypatch):
         proc = _Proc()
 
         async def spawn(*args, **kwargs):
-            return proc
+            return proc, None
 
         async def terminate(process):
             process.end()
 
-        monkeypatch.setattr(proxy.asyncio, "create_subprocess_exec", spawn)
+        monkeypatch.setattr(proxy, "spawn_in_kill_on_close_job", spawn)
         monkeypatch.setattr(proxy, "terminate_ssh_process_tree", terminate)
         broker = proxy._ProxyBroker(["ssh"], None, capability="a" * 64)
         reader = asyncio.StreamReader()

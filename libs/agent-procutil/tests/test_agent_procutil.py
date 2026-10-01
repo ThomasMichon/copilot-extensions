@@ -1,11 +1,13 @@
 """Tests for the shared headless/detached process-spawn kwargs."""
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 import subprocess
 import sys
 import time
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -219,6 +221,26 @@ class _FakeKernel32:
         return 1
 
 
+class _FakeNtdll:
+    def __init__(self, calls):
+        self.calls = calls
+        self.NtResumeProcess = _FakeWinFunc("NtResumeProcess", self._resume_process)
+
+    def _resume_process(self, process):
+        self.calls.append(("NtResumeProcess", process))
+        return 0
+
+
+class _FakeProcess:
+    pid = 12345
+
+    def __init__(self):
+        self.killed = False
+
+    def kill(self):
+        self.killed = True
+
+
 def test_bind_to_kill_on_close_job_noop_off_windows(monkeypatch):
     monkeypatch.setattr(pu, "_is_windows", lambda: False)
     assert pu.bind_to_kill_on_close_job(12345) is None
@@ -270,6 +292,66 @@ def test_bind_to_kill_on_close_job_failures_return_none_and_close_handles(
 
     assert pu.bind_to_kill_on_close_job(12345) is None
     assert [call[1] for call in fake.calls if call[0] == "CloseHandle"] == closed_handles
+
+
+def test_spawn_in_kill_on_close_job_noop_off_windows(monkeypatch):
+    process = _FakeProcess()
+    spawn = AsyncMock(return_value=process)
+    monkeypatch.setattr(pu, "_is_windows", lambda: False)
+    monkeypatch.setattr(pu.asyncio, "create_subprocess_exec", spawn)
+
+    result, job = asyncio.run(pu.spawn_in_kill_on_close_job("python", creationflags=7))
+
+    assert result is process
+    assert job is None
+    assert spawn.await_args.args == ("python",)
+    assert spawn.await_args.kwargs["creationflags"] == 7
+
+
+def test_spawn_in_kill_on_close_job_assigns_before_resuming(monkeypatch):
+    fake = _FakeKernel32()
+    ntdll = _FakeNtdll(fake.calls)
+    process = _FakeProcess()
+    spawn = AsyncMock(return_value=process)
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(pu, "_kernel32", lambda: fake)
+    monkeypatch.setattr(pu, "_ntdll", lambda: ntdll)
+    monkeypatch.setattr(pu.asyncio, "create_subprocess_exec", spawn)
+
+    result, job = asyncio.run(
+        pu.spawn_in_kill_on_close_job("python", creationflags=pu._CREATE_NO_WINDOW)
+    )
+
+    assert result is process
+    assert job is not None
+    assert spawn.await_args.kwargs["creationflags"] == (
+        pu._CREATE_NO_WINDOW | pu._CREATE_SUSPENDED
+    )
+    operations = [call[0] for call in fake.calls]
+    assert operations.index("AssignProcessToJobObject") < operations.index("NtResumeProcess")
+    assert not process.killed
+    job.close()
+
+
+def test_spawn_in_kill_on_close_job_resumes_when_assignment_fails(monkeypatch):
+    fake = _FakeKernel32()
+    fake.fail = "AssignProcessToJobObject"
+    ntdll = _FakeNtdll(fake.calls)
+    process = _FakeProcess()
+    spawn = AsyncMock(return_value=process)
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(pu, "_kernel32", lambda: fake)
+    monkeypatch.setattr(pu, "_ntdll", lambda: ntdll)
+    monkeypatch.setattr(pu.ctypes, "get_last_error", lambda: 5, raising=False)
+    monkeypatch.setattr(pu.asyncio, "create_subprocess_exec", spawn)
+
+    result, job = asyncio.run(pu.spawn_in_kill_on_close_job("python"))
+
+    assert result is process
+    assert job is None
+    assert any(call[0] == "AssignProcessToJobObject" for call in fake.calls)
+    assert any(call[0] == "NtResumeProcess" for call in fake.calls)
+    assert not process.killed
 
 
 def _windows_pid_alive(pid: int) -> bool:
@@ -334,3 +416,46 @@ time.sleep(60)
                 stderr=subprocess.DEVNULL,
                 check=False,
             )
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows Job Object integration")
+def test_windows_spawn_in_kill_on_close_job_child_starts_inside_job():
+    src = Path(__file__).resolve().parents[1] / "src"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(src) + os.pathsep + env.get("PYTHONPATH", "")
+    child_code = r"""
+import ctypes
+from ctypes import wintypes
+
+kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+kernel32.IsProcessInJob.argtypes = [
+    wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)
+]
+in_job = wintypes.BOOL()
+if not kernel32.IsProcessInJob(kernel32.GetCurrentProcess(), None, ctypes.byref(in_job)):
+    raise ctypes.WinError(ctypes.get_last_error())
+print("1" if in_job.value else "0", flush=True)
+"""
+
+    async def scenario():
+        process, job = await pu.spawn_in_kill_on_close_job(
+            sys.executable,
+            "-c",
+            child_code,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=10)
+            assert process.returncode == 0, stderr.decode(errors="replace")
+            assert stdout.decode().strip() == "1"
+        finally:
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+            if job is not None:
+                job.close()
+
+    asyncio.run(scenario())

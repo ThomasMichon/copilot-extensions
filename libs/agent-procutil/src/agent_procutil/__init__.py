@@ -44,11 +44,12 @@ this package's own ``README.md`` § Vendoring for the mechanism, and
 
 from __future__ import annotations
 
+import asyncio
+import ctypes
+import logging
 import os
 import subprocess
 import sys
-import ctypes
-import logging
 from typing import Any
 
 # Win32 process-creation flags. Read from ``subprocess`` when present (Windows)
@@ -58,11 +59,13 @@ _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 _DETACHED_PROCESS = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
 _CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
 _CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+_CREATE_SUSPENDED = 0x00000004
 _CONTAINED_TEST_ENV = "COPILOT_EXTENSIONS_TEST_CONTAINED"
 _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x2000
 _JobObjectExtendedLimitInformation = 9
 _PROCESS_SET_QUOTA = 0x0100
 _PROCESS_TERMINATE = 0x0001
+_PROCESS_SUSPEND_RESUME = 0x0800
 _ERROR_ACCESS_DENIED = 5
 
 log = logging.getLogger("agent-procutil")
@@ -73,6 +76,7 @@ __all__ = [
     "no_window_kwargs",
     "JobHandle",
     "bind_to_kill_on_close_job",
+    "spawn_in_kill_on_close_job",
     "detached_kwargs",
     "windowless_daemon_kwargs",
     "windowless_python",
@@ -127,6 +131,10 @@ class JobHandle:
 
 def _kernel32() -> Any:
     return ctypes.WinDLL("kernel32", use_last_error=True)
+
+
+def _ntdll() -> Any:
+    return ctypes.WinDLL("ntdll", use_last_error=True)
 
 
 def _build_job_extended_limit_info() -> type[ctypes.Structure]:
@@ -185,6 +193,16 @@ def _configure_job_api(kernel32: Any) -> None:
     kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
     kernel32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
     kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+
+def _configure_resume_api(kernel32: Any, ntdll: Any) -> None:
+    from ctypes import wintypes
+
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
+    ntdll.NtResumeProcess.restype = ctypes.c_long
 
 
 def _log_job_failure(operation: str) -> None:
@@ -261,6 +279,84 @@ def bind_to_kill_on_close_job(pid: int) -> JobHandle | None:
                 _kernel32().CloseHandle(job)
         except Exception:
             log.debug("CloseHandle(job) failed", exc_info=True)
+
+
+def _resume_suspended_process(pid: int) -> bool:
+    if not _is_windows():
+        return True
+    process = None
+    try:
+        kernel32 = _kernel32()
+        ntdll = _ntdll()
+        _configure_resume_api(kernel32, ntdll)
+        process = kernel32.OpenProcess(_PROCESS_SUSPEND_RESUME, False, int(pid))
+        if not process:
+            _log_job_failure("OpenProcess(PROCESS_SUSPEND_RESUME)")
+            return False
+        status = ntdll.NtResumeProcess(process)
+        if status != 0:
+            log.debug("NtResumeProcess failed with NTSTATUS %#x", status)
+            return False
+        return True
+    except Exception:
+        log.debug("failed to resume suspended pid %s", pid, exc_info=True)
+        return False
+    finally:
+        try:
+            if process:
+                _kernel32().CloseHandle(process)
+        except Exception:
+            log.debug("CloseHandle(process) failed", exc_info=True)
+
+
+async def spawn_in_kill_on_close_job(
+    *args: str,
+    **kwargs: Any,
+) -> tuple[asyncio.subprocess.Process, JobHandle | None]:
+    """Spawn a child already contained by a kill-on-close Job Object.
+
+    On Windows the child is created with ``CREATE_SUSPENDED``, assigned to a
+    kill-on-close job, and then resumed. This closes the race where an owner can
+    die after ``CreateProcess`` succeeds but before a post-spawn
+    ``AssignProcessToJobObject`` call runs. If job creation or assignment fails,
+    the child is still resumed and returned with ``None`` so existing cleanup
+    paths remain in charge. Off Windows this is a plain
+    ``asyncio.create_subprocess_exec`` call returning ``(process, None)``.
+    """
+    if not _is_windows():
+        process = await asyncio.create_subprocess_exec(*args, **kwargs)
+        return process, None
+
+    spawn_kwargs = dict(kwargs)
+    spawn_kwargs["creationflags"] = (
+        int(spawn_kwargs.get("creationflags", 0)) | _CREATE_SUSPENDED
+    )
+    process = await asyncio.create_subprocess_exec(*args, **spawn_kwargs)
+    job_handle: JobHandle | None = None
+    try:
+        pid = getattr(process, "pid", None)
+        if not isinstance(pid, int):
+            log.debug("spawned process has no integer pid; cannot assign owner job")
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            raise RuntimeError("spawned suspended process has no integer pid")
+        job_handle = bind_to_kill_on_close_job(pid)
+        if not _resume_suspended_process(pid):
+            log.debug("killing pid %s because suspended-start resume failed", pid)
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            if job_handle is not None:
+                job_handle.close()
+            raise RuntimeError(f"failed to resume suspended process {pid}")
+    except BaseException:
+        if job_handle is not None:
+            job_handle.close()
+        raise
+    return process, job_handle
 
 
 def _venv_home_pythonw(python: str) -> str | None:
