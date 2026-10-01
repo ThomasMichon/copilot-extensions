@@ -162,6 +162,7 @@ def _emit_remote_plan_for_env(
                 candidate_key.lower() == nl
                 or candidate.display_name.lower() == nl
                 or (candidate.alias and candidate.alias.lower() == nl)
+                or (candidate.hostname and candidate.hostname.lower() == nl)
             ):
                 entry, key = candidate, candidate_key
                 break
@@ -217,7 +218,7 @@ def _resolve_ssh_alias(entry: cfg.MachineEntry) -> str:
 
 
 def _machine_key_for_display(config: cfg.Config, name: str) -> str:
-    """Resolve a picker machine label (display name / key / alias) to its key."""
+    """Resolve a picker machine label (display name / key / alias / hostname) to its key."""
     repo = config.default_repo
     try:
         entries = cfg.load_machines_yaml(repo.anchor)
@@ -229,6 +230,7 @@ def _machine_key_for_display(config: cfg.Config, name: str) -> str:
             key.lower() == nl
             or (entry.alias and entry.alias.lower() == nl)
             or entry.display_name.lower() == nl
+            or (entry.hostname and entry.hostname.lower() == nl)
         ):
             return key
     return name

@@ -2085,12 +2085,30 @@ function Deploy-Venv {
             $prevLoc = Get-Location
             Set-Location "$env:SystemDrive\"
             try {
-                $args_ = @('venv', $VenvDir, '--python', '3.11', '--allow-existing')
-                $uvResult = Invoke-NativeCapture { & uv @args_ }
-                if ($uvResult.ExitCode -ne 0) {
-                    # Fallback: try without version constraint
-                    $args_ = @('venv', $VenvDir, '--allow-existing')
+                # uv's venv creation can transiently fail with "Access is
+                # denied" / "failed to persist temporary file" while renaming
+                # the freshly-written python.exe into place -- a Windows
+                # file-handle race (AV/EDR real-time scan momentarily holding
+                # the file open), not a real, persistent failure. Retry a
+                # handful of times with a short backoff before giving up,
+                # mirroring the signed-Python slot-clean retry above; only the
+                # transient-signature errors are retried so a genuine failure
+                # (e.g. uv missing/misconfigured) still surfaces immediately.
+                $transientPattern = 'Access is denied|failed to persist temporary file'
+                for ($i = 0; $i -lt 3; $i++) {
+                    $args_ = @('venv', $VenvDir, '--python', '3.11', '--allow-existing')
                     $uvResult = Invoke-NativeCapture { & uv @args_ }
+                    if ($uvResult.ExitCode -ne 0) {
+                        # Fallback: try without version constraint
+                        $args_ = @('venv', $VenvDir, '--allow-existing')
+                        $uvResult = Invoke-NativeCapture { & uv @args_ }
+                    }
+                    if ($uvResult.ExitCode -eq 0) { break }
+                    if ($uvResult.Output -notmatch $transientPattern) { break }
+                    if ($i -lt 2) {
+                        Write-ServiceWarn "uv venv creation hit a transient file-lock error -- retrying ($($i + 1)/3)..."
+                        Start-Sleep -Milliseconds 750
+                    }
                 }
             } finally {
                 Set-Location $prevLoc
