@@ -66,6 +66,16 @@ def _patch(monkeypatch, manager: _FakeManager) -> None:
         "agent_codespaces.lifecycle.account_for_codespace", lambda _name: None,
     )
 
+    async def _github_ok(_account=None):
+        from agent_codespaces.auth_preflight import GithubCredentialPreflight
+
+        return GithubCredentialPreflight(ok=True, source="git-credential")
+
+    monkeypatch.setattr(
+        "agent_codespaces.auth_preflight.github_credential_preflight",
+        _github_ok,
+    )
+
 
 class TestCmdCheck:
     def test_ready_venue_exits_zero(self, monkeypatch, capsys) -> None:
@@ -106,6 +116,15 @@ class TestCmdDoctorVenue:
         # change the existing no-name host-side gh-auth/config.d behavior.
         monkeypatch.setattr(
             "agent_codespaces.__main__._gh_auth_preflight", lambda: [],
+        )
+        async def _github_ok(_account=None):
+            from agent_codespaces.auth_preflight import GithubCredentialPreflight
+
+            return GithubCredentialPreflight(ok=True, source="git-credential")
+
+        monkeypatch.setattr(
+            "agent_codespaces.auth_preflight.github_credential_preflight",
+            _github_ok,
         )
         from agent_codespaces import config as config_mod
 

@@ -126,7 +126,10 @@ for f in files:
         except OSError:
             pass
         continue
-    line = "%d\t%s\t%s" % (port, m.get("token", ""), m.get("ado_host", ""))
+    line = "%d\t%s\t%s\t%s" % (
+        port, m.get("token", ""), m.get("ado_host", ""),
+        m.get("github_account", ""),
+    )
     if state == "pong":
         print(line)
         sys.exit(0)
@@ -139,11 +142,14 @@ sys.exit(1)
 PY
 )"
     if [ -n "$_disc" ]; then
-        IFS=$'\t' read -r _dport _dtoken _dhost <<< "$_disc"
+        IFS=$'\t' read -r _dport _dtoken _dhost _dghaccount <<< "$_disc"
         RELAY_PORT="$_dport"
         [ -z "$RELAY_TOKEN" ] && RELAY_TOKEN="$_dtoken"
         if [ -z "${LC_GIT_CREDENTIAL_RELAY_ADO_HOST:-}" ] && [ -n "$_dhost" ]; then
             export LC_GIT_CREDENTIAL_RELAY_ADO_HOST="$_dhost"
+        fi
+        if [ -z "${LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT:-}" ] && [ -n "$_dghaccount" ]; then
+            export LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT="$_dghaccount"
         fi
     fi
 fi
@@ -205,6 +211,16 @@ def _request_fields(data):
 
 
 fields = _request_fields(stdin_data)
+github_account = os.environ.get("LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT", "").strip()
+if (
+    github_account
+    and fields.get("protocol", "https").lower() == "https"
+    and fields.get("host", "").lower() == "github.com"
+    and not fields.get("username")
+):
+    stdin_data = stdin_data.rstrip("\n")
+    stdin_data += "\nusername=" + github_account + "\n\n"
+    fields = _request_fields(stdin_data)
 
 
 def _cache_file():

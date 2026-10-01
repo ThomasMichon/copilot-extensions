@@ -394,7 +394,24 @@ def cmd_detach(
                           "ref_files": [n for n, _ in refs_upload[2]] if ref_files else []}, indent=2))
         return 0
 
-    from .copilot_venue import claim_or_exit_code
+    from .copilot_venue import claim_or_exit_code, github_credential_preflight
+
+    github_auth = github_credential_preflight(args.name)
+    if not github_auth.ok:
+        if github_auth.reason_code == "github-credential-ambiguous":
+            print(
+                f"[WARN] {github_auth.reason_code}: {github_auth.detail}\n"
+                f"       Remedy: {github_auth.remedy}",
+                file=sys.stderr,
+            )
+        else:
+            return _fail(
+                github_auth.detail or "github.com credential unavailable",
+                plan,
+                reason_code=github_auth.reason_code,
+                remedy=github_auth.remedy,
+                github_credential=github_auth.to_dict(),
+            )
 
     claim_rc = claim_or_exit_code(args)
     if claim_rc is not None:

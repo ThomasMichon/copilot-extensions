@@ -273,7 +273,82 @@ class TestGitCredentialSource:
             "host": "github.com",
             "username": "user",
         })
-        assert key == ("https", "github.com")
+        assert key == ("https", "github.com", "user")
+
+    @pytest.mark.asyncio
+    async def test_bound_github_username_is_injected_before_gcm(self):
+        source = GitCredentialSource(github_username="bound-user")
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(
+            return_value=(
+                b"protocol=https\nhost=github.com\nusername=bound-user\npassword=token123\n",
+                b"",
+            )
+        )
+
+        with patch(
+            "credential_relay.sources.git_credential"
+            ".asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=mock_proc,
+        ):
+            result = await source.resolve("get", {
+                "protocol": "https", "host": "github.com",
+            })
+
+        sent = mock_proc.communicate.call_args.kwargs["input"].decode()
+        assert "username=bound-user" in sent
+        assert result is not None and "password=token123" in result
+
+    @pytest.mark.asyncio
+    async def test_existing_github_username_is_preserved(self):
+        source = GitCredentialSource(github_username="bound-user")
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(
+            return_value=(
+                b"protocol=https\nhost=github.com\nusername=existing\npassword=token123\n",
+                b"",
+            )
+        )
+
+        with patch(
+            "credential_relay.sources.git_credential"
+            ".asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=mock_proc,
+        ):
+            await source.resolve("get", {
+                "protocol": "https", "host": "github.com", "username": "existing",
+            })
+
+        sent = mock_proc.communicate.call_args.kwargs["input"].decode()
+        assert "username=existing" in sent
+        assert "username=bound-user" not in sent
+
+    @pytest.mark.asyncio
+    async def test_no_profile_username_leaves_github_request_unchanged(self):
+        source = GitCredentialSource()
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(
+            return_value=(b"protocol=https\nhost=github.com\npassword=token123\n", b"")
+        )
+
+        with patch(
+            "credential_relay.sources.git_credential"
+            ".asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=mock_proc,
+        ):
+            await source.resolve("get", {"protocol": "https", "host": "github.com"})
+
+        sent = mock_proc.communicate.call_args.kwargs["input"].decode()
+        assert "username=" not in sent
 
     @pytest.mark.asyncio
     async def test_resolve_fill_calls_git(self):
@@ -467,9 +542,11 @@ class TestGitCredentialSource:
 class TestGhAuthSource:
 
     def test_supports_only_github_token(self):
-        source = GhAuthSource()
+        source = GhAuthSource(account="user")
         assert source.supports("get-github-token", {})
-        assert not source.supports("get", {"host": "github.com"})
+        assert source.supports("get", {"protocol": "https", "host": "github.com"})
+        assert source.supports("fill", {"protocol": "https", "host": "github.com"})
+        assert not source.supports("get", {"protocol": "https", "host": "example.com"})
         assert not source.supports("store", {})
 
     def test_name(self):
@@ -478,7 +555,7 @@ class TestGhAuthSource:
     @pytest.mark.asyncio
     async def test_resolve_returns_key_value(self):
         """Response should be in key=value format."""
-        source = GhAuthSource()
+        source = GhAuthSource(account="user")
 
         mock_proc = MagicMock()
         mock_proc.returncode = 0
@@ -498,8 +575,129 @@ class TestGhAuthSource:
 
         assert result is not None
         assert "token=gho_test_token_123" in result
+        assert "username=user" in result
         assert "protocol=https" in result
         assert "host=github.com" in result
+
+    @pytest.mark.asyncio
+    async def test_resolve_git_get_returns_bound_account_password(self):
+        source = GhAuthSource(account="bound-user")
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(
+            return_value=(b"gho_bound_token\n", b"")
+        )
+
+        with patch(
+            "credential_relay.sources.gh_auth"
+            ".asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=mock_proc,
+        ) as mock_exec:
+            result = await source.resolve(
+                "get", {"protocol": "https", "host": "github.com"},
+            )
+
+        assert result is not None
+        assert "username=bound-user" in result
+        assert "password=gho_bound_token" in result
+        assert mock_exec.call_args[0] == (
+            "gh", "auth", "token", "--hostname", "github.com", "--user", "bound-user",
+        )
+
+    @pytest.mark.asyncio
+    async def test_resolve_git_get_preserves_existing_username(self):
+        source = GhAuthSource(account="bound-user")
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"gho_existing\n", b""))
+
+        with patch(
+            "credential_relay.sources.gh_auth"
+            ".asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=mock_proc,
+        ) as mock_exec:
+            result = await source.resolve(
+                "get", {
+                    "protocol": "https", "host": "github.com",
+                    "username": "existing",
+                },
+            )
+
+        assert result is not None
+        assert "username=existing" in result
+        assert mock_exec.call_args[0] == (
+            "gh", "auth", "token", "--hostname", "github.com", "--user", "existing",
+        )
+
+    @pytest.mark.asyncio
+    async def test_resolve_git_get_without_username_returns_none(self):
+        source = GhAuthSource()
+
+        with patch(
+            "credential_relay.sources.gh_auth"
+            ".asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+        ) as mock_exec:
+            result = await source.resolve(
+                "get", {"protocol": "https", "host": "github.com"},
+            )
+
+        assert result is None
+        mock_exec.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_github_token_without_account_uses_plain_gh_auth_token(self):
+        source = GhAuthSource()
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"gho_active\n", b""))
+
+        with patch(
+            "credential_relay.sources.gh_auth"
+            ".asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=mock_proc,
+        ) as mock_exec:
+            result = await source.resolve("get-github-token", {})
+
+        assert result is not None
+        assert "token=gho_active" in result
+        assert "username=" not in result
+        assert mock_exec.call_args[0] == (
+            "gh", "auth", "token", "--hostname", "github.com",
+        )
+
+    @pytest.mark.asyncio
+    async def test_falls_through_from_gcm_to_bound_gh_without_logging_token(self, caplog):
+        git_source = MagicMock(spec=CredentialSource)
+        git_source.name = "git-credential"
+        git_source.supports.return_value = True
+        git_source.resolve = AsyncMock(return_value=None)
+
+        gh_source = GhAuthSource(account="bound-user")
+        token_proc = MagicMock()
+        token_proc.returncode = 0
+        token_proc.communicate = AsyncMock(return_value=(b"gho_secret_token\n", b""))
+
+        with patch(
+            "credential_relay.sources.gh_auth"
+            ".asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=token_proc,
+        ):
+            caplog.set_level("INFO")
+            server = CredentialRelayServer(sources=[git_source, gh_source])
+            result = await server._route_to_source(
+                "get", {"protocol": "https", "host": "github.com"},
+            )
+
+        assert result is not None
+        assert "password=gho_secret_token" in result
+        assert "gho_secret_token" not in caplog.text
 
     @pytest.mark.asyncio
     async def test_resolve_gh_not_found(self):

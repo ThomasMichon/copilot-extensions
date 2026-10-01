@@ -474,8 +474,8 @@ It proxies credential requests to local credential stores.
 1. agent-bridge runs the relay server on `127.0.0.1:<live-port>`
 2. The catalog command's `ssh` action includes an SSH reverse-forward for that live port
 3. CodeSpace sends git-credential-protocol requests to `localhost:<live-port>`
-4. Relay routes to matching source (GCM / `git-credential`, plus `az-login` for
-   allowed Azure resources)
+4. Relay routes to matching source (GCM / `git-credential`, `gh-auth` fallback
+   for allowed GitHub hosts, plus `az-login` for allowed Azure resources)
 5. Response flows back through the tunnel
 
 ### Available Sources
@@ -483,6 +483,7 @@ It proxies credential requests to local credential stores.
 | Source | Action | What It Does |
 |--------|--------|-------------|
 | `git-credential` | `get`/`store`/`erase` | Proxies to local Git Credential Manager |
+| `gh-auth` | `get`/`fill` for `github.com`; `get-github-token` | Falls back to `gh auth token --user <account>` for the CodeSpace's bound GitHub account when GCM cannot serve a GitHub credential |
 | `az-login` | `get-azure-token` | Returns Azure access tokens for the built-in ADO/Storage resources plus configured `allowed_resources` |
 
 ### Policy Enforcement
@@ -491,6 +492,16 @@ All requests pass through a policy gate before reaching any source:
 - **Action allowlist** -- only recognized actions are accepted
 - **Host allowlist** -- fnmatch-style patterns per source
 - **Resource allowlist** -- exact-match for Azure resources (az-login)
+
+GitHub order is: inject the CodeSpace's bound account as `username=<account>`
+for `github.com`, call non-interactive GCM, then fall back to `gh-auth` for the
+same account only if GCM still cannot serve it. If no account is bound and
+multiple GitHub accounts are available, the relay reports
+`github-credential-ambiguous` and refuses to guess. Remedy: run the CodeSpace
+operation under the intended account so the existing binding/account-map path
+can select it, or refresh that account on the host with
+`gh auth refresh -h github.com -u <account>`. The fallback only serves
+credential `get`/`fill`; it never stores or erases the `gh` token in GCM.
 
 ## Agent-Bridge Integration
 

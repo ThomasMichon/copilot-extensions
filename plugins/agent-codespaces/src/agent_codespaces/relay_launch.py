@@ -170,10 +170,11 @@ def build_relay_portmap_write(relay_port: int) -> str:
     """POSIX snippet that publishes a relay port-mapping file (best-effort).
 
     Writes ``<RELAY_PORTMAP_DIR>/<port>.json`` =
-    ``{"port","token","ado_host","ts"}`` with a restrictive umask, reading the
+    ``{"port","token","ado_host","github_account","ts"}`` with a restrictive umask, reading the
     secret from the just-exported ``LC_GIT_CREDENTIAL_RELAY_TOKEN`` (never
-    re-interpolated) and the non-secret ADO host from
-    ``LC_GIT_CREDENTIAL_RELAY_ADO_HOST``. Never aborts the prelude (``|| true``).
+    re-interpolated) and non-secret host/account metadata from
+    ``LC_GIT_CREDENTIAL_RELAY_ADO_HOST`` / ``LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT``.
+    Never aborts the prelude (``|| true``).
     Keyed by port so repeat launches to the same relay are idempotent; a stale
     file whose channel later dies is pruned by the auth helpers' liveness probe
     (the discovery reader), not here.
@@ -181,9 +182,10 @@ def build_relay_portmap_write(relay_port: int) -> str:
     d = RELAY_PORTMAP_DIR
     return (
         f'mkdir -p "{d}" 2>/dev/null; '
-        '( umask 177; printf \'{"port":%s,"token":"%s","ado_host":"%s","ts":%s}\\n\' '
+        '( umask 177; printf \'{"port":%s,"token":"%s","ado_host":"%s","github_account":"%s","ts":%s}\\n\' '
         f'{relay_port} "$LC_GIT_CREDENTIAL_RELAY_TOKEN" '
         '"${LC_GIT_CREDENTIAL_RELAY_ADO_HOST:-}" '
+        '"${LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT:-}" '
         '"$(date +%s 2>/dev/null || echo 0)" '
         f'> "{d}/{relay_port}.json" ) 2>/dev/null || true; '
     )
@@ -253,6 +255,7 @@ def build_relay_env(
     *,
     use_relay: bool,
     ado_host: str | None = None,
+    github_account: str | None = None,
     feed_token_env: list[str] | None = None,
     identity_env: list[str] | None = None,
 ) -> str:
@@ -294,6 +297,11 @@ def build_relay_env(
             env += (
                 "export LC_GIT_CREDENTIAL_RELAY_ADO_HOST="
                 f"{shlex.quote(ado_host)}; "
+            )
+        if github_account:
+            env += (
+                "export LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT="
+                f"{shlex.quote(github_account)}; "
             )
         env += build_relay_portmap_write(relay_port)
         env += build_azure_auth_helper_compat_shim()
@@ -355,6 +363,12 @@ def build_relay_launch_env(
     from .config import load_merged_config
 
     cfg = load_merged_config(include_cwd=False)
+    try:
+        from .gh_account import credential_account_for_codespace
+
+        github_account = credential_account_for_codespace(codespace_name)
+    except Exception:
+        github_account = None
     if relay_port is not None:
         port = int(relay_port)
     else:
@@ -375,6 +389,7 @@ def build_relay_launch_env(
             token,
             use_relay=True,
             ado_host=getattr(cfg.credentials, "ado_host", None),
+            github_account=github_account,
             feed_token_env=getattr(cfg.credentials, "feed_token_env", None),
             identity_env=getattr(cfg.credentials, "identity_env", None),
         ),

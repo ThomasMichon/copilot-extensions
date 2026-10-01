@@ -1177,10 +1177,12 @@ def _ssh_session(
     """
     from ssh_manager import ConnectionManager, TargetBusyError, TargetLock
 
+    from .gh_account import credential_account_for_codespace
     from .lifecycle import account_for_codespace
     from .worktrees import ContextRefused
 
     source = CodespaceSource(args.name, account=account_for_codespace(args.name))
+    github_account = credential_account_for_codespace(args.name)
     config = load_merged_config()
     from .relay_launch import effective_relay_port
     relay_port = effective_relay_port(config)
@@ -1272,6 +1274,7 @@ def _ssh_session(
         relay_token,
         use_relay=not args.no_relay,
         ado_host=getattr(config.credentials, "ado_host", None),
+        github_account=github_account,
         feed_token_env=getattr(config.credentials, "feed_token_env", None),
         identity_env=getattr(config.credentials, "identity_env", None),
     )
@@ -2429,6 +2432,7 @@ def _interactive_ssh(
     # then overlay the relay vars. Start from the account env so GH_TOKEN is set
     # even when no relay vars are present.
     account = lifecycle.account_for_codespace(codespace_name)
+    github_account = gh_account.credential_account_for_codespace(codespace_name)
     env = gh_account.env_for_account(account) if account else None
     if relay_port is not None:
         env = {
@@ -2438,6 +2442,8 @@ def _interactive_ssh(
         }
         if relay_token:
             env["LC_GIT_CREDENTIAL_RELAY_TOKEN"] = relay_token
+        if github_account:
+            env["LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT"] = github_account
 
     args = ["gh", "codespace", "ssh", "-c", codespace_name]
     if port_forwards or remote_command:
@@ -2856,26 +2862,9 @@ def _render_codespaces_yaml(defaults: dict | None) -> str:
 
 
 def _parse_gh_account_scopes(status_text: str) -> dict[str, set[str]]:
-    """Parse ``gh auth status`` into ``{login: {scopes}}``.
+    from .auth_preflight import parse_gh_account_scopes
 
-    ``gh auth status`` prints a block per authenticated account; each carries a
-    ``Token scopes: 'a', 'b', ...`` line. We attribute each scopes line to the
-    most recent ``account <login>`` seen so a per-account scope check is
-    possible (multi-account #247/#190).
-    """
-    import re
-
-    accounts: dict[str, set[str]] = {}
-    current: str | None = None
-    for line in status_text.splitlines():
-        m = re.search(r"account\s+([A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?)", line)
-        if m:
-            current = m.group(1)
-            accounts.setdefault(current, set())
-        if current and "token scopes" in line.lower():
-            scopes = set(re.findall(r"'([^']+)'", line))
-            accounts[current] |= scopes
-    return accounts
+    return parse_gh_account_scopes(status_text)
 
 
 def _gh_auth_status() -> tuple[int, str]:
@@ -2901,52 +2890,10 @@ def _gh_auth_status() -> tuple[int, str]:
 
 
 def _gh_auth_preflight() -> list[str]:
-    """Check gh auth + codespace scope. Returns a list of guidance messages
-    (empty if all good).
+    """Check gh auth + codespace scope only for CodeSpace-serving accounts."""
+    from .auth_preflight import gh_auth_preflight
 
-    Beyond the ambient account, verifies every account in the agent-worktrees
-    ``account_map`` is logged in with the ``codespace`` scope, surfacing the
-    per-account remedy (its ``accounts.yaml`` login flow when recorded) so a
-    cross-account list/ssh doesn't fail with a misleading 403/404 (#247/#190).
-    """
-    from . import gh_account
-
-    msgs: list[str] = []
-    rc, combined = _gh_auth_status()
-    if rc == -1:
-        return ["gh CLI not found -- install from https://cli.github.com/ "
-                "then run: gh auth login"]
-    if rc == -2:
-        return ["gh auth status timed out -- check your network / gh install."]
-
-    if rc != 0 or "not logged" in combined.lower():
-        msgs.append("gh is not authenticated -- run: gh auth login")
-        return msgs
-
-    # gh prints "Token scopes: 'gist', 'repo', ..." -- the codespace scope is
-    # required for `gh codespace` operations.
-    if "codespace" not in combined.lower():
-        msgs.append(
-            "gh token is missing the 'codespace' scope (needed for CodeSpace "
-            "operations) -- run: gh auth refresh -h github.com -s codespace"
-        )
-
-    # Per-account check for every account the account_map routes to.
-    per_account = _parse_gh_account_scopes(combined)
-    lowered = {login.casefold(): scopes for login, scopes in per_account.items()}
-    for login in gh_account.mapped_accounts():
-        scopes = lowered.get(login.casefold())
-        if scopes is None:
-            remedy = _account_login_remedy(login)
-            msgs.append(
-                f"mapped gh account '{login}' is not logged in -- {remedy}"
-            )
-        elif "codespace" not in {s.casefold() for s in scopes}:
-            msgs.append(
-                f"mapped gh account '{login}' is missing the 'codespace' scope "
-                f"-- run: gh auth refresh -h github.com -u {login} -s codespace"
-            )
-    return msgs
+    return gh_auth_preflight(_gh_auth_status, _account_login_remedy)
 
 
 def _ambient_codespace_scope() -> tuple[bool, str]:
@@ -3002,34 +2949,30 @@ def _require_codespace_scope(op: str) -> int | None:
 
 
 def _cmd_doctor(*, json_output: bool = False) -> int:
-    """Check gh auth and exhaustively report config-provider hygiene.
-
-    Read-only and available even without ``gh``. Exit behavior remains nonzero
-    for auth failures and config-provider declaration findings.
-    """
+    """Check gh auth, relay credential readiness, and provider hygiene."""
     auth_findings = _gh_auth_preflight()
+    from .auth_preflight import emit_github_credential_doctor, run_github_credential_preflight
+
+    github_credential = run_github_credential_preflight()
     provider_reports = scan_config_providers()
-    has_findings = bool(auth_findings or provider_reports.findings)
+    has_findings = bool(auth_findings or provider_reports.findings or not github_credential.ok)
 
     if json_output:
-        print(json.dumps({
-            "gh": {
-               "ok": not auth_findings,
-               "findings": auth_findings,
-            },
-            "plugin_manifests": provider_reports.active_plugins.to_dict(),
-            "config_d": provider_reports.config_d.to_dict(),
-        }, indent=2, sort_keys=True))
+        print(json.dumps({"gh": {"ok": not auth_findings, "findings": auth_findings},
+                          "github_credential": github_credential.to_dict(),
+                          "plugin_manifests": provider_reports.active_plugins.to_dict(),
+                          "config_d": provider_reports.config_d.to_dict()},
+                         indent=2, sort_keys=True))
         return 1 if has_findings else 0
 
     if not auth_findings:
-        print("[OK] gh is authenticated with the 'codespace' scope "
-              "(ambient + all mapped accounts).")
+        print("[OK] gh is authenticated with the 'codespace' scope (ambient + all mapped accounts).")
     else:
-        print("[gh] CodeSpace auth issue(s) -- `gh codespace` ops will fail until "
-              "resolved:", file=sys.stderr)
+        print("[gh] CodeSpace auth issue(s) -- `gh codespace` ops will fail until resolved:", file=sys.stderr)
         for finding in auth_findings:
             print(f"  - {finding}", file=sys.stderr)
+
+    emit_github_credential_doctor(github_credential)
 
     plugin_report = provider_reports.active_plugins
     print(f"[plugin-manifests] authority: {plugin_report.authority.value}")

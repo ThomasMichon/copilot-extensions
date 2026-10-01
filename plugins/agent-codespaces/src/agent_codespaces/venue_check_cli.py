@@ -52,6 +52,12 @@ async def cmd_check(args: argparse.Namespace) -> int:
 
 async def cmd_doctor_venue(args: argparse.Namespace) -> int:
     """``agent-codespaces doctor <name> [--fix]`` -- probe, optionally remediate."""
+    from .auth_preflight import github_credential_preflight
+    from .gh_account import credential_account_for_codespace
+
+    github_credential = await github_credential_preflight(
+        credential_account_for_codespace(args.name)
+    )
     manager = await _connect_readonly(args.name)
     try:
         readiness = await venue_check.check_remote_venue(
@@ -72,11 +78,21 @@ async def cmd_doctor_venue(args: argparse.Namespace) -> int:
 
     if args.json_output:
         payload = readiness.to_dict()
+        payload["github_credential"] = github_credential.to_dict()
         if remediation is not None:
             payload["remediation"] = remediation.to_dict()
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
         print(venue_check.format_report(readiness, remediation=remediation))
+        if github_credential.ok:
+            print("[OK] github.com credential relay preflight can produce a credential.")
+        else:
+            print(
+                "[github-credential] relay credential issue:\n"
+                f"  - {github_credential.reason_code}: {github_credential.detail}\n"
+                f"    Remedy: {github_credential.remedy}",
+                file=sys.stderr,
+            )
         if readiness.gaps and not args.fix:
             print(
                 "\nRun with --fix to attempt the safely-idempotent "
@@ -84,4 +100,4 @@ async def cmd_doctor_venue(args: argparse.Namespace) -> int:
                 "agent-worktrees provision/refresh).",
                 file=sys.stderr,
             )
-    return 0 if readiness.ready else 1
+    return 0 if readiness.ready and github_credential.ok else 1

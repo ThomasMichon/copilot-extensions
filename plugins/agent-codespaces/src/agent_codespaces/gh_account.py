@@ -127,6 +127,51 @@ def env_for_repo(slug: str | None, base: dict | None = None) -> dict:
     return env_for_account(account_for_repo(slug), base)
 
 
+def active_account(host: str = "github.com") -> str | None:
+    """Return gh's active account for ``host`` without changing global auth."""
+    try:
+        result = subprocess.run(
+            ["gh", "auth", "status", "--hostname", host, "--json", "hosts"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=_creation_flags(),
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        data = json.loads(result.stdout or "{}")
+    except Exception:
+        return None
+    entries = ((data.get("hosts") or {}).get(host) or []) if isinstance(data, dict) else []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("active") is True and entry.get("state") == "success":
+            login = str(entry.get("login") or "").strip()
+            return login or None
+    return None
+
+
+def credential_account_for_codespace(name: str) -> str | None:
+    """Account to pass as github.com credential username for this connection.
+
+    Uses the existing CodeSpace resolver first. ``None`` there means this
+    CodeSpace is operated through ambient gh auth, so use gh's active account.
+    """
+    try:
+        from .lifecycle import account_for_codespace
+
+        account = account_for_codespace(name)
+    except worktrees.ContextRefused:
+        raise
+    except Exception:
+        account = None
+    return account or active_account()
+
+
 def mapped_accounts() -> tuple[str, ...]:
     """Keep namespaced account reads fresh across cells and receipt changes."""
     if worktrees.explicit_context():

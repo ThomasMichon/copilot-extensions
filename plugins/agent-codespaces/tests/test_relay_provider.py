@@ -38,7 +38,9 @@ class _FakeBuilder:
 
 def test_relay_profile_shape():
     prof = relay_profile()
-    assert prof["sources"] == ["git-credential"]
+    assert prof["sources"] == ["git-credential", "gh-auth"]
+    assert "github_account" not in prof
+    assert prof["github_hosts"] == ["github.com"]
     assert prof["gated_actions"] == ["get-azure-token"]
     assert prof["token_store"].endswith("relay-tokens.json")
     assert isinstance(prof["azure_resources"], list) and prof["azure_resources"]
@@ -49,6 +51,7 @@ def test_register_relay_applies_profile_data():
     register_relay(b)
     prof = relay_profile()
     assert "git-credential" in b.sources
+    assert "gh-auth" in b.sources
     assert b.azure == prof["azure_resources"]
     assert b.gated == ["get-azure-token"]
     assert callable(b.authorizer)  # the in-process request-scoped authorizer
@@ -56,10 +59,21 @@ def test_register_relay_applies_profile_data():
 
 
 def test_relay_profile_cli_emits_json(capsys):
-    fake = {"sources": ["git-credential"], "gated_actions": ["get-azure-token"],
+    fake = {"sources": ["git-credential", "gh-auth"], "gated_actions": ["get-azure-token"],
             "azure_resources": ["r"], "port": None, "ado_host": None,
+    "github_hosts": ["github.com"],
             "token_store": "/x/relay-tokens.json"}
     with patch("agent_codespaces.relay_provider.relay_profile", return_value=fake):
         rc = main(["relay-profile"])
     assert rc == 0
     assert json.loads(capsys.readouterr().out) == fake
+
+
+def test_relay_profile_does_not_resolve_accounts(monkeypatch):
+    monkeypatch.setattr(
+        "agent_codespaces.gh_account.account_for_repo",
+        lambda repo: (_ for _ in ()).throw(AssertionError("must not shell account map")),
+        raising=False,
+    )
+
+    assert "github_account" not in relay_profile()

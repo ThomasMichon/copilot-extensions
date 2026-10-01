@@ -1,0 +1,9 @@
+{
+  "comment": "Pass the bound GitHub account into github.com credential relay requests and fail fast on ambiguity.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

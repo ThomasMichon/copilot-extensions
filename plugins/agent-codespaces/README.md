@@ -332,6 +332,18 @@ over the SSH tunnel, resolving them through the host's Git Credential Manager
 by agent-bridge; agent-codespaces contributes the CodeSpace policy/profile and
 sets up the SSH reverse-forward on connect.
 
+For `github.com`, multi-account hosts pass the CodeSpace's bound GitHub account
+as `username=<account>` before calling non-interactive GCM. That avoids GCM's
+account picker (`Cannot prompt because user interactivity has been disabled`)
+when several GitHub accounts are stored. If GCM still cannot serve that account,
+the relay can fall back to the existing `gh-auth` source and serve
+`password=<gh auth token --user <account>>`. If no account is bound and several
+accounts are available, the relay refuses to guess. Remedy: make the CodeSpace
+account binding visible by running the operation under the intended account, or
+refresh that account with `gh auth refresh -h github.com -u <account>`. The
+fallback only serves `get`/`fill`; it never stores or erases the `gh` token in
+GCM.
+
 Provisioning installs the relay-first wrapper only as `~/ado-auth-helper`.
 It deliberately leaves `~/azure-auth-helper` to the native Azure tooling so
 interactive `az login` keeps working. Reconnecting with a newer

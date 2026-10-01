@@ -7,6 +7,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agent_codespaces.auth_preflight import (
+    GITHUB_CREDENTIAL_AMBIGUOUS,
+    GITHUB_CREDENTIAL_UNAVAILABLE,
+    github_credential_preflight,
     host_from_url,
     host_has_auth,
     parse_remote_hosts,
@@ -88,6 +91,92 @@ class TestHostHasAuth:
         source = AsyncMock()
         source.resolve = AsyncMock(side_effect=RuntimeError("boom"))
         assert await host_has_auth("github.com", source=source) is False
+
+
+class TestGithubCredentialPreflight:
+
+    @pytest.mark.asyncio
+    async def test_uses_git_credential_first(self):
+        git_source = AsyncMock()
+        git_source.name = "git-credential"
+        git_source.resolve = AsyncMock(
+            return_value="protocol=https\nhost=github.com\npassword=tok\n\n",
+        )
+        gh_source = AsyncMock()
+        gh_source.name = "gh-auth"
+        gh_source.resolve = AsyncMock(return_value=None)
+
+        result = await github_credential_preflight(
+            "bound-user", git_source=git_source, gh_source=gh_source,
+        )
+
+        assert result.ok is True
+        assert result.source == "git-credential"
+        assert result.account == "bound-user"
+        fields = git_source.resolve.call_args.args[1]
+        assert fields["username"] == "bound-user"
+        gh_source.resolve.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_gh_for_bound_account(self):
+        git_source = AsyncMock()
+        git_source.name = "git-credential"
+        git_source.resolve = AsyncMock(return_value=None)
+        gh_source = AsyncMock()
+        gh_source.name = "gh-auth"
+        gh_source.resolve = AsyncMock(
+            return_value=(
+                "protocol=https\nhost=github.com\nusername=bound-user\n"
+                "password=gho_bound\n\n"
+            ),
+        )
+
+        result = await github_credential_preflight(
+            "bound-user", git_source=git_source, gh_source=gh_source,
+        )
+
+        assert result.ok is True
+        assert result.source == "gh-auth"
+        gh_source.resolve.assert_called_once()
+        fields = gh_source.resolve.call_args.args[1]
+        assert fields["username"] == "bound-user"
+
+    @pytest.mark.asyncio
+    async def test_reports_structured_failure(self):
+        git_source = AsyncMock()
+        git_source.name = "git-credential"
+        git_source.resolve = AsyncMock(return_value=None)
+        gh_source = AsyncMock()
+        gh_source.name = "gh-auth"
+        gh_source.resolve = AsyncMock(return_value=None)
+
+        result = await github_credential_preflight(
+            "bound-user", git_source=git_source, gh_source=gh_source,
+        )
+
+        assert result.ok is False
+        assert result.reason_code == GITHUB_CREDENTIAL_UNAVAILABLE
+        assert "gh auth refresh -h github.com -u bound-user" in result.remedy
+
+    @pytest.mark.asyncio
+    async def test_reports_ambiguous_when_no_bound_account_and_multiple_gcm_accounts(self):
+        git_source = AsyncMock()
+        git_source.name = "git-credential"
+        git_source.resolve = AsyncMock(return_value=None)
+        gh_source = AsyncMock()
+        gh_source.name = "gh-auth"
+        gh_source.resolve = AsyncMock(return_value=None)
+
+        result = await github_credential_preflight(
+            None,
+            git_source=git_source,
+            gh_source=gh_source,
+            gcm_accounts=["work-account", "personal-account"],
+        )
+
+        assert result.ok is False
+        assert result.reason_code == GITHUB_CREDENTIAL_AMBIGUOUS
+        assert "no bound account" in result.detail
 
 
 class TestVerifyRemoteAuth:

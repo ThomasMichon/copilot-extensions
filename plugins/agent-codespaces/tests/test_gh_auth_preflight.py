@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 from dropin_registry import ScanAuthority, ScanSnapshot
 
 from agent_codespaces import __main__ as m
+from agent_codespaces.auth_preflight import GithubCredentialPreflight
 from agent_codespaces.config import ConfigDropinRegistryReport, ConfigProviderReports
 
 _STATUS = """github.com
@@ -51,7 +53,7 @@ def test_parse_gh_account_scopes():
 
 def test_preflight_flags_mapped_account_missing_codespace_scope():
     with patch("subprocess.run") as run, \
-         patch("agent_codespaces.gh_account.mapped_accounts",
+         patch("agent_codespaces.auth_preflight.codespace_scope_accounts",
                return_value=("ThomasMichon", "example-operator")):
         run.return_value = MagicMock(returncode=0, stdout=_STATUS, stderr="")
         msgs = m._gh_auth_preflight()
@@ -63,7 +65,7 @@ def test_preflight_flags_mapped_account_missing_codespace_scope():
 
 def test_preflight_flags_missing_mapped_account():
     with patch("subprocess.run") as run, \
-         patch("agent_codespaces.gh_account.mapped_accounts",
+         patch("agent_codespaces.auth_preflight.codespace_scope_accounts",
                return_value=("ghost",)), \
          patch("agent_codespaces.__main__._account_login_remedy",
                return_value="run: gh auth login"):
@@ -78,11 +80,65 @@ def test_preflight_clean_when_all_scoped():
         "  - Token scopes: 'codespace', 'gist', 'repo'\n",
     )
     with patch("subprocess.run") as run, \
-         patch("agent_codespaces.gh_account.mapped_accounts",
+         patch("agent_codespaces.auth_preflight.codespace_scope_accounts",
                return_value=("ThomasMichon", "example-operator")):
         run.return_value = MagicMock(returncode=0, stdout=status, stderr="")
         msgs = m._gh_auth_preflight()
     assert msgs == []
+
+
+def test_preflight_ignores_mapped_non_codespace_account_for_other_owner():
+    status = """github.com
+  x Logged in to github.com account nakanaki_microsoft (keyring)
+  - Active account: true
+  - Token scopes: 'gist', 'repo'
+
+  x Logged in to github.com account namankanakiya (keyring)
+  - Active account: false
+  - Token scopes: 'gist', 'repo'
+"""
+    with patch("subprocess.run") as run, \
+         patch("agent_codespaces.account_binding.bound_accounts", return_value=()), \
+         patch("agent_codespaces.config.load_merged_config") as load_cfg, \
+         patch("agent_codespaces.gh_account.account_for_repo") as account_for_repo:
+        load_cfg.return_value = MagicMock(
+            repos={"odsp-microsoft/example-codespaces": object()},
+        )
+        account_for_repo.side_effect = lambda repo: {
+            "ThomasMichon/copilot-extensions": "namankanakiya",
+            "odsp-microsoft/example-codespaces": "nakanaki_microsoft",
+        }.get(repo)
+        run.return_value = MagicMock(returncode=0, stdout=status, stderr="")
+        msgs = m._gh_auth_preflight()
+    joined = "\n".join(msgs)
+    assert "nakanaki_microsoft" in joined and "codespace" in joined
+    assert "namankanakiya" not in joined
+
+
+def test_credential_account_for_ambient_codespace_uses_active_gh_account(monkeypatch):
+    from agent_codespaces import gh_account
+
+    monkeypatch.setattr(
+        "agent_codespaces.lifecycle.account_for_codespace",
+        lambda name: None,
+    )
+    monkeypatch.setattr(gh_account, "active_account", lambda: "active-user")
+
+    assert gh_account.credential_account_for_codespace("ambient-cs") == "active-user"
+
+
+def test_active_account_reads_gh_json(monkeypatch):
+    from agent_codespaces import gh_account
+
+    payload = json.dumps({
+        "hosts": {"github.com": [
+            {"state": "success", "active": False, "login": "secondary"},
+            {"state": "success", "active": True, "login": "active-user"},
+        ]},
+    })
+    with patch("subprocess.run") as run:
+        run.return_value = MagicMock(returncode=0, stdout=payload, stderr="")
+        assert gh_account.active_account() == "active-user"
 
 
 # --- _ambient_codespace_scope (focused ambient gate check, #980) ---------
@@ -139,20 +195,54 @@ def test_require_scope_escape_hatch(monkeypatch):
 
 
 def test_doctor_exit_zero_when_clean(capsys):
+    async def _ok(_account=None):
+        return GithubCredentialPreflight(ok=True, source="git-credential")
+
     with patch.object(m, "_gh_auth_preflight", return_value=[]), \
          patch.object(
              m, "scan_config_providers", return_value=_clean_provider_reports()
+         ), patch(
+             "agent_codespaces.auth_preflight.github_credential_preflight",
+             _ok,
          ):
         assert m._cmd_doctor() == 0
     assert "[OK]" in capsys.readouterr().out
 
 
 def test_doctor_exit_nonzero_on_issues(capsys):
+    async def _ok(_account=None):
+        return GithubCredentialPreflight(ok=True, source="git-credential")
+
     with patch.object(
         m, "_gh_auth_preflight",
         return_value=["gh token is missing the 'codespace' scope"],
     ), patch.object(
         m, "scan_config_providers", return_value=_clean_provider_reports()
+    ), patch(
+        "agent_codespaces.auth_preflight.github_credential_preflight",
+        _ok,
     ):
         assert m._cmd_doctor() == 1
     assert "codespace" in capsys.readouterr().err
+
+
+def test_doctor_reports_github_credential_issue(capsys):
+    async def _fail(_account=None):
+        return GithubCredentialPreflight(
+            ok=False,
+            reason_code="github-credential-unavailable",
+            detail="no github credential",
+            remedy="sign in",
+        )
+
+    with patch.object(m, "_gh_auth_preflight", return_value=[]), \
+         patch.object(
+             m, "scan_config_providers", return_value=_clean_provider_reports()
+         ), patch(
+             "agent_codespaces.auth_preflight.github_credential_preflight",
+             _fail,
+         ):
+        assert m._cmd_doctor() == 1
+    err = capsys.readouterr().err
+    assert "github-credential-unavailable" in err
+    assert "sign in" in err

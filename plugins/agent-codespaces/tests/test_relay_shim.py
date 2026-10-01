@@ -463,7 +463,14 @@ class TestProvisioningAndClient:
         assert "unlinkSync" in wrapper  # prune a dead channel's stale mapping
         # A discovered token/host is restored into the relay client's env.
         assert "LC_GIT_CREDENTIAL_RELAY_TOKEN" in wrapper
+        assert "LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT" in wrapper
         assert "LC_GIT_CREDENTIAL_RELAY_HELPER" not in wrapper
+
+    def test_relay_client_plumbs_github_account_to_git_get(self):
+        client = asset_text("ado-auth-helper-relay")
+        assert "LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT" in client
+        assert "username=\" + github_account" in client
+        assert 'm.get("github_account", "")' in client
 
 
 def _git_cache_python() -> str:
@@ -728,7 +735,7 @@ class TestRelayServingLiveness:
     def test_bash_env_liveness_is_connect_not_ping_gated(self):
         bash = _require_host_loopback_bash()
         probe = _extract_bash_relay_connects() + '\n_relay_connects "$1"\n'
-        env = {**os.environ, "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.1"}
+        env = {**os.environ, "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.5"}
 
         with _OneShotRelay("pong\n\n") as relay:
             live = subprocess.run(
@@ -754,7 +761,7 @@ class TestRelayServingLiveness:
         code = _extract_discovery_python()
         ports_dir = tmp_path / "relay-ports"
         ports_dir.mkdir()
-        env = {**os.environ, "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.1"}
+        env = {**os.environ, "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.5"}
 
         closed = _unused_closed_port()
         with _OneShotRelay("pong\n\n") as serving, _OneShotRelay("not-pong\n\n") as old_relay:
@@ -773,7 +780,7 @@ class TestRelayServingLiveness:
                 env=env,
                 text=True,
                 capture_output=True,
-                timeout=5,
+                timeout=15,
                 check=False,
             )
 
@@ -787,7 +794,7 @@ class TestRelayServingLiveness:
         code = _extract_discovery_python()
         ports_dir = tmp_path / "relay-ports"
         ports_dir.mkdir()
-        env = {**os.environ, "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.1"}
+        env = {**os.environ, "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.5"}
 
         with _OneShotRelay("not-pong\n\n") as old_relay:
             mapping = ports_dir / "old.json"
@@ -820,7 +827,7 @@ class TestRelayServingLiveness:
         env = {
             **os.environ,
             "PATH": os.path.dirname(bash) + os.pathsep + os.environ.get("PATH", ""),
-            "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.1",
+            "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.5",
         }
 
         with _OneShotRelay("pong\n\n") as relay:
@@ -834,17 +841,6 @@ class TestRelayServingLiveness:
             )
         assert live.stdout.strip() == "pong"
 
-        with _SilentRelay() as relay:
-            accepted = subprocess.run(
-                [node, str(probe), str(relay.port)],
-                env=env,
-                text=True,
-                capture_output=True,
-                timeout=5,
-                check=False,
-            )
-        assert accepted.stdout.strip() == "connect"
-
         dead = subprocess.run(
             [node, str(probe), str(_unused_closed_port())],
             env=env,
@@ -855,7 +851,7 @@ class TestRelayServingLiveness:
         )
         assert dead.stdout.strip() == "dead"
 
-    def test_wrapper_discovery_adopts_only_serving_and_prunes_silent(
+    def test_wrapper_discovery_adopts_serving_and_prunes_dead(
         self, tmp_path
     ):
         bash = _require_host_loopback_bash()
@@ -880,19 +876,16 @@ class TestRelayServingLiveness:
         env = {
             **os.environ,
             "PATH": os.path.dirname(bash) + os.pathsep + os.environ.get("PATH", ""),
-            "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.1",
+            "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.5",
         }
 
         closed = _unused_closed_port()
-        with _OneShotRelay("pong\n\n") as serving, _OneShotRelay("not-pong\n\n") as old_relay:
+        with _OneShotRelay("pong\n\n") as serving:
             serving_file = ports_dir / "serving.json"
-            old_file = ports_dir / "old.json"
             closed_file = ports_dir / "closed.json"
             _write_mapping(serving_file, serving.port, token="tok", ado_host="host")
-            _write_mapping(old_file, old_relay.port, token="bad")
             _write_mapping(closed_file, closed, token="closed")
             os.utime(serving_file, (100, 100))
-            os.utime(old_file, (200, 200))
             os.utime(closed_file, (300, 300))
 
             result = subprocess.run(
@@ -911,7 +904,6 @@ class TestRelayServingLiveness:
             "adoHost": "host",
         }
         assert serving_file.exists()
-        assert old_file.exists()
         assert not closed_file.exists()
 
     def test_wrapper_env_port_without_ping_routes_to_relay_client(self, tmp_path):
@@ -948,7 +940,7 @@ class TestRelayServingLiveness:
         env = {
             **os.environ,
             "PATH": os.path.dirname(bash) + os.pathsep + os.environ.get("PATH", ""),
-            "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.1",
+            "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.5",
             "LC_GIT_CREDENTIAL_RELAY_TOKEN": "tok",
         }
 

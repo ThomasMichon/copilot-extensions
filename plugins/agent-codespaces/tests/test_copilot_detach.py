@@ -49,6 +49,11 @@ def seams(monkeypatch):
         lambda: [types.SimpleNamespace(name="cs-1", repository="example/example-web-vessel")],
     )
     monkeypatch.setattr(copilot_venue, "claim_or_exit_code", lambda a: None)
+    monkeypatch.setattr(
+        copilot_venue,
+        "github_credential_preflight",
+        lambda n: types.SimpleNamespace(ok=True, to_dict=lambda: {"ok": True}),
+    )
     # Hermetic: never read the developer's own ~/.copilot/settings.json model.
     monkeypatch.setattr(detach, "with_supervisor", lambda venue, ref=None: dict(venue))
     monkeypatch.setattr(detach, "model_copilot_args", lambda existing: [])
@@ -213,6 +218,53 @@ def test_busy_claim_touches_nothing(seams, monkeypatch):
     rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams))
     assert rc == 75
     assert seams.holds == [] and seams.ssh == [] and seams.reserve == []
+
+
+def test_github_credential_preflight_fails_before_owner_hold(seams, monkeypatch, capsys):
+    monkeypatch.setattr(
+        copilot_venue,
+        "github_credential_preflight",
+        lambda n: types.SimpleNamespace(
+            ok=False,
+            detail="no github credential",
+            reason_code="github-credential-unavailable",
+            remedy="sign in",
+            to_dict=lambda: {
+                "ok": False,
+                "reason_code": "github-credential-unavailable",
+                "remedy": "sign in",
+            },
+        ),
+    )
+
+    rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams))
+
+    assert rc == 1
+    out = json.loads(capsys.readouterr().out)
+    assert out["reason_code"] == "github-credential-unavailable"
+    assert out["remedy"] == "sign in"
+    assert seams.holds == [] and seams.ssh == [] and seams.reserve == []
+
+
+def test_github_credential_ambiguity_warns_and_continues(seams, monkeypatch, capsys):
+    monkeypatch.setattr(
+        copilot_venue,
+        "github_credential_preflight",
+        lambda n: types.SimpleNamespace(
+            ok=False,
+            detail="ambiguous github credential",
+            reason_code="github-credential-ambiguous",
+            remedy="bind account",
+            to_dict=lambda: {"ok": False},
+        ),
+    )
+
+    rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout=_CREATED))
+
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "github-credential-ambiguous" in err
+    assert seams.holds and seams.ssh
 
 
 def test_no_host_bridge_fails_before_any_hold(seams, monkeypatch, capsys):

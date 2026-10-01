@@ -115,7 +115,7 @@ function isCacheBackedAction() {
 // publishes under RELAY_PORTS_DIR: newest first, prefer a serving relay that
 // answers ping, otherwise adopt the first TCP-connectable candidate (older
 // relays do not answer ping), and prune only a dead channel's stale mapping.
-// Returns { port, token, adoHost } or null. Mirrors ado-auth-helper-relay so
+// Returns { port, token, adoHost, githubAccount } or null. Mirrors ado-auth-helper-relay so
 // the wrapper picks the relay path (vs the VS Code helper) whenever a live
 // channel exists even if this shell never inherited LC_GIT_CREDENTIAL_RELAY
 // (dotfiles #489/#187/#19).
@@ -146,6 +146,7 @@ function discoverFromMappings() {
       continue;
     }
     const found = { port: port, token: m.token || "", adoHost: m.ado_host || "" };
+    if (m.github_account) found.githubAccount = m.github_account;
     if (state === "pong") return found;
     if (!fallback) fallback = found;
   }
@@ -159,11 +160,15 @@ function discoverFromMappings() {
 function resolveRelay() {
   const env = process.env.LC_GIT_CREDENTIAL_RELAY;
   if (env && (isCacheBackedAction() || canConnect(env))) {
-    return {
+    const found = {
       port: env,
       token: process.env.LC_GIT_CREDENTIAL_RELAY_TOKEN || "",
       adoHost: process.env.LC_GIT_CREDENTIAL_RELAY_ADO_HOST || "",
     };
+    if (process.env.LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT) {
+      found.githubAccount = process.env.LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT;
+    }
+    return found;
   }
   const disc = discoverFromMappings();
   if (disc) return disc;
@@ -194,6 +199,9 @@ function useRelay(r) {
   }
   if (r.adoHost && !env.LC_GIT_CREDENTIAL_RELAY_ADO_HOST) {
     env.LC_GIT_CREDENTIAL_RELAY_ADO_HOST = r.adoHost;
+  }
+  if (r.githubAccount && !env.LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT) {
+    env.LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT = r.githubAccount;
   }
   const rr = cp.spawnSync(RELAY_CLIENT, process.argv.slice(2), {
     stdio: "inherit", env,

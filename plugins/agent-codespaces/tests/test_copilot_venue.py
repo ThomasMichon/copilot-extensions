@@ -177,6 +177,11 @@ def _no_target_lock_enforcement(request, monkeypatch):
         return
     import ssh_manager
     monkeypatch.setattr(ssh_manager, "TargetLock", _FakeTargetLock)
+    monkeypatch.setattr(
+        copilot_venue,
+        "github_credential_preflight",
+        lambda name: argparse.Namespace(ok=True),
+    )
 
 
 def _ns(**kw):
