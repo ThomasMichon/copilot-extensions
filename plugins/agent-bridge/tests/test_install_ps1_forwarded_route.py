@@ -127,10 +127,13 @@ def test_install_ps1_update_checks_forward_before_lifecycle_actions() -> None:
     text = _INSTALL_PS1.read_text(encoding="utf-8")
     body = text.split("function Invoke-Update", 1)[1].split("\n}\n\n# -- Dispatch", 1)[0]
     forward_at = body.index("$activeForward = Test-ActiveIsForward")
+    revalidate_at = body.index("Test-UpdateLifecycleStillTargetsPredecessor")
     drain_at = body.index("Invoke-Drain")
     stop_at = body.index("Invoke-Stop")
     start_at = body.index("Invoke-Start")
-    assert forward_at < drain_at < stop_at < start_at
+    assert forward_at < revalidate_at < drain_at < stop_at < start_at
     assert "$wasRunning = (-not $activeForward) -and" in body
     assert "if ($activeForward) {" in body
+    assert "Forwarded host bridge route appeared during update -- skipping drain/stop/start" in text
+    assert "Active route changed during update -- skipping drain/stop/start" in text
     assert "Forwarded host bridge route still active -- not starting a local daemon" in body

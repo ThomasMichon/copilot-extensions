@@ -1209,6 +1209,45 @@ function Test-ActiveIsForward {
     }
 }
 
+function Get-ActiveSignature {
+    $activeJson = Join-Path $InstallDir 'active.json'
+    if (-not (Test-Path $activeJson)) { return '' }
+    try {
+        $aj = Get-Content $activeJson -Raw -ErrorAction Stop | ConvertFrom-Json
+        $active = $aj.active
+        $p = [int]($active.port)
+        if ($p -le 0) { return '' }
+        $names = @($active.PSObject.Properties.Name)
+        $legacyForward = (
+            ($names -notcontains 'pid') -and
+            ($names -notcontains 'generation') -and
+            ($names -notcontains 'bind')
+        )
+        if (($active.forwarded -eq $true) -or $legacyForward) { return '' }
+        $pidValue = if ($names -contains 'pid') { [string]$active.pid } else { '' }
+        $generationValue = if ($names -contains 'generation') { [string]$active.generation } else { '' }
+        $bindValue = if ($names -contains 'bind') { [string]$active.bind } else { '' }
+        return "$bindValue|$p|$pidValue|$generationValue"
+    } catch {
+        return ''
+    }
+}
+
+function Test-UpdateLifecycleStillTargetsPredecessor {
+    param([string]$Signature)
+    if (Test-ActiveIsForward) {
+        Write-Step 'Forwarded host bridge route appeared during update -- skipping drain/stop/start'
+        return $false
+    }
+    if (-not [string]::IsNullOrWhiteSpace($Signature)) {
+        if ((Get-ActiveSignature) -ne $Signature) {
+            Write-Step 'Active route changed during update -- skipping drain/stop/start'
+            return $false
+        }
+    }
+    return $true
+}
+
 function Test-HealthOnce {
     # Single-shot health probe (no retry/sleep). Used by readiness loops that do
     # their own pacing, so the loop interval is not multiplied by an inner retry.
@@ -2615,6 +2654,7 @@ function Invoke-Update {
     if ($activeForward) {
         Write-Step 'Forwarded host bridge route detected -- updating runtime files without draining/stopping/starting a local daemon'
     }
+    $predecessorSignature = if ($activeForward) { '' } else { Get-ActiveSignature }
 
     # Stop running instance first -- a rebuild/repair of the venv (below) must
     # not race a live bridge holding python.exe open.
@@ -2664,11 +2704,15 @@ function Invoke-Update {
 
     try {
         if ($wasRunning -and -not $useCutover) {
-            $drainTimeout = if ($env:AGENT_BRIDGE_DRAIN_TIMEOUT) {
-                [int]$env:AGENT_BRIDGE_DRAIN_TIMEOUT
-            } else { 120 }
-            Invoke-Drain -TimeoutSec $drainTimeout
-            Invoke-Stop
+            if (Test-UpdateLifecycleStillTargetsPredecessor -Signature $predecessorSignature) {
+                $drainTimeout = if ($env:AGENT_BRIDGE_DRAIN_TIMEOUT) {
+                    [int]$env:AGENT_BRIDGE_DRAIN_TIMEOUT
+                } else { 120 }
+                Invoke-Drain -TimeoutSec $drainTimeout
+                Invoke-Stop
+            } else {
+                $wasRunning = $false
+            }
         }
 
         # Repair venv if python binary is missing (or rebuild if unsigned for SAC).

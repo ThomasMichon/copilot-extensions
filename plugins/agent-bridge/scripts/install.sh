@@ -680,6 +680,49 @@ sys.exit(0 if port > 0 and fwd else 1)
 PYEOF
 }
 
+_active_signature() {
+    local aj="$INSTALL_DIR/active.json" py=""
+    [[ -f "$aj" ]] || return 1
+    py="$VENV_DIR/bin/python"
+    [[ -x "$py" ]] || py="$(command -v python3 || command -v python || true)"
+    [[ -n "$py" ]] || return 1
+    "$py" - "$aj" <<'PYEOF' 2>/dev/null
+import json, sys
+try:
+    a = json.load(open(sys.argv[1])).get("active") or {}
+    port = int(a.get("port") or 0)
+except Exception:
+    sys.exit(1)
+is_forward = a.get("forwarded") is True or (
+    a.get("pid") is None and "generation" not in a and "bind" not in a
+)
+if port <= 0 or is_forward:
+    sys.exit(1)
+print(json.dumps({
+    "bind": a.get("bind"),
+    "port": port,
+    "pid": a.get("pid"),
+    "generation": a.get("generation"),
+}, sort_keys=True, separators=(",", ":")))
+PYEOF
+}
+
+_update_lifecycle_still_targets_predecessor() {
+    local pinned="${1:-}" current=""
+    if _active_is_forward; then
+        _step "Forwarded host bridge route appeared during update -- skipping drain/stop/start"
+        return 1
+    fi
+    if [[ -n "$pinned" ]]; then
+        current="$(_active_signature 2>/dev/null || true)"
+        if [[ "$current" != "$pinned" ]]; then
+            _step "Active route changed during update -- skipping drain/stop/start"
+            return 1
+        fi
+    fi
+    return 0
+}
+
 _active_host() {
     # The daemon's LIVE bind address from the routing table, mirroring
     # install.ps1's endpoint resolution: default loopback, and treat a wildcard
@@ -1984,6 +2027,10 @@ do_update() {
         active_forward=true
         _step "Forwarded host bridge route detected -- updating runtime files without draining/stopping/starting a local daemon"
     fi
+    local predecessor_signature=""
+    if [[ "$active_forward" != true ]]; then
+        predecessor_signature="$(_active_signature 2>/dev/null || true)"
+    fi
 
     # Is the service currently running?
     local was_running=false
@@ -2044,8 +2091,12 @@ do_update() {
     # doing a cutover (which keeps the old daemon up and retires it afterward).
     # Either way, drain first so in-flight turns get a chance to settle.
     if [[ "$was_running" == true && "$cutover" == false ]]; then
-        _drain_service "${AGENT_BRIDGE_DRAIN_TIMEOUT:-120}"
-        do_stop
+        if _update_lifecycle_still_targets_predecessor "$predecessor_signature"; then
+            _drain_service "${AGENT_BRIDGE_DRAIN_TIMEOUT:-120}"
+            do_stop
+        else
+            was_running=false
+        fi
     fi
 
     # Run the protected update; on any failure, roll back to the snapshot.
