@@ -242,17 +242,17 @@ class _FakeProcess:
         self.killed = True
 
 
-def test_bind_to_kill_on_close_job_noop_off_windows(monkeypatch):
+def test_assign_suspended_to_kill_on_close_job_noop_off_windows(monkeypatch):
     monkeypatch.setattr(pu, "_is_windows", lambda: False)
-    assert pu.bind_to_kill_on_close_job(12345) is None
+    assert pu._assign_suspended_to_kill_on_close_job(12345) is None
 
 
-def test_bind_to_kill_on_close_job_assigns_pid_to_job(monkeypatch):
+def test_assign_suspended_to_kill_on_close_job_assigns_pid_to_job(monkeypatch):
     fake = _FakeKernel32()
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     monkeypatch.setattr(pu, "_kernel32", lambda: fake)
 
-    job = pu.bind_to_kill_on_close_job(12345)
+    job = pu._assign_suspended_to_kill_on_close_job(12345)
 
     assert job is not None
     assert fake.calls[:4] == [
@@ -282,7 +282,7 @@ def test_bind_to_kill_on_close_job_assigns_pid_to_job(monkeypatch):
         ("AssignProcessToJobObject", [202, 101]),
     ],
 )
-def test_bind_to_kill_on_close_job_failures_return_none_and_close_handles(
+def test_assign_suspended_to_kill_on_close_job_failures_return_none_and_close_handles(
     monkeypatch, failure, closed_handles
 ):
     fake = _FakeKernel32()
@@ -291,7 +291,7 @@ def test_bind_to_kill_on_close_job_failures_return_none_and_close_handles(
     monkeypatch.setattr(pu, "_kernel32", lambda: fake)
     monkeypatch.setattr(pu.ctypes, "get_last_error", lambda: 5, raising=False)  # Windows-only in ctypes
 
-    assert pu.bind_to_kill_on_close_job(12345) is None
+    assert pu._assign_suspended_to_kill_on_close_job(12345) is None
     assert [call[1] for call in fake.calls if call[0] == "CloseHandle"] == closed_handles
 
 
@@ -378,18 +378,22 @@ def test_windows_job_kills_grandchild_when_owner_is_hard_killed():
     env = os.environ.copy()
     env["PYTHONPATH"] = str(src) + os.pathsep + env.get("PYTHONPATH", "")
     child_code = r"""
-import subprocess
+import asyncio
 import sys
 import time
 
-from agent_procutil import bind_to_kill_on_close_job
+from agent_procutil import spawn_in_kill_on_close_job
 
-grandchild = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
-job = bind_to_kill_on_close_job(grandchild.pid)
-if job is None:
-    raise SystemExit("failed to bind grandchild to job")
-print(grandchild.pid, flush=True)
-time.sleep(60)
+async def main():
+    grandchild, job = await spawn_in_kill_on_close_job(
+        sys.executable, "-c", "import time; time.sleep(60)"
+    )
+    if job is None:
+        raise SystemExit("failed to spawn grandchild inside job")
+    print(grandchild.pid, flush=True)
+    time.sleep(60)
+
+asyncio.run(main())
 """
     child = subprocess.Popen(
         [sys.executable, "-c", child_code],

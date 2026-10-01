@@ -75,7 +75,6 @@ __all__ = [
     "no_window_flags",
     "no_window_kwargs",
     "JobHandle",
-    "bind_to_kill_on_close_job",
     "spawn_in_kill_on_close_job",
     "detached_kwargs",
     "windowless_daemon_kwargs",
@@ -213,13 +212,14 @@ def _log_job_failure(operation: str) -> None:
         log.debug("%s failed with Windows error %d; child job binding skipped", operation, error)
 
 
-def bind_to_kill_on_close_job(pid: int) -> JobHandle | None:
-    """Assign ``pid`` to a Windows Job that dies when this process exits.
+def _assign_suspended_to_kill_on_close_job(pid: int) -> JobHandle | None:
+    """Assign a newly-created suspended ``pid`` to this owner's kill-on-close Job.
 
     The returned :class:`JobHandle` owns the Job Object handle. Hold it for the
-    child process lifetime; close it once ordinary cleanup has finished. The
-    helper is best-effort and intentionally never raises into callers: failures
-    leave existing process cleanup paths in charge and are logged at debug.
+    child process lifetime; close it once ordinary cleanup has finished.
+    Private to :func:`spawn_in_kill_on_close_job`: using a bare PID is safe only
+    while the child is still suspended and cannot have exited or spawned
+    descendants before assignment.
     """
     if not _is_windows():
         return None
@@ -342,7 +342,7 @@ async def spawn_in_kill_on_close_job(
             except ProcessLookupError:
                 pass
             raise RuntimeError("spawned suspended process has no integer pid")
-        job_handle = bind_to_kill_on_close_job(pid)
+        job_handle = _assign_suspended_to_kill_on_close_job(pid)
         if not _resume_suspended_process(pid):
             log.debug("killing pid %s because suspended-start resume failed", pid)
             try:

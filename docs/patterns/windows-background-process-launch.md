@@ -48,7 +48,7 @@ apply the normal captured-child launch primitive at the point that creates it.
 The shared SSH launcher owns this broker in-process for the lifetime of one SSH
 root; normal exit, timeout, and cancellation close its listener and proxy child,
 and both the proxy child and the SSH root are bound to a kill-on-close Job
-Object owned by the spawning process (`agent_procutil.bind_to_kill_on_close_job`),
+Object owned by the spawning process (`agent_procutil.spawn_in_kill_on_close_job`),
 so they also die when that process exits for any reason, a hard kill included --
 a short-lived CLI that exits before its background cleanup finishes no longer
 orphans a `gh cs ssh --stdio` proxy.
