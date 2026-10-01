@@ -431,7 +431,12 @@ in-repo overlay (below); the in-repo version wins when both are present.
 > calling agent relays this to the user, then re-runs `create-pr
 > --confirm-fork` (or `confirm_fork=True`) once they agree. Only that
 > confirmed call creates/verifies the fork (idempotent — a caller who already
-> has one is untouched) and points the local `fork` remote at it.
+> has one is untouched) and points the local `fork` remote at it. This
+> confirmation is asked **once per (operator, repo)**: a successful confirmed
+> call durably records the fork target in the machine-local
+> `fork_consent.yaml` registry (keyed by `owner/repo` slug), and every later
+> `create-pr` for that same repo skips straight to verifying/wiring the fork
+> remote — no `--confirm-fork` needed again, even in a brand-new worktree.
 
 > **Configured profile vs. effective actor profile.** The base `PRConfig`
 > always has a pure, network-free **configured profile**. `get pr-profile`
