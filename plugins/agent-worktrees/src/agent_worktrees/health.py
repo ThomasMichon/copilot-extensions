@@ -620,6 +620,12 @@ def _record_last_activity(record) -> float | None:
         for handoff in getattr(record, "handoffs", None) or ():
             if getattr(handoff, "predecessor", None) == tail_id:
                 stamps.append(getattr(handoff, "opened_at", None))
+                # `associate_handoff_candidate()` leaves a handoff "pending"
+                # while a successor is mid-pickup, and that successor may not
+                # yet make `mux_live`/`bound_live` true -- a recent candidate
+                # association is itself activity just as fresh as a recent
+                # `opened_at`, so it must count the same way here.
+                stamps.append(getattr(handoff, "candidate_at", None))
     epochs = [e for e in (_parse_iso_epoch(s) for s in stamps) if e is not None]
     return max(epochs) if epochs else None
 

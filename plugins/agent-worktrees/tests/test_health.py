@@ -293,8 +293,9 @@ def _session(sid="s1", state="handed-off", successor=None):
                            started_at=None, ended_at=None)
 
 
-def _handoff(predecessor="s1", opened_at=None):
-    return SimpleNamespace(predecessor=predecessor, opened_at=opened_at)
+def _handoff(predecessor="s1", opened_at=None, candidate_at=None):
+    return SimpleNamespace(predecessor=predecessor, opened_at=opened_at,
+                           candidate_at=candidate_at)
 
 
 def _oh_rec(**over):
@@ -374,6 +375,19 @@ class TestOrphanedHandoffs:
         rec = _oh_rec(
             sessions=[_session(state="yielded")],
             handoffs=[_handoff(predecessor="s1", opened_at=_FRESH)],
+        )
+        assert health.find_orphaned_handoffs([rec], now=_NOW) == []
+
+    def test_skips_stale_handoff_with_fresh_candidate_pickup(self):
+        """`associate_handoff_candidate()` leaves a handoff "pending" while a
+        successor is mid-pickup, and that successor may not yet make
+        `mux_live`/`bound_live` true -- a recent candidate association is
+        itself fresh activity just like a recent `opened_at`, so an
+        old-`opened_at`/fresh-`candidate_at` handoff must not be misjudged
+        stale during that pickup window."""
+        rec = _oh_rec(
+            sessions=[_session(state="yielded")],
+            handoffs=[_handoff(predecessor="s1", opened_at=_STALE, candidate_at=_FRESH)],
         )
         assert health.find_orphaned_handoffs([rec], now=_NOW) == []
 
