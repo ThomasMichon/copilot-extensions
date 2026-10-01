@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import os
 from pathlib import Path
 import subprocess
@@ -424,18 +425,10 @@ def test_windows_spawn_in_kill_on_close_job_child_starts_inside_job():
     env = os.environ.copy()
     env["PYTHONPATH"] = str(src) + os.pathsep + env.get("PYTHONPATH", "")
     child_code = r"""
-import ctypes
-from ctypes import wintypes
+import time
 
-kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-kernel32.GetCurrentProcess.restype = wintypes.HANDLE
-kernel32.IsProcessInJob.argtypes = [
-    wintypes.HANDLE, wintypes.HANDLE, ctypes.POINTER(wintypes.BOOL)
-]
-in_job = wintypes.BOOL()
-if not kernel32.IsProcessInJob(kernel32.GetCurrentProcess(), None, ctypes.byref(in_job)):
-    raise ctypes.WinError(ctypes.get_last_error())
-print("1" if in_job.value else "0", flush=True)
+print("ready", flush=True)
+time.sleep(10)
 """
 
     async def scenario():
@@ -448,9 +441,34 @@ print("1" if in_job.value else "0", flush=True)
             env=env,
         )
         try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=10)
-            assert process.returncode == 0, stderr.decode(errors="replace")
-            assert stdout.decode().strip() == "1"
+            assert job is not None
+            assert (
+                await asyncio.wait_for(process.stdout.readline(), timeout=10)
+            ).strip() == b"ready"
+            from ctypes import wintypes
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel32.OpenProcess.restype = wintypes.HANDLE
+            kernel32.IsProcessInJob.argtypes = [
+                wintypes.HANDLE,
+                wintypes.HANDLE,
+                ctypes.POINTER(wintypes.BOOL),
+            ]
+            kernel32.IsProcessInJob.restype = wintypes.BOOL
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            handle = kernel32.OpenProcess(0x1000, False, process.pid)
+            assert handle
+            try:
+                in_returned_job = wintypes.BOOL()
+                assert kernel32.IsProcessInJob(
+                    handle, job.handle, ctypes.byref(in_returned_job)
+                )
+                assert in_returned_job.value
+            finally:
+                kernel32.CloseHandle(handle)
+            process.kill()
+            await process.wait()
         finally:
             if process.returncode is None:
                 process.kill()
