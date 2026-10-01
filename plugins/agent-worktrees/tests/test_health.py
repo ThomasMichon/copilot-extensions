@@ -517,6 +517,34 @@ class TestOrphanedHandoffs:
         orphans = health.find_orphaned_handoffs([rec])
         assert len(orphans) == 1 and orphans[0].session_id == "new"
 
+    def test_detects_ledger_named_orphan_that_is_not_the_list_tail(self):
+        """aperture-labs#7824 regression: `old` registers, `new`
+        registers/concludes, `old` is explicitly re-adopted (the ledger's
+        latest transition names it), then `old` yields. The list TAIL is
+        still terminal `new`, but the ledger's own named, now-ineligible
+        session is the earlier `old` entry -- that is the real orphan, and
+        detection must not miss it just because it isn't last in the list."""
+        old = SessionEntry(session_id="old", started_at="2026-01-01T00:00:00",
+                           state="yielded")
+        new = SessionEntry(session_id="new", started_at="2026-01-01T00:01:00",
+                           state="concluded")
+        rec = WorktreeRecord(
+            worktree_id="wt-1", branch="worktree/wt-1", worktree_path="/tmp/wt-1",
+            repo="test-repo", machine="test", platform="wsl",
+            started_at="2026-01-01T00:00:00", last_resumed_at="2026-01-01T00:00:00",
+            resume_count=0, title=None, status="active", completed_at=None,
+            sessions=[old, new],
+            head_transitions=[
+                HeadTransition(revision=1, session_id="new", reason="initial",
+                               at="2026-01-01T00:01:00"),
+                HeadTransition(revision=2, session_id="old", reason="adopted",
+                               at="2026-01-01T00:02:00"),
+            ],
+        )
+        assert rec.resolved_head_session is None  # the ledger says "old", ineligible
+        orphans = health.find_orphaned_handoffs([rec])
+        assert len(orphans) == 1 and orphans[0].session_id == "old"
+
 
 def test_finds_stale_head_cache_from_transition_replay():
     record = WorktreeRecord(

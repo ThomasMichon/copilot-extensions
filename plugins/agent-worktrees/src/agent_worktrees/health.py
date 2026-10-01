@@ -595,10 +595,11 @@ def _parse_iso_epoch(value) -> float | None:
         return None
 
 
-def _record_last_activity(record) -> float | None:
-    """Newest known activity epoch across a record's timestamp fields and its
-    tail session entry. ``None`` when nothing parseable is present (so staleness
-    cannot be proven -- the detector then conservatively skips the record)."""
+def _record_last_activity(record, orphan_entry=None) -> float | None:
+    """Newest known activity epoch across a record's timestamp fields and the
+    given (or, absent one, tail) session entry. ``None`` when nothing
+    parseable is present (so staleness cannot be proven -- the detector then
+    conservatively skips the record)."""
     stamps = [
         getattr(record, "last_resumed_at", None),
         getattr(record, "started_at", None),
@@ -607,8 +608,8 @@ def _record_last_activity(record) -> float | None:
         getattr(record, "bound_live_at", None),
     ]
     sessions = getattr(record, "sessions", None) or []
-    if sessions:
-        tail = sessions[-1]
+    tail = orphan_entry if orphan_entry is not None else (sessions[-1] if sessions else None)
+    if tail is not None:
         stamps.append(getattr(tail, "ended_at", None))
         stamps.append(getattr(tail, "started_at", None))
         # A "yielded" tail's own handoff-open time is its most recent asserted
@@ -688,6 +689,20 @@ def find_orphaned_handoffs(
             # "any non-eligible session" scan would miss that case.
             if r.resolved_head_session is not None:
                 continue
+            # The orphan candidate is the ledger's own named (now-ineligible)
+            # session when one exists -- an earlier entry can stay the list
+            # TAIL while a LATER session is the one the ledger actually
+            # named and left orphaned (e.g. old registers, new
+            # registers/concludes, old is explicitly re-adopted, old
+            # yields): the list-tail fallback only applies to legacy/
+            # explicitly-cleared ledgers with no named transition at all.
+            replayed = r.replayed_head_transition
+            named = (
+                r.session_entry(replayed.session_id)
+                if replayed is not None and replayed.session_id is not None
+                else None
+            )
+            tail = named if named is not None else sessions[-1]
         else:
             # Lightweight test doubles (e.g. SimpleNamespace fixtures) don't
             # implement ledger-aware resolution; fall back to the naive scan
@@ -695,7 +710,7 @@ def find_orphaned_handoffs(
             if any(getattr(s, "state", "active") not in _NON_HEAD_STATES
                    for s in sessions):
                 continue
-        tail = sessions[-1]
+            tail = sessions[-1]
         if getattr(tail, "state", None) not in _ORPHANABLE_TAIL_STATES:
             continue
         # A linked successor is a different (completed/handled) shape; only an
@@ -704,7 +719,7 @@ def find_orphaned_handoffs(
             continue
         if getattr(r, "mux_live", None) or getattr(r, "bound_live", None):
             continue
-        last = _record_last_activity(r)
+        last = _record_last_activity(r, orphan_entry=tail)
         if last is None or (now - last) < min_age_h * 3600:
             continue
         last_stage = None
