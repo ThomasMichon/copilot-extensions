@@ -26,87 +26,93 @@ with no record of which task produced them or when they stopped mattering.
 
 Different machines and operators have different drive layouts; this skill's
 own guidance (and any checked-in instruction that references it) must never
-bake in a specific path. Resolve in this order, first match wins. **Whichever
-step resolves the root, verify its privacy before trusting it with anything
-sensitive** (a draft containing PII, secrets, or other sensitive output) --
-an explicit override or a machine-local default is just as capable of
-pointing at a shared, symlinked, or overly permissive directory as the OS
-temp fallback is, so the same ownership/no-symlink/effective-permission
-checks described under step 3 apply to the root resolved by step 1 or step 2
-too, not only to the OS-temp default.
+bake in a specific path. Resolve **the scratch root** -- the single directory
+per-task subfolders are created directly under (see the next section) -- in
+this order, first match wins. **Whichever step resolves it, verify its
+privacy before trusting it with anything sensitive** (a draft containing
+PII, secrets, or other sensitive output): an explicit override or a
+machine-local default is just as capable of pointing at a shared,
+symlinked, or overly permissive directory as the OS-temp fallback is.
 
 1. **`AGENT_SCRATCH_ROOT` environment variable**, if set -- an operator's or
-   session's explicit choice. Honor it as-is (create it if it doesn't exist
-   yet; don't second-guess its location) -- but still verify ownership and
-   effective permissions before writing anything sensitive into it, exactly
-   as for the OS-temp fallback below; an operator-set variable is not
-   automatically private.
+   session's explicit choice. **The value itself is the scratch root** --
+   create it as-is if it doesn't exist yet (don't second-guess its
+   location, and don't add any extra subfolder beneath it), but still
+   verify its ownership and effective permissions before writing anything
+   sensitive into it, using the same checks described under step 3; an
+   operator-set variable is not automatically private.
 2. **A machine-local convention the current context already resolves**, if
    one is available and documented for this environment (e.g. a harness's
    own machine-local config declaring a preferred scratch root, the same
    way it might declare a preferred source-checkout root) -- prefer a
-   mechanism already in scope over inventing a new one. This is how an
-   operator configures a durable *default* scratch root, instead of relying
-   on an ad hoc per-invocation environment variable every time. Apply the
-   same privacy verification here too before trusting it with sensitive
-   content.
+   mechanism already in scope over inventing a new one. **The configured
+   path itself is the scratch root** here too, the same as step 1; this is
+   how an operator configures a durable *default*, instead of relying on an
+   ad hoc per-invocation environment variable every time. Apply the same
+   privacy verification before trusting it with sensitive content.
 3. **The operating system's preferred/standard temporary-folder system**
    (what `$env:TEMP` resolves to on Windows, `${TMPDIR:-/tmp}` on POSIX) --
-   the default when neither of the above is configured. Use a private,
-   owner-only `agent-scratch` subfolder of that location (never loose at
-   the temp root either, for the same reason as above), and verify its
-   privacy before trusting it with anything sensitive (a draft containing
-   PII, secrets, or other sensitive output) rather than assuming either
-   platform's temp directory is private by default.
+   the default when neither of the above is configured. Unlike steps 1-2,
+   this location is shared with every other process on the machine, so
+   **the scratch root here is a dedicated private subfolder of it**
+   (`agent-scratch`-style, detailed below), never the bare temp path
+   itself and never loose at the temp root.
 
-### Harden the base scratch directory once; per-task subfolders inherit it
+## Harden the scratch root once; per-task subfolders inherit it
 
-Apply the privacy hardening below to the **base** scratch directory itself
-(the `agent-scratch`-style folder directly under whichever root was
-resolved above), not to every per-task subfolder created under it later --
-a correctly-hardened base already keeps every subfolder beneath it equally
+Apply the privacy hardening below to **the scratch root itself** -- the
+exact directory resolved above (the `AGENT_SCRATCH_ROOT` value, the
+machine-configured path, or the dedicated private subfolder under the OS
+temp directory) -- not to every per-task subfolder created under it later.
+A correctly-hardened root already keeps every subfolder beneath it equally
 private, and repeating per-subfolder ACL/mode changes after creation is
 exactly the non-atomic, racy pattern this section avoids.
 
-- **POSIX**: create the base directory with `os.mkdir(path, 0o700)` (or
-  the shell equivalent, `mkdir -m 700`) directly -- **do not** touch the
-  process umask to do this. Clearing or changing `umask` is process-wide,
-  mutable state; doing it even briefly races every other thread or
+- **POSIX**: create the root with `os.mkdir(path, 0o700)` (or the shell
+  equivalent, `mkdir -m 700`) directly -- **do not** touch the process
+  umask to do this. Clearing or changing `umask` is process-wide, mutable
+  state; doing it even briefly races every other thread or
   concurrently-running code in the same process that creates files during
   that window, trading one race for a worse one. It is also unnecessary:
   umask can only ever *remove* permission bits from the requested mode, it
   can never add bits beyond what was requested, so asking for `0o700`
   directly already caps the result at `0o700` or tighter regardless of the
-  ambient umask. Use a private, per-user path -- e.g.
-  `${TMPDIR:-/tmp}/agent-scratch-$(id -u)` (not a bare shared
-  `/tmp/agent-scratch`). If the path already exists, verify before
-  trusting it: a real directory (not a symlink), owned by the current
-  user, with mode exactly `0700`. Treat a failed check, or an `EEXIST`
-  creation race against another process, as "not trustworthy" and fall
-  back to a fresh unpredictable directory via `mkdtemp` instead of reusing
-  it. Because the base directory is mode `0700`, only its owner can even
+  ambient umask. For the OS-temp fallback specifically, use a private,
+  per-user name -- e.g. `${TMPDIR:-/tmp}/agent-scratch-$(id -u)` (not a
+  bare shared `/tmp/agent-scratch`). If the path already exists, verify
+  before trusting it: a real directory (not a symlink), owned by the
+  current user, with mode exactly `0700`. Treat a failed check, or an
+  `EEXIST` creation race against another process, as "not trustworthy" and
+  fall back to a fresh unpredictable directory via `mkdtemp` instead of
+  reusing it. Because the root is mode `0700`, only its owner can even
   traverse into it -- every subfolder and file created under it is
   contained by that single check, with nothing further required per task.
 - **Windows**: `%TEMP%` is conventionally per-user but its ACL is not
   guaranteed private by the platform and the standard temp-path APIs
-  don't validate it -- don't assume privacy by default. Create the base
-  `agent-scratch` folder with its restrictive ACL set **at creation**, not
-  as a follow-up step, so there is no window where it exists with an
-  inherited, broader ACL: use an API that accepts the ACL as part of
-  directory creation (e.g. .NET's
-  `[System.IO.Directory]::CreateDirectory(path, $directorySecurity)` from
-  PowerShell, with `$directorySecurity` granting full control only to the
-  current user and marked to propagate to children via container-inherit
-  flags) rather than `New-Item` followed by a separate `icacls` call. If
-  the folder already exists, verify its effective ACL grants access only
-  to the current user (and Administrators) before trusting it (e.g.
-  `icacls <path>` showing no broader inherited grant); if that check
-  fails, don't reuse it. Because the base folder's ACL is set to
-  propagate to children at creation, every per-task subfolder created
-  under it inherits the same restriction automatically -- no further
-  per-subfolder ACL step is needed.
+  don't validate it -- don't assume privacy by default. Create the root
+  (for the OS-temp fallback, the dedicated `agent-scratch` subfolder) with
+  its restrictive ACL set **at creation**, not as a follow-up step, so
+  there is no window where it exists with an inherited, broader ACL. An
+  explicit allow-rule alone is not enough: a `DirectorySecurity` carrying
+  only an added rule can still combine with inherited entries from the
+  parent (`%TEMP%`), leaving the folder readable by more than its owner.
+  **Protect the DACL so it stops inheriting from the parent** (.NET's
+  `DirectorySecurity.SetAccessRuleProtection($true, $false)` -- protect
+  the DACL, discard inherited rules), *then* add the explicit rule
+  granting full control only to the current user with container-inherit
+  flags so children propagate it, and pass that fully-built
+  `DirectorySecurity` to the creation call itself (e.g. PowerShell's
+  `[System.IO.Directory]::CreateDirectory(path, $directorySecurity)`)
+  rather than `New-Item` followed by a separate `icacls` call. If the
+  folder already exists, verify its effective ACL grants access only to
+  the current user (and Administrators) before trusting it (e.g.
+  `icacls <path>` showing no inherited broad grant); if that check fails,
+  don't reuse it. Because the root's ACL is both protected (not inherited)
+  and set to propagate to children at creation, every per-task subfolder
+  created under it inherits the same restriction automatically -- no
+  further per-subfolder ACL step is needed.
 - **Either platform**: if privacy can't be verified or established for the
-  base directory, don't write sensitive data under it -- fall back to an
+  scratch root, don't write sensitive data under it -- fall back to an
   operator-configured default (step 2) or escalate to the operator
   instead.
 
