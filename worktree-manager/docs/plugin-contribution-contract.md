@@ -57,6 +57,25 @@ Version-1 compatibility also covers the existing declarative fields:
   the action's keyboard affordance without hard-coding a provider's keys;
 - top-level `worktree_actions`;
 - top-level `config_sections`;
+- optional top-level `create_action` — a pivot-**level** "New …" affordance
+  (no row selected), distinct from a row-scoped `kind:"form"` action:
+  `{"label": <str>, "key"?: <str, default "create">,
+  "fields"?: [{"name": <str>, "type"?: "text"|"textarea"|"choice"|
+  "multichoice" (default "text"), "options"?: [<str>, ...] (required,
+  non-empty, no blank entries, for choice/multichoice), "allow_other"?:
+  <bool>, "show_when"?: {"field": <str>, "equals": <str>}}, ...],
+  "run": [<str>, ...], "confirm"?: <bool>}`. Each field name must be unique
+  after whitespace-trimming. A `show_when` must name a different,
+  unconditional (no `show_when` of its own) `choice` field declared
+  elsewhere in `fields`, whose `options` include the predicate's `equals`
+  value — the runtime form evaluator can only resolve a `choice` field's
+  current answer, so any other shape can never match. `run` is substituted
+  via the same `{field.<name>}` token machinery a row-scoped form action
+  uses (no row/entry tokens are available since there is no selected row)
+  and is command-resolved/validated identically to every other `run` argv.
+  **Schema and command resolution only as of this contract revision** — no
+  live Picker UI yet opens this affordance; a producer may declare it today
+  so the field spec is ready once that UI wiring lands;
 - optional top-level `worker` — `{"worktree": <field>, "label"?: <field>,
   "live"?: <field>, "activity"?: <field>}` — marking the pivot's rows as remote
   workers a worktree supervises. The Manager joins cached rows to Worktrees rows
