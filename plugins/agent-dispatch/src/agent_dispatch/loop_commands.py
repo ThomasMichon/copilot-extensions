@@ -295,9 +295,9 @@ def _repository_issue_loop_status(
     forge_error = None
     reservations = []
     try:
-        from .repository_issue_loops import GitHubProvider, _latest_reservations
+        from .repository_issue_loops import _forge_provider_for, _latest_reservations
 
-        for issue in GitHubProvider(source_config["forge"]["producer_login"]).list_open_issues(
+        for issue in _forge_provider_for(source_config).list_open_issues(
             source_config["repo"]
         ):
             for reservation in _latest_reservations(issue).values():
@@ -457,7 +457,7 @@ def _repository_issue_loop_status(
 def _cmd_repository_issue_loop(args: argparse.Namespace) -> int:
     from .config import overrides_path
     from .overrides import load_overrides, mutate_overrides
-    from .repository_issue_loops import GitHubProvider, run_tick
+    from .repository_issue_loops import _forge_provider_for, run_tick
     from .supervisor_daemon import registration_override_ids
 
     try:
@@ -531,8 +531,8 @@ def _cmd_repository_issue_loop(args: argparse.Namespace) -> int:
                 run_tick(
                     client,
                     source["spec"]["repository_issue_loop"],
-                    provider=GitHubProvider(
-                        source["spec"]["repository_issue_loop"]["forge"]["producer_login"]
+                    provider=_forge_provider_for(
+                        source["spec"]["repository_issue_loop"]
                     ),
                     dry_run=True,
                     cwd=source["spec"].get("cwd"),

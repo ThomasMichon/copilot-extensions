@@ -1,0 +1,9 @@
+{
+  "comment": "repository-issue-loop: add a structural Gitea backlog-provider stub (ForgeProvider shape, NotImplementedError pointing at #4825)",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    }
+  ]
+}
