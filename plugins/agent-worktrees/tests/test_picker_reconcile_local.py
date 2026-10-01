@@ -162,6 +162,69 @@ def test_picker_reconcile_local_json_reports_group_c_payload(
     assert mux_calls == [("wt-one", True, True), ("wt-two", False, True)]
 
 
+def test_picker_reconcile_local_skips_load_config_when_no_pr_to_reconcile(
+    monkeypatch, tmp_path
+):
+    """Render-perf follow-up (#3307, 2026-09-30): ``cfg.load_config()`` pulls
+    in a full, unbounded tracking-records re-scan plus plugin-activation
+    resolution -- ~10s+ on a machine with a large tracking history, the
+    dominant cost of a single-worktree reconcile (the Picker's per-row
+    Actions-dialog refine). Profiling found it was paid in full even when no
+    record in scope had a PR left to reconcile, so ``config`` went unused.
+    A record with NO pr, and one with an already-terminal pr, must never
+    trigger ``load_config()`` at all."""
+    rec_no_pr = _Record("wt-none", tmp_path / "wt-none", prs=[])
+    rec_terminal_pr = _Record(
+        "wt-merged", tmp_path / "wt-merged", prs=[_PR(5, "merged")]
+    )
+    Path(rec_no_pr.worktree_path).mkdir()
+    Path(rec_terminal_pr.worktree_path).mkdir()
+
+    monkeypatch.setattr(picker_reconcile_cli.cfg, "tracking_dir", lambda: tmp_path / "tracking")
+    monkeypatch.setattr(picker_reconcile_cli.cfg, "detect_platform", lambda: "windows")
+
+    def _forbidden_load_config():
+        raise AssertionError(
+            "load_config() must not be called when nothing needs PR reconcile"
+        )
+
+    monkeypatch.setattr(picker_reconcile_cli.cfg, "load_config", _forbidden_load_config)
+    monkeypatch.setattr(
+        picker_reconcile_cli.tracking,
+        "list_records",
+        lambda *args, **kwargs: [rec_no_pr, rec_terminal_pr],
+    )
+    monkeypatch.setattr(
+        picker_reconcile_cli.tracking,
+        "_pr_is_terminal",
+        lambda pr: getattr(pr, "state", "") in {"merged", "closed"},
+    )
+    monkeypatch.setattr(
+        picker_reconcile_cli.pr_ops,
+        "_pr_to_dict",
+        lambda pr: {"number": pr.number, "state": pr.state},
+    )
+    monkeypatch.setattr(
+        picker_reconcile_cli.reclaim, "resolve_bound_copilots", lambda: []
+    )
+    monkeypatch.setattr(
+        picker_reconcile_cli.sessions,
+        "mux_status_many",
+        lambda ids: {wid: types.SimpleNamespace(exists=False, clients=0, attached=False)
+                     for wid in ids},
+    )
+    monkeypatch.setattr(
+        picker_reconcile_cli.sessions,
+        "worktree_session_lock_state",
+        lambda rec: (False, []),
+    )
+
+    payload = picker_reconcile_cli.build_payload()
+
+    assert payload["summary"]["record_count"] == 2
+    assert payload["summary"]["pr_terminal_count"] == 0
+
+
 def test_picker_reconcile_local_avoids_batch_wide_record_lock(monkeypatch, tmp_path):
     monkeypatch.setattr(picker_reconcile_cli.cfg, "tracking_dir", lambda: tmp_path / "tracking")
     monkeypatch.setattr(picker_reconcile_cli.cfg, "detect_platform", lambda: "windows")
