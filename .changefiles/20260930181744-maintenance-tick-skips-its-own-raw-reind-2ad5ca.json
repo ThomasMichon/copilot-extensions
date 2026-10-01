@@ -1,0 +1,9 @@
+{
+  "comment": "maintenance_tick skips its own raw reindex when the service already has one in flight, avoiding a concurrent-writer race against the index store.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
