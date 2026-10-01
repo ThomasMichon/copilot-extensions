@@ -49,12 +49,16 @@ def transitive_obligations(
         return [], [{"path": here, "ref": "", "reason": "cycle detected"}]
     _visited.add(key)
 
-    rec_path = cfg.project_dir(project) / "worktrees" / f"{worktree_id}.yaml"
-    if not rec_path.exists():
-        return [], [{"path": here, "ref": "", "reason": "record not found"}]
     try:
+        rec_path = cfg.project_dir(project) / "worktrees" / f"{worktree_id}.yaml"
+        if not rec_path.exists():
+            return [], [{"path": here, "ref": "", "reason": "record not found"}]
         rec = tracking.load_record(rec_path)
     except Exception as exc:
+        # Covers both an unreadable/corrupt record AND `project_dir` itself
+        # raising -- e.g. a same-machine child naming an unavailable/
+        # unresolvable project state root under a namespaced install. Either
+        # way this is a degraded, reported edge, never a crash.
         return [], [{"path": here, "ref": "", "reason": f"unreadable: {exc}"}]
 
     found: list[dict] = []
@@ -129,7 +133,13 @@ def cmd_claims_transitive(
 
     print(f"Transitive obligations for {wt_id} (whole subtree, recursive):")
     if not found:
-        print("  (none -- the whole subtree is settled)")
+        if unresolved:
+            print(
+                "  (none confirmed -- but see the unresolved edges below; "
+                "the subtree is NOT provably settled)"
+            )
+        else:
+            print("  (none -- the whole subtree is settled)")
     else:
         for o in found:
             path = " -> ".join(o["path"])

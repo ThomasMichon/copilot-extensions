@@ -127,6 +127,30 @@ def test_cross_machine_child_is_unresolved_not_raised(_tracking_d):
     assert "cross-machine" in unresolved[0]["reason"]
 
 
+def test_unresolvable_project_root_is_unresolved_not_raised(_tracking_d, monkeypatch):
+    """A same-machine child naming a project this machine cannot resolve
+    (e.g. an unavailable namespaced state root) must degrade to an
+    `unresolved` entry, never crash the whole query."""
+    b_ref = tracking.format_claim_ref(MACHINE, "missing-proj", "wt-ghost")
+    _save(_tracking_d, "wt-A", resources=[
+        tracking.ResourceClaim(kind="worktree", ref=b_ref, state=ob.ACTIVE),
+    ])
+
+    def _raising_project_dir(name=None):
+        if name == "missing-proj":
+            raise RuntimeError("project state root unavailable")
+        return _tracking_d.parent
+
+    monkeypatch.setattr(cfg, "project_dir", _raising_project_dir)
+
+    found, unresolved = claims_transitive_cli.transitive_obligations("wt-A", "proj", _config())
+
+    assert found == []
+    assert len(unresolved) == 1
+    assert unresolved[0]["path"] == ("wt-A", "wt-ghost")
+    assert "unreadable" in unresolved[0]["reason"]
+
+
 def test_missing_child_record_is_unresolved_not_raised(_tracking_d):
     b_ref = tracking.format_claim_ref(MACHINE, "proj", "wt-ghost")
     _save(_tracking_d, "wt-A", resources=[
@@ -185,6 +209,25 @@ class TestClaimsTransitiveCli:
         assert rc == 1
         # `output.err` prints to plain stdout (not stderr).
         assert "not found" in capsys.readouterr().out
+
+    def test_never_reports_settled_when_an_edge_is_unresolved(
+        self, _tracking_d, monkeypatch, capsys,
+    ):
+        """No confirmed (found) obligation must never be rendered as
+        "the whole subtree is settled" while an edge remains genuinely
+        unresolved -- that would be a false affirmative."""
+        monkeypatch.setattr(cfg, "load_config", lambda: _config())
+        foreign_ref = tracking.format_claim_ref("other-machine", "proj", "wt-B")
+        _save(_tracking_d, "wt-A", resources=[
+            tracking.ResourceClaim(kind="worktree", ref=foreign_ref, state=ob.ACTIVE),
+        ])
+        args = _ns(target=["wt-A"], json=False)
+        rc = claims_cli._claims_transitive(args, "wt-A")
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "the whole subtree is settled" not in out
+        assert "NOT provably settled" in out
+        assert "could not check" in out
 
     def test_json_mode_serializes_paths_as_lists(self, _tracking_d, monkeypatch):
         monkeypatch.setattr(cfg, "load_config", lambda: _config())
