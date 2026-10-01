@@ -44,18 +44,24 @@ instead of using `DETACHED_PROCESS`, so console-subsystem grandchildren do not
 allocate a visible console.
 
 A child that must never outlive the process that spawned it -- even a hard
-kill of that process -- can be bound to a kill-on-close Windows Job Object:
+kill of that process -- is spawned inside a kill-on-close Windows Job Object:
 
 ```python
-proc = subprocess.Popen(cmd, **no_window_kwargs())
-job = bind_to_kill_on_close_job(proc.pid)  # JobHandle | None
+proc, job = await spawn_in_kill_on_close_job(
+    *cmd, stdout=asyncio.subprocess.PIPE, **no_window_kwargs(),
+)  # job: JobHandle | None
 ```
 
-Keep the returned `JobHandle` referenced for as long as the child should live:
-when it is closed (explicitly, or when the owning process exits for any reason)
-Windows terminates every process still in the job. It is best-effort: it returns
-`None` off Windows or when the binding fails, and never raises. Do not use it for
-children meant to outlive their launcher (detached daemons, keepers).
+On Windows the child is created suspended, assigned to the job, and only then
+resumed, so it can neither run nor start descendants outside the job. Keep the
+returned `JobHandle` referenced for as long as the child should live: when it is
+closed (explicitly, or when the owning process exits for any reason) Windows
+terminates every process still in the job. It is best-effort: `job` is `None`
+off Windows or when the job can't be armed (the child still runs). Do not use it
+for children meant to outlive their launcher (detached daemons, keepers).
+`bind_to_kill_on_close_job(pid)` attaches an already-running process instead;
+it can't cover anything that process did before the call, so prefer spawning
+inside the job.
 
 ## Vendoring
 
