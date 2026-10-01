@@ -496,9 +496,17 @@ def read_corpus_sources() -> list[dict]:
        sources.
 
     Each element is a mapping like
-    ``{name, type?, repo?, auth?: {account}, trust_domain?}``, plus internal keys
-    ``_repo_path`` (the contributing project's checkout) and ``_contributed_by``
-    (its project name). Malformed entries are dropped defensively. Returns ``[]``
+    ``{name, type?, repo?, auth?: {account}, trust_domain?, ref?}``, plus
+    internal keys ``_repo_path`` (the contributing project's checkout) and
+    ``_contributed_by`` (its project name). ``ref`` (``git:`` sources only)
+    overrides which branch/revision to index -- e.g. ``origin/dev`` for a repo
+    whose integration branch isn't its default branch -- instead of the
+    connector's own default (the remote's ``HEAD``, i.e. its default branch).
+    ``auth.account`` on a ``git:`` source also authenticates that source's
+    fetch step (resolved the same way as a ``github:`` source's token), so the
+    checkout is actively pulled forward as the remote branch moves rather than
+    depending on the ambient `gh`-backed git credential helper's currently
+    active account. Malformed entries are dropped defensively. Returns ``[]``
     when nothing is declared anywhere.
     """
     def _sources_of_data(data: dict) -> list[dict]:
