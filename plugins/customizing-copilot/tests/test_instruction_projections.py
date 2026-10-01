@@ -2554,8 +2554,81 @@ def test_customizing_copilot_ships_the_repo_wide_local_cache_catchall() -> None:
     assert {spec.source_id for spec in specs} == {"local-cache-catchall"}
     spec = specs[0]
     assert spec.apply_to == "**"
+    # Opted out of its own local cache (skipLocalCache: true in the
+    # declaration) -- otherwise its *.local.instructions.md sibling would
+    # match its own "check every *.local.instructions.md" glob and get
+    # read back, pointlessly repeating the same directive.
+    assert spec.skip_local_cache is True
     rendered = projections.render_projection(spec)
     assert rendered.byte_count <= projections.MAX_PROJECTION_BYTES
     text = rendered.content.decode("utf-8")
     assert ".github/instructions/**/*.local.instructions.md" in text
     assert "Their absence is not an error." in text
+
+
+def test_render_local_cache_honors_skip_local_cache(tmp_path: Path) -> None:
+    """A source declared with ``skipLocalCache: true`` never gets a
+    ``*.local.instructions.md`` sibling -- the repo-wide catch-all's own
+    opt-out (see ``test_customizing_copilot_ships_the_repo_wide_local_cache_
+    catchall``), proven generically here rather than only against the real
+    shipped declaration."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(
+        tmp_path,
+        "market",
+        "policy",
+        entries=[
+            {
+                "id": "fallback",
+                "template": "instructions/fallback.instructions.md",
+                "destination": ".github/instructions/policy/fallback.instructions.md",
+                "customizationKind": "instructions",
+                "applyTo": "**",
+                "legacyMarkers": [],
+                "skipLocalCache": True,
+            }
+        ],
+    )
+
+    result = projections.render_local_cache(repo, lambda: [source])
+
+    assert result.blocking == 0
+    assert result.changed == []
+    assert not (
+        repo
+        / ".github"
+        / "instructions"
+        / "policy"
+        / "fallback.local.instructions.md"
+    ).exists()
+
+
+def test_skip_local_cache_must_be_boolean(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(
+        tmp_path,
+        "market",
+        "policy",
+        entries=[
+            {
+                "id": "fallback",
+                "template": "instructions/fallback.instructions.md",
+                "destination": ".github/instructions/policy/fallback.instructions.md",
+                "customizationKind": "instructions",
+                "applyTo": "**",
+                "legacyMarkers": [],
+                "skipLocalCache": "yes",
+            }
+        ],
+    )
+    result = projections.Result(operation="test")
+
+    specs, _unknown = projections._load_specs(repo, [source], result)
+
+    assert specs == []
+    assert any(
+        "skipLocalCache must be a boolean" in finding.message
+        for finding in result.findings
+    )

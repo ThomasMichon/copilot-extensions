@@ -142,6 +142,7 @@ class ProjectionSpec:
     customization_kind: str
     apply_to: str
     legacy_markers: tuple[str, ...]
+    skip_local_cache: bool = False
 
     @property
     def source_key(self) -> str:
@@ -661,14 +662,20 @@ def _load_specs(
         for index, entry in enumerate(declaration["projections"]):
             entry_path = f"{declaration_path.as_posix()}#projections[{index}]"
             try:
-                if not isinstance(entry, dict) or set(entry) != {
+                _required_keys = {
                     "id",
                     "template",
                     "destination",
                     "customizationKind",
                     "applyTo",
                     "legacyMarkers",
-                }:
+                }
+                _optional_keys = {"skipLocalCache"}
+                if (
+                    not isinstance(entry, dict)
+                    or not _required_keys <= set(entry)
+                    or set(entry) - _required_keys > _optional_keys
+                ):
                     raise ValueError("projection entry has unknown or missing keys")
                 source_id = entry["id"]
                 if not isinstance(source_id, str) or not IDENTIFIER.fullmatch(source_id):
@@ -728,6 +735,9 @@ def _load_specs(
                     or len(set(markers)) != len(markers)
                 ):
                     raise ValueError("legacyMarkers is invalid")
+                skip_local_cache = entry.get("skipLocalCache", False)
+                if not isinstance(skip_local_cache, bool):
+                    raise ValueError("skipLocalCache must be a boolean")
                 template_path = _safe_existing_file(payload_root, template_rel)
                 template_raw = _canonical_template_bytes(
                     _read_bounded_regular(template_path, MAX_TEMPLATE_BYTES)
@@ -765,6 +775,7 @@ def _load_specs(
                     customization_kind=kind,
                     apply_to=apply_to,
                     legacy_markers=tuple(markers),
+                    skip_local_cache=skip_local_cache,
                 )
             )
     _find_spec_conflicts(specs, result)
@@ -1090,6 +1101,13 @@ def _render_local_cache_locked(
     grouped: dict[str, list[tuple[str, ProjectionSpec]]] = {}
     for spec in specs:
         if spec.source_key in duplicate_source_keys:
+            continue
+        if spec.skip_local_cache:
+            # Opted out (``skipLocalCache: true``) -- a source whose own
+            # rendered body already directs the agent to scan for every
+            # *.local.instructions.md sibling (the repo-wide catch-all) must
+            # never gain one of its own: it would match its own scan glob
+            # and get read back, pointlessly repeating the same directive.
             continue
         try:
             local_destination = local_sibling_destination(spec.destination)

@@ -8,7 +8,8 @@
       "destination": ".github/instructions/customizing-copilot/local-cache-catchall.instructions.md",
       "customizationKind": "instructions",
       "applyTo": "**",
-      "legacyMarkers": []
+      "legacyMarkers": [],
+      "skipLocalCache": true
     }
   ]
 }

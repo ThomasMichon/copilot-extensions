@@ -597,6 +597,25 @@ _Pending._
 - `tools/run-plugin-tests.py customizing-copilot`: 303 passed, 8 skipped.
   `check-docs-consistency`, `check-version-consistency`, and
   `check-module-size` all clean (no production module touched this slice).
+- **Review round 1 finding (PR #4798), addressed in the same PR:** the
+  catch-all is a declared source like any other, so `render_local_cache`
+  would also render it into its own `local-cache-catchall.local.
+  instructions.md` -- which the catch-all's own glob
+  (`**/*.local.instructions.md`) then matches, reading back the identical
+  "check for local siblings" directive a second time for no benefit.
+  Added a new, optional, schema-validated `skipLocalCache` declaration
+  field (default `false`) rather than special-casing this one source by
+  name; `_render_local_cache_locked` now skips any source that sets it,
+  and the stale-cleanup pass already removes a previously-generated
+  sibling for a source that newly opts out (no special-casing needed
+  there either -- it just falls out of the existing "not in this call's
+  accepted set" path). Set `skipLocalCache: true` on the shipped
+  `local-cache-catchall` declaration. Added
+  `test_render_local_cache_honors_skip_local_cache` (generic, against a
+  synthetic plugin) and `test_skip_local_cache_must_be_boolean` (schema
+  validation), plus asserted `skip_local_cache is True` on the real shipped
+  spec. A second, small module-size baseline widen (2439 -> 2457) for this
+  real fix, same documented-policy reasoning as slice 3's two widens.
 - Phase 7 Plan items remaining: `agent-worktrees`' own create/resume/
   `sessionStart` wiring -- the actual consumer of everything built across
   slices 1-4 -- is the last unstarted item.
