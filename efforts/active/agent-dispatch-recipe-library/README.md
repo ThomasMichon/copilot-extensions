@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`)
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-09-30
-- **Status:** Draft
+- **Status:** In Progress (Phase 1 done)
 - **Vision:** `visions/plugins/agent-dispatch/README.md` (§*The recipe*)
   advances *loop-recipes* from "four fixed archetypes, hand-declared per
   consumer" to "named, extendable templates a consumer instantiates with a
@@ -198,20 +198,22 @@ not new engines either. The `extends:` model (Phase 3) and provider adapters
 
 ## Plan
 
-### Phase 1 — General task-worker gap check (Request item a)
-- [ ] Confirm the existing manual/self-tracked-task path (`create`/`propose`
+### Phase 1 — General task-worker gap check (Request item a) ✅ no gap found
+- [x] Confirm the existing manual/self-tracked-task path (`create`/`propose`
       with no emitter behind it — "tracked by its caller") plus the
       `goal-driven` recipe already satisfies: a title/prompt/
       evaluation-criteria-shaped task; an agent driving it to completion,
       revalidating against the stated goal; steering-card blocking (never a
       bare stopped turn) per the task's own allowance; autopilot-headless as
-      the default launch mode.
-- [ ] Where a genuine gap exists (e.g. the default worker charter doesn't yet
+      the default launch mode. Confirmed — see Journal entry below for the
+      four concrete citations.
+- [x] Where a genuine gap exists (e.g. the default worker charter doesn't yet
       say "steering card, never stop-and-ask" explicitly, or
       autopilot-headless isn't yet the documented default), fix it as a
-      documentation/charter change — not a new task-worker engine.
-- [ ] Tests: none anticipated beyond existing coverage, unless a real charter
-      behavior gap is found and fixed.
+      documentation/charter change — not a new task-worker engine. No gap
+      found; nothing to fix.
+- [x] Tests: none anticipated beyond existing coverage, unless a real charter
+      behavior gap is found and fixed. None found — no test changes.
 
 ### Phase 2 — Azure DevOps + Gitea provider adapters
 - [ ] Add an Azure DevOps backlog-provider adapter (list/reserve/claim/
@@ -374,3 +376,34 @@ _Pending review._
   an unset value leaves staleness unchecked rather than guessing a cadence)
   and its test item (two fixture declarations with different thresholds
   each resolve independently) to match. No other phase is affected.
+
+### 2026-09-30 (same day) — Phase 1 closed: no gap found
+- Investigated the general task-worker path (Request item a) against the
+  four properties Phase 1 names, citing concrete source:
+  1. **Title/prompt/evaluation-criteria shape** — `create`/`propose` share one
+     argument surface (`create_cli.py`'s `_add_create_args`) including
+     `--goal`/`--done-criteria`; the `goal-driven` recipe
+     (`recipes/registry.py`) renders the identical shape from a single
+     `goal` param.
+  2. **Drive-to-completion, revalidating against the goal** — the autopilot
+     worker charter's goal/progress loop (`worker_charter.py`
+     `_AUTOPILOT_CHARTER`) explicitly resumes from the recorded progress log
+     and re-checks done-criteria each pass, rather than restarting.
+  3. **Steering-card blocking, never a bare stopped turn** — the universal
+     operating-procedures charter (`worker_charter.py`
+     `_OPERATING_PROCEDURES`, "Every turn ends terminal, steered, or
+     waited") already states this as a hard contract, not an informal
+     convention.
+  4. **Autopilot-headless as the default launch mode** — confirmed at two
+     layers: `create_cli.py`'s plain `create --spawn` defaults
+     `spawn_backend` to `"bridge"` (headless ACP), and standing supervisor
+     registrations default `--embody-backend` to `headless`
+     (`supervise_registration_cli.py`). The one deliberate exception —
+     `recipes kick --spawn` defaults to `"embody"` (interactive CLI
+     autopilot) — is an intentional, documented choice for an ad-hoc,
+     developer-kicked recipe instance, not a contradiction of the general
+     task-worker default.
+- No documentation/charter gap found; all four properties are already
+  shipped and already documented. Checked off Phase 1 with no code/doc
+  changes beyond this Journal entry and the checklist itself. Moving to
+  Phase 2 (Azure DevOps + Gitea provider adapters).
