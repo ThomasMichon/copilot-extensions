@@ -267,7 +267,16 @@ def _rate_reset_delay(response: httpx.Response) -> float | None:
     now = time.time()
     if reset_value > now - 60:
         return max(0.0, reset_value - now + 1.0)
-    return max(0.0, reset_value + 1.0)
+    # The reset timestamp is more than 60s in the past -- the rate-limit
+    # window has already reset, so there's nothing to wait for. Returning
+    # `reset_value` itself here (a prior bug) treated a stale/garbled epoch
+    # timestamp as a SECONDS delay: `time.sleep(reset_value)` on a real
+    # GitHub epoch value (~1.7e9) sleeps for ~54 years, which in practice
+    # manifested as an indefinitely stuck reindex worker (observed in
+    # production: a worker idle in this exact call for 8+ hours with zero
+    # CPU activity, py-spy confirming `_respect_rate_limit` -> `time.sleep`).
+    return 0.0
+
 
 
 def _first_header(response: httpx.Response, names: tuple[str, ...]) -> str | None:

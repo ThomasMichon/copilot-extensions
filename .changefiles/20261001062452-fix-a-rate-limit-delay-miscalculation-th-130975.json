@@ -1,0 +1,9 @@
+{
+  "comment": "Fix a rate-limit delay miscalculation that could sleep a reindex worker for years: a stale/garbled X-RateLimit-Reset epoch timestamp was returned verbatim as a seconds-delay instead of 0.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

@@ -6,7 +6,7 @@ from collections.abc import Iterator
 
 import httpx
 
-from agent_index.sources.good_citizen_http import GoodCitizenSession
+from agent_index.sources.good_citizen_http import GoodCitizenSession, _rate_reset_delay
 
 
 def _json_response(
@@ -87,3 +87,47 @@ def test_session_follows_continuation_token_pages() -> None:
 
     assert [page.data for page in pages] == [{"value": [1]}, {"value": [2]}]
     assert requested_tokens == [None, "next"]
+
+
+def test_rate_reset_delay_computes_positive_delay_for_future_reset() -> None:
+    response = _json_response(200, {}, headers={"X-RateLimit-Reset": str(int(time.time()) + 30)})
+    delay = _rate_reset_delay(response)
+    assert delay is not None
+    assert 0 < delay <= 31
+
+
+def test_rate_reset_delay_is_zero_for_a_stale_reset_header() -> None:
+    """A reset timestamp more than 60s in the past means the rate-limit
+    window has already reset -- there's nothing to wait for. A prior bug
+    returned the raw (garbled/stale) epoch value itself as the delay, so
+    `time.sleep(reset_value)` on a real GitHub epoch timestamp (~1.7e9)
+    slept for ~54 years -- observed in production as an indefinitely stuck
+    reindex worker (8+ hours idle, zero CPU, py-spy confirming this exact
+    call site)."""
+    stale_reset = int(time.time()) - 3600
+    response = _json_response(200, {}, headers={"X-RateLimit-Reset": str(stale_reset)})
+    assert _rate_reset_delay(response) == 0.0
+
+
+def test_session_does_not_sleep_for_a_wildly_stale_reset_header(monkeypatch) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+    # A real GitHub-style epoch value, but stale (long past) -- the buggy
+    # fallback would have slept for this many SECONDS (~54 years).
+    stale_epoch = 1_700_000_000
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _json_response(
+            200,
+            {"ok": True},
+            headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": str(stale_epoch)},
+        )
+
+    session = GoodCitizenSession(
+        base_url="https://example.test",
+        transport=httpx.MockTransport(handler),
+        min_interval_s=0,
+    )
+
+    assert session.get_json("/items").data == {"ok": True}
+    assert sleeps == [] or all(delay < 60 for delay in sleeps)
