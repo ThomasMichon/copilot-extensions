@@ -198,6 +198,17 @@ reads as authoritative.
   (e.g. "Full inception exchange: `inception-transcript.md`"). This keeps the
   README a navigable map — its own stated purpose — without losing the
   authoritative record of what was actually said.
+- **Redaction is the one safety exception to verbatim capture.** If the
+  operator's own words name a real private/internal identifier this repo's
+  own leak-guard conventions would flag (see *Keep internal specifics out of
+  a public-facing effort* below), capture everything else verbatim and
+  replace only that identifier with a generic placeholder — never drop,
+  paraphrase, or soften the surrounding intent to work around it. This
+  applies equally to the sidecar transcript: a verbatim exchange that
+  necessarily contains such an identifier is captured in full in a private
+  knowledge repo's own sidecar instead of the public repo's
+  `inception-transcript.md`, with the public README linking to it
+  generically rather than reproducing it.
 
 ## Plan an effort
 
@@ -287,11 +298,17 @@ An effort's Journal is a natural place to record *how* a decision was reached
 repo is a **public or externally-shareable** one (no private, closed-circuit
 relationship to the systems being discussed), that narrative can't carry the
 same level of concrete detail a private knowledge repo's effort would: a real
-internal repo/system name, a cross-organization issue number, device or
-account naming conventions, or a blow-by-blow internal-investigation
-narrative is exactly the kind of content that leaks when it's committed to a
-public tree, even inside an effort folder that otherwise looks like ordinary
-engineering notes.
+**private/internal** repo or system name, a **private** cross-organization
+issue reference, device or account naming conventions, or a blow-by-blow
+internal-investigation narrative is exactly the kind of content that leaks
+when it's committed to a public tree, even inside an effort folder that
+otherwise looks like ordinary engineering notes. This is **not** a rule
+against cross-repo references in general — a fully-qualified reference to a
+genuinely public repo (upstream, downstream, a public dependency) is
+legitimate traceability and belongs in the Journal exactly as this skill's
+own *Cross-repo efforts* and *Issues and sources* sections already expect;
+narrow the caution to references that would themselves reveal a private
+repo, system, or organization's existence or internals.
 
 - **Abstract, don't omit.** The *decision* and its *rationale* are still
   worth capturing — generalize the specifics instead of deleting the entry.
@@ -461,9 +478,11 @@ change that realizes it.
   summarizing the gist and moving the full exchange to
   `inception-transcript.md`.
 - ❌ Letting the conversation, not the README, hold effort state.
-- ❌ Journaling a real internal repo/system name, cross-org issue number, or
-  unabstracted incident narrative into a public-facing effort — abstract the
-  specifics or route the precise record to a private knowledge repo instead.
+- ❌ Journaling a real **private/internal** repo or system name, a private
+  cross-org reference, or unabstracted incident narrative into a
+  public-facing effort — abstract the specifics or route the precise record
+  to a private knowledge repo instead. (A fully-qualified reference to a
+  genuinely *public* repo remains expected traceability, not a leak.)
 - ❌ Clearing `follow_up` manually while an open effort remains bound, or
   dropping the binding without verified completion or a named transfer.
 - ❌ Cross-repo issues linking this repo's effort paths.
