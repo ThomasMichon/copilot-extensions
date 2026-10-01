@@ -378,6 +378,28 @@ def test_slot_clean_reports_failure_instead_of_silently_downgrading_signed_venv(
     assert 'Write-ServiceErr "Runtime slot still in use after retries' in deploy_fn
 
 
+def test_uv_venv_fallback_retries_transient_access_denied():
+    """A Windows file-handle race while uv renames the freshly-written
+    python.exe into place ('Access is denied' / 'failed to persist temporary
+    file', typically AV/EDR briefly holding the file open) must not abort the
+    whole plugin update on the first hit -- Deploy-Venv must retry the uv venv
+    attempt a bounded number of times, the same way it already retries the
+    signed-Python slot-clean race above. A non-transient uv failure (any
+    output not matching the transient signature) must still fail immediately
+    without burning the retry budget."""
+    installer = INSTALLER.read_text(encoding="utf-8")
+    deploy_fn = installer.split("function Deploy-Venv", 1)[1].split(
+        "function Deploy-Wrappers", 1
+    )[0]
+
+    assert "$transientPattern = 'Access is denied|failed to persist temporary file'" in deploy_fn
+    assert "for ($i = 0; $i -lt 3; $i++) {" in deploy_fn
+    # Bounded: stop retrying once it succeeds, or once the failure isn't the
+    # known-transient signature -- never retry a genuine/persistent failure.
+    assert "if ($uvResult.ExitCode -eq 0) { break }" in deploy_fn
+    assert "if ($uvResult.Output -notmatch $transientPattern) { break }" in deploy_fn
+
+
 def test_early_installer_utilities_are_powershell_51_safe_ascii():
     utilities = SERVICE_UTILS.read_text(encoding="utf-8")
 

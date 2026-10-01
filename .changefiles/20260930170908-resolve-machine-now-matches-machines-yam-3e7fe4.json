@@ -1,0 +1,9 @@
+{
+  "comment": "resolve --machine now matches machines.yaml hostname: entries; uv venv fallback retries transient Windows Access Denied races",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
