@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import sys
@@ -23,6 +24,23 @@ def _canonical_lib(root: Path, lib: str, *, version: str, content: str) -> Path:
     (d / "src" / pkg / "__init__.py").write_text(content, encoding="utf-8")
     (d / "pyproject.toml").write_text(
         f'[project]\nname = "x"\nversion = "{version}"\n', encoding="utf-8"
+    )
+    return d
+
+
+def _retired_pointer(root: Path, plugin: str, lib: str, *, source: str | None = None) -> Path:
+    d = root / "plugins" / plugin / "libs" / lib
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "VENDOR_POINTER.json").write_text(
+        json.dumps(
+            {
+                "schema": "copilot-extensions.vendor-pointer",
+                "version": 1,
+                "source": source or f"libs/{lib}",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
     )
     return d
 
@@ -180,6 +198,47 @@ def test_main_smoke(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys):
     assert code == 0
     out = capsys.readouterr().out
     assert "Materialized 1 artifact(s)" in out
+
+
+def test_build_overwrites_a_stale_existing_dest(tmp_path: Path):
+    source = tmp_path / "source"
+    _canonical_lib(source, "zdd", version="0.1.0-dev1", content="fresh\n")
+    (source / "marker.txt").write_text("v2\n", encoding="utf-8")
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    (dest / "stale-leftover.txt").write_text("old build\n", encoding="utf-8")
+
+    mm.build(dest, source_root=source)
+    assert not (dest / "stale-leftover.txt").exists()
+    assert (dest / "marker.txt").read_text() == "v2\n"
+
+
+def test_build_preserves_a_symlink_instead_of_dereferencing_its_content(tmp_path: Path):
+    source_root = tmp_path / "repo"
+    secret = tmp_path / "outside-repo-secret"
+    secret.mkdir()
+    (secret / "leaked.txt").write_text("do not leak\n", encoding="utf-8")
+    (source_root / "some-dir").mkdir(parents=True)
+    (source_root / "some-dir" / "a-link").symlink_to(secret, target_is_directory=True)
+    (source_root / "README.md").write_text("hello\n", encoding="utf-8")
+    dest = tmp_path / "dest"
+
+    mm.build(dest, source_root=source_root)
+
+    copied_link = dest / "some-dir" / "a-link"
+    assert copied_link.is_symlink(), "a-link must be preserved as a symlink, not dereferenced"
+    assert os.readlink(copied_link) == str(secret)
+
+
+def test_materialize_refuses_a_retired_directory_pointer_marker(tmp_path: Path):
+    root = tmp_path / "repo"
+    pointer_dir = _retired_pointer(root, "agent-bridge", "zdd")
+
+    log = mm.materialize(root, canonical_root=root)
+
+    assert any("retired directory-pointer kind still present" in line for line in log)
+    assert (pointer_dir / "VENDOR_POINTER.json").exists()
 
 
 def _uv_editable_consumer(

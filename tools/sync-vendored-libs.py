@@ -35,35 +35,25 @@ This tool closes that gap in three modes:
   NOT blocked merely because content differs when canonical is the newer
   side -- that is the normal, expected pre-materialize state.
 
-### DRY vendor pointers (the dev-branch form)
+### Legacy directory-pointer compatibility
 
-A plugin's vendored copy of a lib may, instead of carrying a real ``src/``,
-carry a single ``VENDOR_POINTER.json`` (``{"source": "libs/<lib>", ...}``) --
-this is the DRY *dev*-branch form the release-pipeline effort's promotion
-step exists to expand (validated end-to-end in a standalone trial clone; see
-the effort's Journal). A pointer copy is never a "real copy": its ``src/``
-(if any) is never this lib's real, verified-agreeing content, so it is
-excluded from copies-vs-copies agreement checks and from
-``--restore-canonical``'s "which copy is the truth" selection -- treating a
-pointer's own content as truth would silently **wipe canonical** (a real bug
-caught during that trial: converting a lib's copies to pointers and then
-running ``--restore-canonical`` blindly copied "no content" up into
-canonical). ``--materialize`` still fully handles pointer copies: it expands
-each one from canonical (writing real ``src/`` + version, then deleting the
-now-superseded pointer file) exactly like it refreshes a real copy.
-``src/`` is always refreshed for a pointer copy; ``tests/`` is refreshed
-too, but **only when the copy already carries one** -- a copy vendors
-``tests/`` from canonical as a deliberate, opt-in choice at
-``--pointerize`` time (some copies have none, e.g. a lib pointerized
-before this rule existed, or a consuming plugin whose own test runner
-never discovers nested ``libs/*/tests/`` anyway), and materialization must
-respect that choice rather than unilaterally introducing ``tests/`` a copy
-never had just because canonical happens to carry one. This differs from
-``check-vendored-libs-sync.py``'s own copies-vs-copies invariant (which
-only ever compares ``src/``, and still treats every copy's ``tests/`` as
-out of scope for *that* guard) -- the two tools intentionally diverge here:
-one guards drift between copies, the other refreshes a pointer's own
-vendored content from its single source of truth.
+Older checkouts or fixtures may still carry a ``VENDOR_POINTER.json`` beside a
+vendored lib copy. That shape is retired repo-wide: this tool no longer writes
+it, and ``tools/materialize_main.py`` / ``tools/preview_release.py`` no longer
+expand it during promotion or preview. ``sync-vendored-libs.py`` still
+recognizes the legacy form only so compatibility helpers such as
+``--restore-canonical``, ``--materialize``, and ``--uv-editable`` can reason
+about an already-existing pointer copy instead of treating it as a real source
+tree.
+
+A legacy pointer copy is never a "real copy": its ``src/`` (if any) is never
+this lib's real, verified-agreeing content, so it stays excluded from
+copies-vs-copies agreement checks and from ``--restore-canonical``'s "which
+copy is the truth" selection -- treating a pointer's own content as truth
+would silently **wipe canonical**. ``--materialize`` still knows how to
+refresh such a legacy copy in-place for compatibility purposes: it replaces
+the marker with real ``src/`` + version content from canonical, and refreshes
+``tests/`` only when the copy already carried its own copy of them.
 
 Two pointer *kinds* exist, both identified purely by ``VENDOR_POINTER.json``:
 
@@ -82,10 +72,8 @@ Two pointer *kinds* exist, both identified purely by ``VENDOR_POINTER.json``:
   real modules -- `uv pip install -e .`, `run-plugin-tests.py`, and CI's own
   test-runner job all keep working unmodified on `dev`, with zero copy-drift
   risk (there is nothing to keep in sync; editing canonical takes effect
-  immediately). `--materialize`/`materialize_main.py` (the real dev->main
-  promotion path) still expand it into a real byte-identical copy exactly
-  like the bare kind -- a marketplace-installed plugin ships alone, with no
-  sibling `libs/` directory for the stub to forward into.
+  immediately). This tool's legacy ``--materialize`` compatibility mode still
+  expands it into a real byte-identical copy exactly like the bare kind.
 
 A THIRD, distinct mechanism -- not a `VENDOR_POINTER.json` pointer at all --
 also exists: the **`uv`-editable canonical-reference form**

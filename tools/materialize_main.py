@@ -87,6 +87,13 @@ def find_file_pointers(root: Path) -> list[Path]:
     )
 
 
+def find_retired_directory_pointers(root: Path) -> list[Path]:
+    """Every retired directory-pointer marker still present under ``root``."""
+    return sorted(root.glob("plugins/*/libs/*/" + POINTER_NAME)) + sorted(
+        root.glob("worktree-manager/libs/*/" + POINTER_NAME)
+    )
+
+
 def materialize_uv_editable_ref_into(
     *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path,
     dest_root: Path | None = None,
@@ -473,11 +480,13 @@ def materialize_launch_wrapper_assets(dest: Path, *, canonical_root: Path) -> li
 
 
 def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
-    """Expand every pointer found under ``dest`` from ``canonical_root``.
+    """Materialize every still-live dev-only reference found under ``dest``.
 
     ``canonical_root`` is a parameter (not hardcoded to ``REPO``) so a test
     can point it at an isolated tree instead of the real checkout."""
     log = [
+        f"SKIP {pointer_path}: retired directory-pointer kind still present -- refusing"
+        for pointer_path in find_retired_directory_pointers(dest)
     ]
     log.extend(materialize_file_pointers(dest, canonical_root=canonical_root))
     log.extend(materialize_uv_editable_refs(dest, canonical_root=canonical_root))
