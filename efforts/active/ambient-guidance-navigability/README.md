@@ -886,6 +886,43 @@ _Pending._
     `test_hook_ipc.py`, `test_paired_carve.py`, `test_launch_project_
     scoping.py`, `test_git_ops.py`): 219 passed, 4 skipped. `tools/check-
     module-size.py` and `tools/check-docs-consistency.py` both clean.
+- **Review round 8 findings (PR #4809), both addressed in the same PR:**
+  - **Real cross-repo contamination gap in round 7's own identity-
+    verified fix:** `resolve_active_plugins()` aggregates every
+    agent-worktrees-registered project plus global settings, and its own
+    scope-precedence contract orders a project-local root ahead of the
+    global installed one for the same source. `_resolve_cli_script`'s
+    round-7 fix iterated `.active.values()` and took whichever root
+    `ActivePlugin.root`/`live_roots` reported first, with no regard for
+    *which* scope that root came from -- so a session in repo B could end
+    up executing repo A's project-scoped local dev override of
+    customizing-copilot, and multiple same-name marketplace identities
+    were picked by dictionary iteration order rather than failing closed.
+    Fixed: only the plugin's **global** activation scope
+    (`ActivePlugin.root_for_scope("global")`) is ever trusted now --
+    never any project-scoped override, regardless of which repo the
+    refresh runs for -- and resolution now requires **exactly one**
+    matching active-plugin entry to even consider a root, failing closed
+    (`None`) on zero or more than one match.
+  - **Real unbounded-resolution gap in round 7's own identity-verified
+    fix:** `resolve_active_plugins()` verifies every registered project
+    with its own pair of Git calls (each up to a 10s timeout) before
+    returning -- a step `_resolve_cli_script` performed with no bound of
+    its own, ahead of the already-bounded `push_timeout.run_bounded`
+    subprocess call, so a single slow or unreachable registered project
+    could blow the sessionStart hook's entire deadline before the render
+    step even started. Fixed: `_resolve_cli_script` now accepts an
+    optional `timeout`, running the resolution call on a daemon thread
+    and failing closed if it doesn't finish within that bound (never
+    blocking past it, and never treating an unfinished resolution as
+    success); `refresh_local_cache`'s own `timeout` is now split between
+    a capped `_RESOLUTION_TIMEOUT_S` (2.0s) for this step and whatever
+    remains for the render subprocess, so the function's total
+    worst-case cost still respects the caller's single `timeout` budget.
+  - Targeted suite (`test_local_cache_refresh.py`, `test_hook_ipc.py`,
+    `test_paired_carve.py`, `test_launch_project_scoping.py`,
+    `test_git_ops.py`): 222 passed, 4 skipped. `tools/check-module-
+    size.py` and `tools/check-docs-consistency.py` both clean.
 
 ### 2026-10-01 -- Phase 7 slice 4: the repo-wide catch-all static projection
 - Picked up the next unstarted Plan item (slice 3's steer): `customizing-

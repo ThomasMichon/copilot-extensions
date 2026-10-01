@@ -60,34 +60,77 @@ SESSIONSTART_MAX_TIMEOUT_S = 5.0
 # (see push_timeout.py) -- wall-clock on top of the subprocess timeout
 # itself that a deadline-derived budget must also reserve.
 _RUN_BOUNDED_CLEANUP_GRACE_S = 5.0
+# resolve_active_plugins() verifies every agent-worktrees-registered
+# project with its own pair of Git calls (each up to a 10s timeout) before
+# returning -- bound how long this module waits for that verification so a
+# single slow or unreachable registered project can't itself consume the
+# whole refresh's budget before the render subprocess even starts.
+_RESOLUTION_TIMEOUT_S = 2.0
+# The scope name resolve_active_plugins() uses for a plugin's machine-wide
+# (non-project-specific) activation -- see ActivePlugin.root_for_scope().
+_GLOBAL_SCOPE = "global"
 
 
-def _resolve_cli_script(home: Path) -> Path | None:
+def _resolve_cli_script(home: Path, *, timeout: float | None = None) -> Path | None:
     """Resolve customizing-copilot's ``render-local-cache`` CLI script
     through identity-verified active-plugin evidence, never a bare
     directory scan: a self-declared ``plugin.json`` name alone is not
     installation identity (``docs/patterns/marketplace-installation-
     cells.md``), so a stale or unrelated directory must never be trusted
-    to supply code this module goes on to execute. Returns ``None`` --
-    failing closed -- when customizing-copilot isn't resolved as an
-    active plugin, or its script isn't present at the reported root.
+    to supply code this module goes on to execute.
+
+    Only the plugin's **global** activation scope is ever trusted here --
+    never a project-scoped override, which `resolve_active_plugins()`
+    aggregates from every agent-worktrees-registered project and can
+    otherwise supply an unrelated project's locally-overridden copy of
+    customizing-copilot (a real cross-repo contamination risk: this
+    refresh must only ever run the one machine-wide install, regardless
+    of which repo it's invoked for). Returns ``None`` -- failing closed --
+    when customizing-copilot isn't resolved as an active plugin at that
+    scope, when more than one active plugin claims the name (an ambiguous
+    identity resolution picking one would be unsafe to trust), its script
+    isn't present at the reported root, or resolution itself doesn't
+    complete within ``timeout`` (when given).
     """
     try:
         from plugin_activation import resolve_active_plugins
     except Exception:
         return None
-    try:
-        report = resolve_active_plugins(home=home)
-    except Exception:
-        return None
+
+    if timeout is None:
+        try:
+            report = resolve_active_plugins(home=home)
+        except Exception:
+            return None
+    else:
+        import threading
+
+        outcome: list = [None, None]  # [report, exception]
+
+        def _resolve() -> None:
+            try:
+                outcome[0] = resolve_active_plugins(home=home)
+            except Exception as exc:  # noqa: BLE001 -- captured, re-raised never
+                outcome[1] = exc
+
+        thread = threading.Thread(target=_resolve, daemon=True)
+        thread.start()
+        thread.join(timeout)
+        if thread.is_alive() or outcome[1] is not None or outcome[0] is None:
+            return None
+        report = outcome[0]
+
+    candidate_roots: list[Path] = []
     for plugin in report.active.values():
         if plugin.name != _SIBLING_PLUGIN_NAME:
             continue
-        for live_root in plugin.live_roots:
-            script = live_root.root / _SIBLING_RELATIVE_SCRIPT
-            if script.is_file():
-                return script
-    return None
+        root = plugin.root_for_scope(_GLOBAL_SCOPE)
+        if root is not None:
+            candidate_roots.append(root)
+    if len(candidate_roots) != 1:
+        return None
+    script = candidate_roots[0] / _SIBLING_RELATIVE_SCRIPT
+    return script if script.is_file() else None
 
 
 def _resolve_own_agent_worktrees_command() -> str | None:
@@ -130,22 +173,28 @@ def refresh_local_cache(
     Call this at each worktree lifecycle boundary (create, resume,
     ``sessionStart``) -- never conditionally skip it on the caller's own
     error-handling grounds; let this function's own internal absorption
-    handle every failure mode. Invokes customizing-copilot's own
-    ``render-local-cache`` CLI as a subprocess, bounded by ``timeout``: a
-    hard, enforced ceiling on this call's own worst-case cost, which a
-    purely in-process call could not give the same guarantee for. Run via
+    handle every failure mode. ``timeout`` is the hard, enforced ceiling
+    on this call's **entire** cost, split between two bounded steps:
+    resolving the sibling's CLI script (capped at
+    ``_RESOLUTION_TIMEOUT_S``, since ``resolve_active_plugins()`` can
+    itself block on registered-project Git verification) and invoking it
+    as a subprocess for whatever of ``timeout`` remains. Run via
     ``push_timeout.run_bounded`` rather than a plain ``subprocess.run(
     timeout=...)``, which only terminates its direct child -- the CLI can
     itself spawn descendants (an ``agent-worktrees`` lookup, git probes),
     which a bare ``timeout=`` would leave running past a stall.
     ``run_bounded`` kills the whole process tree instead. A timeout (or
-    any other failure) simply means the refresh doesn't complete this
-    round -- never worse than not calling it at all.
+    any other failure) at either step simply means the refresh doesn't
+    complete this round -- never worse than not calling it at all.
     """
     home = home or Path.home()
     try:
-        script = _resolve_cli_script(home)
+        resolution_timeout = min(timeout, _RESOLUTION_TIMEOUT_S)
+        script = _resolve_cli_script(home, timeout=resolution_timeout)
         if script is None:
+            return
+        render_timeout = timeout - resolution_timeout
+        if render_timeout <= 0:
             return
         argv = [
             sys.executable,
@@ -161,7 +210,9 @@ def refresh_local_cache(
             argv += ["--agent-worktrees-path", agent_worktrees_command]
         from . import push_timeout
 
-        push_timeout.run_bounded(argv, cwd=None, env=dict(os.environ), timeout=timeout)
+        push_timeout.run_bounded(
+            argv, cwd=None, env=dict(os.environ), timeout=render_timeout
+        )
     except Exception:
         pass
 

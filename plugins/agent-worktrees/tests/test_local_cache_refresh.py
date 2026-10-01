@@ -29,7 +29,13 @@ class TestResolveCliScript:
     def test_returns_none_when_not_installed(self, tmp_path: Path) -> None:
         assert lcr._resolve_cli_script(tmp_path) is None
 
-    def test_finds_the_script_at_an_identity_verified_active_root(
+    def _fake_plugin(self, name: str, *, global_root: Path | None = None) -> SimpleNamespace:
+        def _root_for_scope(scope: str) -> Path | None:
+            return global_root if scope == "global" and global_root is not None else None
+
+        return SimpleNamespace(name=name, root_for_scope=_root_for_scope)
+
+    def test_finds_the_script_at_an_identity_verified_global_root(
         self, tmp_path: Path, monkeypatch
     ) -> None:
         plugin_root = tmp_path / "customizing-copilot"
@@ -40,10 +46,7 @@ class TestResolveCliScript:
         script = scripts_dir / "manage-instruction-projections.py"
         script.write_text("", encoding="utf-8")
 
-        fake_plugin = SimpleNamespace(
-            name="customizing-copilot",
-            live_roots=[SimpleNamespace(root=plugin_root)],
-        )
+        fake_plugin = self._fake_plugin("customizing-copilot", global_root=plugin_root)
         fake_report = SimpleNamespace(active={"customizing-copilot@local": fake_plugin})
         monkeypatch.setattr(
             "plugin_activation.resolve_active_plugins", lambda **k: fake_report
@@ -54,10 +57,50 @@ class TestResolveCliScript:
     def test_ignores_an_active_plugin_with_a_different_name(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        fake_plugin = SimpleNamespace(
-            name="some-other-plugin", live_roots=[SimpleNamespace(root=tmp_path)]
-        )
+        fake_plugin = self._fake_plugin("some-other-plugin", global_root=tmp_path)
         fake_report = SimpleNamespace(active={"some-other-plugin@local": fake_plugin})
+        monkeypatch.setattr(
+            "plugin_activation.resolve_active_plugins", lambda **k: fake_report
+        )
+
+        assert lcr._resolve_cli_script(tmp_path) is None
+
+    def test_ignores_a_project_scoped_override_never_trusting_non_global_roots(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """A matching-named plugin whose live roots are ONLY project-
+        scoped (an agent-worktrees-registered project's local dev
+        override of customizing-copilot, never this machine's own global
+        install) must never be trusted -- a session in an unrelated repo
+        must never execute that project's own local content."""
+        fake_plugin = SimpleNamespace(
+            name="customizing-copilot", root_for_scope=lambda scope: None,
+        )
+        fake_report = SimpleNamespace(active={"customizing-copilot@local": fake_plugin})
+        monkeypatch.setattr(
+            "plugin_activation.resolve_active_plugins", lambda **k: fake_report
+        )
+
+        assert lcr._resolve_cli_script(tmp_path) is None
+
+    def test_fails_closed_when_multiple_active_plugins_share_the_name(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Two distinct active-plugin entries both claiming the expected
+        name (different marketplace identities) must never be resolved by
+        arbitrary iteration order -- an ambiguous identity is refused."""
+        root_a = tmp_path / "a"
+        root_b = tmp_path / "b"
+        fake_report = SimpleNamespace(
+            active={
+                "customizing-copilot@marketplace-a": self._fake_plugin(
+                    "customizing-copilot", global_root=root_a
+                ),
+                "customizing-copilot@marketplace-b": self._fake_plugin(
+                    "customizing-copilot", global_root=root_b
+                ),
+            }
+        )
         monkeypatch.setattr(
             "plugin_activation.resolve_active_plugins", lambda **k: fake_report
         )
@@ -70,9 +113,7 @@ class TestResolveCliScript:
         """An active-plugin match whose reported root doesn't actually
         contain the expected script (a stale or mismatched report) must
         never fall back to trusting anything else -- fail closed."""
-        fake_plugin = SimpleNamespace(
-            name="customizing-copilot", live_roots=[SimpleNamespace(root=tmp_path)]
-        )
+        fake_plugin = self._fake_plugin("customizing-copilot", global_root=tmp_path)
         fake_report = SimpleNamespace(active={"customizing-copilot@local": fake_plugin})
         monkeypatch.setattr(
             "plugin_activation.resolve_active_plugins", lambda **k: fake_report
@@ -89,6 +130,28 @@ class TestResolveCliScript:
         monkeypatch.setattr("plugin_activation.resolve_active_plugins", _boom)
 
         assert lcr._resolve_cli_script(tmp_path) is None
+
+    def test_fails_closed_when_resolution_exceeds_the_given_timeout(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """``resolve_active_plugins()`` can itself block on registered-
+        project Git verification; a bound that's exceeded must fail
+        closed rather than wait indefinitely for a slow or unreachable
+        registered project."""
+        import threading
+
+        release = threading.Event()
+
+        def _slow(**k):
+            release.wait(10)
+            return SimpleNamespace(active={})
+
+        monkeypatch.setattr("plugin_activation.resolve_active_plugins", _slow)
+
+        try:
+            assert lcr._resolve_cli_script(tmp_path, timeout=0.1) is None
+        finally:
+            release.set()
 
 
 class TestResolveOwnAgentWorktreesCommand:
@@ -163,7 +226,7 @@ class TestRefreshLocalCache:
     ) -> None:
         script = tmp_path / "manage-instruction-projections.py"
         script.write_text("", encoding="utf-8")
-        monkeypatch.setattr(lcr, "_resolve_cli_script", lambda home: script)
+        monkeypatch.setattr(lcr, "_resolve_cli_script", lambda home, **k: script)
 
         def _boom(*a, **k):
             raise RuntimeError("boom")
@@ -181,7 +244,7 @@ class TestRefreshLocalCache:
     ) -> None:
         script = tmp_path / "manage-instruction-projections.py"
         script.write_text("", encoding="utf-8")
-        monkeypatch.setattr(lcr, "_resolve_cli_script", lambda home: script)
+        monkeypatch.setattr(lcr, "_resolve_cli_script", lambda home, **k: script)
 
         import subprocess as subprocess_mod
 
@@ -201,7 +264,7 @@ class TestRefreshLocalCache:
     ) -> None:
         script = tmp_path / "manage-instruction-projections.py"
         script.write_text("", encoding="utf-8")
-        monkeypatch.setattr(lcr, "_resolve_cli_script", lambda home: script)
+        monkeypatch.setattr(lcr, "_resolve_cli_script", lambda home, **k: script)
         monkeypatch.setattr(
             lcr, "_resolve_own_agent_worktrees_command", lambda: "/bin/agent-worktrees"
         )
@@ -229,14 +292,14 @@ class TestRefreshLocalCache:
         ]
         assert argv[6] == str(tmp_path / ".copilot" / "installed-plugins")
         assert argv[7:] == ["--agent-worktrees-path", "/bin/agent-worktrees"]
-        assert kwargs["timeout"] == 12.0
+        assert kwargs["timeout"] == 12.0 - lcr._RESOLUTION_TIMEOUT_S
 
     def test_omits_agent_worktrees_path_when_unresolved(
         self, tmp_path: Path, monkeypatch
     ) -> None:
         script = tmp_path / "manage-instruction-projections.py"
         script.write_text("", encoding="utf-8")
-        monkeypatch.setattr(lcr, "_resolve_cli_script", lambda home: script)
+        monkeypatch.setattr(lcr, "_resolve_cli_script", lambda home, **k: script)
         monkeypatch.setattr(lcr, "_resolve_own_agent_worktrees_command", lambda: None)
 
         calls = []
@@ -302,7 +365,7 @@ class TestRefreshLocalCache:
             f"open({str(ready)!r}, 'w').write(str(p.pid))\n"
             f"time.sleep(60)\n"
         )
-        monkeypatch.setattr(lcr, "_resolve_cli_script", lambda home: script)
+        monkeypatch.setattr(lcr, "_resolve_cli_script", lambda home, **k: script)
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -311,7 +374,11 @@ class TestRefreshLocalCache:
         grandchild_start_time: str | None = None
         try:
             # Must not raise -- refresh_local_cache absorbs the timeout.
-            lcr.refresh_local_cache(repo, home=tmp_path, timeout=1.0)
+            # timeout is split between the (mocked, instant) resolution
+            # step and the render subprocess -- see _RESOLUTION_TIMEOUT_S.
+            lcr.refresh_local_cache(
+                repo, home=tmp_path, timeout=lcr._RESOLUTION_TIMEOUT_S + 1.0
+            )
 
             deadline = time.monotonic() + 10
             while (
