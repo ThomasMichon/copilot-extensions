@@ -395,3 +395,19 @@ _Pending._
 - Remaining: `FORBIDDEN_IDS_WORK` provisioning is still the operator's
   work-context harness agent's own task, unchanged from the 2026-09-27
   entry above.
+
+### 2026-09-30 - `FORBIDDEN_IDS_WORK` now actively being built by the work-context harness agent
+
+- Operator confirmed a work-context harness agent is actively building the
+  `FORBIDDEN_IDS_WORK` denylist and will push it to the repository secret the
+  same way `FORBIDDEN_IDS_FACILITY` landed. This is genuinely out of reach
+  for this repo's own facility/public-repo session: that harness isn't part
+  of any reachable machine mesh or agent-bridge roster here, so it is tracked
+  as an external, in-flight handoff rather than driven from this side.
+- With this confirmation, the facility/public-repo side of this effort is
+  fully complete -- every other Plan and Validation Plan item is already
+  checked (see Phase 0-4 and the Validation Plan above). The only remaining
+  open item is `FORBIDDEN_IDS_WORK` provisioning itself, owned entirely by
+  that external agent; this effort stays **Active** (not yet `Done`) until
+  that secret lands and the Validation Plan's denylist-backed-scan item can
+  be reconfirmed with both secrets present.
