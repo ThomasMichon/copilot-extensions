@@ -103,6 +103,41 @@ def test_launch_never_overrides_explicit_model_flag(tmp_path, monkeypatch):
     assert cmd[cmd.index("--model") + 1] == "gpt-5.4"
 
 
+def test_launch_never_overrides_flag_embedded_in_configured_template(tmp_path, monkeypatch):
+    # A repo's configured `launch` template may already bake in a flag
+    # directly (not via copilot_args/profile args) -- that must still win
+    # over the ambient settings.json default, and must not be duplicated.
+    home = tmp_path / "home"
+    (home / ".copilot").mkdir(parents=True)
+    (home / ".copilot" / "settings.json").write_text(
+        json.dumps({"model": "claude-sonnet-5"}), encoding="utf-8"
+    )
+    monkeypatch.setattr(launch_prefs.Path, "home", classmethod(lambda cls: home))
+    config = _config(launch={"linux": ["copilot", "--model", "gpt-5.4"]})
+    cmd = m._build_launch_cmd(config, _args([]), "/w/wt")
+    assert cmd.count("--model") == 1
+    assert cmd[cmd.index("--model") + 1] == "gpt-5.4"
+
+
+def test_launch_skips_preference_flags_for_acp_sessions(tmp_path, monkeypatch):
+    # Copilot CLI ignores these flags in ACP mode; agent-bridge's ACP client
+    # carries model/effort through its own configuration path instead, so
+    # injecting them here would be dead weight at best.
+    home = tmp_path / "home"
+    (home / ".copilot").mkdir(parents=True)
+    (home / ".copilot" / "settings.json").write_text(
+        json.dumps(
+            {"model": "claude-sonnet-5", "effortLevel": "medium", "contextTier": "long_context"}
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(launch_prefs.Path, "home", classmethod(lambda cls: home))
+    cmd = m._build_launch_cmd(_config(), _args(["--acp", "--stdio"]), "/w/wt")
+    assert "--model" not in cmd
+    assert "--reasoning-effort" not in cmd
+    assert "--context" not in cmd
+
+
 def test_existing_all_perm_flag_not_duplicated():
     # --allow-all-tools, --allow-all, and --yolo are each an all-permissions
     # stance the caller already expressed, so we must not append our default

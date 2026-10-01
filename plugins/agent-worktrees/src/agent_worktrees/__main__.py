@@ -2360,8 +2360,14 @@ def _build_launch_cmd(
     # observed to ignore the persisted settings values at startup, so every
     # worktree create/resume launch must carry the facility's current
     # preference explicitly rather than rely on the settings file alone.
-    # Never overrides an explicit flag the caller already supplied.
-    cmd.extend(resolve_launch_pref_flags(passthrough))
+    # Never overrides a flag already present ANYWHERE in the command so far
+    # (a configured `launch` template may already embed one, not just
+    # `copilot_args`/profile args). Skipped for ACP sessions: Copilot ignores
+    # these CLI flags in ACP mode, and agent-bridge's ACP client carries
+    # model/effort through its own configuration path there instead (context
+    # tier is not yet carried through ACP -- a separate, tracked gap).
+    if not is_acp:
+        cmd.extend(resolve_launch_pref_flags(cmd))
 
     # Every resolved session command passes through one installed wrapper.
     # This gives optional sibling integrations a single pre-exec seam even for

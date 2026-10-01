@@ -30,6 +30,41 @@ def test_malformed_settings_file_yields_no_flags(tmp_path, monkeypatch):
     assert prefs.resolve_launch_pref_flags([]) == []
 
 
+def test_line_comments_in_settings_file_are_tolerated(tmp_path, monkeypatch):
+    # Copilot CLI's own settings.json may be JSON-with-comments; a plain
+    # json.loads would reject the whole file and silently drop every
+    # preference, so this must not regress.
+    home = tmp_path / "home"
+    (home / ".copilot").mkdir(parents=True)
+    (home / ".copilot" / "settings.json").write_text(
+        '{\n'
+        '  // facility default\n'
+        '  "model": "claude-sonnet-5", // trailing note\n'
+        '  "effortLevel": "medium"\n'
+        '}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(prefs.Path, "home", classmethod(lambda cls: home))
+    assert prefs.resolve_launch_pref_flags([]) == [
+        "--model", "claude-sonnet-5",
+        "--reasoning-effort", "medium",
+    ]
+
+
+def test_double_slash_inside_a_string_value_is_preserved(tmp_path, monkeypatch):
+    # _strip_line_comments must not treat "//" inside a quoted string as a
+    # comment marker -- e.g. a URL-shaped value.
+    home = tmp_path / "home"
+    (home / ".copilot").mkdir(parents=True)
+    (home / ".copilot" / "settings.json").write_text(
+        '{"model": "https://example.test//model"}', encoding="utf-8"
+    )
+    monkeypatch.setattr(prefs.Path, "home", classmethod(lambda cls: home))
+    assert prefs.resolve_launch_pref_flags([]) == [
+        "--model", "https://example.test//model",
+    ]
+
+
 def test_full_preference_translates_to_cli_flags(tmp_path, monkeypatch):
     _write_settings(
         tmp_path,
