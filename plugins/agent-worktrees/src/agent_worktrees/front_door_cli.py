@@ -818,9 +818,9 @@ def cmd_manager_install_trigger(project: str | None) -> int:
     with output.stdout_to_stderr():
         output.header(f"{name} -- interactive mode needs Worktree Manager")
     print(
-        "No usable Worktree Manager is installed yet. That's an expected "
-        "first-run state on a machine that only has the plugin so far, not a "
-        "broken launch.",
+        "No usable Worktree Manager is available right now. On a first run "
+        "that's expected; if this machine already had one, update or repair "
+        "it with the bootstrap below.",
         file=out,
     )
     print(
