@@ -77,7 +77,6 @@ ALL_STATES: frozenset[str] = frozenset(
         Status.SUBMITTED,
         Status.COMPLETED,
         Status.ABANDONED,
-        Status.DEAD_LETTER,
     }
 )
 
@@ -157,9 +156,9 @@ TRANSITIONS: tuple[Transition, ...] = (
         implemented_by="TaskQueue.yield_task (worker-initiated recoverable-snag release)",
     ),
     Transition(
-        name="dead_letter_held",
+        name="abandon_held_exhausted",
         from_states=Status.HELD,
-        to_state=Status.DEAD_LETTER,
+        to_state=Status.ABANDONED,
         recovery_mode=RecoveryMode.SELF_REPAIR,
         implemented_by="TaskQueue liveness GC (attempt cap exceeded)",
     ),

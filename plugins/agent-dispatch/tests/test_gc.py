@@ -339,13 +339,13 @@ def test_reconcile_fence_no_ops_when_owner_reclaimed_midpass(q):
     assert q.get(t.id).generation != gen_before
 
 
-def test_reconcile_dead_letters_past_attempt_cap(q):
+def test_reconcile_abandons_past_attempt_cap_and_clears_owner(q):
     t = q.create("poison", now=1000.0)
     reservation, _ = q.reserve_spawn(t.id, now=1000.0)
     q.record_spawn(reservation.key, session_handle="local-body:S1", now=1000.0)
     for i in range(10):
         st = q.get(t.id)
-        if st.status == Status.DEAD_LETTER:
+        if st.status == Status.ABANDONED:
             break
         if st.status in (Status.QUEUED, Status.PROPOSED):
             q.claim_one("m/wt", machine="m", worktree="wt", task_id=t.id, now=1100.0 + i)
@@ -353,7 +353,11 @@ def test_reconcile_dead_letters_past_attempt_cap(q):
         q.reconcile_liveness(
             headless_local_verdict=lambda sid: "gone", max_attempts=3, now=1200.0 + i
         )
-    assert q.get(t.id).status == Status.DEAD_LETTER
+    task = q.get(t.id)
+    assert task.status == Status.ABANDONED
+    assert task.owner is None
+    assert task.owner_session_id is None
+    assert task.completed_at is not None
 
 
 def test_reconcile_ignores_unheld_tasks(q):
