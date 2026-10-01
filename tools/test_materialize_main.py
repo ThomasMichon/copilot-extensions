@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -811,6 +812,65 @@ def _uv_editable_consumer(
     return d
 
 
+def _rewrite_to_local_path(pyproject: Path, *, name: str, raw_path: str, lib: str) -> None:
+    text = pyproject.read_text(encoding="utf-8")
+    pattern = re.compile(
+        r'^([ \t]*(?:"' + re.escape(name) + r'"|\'' + re.escape(name) + r"'|" +
+        re.escape(name) + r')\s*=\s*)\{\s*(?:'
+        r'path\s*=\s*(?:"' + re.escape(raw_path) + r'"|\'' + re.escape(raw_path) + r"')"
+        r'\s*,\s*editable\s*=\s*true'
+        r'|editable\s*=\s*true\s*,\s*path\s*=\s*(?:"' + re.escape(raw_path) + r'"|\'' +
+        re.escape(raw_path) + r"'))\s*\}[ \t]*(?:#.*)?$",
+        re.MULTILINE,
+    )
+    text, count = pattern.subn(
+        lambda m: f'{m.group(1)}{{ path = "libs/{lib}" }}',
+        text,
+        count=1,
+    )
+    assert count == 1, f"{pyproject}: missing top-level entry for {name}"
+    pyproject.write_text(text, encoding="utf-8")
+
+
+def _rewrite_nested_path(pyproject: Path, *, name: str, raw_path: str) -> None:
+    text = pyproject.read_text(encoding="utf-8")
+    pattern = re.compile(
+        r'^([ \t]*(?:"' + re.escape(name) + r'"|\'' + re.escape(name) + r"'|" +
+        re.escape(name) + r')\s*=\s*)\{\s*(?:'
+        r'path\s*=\s*(?:"' + re.escape(raw_path) + r'"|\'' + re.escape(raw_path) + r"')"
+        r'\s*,\s*editable\s*=\s*true'
+        r'|editable\s*=\s*true\s*,\s*path\s*=\s*(?:"' + re.escape(raw_path) + r'"|\'' +
+        re.escape(raw_path) + r"'))\s*\}[ \t]*(?:#.*)?$",
+        re.MULTILINE,
+    )
+    text, count = pattern.subn(
+        lambda m: f'{m.group(1)}{{ path = "{raw_path}" }}',
+        text,
+        count=1,
+    )
+    assert count == 1, f"{pyproject}: missing nested entry for {name}"
+    pyproject.write_text(text, encoding="utf-8")
+
+
+def _build_expected_vendored_tree(dest_lib: Path, *, canonical_root: Path) -> None:
+    """Independently reconstruct the vendored tree from current canonical libs.
+
+    This intentionally does NOT call the production nested materializer: it
+    copies the canonical lib, rewrites nested source entries itself, and recurses
+    over nested canonical sibling deps so the expected manifests are an
+    independent oracle.
+    """
+
+    refs = uer.find_uv_editable_refs(dest_lib)
+    for name, raw_path, lib, editable in refs:
+        assert editable, f"{dest_lib}: expected editable nested ref for {name}"
+        nested_dest = dest_lib.parent.parent / "libs" / lib
+        if not nested_dest.exists():
+            shutil.copytree(canonical_root / "libs" / lib, nested_dest, ignore=mm._ignore)
+            _build_expected_vendored_tree(nested_dest, canonical_root=canonical_root)
+        _rewrite_nested_path(dest_lib / "pyproject.toml", name=name, raw_path=raw_path)
+
+
 def test_find_uv_editable_refs_only_returns_escaping_entries_regardless_of_editable(tmp_path: Path):
     root = tmp_path / "repo"
     consumer = _uv_editable_consumer(
@@ -1121,6 +1181,11 @@ def test_real_repo_uv_editable_materialization_matches_current_canonical_trees(
             pyproject_text,
             encoding="utf-8",
         )
+        for name, raw_path, lib, editable in refs:
+            assert editable, f"{consumer}: expected editable ref for {name}"
+            _rewrite_to_local_path(
+                expected_consumer_dir / "pyproject.toml", name=name, raw_path=raw_path, lib=lib
+            )
 
     log = mm.materialize(actual_root, canonical_root=repo)
     skips = [line for line in log if line.startswith("SKIP")]
@@ -1128,17 +1193,14 @@ def test_real_repo_uv_editable_materialization_matches_current_canonical_trees(
     for consumer, _consumer_dir, refs in discovered:
         actual_consumer_dir = _consumer_snapshot_dir(actual_root, consumer)
         expected_consumer_dir = _consumer_snapshot_dir(tmp_path / "expected", consumer)
+        assert (actual_consumer_dir / "pyproject.toml").read_text(encoding="utf-8") == (
+            expected_consumer_dir / "pyproject.toml"
+        ).read_text(encoding="utf-8")
         for _name, _raw_path, lib, _editable in refs:
             expected_lib = expected_consumer_dir / "libs" / lib
             if not expected_lib.exists():
                 shutil.copytree(repo / "libs" / lib, expected_lib, ignore=mm._ignore)
-            nested_log, _ = mm.nuer.materialize_nested_uv_editable_refs(
-                expected_lib,
-                canonical_root=repo,
-                dest_root=expected_consumer_dir,
-            )
-            nested_skips = [line for line in nested_log if line.startswith("SKIP")]
-            assert not nested_skips, f"{consumer}: {'; '.join(nested_skips)}"
+                _build_expected_vendored_tree(expected_lib, canonical_root=repo)
 
             materialized = actual_consumer_dir / "libs" / lib
             assert materialized.is_dir(), f"{consumer}: libs/{lib} was not materialized"
