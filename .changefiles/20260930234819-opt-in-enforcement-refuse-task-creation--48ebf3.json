@@ -1,0 +1,9 @@
+{
+  "comment": "Opt-in enforcement: refuse task creation against a repo lane with no registered 'repo' pointer (AGENT_DISPATCH_ENFORCE_REGISTERED_REPOS=1)",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

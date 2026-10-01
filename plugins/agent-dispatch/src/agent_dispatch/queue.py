@@ -98,6 +98,7 @@ from .queue_records import (  # noqa: F401 -- re-exported for existing call site
     Status,
     TaskError,
 )
+from .queue_agent_backed_repo import AgentBackedRepoMixin
 from .queue_routing_assignments import RoutingAssignmentMixin
 from .queue_schedule_registry import ScheduleRegistrationMixin
 from .queue_spawn_reservations import (  # noqa: F401 -- re-exported for existing call sites/tests
@@ -136,6 +137,7 @@ class TaskQueue(
     SpawnReservationMixin,
     ProducerFenceMixin,
     QueueStorageMixin,
+    AgentBackedRepoMixin,
     QueueClaimQueriesMixin,
     QueueLifecycleMixin,
     QueueSuspendMixin,

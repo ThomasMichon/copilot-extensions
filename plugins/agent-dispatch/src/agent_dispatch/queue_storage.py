@@ -799,6 +799,7 @@ class QueueStorageMixin:
                         },
                     )
                 if accepted is None:
+                    self._require_agent_backed_repo(canonical_repo)
                     if supersede_exclusive_key:
                         superseded = conn.execute(
                             "SELECT id, status FROM tasks "

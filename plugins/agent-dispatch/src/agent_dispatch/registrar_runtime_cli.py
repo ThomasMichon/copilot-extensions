@@ -162,7 +162,13 @@ def _cmd_registrar(args: argparse.Namespace) -> int:
                 print("  Cleanup is report-only; no --fix operation is available.")
             return 1 if failed else 0
         if args.registrar_command == "add-pointer":
-            pointer = rd.add_pointer(args.name, args.location, kind=args.kind, owner=args.owner)
+            kwargs: dict[str, Any] = {
+                "kind": args.kind,
+                "aliases": getattr(args, "aliases", None),
+            }
+            if args.owner is not None:
+                kwargs["owner"] = args.owner
+            pointer = rd.add_pointer(args.name, args.location, **kwargs)
             return _core()._emit(pointer.to_dict())
         if args.registrar_command == "list":
             return _core()._emit([p.to_dict() for p in rd.load_pointers()])
