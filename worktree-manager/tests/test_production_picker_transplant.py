@@ -507,8 +507,10 @@ def test_manager_acts_on_production_picker_new_decision_with_no_seed_prompt(
     monkeypatch,
 ):
     """An absent/blank seed_prompt (Bare, or a skipped/blank Launch) must
-    translate to None, not an empty string, through to LaunchRequest --
-    engine_client.resolve_launch_plan only forwards --seed on a truthy value."""
+    translate to None, not an empty string, through to LaunchRequest. This
+    only verifies that normalization -- `_resolve_for()` does not yet pass
+    `seed_prompt` on to `engine_client.resolve_launch_plan()` at all (see
+    this effort's own README: that wiring is still an incomplete seam)."""
     monkeypatch.setattr(
         runner,
         "run",

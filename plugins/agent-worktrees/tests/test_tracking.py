@@ -3355,6 +3355,43 @@ class TestSystemWorktreeKind:
         raw = (tmp_path / "wt-seeded.yaml").read_text(encoding="utf-8")
         assert "pending_seed" not in raw
 
+    def test_stale_full_record_writer_cannot_resurrect_a_delivered_seed(
+        self, tmp_path: Path,
+    ):
+        """A process that loaded the record BEFORE a claim (e.g. to update
+        an unrelated field like `summary`) and saves its own stale
+        in-memory snapshot AFTER the claim must not resurrect the
+        already-delivered seed -- `_save_record_unlocked` merges
+        `pending_seed` the same way it already does for
+        `effort_revision`/`lifecycle_revision`: the ON-DISK
+        `pending_seed_revision` wins when it is newer."""
+        path = tmp_path / "wt-stale.yaml"
+        rec = create_new_record(
+            "wt-stale", "worktree/wt-stale", "/tmp/wt-stale", "test-repo",
+            "test", "wsl", tmp_path, pending_seed="do the thing",
+        )
+        assert rec.pending_seed_revision == 0
+
+        # Another process loads the SAME on-disk state before the claim.
+        stale = load_record(path)
+        assert stale.pending_seed == "do the thing"
+
+        # The claim happens (clear + bump revision) and is saved first.
+        rec.pending_seed = None
+        rec.pending_seed_revision += 1
+        save_record(rec, path)
+        assert load_record(path).pending_seed is None
+
+        # The stale writer's later save (e.g. after bumping `summary`,
+        # unaware of the claim) must not bring the seed back.
+        stale.summary = "unrelated update"
+        save_record(stale, path)
+
+        final = load_record(path)
+        assert final.pending_seed is None
+        assert final.summary == "unrelated update"
+        assert final.pending_seed_revision == 1
+
     def test_create_new_record_bound_agent_whitespace_normalizes_to_none(
         self, tmp_path: Path,
     ):

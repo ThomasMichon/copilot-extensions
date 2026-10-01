@@ -348,7 +348,19 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     except _ResolveEarlyExit as exc:
         return exc.exit_code
 
-    if state.use_new and state.requested_machine and getattr(state.args, "seed", None):
+    requested_seed = getattr(state.args, "seed", None)
+    if requested_seed and not state.use_new:
+        # --seed is documented as valid only with --new (it persists onto
+        # a NEWLY created worktree's record) -- without it, --worktree-id/
+        # --base resolve calls would otherwise silently succeed and
+        # discard the value.
+        message = "--seed is only valid with --new."
+        if state.use_json:
+            return _json_error(message)
+        output.err(message)
+        return 2
+
+    if state.use_new and state.requested_machine and requested_seed:
         # Validated here, before the JSON/non-JSON split: the non-JSON
         # dispatcher checks state.use_new before state.requested_machine
         # (below) and would otherwise silently create a LOCAL seeded

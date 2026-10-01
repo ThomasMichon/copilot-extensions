@@ -797,3 +797,68 @@ Tests: full targeted regression set (`tracking`, `tracking_write`,
 `embody`, `handoff_cutover`, `codename_cli`, `launch_preflight`,
 `owner_inheritance`, `paired_carve`, `resolve_cli_seed_guard`): 483
 passed. Module-size gate: OK.
+
+### 2026-09-30 — Fourth and fifth review rounds: a real non-JSON gap, a
+### merge-safety hole, and documentation hygiene
+Two more rounds, five more genuine findings (still zero repeats):
+
+**Round 4:**
+- **`resolve --new --machine X --seed Y` (no `--json`) still slipped
+  through.** The rejection only lived in `_resolve_json_mode`; the
+  non-JSON dispatcher in `cmd_resolve` checks `state.use_new` BEFORE
+  `state.requested_machine`, so it would silently create a LOCAL seeded
+  worktree instead of honoring (or rejecting) `--machine` at all. Moved
+  the validation up into `cmd_resolve` itself, before the JSON/non-JSON
+  split, so both paths reject consistently; rewrote the guard tests to
+  exercise `cmd_resolve` end-to-end (both JSON and non-JSON) instead of
+  only the JSON-mode internal function.
+- **This effort's own Plan item 4 still read like the superseded design**
+  (the Picker-specific launch-script argument chain) with a redesign note
+  bolted on top, leaving the "actionable" text inconsistent with both the
+  implementation and the Journal. Rewrote the item to state the CURRENT
+  design directly (persist at creation, deliver via embody on first
+  attach, two still-incomplete seams named explicitly); the design-history
+  narrative stays here, in the Journal, where it belongs.
+- **`pending_seed.py`'s and `field_widgets.py`'s module docstrings
+  described their own extraction history** ("mechanical extraction...
+  moved verbatim") instead of their lasting responsibility. Reworded both
+  to be timeless; the history is this Journal's job.
+
+**Round 5:**
+- **The claim-once guarantee had a merge-safety hole:** any OTHER process
+  that loaded the SAME record before a claim (e.g. to bump an unrelated
+  field like `summary`) and saved its own stale in-memory snapshot AFTER
+  the claim would silently resurrect the already-delivered seed -- nothing
+  in `_save_record_unlocked` knew `pending_seed` needed protecting the way
+  `effort_revision`/`lifecycle_revision` already are. Fixed the same way:
+  a new monotonic `WorktreeRecord.pending_seed_revision` field, bumped on
+  every claim/restore, with a merge rule in `_save_record_unlocked` --
+  "take the on-disk value when its revision is newer" -- so a stale save
+  can never roll a delivered/cleared seed backward. Added
+  `test_stale_full_record_writer_cannot_resurrect_a_delivered_seed`
+  (real `create_new_record`/`load_record`/`save_record`, not fakes) to
+  prove it.
+- **`restore_pending_seed` gave up permanently after one 2s sidecar
+  timeout**, silently losing a prompt that had ALREADY been claimed for a
+  delivery that then failed -- strictly worse than `claim_pending_seed`
+  giving up (which loses nothing, since the claim itself never happened).
+  Added a bounded retry (3 attempts, 1s apart) before accepting the loss.
+- **`--seed` was only rejected alongside a remote `--machine` target.**
+  `resolve --json --worktree-id <id> --seed ...` and `--base --seed ...`
+  both silently succeeded while discarding the prompt (it's only
+  meaningful with `--new`, which persists it onto a NEW record). Added a
+  blanket `requested_seed and not state.use_new` rejection, ahead of the
+  (now narrower) remote-specific one.
+- **A test docstring overstated the current wiring**, claiming
+  `engine_client.resolve_launch_plan` already forwards `--seed` on a
+  truthy value -- it doesn't yet (that's the still-incomplete seam this
+  whole effort keeps naming). Reworded the docstring to say only what the
+  test actually verifies (decision-dict -> `LaunchRequest` normalization),
+  and to point at the real gap instead of implying it's closed.
+
+Tests: full targeted regression set re-run clean (315 + 170 passed across
+two batches, covering `tracking`/`tracking_write`/`embody`/
+`resolve_cli_seed_guard` plus `handoff_cutover`/`codename_cli`/
+`launch_preflight`/`owner_inheritance`/`paired_carve`). `tracking.py`'s
+soft baseline widened again (4090 -> 4105) for the revision-merge fix.
+Module-size gate: OK.

@@ -6,6 +6,7 @@ whichever path first attaches a live Copilot session to that worktree.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from . import tracking
@@ -27,6 +28,7 @@ def claim_pending_seed(path: Path) -> str | None:
             seed = getattr(record, "pending_seed", None)
             if seed:
                 record.pending_seed = None
+                record.pending_seed_revision = getattr(record, "pending_seed_revision", 0) + 1
                 tracking.save_record(record, path)
             return seed or None
     except TimeoutError:
@@ -34,15 +36,25 @@ def claim_pending_seed(path: Path) -> str | None:
 
 
 def restore_pending_seed(path: Path, seed: str) -> None:
-    """Roll back an unconfirmed claim so a later attach can retry."""
-    try:
-        with tracking._RecordLock(path, require_sidecar=True):
-            try:
-                record = tracking.load_record(path)
-            except Exception:
+    """Roll back an unconfirmed claim so a later attach can retry.
+
+    Unlike ``claim_pending_seed`` (where giving up on contention loses
+    nothing -- the claim simply never happened), giving up here would
+    permanently lose a prompt that was ALREADY claimed for a delivery that
+    then failed. Retries the sidecar lock a few times before accepting
+    that loss, rather than abandoning it after one 2s timeout."""
+    for attempt in range(3):
+        try:
+            with tracking._RecordLock(path, require_sidecar=True):
+                try:
+                    record = tracking.load_record(path)
+                except Exception:
+                    return
+                if not record.pending_seed:
+                    record.pending_seed = seed
+                    record.pending_seed_revision = getattr(record, "pending_seed_revision", 0) + 1
+                    tracking.save_record(record, path)
                 return
-            if not record.pending_seed:
-                record.pending_seed = seed
-                tracking.save_record(record, path)
-    except TimeoutError:
-        pass
+        except TimeoutError:
+            if attempt < 2:
+                time.sleep(1.0)
