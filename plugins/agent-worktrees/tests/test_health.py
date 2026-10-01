@@ -340,6 +340,24 @@ class TestOrphanedHandoffs:
         rec = _oh_rec(sessions=[_session(state="concluded")])
         assert health.find_orphaned_handoffs([rec], now=_NOW) == []
 
+    def test_detects_dark_stale_unlinked_yielded_tail(self, monkeypatch):
+        """aperture-labs#7824 regression: a lone "yielded" tail (opened a
+        handoff intent, never linked to a successor) is the same "orphaned,
+        nobody ever took head" shape as an unlinked "handed-off" tail, and
+        must be detected the same way."""
+        monkeypatch.setattr(health.cfg, "active_project", lambda: "proj-a")
+        monkeypatch.setattr(
+            health.handoff_trace, "read_trace", lambda project, worktree_id: [],
+        )
+        rec = _oh_rec(sessions=[_session(state="yielded")])
+        found = health.find_orphaned_handoffs([rec], now=_NOW)
+        assert len(found) == 1
+        assert found[0].session_id == "s1"
+
+    def test_skips_when_yielded_tail_has_linked_successor(self):
+        rec = _oh_rec(sessions=[_session("old", "yielded", successor="new")])
+        assert health.find_orphaned_handoffs([rec], now=_NOW) == []
+
     def test_skips_completed_succession(self):
         # Predecessor handed-off + a live successor => head resolves, not orphaned.
         rec = _oh_rec(sessions=[
@@ -387,8 +405,30 @@ class TestOrphanedHandoffs:
         o.record.head_session = o.session_id
         assert rec.resolved_head_session == "s1"  # resumable again
 
+    def test_yielded_tail_reactivation_makes_head_resolvable(self):
+        """Same end-to-end semantic as `test_reactivation_makes_head_resolvable`
+        above, for a "yielded" (not "handed-off") orphaned tail -- the
+        orchestrator's --fix mutate must reactivate either state the same
+        way (aperture-labs#7824)."""
+        entry = SessionEntry(session_id="s1", started_at="2026-01-01T00:00:00",
+                             state="yielded")
+        rec = WorktreeRecord(
+            worktree_id="wt-1", branch="worktree/wt-1", worktree_path="/tmp/wt-1",
+            repo="test-repo", machine="test", platform="wsl",
+            started_at="2026-01-01T00:00:00", last_resumed_at="2026-01-01T00:00:00",
+            resume_count=0, title=None, status="active", completed_at=None,
+            sessions=[entry],
+        )
+        assert rec.resolved_head_session is None  # orphaned
+        orphans = health.find_orphaned_handoffs([rec])
+        assert len(orphans) == 1 and orphans[0].session_id == "s1"
+        o = orphans[0]
+        e = o.record.session_entry(o.session_id)
+        e.state = "active"
+        o.record.head_session = o.session_id
+        assert rec.resolved_head_session == "s1"  # resumable again
 
-def test_finds_stale_head_cache_from_transition_replay():
+
     record = WorktreeRecord(
         worktree_id="wt-head",
         branch="worktree/wt-head",

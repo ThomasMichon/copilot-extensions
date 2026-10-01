@@ -156,12 +156,22 @@ def apply_session_register(args: dict) -> dict:
             if (
                 not candidate_token
                 and record.resolved_head_session is None
-                and entry.state == "active"
+                and entry.state in ("active", "yielded")
                 and (
                     source == "bind"
                     or tracking._pending_handoffs_all_from_yielded(record)
                 )
             ):
+                # A session reclaiming its OWN prior "yielded" state (it opened
+                # a handoff that was never formally linked to a successor) is
+                # a supported recovery, not a bug: flip it back to "active" as
+                # part of the same rebind that cancels its stale pending
+                # handoff(s). This loop only ever reaches the entry matching
+                # `session_id` (the registering session itself), so this can
+                # never let an unrelated session reclaim another session's
+                # yielded state.
+                if entry.state == "yielded":
+                    entry.state = "active"
                 tracking._cancel_pending_handoffs(record)
                 tracking._append_head_transition(
                     record, session_id, reason="rebind", at=event_at,

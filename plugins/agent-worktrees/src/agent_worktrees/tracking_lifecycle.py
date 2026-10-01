@@ -438,6 +438,7 @@ def link_succession(
         pred.successor = successor_id
         pred.state = predecessor_state
         succ.predecessor = predecessor_id
+        succ.state = "active"
         _ensure_head_ledger(record)
         _append_head_transition(
             record,

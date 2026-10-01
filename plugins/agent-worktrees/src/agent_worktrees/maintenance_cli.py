@@ -531,7 +531,7 @@ def cmd_doctor(args) -> int:
         if apply:
             for orphan in orphaned:
                 entry = orphan.record.session_entry(orphan.session_id)
-                if entry is not None and entry.state == "handed-off":
+                if entry is not None and entry.state in ("handed-off", "yielded"):
                     entry.state = "active"
                     tracking.set_head_session(
                         orphan.record,

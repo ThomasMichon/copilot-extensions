@@ -552,6 +552,18 @@ def audit_alignment(records, session_state_dir: Path) -> list[dict]:
 # self-contained and unit-testable without importing tracking).
 _CONCLUDED_STATES = ("handed-off", "concluded")
 _HANDED_OFF = "handed-off"
+_YIELDED = "yielded"
+# A tail in either state leaves the worktree headless (mirrors
+# ``tracking._HEAD_INELIGIBLE_STATES`` minus "concluded", which never has a
+# successor to wait for): "handed-off" is a cutover whose successor never
+# registered; "yielded" is a session that opened a handoff intent (itself
+# normal) that was never formally linked to a successor. Both are the same
+# "orphaned, nobody ever took head" shape and get the same detection/fix.
+_ORPHANABLE_TAIL_STATES = (_HANDED_OFF, _YIELDED)
+# Other sessions in the worktree must also be non-head-eligible for the
+# derived head to be None -- a "yielded" peer counts here the same as a
+# concluded one (see `_ORPHANABLE_TAIL_STATES` above).
+_NON_HEAD_STATES = (*_CONCLUDED_STATES, _YIELDED)
 
 
 @dataclass
@@ -615,22 +627,27 @@ def find_orphaned_handoffs(
     successor registers, so a transient headless window is **normal and correct**
     (``resolved_head_session`` is intentionally None then). This detects the
     *permanent* case -- the successor never materialized (e.g. it died on the CLI
-    resume-hang before ``register-session``/``link-succession`` landed) -- with
-    conservative guards so a healthy in-flight cutover is **never** touched:
+    resume-hang before ``register-session``/``link-succession`` landed), **or**
+    the equivalent "yielded" case -- a session opened a handoff intent (itself
+    normal) that was never formally linked to a successor, and nobody ever
+    reclaimed head -- with conservative guards so a healthy in-flight cutover
+    is **never** touched:
 
       * the worktree is non-terminal (``status == "active"``);
-      * it has sessions, and **none** is non-concluded (so the derived head is
-        None -- there is no current session);
-      * the **tail** session is ``handed-off`` with **no linked successor** (the
-        cutover began but no successor was ever recorded);
+      * it has sessions, and **none** is head-eligible (so the derived head is
+        None -- there is no current session; see ``_NON_HEAD_STATES``);
+      * the **tail** session is ``handed-off`` or ``yielded`` with **no linked
+        successor** (the cutover/handoff began but no successor was ever
+        recorded -- see ``_ORPHANABLE_TAIL_STATES``);
       * the worktree is **dark** -- ``mux_live`` and ``bound_live`` both falsy
         (nothing live that could be a successor starting up); and
       * its last activity is **stale** past ``min_age_h`` (a successor would have
         registered long ago -- unprovable staleness conservatively skips).
 
-    Report-only. The orchestrator re-activates the tail (``handed-off`` ->
-    ``active``) under ``--fix`` so ``resolved_head_session`` derives it again and
-    the worktree becomes resumable -- the mechanical form of the manual repair.
+    Report-only. The orchestrator re-activates the tail (``handed-off``/
+    ``yielded`` -> ``active``) under ``--fix`` so ``resolved_head_session``
+    derives it again and the worktree becomes resumable -- the mechanical form
+    of the manual repair.
     """
     now = time.time() if now is None else now
     out: list[OrphanedHandoff] = []
@@ -641,15 +658,15 @@ def find_orphaned_handoffs(
         sessions = getattr(r, "sessions", None) or []
         if not sessions:
             continue
-        # Any non-concluded session => the head resolves to it => not orphaned.
-        if any(getattr(s, "state", "active") not in _CONCLUDED_STATES
+        # Any head-eligible session => the head resolves to it => not orphaned.
+        if any(getattr(s, "state", "active") not in _NON_HEAD_STATES
                for s in sessions):
             continue
         tail = sessions[-1]
-        if getattr(tail, "state", None) != _HANDED_OFF:
+        if getattr(tail, "state", None) not in _ORPHANABLE_TAIL_STATES:
             continue
         # A linked successor is a different (completed/handled) shape; only an
-        # unlinked handed-off tail is the "successor never came" case.
+        # unlinked handed-off/yielded tail is the "successor never came" case.
         if getattr(tail, "successor", None):
             continue
         if getattr(r, "mux_live", None) or getattr(r, "bound_live", None):
