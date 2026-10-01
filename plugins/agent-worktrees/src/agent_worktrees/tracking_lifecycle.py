@@ -435,9 +435,24 @@ def link_succession(
         handoff = open_handoff(record, predecessor_id, token, save=False)
         link_handoff(record, handoff.token, successor_id, save=False)
     else:
+        if succ.state in tracking._CONCLUDED_SESSION_STATES:
+            # Mirrors `link_handoff`'s equivalent guard: a terminal successor
+            # (explicitly handed-off or concluded) must never be resurrected
+            # and handed head just because a manual-repair caller named it.
+            raise SessionLifecycleError(
+                f"successor {successor_id} is already {succ.state}"
+            )
         pred.successor = successor_id
         pred.state = predecessor_state
         succ.predecessor = predecessor_id
+        if succ.state == "yielded":
+            # The successor's own still-pending handoff (the one that made
+            # it "yielded") must not survive becoming head here -- an active
+            # head that still reports a pending handoff blocks terminal
+            # cleanup and could let a later token consumer link a handoff
+            # this succession already supersedes.
+            _cancel_pending_handoffs(record)
+        succ.state = "active"
         _ensure_head_ledger(record)
         _append_head_transition(
             record,

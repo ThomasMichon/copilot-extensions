@@ -11,7 +11,14 @@ from types import SimpleNamespace
 import yaml
 
 from agent_worktrees import health
-from agent_worktrees.tracking import HeadTransition, SessionEntry, WorktreeRecord
+from agent_worktrees.tracking import (
+    HeadTransition,
+    SessionEntry,
+    SessionHandoff,
+    WorktreeRecord,
+    load_record,
+    save_record,
+)
 
 # --------------------------------------------------------------------------- #
 # YAML integrity
@@ -293,6 +300,11 @@ def _session(sid="s1", state="handed-off", successor=None):
                            started_at=None, ended_at=None)
 
 
+def _handoff(predecessor="s1", opened_at=None, candidate_at=None):
+    return SimpleNamespace(predecessor=predecessor, opened_at=opened_at,
+                           candidate_at=candidate_at)
+
+
 def _oh_rec(**over):
     base = dict(
         worktree_id="wt", status="active",
@@ -300,6 +312,7 @@ def _oh_rec(**over):
         last_resumed_at=_STALE, started_at=None, session_state_at=None,
         mux_live_at=None, bound_live_at=None,
         sessions=[_session()],
+        handoffs=[],
     )
     base.update(over)
     return SimpleNamespace(**base)
@@ -340,6 +353,51 @@ class TestOrphanedHandoffs:
         rec = _oh_rec(sessions=[_session(state="concluded")])
         assert health.find_orphaned_handoffs([rec], now=_NOW) == []
 
+    def test_detects_dark_stale_unlinked_yielded_tail(self, monkeypatch):
+        """aperture-labs#7824 regression: a lone "yielded" tail (opened a
+        handoff intent, never linked to a successor) is the same "orphaned,
+        nobody ever took head" shape as an unlinked "handed-off" tail, and
+        must be detected the same way."""
+        monkeypatch.setattr(health.cfg, "active_project", lambda: "proj-a")
+        monkeypatch.setattr(
+            health.handoff_trace, "read_trace", lambda project, worktree_id: [],
+        )
+        rec = _oh_rec(sessions=[_session(state="yielded")])
+        found = health.find_orphaned_handoffs([rec], now=_NOW)
+        assert len(found) == 1
+        assert found[0].session_id == "s1"
+
+    def test_skips_when_yielded_tail_has_linked_successor(self):
+        rec = _oh_rec(sessions=[_session("old", "yielded", successor="new")])
+        assert health.find_orphaned_handoffs([rec], now=_NOW) == []
+
+    def test_skips_freshly_yielded_handoff_despite_stale_record_timestamps(self):
+        """`open_handoff()` only ever runs on an *active* session, so a
+        handoff it opened moments ago is itself fresh activity -- a
+        long-dormant `last_resumed_at` must never outrank it. Without
+        folding `SessionHandoff.opened_at` into the activity calculation, a
+        record with stale legacy timestamps but a handoff opened seconds ago
+        would be misjudged stale and `doctor --fix` would undo an in-flight
+        handoff."""
+        rec = _oh_rec(
+            sessions=[_session(state="yielded")],
+            handoffs=[_handoff(predecessor="s1", opened_at=_FRESH)],
+        )
+        assert health.find_orphaned_handoffs([rec], now=_NOW) == []
+
+    def test_skips_stale_handoff_with_fresh_candidate_pickup(self):
+        """`associate_handoff_candidate()` leaves a handoff "pending" while a
+        successor is mid-pickup, and that successor may not yet make
+        `mux_live`/`bound_live` true -- a recent candidate association is
+        itself fresh activity just like a recent `opened_at`, so an
+        old-`opened_at`/fresh-`candidate_at` handoff must not be misjudged
+        stale during that pickup window."""
+        rec = _oh_rec(
+            sessions=[_session(state="yielded")],
+            handoffs=[_handoff(predecessor="s1", opened_at=_STALE, candidate_at=_FRESH)],
+        )
+        assert health.find_orphaned_handoffs([rec], now=_NOW) == []
+
     def test_skips_completed_succession(self):
         # Predecessor handed-off + a live successor => head resolves, not orphaned.
         rec = _oh_rec(sessions=[
@@ -365,9 +423,9 @@ class TestOrphanedHandoffs:
         rec = _oh_rec(last_resumed_at=None)
         assert health.find_orphaned_handoffs([rec], now=_NOW) == []
 
-    def test_reactivation_makes_head_resolvable(self):
-        # End-to-end semantic (mirrors the orchestrator's inline --fix): a real
-        # record whose head is orphaned re-derives to the re-activated session.
+    def test_reactivation_makes_head_resolvable(self, tmp_tracking_dir, monkeypatch_config):
+        # End-to-end semantic: a real record whose head is orphaned re-derives
+        # to the re-activated session via the orchestrator's own repair verb.
         entry = SessionEntry(session_id="s1", started_at="2026-01-01T00:00:00",
                              state="handed-off")
         rec = WorktreeRecord(
@@ -377,15 +435,178 @@ class TestOrphanedHandoffs:
             resume_count=0, title=None, status="active", completed_at=None,
             sessions=[entry],
         )
+        save_record(rec, tmp_tracking_dir / "wt-1.yaml")
         assert rec.resolved_head_session is None  # orphaned
         orphans = health.find_orphaned_handoffs([rec])
         assert len(orphans) == 1 and orphans[0].session_id == "s1"
-        # Apply the orchestrator's mutate.
-        o = orphans[0]
-        e = o.record.session_entry(o.session_id)
-        e.state = "active"
-        o.record.head_session = o.session_id
-        assert rec.resolved_head_session == "s1"  # resumable again
+        assert health.reactivate_orphaned_handoff(orphans[0]) is True
+        assert orphans[0].reactivated is True
+        fresh = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert fresh.resolved_head_session == "s1"  # resumable again
+
+    def test_yielded_tail_reactivation_makes_head_resolvable(
+        self, tmp_tracking_dir, monkeypatch_config
+    ):
+        """Same end-to-end semantic as `test_reactivation_makes_head_resolvable`
+        above, for a "yielded" (not "handed-off") orphaned tail -- the
+        orchestrator's repair must reactivate either state the same way
+        (aperture-labs#7824)."""
+        entry = SessionEntry(session_id="s1", started_at="2026-01-01T00:00:00",
+                             state="yielded")
+        rec = WorktreeRecord(
+            worktree_id="wt-1", branch="worktree/wt-1", worktree_path="/tmp/wt-1",
+            repo="test-repo", machine="test", platform="wsl",
+            started_at="2026-01-01T00:00:00", last_resumed_at="2026-01-01T00:00:00",
+            resume_count=0, title=None, status="active", completed_at=None,
+            sessions=[entry],
+        )
+        save_record(rec, tmp_tracking_dir / "wt-1.yaml")
+        assert rec.resolved_head_session is None  # orphaned
+        orphans = health.find_orphaned_handoffs([rec])
+        assert len(orphans) == 1 and orphans[0].session_id == "s1"
+        assert health.reactivate_orphaned_handoff(orphans[0]) is True
+        fresh = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert fresh.resolved_head_session == "s1"  # resumable again
+
+    def test_yielded_tail_reactivation_cancels_its_stale_pending_handoff(
+        self, tmp_tracking_dir, monkeypatch_config
+    ):
+        """The pending handoff that produced a yielded orphan's state must
+        not survive its repair -- an active head that still reports a
+        pending handoff blocks terminal cleanup and could let a later token
+        consumer link a handoff the repair already superseded."""
+        entry = SessionEntry(session_id="s1", started_at="2026-01-01T00:00:00",
+                             state="yielded")
+        rec = WorktreeRecord(
+            worktree_id="wt-1", branch="worktree/wt-1", worktree_path="/tmp/wt-1",
+            repo="test-repo", machine="test", platform="wsl",
+            started_at="2026-01-01T00:00:00", last_resumed_at="2026-01-01T00:00:00",
+            resume_count=0, title=None, status="active", completed_at=None,
+            sessions=[entry],
+            handoffs=[
+                SessionHandoff(ordinal=1, token="tok", predecessor="s1",
+                               state="pending", opened_at="2026-01-01T00:00:00"),
+            ],
+        )
+        save_record(rec, tmp_tracking_dir / "wt-1.yaml")
+        orphans = health.find_orphaned_handoffs([rec])
+        assert len(orphans) == 1
+        assert health.reactivate_orphaned_handoff(orphans[0]) is True
+        fresh = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert fresh.resolved_head_session == "s1"
+        assert fresh.handoffs[0].state == "cancelled"
+
+    def test_reactivate_orphaned_handoff_bumps_revision_even_when_head_unchanged(
+        self, tmp_tracking_dir, monkeypatch_config
+    ):
+        """aperture-labs#7824 review follow-through: `set_head_session` is a
+        no-op when the ledger already names the orphan candidate (true here,
+        since it IS the orphan candidate), so without an explicit revision
+        bump a stale equal-revision writer could later silently undo this
+        repair."""
+        entry = SessionEntry(session_id="s1", started_at="2026-01-01T00:00:00",
+                             state="yielded")
+        rec = WorktreeRecord(
+            worktree_id="wt-1", branch="worktree/wt-1", worktree_path="/tmp/wt-1",
+            repo="test-repo", machine="test", platform="wsl",
+            started_at="2026-01-01T00:00:00", last_resumed_at="2026-01-01T00:00:00",
+            resume_count=0, title=None, status="active", completed_at=None,
+            lifecycle_revision=5,
+            sessions=[entry],
+            head_transitions=[
+                HeadTransition(revision=5, session_id="s1", reason="initial",
+                               at="2026-01-01T00:00:00"),
+            ],
+        )
+        save_record(rec, tmp_tracking_dir / "wt-1.yaml")
+        orphans = health.find_orphaned_handoffs([rec])
+        assert len(orphans) == 1
+        assert health.reactivate_orphaned_handoff(orphans[0]) is True
+        fresh = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert fresh.lifecycle_revision > 5
+
+    def test_reactivate_orphaned_handoff_skips_when_superseded(
+        self, tmp_tracking_dir, monkeypatch_config
+    ):
+        """`find_orphaned_handoffs` runs outside any lock, so the snapshot it
+        returns can go stale before the repair acts on it -- e.g. a live
+        session genuinely claims this handoff (linking a real successor) in
+        the interim. The repair must re-validate under its own lock and
+        no-op rather than clobber that live claim."""
+        entry = SessionEntry(session_id="s1", started_at="2026-01-01T00:00:00",
+                             state="yielded")
+        rec = WorktreeRecord(
+            worktree_id="wt-1", branch="worktree/wt-1", worktree_path="/tmp/wt-1",
+            repo="test-repo", machine="test", platform="wsl",
+            started_at="2026-01-01T00:00:00", last_resumed_at="2026-01-01T00:00:00",
+            resume_count=0, title=None, status="active", completed_at=None,
+            sessions=[entry],
+        )
+        save_record(rec, tmp_tracking_dir / "wt-1.yaml")
+        orphans = health.find_orphaned_handoffs([rec])
+        assert len(orphans) == 1
+        # A live session claims the worktree on disk after the scan.
+        on_disk = load_record(tmp_tracking_dir / "wt-1.yaml")
+        on_disk.session_entry("s1").state = "active"
+        save_record(on_disk, tmp_tracking_dir / "wt-1.yaml")
+        assert health.reactivate_orphaned_handoff(orphans[0]) is False
+        assert orphans[0].reactivated is False
+        fresh = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert fresh.session_entry("s1").state == "active"  # untouched, not clobbered
+
+    def test_detects_yielded_tail_despite_an_older_active_session(self):
+        """aperture-labs#7824 regression: an older session left
+        "active" must not save a worktree from detection when the ledger's
+        authoritative head is a LATER, now-yielded session -- the real
+        `resolved_head_session` ledger replay (not a naive "any session is
+        head-eligible" scan) is what must gate this, since the naive scan
+        would wrongly treat the older active session as still current."""
+        old = SessionEntry(session_id="old", started_at="2026-01-01T00:00:00",
+                           state="active")
+        new = SessionEntry(session_id="new", started_at="2026-01-01T00:01:00",
+                           state="yielded")
+        rec = WorktreeRecord(
+            worktree_id="wt-1", branch="worktree/wt-1", worktree_path="/tmp/wt-1",
+            repo="test-repo", machine="test", platform="wsl",
+            started_at="2026-01-01T00:00:00", last_resumed_at="2026-01-01T00:00:00",
+            resume_count=0, title=None, status="active", completed_at=None,
+            sessions=[old, new],
+            head_transitions=[
+                HeadTransition(revision=1, session_id="new", reason="initial",
+                               at="2026-01-01T00:01:00"),
+            ],
+        )
+        assert rec.resolved_head_session is None  # the ledger says "new", ineligible
+        orphans = health.find_orphaned_handoffs([rec])
+        assert len(orphans) == 1 and orphans[0].session_id == "new"
+
+    def test_detects_ledger_named_orphan_that_is_not_the_list_tail(self):
+        """aperture-labs#7824 regression: `old` registers, `new`
+        registers/concludes, `old` is explicitly re-adopted (the ledger's
+        latest transition names it), then `old` yields. The list TAIL is
+        still terminal `new`, but the ledger's own named, now-ineligible
+        session is the earlier `old` entry -- that is the real orphan, and
+        detection must not miss it just because it isn't last in the list."""
+        old = SessionEntry(session_id="old", started_at="2026-01-01T00:00:00",
+                           state="yielded")
+        new = SessionEntry(session_id="new", started_at="2026-01-01T00:01:00",
+                           state="concluded")
+        rec = WorktreeRecord(
+            worktree_id="wt-1", branch="worktree/wt-1", worktree_path="/tmp/wt-1",
+            repo="test-repo", machine="test", platform="wsl",
+            started_at="2026-01-01T00:00:00", last_resumed_at="2026-01-01T00:00:00",
+            resume_count=0, title=None, status="active", completed_at=None,
+            sessions=[old, new],
+            head_transitions=[
+                HeadTransition(revision=1, session_id="new", reason="initial",
+                               at="2026-01-01T00:01:00"),
+                HeadTransition(revision=2, session_id="old", reason="adopted",
+                               at="2026-01-01T00:02:00"),
+            ],
+        )
+        assert rec.resolved_head_session is None  # the ledger says "old", ineligible
+        orphans = health.find_orphaned_handoffs([rec])
+        assert len(orphans) == 1 and orphans[0].session_id == "old"
 
 
 def test_finds_stale_head_cache_from_transition_replay():
