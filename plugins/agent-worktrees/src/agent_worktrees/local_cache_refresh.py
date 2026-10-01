@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -126,9 +125,14 @@ def refresh_local_cache(
     handle every failure mode. Invokes customizing-copilot's own
     ``render-local-cache`` CLI as a subprocess, bounded by ``timeout``: a
     hard, enforced ceiling on this call's own worst-case cost, which a
-    purely in-process call could not give the same guarantee for. A
-    timeout (or any other failure) simply means the refresh doesn't
-    complete this round -- never worse than not calling it at all.
+    purely in-process call could not give the same guarantee for. Run via
+    ``push_timeout.run_bounded`` rather than a plain ``subprocess.run(
+    timeout=...)``, which only terminates its direct child -- the CLI can
+    itself spawn descendants (an ``agent-worktrees`` lookup, git probes),
+    which a bare ``timeout=`` would leave running past a stall.
+    ``run_bounded`` kills the whole process tree instead. A timeout (or
+    any other failure) simply means the refresh doesn't complete this
+    round -- never worse than not calling it at all.
     """
     home = home or Path.home()
     try:
@@ -147,12 +151,9 @@ def refresh_local_cache(
         agent_worktrees_command = _resolve_own_agent_worktrees_command()
         if agent_worktrees_command:
             argv += ["--agent-worktrees-path", agent_worktrees_command]
-        subprocess.run(
-            argv,
-            capture_output=True,
-            timeout=timeout,
-            check=False,
-        )
+        from . import push_timeout
+
+        push_timeout.run_bounded(argv, cwd=None, env=dict(os.environ), timeout=timeout)
     except Exception:
         pass
 

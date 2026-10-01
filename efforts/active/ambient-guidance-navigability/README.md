@@ -488,16 +488,19 @@ and the new sibling pattern doc,
       target repo to already be a trusted folder (same prerequisite
       `session-scoped-dynamic-guidance.md` §3 already documents for
       repository-level hooks). **Landed**: a new
-      `agent_worktrees.local_cache_refresh` module locates customizing-
-      copilot's installed `instruction_projections.py` at runtime
-      (marketplace layout, `_direct`-install fallback by manifest name) and
-      calls `render_local_cache()`, fully best-effort (never raises, never
-      gates the caller). Wired into `worktree_creation._create_worktree_core`
-      (after trust/permission approval, every `kind`), `resolve_launch_cli.
-      _resolve_resume_context` (after the fast-forward, skipped on
-      `--dry-run`), and `__main__._run_session_lifecycle` (the real
-      `sessionStart` handler, as a silent diagnostic-budget-respecting
-      backup). See the Journal.
+      `agent_worktrees.local_cache_refresh` module resolves customizing-
+      copilot's declared, versioned `render-local-cache` CLI operation
+      (`manage-instruction-projections.py`) and invokes it as a
+      bounded-timeout subprocess -- never importing that plugin's Python
+      package directly, per `a-la-carte-independence.md`'s "no
+      cross-plugin reach-around" rule -- fully best-effort (never raises,
+      never gates the caller). Wired into `worktree_creation.
+      _create_worktree_core` (after trust/permission approval, every
+      `kind`), `resolve_launch_cli._resolve_resume_context` (after the
+      fast-forward, skipped on `--dry-run`), and `__main__.
+      _run_session_lifecycle` (the real `sessionStart` handler, via
+      `local_cache_refresh.sessionstart_diagnostic()` as a silent,
+      synchronous, deadline-bounded backup). See the Journal.
 - [x] Guard test: a synthetic plugin with a fresh installed payload produces
       a `.local.instructions.md` sibling whose content byte-matches a fresh
       `sync`-equivalent `render_projection` call, and the checked-in file's
@@ -814,6 +817,30 @@ _Pending._
     4 skipped; customizing-copilot's own suite (for the new CLI operation):
     307 passed, 8 skipped. `tools/check-module-size.py` and `tools/check-
     docs-consistency.py` both clean with no baseline changes needed.
+- **Review round 6 findings (PR #4809), all addressed in the same PR:**
+  - **Real descendant-leak bug in round 5's own redesign:** the new
+    `subprocess.run(argv, timeout=timeout)` call only terminates its
+    direct child, not any descendant the CLI itself spawns (an
+    `agent-worktrees repos find` lookup, git subprocesses --
+    `scan_plugin_sources.py`) -- exactly the limitation `push_timeout.py`
+    already documents and exists to close. Fixed by routing the call
+    through `push_timeout.run_bounded()` instead (already reused for a
+    non-push purpose by `git_ops.py`, so this isn't a new cross-purpose
+    use), which kills the whole process tree on a stall. Added a real,
+    non-mocked descendant-timeout regression test mirroring
+    `test_git_ops.py`'s own `TestPushTimeoutTreeKill`: a stand-in CLI
+    script spawns a grandchild and hangs, proving the grandchild does not
+    survive `refresh_local_cache`'s own timeout.
+  - **Two stale-design mentions the round-5 redesign missed:** a Plan-
+    section landing note (separate from the Journal) and the PR
+    description itself still described the superseded in-process
+    `importlib`/`render_local_cache()` design. Updated both to describe
+    the actual subprocess/CLI-boundary design.
+  - **Graceful cutover impact statement** had been added to the PR
+    description in round 5's own fix, but the round-6 review ran against
+    an earlier fetch of that description (before the edit propagated) and
+    flagged it as missing again -- reconfirmed present, no further action
+    needed.
 
 ### 2026-10-01 -- Phase 7 slice 4: the repo-wide catch-all static projection
 - Picked up the next unstarted Plan item (slice 3's steer): `customizing-

@@ -169,7 +169,9 @@ class TestRefreshLocalCache:
         def _boom(*a, **k):
             raise RuntimeError("boom")
 
-        monkeypatch.setattr(lcr.subprocess, "run", _boom)
+        from agent_worktrees import push_timeout
+
+        monkeypatch.setattr(push_timeout, "run_bounded", _boom)
         repo = tmp_path / "repo"
         repo.mkdir()
         # Must not raise.
@@ -190,10 +192,12 @@ class TestRefreshLocalCache:
 
         import subprocess as subprocess_mod
 
+        from agent_worktrees import push_timeout
+
         def _timeout(*a, **k):
             raise subprocess_mod.TimeoutExpired(cmd="x", timeout=1)
 
-        monkeypatch.setattr(lcr.subprocess, "run", _timeout)
+        monkeypatch.setattr(push_timeout, "run_bounded", _timeout)
         repo = tmp_path / "repo"
         repo.mkdir()
         # Must not raise.
@@ -216,11 +220,13 @@ class TestRefreshLocalCache:
 
         calls = []
 
-        def _fake_run(argv, **kwargs):
+        def _fake_run_bounded(argv, **kwargs):
             calls.append((argv, kwargs))
             return SimpleNamespace(returncode=0)
 
-        monkeypatch.setattr(lcr.subprocess, "run", _fake_run)
+        from agent_worktrees import push_timeout
+
+        monkeypatch.setattr(push_timeout, "run_bounded", _fake_run_bounded)
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -236,7 +242,6 @@ class TestRefreshLocalCache:
         assert argv[6] == str(tmp_path / ".copilot" / "installed-plugins")
         assert argv[7:] == ["--agent-worktrees-path", "/bin/agent-worktrees"]
         assert kwargs["timeout"] == 12.0
-        assert kwargs["check"] is False
 
     def test_omits_agent_worktrees_path_when_unresolved(
         self, tmp_path: Path, monkeypatch
@@ -254,17 +259,119 @@ class TestRefreshLocalCache:
 
         calls = []
 
-        def _fake_run(argv, **kwargs):
+        def _fake_run_bounded(argv, **kwargs):
             calls.append(argv)
             return SimpleNamespace(returncode=0)
 
-        monkeypatch.setattr(lcr.subprocess, "run", _fake_run)
+        from agent_worktrees import push_timeout
+
+        monkeypatch.setattr(push_timeout, "run_bounded", _fake_run_bounded)
 
         repo = tmp_path / "repo"
         repo.mkdir()
         lcr.refresh_local_cache(repo, home=tmp_path)
 
         assert "--agent-worktrees-path" not in calls[0]
+
+    def test_descendant_of_a_timed_out_cli_does_not_survive(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Real-subprocess regression (round 6 review finding): a plain
+        ``subprocess.run(timeout=...)`` only terminates its direct child,
+        so a CLI invocation that itself spawns a descendant (the real CLI
+        can launch an ``agent-worktrees`` lookup and git subprocesses, see
+        ``scan_plugin_sources.py``) could leak that descendant past a
+        timeout -- exactly the limitation ``push_timeout.py`` documents
+        and ``test_git_ops.py``'s ``TestPushTimeoutTreeKill`` already
+        proves ``run_bounded`` itself closes. This proves
+        ``refresh_local_cache`` is actually wired to that tree-killing
+        runner, not a bare ``subprocess.run``: a stand-in CLI script spawns
+        a grandchild and hangs, and the grandchild must not survive the
+        refresh's own timeout.
+        """
+        import os
+        import platform
+        import subprocess
+        import time
+
+        from agent_worktrees.locks import pid_alive, process_start_time
+
+        # See TestPushTimeoutTreeKill's own docstring for why this must be
+        # cleared: the repository's full-suite test runner sets this
+        # ambiently to protect itself, which would otherwise silently
+        # disable the real descendant sweep this test asserts on.
+        monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+
+        scripts_dir = (
+            tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions"
+            / "customizing-copilot" / "skills" / "reviewing-customizations"
+            / "scripts"
+        )
+        scripts_dir.mkdir(parents=True)
+
+        ready = tmp_path / "ready"
+        pidfile = tmp_path / "grandchild.pid"
+        grandchild_script = tmp_path / "grandchild.py"
+        grandchild_script.write_text(
+            f"import time\n"
+            f"open({str(pidfile)!r}, 'w').write('x')\n"
+            f"time.sleep(60)\n"
+        )
+        # Stand-in for manage-instruction-projections.py: spawns a
+        # descendant (mirroring the real CLI's own subprocess calls) then
+        # hangs well past the timeout below.
+        (scripts_dir / "manage-instruction-projections.py").write_text(
+            f"import subprocess, sys, time\n"
+            f"p = subprocess.Popen([sys.executable, {str(grandchild_script)!r}])\n"
+            f"open({str(ready)!r}, 'w').write(str(p.pid))\n"
+            f"time.sleep(60)\n"
+        )
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        grandchild_pid: int | None = None
+        grandchild_start_time: str | None = None
+        try:
+            # Must not raise -- refresh_local_cache absorbs the timeout.
+            lcr.refresh_local_cache(repo, home=tmp_path, timeout=1.0)
+
+            deadline = time.monotonic() + 10
+            while (
+                not (ready.exists() and pidfile.exists())
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.1)
+            assert ready.exists() and pidfile.exists(), (
+                "grandchild never started -- test setup issue, not a real assertion"
+            )
+            grandchild_pid = int(ready.read_text().strip())
+            grandchild_start_time = process_start_time(grandchild_pid)
+
+            deadline = time.monotonic() + 10
+            alive = pid_alive(grandchild_pid)
+            while alive and time.monotonic() < deadline:
+                time.sleep(0.2)
+                alive = pid_alive(grandchild_pid)
+            assert not alive, "grandchild process survived refresh_local_cache's timeout"
+        finally:
+            if (
+                grandchild_pid is not None
+                and grandchild_start_time is not None
+                and pid_alive(grandchild_pid)
+                and process_start_time(grandchild_pid) == grandchild_start_time
+            ):
+                if platform.system() == "Windows":
+                    subprocess.run(
+                        ["taskkill", "/F", "/PID", str(grandchild_pid)],
+                        capture_output=True, check=False,
+                    )
+                else:
+                    import signal
+                    try:
+                        os.kill(grandchild_pid, signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError):
+                        pass
 
     def test_real_cli_round_trip(self, tmp_path: Path) -> None:
         """End-to-end against the real, shipped ``manage-instruction-
