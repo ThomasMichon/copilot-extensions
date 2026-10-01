@@ -1244,6 +1244,7 @@ def test_combined_lifecycle_preserves_side_effect_snapshots(monkeypatch, tmp_pat
     monkeypatch.setattr(
         main, "_anchor_hygiene_diagnostic", lambda cwd: "anchor warning\n"
     )
+    monkeypatch.setattr(main, "_refresh_local_cache_diagnostic", lambda cwd: None)
     monkeypatch.setattr(
         main,
         "_migrate_legacy_marketplace_overrides",
@@ -1286,6 +1287,109 @@ def test_combined_lifecycle_preserves_side_effect_snapshots(monkeypatch, tmp_pat
     assert registration["assignment_token"] == "assignment-1"
     assert registration["handoff_candidate_token"] == "handoff-1"
     assert registration["resident_environment"] is True
+
+
+def test_session_lifecycle_calls_local_cache_refresh_as_a_backup(
+    monkeypatch, tmp_path
+):
+    """``_run_session_lifecycle`` repeats the worktree-scoped-dynamic-
+    guidance render as a backup (docs/patterns/worktree-scoped-dynamic-
+    guidance.md §4), independent of every other collaborator in the
+    combined-lifecycle test above."""
+    payload = {
+        "sessionId": "session-1",
+        "workingDirectory": str(tmp_path),
+        "source": "new",
+        "timestamp": 1_000,
+    }
+    monkeypatch.setattr(main.cfg, "active_project", lambda: None)
+    monkeypatch.setattr(main.cfg, "set_active_project", lambda value: None)
+    monkeypatch.setattr(main, "_start_project_session_hook", lambda cwd, env: None)
+    monkeypatch.setattr(
+        main, "_finish_project_session_hook", lambda process, deadline: ({}, "")
+    )
+    monkeypatch.setattr(main, "_registration_nudge_context", lambda cwd: "")
+    monkeypatch.setattr(
+        main, "_write_session_lifecycle_snapshot", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        main, "_write_session_lifecycle_receipt", lambda payload, state: None
+    )
+    monkeypatch.setattr(main, "cmd_register_session", lambda args: 0)
+    monkeypatch.setattr(main, "_anchor_hygiene_diagnostic", lambda cwd: "")
+    monkeypatch.setattr(
+        main, "_migrate_legacy_marketplace_overrides", lambda payload, cwd: None
+    )
+    monkeypatch.setattr(
+        main, "_reconcile_knowledge_plugin_overlay", lambda payload, cwd: None
+    )
+    monkeypatch.setattr(
+        main, "_start_provisioning_if_needed", lambda cwd, environment: ""
+    )
+
+    calls = []
+    from agent_worktrees import local_cache_refresh
+
+    monkeypatch.setattr(
+        local_cache_refresh,
+        "refresh_local_cache",
+        lambda repo_root, **k: calls.append(repo_root),
+    )
+
+    main._run_session_lifecycle(payload, deadline=time.time() + 200.0)
+
+    assert calls == [str(tmp_path)]
+
+
+def test_session_lifecycle_absorbs_local_cache_refresh_failure(
+    monkeypatch, tmp_path
+):
+    """A failure inside the refresh (customizing-copilot not installed, a
+    render error, anything) never surfaces as a session-lifecycle failure
+    -- ``_refresh_local_cache_diagnostic`` absorbs it silently, matching
+    ``local_cache_refresh.refresh_local_cache``'s own best-effort contract.
+    """
+    payload = {
+        "sessionId": "session-1",
+        "workingDirectory": str(tmp_path),
+        "source": "new",
+        "timestamp": 1_000,
+    }
+    monkeypatch.setattr(main.cfg, "active_project", lambda: None)
+    monkeypatch.setattr(main.cfg, "set_active_project", lambda value: None)
+    monkeypatch.setattr(main, "_start_project_session_hook", lambda cwd, env: None)
+    monkeypatch.setattr(
+        main, "_finish_project_session_hook", lambda process, deadline: ({}, "")
+    )
+    monkeypatch.setattr(main, "_registration_nudge_context", lambda cwd: "")
+    monkeypatch.setattr(
+        main, "_write_session_lifecycle_snapshot", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        main, "_write_session_lifecycle_receipt", lambda payload, state: None
+    )
+    monkeypatch.setattr(main, "cmd_register_session", lambda args: 0)
+    monkeypatch.setattr(main, "_anchor_hygiene_diagnostic", lambda cwd: "")
+    monkeypatch.setattr(
+        main, "_migrate_legacy_marketplace_overrides", lambda payload, cwd: None
+    )
+    monkeypatch.setattr(
+        main, "_reconcile_knowledge_plugin_overlay", lambda payload, cwd: None
+    )
+    monkeypatch.setattr(
+        main, "_start_provisioning_if_needed", lambda cwd, environment: ""
+    )
+
+    from agent_worktrees import local_cache_refresh
+
+    def _boom(repo_root, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(local_cache_refresh, "refresh_local_cache", _boom)
+
+    result = main._run_session_lifecycle(payload, deadline=time.time() + 200.0)
+
+    assert "boom" not in str(result)
 
 
 def test_migrate_legacy_marketplace_overrides_retires_marker(tmp_path):

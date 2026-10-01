@@ -482,12 +482,22 @@ and the new sibling pattern doc,
       the pattern doc's §3 template. Covered by the generic
       `test_shipped_projection_budgets.py` (auto-discovers any plugin's
       `instruction-projections.json`) plus a dedicated validity test.
-- [ ] `agent-worktrees`: wire the render-only entry point into worktree
+- [x] `agent-worktrees`: wire the render-only entry point into worktree
       **create and resume**, and repeat it from the plugin's own
       `sessionStart` hook as a backup for drift accrued since. Requires the
       target repo to already be a trusted folder (same prerequisite
       `session-scoped-dynamic-guidance.md` §3 already documents for
-      repository-level hooks).
+      repository-level hooks). **Landed**: a new
+      `agent_worktrees.local_cache_refresh` module locates customizing-
+      copilot's installed `instruction_projections.py` at runtime
+      (marketplace layout, `_direct`-install fallback by manifest name) and
+      calls `render_local_cache()`, fully best-effort (never raises, never
+      gates the caller). Wired into `worktree_creation._create_worktree_core`
+      (after trust/permission approval, every `kind`), `resolve_launch_cli.
+      _resolve_resume_context` (after the fast-forward, skipped on
+      `--dry-run`), and `__main__._run_session_lifecycle` (the real
+      `sessionStart` handler, as a silent diagnostic-budget-respecting
+      backup). See the Journal.
 - [x] Guard test: a synthetic plugin with a fresh installed payload produces
       a `.local.instructions.md` sibling whose content byte-matches a fresh
       `sync`-equivalent `render_projection` call, and the checked-in file's
@@ -564,13 +574,86 @@ and the new sibling pattern doc,
       preamble and the repo-wide catch-all are each independently provable
       to drive an agent to the fresher content in a clean-room-style test
       matching the methodology `session-scoped-dynamic-guidance.md`'s own
-      evidence section used.
+      evidence section used. **Partially covered:** every Plan item's own
+      guard/negative-proof unit and integration tests pass (preamble
+      placement/naming, local-cache self-reference exclusion, the
+      `skipLocalCache` opt-out and its schema validation, the aggregate-
+      budget fit, and the `agent-worktrees` create/resume/`sessionStart`
+      wiring, each with dedicated tests -- see the Journal for every
+      slice). The specific **clean-room, agent-driven proof** this item
+      asks for (an isolated sub-agent, given only a system-prompt snapshot
+      carrying both a checked-in projection and a divergent
+      `.local.instructions.md` sibling, demonstrably prefers the sibling's
+      content) has **not** been built -- it is a distinct, heavier
+      validation exercise (the navigability audit's own 3-sub-agent,
+      skill/tool-forbidden methodology), not yet attempted. This is the
+      one remaining item before Phase 7 can be marked Done.
 
 ## Proposal
 
 _Pending._
 
 ## Journal
+
+### 2026-10-01 (cont.) -- Phase 7 slice 5: `agent-worktrees` wiring (last Plan item)
+- Picked up the last unstarted Plan item: wired `customizing-copilot`'s
+  `render_local_cache()` into `agent-worktrees`' own lifecycle boundaries.
+  Explicit operator goal for this slice: roughly eliminate the need for a
+  manual force-sync, in favor of an occasional housekeeping sync -- this
+  wiring is what actually makes the mechanism built across slices 1-4
+  *automatic* rather than something an operator has to remember to trigger.
+- New `agent_worktrees.local_cache_refresh` module: resolves customizing-
+  copilot's installed `skills/reviewing-customizations/scripts/
+  instruction_projections.py` at runtime (marketplace layout first, falling
+  back to a `_direct` install matched by `plugin.json` name -- generalizing
+  `update_stage.discover_plugin_dir`'s own agent-worktrees-specific
+  resolution to a named sibling plugin, since no prior cross-plugin runtime
+  import existed anywhere in this codebase), then calls its
+  `render_local_cache()` against `discover_enabled_sources(repo_root,
+  require_trust=False)` -- the same `require_trust=False` the mechanism's
+  own tests already use for a context where trust is already established.
+  Fully best-effort by construction: customizing-copilot not being
+  installed, the repo not yet trusted, or any render failure are all
+  absorbed inside `refresh_local_cache()` itself, never gating the caller.
+- Three call sites, exactly matching the pattern doc's §4:
+  - `worktree_creation._create_worktree_core`, right after trust +
+    extension-permission approval (every `kind`, including `system`) --
+    before the paired-knowledge carve and before Copilot ever launches.
+  - `resolve_launch_cli._resolve_resume_context`, right after the
+    fast-forward (which may have just changed the installed payload this
+    worktree sees), guarded by `not args.dry_run` -- a preview must never
+    have this side effect.
+  - `__main__._run_session_lifecycle` (the real handler
+    `hook_client.py`'s thin client subprocess-dispatches to for
+    `sessionStart` -- the hook itself never contained the real logic),
+    alongside the existing anchor-hygiene/provisioning diagnostics, as a
+    silent backup (no diagnostics string, since the refresh is itself
+    silent by design and this call is pure backup, not a user-facing
+    event).
+- Tests: a new `tests/test_local_cache_refresh.py` (candidate-root
+  resolution incl. marketplace + `_direct`-install-by-manifest-name
+  fallback, graceful absence, internal-failure absorption, successful
+  delegation to a stub module; direct wiring assertions for create and
+  resume including a dry-run-never-refreshes case) plus two new tests in
+  `tests/test_hook_ipc.py` for the `sessionStart` backup (calls through,
+  and absorbs an internal failure without surfacing it). Patched every
+  pre-existing test that exercises `_create_worktree_core`/
+  `_resolve_resume(_context)` unmocked (`test_paired_carve.py`,
+  `test_launch_project_scoping.py`) to stub the new call, so those tests
+  stay hermetic rather than implicitly depending on whatever customizing-
+  copilot install happens to be present on the machine running them.
+  `tools/run-plugin-tests.py agent-worktrees`: 396 passed (plus the
+  pre-existing, unrelated `test_posix_binstub_self_provisions_from_a_
+  direct_install_layout` POSIX-shell failure on this Windows environment,
+  confirmed via `git stash` to predate this change) across the suite's
+  first three sub-suites before the test-supervisor's own wall-clock cap
+  on this large suite; a broader targeted run across every file touched or
+  exercising the new wiring (323 tests) passed clean.
+- **Not done in this slice:** the clean-room, agent-driven proof the
+  Validation Plan item above calls for. Flagged there rather than silently
+  dropped -- it's the one remaining item before Phase 7 is Done.
+- Phase 7's Plan is now fully landed (slices 1-5); the effort stays Active
+  pending that one Validation Plan item.
 
 ### 2026-10-01 -- Phase 7 slice 4: the repo-wide catch-all static projection
 - Picked up the next unstarted Plan item (slice 3's steer): `customizing-

@@ -34,6 +34,7 @@ from . import (
     activity,
     codename_tracking,
     git_ops,
+    local_cache_refresh,
     obligations,
     permissions,
     profile_assignment,
@@ -784,6 +785,14 @@ def _create_worktree_core(
     # necessarily present to answer (github/copilot-agent-runtime#22266).
     if permissions.ensure_extension_permission_approvals(worktree_path):
         print("Pre-approved facility extension permissions for worktree path.", file=sys.stderr)
+
+    # Worktree-scoped dynamic guidance (docs/patterns/worktree-scoped-
+    # dynamic-guidance.md): refresh every enabled source's gitignored
+    # *.local.instructions.md sibling now, before the first session here
+    # even starts, so a directory-scanning harness may pick it up with no
+    # reliance on the repo-wide catch-all. Best-effort and silent -- see
+    # local_cache_refresh's own docstring.
+    local_cache_refresh.refresh_local_cache(worktree_path)
 
     # citadel paired -harness/-knowledge worktree lifecycle (#957): when this is
     # a stateless harness bound to a knowledge repo, carve/stamp the knowledge

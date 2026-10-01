@@ -3828,6 +3828,23 @@ def _anchor_hygiene_diagnostic(cwd: str) -> str:
     return "".join(f"{message}\n" for message in messages)
 
 
+def _refresh_local_cache_diagnostic(cwd: str) -> None:
+    """``sessionStart``'s backup worktree-scoped-dynamic-guidance refresh
+    (docs/patterns/worktree-scoped-dynamic-guidance.md §4) -- catches
+    payload drift accrued between this worktree's own create/resume and the
+    current session's start. ``create``/``resume`` already run the primary
+    refresh; this is deliberately silent (no diagnostics string) since
+    ``local_cache_refresh.refresh_local_cache`` is itself fully best-effort
+    and this call is a pure backup, not a user-facing event.
+    """
+    try:
+        from . import local_cache_refresh
+
+        local_cache_refresh.refresh_local_cache(cwd)
+    except Exception:
+        pass
+
+
 def _migrate_legacy_marketplace_overrides(payload: dict, cwd: str) -> None:
     """One-time cleanup of a marker left by the retired marketplace_overrides
     mechanism.
@@ -4150,6 +4167,8 @@ def _run_session_lifecycle(
 
         if deadline is None or time.time() < deadline - 1.0:
             diagnostics += _anchor_hygiene_diagnostic(cwd)
+        if deadline is None or time.time() < deadline - 1.0:
+            _refresh_local_cache_diagnostic(cwd)
         if deadline is None or time.time() < deadline - 1.0:
             if provisioning_start_event is None:
                 diagnostics += _start_provisioning_if_needed(cwd, session_environment)

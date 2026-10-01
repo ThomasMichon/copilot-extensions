@@ -123,7 +123,15 @@ resume** -- before the first (or next) session in that worktree even starts,
 so the harness's own directory scan (if it reads live files rather than a git
 index) may pick it up with zero reliance on the catch-all at all. This
 mirrors the existing manual "an anchor-repo user restarts to pick up a
-freshly-synced set" behavior, made automatic and moved earlier.
+freshly-synced set" behavior, made automatic and moved earlier. **Landed**:
+`agent_worktrees.local_cache_refresh.refresh_local_cache()` locates
+`customizing-copilot`'s installed `instruction_projections.py` at runtime
+(marketplace layout, with a `_direct`-install fallback) and calls its
+`render_local_cache()`; `worktree_creation._create_worktree_core` and
+`resolve_launch_cli._resolve_resume_context` (skipped on `--dry-run`) both
+call it at exactly the point described above. Fully best-effort: customizing-
+copilot not being installed, the repo not yet being trusted, or any render
+failure are all silently absorbed, never gating create/resume itself.
 
 The plugin's `sessionStart` hook repeats the same render as a backup, to
 catch payload drift accrued between a worktree's creation/resume and the
@@ -132,6 +140,10 @@ current session's own start. Because the render is a pure side effect (never
 unreliable for *this* session's preloaded instructions does not apply here:
 the catch-all instruction from step 3 drives an explicit, first-turn tool
 read, which always executes strictly after the hook has finished.
+**Landed**: `agent_worktrees.__main__._run_session_lifecycle` (the real
+`sessionStart` handler `hook_client.py`'s thin client dispatches to) calls
+the same `refresh_local_cache()` as a diagnostic-budget-respecting backup
+step, alongside its existing anchor-hygiene and provisioning diagnostics.
 
 ### 5. The checked-in copy remains the unconditional floor
 
@@ -168,11 +180,11 @@ attempt a privileged sync merely to see current guidance.
 pattern's render side, landed as part of
 `efforts/active/ambient-guidance-navigability` Phase 7
 ([ThomasMichon/copilot-extensions#4674](https://github.com/ThomasMichon/copilot-extensions/issues/4674)).
-The per-file "prefer local" preamble (step 2) and the repo-wide catch-all
+The per-file "prefer local" preamble (step 2), the repo-wide catch-all
 projection (step 3, opted out of its own local cache per step 1's
-exception) have both landed; the `agent-worktrees` create/resume +
-`sessionStart` wiring (step 4) remains the one open Plan item in that same
-phase.
+exception), and the `agent-worktrees` create/resume + `sessionStart` wiring
+(step 4, via `agent_worktrees.local_cache_refresh`) have all landed --
+Phase 7 is complete.
 
 ## See Also
 
