@@ -3836,11 +3836,19 @@ def _refresh_local_cache_diagnostic(cwd: str) -> None:
     refresh; this is deliberately silent (no diagnostics string) since
     ``local_cache_refresh.refresh_local_cache`` is itself fully best-effort
     and this call is a pure backup, not a user-facing event.
+
+    Dispatched to a daemon thread: the resident hook server's decision
+    deadline is far shorter than this refresh's own worst-case cost. Never
+    blocks this function's return; if the host process exits before the
+    thread finishes, the refresh just doesn't complete that round.
     """
     try:
         from . import local_cache_refresh
 
-        local_cache_refresh.refresh_local_cache(cwd)
+        thread = threading.Thread(
+            target=local_cache_refresh.refresh_local_cache, args=(cwd,), daemon=True,
+        )
+        thread.start()
     except Exception:
         pass
 

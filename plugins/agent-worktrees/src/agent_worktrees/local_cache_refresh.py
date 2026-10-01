@@ -32,7 +32,11 @@ from pathlib import Path
 _SIBLING_PLUGIN_NAME = "customizing-copilot"
 _SIBLING_RELATIVE_SCRIPT = Path("skills") / "reviewing-customizations" / "scripts" / "instruction_projections.py"
 _MODULE_NAME = "_agent_worktrees_instruction_projections"
-_LOAD_LOCK = threading.Lock()
+# Reentrant: refresh_local_cache holds this for its *entire* body (module
+# load through the render call), and _load_instruction_projections also
+# acquires it internally when called directly (e.g. from tests) -- a plain
+# Lock would deadlock the same thread on the nested acquisition.
+_LOAD_LOCK = threading.RLock()
 
 
 def _candidate_plugin_roots(home: Path) -> list[Path]:
@@ -59,14 +63,15 @@ def _candidate_plugin_roots(home: Path) -> list[Path]:
 
 
 def _load_instruction_projections(home: Path):
-    # Serialized: the sessionStart resident server handles concurrent hook
-    # requests on its own threads, so two callers can reach this at once. A
-    # racing second caller must never observe the module mid-``exec_module``
-    # -- the pre-registration below (required so the module's own
-    # postponed-annotation dataclasses can resolve `sys.modules[cls.__module__]`
-    # while their class bodies run) would otherwise let it see a partially
-    # initialized object and silently skip the refresh (`render_local_cache`
-    # not yet defined on it).
+    # Serialized: `refresh_local_cache` holds the same (reentrant) lock for
+    # its entire body, so a racing second caller can never observe the
+    # module -- or anything it lazily loads during the render call -- mid-
+    # initialization. The pre-registration below (required so the module's
+    # own postponed-annotation dataclasses can resolve
+    # `sys.modules[cls.__module__]` while their class bodies run) would
+    # otherwise let an unserialized caller see a partially initialized
+    # object and silently skip the refresh (`render_local_cache` not yet
+    # defined on it).
     with _LOAD_LOCK:
         cached = sys.modules.get(_MODULE_NAME)
         if cached is not None:
@@ -131,22 +136,29 @@ def refresh_local_cache(repo_root: str | Path, *, home: Path | None = None) -> N
     Call this at each worktree lifecycle boundary (create, resume,
     ``sessionStart``) -- never conditionally skip it on the caller's own
     error-handling grounds; let this function's own internal absorption
-    handle every failure mode.
+    handle every failure mode. The entire call is serialized behind the
+    same lock ``_load_instruction_projections`` uses, so a concurrent
+    caller (the sessionStart resident server handles concurrent hook
+    requests on its own threads) can never observe a nested module
+    (``instruction_projections.py``'s own lazily-loaded scanner support
+    module, loaded during the render call itself) mid-initialization
+    either -- not just the outer module this function loads directly.
     """
     home = home or Path.home()
-    try:
-        projections = _load_instruction_projections(home)
-        if projections is None:
-            return
-        root = Path(repo_root)
-        agent_worktrees_command = _resolve_own_agent_worktrees_command()
-        projections.render_local_cache(
-            root,
-            lambda: projections.discover_enabled_sources(
+    with _LOAD_LOCK:
+        try:
+            projections = _load_instruction_projections(home)
+            if projections is None:
+                return
+            root = Path(repo_root)
+            agent_worktrees_command = _resolve_own_agent_worktrees_command()
+            projections.render_local_cache(
                 root,
-                require_trust=False,
-                agent_worktrees_command=agent_worktrees_command,
-            ),
-        )
-    except Exception:
-        pass
+                lambda: projections.discover_enabled_sources(
+                    root,
+                    require_trust=False,
+                    agent_worktrees_command=agent_worktrees_command,
+                ),
+            )
+        except Exception:
+            pass

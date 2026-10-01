@@ -23,6 +23,30 @@ _SPEC = importlib.util.spec_from_file_location("hook_client_under_test", _SCRIPT
 assert _SPEC and _SPEC.loader
 hook_client = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = hook_client
+
+
+class _SynchronousThread:
+    """A ``threading.Thread`` stand-in that runs its target inline on
+    ``start()`` -- for tests proving a daemon-dispatched call site reaches
+    its target, without racing the real background thread. Mirrors real
+    ``Thread`` semantics: an exception in the target never propagates to
+    the caller."""
+
+    def __init__(self, *, target, args=(), kwargs=None, daemon=None):
+        self._target = target
+        self._args = args
+        self._kwargs = kwargs or {}
+
+    def start(self):
+        try:
+            self._target(*self._args, **self._kwargs)
+        except Exception:
+            pass
+
+    def join(self, timeout=None):
+        pass
+
+
 _SPEC.loader.exec_module(hook_client)
 
 
@@ -1335,6 +1359,10 @@ def test_session_lifecycle_calls_local_cache_refresh_as_a_backup(
         "refresh_local_cache",
         lambda repo_root, **k: calls.append(repo_root),
     )
+    # The real dispatch runs on a daemon thread (never blocks the hook's own
+    # deadline); run it synchronously here so the assertion below doesn't
+    # race the background thread.
+    monkeypatch.setattr(main.threading, "Thread", _SynchronousThread)
 
     main._run_session_lifecycle(payload, deadline=time.time() + 200.0)
 
@@ -1386,6 +1414,7 @@ def test_session_lifecycle_absorbs_local_cache_refresh_failure(
         raise RuntimeError("boom")
 
     monkeypatch.setattr(local_cache_refresh, "refresh_local_cache", _boom)
+    monkeypatch.setattr(main.threading, "Thread", _SynchronousThread)
 
     result = main._run_session_lifecycle(payload, deadline=time.time() + 200.0)
 

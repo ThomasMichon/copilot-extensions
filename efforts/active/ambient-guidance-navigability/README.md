@@ -726,6 +726,34 @@ _Pending._
   (`plugins/agent-worktrees/{plugin.json,src/agent_worktrees/,
   bin/payload/agent-worktrees}`), per the reviewer's explicit ask for a
   real-layout regression test rather than only a monkeypatched stand-in.
+- **Review round 4 findings (PR #4809), both addressed in the same PR:**
+  - **Real timing bug:** the `sessionStart` backup ran synchronously inside
+    `_run_session_lifecycle`, but the resident hook server's own decision
+    deadline is far shorter than `refresh_local_cache`'s worst-case cost
+    (an `agent-worktrees-repo` source's own resolution budget, plus the
+    renderer's git probes) -- a slow refresh could make the *entire*
+    lifecycle response miss its deadline and get discarded, exactly the
+    kind of harm a "pure backup" must never cause. Fixed by dispatching
+    `refresh_local_cache` to a daemon thread instead of awaiting it inline
+    -- never blocks this function's return; if the hosting process exits
+    before the thread finishes, the refresh simply doesn't complete that
+    round, no worse than skipping it. Updated the two existing `sessionStart`
+    tests (a `_SynchronousThread` stand-in runs the dispatched target
+    inline so the assertions don't race the real background thread).
+  - **Real gap in round 2's own concurrency fix:** the lock only protected
+    `_load_instruction_projections`'s own module load, not the nested,
+    separately-unsynchronized lazy load `instruction_projections.py`'s own
+    `discover_enabled_sources` performs internally (its own `scan-
+    customizations.py` support module) during the render call -- a
+    concurrent caller could still race on *that* nested load even with
+    round 2's fix in place. Widened the lock (now an `RLock`, since
+    `refresh_local_cache` holds it for its *entire* body and
+    `_load_instruction_projections` also acquires it internally) to cover
+    the whole refresh, transitively serializing any nested load the
+    render call performs, without touching customizing-copilot's own
+    source. Added a dedicated concurrent-`refresh_local_cache` regression
+    test (not just the outer module load) with a fake nested-module lazy
+    loader reproducing the shape of the real one.
 
 ### 2026-10-01 -- Phase 7 slice 4: the repo-wide catch-all static projection
 - Picked up the next unstarted Plan item (slice 3's steer): `customizing-

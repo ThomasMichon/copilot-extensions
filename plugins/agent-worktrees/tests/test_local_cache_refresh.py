@@ -176,6 +176,69 @@ class TestLoadInstructionProjections:
         finally:
             sys.modules.pop(lcr._MODULE_NAME, None)
 
+    def test_concurrent_refresh_local_cache_serializes_a_nested_lazy_load(
+        self, tmp_path: Path
+    ) -> None:
+        """``refresh_local_cache`` itself -- not just the outer module
+        load -- must serialize concurrent callers, because the real
+        ``instruction_projections.py`` lazily loads a second, nested
+        module (``scan-customizations.py``) during ``discover_enabled_
+        sources`` using the exact same register-before-exec pattern. A
+        fake module reproducing that nested load (with an artificial
+        delay to widen the race window) proves concurrent
+        ``refresh_local_cache()`` calls never observe it mid-init."""
+        import sys
+
+        scripts_dir = (
+            tmp_path / ".copilot" / "installed-plugins" / "copilot-extensions"
+            / "customizing-copilot" / "skills" / "reviewing-customizations"
+            / "scripts"
+        )
+        scripts_dir.mkdir(parents=True)
+        (scripts_dir / "instruction_projections.py").write_text(
+            "import importlib.util, sys, time\n"
+            "_NESTED = '_test_nested_scanner_support'\n"
+            "def _load_nested():\n"
+            "    cached = sys.modules.get(_NESTED)\n"
+            "    if cached is not None:\n"
+            "        return cached\n"
+            "    import types\n"
+            "    module = types.ModuleType(_NESTED)\n"
+            "    sys.modules[_NESTED] = module\n"
+            "    time.sleep(0.05)\n"
+            "    module.assemble_enabled_plugins = lambda: []\n"
+            "    return module\n"
+            "def discover_enabled_sources(root, *, require_trust, "
+            "agent_worktrees_command=None):\n"
+            "    nested = _load_nested()\n"
+            "    return nested.assemble_enabled_plugins()\n"
+            "def render_local_cache(root, discover_sources):\n"
+            "    return discover_sources()\n",
+            encoding="utf-8",
+        )
+
+        def _refresh(n: int) -> None:
+            lcr.refresh_local_cache(tmp_path / f"repo-{n}", home=tmp_path)
+
+        try:
+            threads = [threading.Thread(target=_refresh, args=(n,)) for n in range(4)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=5)
+
+            assert not any(thread.is_alive() for thread in threads)
+            # The widened lock serializes the entire refresh (load through
+            # render), so the nested module -- however many threads raced
+            # to reach it -- must end up fully initialized, never left
+            # half-populated by an interrupted first loader.
+            nested = sys.modules.get("_test_nested_scanner_support")
+            assert nested is not None
+            assert nested.assemble_enabled_plugins() == []
+        finally:
+            sys.modules.pop(lcr._MODULE_NAME, None)
+            sys.modules.pop("_test_nested_scanner_support", None)
+
 
 class TestResolveOwnAgentWorktreesCommand:
     def test_returns_none_when_no_payload_command_deployed(
