@@ -754,6 +754,66 @@ _Pending._
     source. Added a dedicated concurrent-`refresh_local_cache` regression
     test (not just the outer module load) with a fake nested-module lazy
     loader reproducing the shape of the real one.
+- **Review round 5 findings (PR #4809), all addressed with a redesign in
+  the same PR:**
+  - **Cross-plugin reach-around (the deepest finding):** every fix through
+    round 4 still had `local_cache_refresh` directly `importlib`-loading
+    customizing-copilot's own private `instruction_projections.py` module
+    and calling its internals in-process. This violates
+    `docs/patterns/a-la-carte-independence.md` and
+    `docs/patterns/runtime-agent-plugin.md`'s "no cross-plugin
+    reach-around" rule -- a plugin may only talk to a sibling through its
+    own declared, versioned surface, never by importing/poking its
+    internal files, mirroring the precedent `claim_providers.py` already
+    set (resolve only to a sibling's own payload-local binstub, invoke as
+    a subprocess). Fixed with a real redesign: customizing-copilot's
+    `manage-instruction-projections.py` CLI gained a third operation,
+    `render-local-cache`, as the new declared surface; `local_cache_
+    refresh.py` was rewritten from scratch to resolve that script's path
+    and invoke it via a bounded-timeout `subprocess.run()` instead of any
+    Python import. This incidentally eliminated the `sys.modules`/
+    threading/lock machinery rounds 1-4 had been patching entirely --
+    each subprocess is a fresh interpreter with no shared state to race.
+  - **Round 4's daemon-thread fix was itself wrong:** dispatching the
+    `sessionStart` backup to a background thread solved the deadline-
+    blocking problem but broke correctness -- `docs/patterns/worktree-
+    scoped-dynamic-guidance.md` §4's guarantee that the catch-all
+    instruction's first-turn tool read is safe *because* `sessionStart`
+    has already finished only holds if the render completes
+    synchronously before the hook returns; an async dispatch races that
+    read instead of guaranteeing it. Reverted to synchronous execution,
+    but bounded: the backup now computes a timeout from the hook's own
+    remaining decision-deadline budget (capped at a new
+    `SESSIONSTART_MAX_TIMEOUT_S = 5.0`), skipping the call outright once
+    under 2s of budget remains, so a slow refresh can again never cause
+    the whole lifecycle response to miss its deadline -- without ever
+    risking the first-turn-read race a thread would have introduced.
+  - **Thread/lock accumulation:** every `sessionStart` call would have
+    spawned a new daemon thread, all serialized behind one process-global
+    lock -- unbounded queueing, violating
+    `docs/patterns/work-coalescing-singleton.md`. Moot under the
+    subprocess redesign: there is no shared lock or thread pool left to
+    accumulate against.
+  - **Missing Graceful cutover impact statement** (`CONTRIBUTING.md:609-
+    628`, required for any change touching the resident `sessionStart`
+    hook server): added to the PR description -- the redesign makes this
+    a non-issue by construction, since the backup is a synchronous,
+    timeout-bounded subprocess call inside the same request-handling
+    thread, with no background daemon thread and no state held across a
+    drain/cutover.
+  - Also moved `_refresh_local_cache_diagnostic` (renamed
+    `sessionstart_diagnostic`) out of the already-near-its-ceiling
+    `__main__.py` into `local_cache_refresh.py` itself, alongside the
+    function it wraps, shrinking `__main__.py` well clear of its 7083-line
+    module-size cap instead of requiring a deliberate baseline widen.
+  - `test_local_cache_refresh.py` rewritten for the subprocess-based
+    design (including a real CLI round-trip test against the shipped
+    `manage-instruction-projections.py`, not a stub); `test_hook_ipc.py`'s
+    sessionStart coverage updated to match (removed the `_SynchronousThread`
+    stand-in the round-4 fix had needed). Full targeted suite: 105 passed,
+    4 skipped; customizing-copilot's own suite (for the new CLI operation):
+    307 passed, 8 skipped. `tools/check-module-size.py` and `tools/check-
+    docs-consistency.py` both clean with no baseline changes needed.
 
 ### 2026-10-01 -- Phase 7 slice 4: the repo-wide catch-all static projection
 - Picked up the next unstarted Plan item (slice 3's steer): `customizing-

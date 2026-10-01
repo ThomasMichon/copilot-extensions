@@ -25,28 +25,6 @@ hook_client = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = hook_client
 
 
-class _SynchronousThread:
-    """A ``threading.Thread`` stand-in that runs its target inline on
-    ``start()`` -- for tests proving a daemon-dispatched call site reaches
-    its target, without racing the real background thread. Mirrors real
-    ``Thread`` semantics: an exception in the target never propagates to
-    the caller."""
-
-    def __init__(self, *, target, args=(), kwargs=None, daemon=None):
-        self._target = target
-        self._args = args
-        self._kwargs = kwargs or {}
-
-    def start(self):
-        try:
-            self._target(*self._args, **self._kwargs)
-        except Exception:
-            pass
-
-    def join(self, timeout=None):
-        pass
-
-
 _SPEC.loader.exec_module(hook_client)
 
 
@@ -1268,7 +1246,11 @@ def test_combined_lifecycle_preserves_side_effect_snapshots(monkeypatch, tmp_pat
     monkeypatch.setattr(
         main, "_anchor_hygiene_diagnostic", lambda cwd: "anchor warning\n"
     )
-    monkeypatch.setattr(main, "_refresh_local_cache_diagnostic", lambda cwd: None)
+    from agent_worktrees import local_cache_refresh as _lcr_stub
+
+    monkeypatch.setattr(
+        _lcr_stub, "sessionstart_diagnostic", lambda cwd, **k: None
+    )
     monkeypatch.setattr(
         main,
         "_migrate_legacy_marketplace_overrides",
@@ -1359,10 +1341,6 @@ def test_session_lifecycle_calls_local_cache_refresh_as_a_backup(
         "refresh_local_cache",
         lambda repo_root, **k: calls.append(repo_root),
     )
-    # The real dispatch runs on a daemon thread (never blocks the hook's own
-    # deadline); run it synchronously here so the assertion below doesn't
-    # race the background thread.
-    monkeypatch.setattr(main.threading, "Thread", _SynchronousThread)
 
     main._run_session_lifecycle(payload, deadline=time.time() + 200.0)
 
@@ -1374,8 +1352,9 @@ def test_session_lifecycle_absorbs_local_cache_refresh_failure(
 ):
     """A failure inside the refresh (customizing-copilot not installed, a
     render error, anything) never surfaces as a session-lifecycle failure
-    -- ``_refresh_local_cache_diagnostic`` absorbs it silently, matching
-    ``local_cache_refresh.refresh_local_cache``'s own best-effort contract.
+    -- ``local_cache_refresh.sessionstart_diagnostic`` absorbs it silently,
+    matching ``local_cache_refresh.refresh_local_cache``'s own best-effort
+    contract.
     """
     payload = {
         "sessionId": "session-1",
@@ -1414,7 +1393,6 @@ def test_session_lifecycle_absorbs_local_cache_refresh_failure(
         raise RuntimeError("boom")
 
     monkeypatch.setattr(local_cache_refresh, "refresh_local_cache", _boom)
-    monkeypatch.setattr(main.threading, "Thread", _SynchronousThread)
 
     result = main._run_session_lifecycle(payload, deadline=time.time() + 200.0)
 

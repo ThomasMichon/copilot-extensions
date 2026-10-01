@@ -1,5 +1,5 @@
 {
-  "comment": "Phase 7 slice 5: wire customizing-copilot's render_local_cache() into worktree create, resume, and sessionStart (new local_cache_refresh module), so the worktree-scoped dynamic guidance mechanism built across Phase 7 is automatic rather than a manual force-sync.",
+  "comment": "Phase 7 slice 5: wire customizing-copilot's render-local-cache CLI into worktree create, resume, and sessionStart (new local_cache_refresh module, invoked as a bounded-timeout subprocess across the plugin boundary) so the worktree-scoped dynamic guidance mechanism built across Phase 7 is automatic rather than a manual force-sync.",
   "changes": [
     {
       "plugin": "agent-worktrees",

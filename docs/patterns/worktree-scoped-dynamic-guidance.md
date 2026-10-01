@@ -125,13 +125,19 @@ index) may pick it up with zero reliance on the catch-all at all. This
 mirrors the existing manual "an anchor-repo user restarts to pick up a
 freshly-synced set" behavior, made automatic and moved earlier. **Landed**:
 `agent_worktrees.local_cache_refresh.refresh_local_cache()` locates
-`customizing-copilot`'s installed `instruction_projections.py` at runtime
-(marketplace layout, with a `_direct`-install fallback) and calls its
-`render_local_cache()`; `worktree_creation._create_worktree_core` and
+`customizing-copilot`'s installed, declared `render-local-cache` CLI
+operation (`manage-instruction-projections.py`) and invokes it as a
+bounded-timeout subprocess -- never importing that plugin's Python package
+directly, per
+[`a-la-carte-independence.md`](a-la-carte-independence.md)'s "no
+cross-plugin reach-around" rule (the same payload-local-binstub resolution
+`claim_providers.py` already uses for its own sibling callbacks).
+`worktree_creation._create_worktree_core` and
 `resolve_launch_cli._resolve_resume_context` (skipped on `--dry-run`) both
 call it at exactly the point described above. Fully best-effort: customizing-
-copilot not being installed, the repo not yet being trusted, or any render
-failure are all silently absorbed, never gating create/resume itself.
+copilot not being installed, the repo not yet being trusted, a subprocess
+timeout, or any other render failure are all silently absorbed, never
+gating create/resume itself.
 
 The plugin's `sessionStart` hook repeats the same render as a backup, to
 catch payload drift accrued between a worktree's creation/resume and the
@@ -139,11 +145,18 @@ current session's own start. Because the render is a pure side effect (never
 `additionalContext`), the timing race that makes hook-written content
 unreliable for *this* session's preloaded instructions does not apply here:
 the catch-all instruction from step 3 drives an explicit, first-turn tool
-read, which always executes strictly after the hook has finished.
-**Landed**: `agent_worktrees.__main__._run_session_lifecycle` (the real
-`sessionStart` handler `hook_client.py`'s thin client dispatches to) calls
-the same `refresh_local_cache()` as a diagnostic-budget-respecting backup
-step, alongside its existing anchor-hygiene and provisioning diagnostics.
+read, which always executes strictly after the hook has finished -- a
+guarantee that depends on this backup refresh running **synchronously**
+within the hook's own request handling, never dispatched to a background
+thread. **Landed**: `agent_worktrees.__main__._run_session_lifecycle` (the
+real `sessionStart` handler `hook_client.py`'s thin client dispatches to)
+calls `local_cache_refresh.sessionstart_diagnostic()` as this synchronous
+backup step, alongside its existing anchor-hygiene and provisioning
+diagnostics. Its subprocess call is bounded by a timeout derived from the
+hook's own remaining decision-deadline budget (capped at
+`local_cache_refresh.SESSIONSTART_MAX_TIMEOUT_S`), and skipped entirely once
+too little budget remains -- so it can never itself cause the resident hook
+server to miss its own response deadline.
 
 ### 5. The checked-in copy remains the unconditional floor
 

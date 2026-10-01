@@ -1,42 +1,55 @@
-"""Wire customizing-copilot's ``render_local_cache()`` into the worktree
+"""Wire customizing-copilot's ``render-local-cache`` CLI into the worktree
 lifecycle boundaries this pattern depends on: create, resume, and
 ``sessionStart`` (a backup for drift accrued since).
 
 See ``docs/patterns/worktree-scoped-dynamic-guidance.md`` and
 ``efforts/active/ambient-guidance-navigability`` Phase 7. This is the
-*consumer* side of a mechanism `customizing-copilot` owns entirely --
-``render_local_cache()`` itself, and the sibling-resolution/declaration
-schema it depends on, all live in that plugin's own
-``skills/reviewing-customizations/scripts/instruction_projections.py``.
-This module only locates that module at runtime (marketplace install, with
-a ``_direct``-install fallback mirroring ``update_stage.discover_plugin_dir``'s
-own agent-worktrees-specific resolution, generalized to a named sibling
-plugin) and calls into it.
+*consumer* side of a mechanism ``customizing-copilot`` owns entirely:
+``instruction_projections.render_local_cache()`` and the sibling-resolution/
+declaration schema it depends on all live in that plugin's own
+``skills/reviewing-customizations/scripts/``. Per
+``docs/patterns/a-la-carte-independence.md``'s "no cross-plugin
+reach-around" rule, this module never imports that plugin's Python package
+or assumes its internal layout beyond locating its own declared,
+versioned CLI entry point (``manage-instruction-projections.py``'s
+``render-local-cache`` operation) -- it invokes that payload-local script
+across a process boundary (a bounded-timeout subprocess), exactly as
+``claim_providers.py`` resolves a sibling's payload-local binstub for its
+own callbacks.
 
 Every entry point here is deliberately best-effort and silent: customizing-
-copilot not being installed, the repo not yet being a trusted folder, or any
-render failure are all absorbed rather than raised. This is a convenience
-refresh at a lifecycle boundary, never a gate on create/resume/sessionStart
-succeeding.
+copilot not being installed, the repo not yet being a trusted folder, a
+subprocess timeout, or any other failure are all absorbed rather than
+raised. This is a convenience refresh at a lifecycle boundary, never a gate
+on create/resume/sessionStart succeeding.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
+import subprocess
 import sys
-import threading
+import time
 from pathlib import Path
 
 _SIBLING_PLUGIN_NAME = "customizing-copilot"
-_SIBLING_RELATIVE_SCRIPT = Path("skills") / "reviewing-customizations" / "scripts" / "instruction_projections.py"
-_MODULE_NAME = "_agent_worktrees_instruction_projections"
-# Reentrant: refresh_local_cache holds this for its *entire* body (module
-# load through the render call), and _load_instruction_projections also
-# acquires it internally when called directly (e.g. from tests) -- a plain
-# Lock would deadlock the same thread on the nested acquisition.
-_LOAD_LOCK = threading.RLock()
+_SIBLING_RELATIVE_SCRIPT = (
+    Path("skills")
+    / "reviewing-customizations"
+    / "scripts"
+    / "manage-instruction-projections.py"
+)
+
+# create/resume run as ordinary one-shot CLI commands, not inside the
+# long-lived resident status-monitor daemon -- a generous bound is fine.
+DEFAULT_TIMEOUT_S = 30.0
+# sessionStart's backup runs inside the resident hook server's own request
+# handling; its decision deadline is far shorter than this refresh's own
+# worst case, so this bound must leave headroom for every other diagnostic
+# sharing that same budget. Callers compute a tighter, deadline-derived
+# timeout and pass it explicitly; this is only the floor/ceiling.
+SESSIONSTART_MAX_TIMEOUT_S = 5.0
 
 
 def _candidate_plugin_roots(home: Path) -> list[Path]:
@@ -62,43 +75,12 @@ def _candidate_plugin_roots(home: Path) -> list[Path]:
     return roots
 
 
-def _load_instruction_projections(home: Path):
-    # Serialized: `refresh_local_cache` holds the same (reentrant) lock for
-    # its entire body, so a racing second caller can never observe the
-    # module -- or anything it lazily loads during the render call -- mid-
-    # initialization. The pre-registration below (required so the module's
-    # own postponed-annotation dataclasses can resolve
-    # `sys.modules[cls.__module__]` while their class bodies run) would
-    # otherwise let an unserialized caller see a partially initialized
-    # object and silently skip the refresh (`render_local_cache` not yet
-    # defined on it).
-    with _LOAD_LOCK:
-        cached = sys.modules.get(_MODULE_NAME)
-        if cached is not None:
-            return cached
-        for root in _candidate_plugin_roots(home):
-            script = root / _SIBLING_RELATIVE_SCRIPT
-            if not script.is_file():
-                continue
-            spec = importlib.util.spec_from_file_location(_MODULE_NAME, script)
-            if spec is None or spec.loader is None:
-                continue
-            module = importlib.util.module_from_spec(spec)
-            # Register in sys.modules BEFORE executing: the real shipped
-            # instruction_projections.py declares postponed-annotation
-            # dataclasses, whose machinery looks up
-            # `sys.modules[cls.__module__]` while the class body runs --
-            # executing first would leave that lookup unresolved. Remove
-            # the partial entry on failure so a broken module is never left
-            # cached as if it had loaded.
-            sys.modules[_MODULE_NAME] = module
-            try:
-                spec.loader.exec_module(module)
-            except Exception:
-                sys.modules.pop(_MODULE_NAME, None)
-                continue
-            return module
-        return None
+def _resolve_cli_script(home: Path) -> Path | None:
+    for root in _candidate_plugin_roots(home):
+        script = root / _SIBLING_RELATIVE_SCRIPT
+        if script.is_file():
+            return script
+    return None
 
 
 def _resolve_own_agent_worktrees_command() -> str | None:
@@ -112,9 +94,9 @@ def _resolve_own_agent_worktrees_command() -> str | None:
     ``bin/payload/`` (the same path every project binstub execs into --
     see ``installer._project_binstub_specs``), resolved via
     ``installer._payload_root()``. ``None`` when that payload command isn't
-    deployed, or the payload root itself can't be resolved --
-    ``discover_enabled_sources`` then falls back to its own ambient
-    resolution, unchanged from before this existed.
+    deployed, or the payload root itself can't be resolved -- the CLI then
+    falls back to its own ambient resolution, unchanged from before this
+    existed.
     """
     try:
         from . import installer
@@ -129,36 +111,81 @@ def _resolve_own_agent_worktrees_command() -> str | None:
     return str(candidate) if candidate.is_file() else None
 
 
-def refresh_local_cache(repo_root: str | Path, *, home: Path | None = None) -> None:
+def refresh_local_cache(
+    repo_root: str | Path,
+    *,
+    home: Path | None = None,
+    timeout: float = DEFAULT_TIMEOUT_S,
+) -> None:
     """Best-effort refresh of every enabled source's gitignored
     ``*.local.instructions.md`` sibling under ``repo_root``.
 
     Call this at each worktree lifecycle boundary (create, resume,
     ``sessionStart``) -- never conditionally skip it on the caller's own
     error-handling grounds; let this function's own internal absorption
-    handle every failure mode. The entire call is serialized behind the
-    same lock ``_load_instruction_projections`` uses, so a concurrent
-    caller (the sessionStart resident server handles concurrent hook
-    requests on its own threads) can never observe a nested module
-    (``instruction_projections.py``'s own lazily-loaded scanner support
-    module, loaded during the render call itself) mid-initialization
-    either -- not just the outer module this function loads directly.
+    handle every failure mode. Invokes customizing-copilot's own
+    ``render-local-cache`` CLI as a subprocess, bounded by ``timeout``: a
+    hard, enforced ceiling on this call's own worst-case cost, which a
+    purely in-process call could not give the same guarantee for. A
+    timeout (or any other failure) simply means the refresh doesn't
+    complete this round -- never worse than not calling it at all.
     """
     home = home or Path.home()
-    with _LOAD_LOCK:
-        try:
-            projections = _load_instruction_projections(home)
-            if projections is None:
-                return
-            root = Path(repo_root)
-            agent_worktrees_command = _resolve_own_agent_worktrees_command()
-            projections.render_local_cache(
-                root,
-                lambda: projections.discover_enabled_sources(
-                    root,
-                    require_trust=False,
-                    agent_worktrees_command=agent_worktrees_command,
-                ),
-            )
-        except Exception:
-            pass
+    try:
+        script = _resolve_cli_script(home)
+        if script is None:
+            return
+        argv = [
+            sys.executable,
+            str(script),
+            "render-local-cache",
+            str(repo_root),
+            "--json",
+            "--installed-root",
+            str(home / ".copilot" / "installed-plugins"),
+        ]
+        agent_worktrees_command = _resolve_own_agent_worktrees_command()
+        if agent_worktrees_command:
+            argv += ["--agent-worktrees-path", agent_worktrees_command]
+        subprocess.run(
+            argv,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+    except Exception:
+        pass
+
+
+def sessionstart_diagnostic(cwd: str, *, deadline: float | None) -> None:
+    """``sessionStart``'s backup worktree-scoped-dynamic-guidance refresh
+    (docs/patterns/worktree-scoped-dynamic-guidance.md §4) -- catches
+    payload drift accrued between this worktree's own create/resume and the
+    current session's start. ``create``/``resume`` already run the primary
+    refresh; this is deliberately silent (no diagnostics string) since
+    ``refresh_local_cache`` is itself fully best-effort and this call is a
+    pure backup, not a user-facing event.
+
+    Runs synchronously and in-order with the hook's other diagnostics --
+    never dispatched to a background thread -- because the pattern this
+    backs depends on the render having genuinely completed by the time
+    this hook call returns (the catch-all instruction's own first-turn
+    read is only safe *because* sessionStart has already finished). A
+    background thread would race that read instead of guaranteeing it.
+    Bounded by a timeout derived from the hook's own remaining budget
+    (capped at ``SESSIONSTART_MAX_TIMEOUT_S``) rather than this refresh's
+    own unbounded worst case, so it can never itself cause the whole
+    lifecycle response to miss the resident hook server's deadline --
+    skipped entirely once too little budget remains to be worth
+    attempting.
+    """
+    try:
+        budget = (
+            SESSIONSTART_MAX_TIMEOUT_S if deadline is None else deadline - time.time() - 1.0
+        )
+        if budget < 2.0:
+            return
+        timeout = min(budget, SESSIONSTART_MAX_TIMEOUT_S)
+        refresh_local_cache(cwd, timeout=timeout)
+    except Exception:
+        pass

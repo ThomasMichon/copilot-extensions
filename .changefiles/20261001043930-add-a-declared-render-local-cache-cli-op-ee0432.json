@@ -1,0 +1,9 @@
+{
+  "comment": "Add a declared render-local-cache CLI operation to manage-instruction-projections.py, the process-boundary surface agent-worktrees invokes instead of importing this plugin's internals (per a-la-carte-independence's no-cross-plugin-reach-around rule).",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}
