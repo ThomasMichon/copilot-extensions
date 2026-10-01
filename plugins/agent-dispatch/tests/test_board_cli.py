@@ -534,10 +534,10 @@ def test_endpoint_maps_wildcard_bind_to_loopback(monkeypatch, tmp_path):
 
 
 def test_local_machine_reads_persisted_alias_before_hostname(monkeypatch, tmp_path):
-    (tmp_path / "machine").write_text("augloop1", encoding="utf-8")
+    (tmp_path / "machine").write_text("box1", encoding="utf-8")
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
     monkeypatch.setattr(board_cli.platform, "node", lambda: "CPC-tmich-OIXUI")
-    assert board_cli._local_machine() == "augloop1"
+    assert board_cli._local_machine() == "box1"
 
 
 def test_main_reports_missing_endpoint_without_traceback(

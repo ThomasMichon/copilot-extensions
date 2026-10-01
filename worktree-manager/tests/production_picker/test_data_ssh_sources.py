@@ -970,11 +970,11 @@ def test_local_machine_matched_by_hostname_field(monkeypatch):
     recognized as local via its hostname field -- so it becomes the in-process
     local tab and NO duplicate raw-COMPUTERNAME source leaks in."""
     entries = {
-        "host-augloop1": _entry(
-            "host-augloop1", "augloop1",
-            [cfg.SSHEnvironment(name="windows", alias="host-augloop1",
+        "host-box1": _entry(
+            "host-box1", "box1",
+            [cfg.SSHEnvironment(name="windows", alias="host-box1",
                                 shell="pwsh")],
-            ssh_ready=True, alias="augloop1", hostname="cpc-tmich-oixui"),
+            ssh_ready=True, alias="box1", hostname="cpc-tmich-oixui"),
     }
     _install_roster(
         monkeypatch, entries, machine="",                 # config.machine unset
@@ -983,7 +983,7 @@ def test_local_machine_matched_by_hostname_field(monkeypatch):
     sources = data_ssh._build_sources()
     assert len(sources) == 1
     local = sources[0]
-    assert local.machine == "host-augloop1"   # roster key, not the raw COMPUTERNAME
+    assert local.machine == "host-box1"   # roster key, not the raw COMPUTERNAME
     assert local.env == "Win"
     assert local.local is True
     assert local.argv is None             # in-process, not an SSH-to-self source
@@ -1590,8 +1590,8 @@ def test_log_load_header_enumerates_roster_with_skip_reasons(monkeypatch, tmp_pa
                         alias="host-dev6"),
         data_ssh.Source("cloud1", "Win", None, ready=False, alias="",
                         shell="pwsh"),
-        data_ssh.Source("augloop1", "Win", None, ready=False,
-                        alias="host-augloop1", shell="pwsh"),
+        data_ssh.Source("box1", "Win", None, ready=False,
+                        alias="host-box1", shell="pwsh"),
     ]
     loader = data_ssh.LiveLoader(sources)
     loader._log_load_header()
@@ -1600,7 +1600,7 @@ def test_log_load_header_enumerates_roster_with_skip_reasons(monkeypatch, tmp_pa
     assert "LOCAL   book2/Win" in text
     assert "RESOLVE dev6/Win alias=host-dev6" in text
     assert "SKIP    cloud1/Win (no SSH alias/profile)" in text
-    assert "SKIP    augloop1/Win (machine not ssh.ready in machines.yaml)" in text
+    assert "SKIP    box1/Win (machine not ssh.ready in machines.yaml)" in text
 
 
 def test_load_one_failure_logs_reason(monkeypatch, tmp_path):

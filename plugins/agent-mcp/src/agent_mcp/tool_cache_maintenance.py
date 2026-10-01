@@ -54,7 +54,7 @@ class ScanResult:
 
 
 def resolve_cache_dir(override: str | None = None) -> Path | None:
-    """Mirror `copilot-agent-runtime`'s cache-home resolution
+    """Mirror the Copilot CLI runtime's cache-home resolution
     (``session/mcp/tool_snapshot_cache.rs``'s ``cache_home()`` +
     ``mcp/tool_cache.rs``'s ``path()``): an explicit ``COPILOT_CACHE_HOME``
     override replaces the whole cache-home directory (the runtime then joins

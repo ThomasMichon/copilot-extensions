@@ -115,7 +115,7 @@ mechanism CLI mode binds through.
       another admission source. Add the regression the delegation contract's
       "experimental until proven" note is waiting on.
       **Done** — traced the actual root cause against
-        `copilot-agent-runtime`'s send-admission path
+        the Copilot CLI runtime's send-admission path
         (`session_send_dispatch.rs::apply_public_send_admission`,
         `SendRequest.source` in the generated API): a `session.send()` call
         with no explicit `source` defaults to `source: "user"` for an
@@ -1653,7 +1653,7 @@ deferred. Phase 2 (Session Host CLI mode + cwd-keyed discovery) is next.
 ### 2026-09-19 — Phase 1 first fix: send single-stream admission
 
 Traced the "experimental until single-stream admission is proven" gap to its
-actual mechanism using a local `copilot-agent-runtime` checkout:
+actual mechanism using a local checkout of the Copilot CLI runtime:
 `session_send_dispatch.rs::apply_public_send_admission` defaults an
 immediate/visible `session.send()` with no explicit `source` to
 `source: "user"`. `agent-bridge`'s inbox-delivery poller

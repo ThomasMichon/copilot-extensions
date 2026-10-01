@@ -1303,7 +1303,7 @@ function Remove-CoordinatorTask {
 function Get-ServiceMode {
     # Resolve the service auto-start mode for this host:
     #   'interactive' -- an interactive (RDP/console) logon is required before the
-    #                    box is usable (verified: dev6/cloud1/augloop1 must be
+    #                    box is usable (verified: dev6/cloud1/box1 must be
     #                    RDP-kicked before SSH works). Such a logon ALWAYS precedes
     #                    dispatch, so the non-elevated HKCU logon auto-start is the
     #                    first-class coordinator service -- no elevated boot task.

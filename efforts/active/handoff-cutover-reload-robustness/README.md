@@ -27,7 +27,7 @@ visions:
   clean-room scenario** (`context-handoff-cutover`, 11/0 on a fresh box). **Sub A
   closed as not-viable plugin-side** (see Phase 2) — deferred to runtime **Sub C**
   (#5253† / upstream #13494) — **confirmed fixed permanently upstream 2026-09-20**
-  (github/copilot-agent-runtime#13494 shipped; the extension-reload orphaned-call
+  (a private Copilot CLI runtime issue #13494 shipped; the extension-reload orphaned-call
   race no longer occurs). **Sub D (env-var-free candidate confirmation)
   merged 2026-09-16** — copilot-extensions PR
   [#2757](https://github.com/ThomasMichon/copilot-extensions/pull/2757) (squash-merged,
@@ -71,7 +71,7 @@ handoff on its own.
 `consume_handoff` is an **extension-provided (external) tool** from the
 `context-handoff` plugin. When the successor Copilot starts, the CLI can reload
 its extensions several times in the first ~15 seconds (a known runtime
-generation race — upstream github/copilot-agent-runtime **#13492**, fix
+generation race — upstream private Copilot CLI runtime issue **#13492**, fix
 **#13494**; also described in the facility's managed "Loading…/Resuming… hang"
 note). If the `consume_handoff` request is routed to an extension instance that
 is then **torn down** during that reload storm, the runtime emits **no**
@@ -168,7 +168,7 @@ to the runtime fix (#5253† / upstream #13494). Findings:
       permanently upstream 2026-09-20** (operator confirmation): the runtime
       now fails/re-routes in-flight external-tool requests across an
       extension-reload generation boundary instead of orphaning them forever.
-- [x] Tracked the upstream fix (github/copilot-agent-runtime#13494); no
+- [x] Tracked the upstream fix (a private Copilot CLI runtime issue #13494); no
       further plugin-side mitigation is needed for this specific race. All
       "Loading…/Resuming… hang" advisory text tied to #13492/#13494 has been
       removed from this repo's skills/docs as stale (see Sub E's PR).
@@ -277,7 +277,7 @@ _Correlated via a facility-driven sweep of open `bug`-labeled issues against act
 ## Journal
 
 ### 2026-09-20 — Sub C confirmed fixed upstream; Sub E opened (spawn-retry loop, b431)
-- Operator confirmed github/copilot-agent-runtime#13494 is now permanently
+- Operator confirmed a private Copilot CLI runtime issue #13494 is now permanently
   fixed upstream. Marked Sub C (Phase 4) done; removed the now-stale
   "Loading…/Resuming… hang" advisory text tied to #13492/#13494 from
   `agent-worktrees`' `repairing-worktrees` skill, `agent-bridge`'s

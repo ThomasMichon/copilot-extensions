@@ -182,7 +182,7 @@ def test_current_repo_layers_union_sources_and_preserve_overlay_indexer(
     _write(root / ".agent-index" / "config.yaml", """\
         corpus:
           sources:
-            - name: github:gim-home/odsp-web-harness
+            - name: github:example-org/example-repo
               trust_domain: harness
     """)
     _write(root / ".copilot-extensions" / "agent-index" / "config.yaml", """\
@@ -201,7 +201,7 @@ def test_current_repo_layers_union_sources_and_preserve_overlay_indexer(
     sources = cfg.read_corpus_sources()
     assert [s["name"] for s in sources] == [
         "github:ThomasMichon/copilot-extensions",
-        "github:gim-home/odsp-web-harness",
+        "github:example-org/example-repo",
     ]
 
 
@@ -256,7 +256,7 @@ def test_current_repo_unions_base_knowledge_and_machine_local_sources(
     _write(root / ".agent-index" / "config.yaml", """\
         corpus:
           sources:
-            - name: github:gim-home/odsp-web-harness
+            - name: github:example-org/example-repo
               trust_domain: harness
     """)
     _write(knowledge / ".agent-index" / "config.yaml", """\
@@ -279,7 +279,7 @@ def test_current_repo_unions_base_knowledge_and_machine_local_sources(
     sources = cfg.read_corpus_sources()
     assert [s["name"] for s in sources] == [
         "github:owner/dotfiles",
-        "github:gim-home/odsp-web-harness",
+        "github:example-org/example-repo",
         "github:personal/notes",
     ]
 
