@@ -216,13 +216,27 @@ not new engines either. The `extends:` model (Phase 3) and provider adapters
       behavior gap is found and fixed. None found — no test changes.
 
 ### Phase 2 — Azure DevOps + Gitea provider adapters
-- [ ] Add an Azure DevOps backlog-provider adapter (list/reserve/claim/
+- [x] Add an Azure DevOps backlog-provider adapter (list/reserve/claim/
       release) implementing the existing provider-neutral surface
-      `repository_issue_loops.py` already defines for GitHub.
-- [ ] Add a Gitea backlog-provider adapter, same surface.
+      `repository_issue_loops.py` already defines for GitHub. **Already
+      shipped, discovered during this effort** — `AzureDevOpsProvider` in
+      `repository_issue_loops.py` (via the authenticated `az` CLI) fully
+      implements `ForgeProvider`, and `"azure-devops"` is already in
+      `_SUPPORTED_FORGE_PROVIDERS`. Landed by a different effort before this
+      one reached Phase 2; no new code needed here beyond this finding.
+- [ ] Add a Gitea backlog-provider adapter, same surface. **Blocked on an
+      operator decision** — see Journal entry below: no existing convention
+      in this repo for talking to Gitea (no CLI analog to `gh`/`az` is
+      currently vendored or assumed), and no live Gitea instance is
+      available in this session to validate against per this repo's own
+      "validate beyond unit tests" policy.
 - [ ] Add the equivalent forge adapters for the **reviewer** recipe's
       provider-neutral review capability (author/reviewer relationships,
       verdict posting, merge/close state) for Azure DevOps and Gitea.
+      **Genuinely new, not yet started** — confirmed the reviewer-side PR
+      feed/verdict posting is GitHub-only today
+      (`producers/github_pr_review_webhook.py`, no ADO/Gitea equivalent);
+      the ADO backlog adapter above does not cover this surface.
 - [ ] Tests: adapter contract tests mirroring the existing GitHub adapter's
       own test shape, for both backlog and reviewer surfaces.
 
@@ -407,3 +421,32 @@ _Pending review._
   shipped and already documented. Checked off Phase 1 with no code/doc
   changes beyond this Journal entry and the checklist itself. Moving to
   Phase 2 (Azure DevOps + Gitea provider adapters).
+
+### 2026-09-30 (same day) — Phase 2: ADO backlog adapter already shipped; Gitea blocked on a design decision
+- Investigating Phase 2's first item (Azure DevOps backlog adapter) found it
+  **already fully implemented**: `AzureDevOpsProvider` in
+  `repository_issue_loops.py` implements the `ForgeProvider` protocol
+  (`list_open_issues`/`reserve`/`claim`/`release`) via the authenticated
+  `az` CLI, including identity verification, WIQL-based issue discovery,
+  and the same comment-marker reservation convention the GitHub adapter
+  uses. `"azure-devops"` is already registered in
+  `_SUPPORTED_FORGE_PROVIDERS`. This landed via a different, independent
+  effort/commit before this effort reached Phase 2 — checked off with a
+  citation, no new code required.
+- Confirmed the reviewer recipe's PR-feed/verdict-posting surface
+  (`producers/github_pr_review_webhook.py`) is still GitHub-only; the ADO
+  backlog adapter above does not cover it. That half of Phase 2's third
+  item is genuinely still open.
+- **Stopped before starting the Gitea backlog adapter** — this repo has no
+  existing convention for talking to Gitea (no vendored CLI analogous to
+  `gh`/`az devops`, no prior adapter code, no declared choice of REST API
+  vs. a CLI tool such as `tea`), and no live Gitea instance is available in
+  this session to validate against, per this repo's own "validate beyond
+  unit tests before landing a fix" policy (`AGENTS.md`) — a Gitea adapter
+  built and merged on unit tests alone, with no end-to-end check against a
+  real Gitea instance, would repeat exactly the class of mistake that
+  policy exists to prevent. This is a genuine design-crossroads blocker
+  (not a "good stopping point"): the operator needs to decide the
+  integration approach and name an available Gitea instance (or confirm
+  none is available and the adapter should be built unit-tested-only with
+  that limitation explicitly recorded) before this item can proceed.
