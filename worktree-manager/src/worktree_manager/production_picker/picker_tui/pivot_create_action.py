@@ -53,10 +53,16 @@ def _parse_create_fields(raw: object, *, where: str) -> tuple[Mapping[str, objec
         name = item.get("name")
         if not isinstance(name, str) or not name.strip():
             raise ManifestError(f"{where}[{i}].name is required")
+        normalized_name = name.strip()
+        if any(f["name"] == normalized_name for f in out):
+            raise ManifestError(
+                f"{where}[{i}].name {normalized_name!r} duplicates an earlier "
+                "field (after whitespace normalization)"
+            )
         ftype = item.get("type", "text")
-        if ftype not in valid_types:
+        if not isinstance(ftype, str) or ftype not in valid_types:
             raise ManifestError(f"{where}[{i}].type must be one of {sorted(valid_types)}")
-        field: dict = {"name": name.strip(), "type": ftype}
+        field: dict = {"name": normalized_name, "type": ftype}
         if ftype in choice_types:
             opts = item.get("options")
             if not isinstance(opts, Sequence) or isinstance(opts, (str, bytes)) or not opts:
@@ -65,7 +71,12 @@ def _parse_create_fields(raw: object, *, where: str) -> tuple[Mapping[str, objec
                     f"{ftype} field"
                 )
             field["options"] = tuple(str(o) for o in opts)
-            if item.get("allow_other"):
+            allow_other = item.get("allow_other", False)
+            if not isinstance(allow_other, bool):
+                raise ManifestError(
+                    f"{where}[{i}].allow_other must be a boolean when present"
+                )
+            if allow_other:
                 field["allow_other"] = True
         condition = item.get("show_when")
         if condition is not None:

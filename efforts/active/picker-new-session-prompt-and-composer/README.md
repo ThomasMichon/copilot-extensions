@@ -919,9 +919,8 @@ Module-size gate: OK.
 ### 2026-10-01 — Phase B item 1 (manifest schema): new session, fresh worktree
 Resumed via handoff `d75d8a385b3c4ab5b94a3558d15c297b`. Phase A's worktree
 was already finalized (PR #4768 merged, no live copilot-extensions worktree
-left); created a fresh one
-(`tmichon-cloud1-win-20261001-115749-79c3`) per the handoff's own
-instruction before touching anything.
+left); created a fresh, isolated worktree per the handoff's own instruction
+before touching anything.
 
 **Choice made:** of the handoff's two offered next-slices (close Phase A's
 remaining seams, or start Phase B), picked **Phase B**. Reasoning: Phase A's

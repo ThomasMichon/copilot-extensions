@@ -891,6 +891,52 @@ def test_create_action_default_key_is_create(tmp_path):
     assert p.create_action.fields == ()
 
 
+def test_create_action_rejects_duplicate_field_names_after_normalization(tmp_path):
+    with pytest.raises(pivots.ManifestError):
+        pivots.parse_manifest(
+            {"label": "M", "list": ["x"], "create_action": {
+                "label": "New", "run": ["x"],
+                "fields": [{"name": "title"}, {"name": " title "}],
+            }},
+            name="m", source_path="x")
+
+
+def test_create_action_non_string_type_is_manifest_error_not_fatal(tmp_path):
+    # A `type` that isn't even hashable-comparable (list/dict) must not crash
+    # discovery with an unhandled TypeError -- it must sink to ManifestError
+    # (and discover_pivots must skip only the bad manifest, per below).
+    with pytest.raises(pivots.ManifestError):
+        pivots.parse_manifest(
+            {"label": "M", "list": ["x"], "create_action": {
+                "label": "New", "run": ["x"],
+                "fields": [{"name": "f", "type": []}],
+            }},
+            name="m", source_path="x")
+    with pytest.raises(pivots.ManifestError):
+        pivots.parse_manifest(
+            {"label": "M", "list": ["x"], "create_action": {
+                "label": "New", "run": ["x"],
+                "fields": [{"name": "f", "type": {}}],
+            }},
+            name="m", source_path="x")
+    _write(tmp_path, "ok", {"label": "Ok", "list": ["agent-x", "y"]})
+    _write(tmp_path, "bad", {"label": "Bad", "list": ["agent-x", "y"],
+           "create_action": {"label": "New", "run": ["x"],
+                              "fields": [{"name": "f", "type": []}]}})
+    assert {p.name for p in pivots.discover_pivots(tmp_path)} == {"ok"}
+
+
+def test_create_action_rejects_non_boolean_allow_other(tmp_path):
+    with pytest.raises(pivots.ManifestError):
+        pivots.parse_manifest(
+            {"label": "M", "list": ["x"], "create_action": {
+                "label": "New", "run": ["x"],
+                "fields": [{"name": "p", "type": "choice", "options": ["a"],
+                            "allow_other": "false"}],
+            }},
+            name="m", source_path="x")
+
+
 def test_card_action_parses_with_defaults(tmp_path):
     _write(tmp_path, "m", {"label": "M", "list": ["agent-x", "y"], "actions": [
         {"key": "card", "label": "View card", "kind": "card",
