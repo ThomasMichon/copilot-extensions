@@ -420,3 +420,26 @@ def test_recent_demand_projects_reports_all_active_projects(_cache_home):
         "b", args, project="p2", tracking_status="all")
 
     assert lc.recent_demand_projects() == {"p1", "p2"}
+
+
+def test_one_off_scope_reuses_an_active_resident_session():
+    """A nested one-off scope must not mask a monitor's TTL-bounded session."""
+    from agent_worktrees import config_cache
+
+    resident = config_cache.ConfigCacheSession(ttl=60)
+    calls = {"n": 0}
+
+    def load():
+        calls["n"] += 1
+        return calls["n"]
+
+    with resident.scope():
+        with config_cache.cached_load_config_scope() as inner:
+            assert inner is resident
+            config_cache.memoize_in_scope(load)
+    with resident.scope():
+        with config_cache.cached_load_config_scope():
+            assert config_cache.memoize_in_scope(load) == 1
+    assert calls["n"] == 1
+    with config_cache.cached_load_config_scope() as standalone:
+        assert standalone is not resident
