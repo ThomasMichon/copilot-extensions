@@ -436,9 +436,6 @@ class StatePair:
         return result
 
 
-UNTRACKED_WORKTREE_ERROR = "current directory is not a tracked worktree"
-
-
 def _git_toplevel(cwd: str | None) -> str | None:
     """Return the git worktree root of ``cwd`` (or the process cwd), or None."""
     try:
@@ -619,7 +616,9 @@ def resolve_pair(config: cfg.Config | None, *, cwd: str | None = None) -> StateP
     worktree_id = tracking.find_worktree_id_by_cwd(current_dir)
     record = tracking.load_record_by_id(worktree_id) if worktree_id else None
     if record is None:
-        return StatePair(paired=False, error=UNTRACKED_WORKTREE_ERROR)
+        return StatePair(
+            paired=False, error="current directory is not a tracked worktree"
+        )
     current = PairCheckout(
         role=record.pair_role or "",
         path=record.worktree_path,

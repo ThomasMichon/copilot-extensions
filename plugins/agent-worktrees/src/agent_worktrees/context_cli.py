@@ -534,6 +534,9 @@ def cmd_installer_readiness(args: argparse.Namespace) -> int:
     return emit(evaluate())
 
 
+_UNTRACKED_WORKTREE_ERROR = "current directory is not a tracked worktree"
+
+
 def _untracked_pair_context(
     pair: state_root_mod.StatePair,
     config: cfg.Config | None,
@@ -542,7 +545,7 @@ def _untracked_pair_context(
     config_error: str | None = None,
 ) -> tuple[dict, str | None]:
     payload = pair.as_dict()
-    if pair.error != state_root_mod.UNTRACKED_WORKTREE_ERROR:
+    if pair.error != _UNTRACKED_WORKTREE_ERROR:
         return payload, None
 
     try:
