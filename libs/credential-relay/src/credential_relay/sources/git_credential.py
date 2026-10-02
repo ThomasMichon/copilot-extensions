@@ -67,6 +67,17 @@ def _powershell() -> str | None:
     return shutil.which("powershell.exe") if _IS_WSL else None
 
 
+async def _reap(proc: asyncio.subprocess.Process | None) -> None:
+    """Kill and reap a helper still running after a timeout or cancellation
+    (a no-op once it has exited). Safe to await from a cancelled task."""
+    if proc is None or proc.returncode is not None:
+        return
+    with contextlib.suppress(ProcessLookupError, OSError):
+        proc.kill()
+    with contextlib.suppress(Exception, asyncio.CancelledError):
+        await asyncio.wait_for(proc.wait(), timeout=5.0)
+
+
 class GitCredentialSource:
     """Proxies git-credential requests to local Git Credential Manager.
 
@@ -284,9 +295,7 @@ class GitCredentialSource:
             log.error("git not found on PATH")
             return None
         finally:
-            if proc is not None and proc.returncode is None:
-                with contextlib.suppress(ProcessLookupError, OSError):
-                    proc.kill()
+            await _reap(proc)
 
         if proc.returncode != 0:
             log.error(
@@ -318,6 +327,7 @@ class GitCredentialSource:
         ps_array = ",".join(f"'{line}'" for line in lines) + ",''"
         ps_cmd = f"@({ps_array}) | git credential fill"
 
+        proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 powershell, "-NoProfile", "-Command", ps_cmd,
@@ -332,6 +342,8 @@ class GitCredentialSource:
         except (TimeoutError, asyncio.TimeoutError):
             log.error("PowerShell git credential fill timed out (%.0fs)", timeout)
             return None
+        finally:
+            await _reap(proc)
 
         if proc.returncode != 0:
             log.error(

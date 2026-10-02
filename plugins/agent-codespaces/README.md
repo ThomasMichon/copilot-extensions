@@ -341,7 +341,7 @@ relay profile itself stays account-free, and a missing/ambiguous GitHub
 credential warns during launch rather than blocking the session; `doctor`
 continues to report it. If GCM still cannot serve the selected account, sign in
 to GitHub in GCM for that account; the relay never substitutes a `gh auth token`
-for git `get`/`fill`, and never stores or erases tokens in GCM.
+for git `get`/`fill` (git `store`/`erase` still go to GCM as usual).
 
 Provisioning installs the relay-first wrapper only as `~/ado-auth-helper`.
 It deliberately leaves `~/azure-auth-helper` to the native Azure tooling so

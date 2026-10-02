@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from collections.abc import Awaitable, Callable
 from urllib.parse import urlsplit
 
+from agent_procutil import no_window_flags
 from credential_relay.sources.git_credential import GitCredentialSource
 
 from .provision import DOTFILES_DIR
@@ -110,13 +111,18 @@ def codespace_scope_accounts() -> tuple[tuple[str, ...], bool]:
 
 
 def _active_scope_findings(
-    lowered: dict[str, set[str]], combined: str, failures: dict[str, str] | None = None
+    lowered: dict[str, set[str]], combined: str, failures: dict[str, str] | None = None,
+    account_login_remedy: Callable[[str], str] | None = None,
 ) -> list[str]:
     from . import gh_account
 
     active = gh_account.active_account()
-    if active and (failures or {}).get(active.casefold()) == "timeout":
+    failure = (failures or {}).get(active.casefold()) if active else None
+    if failure == "timeout":
         return [_timeout_finding(active)]
+    if failure == "failed":
+        remedy = account_login_remedy(active) if account_login_remedy else "run: gh auth login"
+        return [f"active gh account '{active}' is not logged in -- {remedy}"]
     scopes = lowered.get(active.casefold()) if active else None
     if active and "codespace" not in {scope.casefold() for scope in (scopes or set())}:
         return [
@@ -151,10 +157,10 @@ def gh_auth_preflight(status_func, account_login_remedy) -> list[str]:
     }
     accounts, uses_ambient = codespace_scope_accounts()
     if not accounts:
-        msgs.extend(_active_scope_findings(lowered, combined, failures))
+        msgs.extend(_active_scope_findings(lowered, combined, failures, account_login_remedy))
         return msgs
     if uses_ambient:
-        msgs.extend(_active_scope_findings(lowered, combined, failures))
+        msgs.extend(_active_scope_findings(lowered, combined, failures, account_login_remedy))
     for login in accounts:
         scopes = lowered.get(login.casefold())
         if failures.get(login.casefold()) == "timeout":
@@ -276,6 +282,7 @@ def gcm_github_accounts(*, timeout: float = 10.0) -> list[str]:
     try:
         result = subprocess.run(
             ["git", "credential-manager", "github", "list"],
+            creationflags=no_window_flags(),
             capture_output=True,
             text=True,
             timeout=timeout,

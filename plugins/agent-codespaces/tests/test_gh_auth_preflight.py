@@ -244,6 +244,17 @@ def test_preflight_reports_a_status_timeout_as_a_timeout_not_a_missing_scope():
     assert "scope" not in msgs[0]
 
 
+def test_a_failed_active_account_is_reported_as_not_logged_in():
+    status = _STATUS.replace("x Logged in to github.com account alice", "X Failed to log in to github.com account alice")
+    with patch("subprocess.run") as run, \
+         patch("agent_codespaces.auth_preflight.codespace_scope_accounts", return_value=((), False)), \
+         patch("agent_codespaces.gh_account.active_account", return_value="alice"), \
+         patch("agent_codespaces.__main__._account_login_remedy", return_value="run: gh auth login"):
+        run.return_value = MagicMock(returncode=1, stdout=status, stderr="")
+        msgs = m._gh_auth_preflight()
+    assert msgs == ["active gh account 'alice' is not logged in -- run: gh auth login"]
+
+
 def test_fast_credential_account_never_guesses_when_the_binding_is_unreadable(monkeypatch):
     from agent_codespaces import account_binding, gh_account
 

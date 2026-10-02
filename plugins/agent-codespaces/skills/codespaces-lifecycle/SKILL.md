@@ -499,8 +499,7 @@ active `gh` account for ambient-owned CodeSpaces, as `username=<account>` for
 `github.com`; then call non-interactive GCM. The relay profile is account-free.
 Missing or ambiguous GitHub credentials are warnings for connect/detach (ADO-only
 or interactive work can still proceed) but remain doctor findings. The relay
-does not substitute `gh auth token` for git credential `get`/`fill`, and never
-stores or erases tokens in GCM.
+does not substitute `gh auth token` for git credential `get`/`fill`.
 
 ## Agent-Bridge Integration
 
