@@ -355,13 +355,47 @@ the new `full` matrix step runs
 produces a real baseline (187 tests, 10 covered files, correct
 `measured_commit`) when run directly in this checkout.
 
-**Not yet done** (left for the next increment): watching this actually run
-and land for real through a live `validate-and-promote.yml` run (this PR's
-own validation is direct/local only, since triggering the real promotion
-pipeline isn't something a PR branch can do); then expanding the plugin
-list in both the `full` job's `if:` condition and this Journal beyond
-`agent-ssh`, one plugin (or a small batch) at a time, toward "full coverage
-across all plugins" per the operator's own framing.
+**Review response (same PR):** three real findings addressed before
+merge. (1) A missing/transiently-failed collection could silently promote
+with no baseline recorded at all despite `agent-ssh` being "enrolled" --
+added a hard, fail-loud "Verify enrolled coverage baselines were actually
+collected" step in the `promote` job (the collection step itself stays
+`continue-on-error` so a coverage-tool bug never blocks a real release
+`run-plugin-tests.py` already validated; this new step is the actual
+enforcement point). (2) A more serious correctness bug:
+`_write_coverage_baselines_into_scratch` only overlaid this run's own
+freshly-collected files, never seeding what already existed on `main` --
+since `scratch` starts from a plain `dev` checkout with no baselines at
+all, any promotion round with no fresh collection for an already-published
+plugin would have silently dropped its last-known-good baseline entirely
+(the same regression class `_seed_versions_from_main` already exists to
+prevent for version numbers). Added `_seed_coverage_baselines_from_main`,
+called before the fresh overlay, plus a regression test
+(`test_promote_preserves_an_existing_main_baseline_when_no_fresh_one_is_collected`).
+(3) This Journal entry's own "not yet done" note (see below) originally
+implied this PR's own merge could validate the real round trip -- corrected
+to name the actual sequencing (workflow YAML resolves from `main`, not
+`dev`; a baseline-only change is a deliberate no-op) rather than overclaim.
+
+**Not yet done** (left for the next increment): watching this actually land
+through a live `validate-and-promote.yml` run and confirming a real
+baseline reaches `main`. This needs more than just this PR merging to
+`dev` -- important timing/sequencing the first version of this note
+glossed over (review finding, PR #4902):
+`repository_dispatch`/`workflow_run`-triggered runs of this workflow always
+resolve its own YAML from `main`, not `dev` (see this file's own top-of-file
+comment on why), so the promotion that first lands THIS wiring still runs
+the *old* workflow and cannot use it. Only the **next** promotion after
+that -- once this wiring itself is live on `main` -- can actually attempt
+collection. And that next promotion must carry a **genuine new `dev`
+content change**: a coverage-baseline update alone is deliberately excluded
+from the no-op-promotion comparison (see
+`test_promote_a_second_time_with_only_a_coverage_baseline_change_is_a_no_op`),
+so a promotion with nothing else to promote stays a no-op and checks in no
+baseline either. The real validation step is watching the first ordinary
+promotion *after* this wiring reaches `main` and confirming
+`.github/coverage-baselines/agent-ssh.json` actually appears in that
+commit -- not assuming this PR's own merge proves the round trip.
 
 ### 2026-10-01 — Phase 0 storage/correlation decision: check into `main`
 Resolving this Phase 0 Plan item's own open question, per the operator's

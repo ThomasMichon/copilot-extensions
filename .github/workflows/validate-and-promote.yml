@@ -242,8 +242,12 @@ jobs:
         # plugin). Independent of, and in addition to, the trusted
         # `run-plugin-tests.py` run above -- this step's own failure never
         # fails this job (see `continue-on-error` below): a baseline is
-        # optional evidence, never a gate. Expand this plugin list as later
-        # pilots prove out.
+        # optional evidence relative to `run-plugin-tests.py`'s own real
+        # test outcome, but the `promote` job's own "Verify enrolled
+        # coverage baselines were actually collected" step makes an
+        # ENROLLED plugin's baseline a hard requirement regardless -- keep
+        # this `if:` condition's plugin list in exact sync with that step's
+        # own list. Expand both lists together as later pilots prove out.
         if: matrix.plugin == 'agent-ssh'
         continue-on-error: true
         run: |
@@ -602,12 +606,42 @@ jobs:
         # `actions/download-artifact` has no built-in "zero matches is
         # fine" mode for `pattern`, so this step tolerates that itself
         # rather than failing the whole promotion over optional evidence.
+        # The NEXT step enforces the real guarantee: any plugin actually
+        # enrolled in collection must have produced one, or promotion fails
+        # loudly -- this step alone never silently drops that requirement.
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
           pattern: coverage-baseline-*
           path: coverage-baselines
           merge-multiple: true
+      - name: Verify enrolled coverage baselines were actually collected
+        if: steps.decide.outputs.proceed == 'true'
+        # Review finding (PR #4902): `continue-on-error: true` on both the
+        # `full` job's own collection step and this job's download step
+        # above means every failure point along the way is individually
+        # soft -- without this check, collection failing, the artifact
+        # never existing, or the download failing would all silently
+        # result in promotion succeeding with no baseline recorded at all,
+        # defeating the "correlation loop never silently breaks" Behavior
+        # for a plugin that IS supposed to have one. This is the one hard
+        # gate: an ENROLLED plugin's baseline is REQUIRED, never optional --
+        # only a plugin not yet in this list is allowed to have none.
+        #
+        # Keep this list in exact sync with `full` job's own
+        # `if: matrix.plugin == '...'` collection-step condition above --
+        # that's the single other place a plugin gets "enrolled".
+        run: |
+          missing=()
+          for plugin in agent-ssh; do
+            if [ ! -f "coverage-baselines/${plugin}.json" ]; then
+              missing+=("$plugin")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Enrolled plugin(s) missing a collected coverage baseline this run: ${missing[*]} -- refusing to promote without the evidence these plugins are supposed to produce."
+            exit 1
+          fi
       - name: Promote (push a candidate branch; report-only if push=false)
         id: promote
         if: steps.decide.outputs.proceed == 'true'

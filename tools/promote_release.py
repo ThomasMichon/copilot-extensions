@@ -382,12 +382,55 @@ def _write_pipeline_state_into_scratch(scratch: Path, state: dict) -> None:
 COVERAGE_BASELINES_DIR = ".github/coverage-baselines"
 
 
+def _seed_coverage_baselines_from_main(scratch: Path, main_head: str, *, repo: Path) -> int:
+    """Copy every existing ``COVERAGE_BASELINES_DIR/*.json`` file already
+    committed on ``main`` into the scratch worktree, BEFORE any freshly
+    collected baseline for this run is overlaid on top.
+
+    Mirrors ``_seed_versions_from_main``'s own reasoning: ``scratch`` starts
+    as a plain checkout of ``dev``, which has never had a baseline
+    committed into it at all (baselines only ever land on `main`, via this
+    very function's caller) -- so without this seed step, a promotion round
+    with no freshly-collected baseline for some already-enrolled plugin
+    (a transient collection/upload/download failure, or simply a plugin not
+    in this run's artifact set) would wholesale-replace `main`'s tree
+    *without* that plugin's last-known-good baseline at all, silently
+    discarding real evidence a past promotion already recorded -- the exact
+    regression class #3542 named for version numbers, recurring here for
+    coverage baselines.
+
+    Returns the count of files seeded (for the promotion report/log).
+    """
+    listing = _git(
+        ["ls-tree", "-r", "--name-only", main_head, "--", COVERAGE_BASELINES_DIR],
+        cwd=repo, check=False,
+    )
+    if not listing:
+        return 0
+    dest_dir = scratch / COVERAGE_BASELINES_DIR
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    seeded = 0
+    for path in listing.splitlines():
+        raw = _git(["show", f"{main_head}:{path}"], cwd=repo, check=False)
+        if not raw:
+            continue
+        (scratch / path).parent.mkdir(parents=True, exist_ok=True)
+        (scratch / path).write_text(raw + "\n", encoding="utf-8")
+        seeded += 1
+    return seeded
+
+
 def _write_coverage_baselines_into_scratch(
     scratch: Path, baselines_dir: Path | None, *, dev_head: str
 ) -> list[str]:
     """Copy every ``*.json`` baseline file from ``baselines_dir`` into the
     scratch worktree's own ``COVERAGE_BASELINES_DIR``, verifying each one's
     own ``measured_commit`` matches ``dev_head`` first.
+
+    Call ``_seed_coverage_baselines_from_main`` first (see its own
+    docstring) so this only ever OVERLAYS this run's freshly collected
+    baselines on top of whatever `main` already has, never replaces the
+    whole directory.
 
     The promotion's own ``full`` matrix jobs already embed ``measured_commit``
     when collecting (see ``coverage_guided_selection.baseline.collect_baseline``'s
@@ -640,6 +683,7 @@ def promote(
             "promoted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         _write_pipeline_state_into_scratch(scratch, new_state)
+        _seed_coverage_baselines_from_main(scratch, main_head, repo=repo)
         baselines_written = _write_coverage_baselines_into_scratch(
             scratch, coverage_baselines_dir, dev_head=dev_head
         )
