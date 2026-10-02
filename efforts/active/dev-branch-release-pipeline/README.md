@@ -539,7 +539,16 @@ Round 2 (operator's response to that evaluation):
       stray PR against `main` has no automated bounce guard yet. Track
       those two remaining items normally; they are not blocked by this one
       landing early.
-- [ ] Announce cutover; watch the first few real promotion cycles closely.
+- [x] Announce cutover; watch the first few real promotion cycles closely.
+  - **Formal announcement posted, 2026-10-01.** Pinned issue
+    ThomasMichon/copilot-extensions#4861 broadcasts the cutover to every
+    contributor landing on the repo's issues tab: `dev`-targeting, the
+    ~10-20 minute release delay, the "a red `dev` build blocks everyone's
+    release" expectation, and the retarget-don't-reopen guidance for a
+    stale `main`-targeting PR — summarizing (and linking to) CONTRIBUTING.md's
+    fuller "Migrating from the old `main`-targeting flow" section. This
+    closes the gap the item's prior entry explicitly flagged ("formal
+    announcement to other contributors still not done").
   - **In progress.** Several real cycles have now run and been watched
     closely by this effort itself (not yet a separate, deliberate
     post-announcement observation period): PR #3541 (first fully unattended
@@ -2304,6 +2313,20 @@ Validation Plan item, with the latter's "every harness worktree" claim
 honestly scoped to what was actually verified (one machine, standing in
 for the general mechanism since it isn't machine-specific code) rather
 than overclaiming universal coverage from a single data point.
+
+### 2026-10-01 — Posted the formal cutover announcement (Phase 5)
+
+The Phase 5 "announce cutover" item had been carrying real evidence of
+cycles being watched, but explicitly noted the formal broadcast to other
+contributors had never actually gone out — the migration guide in
+CONTRIBUTING.md existed but is only discovered by someone who already opens
+CONTRIBUTING.md. Closed that gap directly: opened and pinned
+ThomasMichon/copilot-extensions#4861, a repo-visible announcement
+summarizing the dev-targeting cutover, the 10-20 minute release delay, the
+shared-responsibility expectation around a red `dev` build, and the
+retarget-not-reopen guidance for a stale `main`-targeting PR, linking back
+to CONTRIBUTING.md's fuller migration section for the complete mechanics.
+Checked off the Phase 5 item.
 
 
 
