@@ -305,11 +305,19 @@ this phase) is considered.)_
       newest-first set — see the dedicated bullet below — and a full re-fetch
       sidesteps that class of bug entirely by construction, at the cost of
       one full fetch per wake instead of a cheaper partial update.)
-  - [ ] **Debounce the wake:** a burst of events (several task mutations in
-        quick succession) must coalesce into a single pending re-fetch, not
-        one re-fetch per event — if a fetch is already in flight or already
-        scheduled, a newly arriving event extends/no-ops rather than queuing
-        a second one.
+  - [ ] **Debounce the wake, but never drop an event that arrives mid-fetch
+        as a no-op:** a burst of events (several task mutations in quick
+        succession) must coalesce into a single pending re-fetch, not one
+        re-fetch per event — if a fetch hasn't started yet and is merely
+        scheduled, a newly arriving event coalesces into that same pending
+        fetch. But an event arriving **while a fetch is already in
+        flight** cannot be a plain no-op: that fetch may already have read
+        the pre-mutation snapshot, so silently dropping the new event would
+        leave the mutation invisible until the 30-60s safety reconcile.
+        Fixed by a trailing-dirty flag: any event arriving during an
+        in-flight fetch sets a flag that triggers exactly one more
+        re-fetch immediately after the current one completes, rather than
+        being coalesced away.
   - [ ] **Close the gap between the initial snapshot and the subscription
         actually being live — and prove it's actually live, not just that
         the HTTP response started:** a mutation that lands after the
@@ -324,8 +332,26 @@ this phase) is considered.)_
         reconcile right after `stream_events()` returns can still race the
         exact gap this bullet means to close. Fixed by having the route
         emit an explicit **ready frame** immediately after queue
-        registration (before yielding any real event), and having the
-        client: (1) wait for that ready frame, (2) buffer any events
+        registration (before yielding any real event), with its own
+        version-skew handling (agent-dispatch has no existing
+        protocol-version module like agent-bridge's `protocol.py` — this
+        introduces a minimal, purpose-built capability signal rather than
+        importing that machinery): the coordinator advertises support for
+        the ready frame on `/health` (the same place it already advertises
+        other capabilities); the client checks that advertisement before
+        relying on the frame at all. Against a daemon that advertises
+        support, wait for the ready frame (bounded — if it doesn't arrive
+        within a short timeout despite being advertised, treat that as a
+        stream failure and fall back to polling, never wait forever).
+        Against a daemon that doesn't advertise it, skip the wait entirely
+        and start the reconcile immediately after `stream_events()`
+        returns — the pre-fix behavior and its narrower race, not an
+        indefinite hang. The ready frame itself is a control frame the
+        relay's own consumer filters out before it ever reaches row/diff
+        logic — it must never be exposed as a task event to an unrelated
+        `watch`-style consumer of the same stream. Once past that gate, the
+        client: (1) waits for the ready frame (when the daemon supports
+        it), (2) buffers any events
         received from that point on (count only — these are wake signals,
         not row payloads, consistent with the wake-only model below; there
         is no per-event state to "apply"), (3) run the immediate reconcile
@@ -476,8 +502,11 @@ this phase) is considered.)_
         problem `ResolvingDispatchClient` (`client.py:1112`) already exists
         to solve for long-running supervisors; this reconnect reuses that
         exact pattern rather than inventing a second one.
-- [ ] **3b — agent-bridge daemon-side cache (land first; smaller, no new
-      failure mode):** `AgentResolver`'s per-call resolver scan is the actual
+- [ ] **3b — agent-bridge daemon-side cache (land first; smaller than the
+      agent-dispatch relay, no new HTTP-call-shape change, though it does
+      introduce its own new failure modes around the background refresh
+      itself — see the bullets below, not "no new failure mode" at all):**
+      `AgentResolver`'s per-call resolver scan is the actual
       cost (Phase 2's `incomplete_namespaces` work was about tolerating its
       partial-failure shape, not removing the cost). Move that scan **into
       the daemon**, on its own background refresh timer, maintaining an
@@ -552,19 +581,30 @@ this phase) is considered.)_
         that state is *always* reported in `incomplete_namespaces` until its
         first successful scan completes — never silently omitted as if it
         had simply resolved to zero agents.
-  - [ ] **The namespace set itself is dynamic, not fixed at startup:**
-        `refresh_provider_resolvers()` (`agent_registry_resolver.py:159`)
-        already adds, replaces, and unregisters `providers.d`-declared
-        resolvers at runtime on its own TTL — the cache's namespace set must
-        track this, not assume the set discovered at daemon startup is
-        permanent. The background refresh cycle re-runs this same provider
-        scan on its own cadence and reconciles cache membership against it:
-        a newly-registered namespace enters the cache in the
-        **uninitialized** state above (not silently absent until some
-        unrelated trigger populates it), and a namespace whose provider was
-        unregistered is retired from the cache outright — never left
-        serving its last-known-good agents indefinitely as if that provider
-        still existed.
+  - [ ] **The namespace set itself is dynamic, not fixed at startup — and a
+        same-namespace provider *replacement* is its own case, not covered
+        by add/remove alone:** `refresh_provider_resolvers()`
+        (`agent_registry_resolver.py:159`) already adds, replaces, and
+        unregisters `providers.d`-declared resolvers at runtime on its own
+        TTL — the cache's namespace set must track this, not assume the set
+        discovered at daemon startup is permanent. The background refresh
+        cycle re-runs this same provider scan on its own cadence and
+        reconciles cache membership against it: a newly-registered
+        namespace enters the cache in the **uninitialized** state above
+        (not silently absent until some unrelated trigger populates it),
+        and a namespace whose provider was unregistered is retired from
+        the cache outright — never left serving its last-known-good agents
+        indefinitely as if that provider still existed. **Replacement**
+        (the same namespace unregistered and re-registered to a *different*
+        resolver, not simply removed) is distinct from either case: keeping
+        that namespace's existing last-known-good cache entry across the
+        swap would let the *old* provider's agents keep serving as
+        authoritative if the *new* resolver's first scan fails. Any
+        namespace whose provider generation changes — not just whose
+        namespace is added or removed — must have its cache entry
+        invalidated (discarding any in-flight scan against the old resolver
+        and resetting to **uninitialized**) before the new resolver's first
+        scan runs, exactly the same treatment as a brand-new namespace gets.
   - [ ] **`force_refresh` is a protocol-gated capability, not an additive
         response field:** unlike Phase 2's
         `incomplete_namespaces` (an additive, tolerant-reader *response*
@@ -1463,3 +1503,44 @@ Two findings:
   ordinary events already use — not a second, inconsistent mechanism.
 
 Both replied-to inline.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 9: ready-frame version skew, trailing-fetch gap, provider-replacement cache staleness, a contradictory claim
+One new finding plus three previously-missed ones surfaced together:
+
+- **New: the ready-frame handshake itself needed version-skew handling.**
+  Waiting unboundedly for a frame an older coordinator will never send would
+  hang the relay forever (this design also removes the read timeout for
+  exactly this stream). Fixed by having the coordinator advertise ready-frame
+  support on `/health` (agent-dispatch has no existing protocol-version
+  module like agent-bridge's `protocol.py` — a minimal, purpose-built
+  capability signal was the right scope here, not importing that machinery);
+  the client only waits for the frame when the daemon advertises it, and
+  even then with a bounded timeout, never an indefinite one. The frame
+  itself is explicitly a control frame the relay filters out before it
+  reaches row/diff logic, never exposed as a task event to an unrelated
+  `watch` consumer.
+- **Previously missed: the debounce no-op was wrong for an event arriving
+  mid-fetch.** Coalescing a not-yet-started pending fetch is correct, but
+  silently no-op'ing an event that arrives *while* a fetch is already in
+  flight can lose it — that fetch may have already read the pre-mutation
+  snapshot. Fixed with a trailing-dirty flag: an event during an in-flight
+  fetch triggers exactly one more re-fetch immediately after, rather than
+  being coalesced away.
+- **Previously missed: the dynamic-namespace fix covered add/remove but not
+  same-namespace replacement.** `refresh_provider_resolvers()` can
+  unregister and re-register a provider under the *same* namespace; keeping
+  that namespace's last-known-good cache entry across the swap would let
+  the old provider's agents keep serving as authoritative if the new
+  resolver's first scan fails. Fixed by requiring a provider-generation
+  change (not just a namespace add/remove) to invalidate that namespace's
+  cache entry and reset it to uninitialized before the new resolver's first
+  scan.
+- **Previously missed: 3b's own intro claimed "no new failure mode," which
+  the design's own later bullets (and its own Validation Plan) contradict.**
+  Fixed by correcting the claim in both the README and the PR description to
+  describe what's actually true — no new HTTP-call-shape change for existing
+  callers, but real new failure modes in the background refresh itself,
+  addressed by the bullets that already follow it rather than claimed away.
+
+All four replied-to inline (one new thread; three on previously-missed
+findings in code this design had already touched by this round).
