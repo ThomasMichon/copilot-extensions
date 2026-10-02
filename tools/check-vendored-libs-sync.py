@@ -105,8 +105,30 @@ def _editable_pointer_consumers() -> dict[str, list[str]]:
     ``pyproject.toml`` (vendor-pointer-generalization effort) -- no local
     ``libs/<lib>`` copy directory at all, so ``_lib_copies()`` never sees
     these consumers. Mirrors ``check-version-bump.py``'s own identical scan
-    (``_vendored_consumers``'s editable-ref half) rather than duplicating its
-    fail-closed behavior on an unreadable manifest."""
+    (``_vendored_consumers``'s editable-ref half), including its symlink
+    preflight: ``iter_consumer_dirs()`` filters by ``pyproject.toml.is_file()``,
+    which is ALSO False for a symlink (valid or dangling) or a symlink-to-
+    directory -- so a symlinked manifest would otherwise vanish from the scan
+    before ``find_uv_editable_refs``'s own symlink check ever saw it, letting
+    a stale real copy pass with canonical silently omitted from comparison
+    (PR #4954 review)."""
+    candidate_dirs: list[tuple[str, Path]] = []
+    if PLUGINS_DIR.is_dir():
+        candidate_dirs.extend(
+            (p.name, p) for p in sorted(PLUGINS_DIR.iterdir()) if p.is_dir()
+        )
+    candidate_dirs.extend(
+        (extra, REPO / extra) for extra in uer._EXTRA_CONSUMER_DIRS
+        if (REPO / extra).is_dir()
+    )
+    for name, consumer_dir in candidate_dirs:
+        pyproject = consumer_dir / "pyproject.toml"
+        if pyproject.is_symlink():
+            raise SystemExit(
+                f"check-vendored-libs-sync: {pyproject} is a symlink -- "
+                f"cannot safely determine {name}'s uv-editable consumers; "
+                "replace it with a real file."
+            )
     consumers: dict[str, list[str]] = {}
     for name, consumer_dir in uer.iter_consumer_dirs():
         try:

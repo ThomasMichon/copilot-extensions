@@ -143,6 +143,39 @@ def test_unrelated_pending_changefile_does_not_satisfy(repo: Path):
     assert "alpha" in result.stderr
 
 
+def test_nested_added_changefile_does_not_satisfy_via_basename_collision(repo: Path):
+    """The regression this test exists for (PR #4954 review): a changefile
+    added at a NESTED path (e.g. ``.changefiles/archive/pending.json``) must
+    not satisfy the requirement by basename alone just because an existing,
+    unrelated TOP-LEVEL file (``.changefiles/pending.json``) happens to share
+    that name -- ``changefile.read_changefiles()`` only ever globs
+    ``.changefiles/*.json`` non-recursively, so the nested file this PR adds
+    is never actually consumed at all."""
+    _write(repo, ".changefiles/pending.json",
+           json.dumps({"comment": "unrelated, top-level",
+                       "changes": [{"plugin": "beta", "type": "patch"}]}))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "unrelated top-level pending.json, already merged")
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", base_sha)
+
+    _write(repo, "plugins/alpha/src/alpha/feature.py", "def f():\n    return 1\n")
+    _write(repo, ".changefiles/archive/pending.json",
+           json.dumps({"comment": "archived, not consumable",
+                       "changes": [{"plugin": "alpha", "type": "patch"}]}))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "alpha feature, changefile only added at a nested path")
+    result = _run(repo)
+    assert result.returncode == 1, (
+        "alpha must still be charged -- the added changefile is nested, not "
+        "top-level, so read_changefiles() never actually sees it: "
+        + result.stdout + result.stderr
+    )
+    assert "alpha" in result.stderr
+
+
 def test_untouched_plugin_is_not_charged(repo: Path):
     _plugin(repo, "beta")
     _git(repo, "add", "-A")

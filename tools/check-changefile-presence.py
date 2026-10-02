@@ -73,7 +73,17 @@ def added_changefile_names(base_ref: str, head_ref: str = "HEAD") -> set[str]:
     a promotion before this PR merges, the plugin ships this PR's content
     with no bump at all: exactly the silent stale-deploy failure this whole
     guard exists to prevent (dotfiles #1025), just one level removed
-    (PR #4942 review)."""
+    (PR #4942 review).
+
+    Restricted to TOP-LEVEL ``.changefiles/*.json`` paths -- the only shape
+    ``changefile.read_changefiles()`` itself ever reads (it globs
+    ``.changefiles/*.json`` non-recursively). Reducing to a bare basename
+    without that restriction let an added nested path (e.g.
+    ``.changefiles/archive/pending.json``) coincidentally match an existing,
+    unrelated TOP-LEVEL file of the same name (``.changefiles/pending.json``)
+    that ``read_changefiles()`` would actually consume -- passing a PR whose
+    diff never added a changefile ``read_changefiles()`` can see at all
+    (PR #4954 review)."""
     cvb = _load_check_version_bump()
     head = cvb._rev_parse(head_ref)
     if head is None:
@@ -84,7 +94,15 @@ def added_changefile_names(base_ref: str, head_ref: str = "HEAD") -> set[str]:
     mbase = cvb._merge_base(base, head) or base
     r = cvb._git("diff", "--name-only", "--diff-filter=A", f"{mbase}..{head}",
                  "--", ".changefiles")
-    return {Path(ln.strip()).name for ln in r.stdout.splitlines() if ln.strip()}
+    names = set()
+    for ln in r.stdout.splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        p = Path(ln)
+        if p.parent.as_posix() == ".changefiles" and p.suffix == ".json":
+            names.add(p.name)
+    return names
 
 
 def plugins_with_pending_changefiles(base_ref: str, head_ref: str = "HEAD") -> set[str]:

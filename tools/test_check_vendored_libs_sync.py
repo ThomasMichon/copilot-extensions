@@ -194,3 +194,30 @@ def test_verify_ignores_editable_pointer_only_libs_with_a_single_real_copy(
 
     assert check_vendored_libs_sync.verify() == []
 
+
+def test_verify_fails_closed_on_symlinked_consumer_pyproject(fake_repo: Path):
+    """The regression this test exists for (PR #4954 review): if the ONLY
+    editable-pointer consumer's `pyproject.toml` is a symlink,
+    `find_uv_editable_refs()` returns no references for it (its own explicit
+    refusal) -- a caller that doesn't reject the symlink itself first would
+    treat that empty result as "no editable-pointer consumers for this lib",
+    silently omit canonical from the comparison, and let a stale real copy
+    pass. Must fail closed instead (`check-version-bump.py`'s identical
+    preflight, mirrored here)."""
+    _seed_real_lib(fake_repo, "libs/shared-lib", content="canonical\n")
+    _seed_real_lib(
+        fake_repo, "plugins/agent-worktrees/libs/shared-lib", content="still-old\n",
+    )
+    consumer_dir = fake_repo / "plugins" / "agent-bridge"
+    consumer_dir.mkdir(parents=True, exist_ok=True)
+    real = fake_repo / "plugins" / "agent-bridge" / "real-pyproject.toml"
+    real.write_text(
+        '[project]\nname = "agent-bridge"\nversion = "0.1.0"\n\n'
+        '[tool.uv.sources]\nshared-lib = { path = "../../libs/shared-lib", editable = true }\n',
+        encoding="utf-8",
+    )
+    (consumer_dir / "pyproject.toml").symlink_to(real)
+
+    with pytest.raises(SystemExit, match="(?i)symlink"):
+        check_vendored_libs_sync.verify()
+
