@@ -265,6 +265,16 @@ class TestNoStdlibModuleNameCollisions:
         local_names = {
             p.stem for p in package_dir.glob("*.py") if p.name != "__init__.py"
         }
+        # A sibling PACKAGE directory (one with its own __init__.py) is just
+        # as importable -- and just as capable of shadowing a stdlib
+        # top-level package (e.g. a future `email/` here would shadow
+        # stdlib `email`) -- as a sibling module file, so it must be
+        # collected the same way, not just *.py files.
+        local_names |= {
+            d.name
+            for d in package_dir.iterdir()
+            if d.is_dir() and (d / "__init__.py").is_file()
+        }
         collisions = local_names & set(sys.stdlib_module_names)
         assert not collisions, (
             f"{collisions!r} collide with stdlib top-level module names -- "
