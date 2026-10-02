@@ -26,12 +26,13 @@ state for the current project. `state-root --pair` is stricter: it resolves the
 task-specific sibling of the current tracked worktree and exits `3` when no
 pair is available.
 
-When `--pair` runs from a registered repository anchor, JSON output preserves
-the existing `"error": "current directory is not a tracked worktree"` contract
-and also reports the independently resolved state root, checkout classification,
-and recovery guidance. Plain output keeps the same error as its first line and
-adds the safe read-only destination when available. The command never guesses
-among the anchor's worktrees and never creates or selects a writable pair.
+From a registered repository anchor, `--pair` exits `3` because the anchor does
+not identify one task-specific writable sibling. Its JSON result contains
+`"paired": false`, `"error": "current directory is not a tracked worktree"`,
+the independently resolved state root, checkout classification, and recovery
+guidance. Plain output begins with the same error and reports the safe read-only
+destination when available. The command never guesses among the anchor's
+worktrees and never creates or selects a writable pair.
 
 ## Knowledge plugin composition
 
