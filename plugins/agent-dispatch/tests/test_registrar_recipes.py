@@ -368,3 +368,208 @@ def test_resolve_extends_rejects_a_non_mapping_recipe_document(tmp_path, monkeyp
     monkeypatch.setitem(GLOBAL_RECIPES, "bad", [1, 2, 3])
     with pytest.raises(RegistrarError, match="resolved to a non-mapping document"):
         resolve_extends({"extends": "global:bad"}, base_dir=tmp_path)
+
+
+# -- The four shipped global recipes (Sub-PR 2) -------------------------------
+#
+# Each of the four named archetypes (ThomasMichon/copilot-extensions#4691
+# Phase 3's own Sub-PR 2 description) resolves end-to-end through
+# `read_declaration_file_set` -- the same chokepoint a hand-written direct
+# `kind:` declaration goes through -- to prove the "no behavior change to the
+# existing direct-declaration path" guarantee at the engine level, not just
+# at the raw-dict-merge level `resolve_extends` alone already covers above.
+
+
+def test_global_repository_issue_loop_equivalent_to_direct_kind(tmp_path):
+    import json as _json
+
+    from agent_dispatch.registrar_discovery import read_declaration_file_set
+
+    override = {
+        "name": "backlog",
+        "repo": "example/project",
+        "source": "repository-backlog",
+        "cadence_seconds": 3600,
+        "task_label": "repository-issue-work",
+        "forge": {"provider": "github", "producer_login": "issue-bot"},
+        "reservation": {"label": "agent-reserved"},
+        "pool": {
+            "max_active_processes": 1,
+            "body": {"agent": "issue-worker"},
+        },
+    }
+
+    direct_path = tmp_path / "direct.json"
+    direct_path.write_text(
+        _json.dumps(
+            {
+                **override,
+                "kind": "repository-issue-loop",
+                "exclude_labels": [
+                    "bootstrap", "wontfix", "invalid", "duplicate", "question"
+                ],
+                "pool": {**override["pool"], "body": {
+                    "type": "headless", **override["pool"]["body"],
+                }},
+            }
+        ),
+        encoding="utf-8",
+    )
+    extends_path = tmp_path / "extends.json"
+    extends_path.write_text(
+        _json.dumps({**override, "extends": "global:repository-issue-loop"}),
+        encoding="utf-8",
+    )
+
+    direct = read_declaration_file_set(direct_path)
+    extended = read_declaration_file_set(extends_path)
+
+    assert extended == direct
+
+
+def test_global_goal_driven_resolves_to_repository_issue_loop_with_identity(tmp_path):
+    import json as _json
+
+    from agent_dispatch.registrar_discovery import read_declaration_file_set
+
+    path = tmp_path / "goal.json"
+    path.write_text(
+        _json.dumps(
+            {
+                "extends": "global:goal-driven",
+                "name": "goal-backlog",
+                "repo": "example/project",
+                "source": "goal-backlog",
+                "cadence_seconds": 3600,
+                "task_label": "goal-work",
+                "forge": {"provider": "github", "producer_login": "goal-bot"},
+                "reservation": {"label": "goal-reserved"},
+                "pool": {
+                    "max_active_processes": 1,
+                    "body": {"agent": "goal-worker"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    declarations = read_declaration_file_set(path)
+
+    workers = next(d for d in declarations if d.name == "goal-backlog-workers")
+    assert workers.body.type == "headless"
+    assert workers.body.agent == "goal-worker"
+    # worker_identity: goal-driven threads through repository_issue_loops'
+    # own worker-identity resolution into the emitter spec it stamps onto
+    # each created task -- not directly onto the pool's own `body`.
+    source = next(d for d in declarations if d.name == "goal-backlog-source")
+    assert "goal-driven" in str(source.spec)
+
+
+def test_global_reviewer_resolves_to_reviewer_loop_with_standing_charter(tmp_path):
+    import json as _json
+
+    from agent_dispatch.registrar_discovery import read_declaration_file_set
+
+    path = tmp_path / "reviewer.json"
+    path.write_text(
+        _json.dumps(
+            {
+                "extends": "global:reviewer",
+                "name": "my-reviewer",
+                "repo": "github.com/example/project",
+                "task_label": "external-review",
+                "emitter": {
+                    "command": ["python", "discover.py"],
+                    "interval_seconds": 60,
+                },
+                "evaluator": {"evaluator_spec": {"rules": []}, "interval": 30},
+                "pool": {"max_active_processes": 2},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    declarations = read_declaration_file_set(path)
+
+    workers = next(d for d in declarations if d.name == "my-reviewer-workers")
+    assert workers.body.type == "headless"
+    assert "standing reviewer" in workers.body.charter
+    assert "land=self" in workers.body.charter
+
+
+def test_global_conflict_resolution_resolves_to_reviewer_loop_with_standing_charter(
+    tmp_path,
+):
+    import json as _json
+
+    from agent_dispatch.registrar_discovery import read_declaration_file_set
+
+    path = tmp_path / "conflict.json"
+    path.write_text(
+        _json.dumps(
+            {
+                "extends": "global:conflict-resolution",
+                "name": "unstick",
+                "repo": "github.com/example/project",
+                "task_label": "conflict-resolution",
+                "emitter": {
+                    "command": ["python", "discover.py"],
+                    "interval_seconds": 60,
+                },
+                "evaluator": {"evaluator_spec": {"rules": []}, "interval": 30},
+                "pool": {"max_active_processes": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    declarations = read_declaration_file_set(path)
+
+    workers = next(d for d in declarations if d.name == "unstick-workers")
+    assert workers.body.type == "headless"
+    assert "force-push" in workers.body.charter
+
+
+def test_global_reviewer_declaration_can_override_the_default_charter(tmp_path):
+    """A consumer can still supply its own `pool.body.charter`, replacing
+    the template's default outright (deep_merge's ordinary scalar-override
+    behavior) -- the shipped charter is a default, not a forced value."""
+    import json as _json
+
+    from agent_dispatch.registrar_discovery import read_declaration_file_set
+
+    path = tmp_path / "reviewer.json"
+    path.write_text(
+        _json.dumps(
+            {
+                "extends": "global:reviewer",
+                "name": "my-reviewer",
+                "repo": "github.com/example/project",
+                "task_label": "external-review",
+                "emitter": {
+                    "command": ["python", "discover.py"],
+                    "interval_seconds": 60,
+                },
+                "evaluator": {"evaluator_spec": {"rules": []}, "interval": 30},
+                "pool": {
+                    "max_active_processes": 2,
+                    "body": {"charter": "a completely custom charter"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    declarations = read_declaration_file_set(path)
+
+    workers = next(d for d in declarations if d.name == "my-reviewer-workers")
+    assert workers.body.charter == "a completely custom charter"
+
+
+def test_goal_driven_builtin_identity_resolves():
+    from agent_dispatch.worker_identities import load_worker_identity
+
+    identity = load_worker_identity("goal-driven")
+
+    assert identity.name == "goal-driven"
+    assert "drive it to completion" in identity.rules

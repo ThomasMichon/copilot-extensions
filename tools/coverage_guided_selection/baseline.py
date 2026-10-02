@@ -290,7 +290,7 @@ def collect_baseline(
             proc = subprocess.run(
                 command,
                 cwd=cwd,
-                env=_subprocess_env(cov_data_file),
+                env=_subprocess_env(cov_data_file, tmp_path / "sandbox"),
                 capture_output=True,
                 text=True,
                 timeout=timeout_s,
@@ -317,18 +317,43 @@ def collect_baseline(
     }
 
 
-def _subprocess_env(cov_data_file: Path) -> dict:
+def _subprocess_env(cov_data_file: Path, sandbox: Path) -> dict:
     import os
 
-    env = dict(os.environ)
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from plugin_test_containment import isolated_environment
+
+    # Run baseline collection under the exact same containment
+    # `run-plugin-tests.py`'s own trusted path always uses: `HOME`,
+    # `USERPROFILE`, every XDG dir, and plugin-specific state paths are all
+    # redirected into `sandbox` (never the caller's real host state), and
+    # `GH_TOKEN`/`GITHUB_TOKEN`/facility env vars (e.g. `AGENT_RT_ROOT`) are
+    # scrubbed outright -- confirmed live: without this, a plugin under test
+    # (e.g. `agent-containers`' own `provider_ssh.py`) can read a leaked
+    # ambient value ahead of a test's own monkeypatched substitute, or a
+    # baseline run can read/write real host state a sandboxed test run
+    # never would. A baseline is only ever earned from the same conditions
+    # the real validation gate runs under (see `collect_baseline`'s own
+    # docstring).
+    env = isolated_environment(os.environ, sandbox)
+    # Match `run-plugin-tests.py`'s own override exactly (not just leave
+    # `isolated_environment`'s caller-preserved `PYTHONPATH` as-is): without
+    # this, an ambient stale source tree on `PYTHONPATH` could still take
+    # import precedence in this baseline's own pytest run even though the
+    # trusted validation run never would, breaking the "same conditions"
+    # contract this isolation exists to provide.
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
     # Never let a cached dev-venv's own interpreter/env leak into the
     # ephemeral baseline run (mirrors test-supervisor's own caller-env
     # scrubbing for the same reason: these describe the *caller's* bootstrap
-    # environment, not the selector's).
+    # environment, not the selector's). Not part of `isolated_environment`'s
+    # own scrub list, so handled separately here.
     env.pop("UV_PROJECT_ENVIRONMENT", None)
     env.pop("VIRTUAL_ENV", None)
     # Never let an ambient pytest-selection override make a partial
-    # collection look like a complete, authoritative baseline run.
+    # collection look like a complete, authoritative baseline run. Also not
+    # part of `isolated_environment`'s own scrub list (that targets host
+    # state/credentials, not pytest-specific selection overrides).
     for var in _AMBIENT_PYTEST_SELECTION_ENV_VARS:
         env.pop(var, None)
     # Direct pytest-cov's own data file to our temp path -- without this,

@@ -16,13 +16,101 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from .recipes import EXTERNAL_AUTHOR_CLAUSE, RESOLUTION_CLAUSE, STAGNATION_CLAUSE, SUSPEND_CLAUSE
 from .registrar import RegistrarError
 
+#: Shared, generalized standing-loop charters for the reviewer and
+#: conflict-resolution archetypes (Sub-PR 2, ThomasMichon/copilot-extensions
+#: #4691 Phase 3). Unlike the ad-hoc ``agent_dispatch.recipes`` CLI
+#: archetypes' own charter templates, these carry no ``{repo}``/``{pr}``
+#: placeholders: a standing ``reviewer-loop`` pool's ``pool.body.charter``
+#: is static, general-purpose conduct applied to *every* task the pool
+#: claims -- the specific repo/PR/landing-model detail for one occurrence
+#: lives in that occurrence's own task (``goal``/``prompt``), which the
+#: declaration's own discovery emitter sets, not this static charter. The
+#: four shared clauses are reused verbatim from the ad-hoc recipes (see
+#: ``recipes/registry.py``) rather than duplicated, so sharpening one
+#: clause improves every charter built on it.
+_REVIEWER_CHARTER = (
+    "You are a standing reviewer for this pool's target repository, picking up "
+    "one pull request at a time under that task's own stated landing model "
+    "(`land=self` or `land=author` -- read the task's own goal/prompt for "
+    "which applies, since a single pool may serve more than one review "
+    "policy).\n\n"
+    "Loop: read the change and post specific feedback or approve. Under "
+    "`land=self`, drive it toward merge and take ownership of landing when "
+    "ready. Under `land=author`, the author owns updates and landing: record "
+    "the delivered verdict, suspend without holding worker capacity, and "
+    "resume only when the change updates or the non-response policy expires. "
+    "Never merge on the author's behalf in that model. " + SUSPEND_CLAUSE
+    + " When the change updates, resume and re-review only what moved.\n\n"
+    + EXTERNAL_AUTHOR_CLAUSE + "\n\n"
+    + STAGNATION_CLAUSE + "\n\n"
+    + RESOLUTION_CLAUSE
+)
+
+_CONFLICT_RESOLUTION_CHARTER = (
+    "You are a standing conflict-resolution worker for this pool's target "
+    "repository: each task you pick up names a pull request an automated "
+    "producer opened that is now stuck -- it has merge conflicts against its "
+    "base and nobody is driving it. Take the last mile to a mergeable state "
+    "-- check out its branch into a local worktree, rebase (or merge) the "
+    "base branch in, resolve the conflicts, and **force-push the resolved "
+    "branch back over the PR head** so the same PR updates in place -- never "
+    "open a second PR. Then answer its review and build state.\n\n"
+    + SUSPEND_CLAUSE + " Resume on the next review/build/update and iterate "
+    "until it lands.\n\n"
+    "Stay within the intent of the existing change -- you are unblocking it, "
+    "not redesigning it.\n\n"
+    + STAGNATION_CLAUSE + "\n\n"
+    + RESOLUTION_CLAUSE
+)
+
+#: Labels excluded from backlog eligibility by every real repository-issue-loop
+#: adopter today (both this repo's own harness/dotfiles triage and backlog
+#: loops already repeat this exact list verbatim) -- the effort's own
+#: motivating operational finding (per-repo duplication of genuinely shared
+#: config) made concrete for one field.
+_COMMON_EXCLUDE_LABELS = ["bootstrap", "wontfix", "invalid", "duplicate", "question"]
+
 #: Built-in, plugin-shipped recipe templates, keyed by name (referenced as
-#: ``extends: "global:<name>"``). Currently empty: no built-in recipes ship
-#: yet, so every ``global:`` ref fails loud rather than silently matching
-#: nothing.
-GLOBAL_RECIPES: dict[str, Mapping[str, Any]] = {}
+#: ``extends: "global:<name>"``). Each covers the fields real adopters
+#: already repeat verbatim (shared exclude-label conventions, the headless
+#: pool body type, the archetype's standing-conduct charter) while leaving
+#: everything genuinely repo-specific (target repo, forge producer login,
+#: task label, emitter discovery command, evaluator verdict-application
+#: policy) for the declaration itself to supply -- see
+#: ``phase-3-extends-registrar.md``'s Sub-PR 2 description.
+#:
+#: ``repository-issue-loop`` is the one truly generic entry (no archetype
+#: charter -- what the loop is *for* varies completely per adopter).
+#: ``goal-driven`` reuses the same engine with the goal-driven archetype's
+#: standing identity. ``reviewer``/``conflict-resolution`` both reuse the
+#: ``reviewer-loop`` engine (the standing-loop counterpart of those two
+#: ad-hoc CLI archetypes), differing only in ``pool.body.charter``.
+GLOBAL_RECIPES: dict[str, Mapping[str, Any]] = {
+    "repository-issue-loop": {
+        "kind": "repository-issue-loop",
+        "exclude_labels": list(_COMMON_EXCLUDE_LABELS),
+        "pool": {"body": {"type": "headless"}},
+    },
+    "goal-driven": {
+        "kind": "repository-issue-loop",
+        "exclude_labels": list(_COMMON_EXCLUDE_LABELS),
+        "worker_identity": "goal-driven",
+        "pool": {"body": {"type": "headless"}},
+    },
+    "reviewer": {
+        "kind": "reviewer-loop",
+        "pool": {"body": {"type": "headless", "charter": _REVIEWER_CHARTER}},
+    },
+    "conflict-resolution": {
+        "kind": "reviewer-loop",
+        "pool": {
+            "body": {"type": "headless", "charter": _CONFLICT_RESOLUTION_CHARTER}
+        },
+    },
+}
 
 #: Recipe files are declaration documents (YAML/JSON), same suffix contract
 #: `registrar_discovery.py` enforces for every other declaration file.

@@ -273,14 +273,33 @@ below — read it before starting any Phase 3 work).
       unresolved placeholders left intact), then the declaration's keys are
       deep-merged over the result. `global:` recipe refs resolve against an
       (currently empty) in-code registry — see the next item.
-- [ ] Ship the four already-existing archetypes (reviewer,
+- [x] Ship the four already-existing archetypes (reviewer,
       conflict-resolution, goal-driven, repository-issue-loop) as
       `extends:`-able global recipes under this model, with no behavior
       change to their existing direct-declaration path (backward
-      compatible). **Not yet started** — the resolution mechanism above
-      supports `global:` refs structurally, but `GLOBAL_RECIPES` ships no
-      entries yet (sub-plan §*Sub-PRs* item 2).
-- [ ] Tests: an `extends:`-based declaration referencing each existing
+      compatible). **Landed (Sub-PR 2):** `GLOBAL_RECIPES` now has four
+      entries. `repository-issue-loop` is a thin pass-through (the common
+      `exclude_labels` set + `pool.body.type: headless` — no charter
+      default, since what the loop is *for* varies completely per
+      adopter). `goal-driven` reuses the same engine with a new built-in
+      `worker_identity: goal-driven` (`agent_dispatch/identities/
+      goal-driven.identity.md`) — the standing-loop counterpart of this
+      package's ad-hoc `goal-driven` CLI recipe. `reviewer`/
+      `conflict-resolution` both resolve to `kind: reviewer-loop` (the
+      actual standing-loop engine for PR review today — there is no
+      separate `kind: reviewer`), differing only in a default
+      `pool.body.charter` generalized from each archetype's own ad-hoc CLI
+      charter (no `{repo}`/`{pr}` placeholders, since those vary per
+      discovered PR and live in that PR's own task, not this static
+      charter). The four shared standing-conduct clauses
+      (`RESOLUTION_CLAUSE`/`SUSPEND_CLAUSE`/`EXTERNAL_AUTHOR_CLAUSE`/
+      `STAGNATION_CLAUSE`) were exported as a public surface from
+      `recipes/registry.py` so both the ad-hoc CLI recipes and these
+      registrar charters share one source rather than duplicating prose.
+      A consumer can still override any shipped default outright (ordinary
+      deep-merge). Documented with a worked migration example in
+      `plugins/agent-dispatch/README.md`.
+- [x] Tests: an `extends:`-based declaration referencing each existing
       archetype behaves identically to today's direct `kind:` declaration
       with the same effective params; a repo-local and a cross-repo recipe
       reference both resolve correctly. **Repo-local/cross-repo path-ref
@@ -297,7 +316,26 @@ below — read it before starting any Phase 3 work).
       `test_registrar_registry.py` proving a transient recipe-file I/O
       failure is classified indeterminate (not invalid) and that a
       plugin-contributed declaration's `extends:` ref resolves against the
-      plugin root, not the registrar subdirectory).
+      plugin root, not the registrar subdirectory). **Plus (Sub-PR 2): 7
+      more tests** in `test_registrar_recipes.py` proving each of the four
+      `global:` recipes resolves end-to-end through
+      `read_declaration_file_set` (including full equality against a
+      hand-written direct declaration for `repository-issue-loop`), that a
+      declaration can still override a shipped default charter outright,
+      and that the built-in `goal-driven` identity resolves. Full affected-
+      file suite green (3743 passed, 23 skipped; the sole failure
+      encountered mid-development, `test_idle_headless_fleet_nudge_
+      includes_remote_host`, is a known pre-existing unrelated flake that
+      fails even in isolation on a clean `dev` checkout -- confirmed, not
+      introduced here). Three other apparent failures
+      (`test_consume_baton_completes_on_pickup` and two siblings) turned
+      out to be a test-environment artifact, not a real regression: running
+      pytest from *inside* a live Copilot CLI session inherits
+      `COPILOT_AGENT_SESSION_ID` into the test process, which an
+      environment-conditional code path in `task_query_cli.py` reads
+      directly -- clearing the variable before the run reproduces green
+      every time, confirming an actual CI runner (which never sets it) is
+      unaffected.
       Left **unchecked**: the "each existing archetype" half is blocked on
       the global-recipes item above and is not complete until that lands.
 
@@ -838,3 +876,61 @@ _Pending review._
 - Final count: 38 new tests (31 unit, 4 integration, 1 CLI-level
   regression, 2 registrar-registry tests). Full affected-file suite green
   (317 passed).
+
+### 2026-10-02 — Sub-PR 2: ship the four global recipes
+
+With Sub-PR 1 merged (#4875), populated `GLOBAL_RECIPES` with all four named
+archetypes. The two genuinely non-obvious design calls, both surfaced to the
+operator before implementing (not guessed at unilaterally, given a
+concurrent session was already deep in this exact file):
+
+1. **Naming vs. engine mapping.** The sub-plan names `global:reviewer`/
+   `global:conflict-resolution`/`global:goal-driven` after the *ad-hoc CLI
+   recipe* archetypes (`agent_dispatch.recipes.registry`), not any existing
+   registrar `kind`. Only `repository-issue-loop` has a matching standing-
+   loop engine today; `reviewer-loop` is a separate, independently-
+   implemented engine (never built on the CLI recipe's own
+   `render_recipe("reviewer", ...)`), and `conflict-resolution`/
+   `goal-driven` have no standing-loop form at all. Operator confirmed the
+   goal is genuinely delivering all four as real, working archetypes (not
+   stubs) — resolved by mapping `reviewer`/`conflict-resolution` onto the
+   existing `reviewer-loop` engine (its own standing-loop counterpart) and
+   `goal-driven` onto `repository-issue-loop` (issues-as-goals, one worker
+   per discovered issue), each via a default `pool.body.charter` (reviewer/
+   conflict-resolution) or `worker_identity` (goal-driven, since
+   `reviewer-loop` has no identity-file mechanism — only `pool.body.charter`/
+   `pool.body.agent` — while `repository-issue-loop` does).
+2. **Charter content must be generalized, not ad-hoc-recipe-shaped.** The
+   CLI recipes' own charter templates are written for *one specific task*
+   (`{repo}`/`{pr}`/`{land}` placeholders filled per `kick` invocation). A
+   standing loop's `pool.body.charter` is static across every task the pool
+   ever claims — the per-occurrence specifics live in that occurrence's own
+   task (set by the consumer's own discovery/emitter script), not in this
+   charter. Wrote generalized versions instead of reusing the CLI templates
+   verbatim, while still reusing the four shared standing-conduct clauses
+   (now exported publicly from `recipes/registry.py`) rather than
+   duplicating that prose a third time.
+
+Also found and fixed two false positives during validation, both confirmed
+not to be real regressions before moving on:
+- `test_idle_headless_fleet_nudge_includes_remote_host` — a known,
+  previously-confirmed pre-existing flake (fails in isolation on a clean
+  `dev` checkout too).
+- Three `test_consume_*` tests in `test_cli.py` appeared to fail
+  (`bind_owner_session` appearing in the recorded transition list where the
+  fixture didn't expect it) — traced to `task_query_cli.py`'s
+  `COPILOT_AGENT_SESSION_ID`-conditional bind step reading that env var
+  directly from the process environment, which a pytest run launched *from
+  inside* a live Copilot CLI session inherits (since the shell tool itself
+  runs within that session). Clearing the variable before the test run
+  reproduces green consistently; an actual CI runner never sets it, so this
+  was a test-environment artifact of the authoring environment, not a code
+  defect.
+
+Shipped: `registrar_recipes.py` (`GLOBAL_RECIPES`, 4 entries), a new
+built-in `agent_dispatch/identities/goal-driven.identity.md`, public
+`RESOLUTION_CLAUSE`/`SUSPEND_CLAUSE`/`EXTERNAL_AUTHOR_CLAUSE`/
+`STAGNATION_CLAUSE` exports from `recipes/registry.py` + `recipes/__init__.py`,
+a worked migration example + shipped-recipes table in
+`plugins/agent-dispatch/README.md`, and 7 new tests. Full affected-file
+suite green (3743 passed, 23 skipped, the one known flake above).

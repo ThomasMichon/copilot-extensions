@@ -225,6 +225,20 @@ one sync setting that is genuinely the same value for every machine in the
 fleet. Everything else about sync (which target is active, credentials,
 machine identity) stays machine-local and cannot be set from a repo.
 
+**`sync.local_path`'s platform-neutral syntax (non-empty, no `~`, absolute on
+*some* platform's syntax, no `..`) is validated eagerly on every target, the
+same as always.** Only the final *host-native* absoluteness check -- whether
+a value that already passed those checks is absolute on *this specific*
+platform -- is deferred until a machine's own resolved `sync.target` is
+known, since a mixed Windows/POSIX fleet has no single string that's a
+native absolute path on every platform. On a machine whose own target is
+`local`, a value foreign to this platform still fails the whole config load
+(the same strict check as always, since `Config.sync_path` would otherwise
+risk silently resolving it as relative). On any other target, a foreign
+value is inapplicable there and is quietly dropped back to that machine's
+own `sync.targets.local.path` (or the default) instead of failing the load
+over a value it never consumes.
+
 ```yaml
 schema_version: 3
 sync:

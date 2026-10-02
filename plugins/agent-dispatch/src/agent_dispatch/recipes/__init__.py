@@ -16,7 +16,11 @@ from __future__ import annotations
 
 from .driver import DriverAction, decide, resolution_outcome
 from .registry import (
+    EXTERNAL_AUTHOR_CLAUSE,
     REGISTRY,
+    RESOLUTION_CLAUSE,
+    STAGNATION_CLAUSE,
+    SUSPEND_CLAUSE,
     Recipe,
     RecipeError,
     RecipeParam,
@@ -31,10 +35,14 @@ from .registry import (
 __all__ = [
     "REGISTRY",
     "DriverAction",
+    "EXTERNAL_AUTHOR_CLAUSE",
+    "RESOLUTION_CLAUSE",
     "Recipe",
     "RecipeError",
     "RecipeParam",
     "RenderedRecipe",
+    "STAGNATION_CLAUSE",
+    "SUSPEND_CLAUSE",
     "UnknownRecipe",
     "decide",
     "dedup_key_for",

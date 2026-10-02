@@ -346,6 +346,56 @@ future module added to this package needs a quick stdlib-name collision
 check before landing, not just a local test pass (the fast test suite *did*
 pass before this incident, since it only ever imports the package normally).
 
+### 2026-10-02 (later) — Phase 1: enroll `agent-codespaces` and `agent-containers`
+Operator chose the next two Phase 1 plugins to wire ("incrementally work
+towards full coverage across all plugins"), out of the 8 remaining in
+`validate-and-promote.yml`'s own `full` matrix.
+
+**Generalized the per-plugin wiring** rather than copy-pasting a third
+near-identical `if: matrix.plugin == '...'` block: the `full` job's
+Coverage-baseline/Upload-coverage-baseline steps now gate on
+`contains(fromJSON('["agent-ssh","agent-codespaces","agent-containers"]'),
+matrix.plugin)`, and `--cov-source` is derived from `matrix.plugin` itself
+(`plugins/<plugin>/src/<plugin-with-underscores>` -- every enrolled plugin's
+own `src/` package name follows this exact rule) instead of a hardcoded
+per-plugin path. The `promote` job's enrolled-baseline hard-gate list
+(`for plugin in agent-ssh agent-codespaces agent-containers`) stays in the
+same commit, per the existing "keep both lists in sync" contract. Scaling to
+a 4th+ plugin going forward only ever touches these two lists.
+
+**Found a real environment-isolation gap enrolling `agent-containers`:**
+running `baseline.py` against its real suite failed one test
+(`test_profile_spec_can_describe_project_scoped_picker_source`) that passes
+cleanly under the trusted `run-plugin-tests.py` runner. Root-caused (not
+guessed): this machine's ambient `AGENT_RT_ROOT` env var leaked into
+`baseline.py`'s ephemeral collection subprocess (`_subprocess_env` copied
+`os.environ` wholesale), and `agent-containers`' own `provider_ssh.py` reads
+`AGENT_RT_ROOT` ahead of the test's monkeypatched `RUNTIME_DIR` substitute --
+`run-plugin-tests.py`'s own `isolated_environment` already scrubs this exact
+var (and others) for the trusted path, `baseline.py` never did. Exported
+`plugin_test_containment.py`'s existing `_ALWAYS_SCRUB_NAMES` as a public
+`ALWAYS_SCRUB_NAMES` and reused it in `_subprocess_env`, so a baseline is
+only ever collected under the same containment the real validation gate
+already guarantees -- re-ran `baseline.py` against `agent-containers` after
+the fix and it now collects cleanly, with no regression against the
+existing `agent-ssh` pilot. Added a fast, mocked regression test
+(`test_subprocess_env_scrubs_ambient_containment_variables`) asserting
+every `ALWAYS_SCRUB_NAMES` entry is absent from `_subprocess_env`'s own
+built env, so this exact containment gap can't regress unseen.
+
+**Verified directly**, not just by code reading: `baseline.py` run against
+both new plugins' real test suites (a local `--measured-commit` smoke run
+of each) now produces a clean baseline end to end, and
+`tools/test_coverage_guided_selection.py` +
+`tools/test_plugin_test_containment.py` (CI's own exact invocation of both)
+pass unchanged.
+
+**Not yet done:** watching a real promotion after this wiring lands and
+confirming `.github/coverage-baselines/agent-codespaces.json` and
+`agent-containers.json` actually appear on `main` (same sequencing caveat
+as `agent-ssh`'s own entry below), and the operator's next choice of which
+plugin(s) to enroll after these two.
+
 ### 2026-10-02 — Phase 1 pilot: real promotion-gate wiring for `agent-ssh`
 Operator asked to actually get a baseline committed to `main`, "so we can
 incrementally work towards full coverage across all plugins" -- driving

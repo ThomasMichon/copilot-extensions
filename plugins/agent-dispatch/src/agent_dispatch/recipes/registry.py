@@ -173,6 +173,17 @@ _STAGNATION_CLAUSE = (
     "picture, not a stale one."
 )
 
+#: Public aliases for the shared charter clauses above, for a caller outside
+#: this module that wants the same standing-conduct prose without
+#: duplicating it (e.g. a registrar global recipe's static `pool.body.charter`
+#: -- see ``registrar_recipes.py``'s ``GLOBAL_RECIPES``). The underscore-
+#: prefixed names stay the internal spelling this module's own recipe
+#: definitions below use; these aliases are the intentional public surface.
+RESOLUTION_CLAUSE = _RESOLUTION_CLAUSE
+SUSPEND_CLAUSE = _SUSPEND_CLAUSE
+EXTERNAL_AUTHOR_CLAUSE = _EXTERNAL_AUTHOR_CLAUSE
+STAGNATION_CLAUSE = _STAGNATION_CLAUSE
+
 
 REGISTRY: dict[str, Recipe] = {}
 

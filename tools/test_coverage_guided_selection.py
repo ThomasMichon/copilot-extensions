@@ -415,6 +415,28 @@ class TestBaselineCollectionErrorContract:
         )
         assert local_result["measured_commit"] is None
 
+    def test_subprocess_env_scrubs_ambient_containment_variables(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Baseline subprocesses must exclude the same ambient host
+        # variables as the trusted runner, because a plugin under test may
+        # consult them before a test's own monkeypatch takes effect.
+        from tools.plugin_test_containment import ALWAYS_SCRUB_NAMES
+
+        for name in ALWAYS_SCRUB_NAMES:
+            monkeypatch.setenv(name, "ambient-leak-should-not-survive")
+        monkeypatch.setenv("PYTHONPATH", "/some/stale/source/tree")
+        env = baseline_mod._subprocess_env(
+            tmp_path / ".coverage", tmp_path / "sandbox"
+        )
+        for name in ALWAYS_SCRUB_NAMES:
+            assert name not in env, f"{name} should be scrubbed from the baseline subprocess env"
+        assert env["COVERAGE_FILE"] == str(tmp_path / ".coverage")
+        # An ambient PYTHONPATH must never take import precedence over the
+        # repository's own `tools/` path, the same override
+        # `run-plugin-tests.py` always applies.
+        assert env["PYTHONPATH"] == str(_REPO_ROOT / "tools")
+
 
 def test_collect_baseline_round_trips_against_a_real_plugin_suite() -> None:
     # Deliberately opt-in: spawns a real "uv run --with coverage ..."
