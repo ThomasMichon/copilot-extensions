@@ -105,23 +105,23 @@ class FileTokenAuthorizer:
         return False
 
 
-def _relay_source_by_name(name: str):
+def _relay_source_by_name(name: str, profile: dict | None = None):
     """Construct a shared ``credential_relay`` source by its profile name."""
     from credential_relay.sources.gh_auth import GhAuthSource
     from credential_relay.sources.git_credential import GitCredentialSource
 
-    factories = {
-        "git-credential": GitCredentialSource,
-        "gh-auth": GhAuthSource,
-    }
-    ctor = factories.get(name)
-    return ctor() if ctor is not None else None
+    profile = profile or {}
+    if name == "git-credential":
+        return GitCredentialSource(github_hosts=profile.get("github_hosts"))
+    if name == "gh-auth":
+        return GhAuthSource(github_hosts=profile.get("github_hosts"))
+    return None
 
 
 def _apply_relay_profile(builder, profile: dict) -> None:
     """Apply a declarative provider relay profile to ``builder``."""
     for source_name in profile.get("sources", []):
-        source = _relay_source_by_name(source_name)
+        source = _relay_source_by_name(source_name, profile)
         if source is not None:
             builder.add_source(source)
         else:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 import base64
 import re
 from pathlib import Path
@@ -164,6 +166,31 @@ class TestBuildDotfilesCommand:
         assert 'rm -rf "$df"' in cmd
         assert "partial non-git dir" in cmd
 
+    @pytest.mark.asyncio
+    async def test_connect_dotfiles_provision_prepends_account_relay_env(self, monkeypatch):
+        from agent_codespaces import __main__ as cli
+
+        seen = {}
+        monkeypatch.setattr(
+            "agent_codespaces.relay_launch.effective_relay_port",
+            lambda cfg: 1234,
+        )
+
+        async def _capture(_manager, _name, command, **_kw):
+            seen["command"] = command
+            return type("R", (), {"exit_code": 0, "stderr": "", "stdout": ""})()
+
+        monkeypatch.setattr(cli, "exec_with_retry", _capture)
+
+        await cli._provision_dotfiles(
+            object(),
+            "cs-1",
+            type("Cfg", (), {"dotfiles_repo": "example-org/dotfiles"})(),
+            relay_env="export LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT=alice; ",
+        )
+
+        assert "LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT=alice" in seen["command"]
+
 
 class TestBuildHarnessCommand:
     def _cmd(self, repo="acme/harness", port=9857):
@@ -212,6 +239,31 @@ class TestBuildHarnessCommand:
 
         assert harness_dir_for("acme/harness") == "/workspaces/harness"
         assert harness_dir_for("acme/control-plane/") == "/workspaces/control-plane"
+
+    @pytest.mark.asyncio
+    async def test_connect_harness_provision_prepends_account_relay_env(self, monkeypatch):
+        from agent_codespaces import __main__ as cli
+
+        seen = {}
+        monkeypatch.setattr(
+            "agent_codespaces.relay_launch.effective_relay_port",
+            lambda cfg: 1234,
+        )
+
+        async def _capture(_manager, _name, command, **_kw):
+            seen["command"] = command
+            return type("R", (), {"exit_code": 0, "stderr": "", "stdout": ""})()
+
+        monkeypatch.setattr(cli, "exec_with_retry", _capture)
+
+        await cli._provision_harness(
+            object(),
+            "cs-1",
+            type("Cfg", (), {"harness_repo": "example-org/harness"})(),
+            relay_env="export LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT=alice; ",
+        )
+
+        assert "LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT=alice" in seen["command"]
 
     def test_repo_is_shell_quoted(self) -> None:
         cmd = self._cmd(repo="acme/c;rm -rf")

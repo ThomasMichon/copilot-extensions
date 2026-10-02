@@ -66,6 +66,16 @@ def _patch(monkeypatch, manager: _FakeManager) -> None:
         "agent_codespaces.lifecycle.account_for_codespace", lambda _name: None,
     )
 
+    async def _github_ok(_account=None):
+        from agent_codespaces.auth_preflight import GithubCredentialPreflight
+
+        return GithubCredentialPreflight(ok=True, source="git-credential")
+
+    monkeypatch.setattr(
+        "agent_codespaces.auth_preflight.github_credential_preflight",
+        _github_ok,
+    )
+
 
 class TestCmdCheck:
     def test_ready_venue_exits_zero(self, monkeypatch, capsys) -> None:
@@ -107,6 +117,15 @@ class TestCmdDoctorVenue:
         monkeypatch.setattr(
             "agent_codespaces.__main__._gh_auth_preflight", lambda: [],
         )
+        async def _github_ok(_account=None):
+            from agent_codespaces.auth_preflight import GithubCredentialPreflight
+
+            return GithubCredentialPreflight(ok=True, source="git-credential")
+
+        monkeypatch.setattr(
+            "agent_codespaces.auth_preflight.github_credential_preflight",
+            _github_ok,
+        )
         from agent_codespaces import config as config_mod
 
         class _EmptyReport:
@@ -117,8 +136,12 @@ class TestCmdDoctorVenue:
         class _Providers:
             active_plugins = _EmptyReport()
             config_d = _EmptyReport()
+            findings: list = []
 
         monkeypatch.setattr(config_mod, "scan_config_providers", lambda: _Providers())
+        monkeypatch.setattr(
+            "agent_codespaces.__main__.scan_config_providers", lambda: _Providers(),
+        )
 
         rc = main(["doctor"])
 

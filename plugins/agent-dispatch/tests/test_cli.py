@@ -3395,7 +3395,16 @@ def test_claim_conflicting_task_ids_errors(monkeypatch, capsys):
 
 
 class _PickupClient:
-    """A fake client tracking the consume lifecycle transitions."""
+    """A fake client tracking the consume lifecycle transitions.
+
+    ``claim_error``/``start_error``/``complete_error``/``resume_error`` make
+    the corresponding method raise that :class:`DispatchError` instead of
+    transitioning, to exercise the post-failure handling (the exact bug
+    class this covers: a swallowed DispatchError must never read back as a
+    successful consume). ``owner_after_claim_failure`` controls what the
+    *second* ``get()`` call (the post-failure re-check) reports -- set it to
+    simulate a legitimate concurrent claimant having already won the race.
+    """
 
     def __init__(
         self,
@@ -3406,6 +3415,14 @@ class _PickupClient:
         generation=0,
         labels=None,
         source=None,
+        claim_error: Exception | None = None,
+        start_error: Exception | None = None,
+        complete_error: Exception | None = None,
+        resume_error: Exception | None = None,
+        owner_after_claim_failure: str | None = None,
+        empty_claim: bool = False,
+        status_after_claim_failure: str | None = None,
+        bind_owner_session_error: Exception | None = None,
     ):
         self.status = status
         self.owner = owner
@@ -3415,13 +3432,32 @@ class _PickupClient:
         self.source = source
         self.transitions: list[str] = []
         self.resume_kwargs: dict = {}
+        self.bind_owner_session_kwargs: dict = {}
+        self.bind_owner_session_error = bind_owner_session_error
+        self.claim_error = claim_error
+        self.start_error = start_error
+        self.complete_error = complete_error
+        self.resume_error = resume_error
+        self.owner_after_claim_failure = owner_after_claim_failure
+        self.empty_claim = empty_claim
+        self.status_after_claim_failure = status_after_claim_failure
+        self._get_calls = 0
         self.complete_kwargs: dict = {}
 
     def get(self, task_id):
+        self._get_calls += 1
+        owner = self.owner
+        status = self.status
+        if self._get_calls > 1:
+            if self.owner_after_claim_failure is not None:
+                owner = self.owner_after_claim_failure
+            if self.status_after_claim_failure is not None:
+                status = self.status_after_claim_failure
+                owner = None  # baton-mode completion clears the owner
         return {
             "id": task_id,
-            "status": self.status,
-            "owner": self.owner,
+            "status": status,
+            "owner": owner,
             "owner_session_id": self.owner_session_id,
             "generation": self.generation,
             "labels": self.labels,
@@ -3434,24 +3470,51 @@ class _PickupClient:
 
     def claim(self, **kw):
         self.transitions.append("claim")
-        return {"id": kw.get("task_id"), "owner": "m/wt", "status": "claimed"}
+        if self.claim_error is not None:
+            raise self.claim_error
+        if self.empty_claim:
+            # DispatchClient.claim() can legitimately return None/ownerless
+            # with a 200 (coordinator draining, task no longer claimable) --
+            # no exception at all.
+            return None
+        return {
+            "id": kw.get("task_id"),
+            "owner": "m/wt",
+            "status": "claimed",
+            "generation": self.generation,
+        }
+
+    def bind_owner_session(self, task_id, owner, owner_session_id, **kwargs):
+        self.transitions.append("bind_owner_session")
+        self.bind_owner_session_kwargs = {"owner_session_id": owner_session_id, **kwargs}
+        if self.bind_owner_session_error is not None:
+            raise self.bind_owner_session_error
+        self.owner_session_id = owner_session_id
+        return {"id": task_id, "owner": owner, "owner_session_id": owner_session_id}
 
     def start(self, task_id, owner):
         self.transitions.append("start")
+        if self.start_error is not None:
+            raise self.start_error
         return {"id": task_id, "status": "started", "owner": owner}
 
     def resume(self, task_id, owner, **kwargs):
         self.transitions.append("resume")
         self.resume_kwargs = kwargs
+        if self.resume_error is not None:
+            raise self.resume_error
         return {"id": task_id, "status": "started", "owner": owner}
 
     def complete(self, task_id, owner, **kwargs):
         self.transitions.append("complete")
         self.complete_kwargs = kwargs
+        if self.complete_error is not None:
+            raise self.complete_error
         return {"id": task_id, "status": "submitted", "owner": owner}
 
     def payload(self, task_id):
-        return {"payload": "the brief"}
+        self.transitions.append("payload")
+        return {"payload": "THE-ACTUAL-BRIEF-CONTENT"}
 
     def __enter__(self):
         return self
@@ -3471,8 +3534,8 @@ def test_consume_baton_completes_on_pickup(monkeypatch, capsys):
     args = build_parser().parse_args(["consume", "T1"])
     assert args.func(args) == 0
     # Baton mode drives all the way to completed.
-    assert fake.transitions == ["approve", "claim", "start", "complete"]
-    assert "the brief" in capsys.readouterr().out
+    assert fake.transitions == ["approve", "claim", "start", "complete", "payload"]
+    assert "THE-ACTUAL-BRIEF-CONTENT" in capsys.readouterr().out
 
 
 def test_consume_defer_complete_stops_at_started(monkeypatch, capsys):
@@ -3486,9 +3549,9 @@ def test_consume_defer_complete_stops_at_started(monkeypatch, capsys):
     args = build_parser().parse_args(["consume", "T1", "--defer-complete"])
     assert args.func(args) == 0
     # Deferred: take ownership + start, but NEVER complete -- the successor does.
-    assert fake.transitions == ["approve", "claim", "start"]
+    assert fake.transitions == ["approve", "claim", "start", "payload"]
     assert "complete" not in fake.transitions
-    assert "the brief" in capsys.readouterr().out
+    assert "THE-ACTUAL-BRIEF-CONTENT" in capsys.readouterr().out
 
 
 def test_consume_deferred_suspended_task_resumes_preserved_owner(
@@ -3508,14 +3571,14 @@ def test_consume_deferred_suspended_task_resumes_preserved_owner(
 
     args = build_parser().parse_args(["consume", "T1", "--defer-complete"])
     assert args.func(args) == 0
-    assert fake.transitions == ["resume"]
+    assert fake.transitions == ["resume", "payload"]
     assert fake.resume_kwargs == {
         "wake": False,
         "adopt_session": True,
         "expected_owner_session_id": "session-old",
         "expected_generation": 4,
     }
-    assert "the brief" in capsys.readouterr().out
+    assert "THE-ACTUAL-BRIEF-CONTENT" in capsys.readouterr().out
 
 
 def test_consume_baton_completes_suspended_task_directly(monkeypatch, capsys):
@@ -3533,14 +3596,14 @@ def test_consume_baton_completes_suspended_task_directly(monkeypatch, capsys):
 
     args = build_parser().parse_args(["consume", "T1"])
     assert args.func(args) == 0
-    assert fake.transitions == ["complete"]
+    assert fake.transitions == ["complete", "payload"]
     assert fake.complete_kwargs == {
         "result_ref": "consumed:wt",
         "expected_status": "suspended",
         "expected_owner_session_id": "session-old",
         "expected_generation": 4,
     }
-    assert "the brief" in capsys.readouterr().out
+    assert "THE-ACTUAL-BRIEF-CONTENT" in capsys.readouterr().out
 
 
 class _SpentHandoffClient:
@@ -3639,6 +3702,466 @@ def test_consume_completed_non_handoff_still_prints_payload(monkeypatch, capsys)
     assert a.focus_text == "working on X" and a.list is False
     b = build_parser().parse_args(["focus", "--list", "--machine", "emancipation-cube"])
     assert b.list is True and b.machine == "emancipation-cube" and b.focus_text is None
+
+
+def test_consume_claim_failure_with_no_other_owner_is_a_real_error(
+    monkeypatch, capsys
+):
+    """The core bug this covers: a failed claim must never silently fall
+    through to printing the payload and exiting 0 while the task sits
+    completely untouched (status still queued, no owner at all)."""
+    from agent_dispatch import __main__, identity
+    from agent_dispatch.client import DispatchError
+
+    fake = _PickupClient("proposed", claim_error=DispatchError(409, "conflict"))
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 1
+    err = capsys.readouterr().err
+    assert "could not claim" in err
+    assert "T1" in err
+
+
+def test_consume_claim_failure_with_legitimate_concurrent_owner_refuses_replay(
+    monkeypatch, capsys
+):
+    """A failed claim that lost a legitimate race must NOT replay the
+    payload to the losing caller -- exactly-once handoff delivery means
+    only the actual winner gets the brief; the loser is refused like an
+    already-spent handoff (exit 3), never silently handed the payload."""
+    from agent_dispatch import __main__, identity
+    from agent_dispatch.client import DispatchError
+
+    fake = _PickupClient(
+        "proposed",
+        claim_error=DispatchError(409, "conflict"),
+        owner_after_claim_failure="someone-else/wt2",
+    )
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 3
+    captured = capsys.readouterr()
+    assert "THE-ACTUAL-BRIEF-CONTENT" not in captured.out
+    assert "not replayed" in captured.err
+    # Never reached start/complete -- we never actually took ownership.
+    assert "start" not in fake.transitions
+    assert "complete" not in fake.transitions
+
+
+def test_consume_empty_claim_with_no_exception_is_a_real_error(monkeypatch, capsys):
+    """DispatchClient.claim() can legitimately return None/ownerless with a
+    200 (coordinator draining, task no longer claimable) -- no DispatchError
+    raised at all. This must be treated identically to a raised claim
+    failure, not fall through the exception handler entirely."""
+    from agent_dispatch import __main__, identity
+
+    fake = _PickupClient("proposed", empty_claim=True)
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 1
+    err = capsys.readouterr().err
+    assert "could not claim" in err
+    assert "start" not in fake.transitions
+    assert "complete" not in fake.transitions
+
+
+def test_consume_empty_claim_with_legitimate_concurrent_owner_refuses_replay(
+    monkeypatch, capsys
+):
+    """An empty claim result that lost a legitimate race must also refuse to
+    replay the payload to the losing caller (same exactly-once contract)."""
+    from agent_dispatch import __main__, identity
+
+    fake = _PickupClient(
+        "proposed",
+        empty_claim=True,
+        owner_after_claim_failure="someone-else/wt2",
+    )
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 3
+    assert "THE-ACTUAL-BRIEF-CONTENT" not in capsys.readouterr().out
+    assert "start" not in fake.transitions
+
+
+def test_consume_claim_lost_to_winner_who_already_completed_is_spent_not_error(
+    monkeypatch, capsys
+):
+    """If the winning consumer reaches complete() before this invocation's
+    re-fetch, the refreshed task is a spent handoff with its owner already
+    cleared (baton-mode completion clears ownership) -- checking ownership
+    alone would misread this as a genuine claim failure (exit 1) instead of
+    the documented spent-handoff refusal (exit 3)."""
+    from agent_dispatch import __main__, identity
+    from agent_dispatch.client import DispatchError
+
+    fake = _PickupClient(
+        "proposed",
+        labels=["handoff"],
+        claim_error=DispatchError(409, "conflict"),
+        status_after_claim_failure="submitted",
+    )
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 3
+    err = capsys.readouterr().err
+    assert "could not claim" not in err
+    assert "already consumed" in err or "already spent" in err
+
+
+def test_consume_claim_lost_to_winner_who_completed_a_non_handoff_prints_payload(
+    monkeypatch, capsys
+):
+    """The handoff-only spent-baton refusal must not apply to a non-handoff
+    task: if a concurrent claimant completed a queued non-handoff task
+    before this invocation's re-fetch, the documented contract is
+    idempotent payload delivery (exit 0), not the handoff's exit-3 replay
+    refusal -- the refreshed snapshot must be reclassified the same way the
+    initial snapshot is, not treated as a spent handoff just because it's
+    terminal."""
+    from agent_dispatch import __main__, identity
+    from agent_dispatch.client import DispatchError
+
+    fake = _PickupClient(
+        "proposed",
+        labels=None,
+        source=None,
+        claim_error=DispatchError(409, "conflict"),
+        status_after_claim_failure="completed",
+    )
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 0
+    out = capsys.readouterr().out
+    assert "THE-ACTUAL-BRIEF-CONTENT" in out
+
+
+def test_consume_claim_failure_with_concurrent_abandon_prints_payload(
+    monkeypatch, capsys
+):
+    """``abandoned`` must be classified the same way the initial-snapshot
+    check classifies it (terminal, never a spent-handoff baton): if another
+    caller abandons the task between the initial ``get()`` and this failed
+    claim, the refreshed task has no owner, same as a completed task --
+    this must idempotently print the payload (exit 0), not fall through to
+    the "could not claim" real-error path (exit 1)."""
+    from agent_dispatch import __main__, identity
+    from agent_dispatch.client import DispatchError
+
+    fake = _PickupClient(
+        "proposed",
+        labels=["handoff"],
+        claim_error=DispatchError(409, "conflict"),
+        status_after_claim_failure="abandoned",
+    )
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 0
+    out = capsys.readouterr().out
+    assert "THE-ACTUAL-BRIEF-CONTENT" in out
+
+
+def test_consume_rejects_an_initially_claimed_task_owned_by_someone_else(
+    monkeypatch, capsys
+):
+    """If the winning consumer already claimed the task before this
+    invocation's very first get() (the initial snapshot is already
+    claimed/started/suspended, never 'queued'/'proposed'), blindly copying
+    that stale snapshot's owner and proceeding to start/complete *as* that
+    owner would let an unrelated invocation finish the task and replay the
+    payload under someone else's identity. Must be refused unless the owner
+    actually matches this invocation's own resolved identity."""
+    from agent_dispatch import __main__, identity
+
+    fake = _PickupClient("claimed", owner="someone-else/othertree")
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 3
+    err = capsys.readouterr().err
+    assert "not replayed" in err
+    assert "start" not in fake.transitions
+    assert "complete" not in fake.transitions
+
+
+def test_consume_accepts_an_initially_started_task_owned_by_this_invocation(
+    monkeypatch, capsys
+):
+    """The matching-owner case must still work: an invocation that genuinely
+    already owns a started task (its own resolved machine/worktree matches
+    the task's owner) proceeds normally."""
+    from agent_dispatch import __main__, identity
+
+    fake = _PickupClient("started", owner="m/wt")
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 0
+    assert "THE-ACTUAL-BRIEF-CONTENT" in capsys.readouterr().out
+    assert fake.transitions == ["start", "complete", "payload"]
+
+
+def test_consume_without_session_identity_skips_bind_as_before(monkeypatch, capsys):
+    """No `COPILOT_AGENT_SESSION_ID` available (e.g. a bare CLI invocation
+    outside a tracked session) leaves this unfenced: `bind_owner_session` is
+    never called, and the matching-worker_id case proceeds directly to
+    start/complete."""
+    from agent_dispatch import __main__, identity
+
+    monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
+    fake = _PickupClient("claimed", owner="m/wt")
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 0
+    assert "bind_owner_session" not in fake.transitions
+    assert fake.transitions == ["start", "complete", "payload"]
+
+
+def test_consume_binds_session_identity_for_initially_claimed_task(
+    monkeypatch, capsys
+):
+    """With a durable per-session identity available, the matching-worker-ID
+    case additionally binds it exclusively before start/complete, closing
+    the race worker_id equality alone cannot: worker_id is shared by every
+    session in the same worktree, so it cannot by itself prove this
+    invocation won the original claim."""
+    from agent_dispatch import __main__, identity
+
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "session-a")
+    fake = _PickupClient("claimed", owner="m/wt", generation=5)
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 0
+    assert "THE-ACTUAL-BRIEF-CONTENT" in capsys.readouterr().out
+    assert fake.transitions == ["bind_owner_session", "start", "complete", "payload"]
+    assert fake.bind_owner_session_kwargs["owner_session_id"] == "session-a"
+    assert fake.bind_owner_session_kwargs["expected_generation"] == 5
+
+
+def test_consume_rejects_a_concurrent_session_that_lost_the_bind_race(
+    monkeypatch, capsys
+):
+    """Two successor sessions in the same worktree resolve to the identical
+    worker_id and both pass the owner==worker_id check -- the second one's
+    `bind_owner_session` call must be refused (the first already bound its
+    own identity), and it must never reach start/complete or print the
+    payload a second time."""
+    from agent_dispatch import __main__, identity
+    from agent_dispatch.client import DispatchError
+
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "session-b")
+    fake = _PickupClient(
+        "claimed",
+        owner="m/wt",
+        bind_owner_session_error=DispatchError(
+            409, "already bound to another owner session"
+        ),
+    )
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 3
+    err = capsys.readouterr().err
+    assert "not replayed" in err
+    assert fake.transitions == ["bind_owner_session"]
+    assert "start" not in fake.transitions
+    assert "complete" not in fake.transitions
+    assert "THE-ACTUAL-BRIEF-CONTENT" not in capsys.readouterr().out
+
+
+def test_consume_binds_session_identity_after_a_successful_claim(monkeypatch, capsys):
+    """Claiming clears owner_session_id, and worker_id is shared by every
+    session in the same worktree -- a second session can therefore race in
+    and claim the SAME worker_id right after this invocation's own claim
+    succeeds. The freshly claimed snapshot must be fenced the same way an
+    already-claimed task is, using the claim's own (fresh) generation."""
+    from agent_dispatch import __main__, identity
+
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "session-a")
+    fake = _PickupClient("proposed", generation=7)
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 0
+    assert "THE-ACTUAL-BRIEF-CONTENT" in capsys.readouterr().out
+    assert fake.transitions == [
+        "approve",
+        "claim",
+        "bind_owner_session",
+        "start",
+        "complete",
+        "payload",
+    ]
+    assert fake.bind_owner_session_kwargs["owner_session_id"] == "session-a"
+    assert fake.bind_owner_session_kwargs["expected_generation"] == 7
+
+
+def test_consume_rejects_a_concurrent_session_that_lost_the_bind_race_after_claim(
+    monkeypatch, capsys
+):
+    """The same lost-race refusal applies right after a successful claim,
+    not only on an already-claimed snapshot: a second session's claim can
+    also succeed (the coordinator can't distinguish them by worker_id
+    either), and its `bind_owner_session` call must then be refused."""
+    from agent_dispatch import __main__, identity
+    from agent_dispatch.client import DispatchError
+
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "session-b")
+    fake = _PickupClient(
+        "proposed",
+        bind_owner_session_error=DispatchError(
+            409, "already bound to another owner session"
+        ),
+    )
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 3
+    err = capsys.readouterr().err
+    assert "not replayed" in err
+    assert fake.transitions == ["approve", "claim", "bind_owner_session"]
+    assert "start" not in fake.transitions
+    assert "complete" not in fake.transitions
+    assert "THE-ACTUAL-BRIEF-CONTENT" not in capsys.readouterr().out
+
+
+def test_consume_bind_failure_that_is_not_a_cas_conflict_is_a_real_error(
+    monkeypatch, capsys
+):
+    """Only a 409 CAS conflict supports "a concurrent session won the
+    race" -- a missing task (404), a coordinator failure (5xx), or any
+    other non-409 `DispatchError` from `bind_owner_session` must surface as
+    a real error (exit 1), never be misread as a lost race (exit 3)."""
+    from agent_dispatch import __main__, identity
+    from agent_dispatch.client import DispatchError
+
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "session-a")
+    fake = _PickupClient(
+        "claimed",
+        owner="m/wt",
+        bind_owner_session_error=DispatchError(500, "coordinator unavailable"),
+    )
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 1
+    err = capsys.readouterr().err
+    assert "could not bind" in err
+    assert "not replayed" not in err
+    assert "start" not in fake.transitions
+    assert "complete" not in fake.transitions
+
+
+def test_consume_start_failure_is_a_real_error(monkeypatch, capsys):
+    """We already hold ownership by the time start() runs -- a failure here
+    is never a benign race and must surface as a real error."""
+    from agent_dispatch import __main__, identity
+    from agent_dispatch.client import DispatchError
+
+    fake = _PickupClient("proposed", start_error=DispatchError(500, "boom"))
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 1
+    err = capsys.readouterr().err
+    assert "could not start" in err
+    assert "complete" not in fake.transitions
+
+
+def test_consume_complete_failure_is_a_real_error(monkeypatch, capsys):
+    from agent_dispatch import __main__, identity
+    from agent_dispatch.client import DispatchError
+
+    fake = _PickupClient("proposed", complete_error=DispatchError(500, "boom"))
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 1
+    err = capsys.readouterr().err
+    assert "could not complete" in err
+
+
+def test_consume_resume_failure_is_a_real_error(monkeypatch, capsys):
+    from agent_dispatch import __main__, identity
+    from agent_dispatch.client import DispatchError
+
+    fake = _PickupClient(
+        "suspended",
+        owner="m/wt",
+        owner_session_id="sid-1",
+        resume_error=DispatchError(500, "boom"),
+    )
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1", "--defer-complete"])
+    assert args.func(args) == 1
+    assert "boom" in capsys.readouterr().err
+
+
+def test_consume_suspended_baton_complete_failure_is_a_real_error(
+    monkeypatch, capsys
+):
+    from agent_dispatch import __main__, identity
+    from agent_dispatch.client import DispatchError
+
+    fake = _PickupClient(
+        "suspended",
+        owner="m/wt",
+        owner_session_id="sid-1",
+        complete_error=DispatchError(500, "boom"),
+    )
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 1
+    assert "boom" in capsys.readouterr().err
 
 
 def test_focus_writes_through_status_core(monkeypatch):

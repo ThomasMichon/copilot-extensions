@@ -28,7 +28,7 @@ The daemon advertises both on ``/health``; ``BridgeClient`` reads them (see
 from __future__ import annotations
 
 # Current HTTP wire-contract version this build speaks.
-HTTP_PROTOCOL_VERSION = 19
+HTTP_PROTOCOL_VERSION = 20
 
 # First version that exposes the harness-owned relay interruption capability.
 RELAY_INTERRUPT_PROTOCOL_VERSION = 2
@@ -108,6 +108,12 @@ REMOTE_SESSION_COPILOT_ARGS_PROTOCOL_VERSION = 18
 # (``/controls``, ``/controls/ack``). A caller gates ``/mode`` on it rather than
 # posting to an older daemon that would 404.
 LIVE_SESSION_MODE_PROTOCOL_VERSION = 19
+
+# First version whose CLI-mode reservation release route honors
+# ``unclaimed_only=true`` atomically in the DELETE predicate. A caller gates on
+# it rather than sending the parameter to an older daemon that would ignore it
+# and delete an already-claimed reservation.
+CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION = 20
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.

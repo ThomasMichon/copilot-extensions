@@ -23,6 +23,7 @@ from agent_bridge.agent_registry import (
     NamespaceAgentInfo,
     NamespaceResolver,
 )
+from agent_bridge.agent_registry_namespace import NamespaceListIncomplete
 from agent_bridge.transport import SpawnTarget
 
 
@@ -564,6 +565,60 @@ async def test_no_fallback_resolve_still_raises_when_cli_absent():
             await r.resolve("cs-a")
         with pytest.raises(RuntimeError):
             await r.ensure_ready("cs-a")
+
+
+# --- list(): genuine provider failure (vs. legitimate absence) -----------
+#
+# A found binstub whose namespace-list genuinely
+# fails (timeout, non-zero exit, unparseable output) with no in-process
+# fallback must NOT degrade to [] like the "not installed" case above --
+# that would let AgentResolver.list_agents_async() treat a partial/failed
+# scan as an authoritative empty roster and silently drop real agents from
+# a --subscribe diff with no ``removed`` frame at all.
+
+@pytest.mark.asyncio
+async def test_no_fallback_list_raises_incomplete_on_timeout():
+    r = CliNamespaceResolver("codespace", "agent-codespaces", fallback=None)
+    with patch("shutil.which", _which), patch(
+        "subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd=["agent-codespaces"], timeout=3.5),
+    ):
+        with pytest.raises(NamespaceListIncomplete):
+            await r.list(timeout=3.5)
+
+
+@pytest.mark.asyncio
+async def test_no_fallback_list_raises_incomplete_on_nonzero_exit():
+    r = CliNamespaceResolver("codespace", "agent-codespaces", fallback=None)
+    with patch("shutil.which", _which), patch(
+        "subprocess.run", return_value=_cp(1, "", "boom")
+    ):
+        with pytest.raises(NamespaceListIncomplete):
+            await r.list()
+
+
+@pytest.mark.asyncio
+async def test_no_fallback_list_raises_incomplete_on_unparseable_output():
+    r = CliNamespaceResolver("codespace", "agent-codespaces", fallback=None)
+    with patch("shutil.which", _which), patch(
+        "subprocess.run", return_value=_cp(0, "not json")
+    ):
+        with pytest.raises(NamespaceListIncomplete):
+            await r.list()
+
+
+@pytest.mark.asyncio
+async def test_with_fallback_list_still_falls_back_on_genuine_failure():
+    # A fallback resolver, when present, still covers a genuine failure --
+    # only the no-fallback case must raise instead of silently degrading.
+    fb = _Fallback()
+    r = CliNamespaceResolver("codespace", "agent-codespaces", fallback=fb)
+    with patch("shutil.which", _which), patch(
+        "subprocess.run", return_value=_cp(1, "", "boom")
+    ):
+        agents = await r.list()
+    assert [a.name for a in agents] == ["fallback-cs"]
+    assert fb.calls == ["list"]
 
 
 # --- restricted (container) variant + signature-aware fallback (#892 Inc 3b) ---

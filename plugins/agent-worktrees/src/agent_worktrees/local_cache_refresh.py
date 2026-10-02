@@ -3,7 +3,7 @@ lifecycle boundaries this pattern depends on: create, resume, and
 ``sessionStart`` (a backup for drift accrued since).
 
 See ``docs/patterns/worktree-scoped-dynamic-guidance.md`` and
-``efforts/active/ambient-guidance-navigability`` Phase 7. This is the
+``efforts/2026/10/02 ambient-guidance-navigability`` Phase 7. This is the
 *consumer* side of a mechanism ``customizing-copilot`` owns entirely:
 ``instruction_projections.render_local_cache()`` and the sibling-resolution/
 declaration schema it depends on all live in that plugin's own

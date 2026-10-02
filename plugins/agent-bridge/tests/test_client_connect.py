@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import urllib.error
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
@@ -16,6 +17,10 @@ from agent_bridge.client import (
     BridgeClientError,
     BridgeConnectionError,
 )
+
+
+FORWARDED_ROUTE = {"bind": "127.0.0.1", "port": 62254, "forwarded": True}
+LEGACY_FORWARDED_ROUTE = {"port": 62255}
 
 
 class _FakeResp:
@@ -719,3 +724,42 @@ class TestRefreshEndpoint:
         )
         assert client.refresh_endpoint() is False
         assert client._base == "http://127.0.0.1:9280"
+
+
+def _client_config(tmp_path: Path, active: dict) -> None:
+    (tmp_path / "config.yaml").write_text("port: 9280\n", encoding="utf-8")
+    (tmp_path / "auth.yaml").write_text("token: tok\n", encoding="utf-8")
+    (tmp_path / "active.json").write_text(
+        json.dumps({"active": active}), encoding="utf-8"
+    )
+
+
+def test_from_config_uses_explicit_forwarded_route(tmp_path, monkeypatch):
+    from agent_bridge import config
+
+    _client_config(tmp_path, FORWARDED_ROUTE)
+    monkeypatch.setattr(config, "config_dir", lambda: tmp_path)
+    client = BridgeClient.from_config()
+    assert client._base == "http://127.0.0.1:62254"
+
+
+def test_from_config_uses_legacy_bindless_forwarded_route(tmp_path, monkeypatch):
+    from agent_bridge import config
+
+    _client_config(tmp_path, LEGACY_FORWARDED_ROUTE)
+    monkeypatch.setattr(config, "config_dir", lambda: tmp_path)
+    client = BridgeClient.from_config()
+    assert client._base == "http://127.0.0.1:62255"
+
+
+def test_refresh_endpoint_follows_legacy_forwarded_route(tmp_path, monkeypatch):
+    from agent_bridge import config
+
+    _client_config(tmp_path, FORWARDED_ROUTE)
+    monkeypatch.setattr(config, "config_dir", lambda: tmp_path)
+    client = BridgeClient.from_config()
+    (tmp_path / "active.json").write_text(
+        json.dumps({"active": LEGACY_FORWARDED_ROUTE}), encoding="utf-8"
+    )
+    assert client.refresh_endpoint() is True
+    assert client._base == "http://127.0.0.1:62255"

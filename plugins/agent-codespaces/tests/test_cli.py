@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import types
 from unittest.mock import patch
 
 import pytest
@@ -767,6 +768,60 @@ class TestNamespaceSeams:
 
         with patch("agent_codespaces.resolver.CodespaceResolver.ensure_ready", _fail):
             assert main(["namespace-ensure-ready", "cs-a"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_namespace_ensure_ready_persists_discovered_account(self, monkeypatch):
+        from agent_codespaces.resolver import CodespaceResolver
+
+        bound = []
+        monkeypatch.setattr(
+            "agent_codespaces.resolver.list_codespaces",
+            lambda: [
+                types.SimpleNamespace(
+                    name="cs-a",
+                    display_name="cs-a",
+                    repository="example-org/example",
+                    branch="main",
+                    state="Available",
+                    account="alice",
+                )
+            ],
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.account_binding.bind",
+            lambda name, account, repo="": bound.append((name, account, repo)),
+        )
+
+        await CodespaceResolver().ensure_ready("cs-a")
+
+        assert bound == [("cs-a", "alice", "example-org/example")]
+
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("already_bound, raises", [(None, True), ("alice", False)])
+    async def test_namespace_ensure_ready_surfaces_a_lost_account_binding(
+        self, monkeypatch, already_bound, raises,
+    ):
+        from agent_codespaces.resolver import CodespaceResolver
+
+        monkeypatch.setattr(
+            "agent_codespaces.resolver.list_codespaces",
+            lambda: [types.SimpleNamespace(
+                name="cs-a", display_name="cs-a", repository="example-org/example",
+                branch="main", state="Available", account="alice")],
+        )
+
+        def _bind(*_a, **_k):
+            raise RuntimeError("Could not acquire account binding lock")
+
+        monkeypatch.setattr("agent_codespaces.account_binding.bind", _bind)
+        monkeypatch.setattr("agent_codespaces.account_binding.bound_account",
+                            lambda name: already_bound)
+        if raises:
+            with pytest.raises(RuntimeError, match="alice.*couldn't be recorded"):
+                await CodespaceResolver().ensure_ready("cs-a")
+        else:
+            await CodespaceResolver().ensure_ready("cs-a")
 
 
 class TestRecycleSafetyGate:

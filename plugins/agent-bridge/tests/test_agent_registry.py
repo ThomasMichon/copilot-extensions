@@ -940,6 +940,67 @@ class TestNamespaceResolvers:
         assert "ok:test-agent" in names
         assert not any(n.startswith("broken:") for n in names)
 
+    @pytest.mark.asyncio
+    async def test_list_agents_async_reports_incomplete_namespaces(self):
+        """A namespace resolver that fails/times out must be surfaced via
+        `incomplete_namespaces` -- not just silently dropped -- so a
+        `--stream`/`--subscribe` consumer (`agent-bridge agents --stream`)
+        can tell "transiently unavailable" apart from "genuinely gone" and
+        never report a false removal for it."""
+        class _FailingResolver:
+            @property
+            def prefix(self) -> str:
+                return "broken"
+
+            async def list(self):
+                raise RuntimeError("boom")
+
+            async def resolve(self, name):  # pragma: no cover - unused here
+                raise NotImplementedError
+
+            async def ensure_ready(self, name):  # pragma: no cover - unused
+                raise NotImplementedError
+
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(_FailingResolver())
+        resolver.register_namespace_resolver(_MockResolver("ok"))
+        assert resolver.incomplete_namespaces == []
+        await resolver.list_agents_async()
+        assert resolver.incomplete_namespaces == ["broken"]
+        # A SUBSEQUENT fully-successful call resets it -- it reflects only
+        # the most recent scan, never a sticky/latched failure.
+        resolver._namespace_resolvers.pop("broken")
+        await resolver.list_agents_async()
+        assert resolver.incomplete_namespaces == []
+
+    @pytest.mark.asyncio
+    async def test_list_agents_async_reports_incomplete_for_real_cli_resolver_failure(
+        self,
+    ):
+        """The real production shape (`CliNamespaceResolver` with no
+        in-process fallback) must also surface `incomplete_namespaces` on a
+        genuine provider failure -- not just a bespoke test double's raised
+        exception. A manifest-backed provider (e.g. ``codespace:``) has no
+        fallback, and its namespace-list CLI can fail (non-zero exit,
+        timeout, malformed output) without the binstub itself being
+        missing; that must not be swallowed into a clean empty listing."""
+        from unittest.mock import patch
+
+        cli_resolver = CliNamespaceResolver(
+            "codespace", "agent-codespaces", fallback=None,
+        )
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(cli_resolver)
+        resolver.register_namespace_resolver(_MockResolver("ok"))
+        with patch("shutil.which", return_value="/usr/bin/agent-codespaces"), patch(
+            "subprocess.run",
+            return_value=subprocess.CompletedProcess([], 1, "", "boom"),
+        ):
+            agents = await resolver.list_agents_async()
+        assert resolver.incomplete_namespaces == ["codespace"]
+        assert any(a["name"] == "ok:test-agent" for a in agents)
+        assert not any(a["name"].startswith("codespace:") for a in agents)
+
 
 # -- AdminResolver tests ------------------------------------------------------
 

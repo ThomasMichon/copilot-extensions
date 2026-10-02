@@ -179,7 +179,8 @@ that source's own payload root -- a plain installed-plugins payload copy
 never marked `is_local_checkout`) has no local git history to read, and is
 simply absent from the resulting map rather than guessed at (see its own
 docstring, and issue #3132 for that remaining half). See
-`efforts/active/ambient-guidance-navigability`'s Journal for status on the
+`efforts/2026/10/02 ambient-guidance-navigability`'s Journal for status on
+the
 externally-installed-source resolver described just above -- the only
 remaining piece; the scheduler wrapper (`projection_sync_worker.py`) and
 the setup skill (`setting-up-instruction-sync-worker`) are both already
@@ -316,7 +317,7 @@ claims to own an ambient answer for (e.g. `agent-worktrees` claiming
 
 This registry is opt-in, independent of `instruction-projections.json`, and
 targets exactly the gap the
-`efforts/active/ambient-guidance-navigability` audit found: skills are
+`efforts/2026/10/02 ambient-guidance-navigability` audit found: skills are
 pull-only, so a category with no ambient pointer is undiscoverable to an
 agent that doesn't already know the skill exists. The suite's guard test
 (`plugins/customizing-copilot/tests/test_troubleshooting_index.py`, backed by

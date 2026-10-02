@@ -22,8 +22,8 @@ description: >
 
 # Setting Up the Instruction Sync Worker
 
-Scaffolds `projection-reflect` (`efforts/active/ambient-guidance-navigability`
-Phase 2) for a repo that wants its own scheduled, non-agentic worker to keep
+Scaffolds `projection-reflect` (`efforts/2026/10/02
+ambient-guidance-navigability` Phase 2) for a repo that wants its own scheduled, non-agentic worker to keep
 enabled plugins' checked-in static instruction projections current, closing
 the sync-freshness gap the immediate/proactive resync trigger
 (`copilot-extensions-harness:cross-repo-debug-tracking`) only covers when a
@@ -199,8 +199,8 @@ scan depends on it.
 
 ## See also
 
-- `efforts/active/ambient-guidance-navigability/README.md` -- the full Phase
-  2 plan and Journal this skill is one slice of.
+- `efforts/2026/10/02 ambient-guidance-navigability/README.md` -- the full
+  Phase 2 plan and Journal this skill is one slice of.
 - `reviewing-customizations`'s own `SKILL.md` -- the `sync`/`scan` mechanism,
   the `projection_reflect.py` decision layer, and the coverage registry this
   automation composes with.

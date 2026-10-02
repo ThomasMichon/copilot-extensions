@@ -227,15 +227,18 @@ class _ContainerAdapter:
         *,
         name: str,
         ssh_config: Any,
+        hold_id: str,
         remote_env: str | None,
         relay_port: int | None,
         host_relay_port: int | None,
     ) -> None:
         self.name = name
         self.ssh_config = ssh_config
+        self.hold_id = hold_id
         self.remote_env = remote_env
         self.relay_port = relay_port
         self.host_relay_port = host_relay_port
+        self._hold_updated_at: float | None = None
 
     def run(self, command: str, *, timeout: float) -> tuple[int, str, str]:
         return _remote(self.ssh_config, command, timeout=timeout)
@@ -260,18 +263,28 @@ class _ContainerAdapter:
     def ensure_keeper(self, *, venue_port: int, mux: str) -> dict[str, Any]:
         from . import forward_keeper
 
-        return forward_keeper.ensure_running(
+        result = forward_keeper.ensure_running(
             self.name,
             venue_port=venue_port,
             mux=mux,
+            hold_id=self.hold_id,
             relay_port=self.relay_port,
             host_relay_port=self.host_relay_port,
+            mux_alive=lambda held_mux: forward_keeper._mux_exists(self.ssh_config, held_mux),
         )
+        raw_updated = result.get("hold_updated_at")
+        self._hold_updated_at = float(raw_updated) if raw_updated is not None else None
+        return result
 
     def stop_keeper(self) -> bool:
         from . import forward_keeper
 
-        return forward_keeper.stop_keeper(self.name)
+        return forward_keeper.stop_keeper(
+            self.name,
+            hold_id=self.hold_id,
+            mux_alive=lambda held_mux: forward_keeper._mux_exists(self.ssh_config, held_mux),
+            expected_updated_at=self._hold_updated_at,
+        )
 
     def attach_command(self, plan: dict[str, Any]) -> str:
         return f"agent-containers copilot {self.name}"
@@ -340,6 +353,7 @@ def cmd_detach(
         adapter = _ContainerAdapter(
             name=args.name,
             ssh_config=ssh_config,
+            hold_id=plan["scope_id"],
             remote_env=remote_env,
             relay_port=relay_port,
             host_relay_port=host_relay_port,
@@ -377,14 +391,14 @@ def cmd_stop(args: argparse.Namespace) -> int:
     except RuntimeError as exc:
         return _fail(str(exc))
     plan = plan_for(args, target)
-    state = forward_keeper.read_state(args.name)
-    if state and state.get("mux"):
-        plan["mux_session"] = str(state["mux"])
-        plan["venue"]["mux_session_name"] = plan["mux_session"]
+    if held_mux := forward_keeper.hold_mux(args.name, plan["scope_id"]):
+        plan["mux_session"] = held_mux
+        plan["venue"]["mux_session_name"] = held_mux
     ssh_config = prepare_ssh_config(args.name, target.user)
     adapter = _ContainerAdapter(
         name=args.name,
         ssh_config=ssh_config,
+        hold_id=plan["scope_id"],
         remote_env=None,
         relay_port=None,
         host_relay_port=None,

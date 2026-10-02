@@ -13,10 +13,17 @@ Four pieces, each independently testable:
   test -> wall-clock cost) from a real pytest + `coverage.py` dynamic-context
   run, via an ephemeral `uv run --with coverage --with pytest-cov` subprocess
   so this package itself carries no new ambient dependency.
-- `select`: pure-stdlib diff-scoped selection -- given a baseline and a set
+- `selection`: pure-stdlib diff-scoped selection -- given a baseline and a set
   of changed (file, line) pairs, returns the covering tests, or names which
   changed lines forced a fallback (no baseline entry, or a baseline entry
-  with no attributing test for that specific line).
+  with no attributing test for that specific line). Named `selection.py`,
+  not `select.py`: the latter shadows Python's own stdlib `select` module
+  whenever this package's directory lands on `sys.path` (e.g. running
+  `baseline.py` as a script inserts its own directory first) -- harmless on
+  an interpreter build where `select` is a frozen builtin, but a hard
+  `AttributeError` inside `subprocess`'s own `import selectors` on a build
+  where it isn't (confirmed: GitHub Actions' `actions/setup-python` CPython
+  3.12.14 build hits this; a locally-built CPython may not).
 - `fallback`: pure-stdlib coverage-efficient fallback curation -- a greedy,
   budget-bounded weighted-set-cover selection over the baseline's own
   per-test coverage and cost data (see the vision's "coverage-efficient

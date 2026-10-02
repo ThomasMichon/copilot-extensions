@@ -25,5 +25,11 @@ def _isolate_discovery(monkeypatch, tmp_path):
         "AGENT_DISPATCH_ENDPOINT",
         "AGENT_DISPATCH_WINDOWS_RUN_DIR",
         "AGENT_DISPATCH_WINDOWS_MOUNT",
+        # `consume`'s claimed/started fencing reads this to bind a
+        # per-session identity (see task_query_cli.py); an ambient value
+        # from the *actual* Copilot session running this test suite would
+        # otherwise leak in and silently change `consume`'s behavior/
+        # transition list out from under tests that don't expect it.
+        "COPILOT_AGENT_SESSION_ID",
     ):
         monkeypatch.delenv(var, raising=False)

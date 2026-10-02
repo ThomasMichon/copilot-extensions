@@ -836,8 +836,16 @@ to `machine` only when the mismatch is machine-wide.
 >   it judges the goal reached -- so
 >   `submitted` means *the work is done*, not *the baton was handed over*.
 >
-> An already-terminal (or unclaimable) task just has its payload re-printed,
-> never an error. Use plain `payload --raw` to read *without* any state change.
+> An already-terminal **non-handoff** task just has its payload re-printed
+> (idempotent); an already-terminal **handoff** (`submitted`/`completed`,
+> labeled `handoff` or sourced from `context-handoff`) is refused instead
+> (exit `3`) -- see the replay-debounce note above. Claiming can likewise
+> fail two ways: a genuine failure (nobody owns the task, not even a
+> concurrent claimant) is a real error (exit `1`); losing a claim race to a
+> concurrent claimant refuses to replay the payload to the loser (exit `3`,
+> the same exactly-once refusal). Neither case silently prints a payload
+> the caller does not actually own. Use plain `payload --raw` to read
+> *without* any state change.
 >
 > **`complete <id>` needs no owner** when run inside the owning worktree: it
 > resolves `machine/worktree` from the CWD (like `claim`), so a taken-over

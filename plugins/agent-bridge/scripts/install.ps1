@@ -424,12 +424,31 @@ function Invoke-UvPipInstallResilient {
        be -- mirrors the POSIX installer's `_scrub_payload_build_artifacts`.
 
        ``SourceDir`` (optional): an additional local source directory to
-       scrub, for a vendored dependency (ssh-manager, credential-relay,
-       zdd, ...) installed from its OWN source tree rather than
-       ``$PluginDir`` -- that tree uses the same setuptools src-layout and
-       accumulates the identical stale build/egg-info residue, which
-       ``$PluginDir``-only scrubbing never reaches
-       (copilot-extensions#3456 review). #>
+       scrub, for a vendored dependency installed from its OWN source tree
+       OUTSIDE $PluginDir/libs/ (e.g. a marketplace layout resolving a lib
+       from a sibling checkout) -- the libs/*/ enumeration below only
+       reaches vendored libs that actually live under this payload's own
+       libs/ directory. Harmless to pass a dir the enumeration already
+       covered: Remove-Item on an already-scrubbed path is a no-op.
+
+       An explicit-SourceDir scrub only reaches the ONE vendored lib the
+       caller happens to name -- it silently misses any lib resolved
+       TRANSITIVELY while installing agent-bridge itself (agent-procutil,
+       dropin-registry, plugin-activation, plugin-resolve: pulled in via
+       agent-bridge's own `[tool.uv.sources]` workspace path deps, never
+       given their own dedicated install call here) even though each is its
+       own independent setuptools build root under
+       `$PluginDir/libs/<name>/` and accumulates the identical stale
+       build/egg-info residue. That gap self-reinvited the exact #3444/
+       #3456 bug class on POSIX: a stale libs/agent-procutil/build/lib
+       shadowing a fresh src/agent_procutil and crashing every
+       headless-spawn session host with `ImportError: cannot import name
+       'JobHandle'`. Mirrors the POSIX installer's own fix and
+       agent-dispatch's `Remove-PluginBuildArtifacts` (copilot-extensions
+       #2863) -- enumerate every immediate child of libs/ unconditionally,
+       since directory names under libs/ don't map 1:1 to package names
+       (e.g. agent-zdd -> libs/zdd) and an enumerated allowlist drifts out
+       of sync with new/renamed vendored libs. #>
     param(
         [Parameter(Mandatory)][string[]]$Arguments,
         [string]$SourceDir = ''
@@ -439,6 +458,16 @@ function Invoke-UvPipInstallResilient {
             (Join-Path $PluginDir 'build'), `
             (Join-Path $PluginDir '*.egg-info'), `
             (Join-Path (Join-Path $PluginDir 'src') '*.egg-info')
+        $libsDir = Join-Path $PluginDir 'libs'
+        if (Test-Path -LiteralPath $libsDir) {
+            Get-ChildItem -LiteralPath $libsDir -Directory -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
+                        (Join-Path $_.FullName 'build'), `
+                        (Join-Path $_.FullName '*.egg-info'), `
+                        (Join-Path (Join-Path $_.FullName 'src') '*.egg-info')
+                }
+        }
         if ($SourceDir -and $SourceDir -ne $PluginDir) {
             Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
                 (Join-Path $SourceDir 'build'), `
@@ -1152,6 +1181,9 @@ function Get-RunningProcess {
     # Last resort: find by port binding (catches orphaned processes
     # whose PID file was lost or exe path changed during update). Resolve the
     # live port from active.json so a dynamic-port daemon is found too (#856).
+    if (Test-ActiveIsForward) {
+        return $null
+    }
     $conn = Get-NetTCPConnection -LocalPort (Get-ActiveEndpoint).Port -ErrorAction SilentlyContinue |
         Where-Object { $_.State -eq 'Listen' } |
         Select-Object -First 1
@@ -1188,6 +1220,109 @@ function Get-ActiveEndpoint {
         } catch { }
     }
     return @{ Bind = $bind; Port = $resolved }
+}
+
+function Test-ActiveIsForward {
+    $activeJson = Join-Path $InstallDir 'active.json'
+    if (-not (Test-Path $activeJson)) { return $false }
+    try {
+        $aj = Get-Content $activeJson -Raw -ErrorAction Stop | ConvertFrom-Json
+        $active = $aj.active
+        $p = [int]($active.port)
+        if ($p -le 0) { return $false }
+        if ($active.forwarded -eq $true) { return $true }
+        $names = @($active.PSObject.Properties.Name)
+        return (($names -notcontains 'pid') -and ($names -notcontains 'generation') -and ($names -notcontains 'bind'))
+    } catch {
+        return $false
+    }
+}
+
+function Get-ActiveSignature {
+    $activeJson = Join-Path $InstallDir 'active.json'
+    if (-not (Test-Path $activeJson)) { return '' }
+    try {
+        $aj = Get-Content $activeJson -Raw -ErrorAction Stop | ConvertFrom-Json
+        $active = $aj.active
+        $p = [int]($active.port)
+        if ($p -le 0) { return '' }
+        $names = @($active.PSObject.Properties.Name)
+        $legacyForward = (
+            ($names -notcontains 'pid') -and
+            ($names -notcontains 'generation') -and
+            ($names -notcontains 'bind')
+        )
+        if (($active.forwarded -eq $true) -or $legacyForward) { return '' }
+        $pidValue = if ($names -contains 'pid') { [string]$active.pid } else { '' }
+        $generationValue = if ($names -contains 'generation') { [string]$active.generation } else { '' }
+        $bindValue = if ($names -contains 'bind') { [string]$active.bind } else { '' }
+        return "$bindValue|$p|$pidValue|$generationValue"
+    } catch {
+        return ''
+    }
+}
+
+function Test-UpdateLifecycleStillTargetsPredecessor {
+    # -AllowAbsent: after this update stopped the pinned predecessor, its graceful
+    # shutdown clears its own route, so an absent route still means "ours".
+    param([string]$Signature, [switch]$AllowAbsent)
+    if (Test-ActiveIsForward) {
+        Write-Step 'Forwarded host bridge route appeared during update -- skipping drain/stop/start'
+        return $false
+    }
+    # An empty pin is the legacy fixed-port predecessor with no route: it must
+    # stay empty. -AllowAbsent relaxes only a pinned predecessor that exited.
+    $current = [string](Get-ActiveSignature)
+    $pinned = [string]$Signature
+    if ($AllowAbsent -and $pinned -and -not $current) { return $true }
+    if ($current -ne $pinned) {
+        Write-Step 'Active route changed during update -- skipping drain/stop/start'
+        return $false
+    }
+    return $true
+}
+
+function Get-SignatureBaseUrl {
+    # The validated predecessor's own endpoint (signature "bind|port|pid|generation";
+    # empty = the fixed $Port daemon), so the drain targets exactly it and never
+    # follows a route rewritten after validation -- e.g. to a venue forward.
+    param([string]$Signature)
+    $bind = '127.0.0.1'
+    $p = $Port
+    $parts = if ($Signature) { $Signature.Split('|') } else { @() }
+    $parsed = 0
+    if ($parts.Count -ge 2 -and [int]::TryParse($parts[1], [ref]$parsed) -and $parsed -gt 0) {
+        $p = $parsed
+        if ($parts[0] -eq '::') { $bind = '::1' }
+        elseif ($parts[0] -and $parts[0] -ne '0.0.0.0') { $bind = $parts[0] }
+    }
+    if ($bind.Contains(':')) { return "http://[$bind]:$p" }
+    return "http://${bind}:$p"
+}
+
+function Invoke-UpdateDrainStop {
+    param([string]$Signature, [int]$TimeoutSec = 120)
+    if (-not (Test-UpdateLifecycleStillTargetsPredecessor -Signature $Signature)) {
+        return $false
+    }
+    Invoke-Drain -TimeoutSec $TimeoutSec -BaseUrl (Get-SignatureBaseUrl -Signature $Signature)
+    # The drain can take minutes; a venue forward may publish or bind meanwhile.
+    # Re-check right before stopping so the stop's port cleanup never kills it.
+    if (-not (Test-UpdateLifecycleStillTargetsPredecessor -Signature $Signature -AllowAbsent)) {
+        return $false
+    }
+    Invoke-Stop
+    return $true
+}
+
+function Invoke-UpdateStart {
+    param([string]$Signature, [string]$Message = 'Starting service...')
+    if (-not (Test-UpdateLifecycleStillTargetsPredecessor -Signature $Signature -AllowAbsent)) {
+        return $false
+    }
+    Write-Step $Message
+    Invoke-Start
+    return $true
 }
 
 function Test-HealthOnce {
@@ -1270,15 +1405,21 @@ function Invoke-Drain {
     # Windows pre-stop hook -- Phase 1 zero-downtime). Bounded + forced so an
     # update never blocks indefinitely. Non-fatal; the Stop that follows is the
     # backstop against the Job Object force-kill on daemon exit.
-    param([int]$TimeoutSec = 120)
+    # -BaseUrl pins the drain to that endpoint (AGENT_BRIDGE_BASE_URL overrides the
+    # routing table) instead of whatever active.json names by the time it runs.
+    param([int]$TimeoutSec = 120, [string]$BaseUrl = '')
     $bridgeExe = Join-Path $VenvDir 'Scripts\agent-bridge.exe'
     if (-not (Test-Path $bridgeExe)) { return }
     Write-Step "Draining in-flight sessions (up to ${TimeoutSec}s)..."
+    $prevBaseUrl = $env:AGENT_BRIDGE_BASE_URL
     try {
+        if ($BaseUrl) { $env:AGENT_BRIDGE_BASE_URL = $BaseUrl }
         & $bridgeExe drain --timeout $TimeoutSec --force 2>&1 | Out-Null
         Write-Ok 'Drain window complete'
     } catch {
         Write-Warn 'Drain reported busy sessions -- proceeding with swap'
+    } finally {
+        $env:AGENT_BRIDGE_BASE_URL = $prevBaseUrl
     }
 }
 
@@ -2270,6 +2411,11 @@ function Invoke-Start {
         exit 1
     }
 
+    if (Test-ActiveIsForward) {
+        Write-Skip 'agent-bridge: this machine reaches a host bridge through a forward (active.json); not starting a local daemon over it'
+        return
+    }
+
     # Decide what to do about anything already serving.
     $proc = Get-RunningProcess
     if ($proc) {
@@ -2587,9 +2733,15 @@ function Invoke-Update {
         return
     }
 
+    $activeForward = Test-ActiveIsForward
+    if ($activeForward) {
+        Write-Step 'Forwarded host bridge route detected -- updating runtime files without draining/stopping/starting a local daemon'
+    }
+    $predecessorSignature = if ($activeForward) { '' } else { Get-ActiveSignature }
+
     # Stop running instance first -- a rebuild/repair of the venv (below) must
     # not race a live bridge holding python.exe open.
-    $wasRunning = $null -ne (Get-RunningProcess)
+    $wasRunning = (-not $activeForward) -and ($null -ne (Get-RunningProcess))
 
     # Thread B: the ZDD active/passive cutover is now the DEFAULT whenever a live
     # daemon is running -- activation always cuts over automatically (no opt-in).
@@ -2607,7 +2759,7 @@ function Invoke-Update {
     $prevVersion = ''
     if ($VersionedRuntime) {
         $prevVersion = Get-VersionedCurrent
-        $useCutover = $wasRunning
+        $useCutover = $wasRunning -and (-not $activeForward)
         # Cutover onto the *same* slot is impossible (there is only one dir of that
         # name and the live daemon holds it). A same-version refresh downgrades to
         # the classic stop-and-rebuild.
@@ -2616,7 +2768,7 @@ function Invoke-Update {
             $useCutover = $false
         }
     } else {
-        $useCutover = $wasRunning -and (Test-Path $VenvPython)
+        $useCutover = $wasRunning -and (-not $activeForward) -and (Test-Path $VenvPython)
     }
     if ($useCutover) {
         Write-Step 'Graceful cutover: building the new runtime; will cut over (no stop)'
@@ -2638,8 +2790,9 @@ function Invoke-Update {
             $drainTimeout = if ($env:AGENT_BRIDGE_DRAIN_TIMEOUT) {
                 [int]$env:AGENT_BRIDGE_DRAIN_TIMEOUT
             } else { 120 }
-            Invoke-Drain -TimeoutSec $drainTimeout
-            Invoke-Stop
+            if (-not (Invoke-UpdateDrainStop -Signature $predecessorSignature -TimeoutSec $drainTimeout)) {
+                $wasRunning = $false
+            }
         }
 
         # Repair venv if python binary is missing (or rebuild if unsigned for SAC).
@@ -2791,9 +2944,8 @@ function Invoke-Update {
                 $failedSlot = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
                 if (Test-Path $failedSlot) { Remove-Item -Recurse -Force $failedSlot -ErrorAction SilentlyContinue }
             }
-            if ($wasRunning -and -not $useCutover) {
-                Write-Step 'Restarting the previous version...'
-                Invoke-Start
+            if ($wasRunning -and -not $useCutover -and -not $activeForward) {
+                if (-not (Invoke-UpdateStart -Signature $predecessorSignature -Message 'Restarting the previous version...')) { $wasRunning = $false }
             }
             $prevLabel = if ($prevVersion) { "versions/$prevVersion" } else { 'the previous runtime' }
             Write-Warn "Update failed; kept the previous runtime (venv -> $prevLabel)."
@@ -2802,9 +2954,8 @@ function Invoke-Update {
             Write-Step 'Rolling back to the previous venv...'
             if (Restore-Venv) {
                 Write-Ok 'Previous venv restored'
-                if ($wasRunning) {
-                    Write-Step 'Restarting the previous service...'
-                    Invoke-Start
+                if ($wasRunning -and -not $activeForward) {
+                    if (-not (Invoke-UpdateStart -Signature $predecessorSignature -Message 'Restarting the previous service...')) { $wasRunning = $false }
                 }
             } else {
                 Write-Fail 'Rollback failed -- run "install.ps1 install" to rebuild the runtime'
@@ -2864,7 +3015,10 @@ function Invoke-Update {
     # collapsed. The classic path just (re)starts -- the old daemon was already
     # stopped above. Launch via the `venv` link ($LinkPython) so the process
     # resolves through the junction (never a versions/<v> absolute).
-    if ($useCutover) {
+    if ($activeForward) {
+        Write-Step 'Forwarded host bridge route still active -- not starting a local daemon'
+    }
+    elseif ($useCutover) {
         # Warm the freshly-built slot before the timed cutover (#864): the slot's
         # first full-app start is cold -- Python compiles the whole app graph and,
         # on a managed Windows box, Defender / Smart App Control scans the freshly
@@ -2884,12 +3038,12 @@ function Invoke-Update {
             Write-Ok 'Cutover complete (zero-downtime)'
         } else {
             Write-Warn 'Cutover failed -- falling back to a stop-and-restart swap'
-            Invoke-Stop
-            Invoke-Start
+            if (Invoke-UpdateDrainStop -Signature $predecessorSignature -TimeoutSec 30) {
+                Invoke-UpdateStart -Signature $predecessorSignature | Out-Null
+            }
         }
     } else {
-        Write-Step 'Starting service...'
-        Invoke-Start
+        Invoke-UpdateStart -Signature $predecessorSignature | Out-Null
     }
 
     # Versioned layout: prune old version slots now that the new one is healthy

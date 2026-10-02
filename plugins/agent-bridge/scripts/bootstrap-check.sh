@@ -1,4 +1,27 @@
 #!/usr/bin/env bash
+
+# --- bootstrap-killswitch guard (vendored; see libs/bootstrap-killswitch/README.md) ---
+# One shared, repo-wide switch (not per-plugin) that pauses EVERY adopting
+# plugin's reconcile-on-session-start at once, for when an operator/agent is
+# hand-diagnosing a venv/install and a background reconcile must not race it.
+# Legacy/default installation ONLY: a namespaced marketplace cell
+# (COPILOT_EXTENSIONS_CONTEXT set) reconciles through its own cell-scoped
+# mechanism, never this global state file -- crossing that installation-cell
+# boundary would let one marketplace's switch pause an unrelated,
+# independently-owned cell's reconcile (visions/plugin-services/
+# installation-cells). This guard is therefore a deliberate no-op under a
+# cell context, same as this hook's own existing cell-context exit below.
+if [ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]; then
+  _bks_guard_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  _bks_guard="$_bks_guard_dir/bootstrap-killswitch-guard.sh"
+  if [ -f "$_bks_guard" ] && bash "$_bks_guard" check >&2; then
+    printf '{}'
+    exit 0
+  fi
+  unset _bks_guard_dir _bks_guard
+fi
+# --- end bootstrap-killswitch guard ---
+
 # agent-bridge session-start runtime reconcile (reference implementation).
 # Invoked via hooks.json at session start. Derives the install dir from
 # plugin.json's name (~/.<name>) and re-runs the installer in the BACKGROUND only

@@ -38,6 +38,27 @@ process boundaries, elevated launchers, and out-of-session management callers.
 Catalog adoption does not make those callers payload-aware; they retain their
 current commands until an attributable launcher contract reaches each surface.
 
+### Worktree-picker "Bridges" pivot
+
+The installer drops a pivot manifest at `~/.agent-worktrees/pivots/
+agent-bridge.json` so the agent-worktrees Textual picker grows a **Bridges**
+pivot, rendering the registered-agent roster through `agent-bridge --json
+agents`. The manifest declares `"stream": true, "subscribe": true`
+(pivot-streaming-transport Phase 2): the Picker runs `agents --stream`
+instead of a plain one-shot call, consuming a line-delimited NDJSON envelope
+(`begin`/`row`/`done`) so the roster paints progressively, then holds that
+channel open -- every 45 seconds (`--interval`, matching the Picker's prior
+one-shot repoll cadence) the roster is re-fetched
+in-process and diffed against the last snapshot, emitting `delta`/`removed`
+frames keyed by agent `name` so an open pivot updates live without
+re-invoking the CLI per refresh. Falls back automatically to the plain
+one-shot JSON call on an older `agent-bridge` that doesn't understand
+`--stream`; a held channel that drops mid-session reconnects with bounded
+backoff rather than freezing (the Picker-owned `subscribe` EOF/reconnect
+contract -- see `worktree-manager`'s `tasks.py`). A topology-profile error on
+the initial fetch surfaces as a stream `error` frame (same contract as a
+bridge-connection failure) rather than being silently dropped.
+
 ## How It Works
 
 Agent Bridge runs as a local HTTP service on an OS-assigned loopback port by

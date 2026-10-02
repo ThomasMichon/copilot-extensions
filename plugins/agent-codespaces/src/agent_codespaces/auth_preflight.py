@@ -16,14 +16,22 @@ with no resolvable local credential are reported so the caller can fix auth
 from __future__ import annotations
 
 import logging
+import re
+import subprocess
+import sys
+from dataclasses import dataclass
 from collections.abc import Awaitable, Callable
 from urllib.parse import urlsplit
 
+from agent_procutil import no_window_flags
 from credential_relay.sources.git_credential import GitCredentialSource
 
 from .provision import DOTFILES_DIR
 
 log = logging.getLogger("agent-codespaces.auth-preflight")
+
+GITHUB_CREDENTIAL_UNAVAILABLE = "github-credential-unavailable"
+GITHUB_CREDENTIAL_AMBIGUOUS = "github-credential-ambiguous"
 
 # Remote command that prints the git remotes of both repos a session touches:
 # the workspace/product checkout (preferring the reliable $VM_REPO_PATH set by
@@ -37,6 +45,162 @@ REMOTE_LIST_COMMAND = (
     "git remote -v 2>/dev/null; "
     "} || true"
 )
+
+
+def parse_gh_account_scopes(status_text: str) -> dict[str, set[str]]:
+    """Parse ``gh auth status`` into ``{login: {scopes}}``."""
+    accounts: dict[str, set[str]] = {}
+    current: str | None = None
+    for line in status_text.splitlines():
+        match = re.search(r"account\s+([A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?)", line)
+        if match:
+            current = match.group(1)
+            accounts.setdefault(current, set())
+        if current and "token scopes" in line.lower():
+            accounts[current] |= set(re.findall(r"'([^']+)'", line))
+    return accounts
+
+
+def gh_account_failures(status_text: str) -> dict[str, str]:
+    """``{login (casefolded): "failed" | "timeout"}`` for the accounts ``gh auth
+    status`` couldn't verify: a failed login (an invalid or expired token) or a
+    timeout reaching GitHub. Plain ``gh auth status`` exits nonzero for either."""
+    out: dict[str, str] = {}
+    for kind, login in re.findall(
+        r"(failed to|timeout trying to) log in to \S+ account\s+"
+        r"([A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?)",
+        status_text, re.IGNORECASE,
+    ):
+        out[login.casefold()] = "timeout" if kind.lower().startswith("timeout") else "failed"
+    return out
+
+
+def _timeout_finding(login: str) -> str:
+    return (f"couldn't verify gh account '{login}': gh auth status timed out reaching "
+            "GitHub -- retry once GitHub is reachable")
+
+
+def _live_codespaces() -> list | None:
+    """The CodeSpaces that still exist, or None when they can't be listed."""
+    try:
+        from .lifecycle import list_codespaces
+
+        return list(list_codespaces())
+    except Exception:
+        log.debug("could not list CodeSpaces; keeping every account binding", exc_info=True)
+        return None
+
+
+def codespace_scope_accounts(*, live_only: bool = False) -> tuple[tuple[str, ...], bool]:
+    """``(explicit_accounts, uses_ambient)`` for CodeSpace operations.
+
+    ``live_only`` judges against the CodeSpaces that exist now: it ignores
+    bindings whose CodeSpace is gone (only ``delete_codespace`` unbinds, so one
+    deleted elsewhere leaves its binding behind), and counts a live CodeSpace
+    that is neither bound nor owned by a mapped account (an empty ``account``)
+    as ambient ownership. When CodeSpaces can't be listed, every binding is
+    kept and ambient use comes from configured repos alone.
+    """
+    accounts: list[str] = []
+    uses_ambient = False
+    bindings: list = []
+    try:
+        from . import account_binding
+
+        bindings = account_binding.list_bindings()
+    except Exception:
+        log.debug("could not read CodeSpace account bindings", exc_info=True)
+    try:
+        from . import gh_account
+        from .config import load_merged_config
+
+        cfg = load_merged_config(include_cwd=False)
+        for repo in cfg.repos.keys():
+            account = gh_account.account_for_repo(repo)
+            if account:
+                accounts.append(account)
+            else:
+                uses_ambient = True
+    except Exception:
+        log.debug("could not resolve configured CodeSpace repo accounts", exc_info=True)
+    live = _live_codespaces() if live_only else None
+    if live is not None:
+        names = {cs.name for cs in live}
+        bindings = [b for b in bindings if b.codespace in names]
+        bound = {b.codespace for b in bindings}
+        unbound = [cs for cs in live if cs.name not in bound]
+        uses_ambient = uses_ambient or any(not getattr(cs, "account", "") for cs in unbound)
+        accounts.extend(cs.account for cs in unbound if getattr(cs, "account", ""))
+    seen: list[str] = []
+    for account in [*(b.account for b in bindings if b.account), *accounts]:
+        if account and account not in seen:
+            seen.append(account)
+    return tuple(seen), uses_ambient
+
+
+def _active_scope_findings(
+    lowered: dict[str, set[str]], combined: str, failures: dict[str, str] | None = None,
+    account_login_remedy: Callable[[str], str] | None = None,
+) -> list[str]:
+    from . import gh_account
+
+    active = gh_account.active_account()
+    failure = (failures or {}).get(active.casefold()) if active else None
+    if failure == "timeout":
+        return [_timeout_finding(active)]
+    if failure == "failed":
+        remedy = account_login_remedy(active) if account_login_remedy else "run: gh auth login"
+        return [f"active gh account '{active}' is not logged in -- {remedy}"]
+    scopes = lowered.get(active.casefold()) if active else None
+    if active and "codespace" not in {scope.casefold() for scope in (scopes or set())}:
+        return [
+            f"active gh account '{active}' is missing the 'codespace' scope "
+            f"-- run: gh auth refresh -h github.com -u {active} -s codespace"
+        ]
+    if not active and "codespace" not in combined.lower():
+        return [
+            "gh token is missing the 'codespace' scope (needed for CodeSpace "
+            "operations) -- run: gh auth refresh -h github.com -s codespace"
+        ]
+    return []
+
+
+def gh_auth_preflight(status_func, account_login_remedy) -> list[str]:
+    """Check gh auth and codespace scope only for CodeSpace-serving accounts."""
+    msgs: list[str] = []
+    rc, combined = status_func()
+    if rc == -1:
+        return ["gh CLI not found -- install from https://cli.github.com/ then run: gh auth login"]
+    if rc == -2:
+        return ["gh auth status timed out -- check your network / gh install."]
+    per_account = parse_gh_account_scopes(combined)
+    # A nonzero exit can come from any one stored account failing; only the
+    # accounts selected below matter, so judge per account, not by exit code.
+    if not per_account:
+        return ["gh is not authenticated -- run: gh auth login"]
+    failures = gh_account_failures(combined)
+    lowered = {
+        login.casefold(): scopes for login, scopes in per_account.items()
+        if login.casefold() not in failures
+    }
+    accounts, uses_ambient = codespace_scope_accounts(live_only=True)
+    if not accounts:
+        msgs.extend(_active_scope_findings(lowered, combined, failures, account_login_remedy))
+        return msgs
+    if uses_ambient:
+        msgs.extend(_active_scope_findings(lowered, combined, failures, account_login_remedy))
+    for login in accounts:
+        scopes = lowered.get(login.casefold())
+        if failures.get(login.casefold()) == "timeout":
+            msgs.append(_timeout_finding(login))
+        elif scopes is None:
+            msgs.append(f"CodeSpace gh account '{login}' is not logged in -- {account_login_remedy(login)}")
+        elif "codespace" not in {scope.casefold() for scope in scopes}:
+            msgs.append(
+                f"CodeSpace gh account '{login}' is missing the 'codespace' scope "
+                f"-- run: gh auth refresh -h github.com -u {login} -s codespace"
+            )
+    return msgs
 
 
 def host_from_url(url: str) -> str | None:
@@ -101,6 +265,181 @@ async def host_has_auth(
         log.debug("Auth probe for %s raised", host, exc_info=True)
         return False
     return bool(response and "password=" in response)
+
+
+@dataclass(frozen=True)
+class GithubCredentialPreflight:
+    """Host-side github.com relay credential readiness."""
+
+    ok: bool
+    reason_code: str | None = None
+    detail: str = ""
+    remedy: str = ""
+    source: str | None = None
+    account: str | None = None
+
+    def to_dict(self) -> dict[str, str | bool | None]:
+        return {
+            "ok": self.ok,
+            "reason_code": self.reason_code,
+            "detail": self.detail,
+            "remedy": self.remedy,
+            "source": self.source,
+            "account": self.account,
+        }
+
+
+def github_credential_remedy(account: str | None, *, ambiguous: bool = False) -> str:
+    if ambiguous:
+        return (
+            "bind the CodeSpace to its GitHub account by running the CodeSpace "
+            "operation under the intended account; the relay will pass that "
+            "account as the GCM username. Optional interim only: "
+            "`git config --global credential.https://github.com.username <account>`."
+        )
+    user = f" --username {account}" if account else ""
+    return (
+        f"sign in to GitHub in Git Credential Manager: "
+        f"`git credential-manager github login{user}`. Optional interim only: "
+        "`git config --global credential.https://github.com.username <account>`."
+    )
+
+
+def gcm_github_accounts(*, timeout: float = 10.0) -> list[str]:
+    """Best-effort list of Git Credential Manager github.com accounts."""
+    try:
+        result = subprocess.run(
+            ["git", "credential-manager", "github", "list"],
+            creationflags=no_window_flags(),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except Exception:
+        return []
+    if result.returncode != 0:
+        return []
+    accounts: list[str] = []
+    for line in (result.stdout or "").splitlines():
+        for token in line.replace(",", " ").split():
+            if token and token not in {"x-access-token", "github.com"}:
+                accounts.append(token)
+                break
+    unique: list[str] = []
+    for account in accounts:
+        if account not in unique:
+            unique.append(account)
+    return unique
+
+
+async def github_credential_preflight(
+    account: str | None = None,
+    *,
+    git_source: GitCredentialSource | None = None,
+    gcm_accounts: list[str] | None = None,
+    timeout: float = 15.0,
+) -> GithubCredentialPreflight:
+    """Verify the relay can produce a github.com git credential on the host.
+
+    Mirrors the runtime relay order for CodeSpaces: non-interactive Git
+    Credential Manager with the per-connection username when available.
+    """
+    import asyncio
+    import time
+
+    deadline = time.monotonic() + timeout
+    login = (account or "").strip() or None
+    fields = {"protocol": "https", "host": "github.com"}
+    if login:
+        fields["username"] = login
+
+    sources = [git_source or GitCredentialSource(github_username=login)]
+    for source in sources:
+        try:
+            # Bounded and cancellable: a hung helper is killed at the deadline
+            # (the relay's own resolve allows itself longer).
+            response = await asyncio.wait_for(
+                source.resolve("get", dict(fields), timeout=timeout),
+                timeout=max(0.1, deadline - time.monotonic()),
+            )
+        except Exception:
+            log.debug(
+                "github.com credential preflight source %s raised",
+                getattr(source, "name", type(source).__name__),
+                exc_info=True,
+            )
+            response = None
+        if response and "password=" in response and "quit=1" not in response:
+            return GithubCredentialPreflight(
+                ok=True,
+                source=getattr(source, "name", type(source).__name__),
+                account=login,
+            )
+
+    remaining = deadline - time.monotonic()
+    accounts = gcm_accounts if gcm_accounts is not None else (
+        gcm_github_accounts(timeout=remaining) if remaining > 0.5 else []
+    )
+    if not login and len(accounts) > 1:
+        return GithubCredentialPreflight(
+            ok=False,
+            reason_code=GITHUB_CREDENTIAL_AMBIGUOUS,
+            detail=(
+                "github.com has multiple host GCM accounts and this CodeSpace "
+                "has no bound account to pass as username"
+            ),
+            remedy=github_credential_remedy(None, ambiguous=True),
+        )
+
+    return GithubCredentialPreflight(
+        ok=False,
+        reason_code=GITHUB_CREDENTIAL_UNAVAILABLE,
+        detail=(
+            "the host relay could not produce a non-interactive github.com "
+            f"credential for {login}" if login
+            else "the host relay could not produce a non-interactive "
+            "github.com credential from Git Credential Manager"
+        ),
+        remedy=github_credential_remedy(login),
+        account=login,
+    )
+
+
+def run_github_credential_preflight(account: str | None = None) -> GithubCredentialPreflight:
+    import asyncio
+
+    return asyncio.run(github_credential_preflight(account))
+
+
+def run_github_credential_doctor_checks() -> list[GithubCredentialPreflight]:
+    """One relay credential preflight per CodeSpace-serving account.
+
+    Accounts bound to a still-existing CodeSpace, and configured repo accounts,
+    are each checked; the active account is added only when some CodeSpace
+    operation still uses ambient ownership (or when nothing is bound at all).
+    """
+    from . import gh_account
+
+    accounts, uses_ambient = codespace_scope_accounts(live_only=True)
+    targets: list[str | None] = list(accounts)
+    if uses_ambient or not targets:
+        active = gh_account.active_account()
+        if active not in targets:
+            targets.append(active)
+    return [run_github_credential_preflight(account) for account in targets]
+
+
+def emit_github_credential_doctor(result: GithubCredentialPreflight) -> None:
+    if result.ok:
+        who = f" for '{result.account}'" if result.account else ""
+        print(f"[OK] github.com credential relay preflight can produce a credential{who}.")
+        return
+    print("[github-credential] relay credential issue:", file=sys.stderr)
+    print(
+        f"  - {result.reason_code}: {result.detail}\n"
+        f"    Remedy: {result.remedy}",
+        file=sys.stderr,
+    )
 
 
 async def verify_remote_auth(

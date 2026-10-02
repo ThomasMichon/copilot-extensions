@@ -99,6 +99,43 @@ class TestInteractiveSshReverseForwardsAndRemoteCommand:
         assert "-t" in argv
         assert argv.index("-t") > argv.index("--")
 
+    def test_remote_command_carries_the_relay_github_account(self) -> None:
+        """ssh drops local LC_* vars, so the attached path must export the
+        selected account inside the remote command itself (never the token)."""
+        with (
+            patch("agent_codespaces.lifecycle.account_for_codespace", return_value=None),
+            patch(
+                "agent_codespaces.gh_account.credential_account_for_codespace",
+                return_value="octo-user",
+            ),
+            patch("subprocess.call", return_value=0) as call,
+        ):
+            _interactive_ssh(
+                "cs-example", [], relay_port=9857, relay_token="secret-tok",
+                remote_command="agent-worktrees copilot --anchor",
+            )
+        argv = call.call_args.args[0]
+        assert argv[-1] == (
+            "export LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT=octo-user; "
+            "agent-worktrees copilot --anchor"
+        )
+        assert not any("secret-tok" in a for a in argv)
+        assert call.call_args.kwargs["env"]["LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT"] == "octo-user"
+
+    def test_remote_command_unchanged_without_relay_account(self) -> None:
+        with (
+            patch("agent_codespaces.lifecycle.account_for_codespace", return_value=None),
+            patch(
+                "agent_codespaces.gh_account.credential_account_for_codespace",
+                return_value=None,
+            ),
+            patch("subprocess.call", return_value=0) as call,
+        ):
+            _interactive_ssh(
+                "cs-example", [], relay_port=9857, remote_command="echo hi",
+            )
+        assert call.call_args.args[0][-1] == "echo hi"
+
     def test_no_forwards_or_command_keeps_prior_bare_argv(self) -> None:
         """Existing behavior for a plain interactive connect is unchanged."""
         with (
@@ -173,6 +210,11 @@ def _no_target_lock_enforcement(request, monkeypatch):
     own dedicated coverage (`TestCmdCopilotTargetLockEnforcement`), so it's
     faked out everywhere else unless a test explicitly re-patches it."""
     _FakeTargetLock.instances.clear()
+    monkeypatch.setattr(
+        copilot_venue,
+        "github_credential_preflight",
+        lambda name: argparse.Namespace(ok=True),
+    )
     if request.cls is not None and request.cls.__name__ == "TestCmdCopilotTargetLockEnforcement":
         return
     import ssh_manager
@@ -273,6 +315,33 @@ class TestCmdCopilotAnchorDefault:
 
         assert rc == 0
         assert seen == {"identity": "wt-A", "anchor": False}
+
+    def test_attached_mode_uses_default_ttl_when_flag_is_omitted(
+        self, store, monkeypatch,
+    ) -> None:
+        monkeypatch.setattr(owner, "ensure_owner_running", lambda config: True)
+        monkeypatch.setattr(config_mod, "load_merged_config", lambda: object())
+        monkeypatch.setattr("venue_copilot.resolve_daemon_port", lambda: None)
+        monkeypatch.setattr(
+            "agent_codespaces.relay_launch.effective_relay_port", lambda config: 9857,
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.relay_token.token_for", lambda name, **kw: "tok-1",
+        )
+        seen = {}
+
+        def fake_run_venue_copilot(worktree_id, *, connect, ttl_seconds, **kwargs):
+            seen["ttl_seconds"] = ttl_seconds
+            return 0
+
+        monkeypatch.setattr("venue_copilot.run_venue_copilot", fake_run_venue_copilot)
+
+        rc = copilot_venue.cmd_copilot(
+            _ns(ttl_seconds=None), interactive_ssh=lambda *a, **kw: 0,
+        )
+
+        assert rc == 0
+        assert seen == {"ttl_seconds": 300.0}
 
     def test_places_and_releases_owner_hold_around_a_successful_run(
         self, store, monkeypatch,

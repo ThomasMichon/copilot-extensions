@@ -420,6 +420,21 @@ class CodespaceResolver:
                 ) from None
             raise RuntimeError(f"Codespace '{name}' not found") from None
         if cs.state in ("Available", "Shutdown"):
+            if getattr(cs, "account", ""):
+                from . import account_binding
+
+                # The binding is how a later relay-launch-env process learns
+                # which account to ask GCM for; losing it silently would fall
+                # back to the ambient account.
+                try:
+                    account_binding.bind(cs.name, cs.account, cs.repository)
+                except Exception as exc:
+                    if account_binding.bound_account(cs.name) != cs.account:
+                        raise RuntimeError(
+                            f"Codespace '{cs.name}' is reachable, but its gh account "
+                            f"'{cs.account}' couldn't be recorded for the credential "
+                            f"relay: {exc}"
+                        ) from exc
             return
         raise RuntimeError(
             f"Codespace '{cs.name}' is '{cs.state}' (not in a connectable state)."

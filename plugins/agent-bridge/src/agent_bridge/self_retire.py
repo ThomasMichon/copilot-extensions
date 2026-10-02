@@ -25,7 +25,8 @@ from single_instance_lease import is_superseded as _lib_is_superseded
 from zdd import routing
 
 __all__ = [
-    "_is_listening", "initial_self_retire_status", "is_superseded",
+    "_is_listening", "initial_self_retire_status", "is_replaced_by_forward",
+    "is_superseded", "retire_check",
     "slot_descriptor",
 ]
 
@@ -47,9 +48,54 @@ def is_superseded(
     caller (the daemon's guarded loop treats a raised check as "stay alive").
     """
     table = read_table(config_dir)
+    if _replaced_by_forward(table, is_listening):
+        return True
     return _lib_is_superseded(
         table, my_pid, my_generation, is_listening=is_listening
     )
+
+
+def retire_check(config_dir, my_pid: int, my_generation: int, count_active) -> tuple[bool, bool, str]:
+    """``(superseded, ready_to_retire, why)`` for one self-retire poll.
+
+    A route an explicit live forward replaced retires at once: the daemon's
+    only registrations are the ones it took from the host, so waiting for them
+    to go idle would never end. A newer generation waits for idle
+    (``count_active()`` -- only called when superseded -- reaching 0)."""
+    if is_replaced_by_forward(config_dir):
+        return True, True, "Route replaced by a live forward (not waiting for idle registrations)"
+    if not is_superseded(config_dir, my_pid, my_generation):
+        return False, False, ""
+    return True, count_active() == 0, "Superseded by a live newer generation and idle"
+
+
+def is_replaced_by_forward(
+    config_dir,
+    *,
+    read_table=routing.read_table,
+    is_listening=_is_listening,
+) -> bool:
+    """Has a live explicit forwarded host bridge replaced this daemon's route?"""
+    return _replaced_by_forward(read_table(config_dir), is_listening)
+
+
+def _replaced_by_forward(table, is_listening) -> bool:
+    """A venue launcher re-pointed the route at the host bridge's live forward.
+
+    Only an explicit ``"forwarded": true`` entry with no ``pid`` counts (no
+    daemon publishes one), and only while the forward accepts connections.
+    """
+    active = table.get("active") if isinstance(table, dict) else None
+    if not isinstance(active, dict) or active.get("forwarded") is not True:
+        return False
+    if active.get("pid") is not None:
+        return False
+    try:
+        port = int(active.get("port") or 0)
+    except (TypeError, ValueError):
+        return False
+    bind = active.get("bind") or "127.0.0.1"
+    return port > 0 and isinstance(bind, str) and bool(is_listening(bind, port))
 
 
 _DEFAULT_SELF_RETIRE_STATUS = {

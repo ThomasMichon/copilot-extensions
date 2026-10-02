@@ -12,7 +12,7 @@ test suite during this effort's originating low-risk spike (see this
 effort's own 2026-10-01 Journal entry).
 
 The resulting baseline is deliberately pure JSON (`BASELINE_SCHEMA_VERSION`):
-no live `coverage.py` database is carried past collection, so `select` and
+no live `coverage.py` database is carried past collection, so `selection` and
 `fallback` stay pure-stdlib and have nothing upstream to go stale against
 except the baseline file itself.
 

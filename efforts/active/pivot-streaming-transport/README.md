@@ -249,10 +249,21 @@ is closest to a manifest-only change. Depends on Phase 0 — now unblocked.)_
       `stream: true` auto-fallback (`tasks.py`), also unchanged.
 
 ### Phase 2 — Same for agent-bridge's pivot
-- [ ] Same shape as Phase 1 against `agent-bridge --json agents` / agent-bridge's
-      own SSE delivery loop.
-- [ ] Flip `plugins/agent-bridge/pivots/agent-bridge.json`.
-- [ ] Verify live.
+- [x] Same shape as Phase 1 against `agent-bridge --json agents`. **Done**:
+      added `--stream`/`--subscribe`/`--interval` to the `agents` subcommand
+      (`inventory_cli.py`) — same periodic in-process re-scan shape as
+      Phase 1 (re-fetches `/api/v1/agents`; does **not** consume
+      agent-bridge's own SSE delivery loop — that remains Phase 3's job, the
+      daemon-relay fast path), keyed by agent `name` (the manifest's
+      `entry.id`). A topology-profile error on the initial fetch surfaces as
+      a stream `error` frame rather than being silently dropped (the plain
+      path's `_report_topology_errors` exit-2 doesn't fit the NDJSON
+      envelope contract).
+- [x] Flip `plugins/agent-bridge/pivots/agent-bridge.json`. **Done**:
+      `"stream": true, "subscribe": true`.
+- [x] Verify live. **Done**: ran the patched `agent-bridge --json agents
+      --stream` directly against this machine's live bridge daemon (21 real
+      agents) — full `begin`/21×`row`/`done` envelope.
 
 ### Phase 3 — CLI-relayed daemon fast path (the new capability, revised)
 _(Revised per Copilot review on #4764: the original shape — the Picker
@@ -549,3 +560,211 @@ because agent-dispatch is the *first* real `subscribe: true` adopter:
    (`CONTRIBUTING.md`'s "Contributing a change: add a changefile"); replaced
    the single `agent-dispatch`-only `dev` changefile with one covering both
    touched plugins (`agent-dispatch`, `worktree-manager`) at `patch`.
+
+### 2026-10-01 — Phase 2 landed: agent-bridge's pivot adopts stream/subscribe
+Implemented in `plugins/agent-bridge/src/agent_bridge/inventory_cli.py`, same
+shape as Phase 1, now additionally guarding against the two consumer-contract
+invariants Phase 1's review corrected in `worktree-manager`'s `tasks.py`
+(an explicit `--subscribe` argv flag, and publishing an empty board on
+`done`) — both already baked into this phase's design from the start:
+- Added `--stream`/`--subscribe`/`--interval` to the `agents` subcommand. The
+  existing plain `_cmd_agents` print path is untouched (the new stream path
+  is a dispatch at the top of `_cmd_agents`, calling a standalone
+  `_fetch_agent_rows()` that duplicates only the fetch+project-filter
+  selection logic, not the printing).
+- `_run_agents_stream()` emits `begin`/`row`/`done`, then with `--subscribe`
+  holds the channel open on a periodic re-scan (default 45s — see the
+  corrected cadence below), diffing
+  (`_diff_agent_rows()`, keyed by agent `name` — the manifest's `entry.id`)
+  into `delta`/`removed` frames. A topology-profile error on the initial
+  fetch raises `RuntimeError` from `_fetch_agent_rows()` and is framed as a
+  stream `error` (exit 1) rather than the plain path's
+  `_report_topology_errors` exit-2 convention, which doesn't fit the NDJSON
+  envelope contract.
+- Flipped `plugins/agent-bridge/pivots/agent-bridge.json` to
+  `"stream": true, "subscribe": true` — validated against
+  `worktree-manager`'s `test_real_checkout_manifests_match_contract`.
+- Added tests (`tests/test_inventory_streaming.py`): envelope framing,
+  one-shot behavior, the initial-fetch-failure `error` frame (including the
+  topology-error case specifically), delta/removed diffing, transient
+  re-scan-failure resilience, `_diff_agent_rows` itself, and the
+  `_cmd_agents` stream/non-stream dispatch — `test_project_override.py`
+  (22 passed, unaffected) + `test_client_routing.py` (unaffected) +
+  `test_inventory_streaming.py` all green (final count below, after the
+  round-2/round-3 review fixes grew the file further).
+- Live-verified against this machine's own running bridge daemon (21 real
+  registered agents): `agent-bridge --json agents --stream` produced the
+  full `begin`/21×`row`/`done` envelope.
+- README documented (new "Worktree-picker 'Bridges' pivot" section, no prior
+  pivot-doc section existed for this plugin).
+
+`AgentResolver.list_agents_async()` (`agent_registry_resolver.py`)
+deliberately drops any namespace resolver (e.g. `codespace:`, `container:`)
+that times out or raises, logging a warning but returning a roster that's
+silently partial -- an architectural property of that method, not something
+this phase introduced. The plain `agents` JSON path never diffs against a
+prior snapshot, so a transient partial roster there is low-impact and
+self-heals on the next poll; but `--subscribe`'s diffing is exactly the kind
+of consumer that CAN'T tolerate it: comparing an incomplete roster against a
+complete prior one reads every agent in the transiently-unavailable
+namespace as `removed`, making the open pivot flicker valid entries in and
+out on every resolver hiccup. Closing that gap requires the daemon to tell a
+diffing client which namespace(s) (if any) were incomplete on a given call,
+and for a daemon too old to say so at all to never be trusted as "complete"
+by omission -- an old daemon silently dropping agents is indistinguishable
+from a well-behaved empty response unless its own response can be told
+apart from one that genuinely declares nothing incomplete.
+**Fixed** in three layers:
+1. `AgentResolver` tracks which prefixes were incomplete on the *most
+   recent* `list_agents_async()` call (`incomplete_namespaces` property,
+   reset every call so it never latches a stale failure), surfaced through
+   `GET /api/v1/agents`'s `incomplete_namespaces` response field.
+2. `BridgeClient.list_agents_with_incomplete()` (additive --
+   `list_agents_with_diagnostics()`'s 2-tuple contract is untouched for
+   every other caller) detects whether the DAEMON IT JUST TALKED TO
+   advertises this capability at all by checking the response dict for
+   *key presence*, not merely reading the field with a default: an older
+   daemon's route handler omits `incomplete_namespaces` from the JSON body
+   entirely (it's a tolerant-reader dict response, not a schema-enforced
+   one), so `"incomplete_namespaces" in resp` is itself the exact, reliable
+   capability signal for THIS specific response -- no protocol-version
+   negotiation infrastructure needed at all. `capability_known=False`
+   degrades the caller to "cannot confirm any namespaced removal", never
+   trusting an absent field as proof the scan was complete.
+3. `_run_agents_stream()`'s subscribe loop suppresses `removed` for any id
+   whose namespace prefix is named in that tick's `incomplete_namespaces`
+   (capability-aware daemon) -- or, against a daemon that doesn't advertise
+   the capability at all, suppresses every namespaced (`prefix:name`)
+   removal outright, since none can be confirmed. A suppressed id's
+   last-known row is carried forward in the tracking snapshot, so neither
+   this tick nor a later comparison treats a transient gap as removal; only
+   an actually-complete scan reports an agent gone. The INITIAL scan (first
+   launch, or any Phase 0 reconnect after a dropped channel) has no prior
+   snapshot for that suppression logic to fall back on -- publishing an
+   incomplete initial roster as authoritative would make the Picker replace
+   its whole cache with the smaller set, silently dropping the missing
+   namespaced agents with no `removed` frame at all. `_fetch_complete_
+   initial_rows()` retries the initial fetch (bounded,
+   `INITIAL_SCAN_MAX_RETRIES` attempts) past a detected incomplete
+   namespace before that first publish; a capability-unknown daemon isn't
+   retried (there is no signal retrying could ever resolve), and an
+   initial scan that stays incomplete across every retry still publishes
+   eventually -- bounded means bounded, not blocked forever.
+
+Regression tests at all four touched layers: `test_agent_registry.py`
+(`incomplete_namespaces` reported then reset on a subsequent clean scan,
+157 passed), `test_client_routing.py` (key-presence detection for both the
+reporting and capability-unknown cases, plus the "key present but empty"
+case and defaulting safely against an older daemon's response, 15 passed),
+`test_routes.py::TestAgentRoutes` (the field actually serializes through
+the live route, not just the resolver unit, 6 passed), and
+`test_inventory_streaming.py` (subscribe-loop removal suppression for both
+the capability-aware and capability-unknown cases, plus the initial-scan
+bounded-retry behavior across all three shapes -- resolves, exhausts, and
+never-retries-when-capability-unknown -- 15 passed).
+
+First attempt at the capability-detection mechanism bumped
+`HTTP_PROTOCOL_VERSION` to a new generation and re-attested agent-bridge's
+contract-registry fixtures to match -- caught on review as fabricating
+false provenance: the referenced historical commit's actual `protocol.py`
+still declared the OLD generation, so claiming it as the source of NEW
+generation constants made the fixture's own `captured_from` block
+internally false regardless of which generation number sat next to it.
+Replaced with the simpler key-presence check above, which needs no
+protocol-version machinery and no contract-registry fixture work at all.
+
+**`client.py` module-size baseline widening, explicitly reconciled** (caught
+on review as contradicting this entry's own prior "reverted" claim, which
+was wrong -- only the *protocol-version-specific* widening reverted; the
+two new `BridgeClient` methods themselves are a real, if smaller, net
+addition that still needs one). The new capability genuinely needs
+`list_agents_with_incomplete()` (the real GET + key-presence check) plus a
+one-line `list_agents_with_diagnostics()` delegation to it -- net +14 lines
+over `origin/dev` after trimming both to single-line signatures and
+one-line docstrings; there's no further meaningful extraction (it's already
+the smallest honest expression of "fetch once, derive the 2-tuple view
+from the 4-tuple one"). Widened `tools/module-size-baseline.json`'s entry
+from 1686 to 1700 (the file's exact resulting line count) -- a deliberate,
+reviewed exception per `CONTRIBUTING.md`'s "manual, reviewed edit" escape
+hatch for the shrink-only baseline, not a silent/automated ratchet.
+
+**`--subscribe`'s default interval, corrected** (a real perf finding):
+copied agent-dispatch's 2s default verbatim without accounting for the
+fact that `GET /api/v1/agents` is not a cheap single coordinator call --
+`AgentResolver.list_agents_async()` invokes every registered namespace
+resolver concurrently, and CodeSpaces enumeration alone is documented at
+4-10s (`docs/architecture.md`), backed by only a 12s per-resolver cache
+(`AGENT_BRIDGE_NAMESPACE_LIST_TTL`). A 2s poll would trigger that scan far
+more often than the Picker's prior one-shot repoll cadence (45s,
+`engine_runtime.py`'s `POLL_SECS`) ever did. Changed `DEFAULT_SUBSCRIBE_
+INTERVAL` to 45.0 -- matching the existing cadence it replaces, rather than
+copying a sibling plugin's cadence for a cheaper call shape.
+
+**Review round 5 -- revisited (and declined) the protocol-version bump,
+fixed stale "2 seconds" docs.** Most of round 5's 14 findings were stale
+re-listings of round-2/3 findings already resolved in the diff (e.g. the
+fixture-provenance concerns no longer apply once the whole protocol-bump
+attempt was reverted). Two genuinely new items:
+
+- `routes/agents.py:25` asked to bump `HTTP_PROTOCOL_VERSION` for the new
+  `incomplete_namespaces` response field, per `protocol.py`'s own
+  documented convention. Declined, with a reply comment on the review
+  thread giving the concrete justification: `protocol.py`'s own rule
+  explicitly carves out "additive, tolerant-reader changes (a new optional
+  field an old client simply ignores)" as **not** requiring a bump --
+  `BridgeClient.list_agents_with_incomplete()` already detects support via
+  response dict **key presence**, not protocol negotiation, which is
+  exactly that carved-out case and needs no version number to be correct
+  against an old daemon. Separately (and this would block the bump even if
+  it were wanted): re-verified empirically that `tools/check-agent-bridge-
+  contracts.py` requires every fixture's `captured_from.commit` to resolve
+  to a real, already-existing git commit whose historical source blob
+  matches the claimed generation -- no such commit can exist for a
+  generation this PR itself introduces, since its own commits get
+  squash-merged into an unpredictable hash. Confirmed locally that bumping
+  the constant alone (fixtures left at generation 19) fails 4
+  `test_contract_registry.py` tests, and that the `agent-bridge` CI job
+  (full `pytest -q`, not `-m guard`-filtered) is a real, currently-passing
+  required check on this PR -- this is not merely a local pre-push nicety.
+  This reconfirms round 3's own "keep semantic, attest in follow-up"
+  finding rather than contradicting it: no protocol.py change at all is
+  needed in this PR, so there is nothing left to attest in a follow-up.
+- Fixed the two remaining stale "2 seconds" references round 5 flagged:
+  `plugins/agent-bridge/README.md:50` ("every two seconds" -> "every 45
+  seconds") and this file's own streaming-architecture note above (now
+  describes the 45s default instead of the superseded 2s one).
+
+**Review round 6 -- genuine bug: real CLI-backed namespace providers
+swallow failures that `incomplete_namespaces` was supposed to catch.**
+`AgentResolver.list_agents_async()`'s `incomplete_namespaces` tracking
+(round 2's fix) only records an exception that escapes a namespace
+resolver's `list()` call. The production manifest-backed providers are
+`CliNamespaceResolver`s (`agent_registry_namespace.py`) with no in-process
+fallback, and its `list()` converted a missing binstub, a non-zero exit,
+an execution error/timeout, or malformed JSON output into the *same*
+successful empty list -- so a genuine provider failure never escaped as
+an exception at all, leaving `incomplete_namespaces` empty and letting
+`--subscribe` emit a false `removed` frame for every agent in that
+namespace: exactly the bug the field exists to prevent.
+
+Fixed by splitting the two cases `CliNamespaceResolver.list()` was
+conflating: a missing binstub (the provider genuinely isn't installed on
+this machine -- a legitimate "contributes nothing" absence, checked via
+`shutil.which` on the resolved executable, the explicit `command` vector
+included) still degrades to `[]` with no fallback; anything after that --
+non-zero exit, an execution failure/timeout (`_run` returning `None`
+despite a found executable), or unparseable output -- now raises a new
+`NamespaceListIncomplete` (defined alongside the resolver) when there's no
+fallback to cover it, so it reaches `list_agents_async()`'s existing
+generic exception handling exactly like the test-double failure round 2
+already covered. A resolver *with* a fallback is unaffected -- the
+fallback still absorbs the failure as before. Deliberately left `_run()`
+itself untouched: it's shared by `resolve()`/`ensure_ready()`/
+`target_repo()`, whose own fallback-or-raise handling already treats a
+`None` return correctly, and widening its contract would have changed
+behavior for those unrelated call sites for no benefit here. Added 4 new
+`CliNamespaceResolver`-level tests (timeout, non-zero exit, unparseable
+output each raising with no fallback; the same non-zero-exit case still
+degrading gracefully through a fallback) plus one `AgentResolver`-level
+integration test using a real `CliNamespaceResolver` (not a test double)
+to close the loop the reviewer specifically asked for.

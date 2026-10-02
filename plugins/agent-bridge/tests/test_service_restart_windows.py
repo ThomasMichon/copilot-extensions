@@ -80,6 +80,16 @@ def test_service_start_falls_back_when_task_start_leaves_daemon_down(monkeypatch
     monkeypatch.setattr(m, "_service_port", lambda: 12345)
     monkeypatch.setattr(m, "_active_endpoint", lambda: None)
     monkeypatch.setattr(m, "_read_pid_file", lambda: None)
+    # `_service_start` also probes `_reconcile_live_dynamic_daemon` first, and
+    # `_wait_for_service_start` (reached on the fallback path this test
+    # exercises) separately probes `_service_process_is_live`; both fall
+    # through to `_pid_from_lock` -> the real `_pid_is_agent_bridge` ->
+    # `_powershell_host` -> `shutil.which`, which crashes on a non-Windows CI
+    # runner once `sys.platform` is faked to "win32" above (`_winapi` is a
+    # genuinely Windows-only stdlib module, unavailable here). This test isn't
+    # about either of those probes -- mock them off like the other probes above.
+    monkeypatch.setattr(m, "_reconcile_live_dynamic_daemon", lambda: False)
+    monkeypatch.setattr(m, "_pid_is_agent_bridge", lambda pid, _timeout=15: False)
     # The task-run schtasks call is a no-op that changes nothing.
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Completed(0))
 
@@ -106,6 +116,9 @@ def test_service_start_no_double_spawn_on_direct_path(monkeypatch):
     monkeypatch.setattr(m, "_service_port", lambda: 12345)
     monkeypatch.setattr(m, "_active_endpoint", lambda: None)
     monkeypatch.setattr(m, "_read_pid_file", lambda: None)
+    # See the matching comment in
+    # test_service_start_falls_back_when_task_start_leaves_daemon_down above.
+    monkeypatch.setattr(m, "_reconcile_live_dynamic_daemon", lambda: False)
 
     calls = {"n": 0}
 

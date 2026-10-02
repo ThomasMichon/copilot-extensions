@@ -60,6 +60,10 @@ _PROCESS_ROUTING_LOCK = threading.RLock()
 _PROBE_TIMEOUT_S = 0.25
 
 
+class ActivePublicationRefused(RuntimeError):
+    """Raised when a guarded route publication refuses the current active row."""
+
+
 def format_authority(host: str, port: int) -> str:
     """Format a ``host:port`` authority for a URL, bracketing IPv6 hosts.
 
@@ -312,6 +316,39 @@ def _publish_active_unlocked(
     return new_active, demoted
 
 
+def _same_endpoint(left: Endpoint | None, right: Endpoint | None) -> bool:
+    if left is None or right is None:
+        return left is right
+    return (
+        left.bind == right.bind
+        and left.port == right.port
+        and left.pid == right.pid
+        and left.version == right.version
+        and left.generation == right.generation
+    )
+
+
+def _refuse_or_changed(
+    current_raw: dict | None,
+    *,
+    expected_active: Endpoint | None,
+    refuse_current: Callable[[dict | None], str | None] | None,
+    require_expected_active: bool,
+) -> str | None:
+    if refuse_current is not None:
+        refusal = refuse_current(current_raw)
+        if refusal:
+            return refusal
+    if not require_expected_active:
+        return None
+    current = Endpoint.from_dict(current_raw) if isinstance(current_raw, dict) else None
+    if _same_endpoint(current, expected_active):
+        return None
+    if expected_active is None:
+        return "active endpoint appeared before publication"
+    return "active endpoint changed before publication"
+
+
 def publish_active(
     config_dir: str | os.PathLike[str],
     *,
@@ -359,6 +396,50 @@ def publish_active_with_previous(
     observing a different generation after a concurrent publication.
     """
     with _routing_lock(config_dir):
+        return _publish_active_unlocked(
+            config_dir,
+            bind=bind,
+            port=port,
+            pid=pid,
+            version=version,
+            generation=generation,
+            demote_existing=demote_existing,
+        )
+
+
+def publish_active_with_previous_guarded(
+    config_dir: str | os.PathLike[str],
+    *,
+    bind: str,
+    port: int,
+    pid: int | None = None,
+    version: str | None = None,
+    generation: int | None = None,
+    demote_existing: bool = False,
+    expected_active: Endpoint | None = None,
+    refuse_current: Callable[[dict | None], str | None] | None = None,
+    require_expected_active: bool = True,
+) -> tuple[Endpoint, Endpoint | None]:
+    """Publish active while validating the current active row under the lock.
+
+    This is the CAS-shaped form used by cutover: after a passive daemon becomes
+    healthy, a venue forward may have rejoined and rewritten ``active.json``.
+    Re-read and validate that row under the same routing lock that writes the
+    replacement, so a caller never flips over a newly-published route.
+    """
+    with _routing_lock(config_dir):
+        current = read_table(config_dir) or {}
+        current_raw = current.get("active") if isinstance(current, dict) else None
+        if not isinstance(current_raw, dict):
+            current_raw = None
+        refusal = _refuse_or_changed(
+            current_raw,
+            expected_active=expected_active,
+            refuse_current=refuse_current,
+            require_expected_active=require_expected_active,
+        )
+        if refusal:
+            raise ActivePublicationRefused(refusal)
         return _publish_active_unlocked(
             config_dir,
             bind=bind,

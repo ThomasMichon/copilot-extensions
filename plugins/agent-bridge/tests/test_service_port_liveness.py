@@ -122,3 +122,15 @@ def test_is_running_probes_the_dynamic_port(monkeypatch, tmp_path):
     monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
     assert m._service_is_running() is True
     assert "61234" in probed["url"]
+
+
+def test_forwarded_port_comes_from_one_route_snapshot(monkeypatch, tmp_path):
+    """Classifying a forwarded route and reading its port use one read: a
+    concurrent replacement between two reads can't yield a missing row."""
+    from agent_bridge import service_process_state as sps
+
+    monkeypatch.setattr(m, "_INSTALL_DIR", str(tmp_path))
+    monkeypatch.setattr(sps, "_active_endpoint", lambda: None)
+    routes = iter([{"port": 41000, "forwarded": True}, None])
+    monkeypatch.setattr(sps, "_active_route", lambda: next(routes))
+    assert sps._active_endpoint_port() == 41000

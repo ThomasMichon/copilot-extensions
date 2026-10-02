@@ -1,6 +1,6 @@
 """projection-reflect: deterministic-sync decision layer.
 
-Phase 2 of ``efforts/active/ambient-guidance-navigability``: a generic
+Phase 2 of ``efforts/2026/10/02 ambient-guidance-navigability``: a generic
 sync-automation recipe modeled on the facility's own proven ``config-reflect``
 system (reflect/reconcile split, fail-closed producer, narrow bypass, domain-
 deduped conflict dispatch, non-self-merging reconciler).
@@ -61,7 +61,7 @@ can populate such a map for some or all sources, a caller passes it and
 :func:`bypass_decision` will require a pin for every changed source before
 allowing bypass, closing the remaining half of this gap without a schema
 migration. Building that resolver remains a follow-up slice of
-``efforts/active/ambient-guidance-navigability`` (see its Journal).
+``efforts/2026/10/02 ambient-guidance-navigability`` (see its Journal).
 """
 
 from __future__ import annotations

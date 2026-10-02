@@ -58,8 +58,9 @@ def add_copilot_subparser(sub) -> None:
         "--seed", help="Forwarded to the remote `agent-worktrees copilot --seed`",
     )
     copilot_parser.add_argument(
-        "--ttl-seconds", type=float, default=300.0,
-        help="CLI-mode reservation lifetime before it's reclaimable (default 300)",
+        "--ttl-seconds", type=float, default=None,
+        help="Attached-mode CLI reservation lifetime before it's reclaimable "
+             "(default 300). Not valid with --detach or --stop.",
     )
     copilot_parser.add_argument(
         "--no-ensure-mux", dest="ensure_mux", action="store_false", default=True,
@@ -145,8 +146,9 @@ def add_copilot_subparser(sub) -> None:
         help="With --detach: keep this host's 127.0.0.1:PORT forwarded to the "
              "CodeSpace's 127.0.0.1:VENUE_PORT (default: the same port) for the "
              "session's life, e.g. a worker's dev server that a host browser "
-             "loads. The forward may exist before the server starts. Repeatable; "
-             "a rejoin without it keeps the session's existing forwards.",
+             "loads. Use 0:VENUE_PORT to opt into an Owner-assigned host port "
+             "(reported in JSON). The forward may exist before the server starts. "
+             "Repeatable; a rejoin without it keeps the session's existing forwards.",
     )
     copilot_parser.add_argument(
         "--copilot-arg", dest="copilot_args", action="append", default=[],
@@ -342,6 +344,17 @@ def claim_or_exit_code(args: argparse.Namespace) -> int | None:
     return None
 
 
+def github_credential_preflight(name: str):
+    """Run the host github.com credential relay preflight for ``name``."""
+    import asyncio
+
+    from . import auth_preflight
+    from .gh_account import credential_account_for_codespace
+
+    account = credential_account_for_codespace(name)
+    return asyncio.run(auth_preflight.github_credential_preflight(account))
+
+
 def cmd_copilot(
     args: argparse.Namespace,
     *,
@@ -410,6 +423,12 @@ def cmd_copilot(
         if getattr(args, dest, None) and not getattr(args, "detach", False):
             print(f"[FAIL] {flag} requires --detach", file=sys.stderr)
             return 2
+    if getattr(args, "ttl_seconds", None) is not None and (
+        getattr(args, "detach", False) or getattr(args, "stop", False)
+    ):
+        print("[FAIL] --ttl-seconds applies only to attached mode; omit it with --detach/--stop",
+              file=sys.stderr)
+        return 2
     if getattr(args, "keep_claim", False) and not getattr(args, "stop", False):
         print("[FAIL] --keep-claim requires --stop", file=sys.stderr)
         return 2
@@ -458,6 +477,12 @@ def _cmd_copilot_connect(
     except (OSError, ValueError) as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)
         return 2
+
+    if not args.no_relay:
+        github_auth = github_credential_preflight(args.name)
+        if not github_auth.ok:
+            print(f"[WARN] {github_auth.reason_code}: {github_auth.detail}\n"
+                  f"       Remedy: {github_auth.remedy}", file=sys.stderr)
 
     _ensure_agent_bridge_plugin(args.name)
 
@@ -523,7 +548,7 @@ def _cmd_copilot_connect(
             identity,
             connect=connect,
             anchor=anchor_mode,
-            ttl_seconds=args.ttl_seconds,
+            ttl_seconds=args.ttl_seconds if args.ttl_seconds is not None else 300.0,
             driver=args.driver or _DEFAULT_DRIVER,
             seed=seed,
             ensure_mux=args.ensure_mux,

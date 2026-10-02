@@ -226,32 +226,21 @@ class BridgeClient(CliModeClientMixin, WorktreeRestartMixin):
         elif bind == "::":
             bind = "::1"
 
-        # The static config port is the *fallback*. Prefer the routing table
-        # (active.json) so a zero-downtime redeploy that flipped to a new port
-        # transparently reroutes this client -- without it the CLI would dial a
-        # retired daemon mid-cutover. The table is consulted unless explicitly
-        # overridden; absence falls back to the config port (backward compatible).
         base_url = f"http://{bind}:{port}"
         explicit = os.environ.get("AGENT_BRIDGE_BASE_URL")
-        # A live re-resolver follows a dynamic-port cutover on a connection
-        # rejection. Enabled only on the routing-table discovery path --
-        # an explicit URL or a disabled routing table pins the endpoint, so
-        # re-resolution stays off there (the operator dialed a specific daemon).
         reresolve: "Callable[[], str | None] | None" = None
         if explicit:
-            # Highest priority: the deploy orchestrator dials a *specific*
-            # daemon (old or passive) by URL, bypassing the table entirely.
             base_url = explicit.rstrip("/")
         elif os.environ.get("AGENT_BRIDGE_NO_ROUTING_TABLE") not in ("1", "true"):
             def _reresolve_from_table() -> str | None:
-                """The current listener-verified active endpoint, or None.
-
-                ``verify_listener=True`` skips an advertised-but-dead port
-                (healing active->previous), so a stale entry pointing at a
-                retired daemon is never handed back as 'live'."""
+                """Current listener-verified active endpoint, including forwards."""
                 try:
+                    from .routing_state import forwarded_route_base_url
                     from zdd.routing import read_active_endpoint
 
+                    forwarded = forwarded_route_base_url(config_dir())
+                    if forwarded is not None:
+                        return forwarded
                     ep = read_active_endpoint(config_dir(), verify_listener=True)
                 except Exception:
                     return None
@@ -259,11 +248,16 @@ class BridgeClient(CliModeClientMixin, WorktreeRestartMixin):
 
             reresolve = _reresolve_from_table
             try:
+                from .routing_state import forwarded_route_base_url
                 from zdd.routing import read_active_endpoint
 
-                ep = read_active_endpoint(config_dir())
-                if ep is not None:
-                    base_url = ep.base_url
+                forwarded = forwarded_route_base_url(config_dir())
+                if forwarded is not None:
+                    base_url = forwarded
+                else:
+                    ep = read_active_endpoint(config_dir())
+                    if ep is not None:
+                        base_url = ep.base_url
             except Exception:
                 # The routing table is an optimization, never a hard dependency.
                 pass
@@ -625,15 +619,29 @@ class BridgeClient(CliModeClientMixin, WorktreeRestartMixin):
         agents, _errors = self.list_agents_with_diagnostics()
         return agents
 
-    def list_agents_with_diagnostics(
-        self,
-    ) -> tuple[list[dict[str, Any]], list[str]]:
+    def list_agents_with_diagnostics(self) -> tuple[list[dict[str, Any]], list[str]]:
         """GET /api/v1/agents, including invalid-topology diagnostics."""
+        agents, errors, _incomplete, _known = self.list_agents_with_incomplete()
+        return agents, errors
+
+    def list_agents_with_incomplete(
+        self,
+    ) -> tuple[list[dict[str, Any]], list[str], list[str], bool]:
+        """GET /api/v1/agents incl. topology errors, namespaces incomplete
+        this call, and whether the response carries the key at all (an
+        older daemon omits it entirely rather than sending an empty list --
+        key *presence* is the capability signal, no protocol negotiation
+        needed)."""
         resp = self._request("GET", "/api/v1/agents")
         if not resp:
-            return [], []
+            return [], [], [], False
+        capability_known = "incomplete_namespaces" in resp
         errors = [str(e) for e in resp.get("topology_errors", [])]
-        return resp.get("agents", []), errors
+        incomplete = (
+            [str(p) for p in resp.get("incomplete_namespaces", [])]
+            if capability_known else []
+        )
+        return resp.get("agents", []), errors, incomplete, capability_known
 
     def get_agent(
         self, name: str, *, include_unaddressable: bool = False

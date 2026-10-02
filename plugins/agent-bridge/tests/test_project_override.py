@@ -133,6 +133,16 @@ def test_agents_parser_accepts_all_projects():
     assert args.all_projects is True
 
 
+def test_agents_parser_default_subscribe_interval_matches_picker_cadence():
+    """--interval must default to the Picker's prior one-shot repoll cadence
+    (45s, engine_runtime.py's POLL_SECS) -- /api/v1/agents invokes every
+    namespace resolver and is not a cheap coordinator call like
+    agent-dispatch's board, so copying that plugin's 2s default would
+    trigger expensive provider scans far more often than before."""
+    args = m.build_parser().parse_args(["agents"])
+    assert args.interval == 45.0
+
+
 def test_explicit_project_conflicts_with_all_projects(monkeypatch, capsys):
     m._set_project_override("project-a")
     m._PROJECT_ROUTED = False

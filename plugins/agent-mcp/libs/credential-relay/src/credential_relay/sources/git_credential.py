@@ -10,12 +10,14 @@ GCM roundtrips.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 
 log = logging.getLogger("agent-codespaces.relay.git-credential")
 
@@ -46,6 +48,12 @@ _NONINTERACTIVE_ENV = {
     "GCM_GUI_PROMPT": "false",
 }
 
+_DEFAULT_GITHUB_HOSTS = frozenset({"github.com"})
+
+
+def _normalize_host(host: str | None) -> str:
+    return (host or "").strip().lower()
+
 
 def _noninteractive_env() -> dict[str, str]:
     """Return a copy of the process env with interactive prompts disabled."""
@@ -59,6 +67,17 @@ def _powershell() -> str | None:
     return shutil.which("powershell.exe") if _IS_WSL else None
 
 
+async def _reap(proc: asyncio.subprocess.Process | None) -> None:
+    """Kill and reap a helper still running after a timeout or cancellation
+    (a no-op once it has exited). Safe to await from a cancelled task."""
+    if proc is None or proc.returncode is not None:
+        return
+    with contextlib.suppress(ProcessLookupError, OSError):
+        proc.kill()
+    with contextlib.suppress(Exception, asyncio.CancelledError):
+        await asyncio.wait_for(proc.wait(), timeout=5.0)
+
+
 class GitCredentialSource:
     """Proxies git-credential requests to local Git Credential Manager.
 
@@ -70,8 +89,20 @@ class GitCredentialSource:
     - Field filtering: strips non-core fields to avoid GCM hangs
     """
 
-    def __init__(self, cache_ttl: float = 300.0) -> None:
+    def __init__(
+        self,
+        cache_ttl: float = 300.0,
+        *,
+        github_username: str | None = None,
+        username_resolver: Callable[[dict[str, str]], str | None] | None = None,
+        github_hosts: list[str] | tuple[str, ...] | None = None,
+    ) -> None:
         self._cache_ttl = cache_ttl
+        self._github_username = (github_username or "").strip() or None
+        self._username_resolver = username_resolver
+        self._github_hosts = frozenset(
+            _normalize_host(host) for host in (github_hosts or _DEFAULT_GITHUB_HOSTS)
+        )
         # {cache_key: (response_text, expiry_time)}
         self._cache: dict[tuple[str, ...], tuple[str, float]] = {}
         # {cache_key: asyncio.Future} for in-flight request coalescing
@@ -92,6 +123,7 @@ class GitCredentialSource:
         """Resolve a git credential request via local GCM."""
         # Normalize action
         git_action = _ACTION_MAP.get(action, action)
+        fields = self._fields_with_profile_username(git_action, fields)
 
         # Build filtered input
         filtered_input = self._filter_fields(fields)
@@ -102,9 +134,11 @@ class GitCredentialSource:
                 git_action, filtered_input, timeout=timeout,
             )
             # Invalidate cache for this host
-            cache_key = self._cache_key(fields)
+            protocol, host, _username = self._cache_key(fields)
             async with self._lock:
-                self._cache.pop(cache_key, None)
+                for key in list(self._cache):
+                    if key[0] == protocol and key[1] == host:
+                        self._cache.pop(key, None)
             return result
 
         # Fill: check cache, coalesce, call GCM
@@ -190,16 +224,42 @@ class GitCredentialSource:
         ]
         return "\n".join(lines) + "\n"
 
-    def _cache_key(self, fields: dict[str, str]) -> tuple[str, str]:
+    def _fields_with_profile_username(
+        self, action: str, fields: dict[str, str],
+    ) -> dict[str, str]:
+        """Inject a profile-selected GitHub account before GCM is called."""
+        if action != "fill" or fields.get("username"):
+            return fields
+        if fields.get("protocol", "https").lower() != "https":
+            return fields
+        if _normalize_host(fields.get("host")) not in self._github_hosts:
+            return fields
+        username = (
+            self._github_username
+            or (self._username_resolver(fields) if self._username_resolver else None)
+        )
+        username = (username or "").strip()
+        if not username:
+            return fields
+        enriched = dict(fields)
+        enriched["username"] = username
+        log.info(
+            "Using profile-bound GitHub account for %s credential lookup",
+            fields.get("host", "?"),
+        )
+        return enriched
+
+    def _cache_key(self, fields: dict[str, str]) -> tuple[str, str, str]:
         """Build a cache key from credential fields.
 
-        Uses (protocol, host) only -- username is not included because
-        store/erase operations may have different username fields than
-        the original fill, and we need invalidation to match.
+        Includes username so profile-bound GitHub accounts cannot receive a
+        sibling account's cached credential. Store/erase invalidates every
+        username for the host.
         """
         return (
             fields.get("protocol", ""),
             fields.get("host", ""),
+            fields.get("username", ""),
         )
 
     async def _run_git_credential(
@@ -213,7 +273,8 @@ class GitCredentialSource:
     async def _run_directly(
         self, action: str, credential_input: str, *, timeout: float = 30.0,
     ) -> str | None:
-        """Run git credential directly."""
+        """Run git credential directly; a timed-out or cancelled helper is killed."""
+        proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 "git", "credential", action,
@@ -233,6 +294,8 @@ class GitCredentialSource:
         except FileNotFoundError:
             log.error("git not found on PATH")
             return None
+        finally:
+            await _reap(proc)
 
         if proc.returncode != 0:
             log.error(
@@ -264,6 +327,7 @@ class GitCredentialSource:
         ps_array = ",".join(f"'{line}'" for line in lines) + ",''"
         ps_cmd = f"@({ps_array}) | git credential fill"
 
+        proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 powershell, "-NoProfile", "-Command", ps_cmd,
@@ -278,6 +342,8 @@ class GitCredentialSource:
         except (TimeoutError, asyncio.TimeoutError):
             log.error("PowerShell git credential fill timed out (%.0fs)", timeout)
             return None
+        finally:
+            await _reap(proc)
 
         if proc.returncode != 0:
             log.error(

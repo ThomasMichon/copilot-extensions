@@ -221,3 +221,57 @@ Write-Output "EXITCODE=$($result.ExitCode)"
     assert "EXITCODE=0" in result.stdout
     assert not (vendored_dir / "build").exists()
     assert unrelated.exists()
+
+
+def test_transitively_resolved_lib_under_payload_libs_dir_is_also_scrubbed(
+    tmp_path: Path,
+) -> None:
+    """Regression: the self-reintroducing JobHandle ImportError incident.
+
+    agent-procutil, dropin-registry, plugin-activation, and plugin-resolve
+    are never given a dedicated install call (and therefore never passed as
+    the explicit -SourceDir argument) -- they are resolved TRANSITIVELY
+    while installing agent-bridge itself, via agent-bridge's own
+    `[tool.uv.sources]` workspace path deps. Each still lives under
+    `$PluginDir/libs/<name>/` as its own independent setuptools build root,
+    and accumulates the identical stale build/egg-info residue. The stub
+    `uv` asserts the residue is already gone by the time it's invoked (not
+    merely by the time the wrapper returns), so this proves the scrub
+    actually prevents the stale build/lib from shadowing the install, not
+    just that it gets cleaned up afterwards."""
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    procutil_dir = plugin_dir / "libs" / "agent-procutil"
+    procutil_dir.mkdir(parents=True)
+    _seed_build_residue(procutil_dir)
+    _seed_src_layout_egg_info(procutil_dir)
+    dropin_dir = plugin_dir / "libs" / "dropin-registry"
+    dropin_dir.mkdir(parents=True)
+    _seed_build_residue(dropin_dir)
+    stub = f"""
+function uv {{
+    if ((Test-Path "{procutil_dir}\\build") -or (Test-Path "{procutil_dir}\\some_pkg.egg-info") `
+        -or (Test-Path "{procutil_dir}\\src\\some_pkg.egg-info") -or (Test-Path "{dropin_dir}\\build")) {{
+        [Console]::Error.WriteLine('residue still present at install time')
+        $global:LASTEXITCODE = 1
+        return
+    }}
+    Write-Output 'Installed 1 package'
+    $global:LASTEXITCODE = 0
+}}
+"""
+    extra = """
+$result = Invoke-UvPipInstallResilient @(
+    '--reinstall-package', 'agent-bridge',
+    '--reinstall-package', 'agent-procutil',
+    '--reinstall-package', 'agent-dropin-registry'
+)
+Write-Output "EXITCODE=$($result.ExitCode)"
+"""
+    result = _run_harness(plugin_dir, stub, extra)
+    assert "EXITCODE=0" in result.stdout
+    assert "residue still present" not in result.stderr
+    assert not (procutil_dir / "build").exists()
+    assert not (procutil_dir / "some_pkg.egg-info").exists()
+    assert not (procutil_dir / "src" / "some_pkg.egg-info").exists()
+    assert not (dropin_dir / "build").exists()

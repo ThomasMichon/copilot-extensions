@@ -196,10 +196,27 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
     from . import __version__
     from .client import BridgeClient
     from .config import config_dir, load_config, load_or_create_auth_token
+    from .routing_state import active_route_is_forward
     from zdd import breadcrumb, routing
     from zdd.cutover import CutoverOrchestrator
 
+    forwarded_skip = (
+        "this machine reaches a host bridge through a forward (active.json); "
+        "there is no local daemon to deploy"
+    )
     core = _core()
+    if core._active_endpoint_is_forward() and not getattr(args, "recover", False):
+        # The routed "old daemon" is the host's bridge, through the forward:
+        # a cutover would take the route over, then drain and shut it down.
+        # Skip before any recovery or reap, the same way in both output modes
+        # (an output flag never selects lifecycle mutations); ``--recover``
+        # alone continues, to clean up an aborted cutover's breadcrumb.
+        if getattr(args, "json", False):
+            core._json_out({"ok": False, "error": forwarded_skip, "skipped": True,
+                            "steps": [f"refused: {forwarded_skip}"]})
+        else:
+            print(f"[SKIP] agent-bridge deploy: {forwarded_skip}")
+        return
     cfg = load_config()
     token = load_or_create_auth_token()
     host = cfg.bind if cfg.bind not in ("0.0.0.0", "") else "127.0.0.1"
@@ -271,12 +288,23 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
         health_check=health_check,
         make_client=make_client,
         pick_free_port=pick_free_port,
+        refuse_old=lambda active: forwarded_skip if active_route_is_forward(active) else None,
     )
     res = orch.run(health_timeout=args.health_timeout, drain_timeout=args.drain_timeout, force=args.force)
     # Prepend rather than print eagerly: an eager print corrupts `--json`
     # output, since it lands on stdout ahead of the single JSON payload
     # `core._json_out(res.to_dict())` emits below.
     res.steps = prelude_steps + res.steps
+    if res.error == forwarded_skip:
+        if args.json:
+            data = res.to_dict()
+            data["skipped"] = True
+            core._json_out(data)
+        else:
+            for step in res.steps:
+                print(f"  - {step}")
+            print(f"[SKIP] agent-bridge deploy: {forwarded_skip}")
+        sys.exit(0)
 
     if res.ok:
         active = routing.read_active_endpoint(config_dir(), verify_listener=False)

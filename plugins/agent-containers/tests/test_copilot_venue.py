@@ -24,7 +24,7 @@ def _args(**kw) -> Namespace:
         worktree_id="wt-A",
         driver="cli-mode",
         seed=None,
-        ttl_seconds=300.0,
+        ttl_seconds=None,
         ensure_mux=True,
         no_relay=False,
         force=False,
@@ -197,6 +197,7 @@ class TestCmdCopilotTrusted:
 
         def venue_copilot_run(worktree_id, *, connect, **kwargs):
             assert worktree_id == "wt-A"
+            assert kwargs["ttl_seconds"] == 300.0
             connect_calls.append("called")
             return connect("agent-worktrees copilot --worktree-id wt-A")
 
@@ -220,6 +221,34 @@ class TestCmdCopilotTrusted:
         rc, seen = _call(_args(no_relay=True), target=_target(), monkeypatch=monkeypatch)
         assert rc == 0
         assert seen["reverse_forwards"] == ["9280:127.0.0.1:9280"]
+
+    def test_explicit_attached_ttl_is_forwarded(self, monkeypatch) -> None:
+        seen = {}
+
+        def venue_copilot_run(worktree_id, *, connect, **kwargs):
+            seen["ttl_seconds"] = kwargs["ttl_seconds"]
+            return connect("agent-worktrees copilot --worktree-id wt-A")
+
+        rc, _ = _call(
+            _args(ttl_seconds=45.0),
+            target=_target(),
+            venue_copilot_run=venue_copilot_run,
+            monkeypatch=monkeypatch,
+        )
+
+        assert rc == 0
+        assert seen == {"ttl_seconds": 45.0}
+
+    @pytest.mark.parametrize("flag", ["detach", "stop"])
+    def test_ttl_seconds_is_attached_mode_only(self, monkeypatch, capsys, flag) -> None:
+        rc, _ = _call(
+            _args(ttl_seconds=45.0, **{flag: True}),
+            target=_target(),
+            monkeypatch=monkeypatch,
+        )
+
+        assert rc == 1
+        assert "--ttl-seconds applies only to attached mode" in capsys.readouterr().err
 
     def test_lock_released_even_when_connect_raises(self, monkeypatch) -> None:
         monkeypatch.setattr(

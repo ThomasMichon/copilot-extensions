@@ -548,6 +548,27 @@ def _wait_for_ensure_owner() -> bool:
     return core._service_is_running()
 
 
+#: Waits (seconds) before re-probing a forwarded bridge that did not answer.
+_FORWARD_RETRY_DELAYS_S = (1.0, 2.0, 4.0)
+
+
+def _await_forwarded_bridge(core) -> bool:
+    """Re-probe a forwarded bridge with backoff; never start a daemon over it."""
+    import time
+
+    for delay in _FORWARD_RETRY_DELAYS_S:
+        time.sleep(delay)
+        if core._service_is_running():
+            return True
+    print(
+        "[WARN] agent-bridge: the forwarded bridge in active.json is not "
+        "answering; not starting a local daemon over it (that would take the "
+        "route over from the host).",
+        file=sys.stderr,
+    )
+    return False
+
+
 def _ensure_daemon() -> bool:
     """Boot the daemon if it is down, so a daemon-touching command self-heals."""
     import time
@@ -557,6 +578,8 @@ def _ensure_daemon() -> bool:
         return core._service_is_running()
     if core._service_is_running():
         return True
+    if core._active_endpoint_is_forward():
+        return _await_forwarded_bridge(core)
     if core._reconcile_live_dynamic_daemon():
         return True
     if core._service_process_is_live() and core._wait_for_service_start():
@@ -581,6 +604,10 @@ def _ensure_daemon() -> bool:
     try:
         if core._service_is_running():
             return True
+        if core._active_endpoint_is_forward():
+            core._release_ensure_lock(fd)
+            lock_held = False
+            return _await_forwarded_bridge(core)
         if core._service_process_is_live():
             core._release_ensure_lock(fd)
             lock_held = False
@@ -590,6 +617,10 @@ def _ensure_daemon() -> bool:
                 fh.write(str(now))
         except OSError:
             pass
+        if core._active_endpoint_is_forward():
+            core._release_ensure_lock(fd)
+            lock_held = False
+            return _await_forwarded_bridge(core)
         core._spawn_detached_daemon()
         for _ in range(20):
             time.sleep(1)
@@ -607,6 +638,13 @@ def _service_start() -> None:
     core = _core()
     if core._service_is_running():
         print(f"[OK] agent-bridge already running (port {core._service_port()})")
+        return
+    if core._active_endpoint_is_forward():
+        print(
+            "[SKIP] agent-bridge: this machine reaches a host bridge through a "
+            "forward (active.json) that is not answering; not starting a local "
+            "daemon over it",
+        )
         return
     if core._reconcile_live_dynamic_daemon():
         print(f"[OK] agent-bridge recovered dynamic route (port {core._service_port()})")
@@ -656,12 +694,19 @@ def _service_stop() -> None:
         stopped_any = True
 
     port = core._service_port()
-    victims = {
-        core._read_pid_file(),
-        core._pid_on_port(port),
-        core._pid_from_lock(port),
-        core._pid_from_lock(0),
-    }
+    # A local daemon on its configured port (no pid file) may outlive a route
+    # rewritten to a forward -- even onto that same port, where it then blocks
+    # the forward's bind. Its lock holder is still a victim: the ssh process
+    # carrying a forward never holds this lock, and `_pid_from_lock` only
+    # returns a live agent-bridge holder.
+    fixed_ports = {0, core._configured_port()}
+    victims = {core._read_pid_file(), *(core._pid_from_lock(p) for p in fixed_ports)}
+    if not core._active_endpoint_is_forward():
+        # A forwarded port is held by the ssh session carrying the forward.
+        victims |= {core._pid_from_lock(port)}
+        port_pid = core._pid_on_port(port)
+        if port_pid and core._pid_is_agent_bridge(port_pid):
+            victims.add(port_pid)
     victims.discard(None)
     for victim in victims:
         # Identity-verify at the point of termination, not only afterward
@@ -697,10 +742,13 @@ def _service_stop() -> None:
         return
 
     for _ in range(10):
-        locks = {core._pid_from_lock(core._service_port()), core._pid_from_lock(0)}
+        forwarded = core._active_endpoint_is_forward()
+        lock_ports = fixed_ports if forwarded else {core._service_port(), *fixed_ports}
+        locks = {core._pid_from_lock(port) for port in lock_ports}
         locks.discard(None)
         live_victims = {victim for victim in victims if core._pid_is_agent_bridge(victim)}
-        if not core._service_is_running() and not locks and not live_victims:
+        local_service_down = forwarded or not core._service_is_running()
+        if local_service_down and not locks and not live_victims:
             print("[OK] agent-bridge stopped")
             return
         time.sleep(1)

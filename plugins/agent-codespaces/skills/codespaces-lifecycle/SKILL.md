@@ -163,6 +163,9 @@ session, running in a tmux session inside the CodeSpace, into **this**
 terminal (it reserves the CLI-mode slot on the host agent-bridge, forwards the
 credential relay and the host bridge port, and runs the venue's agent-worktrees
 `copilot` verb there). Re-running it re-attaches to the same session.
+`--ttl-seconds` applies only to this attached-mode CLI reservation (default
+300 seconds before an unclaimed reservation is reclaimable); do not pass it with
+`--detach` or `--stop`.
 
 An **orchestrating agent** uses the detached form instead -- nothing takes over
 its terminal:
@@ -225,9 +228,28 @@ this option is still running -- it exits once it holds nothing.
 keeps this host's `127.0.0.1:PORT` forwarded to the CodeSpace's
 `127.0.0.1:VENUE_PORT` (default: the same port) for the session's life -- for
 example the worker's dev server at a fixed `--port`, so a browser on this host
-loads `https://localhost:PORT`. The forward can exist before the server
-starts. A rejoin without the flag keeps it; `--stop` removes it. The launch
-reports `local_forwards_ready` per host port (bound locally); `false` usually
+loads `https://localhost:PORT`. A fixed host port is the default and documented
+contract: it keeps TLS certs, redirect URIs, cookies, and worker-facing URLs
+tied to the expected `https://localhost:PORT`; use `--forward N:VENUE_PORT`
+when the host port must remain pinned to exactly `N`. Use `--forward 0:VENUE_PORT`
+only when the caller explicitly wants the Owner to bind a system-assigned host
+port; `VENUE_PORT` is required, and the launch JSON reports the actual assigned
+host port in `local_forwards` and `local_forwards_ready`. Once assigned, that
+host port is kept for the session's life across reconnects, rejoins, and Owner
+restarts while the Owner can still bind it. If something else grabs that
+kernel-assigned port while the forward is down, the Owner records a replacement
+assigned port rather than reporting another process's listener as ready; the URL
+changes only because the old assigned port is unusable. Re-running the same
+`--forward 0:VENUE_PORT` for a running session reuses the assigned host port the
+hold recorded, even after an Owner restart (the active-forward beacon may be
+missing or stale then): the restarted Owner rebinds that port and assigns a new
+one only on a proven conflict. The forward can exist
+before the server starts. A rejoin without the flag keeps the
+session's existing assigned or fixed port; `--stop` removes it. If the launch
+times out before the Owner reports the assigned port, the session still returns
+`ok: true` with `session_id`, `commands`, `local_forwards_pending: {"0":
+VENUE_PORT}`, and an `error` note; a pre-upgrade Owner that sanitizes away the
+pending `0` key is the usual cause. `false` in `local_forwards_ready` usually
 means the host port is taken or a pre-`--forward` Owner is still running.
 A multi-line or long seed is written to `~/.agent-bridge/seeds/` on the venue and <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 seeded as a one-line pointer (tmux-typed input must be a single line). It
@@ -474,8 +496,9 @@ It proxies credential requests to local credential stores.
 1. agent-bridge runs the relay server on `127.0.0.1:<live-port>`
 2. The catalog command's `ssh` action includes an SSH reverse-forward for that live port
 3. CodeSpace sends git-credential-protocol requests to `localhost:<live-port>`
-4. Relay routes to matching source (GCM / `git-credential`, plus `az-login` for
-   allowed Azure resources)
+4. Relay routes to matching source (GCM / `git-credential`, plus `gh-auth`
+   only for explicit `get-github-token`, plus `az-login` for allowed Azure
+   resources)
 5. Response flows back through the tunnel
 
 ### Available Sources
@@ -483,6 +506,7 @@ It proxies credential requests to local credential stores.
 | Source | Action | What It Does |
 |--------|--------|-------------|
 | `git-credential` | `get`/`store`/`erase` | Proxies to local Git Credential Manager |
+| `gh-auth` | `get-github-token` | Returns the active `gh auth token` for explicit token requests only; it is not used for git credential `get`/`fill` |
 | `az-login` | `get-azure-token` | Returns Azure access tokens for the built-in ADO/Storage resources plus configured `allowed_resources` |
 
 ### Policy Enforcement
@@ -491,6 +515,13 @@ All requests pass through a policy gate before reaching any source:
 - **Action allowlist** -- only recognized actions are accepted
 - **Host allowlist** -- fnmatch-style patterns per source
 - **Resource allowlist** -- exact-match for Azure resources (az-login)
+
+GitHub order is per connection: inject the bound CodeSpace account, or the
+active `gh` account for ambient-owned CodeSpaces, as `username=<account>` for
+`github.com`; then call non-interactive GCM. The relay profile is account-free.
+Missing or ambiguous GitHub credentials are warnings for connect/detach (ADO-only
+or interactive work can still proceed) but remain doctor findings. The relay
+does not substitute `gh auth token` for git credential `get`/`fill`.
 
 ## Agent-Bridge Integration
 

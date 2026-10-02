@@ -284,9 +284,11 @@ default would hide or `403`/`404` the other org's CodeSpaces entirely.
   mapped account plus the ambient one and merge, tagging each CodeSpace with its
   owning account. Per-CodeSpace ops (stop/delete/ssh) then pin `gh` to that
   account.
-- **Auth preflight** verifies each mapped account is logged in with the
-  `codespace` scope, surfacing the account's recorded `accounts.yaml` login flow
-  as the remedy.
+- **Auth preflight** verifies only the accounts that serve a CodeSpace -- bound
+  to a live CodeSpace, owning one, or configured for a repo -- plus the active
+  account when a CodeSpace uses ambient ownership. Each must be logged in with
+  the `codespace` scope; the remedy is the account's recorded `accounts.yaml`
+  login flow.
 - **Fully additive:** with no `account_map` configured, everything collapses to
   a single ambient `gh` call — today's behavior.
 
@@ -331,6 +333,22 @@ over the SSH tunnel, resolving them through the host's Git Credential Manager
 (`*.visualstudio.com`, `dev.azure.com`) credentials. The relay server is owned
 by agent-bridge; agent-codespaces contributes the CodeSpace policy/profile and
 sets up the SSH reverse-forward on connect.
+
+For `github.com`, each CodeSpace connection can pass its GitHub account as
+`username=<account>` before the request reaches non-interactive GCM. Bound
+CodeSpaces use their persisted account; ambient-owned CodeSpaces use the active
+`gh` account. That avoids GCM's account picker (`Cannot prompt because user
+interactivity has been disabled`) when several GitHub accounts are stored. The
+relay profile itself stays account-free, and a missing/ambiguous GitHub
+credential warns during launch rather than blocking the session; `doctor`
+continues to report it. If GCM still cannot serve the selected account, sign in
+to GitHub in GCM for that account; the relay never substitutes a `gh auth token`
+for git `get`/`fill`. The CodeSpace helper acknowledges git `store`/`erase`
+locally without contacting the relay, so they never change host GCM. The
+account is named only when the running relay advertises the
+`git-credential-username-cache` capability. An older bridge relay caches git
+credentials per host, so against one the helper sends the request without an
+account, as it did before.
 
 Provisioning installs the relay-first wrapper only as `~/ado-auth-helper`.
 It deliberately leaves `~/azure-auth-helper` to the native Azure tooling so

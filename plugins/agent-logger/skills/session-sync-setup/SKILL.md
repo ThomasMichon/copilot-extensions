@@ -44,7 +44,29 @@ the same layout. Configuration lives at `~/.agent-logger/config.yaml` <!-- marke
 | `ssh-tunnel` | Same as `ssh`, routed through a jump host | `host`, `remote_path`, `tunnel_host` |
 | `ingest` | Push to a processing service's rsync-daemon sink | `url` (`rsync://...` or `host::module/path`); optional `password_file`, `notify_url` |
 
-`ssh`, `ssh-tunnel`, and `ingest` require `rsync` (and `ssh`) on PATH.
+`ssh`, `ssh-tunnel`, and `ingest` require `rsync` (and, for `ssh`/`ssh-tunnel`,
+`ssh`) on `PATH`.
+
+> **Windows:** there is no native rsync distribution. When a working WSL
+> distro is reachable (`rsync` on its `PATH` for every target; `ssh` too for
+> `ssh`/`ssh-tunnel`), these targets automatically run the whole rsync
+> invocation wrapped in `wsl.exe -e` (direct exec, not `--`, which silently
+> drops positional arguments when re-shelled through the default distro
+> shell), converting the local source path through WSL's own `wslpath`. An
+> `ingest` `password_file` is **staged as a fresh, owner-only-permission copy
+> inside WSL's own filesystem** rather than just path-converted: a Windows
+> file reached through DrvFS (the `/mnt/c/...` bridge) is normally exposed as
+> group/world-readable, which rsync refuses for `--password-file`. This is
+> preferred over a native MSYS2/Cygwin `rsync.exe` on `PATH`, which hits
+> cross-runtime bugs (see `targets/base.py`'s `wsl_rsync_available()`
+> docstring) -- that native path remains only as a fallback when no WSL
+> distro is usable. **WSL has its own user, `~/.ssh` config, and SSH agent,
+> separate from Windows' own OpenSSH** -- an `ssh`/`ssh-tunnel` host alias
+> and key must be set up *inside* WSL (`wsl -- ssh <host>` should succeed
+> non-interactively) for this to work, not just in the Windows OpenSSH
+> config. Run `<agent-logger catalog "session-sync" argv[0]> doctor` to see
+> which runtime (WSL or native) was selected and whether rsync/ssh were
+> actually found there.
 
 ## Configure
 

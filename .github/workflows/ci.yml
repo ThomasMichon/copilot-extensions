@@ -261,6 +261,8 @@ jobs:
         run: python -m pytest -q tools/test_check_install_contract.py
       - name: Installer-engine vendoring sync guard tests
         run: python -m pytest -q tools/test_sync_installer_engine.py
+      - name: Bootstrap-killswitch vendoring sync guard tests
+        run: python -m pytest -q tools/test_sync_bootstrap_killswitch.py
       - name: Runtime resolution (marker-only, uniform)
         # Every versioned-runtime plugin must resolve its interpreter the one
         # uniform marker-only way (uniform-runtime-resolution, #765): the
@@ -318,6 +320,10 @@ jobs:
           libs/installation-context/tests
       - name: Installation context vendoring
         run: python tools/sync-installation-context.py --check
+      - name: Bootstrap-killswitch guard vendoring
+        run: python tools/sync-bootstrap-killswitch.py --check
+      - name: Bootstrap-killswitch guard tests
+        run: python -m pytest -q libs/bootstrap-killswitch/tests
       - name: Same-cell peer launcher vendoring
         run: >-
           python tools/sync-peer-launch.py --check &&
@@ -460,6 +466,29 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install pytest
       - run: python -m pytest -q tools/test_hook_interpreter.py
+
+  bootstrap-killswitch-powershell-5-1:
+    name: Bootstrap-killswitch guard (Windows PowerShell 5.1)
+    # windows-latest ships Windows PowerShell 5.1 (powershell.exe) alongside
+    # PowerShell 7+ (pwsh.exe). The guard's own test suite defaults to pwsh,
+    # which is BOM-less by default and therefore can never reproduce the
+    # Set-Content -Encoding utf8 BOM regression this suite specifically
+    # exists to catch -- that defect is PS 5.1-only. This job forces the
+    # legacy interpreter so the real contract is exercised, not just the
+    # modern one every other job already covers.
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref != 'main'
+    runs-on: windows-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pytest
+      - name: Guard tests under Windows PowerShell 5.1
+        env:
+          BOOTSTRAP_KILLSWITCH_TEST_SHELL: powershell.exe
+        run: python -m pytest -q libs/bootstrap-killswitch/tests/test_guard_powershell.py
 
   worktree-manager:
     name: worktree-manager (out-of-plugin)

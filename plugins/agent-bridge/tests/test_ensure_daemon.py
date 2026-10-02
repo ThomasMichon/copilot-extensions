@@ -22,9 +22,30 @@ def _fast(monkeypatch, tmp_path):
     import time as _t
 
     monkeypatch.setattr(_t, "sleep", lambda *_a: None)
+    monkeypatch.setattr(m, "_INSTALL_DIR", str(tmp_path))
     monkeypatch.setattr(m, "_ENSURE_LOCK", str(tmp_path / ".ensure.lock"))
     monkeypatch.setattr(m, "_ENSURE_MARKER", str(tmp_path / ".ensure-attempt"))
     monkeypatch.delenv("AGENT_BRIDGE_NO_ENSURE", raising=False)
+    # Isolate from a box's REAL live agent-bridge daemon (this plugin's own
+    # production runtime, started independently of this test run): `_INSTALL_DIR`
+    # (and the `_PID_FILE`/routing paths derived from it) is computed once at
+    # `agent_bridge.__main__` import time, before conftest's
+    # `AGENT_BRIDGE_CONFIG_DIR` env-var isolation fixture ever runs -- so that
+    # fixture cannot retarget it, and `_service_process_is_live()` /
+    # `_reconcile_live_dynamic_daemon()` keep reading the host's real PID file
+    # and routing table. On a dev box where the production daemon happens to
+    # be running, that makes `_ensure_daemon()` take the "already starting"
+    # branch instead of the test's own mocked `_spawn_detached_daemon()` path,
+    # then busy-loop `_wait_for_service_start()` for real wall-clock seconds
+    # (its `time.sleep` is faked above, but `time.monotonic()` is not) waiting
+    # on a `_service_is_running()` state the test's own mock can never flip,
+    # observed live as both a spurious failure and an ~8-minute test-file
+    # slowdown. Tests exercise liveness purely through `_service_is_running`
+    # and `_spawn_detached_daemon`; these two signals default to "no live
+    # process out there" so that path is deterministic regardless of host
+    # state.
+    monkeypatch.setattr(m, "_service_process_is_live", lambda *_a, **_k: False)
+    monkeypatch.setattr(m, "_reconcile_live_dynamic_daemon", lambda: False)
 
 
 def test_ensure_noop_when_already_running(monkeypatch):

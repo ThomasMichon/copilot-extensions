@@ -188,6 +188,37 @@ def _cmd_restore_host(args: argparse.Namespace) -> int:
     return host_restore.emit_result(result, json_output=args.json)
 
 
+def _cmd_copilot_config(args: argparse.Namespace) -> int:
+    from . import copilot_detach
+
+    if args.action == "set":
+        try:
+            path = copilot_detach.set_host_workspace(args.target, args.workspace)
+        except (ValueError, OSError) as exc:
+            print(f"[FAIL] {exc}", file=sys.stderr)
+            return 2
+        print(f"[OK] set {args.target} workspace to {args.workspace} in {path}")
+        return 0
+
+    try:
+        raw = copilot_detach._load_copilot_config()
+    except (copilot_detach.CopilotConfigError, OSError) as exc:
+        print(f"[FAIL] {exc}", file=sys.stderr)
+        return 2
+    hosts = raw.get("hosts") if isinstance(raw, dict) else None
+    if args.json:
+        print(json.dumps({"hosts": hosts if isinstance(hosts, dict) else {}}, indent=2))
+    elif not isinstance(hosts, dict) or not hosts:
+        print("agent-ssh copilot-config: no host workspaces configured")
+    else:
+        for name in sorted(hosts):
+            entry = hosts.get(name)
+            workspace = entry.get("workspace") if isinstance(entry, dict) else None
+            if isinstance(workspace, str):
+                print(f"{name}\t{workspace}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agent-ssh",
@@ -318,6 +349,25 @@ def build_parser() -> argparse.ArgumentParser:
     mode.add_argument("--apply", action="store_true")
     restore_host.add_argument("--json", action="store_true")
     restore_host.set_defaults(func=_cmd_restore_host)
+
+    copilot_config = sub.add_parser(
+        "copilot-config",
+        help="Manage per-host defaults for `agent-ssh copilot`.",
+    )
+    copilot_config_sub = copilot_config.add_subparsers(dest="action", required=True)
+    copilot_config_set = copilot_config_sub.add_parser(
+        "set",
+        help="Set the default remote workspace for one SSH host alias.",
+    )
+    copilot_config_set.add_argument("target", help="SSH host alias")
+    copilot_config_set.add_argument("--workspace", required=True, help="Absolute POSIX checkout path")
+    copilot_config_set.set_defaults(func=_cmd_copilot_config)
+    copilot_config_list = copilot_config_sub.add_parser(
+        "list",
+        help="List configured SSH copilot host workspaces.",
+    )
+    copilot_config_list.add_argument("--json", action="store_true")
+    copilot_config_list.set_defaults(func=_cmd_copilot_config)
 
     from .copilot_detach import add_copilot_subparser, add_forward_keeper_subparser
 

@@ -204,8 +204,10 @@ session to register with the host bridge before reporting success. Repeating
 session starts on the caller's own model, reasoning effort, and context tier
 (from `~/.copilot/settings.json`; an explicit `--copilot-arg=--model=...` wins,
 `AGENT_CODESPACES_MODEL_PROPAGATE=0` opts out). `--stop`
-kills and verifies the venue tmux session, stops the keeper, and deregisters
-the exact live-session row.
+kills and verifies the venue tmux session, releases that session's keeper
+hold, stops the shared per-container keeper only when no other session still
+holds it, and deregisters the exact live-session row. `--ttl-seconds` applies
+to attached mode only; do not combine it with `--detach` or `--stop`.
 
 `--ref-file PATH` (repeatable; a file or a folder, up to 256 MiB per call)
 copies an operator file (a HAR, a log, a transcript) into the container at

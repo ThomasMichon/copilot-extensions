@@ -141,6 +141,15 @@ def _cmd_start(args: argparse.Namespace) -> None:
     passive = bool(getattr(args, "passive", False))
     if passive:
         cfg.enable_credential_relay = False
+    elif core._active_endpoint_is_forward():
+        message = (
+            "[agent-bridge] SKIP: this machine reaches a host bridge through "
+            "a forward (active.json); not publishing or starting a local daemon "
+            "over it."
+        )
+        print(message)
+        logging.getLogger("agent-bridge").info(message)
+        return
 
     singleton = SingleInstance(config_dir(), port=cfg.port)
     try:
@@ -220,6 +229,10 @@ def _cmd_start(args: argparse.Namespace) -> None:
     )
     try:
         server.run(sockets=[listen_sock])
+    except SystemExit:
+        if getattr(app.state, "forwarded_skip", None):
+            return
+        raise
     finally:
         server_stopped.set()
         singleton.release()

@@ -14,7 +14,8 @@ from agent_codespaces.relay_launch import (
 
 def test_build_relay_env_scrubs_and_exports():
     env = build_relay_env(
-        9857, "tok123", use_relay=True, ado_host="example.visualstudio.com"
+        9857, "tok123", use_relay=True, ado_host="example.visualstudio.com",
+        github_account="bound-user",
     )
     # PAT scrub always prepended
     for v in SCRUB_ENV_VARS:
@@ -25,6 +26,7 @@ def test_build_relay_env_scrubs_and_exports():
         "export LC_GIT_CREDENTIAL_RELAY_ADO_HOST=example.visualstudio.com;"
         in env
     )
+    assert "export LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT=bound-user;" in env
     assert "GIT_TERMINAL_PROMPT=0" in env
     assert "GCM_INTERACTIVE=never" in env
     assert "auth-error-policy.instructions.md" in env
@@ -246,11 +248,14 @@ def test_build_relay_launch_env(monkeypatch, tmp_path):
                         lambda *a, **k: _Cfg())
     monkeypatch.setattr("agent_codespaces.relay_token.token_for",
                         lambda name, **kw: "minted-tok")
+    monkeypatch.setattr("agent_codespaces.gh_account.fast_credential_account_for_codespace",
+                        lambda name: "bound-user")
     env, port = rl.build_relay_launch_env("cs-foo")
     assert port == 9999
     assert "export LC_GIT_CREDENTIAL_RELAY=9999;" in env
     assert "minted-tok" in env
     assert "LC_GIT_CREDENTIAL_RELAY_ADO_HOST=example.visualstudio.com" in env
+    assert "LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT=bound-user" in env
 
 
 def test_build_relay_launch_env_live_port_override(monkeypatch):
@@ -392,7 +397,9 @@ def test_prelude_publishes_port_mapping_file():
     assert "relay-ports/51234.json" in env
     assert "|| true" in env  # best-effort; never aborts the prelude
     assert '"ado_host":"%s"' in env
+    assert '"github_account":"%s"' in env
     assert "LC_GIT_CREDENTIAL_RELAY_ADO_HOST" in env
+    assert "LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT" in env
     # Not published when the relay is disabled.
     assert "relay-ports" not in build_relay_env(51234, "tok", use_relay=False)
 
@@ -406,7 +413,9 @@ def test_build_relay_portmap_write_shape():
     assert '"port":%s' in snip
     assert "$LC_GIT_CREDENTIAL_RELAY_TOKEN" in snip   # token not re-interpolated
     assert '"ado_host":"%s"' in snip
+    assert '"github_account":"%s"' in snip
     assert "LC_GIT_CREDENTIAL_RELAY_ADO_HOST" in snip
+    assert "LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT" in snip
     assert snip.rstrip().endswith("|| true;") or "|| true" in snip
 
 
@@ -451,3 +460,17 @@ def test_effective_relay_port_honors_configured_pin(monkeypatch, tmp_path):
 def test_credentials_config_relay_port_defaults_to_dynamic_sentinel():
     from agent_codespaces.config import CredentialsConfig
     assert CredentialsConfig().relay_port == 0
+
+def test_build_relay_portmap_publish_carries_token_and_account_without_the_prelude():
+    from agent_codespaces.relay_launch import build_relay_portmap_publish
+
+    cmd = build_relay_portmap_publish(
+        41000, "tok", ado_host="ado.example", github_account="alice",
+    )
+    assert "export LC_GIT_CREDENTIAL_RELAY_TOKEN=tok;" in cmd
+    assert "export LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT=alice;" in cmd
+    assert "export LC_GIT_CREDENTIAL_RELAY_ADO_HOST=ado.example;" in cmd
+    assert "relay-ports" in cmd and "/41000.json" in cmd
+    # Only the port map: no PAT scrub, feed-token mint or helper shim.
+    assert "get-access-token" not in cmd and "unset " not in cmd
+    assert "export LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT" not in build_relay_portmap_publish(41000, "tok")

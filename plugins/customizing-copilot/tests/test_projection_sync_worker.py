@@ -182,6 +182,57 @@ def test_hand_edit_conflict_routes_away_from_bypass(tmp_path: Path) -> None:
     )
 
 
+def test_disabled_plugin_projection_is_never_touched_even_if_payload_changed(
+    tmp_path: Path,
+) -> None:
+    """A disabled plugin's checked-in projection must never be regenerated,
+    even when its *installed* payload changes -- a source a caller omits
+    from ``sources`` (exactly what ``discover_enabled_sources`` does for a
+    plugin the repo's own settings disable, per ``scan_plugin_sources.
+    assemble_enabled_plugins``'s own ``if not enabled[key]: continue``
+    filter) must leave that destination exactly as it was at its last sync,
+    byte-for-byte, regardless of what the now-unreferenced payload on disk
+    says. This is the "disabled plugin" conjunct of Phase 2's bypass safety
+    boundary -- unlike the stamp-label/diff-shape conjuncts, it is fully
+    implemented in this repo (``run_sync_pass`` takes an explicit
+    ``sources`` list; nothing about this module re-discovers sources on its
+    own), so it is directly provable here without any adopting-repo
+    scaffolding."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plugin, source = _write_plugin(
+        tmp_path, "copilot-extensions", "policy", body="Original body.\n"
+    )
+    worker.run_sync_pass(repo, [source], trusted_marketplaces=["copilot-extensions"])
+
+    destination = (
+        repo / ".github" / "instructions" / "policy" / "fallback.instructions.md"
+    )
+    synced_content = destination.read_bytes()
+    assert b"Original body." in synced_content
+
+    # Simulate the installed payload changing after the plugin is disabled --
+    # the template on disk now says something different, but this source is
+    # no longer passed to run_sync_pass at all (exactly what a caller using
+    # discover_enabled_sources would do once the repo's settings disable it).
+    template = plugin / "instructions" / "fallback.instructions.md"
+    template.write_text(
+        '---\napplyTo: "**"\n---\n\n# Fallback\n\nChanged body.\n',
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    outcome = worker.run_sync_pass(
+        repo, [], trusted_marketplaces=["copilot-extensions"]
+    )
+
+    assert not outcome.changed
+    # The checked-in destination is untouched: still the original content,
+    # never regenerated with the changed-but-now-unreferenced payload.
+    assert destination.read_bytes() == synced_content
+    assert b"Changed body." not in destination.read_bytes()
+
+
 def test_missing_pin_blocks_bypass_when_pins_supplied(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()

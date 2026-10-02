@@ -375,15 +375,38 @@ _is_venv_corruption() {
 # (src/agent_bridge.egg-info), one level deeper than the root-level glob --
 # the exact location that shadowed a real fix and broke a live deployment
 # before being caught (registrar.py's `no_pair` field, same incident).
+#
+# An explicit-$1 scrub_dir only reaches the ONE vendored lib the caller
+# happens to name -- it silently misses any lib resolved TRANSITIVELY while
+# installing agent-bridge itself (agent-procutil, dropin-registry,
+# plugin-activation, plugin-resolve: pulled in via agent-bridge's own
+# `[tool.uv.sources]` workspace path deps, never given their own dedicated
+# install call here) even though each is its own independent setuptools
+# build root under "$PLUGIN_DIR/libs/<name>/" and accumulates the identical
+# stale build/egg-info residue. That gap self-reinvited the exact #3444/
+# #3456 bug class: a stale libs/agent-procutil/build/lib shadowing a fresh
+# src/agent_procutil and crashing every headless-spawn session host with
+# `ImportError: cannot import name 'JobHandle'`. agent-dispatch's own
+# install.sh (copilot-extensions#2863) already fixed this the right way --
+# glob every immediate child of libs/ unconditionally, since directory names
+# under libs/ don't map 1:1 to package names (e.g. agent-zdd -> libs/zdd) and
+# an enumerated allowlist drifts out of sync with new/renamed vendored libs.
 _scrub_payload_build_artifacts() {
     # $1 (optional): an additional local source directory to scrub, for a
-    # vendored dependency (ssh-manager, credential-relay, zdd, ...) installed
-    # from its OWN source tree rather than "$PLUGIN_DIR" -- that tree uses the
-    # same setuptools src-layout and accumulates the identical stale
-    # build/egg-info residue, which "$PLUGIN_DIR"-only scrubbing never
-    # reaches (copilot-extensions#3456 review).
+    # vendored dependency installed from its OWN source tree OUTSIDE
+    # "$PLUGIN_DIR/libs/" (e.g. a marketplace layout resolving a lib from a
+    # sibling checkout) -- the libs/*/ glob below only reaches vendored libs
+    # that actually live under this payload's own libs/ directory. Harmless
+    # to pass a dir the glob already covered: rm -rf on an already-scrubbed
+    # path is a no-op.
     rm -rf "$PLUGIN_DIR/build" "$PLUGIN_DIR"/*.egg-info \
            "$PLUGIN_DIR"/src/*.egg-info 2>/dev/null || true
+    local lib_dir
+    for lib_dir in "$PLUGIN_DIR"/libs/*/; do
+        [[ -d "$lib_dir" ]] || continue
+        rm -rf "${lib_dir}build" "${lib_dir}"*.egg-info \
+               "${lib_dir}"src/*.egg-info 2>/dev/null || true
+    done
     local extra_dir="$1"
     if [[ -n "$extra_dir" && "$extra_dir" != "$PLUGIN_DIR" ]]; then
         rm -rf "$extra_dir/build" "$extra_dir"/*.egg-info \
@@ -653,6 +676,137 @@ if p > 0:
 else:
     sys.exit(1)
 PYEOF
+}
+
+_active_is_forward() {
+    # Whether the routing table points at a host bridge this machine only
+    # forwards to (a venue launcher wrote it): marked "forwarded", or the older
+    # launcher form with a port but no bind/daemon pid/generation. Never start a
+    # local daemon over it -- it would take the route over from the host.
+    # Fails closed: a routing table no interpreter can read counts as a forward.
+    local aj="$INSTALL_DIR/active.json" py=""
+    [[ -f "$aj" ]] || return 1
+    py="$(_route_python)" || return 0
+    "$py" - "$aj" <<'PYEOF' 2>/dev/null
+import json, sys
+try:
+    a = json.load(open(sys.argv[1])).get("active") or {}
+    port = int(a.get("port") or 0)
+except Exception:
+    sys.exit(1)
+fwd = (
+    a.get("forwarded") is True
+    or (a.get("pid") is None and "generation" not in a and "bind" not in a)
+)
+sys.exit(0 if port > 0 and fwd else 1)
+PYEOF
+}
+
+_route_python() {
+    # An interpreter that can read active.json, resolved like the rest of this
+    # installer: the managed runtime (_rt_python), then the current venv link
+    # or PATH python (_bootstrap_python), then PATH directly. These guards run
+    # before this run's slot exists, so $VENV_DIR alone is not enough.
+    local py=""
+    py="$(_rt_python 2>/dev/null)" && [[ -x "$py" ]] && { printf '%s' "$py"; return 0; }
+    py="$(_bootstrap_python 2>/dev/null)" && [[ -n "$py" ]] && { printf '%s' "$py"; return 0; }
+    py="$(command -v python3 || command -v python || true)"
+    [[ -n "$py" ]] || return 1
+    printf '%s' "$py"
+}
+
+_active_signature() {
+    local aj="$INSTALL_DIR/active.json" py=""
+    [[ -f "$aj" ]] || return 1
+    py="$(_route_python)" || return 1
+    "$py" - "$aj" <<'PYEOF' 2>/dev/null
+import json, sys
+try:
+    a = json.load(open(sys.argv[1])).get("active") or {}
+    port = int(a.get("port") or 0)
+except Exception:
+    sys.exit(1)
+is_forward = a.get("forwarded") is True or (
+    a.get("pid") is None and "generation" not in a and "bind" not in a
+)
+if port <= 0 or is_forward:
+    sys.exit(1)
+print(json.dumps({
+    "bind": a.get("bind"),
+    "port": port,
+    "pid": a.get("pid"),
+    "generation": a.get("generation"),
+}, sort_keys=True, separators=(",", ":")))
+PYEOF
+}
+
+_update_lifecycle_still_targets_predecessor() {
+    # $2 == allow-absent: after this update stopped the pinned predecessor, its
+    # graceful shutdown clears its own route, so an absent route still means "ours".
+    local pinned="${1:-}" allow_absent="${2:-}" current=""
+    if _active_is_forward; then
+        _step "Forwarded host bridge route appeared during update -- skipping drain/stop/start"
+        return 1
+    fi
+    # An empty pin is the legacy fixed-port predecessor with no route: it must
+    # stay empty. allow-absent relaxes only a pinned predecessor that exited.
+    current="$(_active_signature 2>/dev/null || true)"
+    if [[ "$allow_absent" == allow-absent && -n "$pinned" && -z "$current" ]]; then
+        return 0
+    fi
+    if [[ "$current" != "$pinned" ]]; then
+        _step "Active route changed during update -- skipping drain/stop/start"
+        return 1
+    fi
+    return 0
+}
+
+_pinned_base_url() {
+    # The validated predecessor's own endpoint (its _active_signature JSON; empty =
+    # the fixed $PORT daemon), so the drain targets exactly it and never follows a
+    # route rewritten after validation -- e.g. to a venue forward.
+    local pinned="${1:-}" py=""
+    if [[ -z "$pinned" ]]; then
+        [[ -n "${PORT:-}" ]] || return 1
+        echo "http://127.0.0.1:${PORT}"
+        return 0
+    fi
+    py="$(_route_python)" || return 1
+    "$py" -c 'import json, sys
+a = json.loads(sys.argv[1])
+port = int(a["port"])
+bind = a.get("bind") or "127.0.0.1"
+bind = {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(bind, bind)
+print(("http://[%s]:%d" if ":" in bind else "http://%s:%d") % (bind, port))' "$pinned" 2>/dev/null
+}
+
+_update_lifecycle_drain_stop() {
+    local pinned="${1:-}" timeout="${2:-120}" base=""
+    if ! _update_lifecycle_still_targets_predecessor "$pinned"; then
+        return 1
+    fi
+    if base="$(_pinned_base_url "$pinned")" && [[ -n "$base" ]]; then
+        # AGENT_BRIDGE_BASE_URL overrides the routing table for the drain client.
+        ( export AGENT_BRIDGE_BASE_URL="$base"; _drain_service "$timeout" )
+    else
+        _warn "Cannot pin the drain to the validated bridge -- skipping drain"
+    fi
+    # The drain can block for its full timeout; a venue forward may publish or
+    # bind meanwhile. Re-check right before stopping so the stop's last-resort
+    # $PORT cleanup never kills it.
+    if ! _update_lifecycle_still_targets_predecessor "$pinned" allow-absent; then
+        return 1
+    fi
+    do_stop
+}
+
+_update_lifecycle_start() {
+    local pinned="${1:-}" message="${2:-Starting service...}"
+    if ! _update_lifecycle_still_targets_predecessor "$pinned" allow-absent; then
+        return 1
+    fi
+    _step "$message"
+    do_start
 }
 
 _active_host() {
@@ -1538,6 +1692,11 @@ do_start() {
         fi
     fi
 
+    if _active_is_forward; then
+        _skip "this machine reaches a host bridge through a forward (active.json); not starting a local daemon"
+        return 0
+    fi
+
     local rt_py
     if ! rt_py="$(_rt_python)"; then
         _fail "agent-bridge not installed. Run: install.sh install"
@@ -1949,9 +2108,19 @@ do_update() {
         return 0
     fi
 
+    local active_forward=false
+    if _active_is_forward; then
+        active_forward=true
+        _step "Forwarded host bridge route detected -- updating runtime files without draining/stopping/starting a local daemon"
+    fi
+    local predecessor_signature=""
+    if [[ "$active_forward" != true ]]; then
+        predecessor_signature="$(_active_signature 2>/dev/null || true)"
+    fi
+
     # Is the service currently running?
     local was_running=false
-    if pid=$(_get_pid) || (command -v systemctl &>/dev/null && systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null); then
+    if [[ "$active_forward" != true ]] && { pid=$(_get_pid) || (command -v systemctl &>/dev/null && systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null); }; then
         was_running=true
     fi
 
@@ -1992,7 +2161,7 @@ do_update() {
     # longer needs the (new) venv to pre-exist -- gate only on "running".
     local cutover=false
     if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
-        if [[ "$was_running" == true ]]; then
+        if [[ "$was_running" == true && "$active_forward" != true ]]; then
             cutover=true
             # Cutover onto the same slot is impossible; downgrade to stop-and-rebuild.
             if [[ "$SRC_VERSION" == "$prev_version" ]]; then
@@ -2000,7 +2169,7 @@ do_update() {
                 cutover=false
             fi
         fi
-    elif [[ "$was_running" == true && -x "$VENV_DIR/bin/agent-bridge" ]]; then
+    elif [[ "$was_running" == true && "$active_forward" != true && -x "$VENV_DIR/bin/agent-bridge" ]]; then
         cutover=true
     fi
 
@@ -2008,8 +2177,9 @@ do_update() {
     # doing a cutover (which keeps the old daemon up and retires it afterward).
     # Either way, drain first so in-flight turns get a chance to settle.
     if [[ "$was_running" == true && "$cutover" == false ]]; then
-        _drain_service "${AGENT_BRIDGE_DRAIN_TIMEOUT:-120}"
-        do_stop
+        if ! _update_lifecycle_drain_stop "$predecessor_signature" "${AGENT_BRIDGE_DRAIN_TIMEOUT:-120}"; then
+            was_running=false
+        fi
     fi
 
     # Run the protected update; on any failure, roll back to the snapshot.
@@ -2023,9 +2193,8 @@ do_update() {
             if [[ -n "$SRC_VERSION" && "$SRC_VERSION" != "$prev_version" ]]; then
                 rm -rf "$INSTALL_DIR/versions/$SRC_VERSION"
             fi
-            if [[ "$was_running" == true && "$cutover" == false ]]; then
-                _step "Restarting the previous version..."
-                do_start
+            if [[ "$was_running" == true && "$cutover" == false && "$active_forward" != true ]]; then
+                _update_lifecycle_start "$predecessor_signature" "Restarting the previous version..." || was_running=false
             fi
             _warn "Update failed; kept the previous runtime (venv -> versions/${prev_version:-<previous>})."
         elif [[ "$have_backup" == true ]]; then
@@ -2034,9 +2203,8 @@ do_update() {
                 _ok "Previous venv restored"
                 # Only restart in the default path -- in cutover mode the old
                 # daemon was never stopped, so it is still serving.
-                if [[ "$was_running" == true && "$cutover" == false ]]; then
-                    _step "Restarting the previous service..."
-                    do_start
+                if [[ "$was_running" == true && "$cutover" == false && "$active_forward" != true ]]; then
+                    _update_lifecycle_start "$predecessor_signature" "Restarting the previous service..." || was_running=false
                 fi
             else
                 _fail "Rollback failed -- run install.sh install to rebuild the runtime"
@@ -2071,20 +2239,21 @@ do_update() {
     _write_deploy_manifest
 
     # Bring the new version into service, via the resolved slot interpreter.
-    if [[ "$cutover" == true ]]; then
+    if [[ "$active_forward" == true ]]; then
+        _step "Forwarded host bridge route still active -- not starting a local daemon"
+    elif [[ "$cutover" == true ]]; then
         _step "Zero-downtime cutover (agent-bridge deploy)..."
         if _bridge_cli deploy \
                 --drain-timeout "${AGENT_BRIDGE_DRAIN_TIMEOUT:-300}"; then
             _ok "Cutover complete -- new daemon active, old retired"
         else
             _warn "Cutover failed -- falling back to drain/stop/start"
-            _drain_service 30
-            do_stop
-            do_start
+            if _update_lifecycle_drain_stop "$predecessor_signature" 30; then
+                _update_lifecycle_start "$predecessor_signature" "Starting service..." || true
+            fi
         fi
     else
-        _step "Starting service..."
-        do_start
+        _update_lifecycle_start "$predecessor_signature" "Starting service..." || true
     fi
 
     # Versioned layout: prune old version slots now that the new one is healthy

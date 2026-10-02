@@ -1585,6 +1585,41 @@ function Invoke-ManagedMuxRegister {
         Write-SetupLog "psmux: managed mux registration failed: $($_.Exception.Message)" 'WARN'
     }
 }
+# Deliver a worktree's queued `pending_seed` (picker-new-session-prompt-and-
+# composer Phase A) once this launcher has just created its FIRST live psmux
+# session for it -- this launcher creates the pane directly (`new-session`
+# above), so nothing else ever triggers delivery for a Picker-originated
+# creation. `agent-worktrees embody --worktree-id` already owns the whole
+# contract: its "already embodies this worktree" resume branch (now true,
+# since the session above just started existing) claims (clears) any pending
+# seed under a race-safe write-guard and types it into the registry-identified
+# Copilot pane via its own ready-poll/send-keys path -- this call needs no new
+# pane-ready-detection logic of its own. A no-op (no pending seed) costs one
+# cheap venv-python round trip. Dispatched detached (mirrors
+# Invoke-ManagedMuxRegister above): the ready-poll can legitimately take up to
+# embody's own `--seed-ready-timeout` (default 180s) for a slow-loading
+# MCP/skill-heavy session, and the operator's attach below must never wait on
+# it.
+function Invoke-SeedDeliverySafe {
+    param([string]$WorktreeId)
+    if ([string]::IsNullOrWhiteSpace($WorktreeId)) { return }
+    if (-not $script:VenvPython -or -not (Test-Path -LiteralPath $script:VenvPython)) { return }
+    try {
+        $embodyArgs = @('-m', 'agent_worktrees')
+        if (-not [string]::IsNullOrWhiteSpace([string]$script:LaunchProject)) {
+            $embodyArgs += @('--project', [string]$script:LaunchProject)
+        }
+        $embodyArgs += @('embody', '--worktree-id', $WorktreeId, '--json')
+        # conhost --headless: -WindowStyle Hidden alone is ignored by the
+        # DefTerm handoff and can flash a console (windows-launch-hardening
+        # #786) -- mirrors Write-ActivityLog's own dispatch above.
+        Start-Process -FilePath 'conhost.exe' `
+            -ArgumentList (@('--headless', "`"$script:VenvPython`"") + $embodyArgs) `
+            -WindowStyle Hidden -ErrorAction Stop | Out-Null
+    } catch {
+        Write-SetupLog "psmux: seed-delivery embody dispatch failed: $($_.Exception.Message)" 'WARN'
+    }
+}
 # Per-session psmux options (status bar + behaviors). agent-worktrees does NOT
 # own ~/.psmux.conf; the launcher stamps these onto each session it creates or
 # joins (psmux set-option -t <session>, no -g), mirroring the Linux/WSL
@@ -1955,6 +1990,7 @@ if (-not $noMux) {
         # (per-session source-file) so PageUp/wheel/arrows reach Copilot.
         Invoke-AwPsmuxPassthroughSafe $sessName
         Invoke-ManagedMuxRegister $sessName $muxStatusPath
+        Invoke-SeedDeliverySafe $plan.worktree_id
         if ($nested) {
             Write-Host "Session created: $sessName (open a new terminal to join)"
             exit 0

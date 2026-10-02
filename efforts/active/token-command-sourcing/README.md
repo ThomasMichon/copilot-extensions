@@ -1,0 +1,642 @@
+# Configurable token-command sourcing for every agent-* service
+
+- **Slug:** `token-command-sourcing`
+- **Repo:** copilot-extensions (generalizes a pattern already proven in
+  `plugins/agent-dispatch`; consumers: `plugins/agent-vault`, `plugins/agent-index`)
+- **Branch(es):** per-phase PRs against `dev`
+- **Created:** 2026-10-02
+- **Status:** Draft
+- **Vision:** None — below-altitude operational/config capability. No
+  existing vision governs cross-plugin credential-sourcing configuration;
+  `visions/installer` covers machine bootstrap, not per-plugin runtime token
+  resolution, and neither `agent-vault` nor `agent-index` has its own vision
+  doc under `visions/plugins/`. A future related change may warrant
+  authoring a leaf vision then; this effort does not invent one to satisfy
+  the template.
+- **Umbrella issue:** _to file once this effort's plan clears review_
+- **Sub-issues:** _TBD, one per Plan phase_
+- **Hybrid split:** this is the canonical, generalized effort. A private
+  downstream adoption effort tracks facility-specific deployment wiring
+  (Vault-sourced commands, docs, deployment env files) once this lands; it is
+  not linked here per this repo's public-artifact conventions, and does not
+  duplicate this plan.
+
+## Guiding Intent
+
+An adopter should never have to put a bearer token's raw value in a persisted
+environment file to run an agent-* service. `agent-dispatch` already proves
+the right shape for this: `AGENT_DISPATCH_CONTROL_TOKEN_COMMAND` names a shell
+command whose stdout is the token, fetched **on demand** (never persisted) via
+`resolve_control_token()` / `_run_token_command()` in
+`plugins/agent-dispatch/src/agent_dispatch/config.py`. Every other agent-*
+service that reads an operator-managed bearer/API token directly from a plain
+env var should get the same `_COMMAND` escape hatch, sourced from one shared,
+tested helper instead of each plugin re-implementing (or never implementing)
+the pattern.
+
+This is a **generalization effort, not a per-plugin patch**: extract the
+existing agent-dispatch logic into a small new shared lib, migrate
+agent-dispatch itself onto it (so there is exactly one implementation, not two
+parallel ones), and add `_COMMAND` support to the plugins currently missing
+it — including proper packaging (dependency + installer wiring) so the shared
+lib is actually deployable, not just importable in a dev checkout.
+
+**Scope note:** `agent-mcp`'s `AGENT_MCP_CONTROL_TOKEN` is not an
+operator-managed credential. A fresh token is generated per cutover
+generation
+(`secrets.token_hex(16)` in `cutover.py`) and always injected directly into
+the new daemon's environment — the daemon itself then persists it to a
+PID-keyed sidecar file for internal coordination (`serve.py`). This is an
+internally-generated, ephemeral coordination secret exactly like
+`agent-index`'s cell tokens, not a Vault-sourceable credential, and a
+`_COMMAND` slot would never actually be consulted (cutover always wins).
+**`agent-mcp` is dropped from this effort's scope entirely** rather than
+redesigning its cutover/sidecar lifecycle, which is unrelated, out of scope,
+and risky.
+
+## Participants
+
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Lambda-Core (host) | Designs the shared lib, migrates agent-dispatch, adds support to agent-vault/agent-index, drives PRs | local `copilot-extensions` worktree |
+
+## Coordination
+
+- **Topology:** independent per-phase PRs — each phase lands and deploys
+  cleanly on its own (Phase 1 is a pure addition; Phase 2 is a same-behavior
+  refactor; Phases 3-4 are additive per-plugin features), so no shared feature
+  branch is needed.
+- **Host (owns PRs):** Lambda-Core (solo effort; no delegates yet).
+- **Delegates:** none currently.
+- **Handoff:** n/a (single participant).
+
+## Context
+
+Surveyed during a private downstream adopter's session (a durable fix for a
+self-reintroducing packaging bug in `agent-bridge`; this effort was carved out
+as a follow-up request, not part of that fix).
+
+**Operator-managed credential tokens found reading a plain env var with no
+`_COMMAND` alternative:**
+- `agent-vault`: `AGENT_VAULT_CORE_TOKEN`
+  (`plugins/agent-vault/src/agent_vault/core_ext.py:47,106`)
+- `agent-dispatch`: `AGENT_DISPATCH_TOKEN`, the plain client bearer — distinct
+  from the three pairs below that already have `_COMMAND`. Read directly
+  from `os.environ` at **seven call sites total**: `client_token()` itself
+  (`config.py:535`), `config.py:231` (inside `load_config()`'s `Config`
+  construction), `board_cli.py:342,368,549,739` (four separate board
+  requests), and `producers/webhook.py:167` (the webhook producer, including
+  coordinator startup).
+- `agent-index`: `AGENT_INDEX_ADO_TOKEN`, the Azure DevOps source's PAT
+  (`agent_index/sources/azure_devops.py:62-66`).
+- `agent-index`: `AGENT_INDEX_GITHUB_TOKEN`, the GitHub source's token
+  (`agent_index/sources/github.py:283-287`), ahead of the ambient `GH_TOKEN`/
+  `GITHUB_TOKEN` fallbacks in the same resolution chain.
+
+**Already has the `_COMMAND` pattern (the reference implementation to
+extract):**
+- `agent-dispatch`: `AGENT_DISPATCH_CONTROL_TOKEN[_COMMAND]`,
+  `AGENT_DISPATCH_SHARED_TOKEN[_COMMAND]`,
+  `AGENT_DISPATCH_SHARED_CONTROL_TOKEN[_COMMAND]` — see
+  `resolve_control_token()` / `_run_token_command()` in
+  `plugins/agent-dispatch/src/agent_dispatch/config.py`.
+- `agent-dispatch` also has a **second, differently-shaped** resolver,
+  `producer_capability()` (`config.py:611-623`): it is **command-first**
+  (tries `AGENT_DISPATCH_PRODUCER_CAPABILITY_COMMAND` first, falls back to
+  the raw `AGENT_DISPATCH_PRODUCER_CAPABILITY` env value only if the command
+  is absent or fails), the **opposite precedence** of
+  `resolve_control_token()`'s direct-first logic. Both share the same
+  low-level `_run_token_command()` primitive. **The shared lib must expose
+  both precedence orders as separate, explicitly-named functions** (e.g.
+  `resolve_direct_first()` / `resolve_command_first()`, or equivalent) built
+  on one shared `run_token_command()` primitive — never assume one universal
+  precedence, and never silently change `producer_capability()`'s existing
+  behavior.
+
+**Explicitly out of scope** — internally-generated coordination secrets, not
+operator-sourced credentials, so a `_COMMAND` slot doesn't apply:
+`agent-mcp`'s `AGENT_MCP_CONTROL_TOKEN` (see the scope correction above —
+cutover always injects a fresh generated token directly, bypassing any
+`_COMMAND` path), `agent-index`'s
+`CELL_TRANSACTION_TOKEN`/`CELL_LOCK_TOKEN`/`CELL_START_TOKEN`, `agent-ssh`'s
+`AGENT_SSH_KEEPER_TOKEN`, `agent-worktrees`' handoff/assignment tokens.
+
+**Packaging precedent (the pattern every consumer's installer change
+follows):** `agent-mcp/scripts/init.sh`'s "Preinstall workspace path deps
+(non-uv fallback)" loop (~line 440) enumerates each vendored
+`[tool.uv.sources]` workspace path dep as a `'<libs-dir-name>:<pypi-pkg-name>'`
+string and explicitly `pip install`s it when `uv` is unavailable (bare `pip`
+doesn't honor `[tool.uv.sources]` at all) — `init.ps1` (~line 664) does the
+same for Windows. Every plugin this effort actually touches has its own
+equivalent preinstall list (confirm the exact location per plugin) and needs
+the new shared lib added to it, in addition to a normal `pyproject.toml`
+dependency + `[tool.uv.sources]` entry. A shared package that exists only as
+source with no installer/dependency wiring is not actually deployable.
+
+**Architectural pattern reconciliation:** this effort adds a new cross-plugin
+shared runtime dependency (`libs/token-resolve/`), checked against the two
+governing patterns rather than treated as pure below-altitude plumbing:
+`docs/patterns/vendor-pointer.md` (canonical-to-shipped materialization) —
+`libs/token-resolve/` follows the existing canonical-reference kind already
+used by `agent-procutil`/`zdd` (no new vendoring kind introduced); and
+`docs/patterns/a-la-carte-independence.md` (independent installability) —
+each consumer gets its own materialized copy, so no plugin depends on
+another being present, exactly like the existing vendored libs. The "no
+governing vision" conclusion stands: these two patterns govern *how* a
+shared dependency is vendored (already satisfied by following precedent),
+not *whether* a new architectural capability is introduced.
+
+## Request
+
+Operator (verbatim, private repo name redacted per this repo's public-artifact
+conventions): "For the control token, we need to make sure all agent-*
+services which need tokens support a user- or repo-configurable 'command'
+slot, for a shell/pwsh/python command that will pipe it a token. For
+[our private deployment], we'll prefer sourcing from Vault." Follow-up,
+clarifying the underlying goal: "just wanted to avoid putting tokens in ENV.
+Prefer on-demand sourcing from contained locations." Scope decisions
+confirmed: shared-lib extraction preferred over per-plugin duplication; track
+as a formal effort. The concrete per-plugin consumer set is `agent-dispatch`,
+`agent-vault`, and `agent-index` (see Context's scope note on `agent-mcp` and
+the Journal for how that set was determined) — implementation-detail
+corrections to the same original ask, not a change in intent.
+
+## Plan
+
+### Phase 1 — Extract the shared helper
+
+A new small vendored lib (`libs/token-resolve/` — mirrors the existing
+`libs/<name>/` vendoring convention used by `agent-procutil`, `zdd`, etc.),
+lifting agent-dispatch's existing `resolve_control_token()`/
+`_run_token_command()` logic. Scope note: this phase carries several
+cross-platform correctness requirements surfaced across review — treat the
+cited precedent docs as authoritative for exact mechanics during
+implementation rather than re-deriving them here.
+
+- [ ] `run_token_command(command: str) -> str | None` — the low-level
+      primitive. Preserve the existing 30-second timeout, launch consoleless
+      (`agent_procutil.no_window_kwargs()`), and contain the full process
+      tree on timeout on **both** platforms (POSIX: new process group +
+      `killpg`; Windows: `agent_procutil.spawn_in_kill_on_close_job`, which
+      is a no-op off Windows and can itself fail — don't trust it alone) per
+      `docs/patterns/windows-background-process-launch.md`'s launch-kind
+      matrix ("timeout owns the complete tree"). Parse with
+      `shlex.split(command, posix=(os.name != "nt"))`, then strip one
+      matching pair of leading/trailing quote characters from each token on
+      the Windows branch (`posix=False` alone leaves literal quotes in
+      `argv[0]`). Declare the `agent_procutil` dependency in
+      `token-resolve`'s own `pyproject.toml`/`[tool.uv.sources]` as a
+      canonical-reference vendor pointer, matching `libs/ssh-manager`'s
+      existing nested-dependency pattern (`ssh-manager/pyproject.toml:15-25`).
+- [ ] `resolve_direct_first(direct_var, command_var)` — direct env wins,
+      else fetch via command. Mirrors `resolve_control_token()`'s existing
+      precedence.
+- [ ] `resolve_command_first(direct_var, command_var)` — command tried
+      first, falls back to the raw direct value only if the command is
+      unset/fails/empty. Mirrors `producer_capability()`'s existing
+      precedence.
+- [ ] Unit tests: both resolvers (direct value, command fetch, neither set,
+      command failure/empty output) plus the primitive directly (POSIX,
+      Windows unquoted, Windows quoted command strings, headless-child
+      launch) and a cross-platform live regression proving full tree exit
+      on a forced timeout (kept out of the fast required CI lane on the
+      Windows leg, which needs a real Windows host; the POSIX leg runs in
+      the ordinary Linux lane).
+- [ ] Register `libs/token-resolve/tests` in the shared-library CI lane
+      (`.github/workflows/ci.yml`'s existing `libs/agent-procutil/tests`
+      etc. list). Add a small, **path-gated** `windows-latest` job (skip
+      unless `libs/token-resolve/**` or its own CI wiring changed, per
+      `TESTING.md`'s "gate specialized suites by changed paths" rule;
+      mirrors the existing narrow-scope `windows-hooks` job) so the Windows
+      parsing branch gets real CI coverage. Wire this job's name into
+      `pr-gate`'s own `needs:` list (`pr-gate` already tolerates a
+      "skipped" result, so a path-gated job is safe to list there).
+
+
+### Phase 2 — Migrate agent-dispatch onto the shared lib
+- [ ] Replace `agent-dispatch`'s own `resolve_control_token()` with a thin
+      wrapper over the shared lib's `resolve_direct_first()`, for all three
+      of its existing `_COMMAND` pairs (`AGENT_DISPATCH_CONTROL_TOKEN`,
+      `AGENT_DISPATCH_SHARED_TOKEN`, `AGENT_DISPATCH_SHARED_CONTROL_TOKEN`).
+- [ ] Replace `producer_capability()`'s inline logic with a thin wrapper over
+      the shared lib's `resolve_command_first()` — **preserve its exact
+      existing precedence**; this is the highest-risk migration step and
+      must ship with its own explicit before/after test proving identical
+      behavior for: command present+succeeds, command present+fails, command
+      absent+direct value present, both absent.
+- [ ] Add `agent-dispatch` as a consumer of the new lib: `pyproject.toml`
+      dependency + `[tool.uv.sources]` entry. The actual local-path
+      dependency/preinstall logic for agent-dispatch lives in
+      **`scripts/install.sh`/`install.ps1`** (not `init.sh`/`init.ps1`,
+      which is a separate script) — add the new lib there. It must **also**
+      join the stale-cache force-refresh arrays
+      (`_STALE_CACHE_REFRESH_PACKAGES` in `install.sh:~739-747`, and the
+      equivalent PowerShell array in `install.ps1:~1040-1065`) alongside
+      `agent-procutil`/`agent-zdd`/etc. — these exist specifically because
+      `uv`'s local-path build cache is keyed by source path, not content
+      (copilot-extensions#2863), so a new local-path dependency left out of
+      this list risks deploying a stale cached wheel instead of a fresh
+      build, exactly the bug class this mechanism exists to prevent.
+- [ ] No behavior change for existing agent-dispatch deployments — this is a
+      pure refactor; existing tests must continue to pass unmodified in
+      intent (updates only for the new call shape).
+- [ ] **Docs, in this phase, not deferred:** since this phase is a pure
+      refactor of already-documented `_COMMAND` vars (no new vars
+      introduced), no env-var table changes are needed here — confirm the
+      existing `agent-dispatch` docs still accurately describe
+      `AGENT_DISPATCH_CONTROL_TOKEN_COMMAND`/`AGENT_DISPATCH_SHARED_TOKEN_COMMAND`/
+      `AGENT_DISPATCH_SHARED_CONTROL_TOKEN_COMMAND` post-migration (same
+      behavior, so they should), and correct them in this same PR if not.
+
+### Phase 3 — Add `_COMMAND` support to agent-vault
+- [ ] `AGENT_VAULT_CORE_TOKEN_COMMAND` via the shared lib's
+      `resolve_direct_first()`, consumed wherever `AGENT_VAULT_CORE_TOKEN` is
+      read today (`plugins/agent-vault/src/agent_vault/core_ext.py:47,106`).
+- [ ] Packaging: `pyproject.toml` dependency + `[tool.uv.sources]` entry, plus
+      add the new lib to agent-vault's own preinstall workspace-path-dep list
+      (confirm its exact location/shape during this phase — follow the
+      `agent-mcp/scripts/init.sh`/`init.ps1` pattern cited in Context as the
+      model, adapted to agent-vault's own installer layout).
+- [ ] Tests mirroring agent-dispatch's existing coverage shape.
+- [ ] **Docs, in this phase:** add `AGENT_VAULT_CORE_TOKEN_COMMAND` to
+      `agent-vault`'s own env-var table (not deferred to a later phase):
+      command whose stdout (stripped) is the core bearer token, fetched on
+      demand and never persisted; only consulted when `AGENT_VAULT_CORE_TOKEN`
+      is unset (direct value wins, matching `resolve_direct_first()`).
+
+### Phase 4 — Expand scope to agent-dispatch's remaining token and agent-index
+
+Full per-call-site inventory and precedence design extracted to
+[`phase-4-remaining-tokens.md`](phase-4-remaining-tokens.md) (read it when
+working this phase). Summary:
+
+- [ ] `agent-dispatch`: `AGENT_DISPATCH_TOKEN` is read directly from
+      `os.environ` at seven call sites with different risk profiles —
+      consolidate the actual consumption sites (`client_token()`,
+      `board_cli.py` x4, `webhook.py:167`) onto `client_token()`, add
+      `_COMMAND` support there; leave `config.py:231`'s `load_config()` read
+      raw (no side-effecting command fetch during generic config load); add
+      explicit resolution at `_cmd_serve` (preserving the `--token` CLI
+      override) and at `build_app()`/`serve()`'s own default-`cfg` path;
+      update the `no_cli_prompts.py` standalone helper; propagate through the
+      canonical `libs/peer-launch/peer_launch.py` source (re-synced to all 8
+      consumer plugins, each needing its own changefile), `agent-containers`'
+      separate `copilot_detach.py` allowlist, and the detached waiter's
+      `--shared` re-exec translation (`execution_cli.py:_spawn_detached_waiter()`)
+      — including clearing a stale inherited local token when only the
+      shared `_COMMAND` form is configured.
+- [ ] `agent-index`: add `AGENT_INDEX_ADO_TOKEN_COMMAND` and
+      `AGENT_INDEX_GITHUB_TOKEN_COMMAND`, each preserving its source's
+      existing explicit-constructor-override precedence ahead of both the
+      direct env and the new command resolver; re-verify the
+      internally-generated-token exclusion for agent-index's other tokens.
+- [ ] Packaging for agent-index covers **both** its service venv AND its
+      separate engine venv (`ENGINE_VENV_PYTHON`) preinstall paths in
+      `install.sh`/`install.ps1` — adding the new lib to only one leaves the
+      other's install broken.
+- [ ] **Docs, in this phase:** add each new var to its plugin's env-var
+      table — `AGENT_DISPATCH_TOKEN_COMMAND` (consulted at every
+      consumption site this phase consolidated, excluding the deliberately-
+      raw `config.py:231`; direct env wins when set);
+      `AGENT_INDEX_ADO_TOKEN_COMMAND` (precedence: constructor `token=` →
+      direct env → this command); `AGENT_INDEX_GITHUB_TOKEN_COMMAND`
+      (precedence: constructor `token=` → direct env → this command →
+      ambient `GH_TOKEN`/`GITHUB_TOKEN`, unchanged).
+
+### Phase 5 — Final documentation sweep
+- [ ] Confirm every `_COMMAND` var introduced in Phases 2-4 actually landed
+      in its plugin's docs in the phase that introduced it (per each phase's
+      own Docs sub-task above) — this phase is a verification pass, not
+      where the writing happens.
+- [ ] Note the new shared lib in `CONTRIBUTING.md`'s vendored-libs table if
+      that table is exhaustive (confirm during Phase 1).
+
+## Validation Plan
+
+- [ ] New shared-lib unit tests (Phase 1) pass via the bounded test runner,
+      covering both `resolve_direct_first()` and `resolve_command_first()`
+      **and both POSIX and Windows-style command strings** (the shlex
+      Windows-path fix).
+- [ ] agent-dispatch's full existing test suite passes unmodified in intent
+      after the Phase 2 migration — proves the refactor preserves current
+      behavior exactly, **including `producer_capability()`'s command-first
+      precedence** (the highest-risk migration step).
+- [ ] New agent-vault, agent-dispatch (`AGENT_DISPATCH_TOKEN` — covering the
+      five consumption-site consolidations onto `client_token()`, the
+      explicit `_cmd_serve` server-side resolution, the standalone
+      `no_cli_prompts.py` helper, the canonical `libs/peer-launch/
+      peer_launch.py` sync (regenerating every consumer's `_peer_launch.py`/
+      `peer_launch.py` copy), and `agent-containers`' separate
+      `copilot_detach.py` `_DISPATCH_ENV_KEYS` tuple, but explicitly *not*
+      routing `config.py:231`'s `load_config()` read through command
+      resolution), and agent-index (`AGENT_INDEX_ADO_TOKEN` and
+      `AGENT_INDEX_GITHUB_TOKEN`) tests (Phase 4) pass, each proving:
+      direct env wins (or loses, per the correct precedence for that call
+      site) when both are set; command fetch works when only `_COMMAND` is
+      set; absence of both resolves to `None`/not-configured, matching each
+      plugin's existing behavior for "no token"; and `load_config()` never
+      executes a token-fetch command as a side effect of unrelated config
+      resolution.
+- [ ] Packaging validation: for each touched plugin, a clean non-uv install
+      (bare `pip`, simulating `HAVE_UV=0`) succeeds and the plugin can import
+      the shared lib — proves the installer preinstall-list additions are
+      correct, not just the `pyproject.toml`/`[tool.uv.sources]` entries.
+- [ ] Manual smoke: for agent-vault, set only the `_COMMAND` var to a trivial
+      `echo <value>` and confirm the service actually authenticates using the
+      fetched value.
+
+## Proposal
+
+_Pending — Phase 1 design (exact lib name/shape, which existing vendored lib
+conventions to mirror) to be elaborated once this plan clears review._
+
+## Journal
+
+### 2026-10-02 — Kickoff
+- Effort created from an operator request surfaced immediately after landing
+  a durable `agent-bridge` packaging fix (PR #4908) in the same private
+  downstream session. Candidate token inventory, shared-lib approach, and
+  effort tracking confirmed with the operator before any implementation
+  started.
+
+### 2026-10-02 — Review round 1 (PR #4910)
+- Copilot review flagged: (1) a High-severity scope gap —
+  `producer_capability()`'s command-first precedence wasn't accounted for and
+  risked a silent behavior change; (2) a Medium packaging gap — the shared
+  lib needs real dependency/installer wiring per consumer, not just source;
+  (3) a Low section-set gap — missing `Vision`/`## Coordination`; (4) a Low
+  scope-completeness gap — `AGENT_DISPATCH_TOKEN`/`AGENT_INDEX_ADO_TOKEN`
+  weren't covered by the stated "every operator-managed token" claim. All
+  four addressed in this revision: added `resolve_command_first()` as a
+  distinct function and a dedicated Phase 2 sub-task for the
+  `producer_capability()` migration; added explicit packaging/installer
+  sub-tasks to Phases 2-5; added `Vision`/`## Coordination`; added Phase 5
+  covering both previously-missed tokens.
+
+### 2026-10-02 — Review round 2 (PR #4910)
+- Copilot review flagged: (1) a Medium cross-platform gap — the proposed
+  shared primitive would inherit agent-dispatch's existing `shlex.split()`
+  bug (POSIX mode mangles Windows backslash paths); (2) a Medium scope gap —
+  Phase 5's `AGENT_DISPATCH_TOKEN` migration only named `client_token()`,
+  missing five other direct `os.environ.get("AGENT_DISPATCH_TOKEN")` reads
+  (`config.py:231`, `board_cli.py` x4, `producers/webhook.py:167`); (3) a Low
+  public-artifact violation — this file named a private downstream repo,
+  issue number, and hostname. All three addressed: Phase 1 now specifies
+  `shlex.split(command, posix=(os.name != "nt"))` with explicit
+  Windows-path test coverage; Phase 5 now consolidates all six
+  `AGENT_DISPATCH_TOKEN` read sites onto `client_token()` first, then adds
+  `_COMMAND` support there; every private repo/issue/hostname reference
+  removed or redacted (hybrid-split note, Context survey line, and the
+  Request's verbatim operator quote).
+
+### 2026-10-02 — Review round 3 (PR #4910)
+- Copilot review flagged: (1) a High-severity scope error — `agent-mcp`'s
+  `AGENT_MCP_CONTROL_TOKEN` is actually an internally-generated,
+  per-cutover-generation coordination secret (always injected directly by
+  `cutover.py`, persisted to a PID sidecar by `serve.py`), not an
+  operator-managed credential; a `_COMMAND` slot there would never be
+  consulted; (2) a Medium previously-missed gap — `agent-index`'s
+  `AGENT_INDEX_GITHUB_TOKEN` (`sources/github.py:283-287`) still wasn't
+  covered by the "every operator-managed token" claim; (3) a Low
+  public-artifact miss — the **PR description** (not just the file) still
+  named the private downstream repo/effort. Addressed: dropped `agent-mcp`
+  from scope entirely (Phase 3 removed, moved to "explicitly out of scope"
+  alongside the other internally-generated tokens) rather than redesigning
+  its unrelated cutover/sidecar lifecycle; added `AGENT_INDEX_GITHUB_TOKEN`
+  coverage to the agent-index phase, with explicit precedence over the
+  existing ambient `GH_TOKEN`/`GITHUB_TOKEN` fallbacks (which are
+  deliberately NOT given their own `_COMMAND`, being external-tool-owned
+  conventions); renumbered remaining phases; will update the PR description
+  itself to match this file's generic framing before the next push.
+
+### 2026-10-02 — Review round 4 (PR #4910)
+- Copilot review flagged: (1) a count error — the plan said "six" direct
+  `AGENT_DISPATCH_TOKEN` read sites when the actual inventory is seven
+  (including `client_token()` itself); (2) a side-effect risk — routing
+  `config.py:231` (inside `load_config()`) through `client_token()` would
+  make generic config loading (e.g. `client_url()`, which only needs
+  host/port) execute a token-fetch command as an unwanted side effect,
+  contradicting the existing `resolve_control_token()` discipline this
+  effort is supposed to preserve; (3) an incomplete-propagation gap — the
+  standalone helper `no_cli_prompts.py` generates and resolves tokens
+  independently (won't inherit `client_token()` changes), and
+  agent-codespaces/agent-containers' peer env-var allowlists don't yet know
+  the new `_COMMAND` var name; (4) a precedence contradiction — the
+  agent-index GitHub token sub-task named `resolve_direct_first()` but then
+  described command-first behavior. All four addressed: corrected the count
+  to seven and explicitly listed all seven sites; `config.py:231` now stays
+  a raw read, excluded from the `client_token()` consolidation, with its own
+  Validation Plan line; added explicit sub-tasks for the standalone helper
+  and both peer allowlists; fixed the GitHub-token precedence description to
+  match `resolve_direct_first()`'s actual semantics (direct value wins,
+  command is the fallback, both still precede the ambient CLI fallbacks).
+  Also removed "flagged by review"-style process narration throughout in
+  favor of stating the technical facts/decisions directly (the Journal
+  entries already carry the review history).
+
+### 2026-10-02 — Review round 5 (PR #4910)
+- Copilot review: all five findings from round 4 resolved; one new Low
+  finding — the effort adds a new cross-plugin shared runtime dependency,
+  which is architectural enough to warrant explicit reconciliation against
+  `docs/patterns/vendor-pointer.md` and `docs/patterns/a-la-carte-independence.md`,
+  not just a bare "no governing vision" conclusion. Addressed: added an
+  "Architectural pattern reconciliation" subsection to Context confirming
+  the new lib follows the existing canonical-reference vendoring kind
+  (no new pattern introduced) and preserves standalone per-plugin
+  installability (no mandatory coordinator, no cross-plugin runtime
+  dependency) — both already-established patterns, applied rather than
+  reinvented.
+
+### 2026-10-02 — Review round 6 (PR #4910)
+- Copilot review: the pattern-reconciliation fix from round 5 resolved; two
+  Medium findings carried forward from an earlier pass that hadn't yet been
+  addressed: (1) the plan kept `config.py:231`'s `load_config().token` raw
+  (correctly, to avoid the `load_config()` side-effect risk), but never
+  added explicit resolution at the server's OWN consumption sites —
+  `coordinator_cli.py:_cmd_serve` builds `cfg.token` from that same raw
+  value, which then gates `server.py`'s unsafe-bind guard and request auth,
+  so a `_COMMAND`-only configuration would leave the coordinator itself
+  believing no token is set even though clients resolve one; (2) the
+  peer-propagation sub-task named only agent-codespaces/agent-containers,
+  but `_peer_launch.py` (`peer_launch.py` for agent-dispatch itself) is a
+  **generated, synced copy** in 8 different plugins
+  (`tools/sync-peer-launch.py`) — editing a copy directly breaks the sync
+  guard; the actual edit point is the canonical
+  `libs/peer-launch/peer_launch.py` source, followed by re-running the sync
+  tool. Also found a second, genuinely separate allowlist in
+  `agent-containers/copilot_detach.py`'s own `_DISPATCH_ENV_KEYS` tuple that
+  the peer-launch sync doesn't touch at all. Both addressed: added an
+  explicit `_cmd_serve`-level `resolve_direct_first()` call (not via
+  `load_config()`) for the server's own token resolution; corrected the
+  propagation sub-task to edit the canonical `peer_environment()` allowlist
+  and re-run the sync tool, plus a separate sub-task for
+  `copilot_detach.py`'s own tuple.
+
+### 2026-10-02 — Review round 7 (PR #4910)
+- Copilot review: two new findings plus three carried-forward previously-missed
+  findings. New: (1) Medium — the round-6 `_cmd_serve` fix as drafted would
+  have replaced `args.token or base.token` outright, silently dropping the
+  explicit `--token` CLI override's precedence; (2) Low — the PR description
+  had gone stale (wrong round count, wrong site count). Previously missed:
+  (3) Medium — `libs/token-resolve/tests` needs registering in
+  `.github/workflows/ci.yml`'s shared-library test lane, not just runnable
+  locally; (4) Medium — Azure DevOps's `AzureDevOpsSource.__init__` already
+  has an explicit `token=` constructor override that must keep precedence
+  over both the direct env and the new command resolver; (5) Low — a few
+  standing (non-Journal) sections still narrated "review round N" history
+  inline instead of stating the current system plainly. All five addressed:
+  `_cmd_serve`'s fix is now `args.token or resolve_direct_first(...)`,
+  preserving the CLI override; added an explicit CI-registration sub-task to
+  Phase 1; both Azure DevOps and GitHub (which has the identical
+  constructor-override pattern, caught while fixing this) now specify the
+  full `explicit arg → direct env → command → ambient CLI fallback`
+  precedence chain; removed "review round" framing from the Guiding
+  Intent/Request/Scope-note prose, keeping only the Journal as the review
+  history record. PR description will be refreshed to match before the next
+  push.
+
+### 2026-10-02 — Review round 8 (PR #4910)
+- Copilot review: the CLI-override precedence fix resolved; three new/carried
+  findings. (1) Medium — `build_app()`/`serve()` have their own independent
+  default-`cfg` path (`server.py:85,308`) bypassing `_cmd_serve` entirely,
+  so a direct caller (library use, tests, a future entry point) would still
+  get an unresolved token; (2) Medium — regenerating the canonical
+  `libs/peer-launch/peer_launch.py` source changes the materialized payload
+  of all 8 listed consumer plugins at once, each needing its own pending
+  changefile per `CONTRIBUTING.md`'s changefile-presence check, not just
+  `agent-dispatch`'s; (3) Low — the 557-line README violated the "extract
+  substantial inventories to sibling docs" rule. The PR-description
+  staleness finding was carried forward from a stale review cache; the
+  description was already corrected before this round ran. Addressed: added
+  the `build_app()`/`serve()` default-`cfg` fix (extending both
+  `replace(...)` calls to also resolve `token=`, mirroring how
+  `control_token` is already resolved there); added the explicit
+  per-plugin changefile requirement to the peer-launch sync sub-task;
+  extracted Phase 4's full per-call-site inventory and precedence design to
+  `phase-4-remaining-tokens.md`, leaving a short summary + link in the main
+  Plan (557 → 459 lines).
+
+### 2026-10-02 — Review round 9 (PR #4910)
+- Copilot review: four findings resolved (per-plugin changefiles, command-aware
+  config at all server entry points, Phase 4 extraction, PR description); one
+  new finding plus one lingering pre-existing gap. New: `execution_cli.py`'s
+  `_spawn_detached_waiter()` translates a `--shared` invocation's raw shared
+  tokens for its re-exec'd child but never the `_COMMAND` variants, so a
+  `_COMMAND`-only shared configuration leaves the detached child with no
+  matching local `_COMMAND` var (and risks a stale inherited local token
+  silently winning). Pre-existing: the CI shared-library lane only runs on
+  `ubuntu-latest`, so the Windows-safe parsing fix's `os.name == "nt"` branch
+  is never actually exercised by CI. Addressed: added the matching
+  `_COMMAND` translations (plus clearing a stale inherited local token) to
+  the detached-waiter sub-task, with a dedicated regression test requirement;
+  added a small dedicated `windows-latest` CI job (following the existing
+  narrow-scope `windows-hooks` pattern) to Phase 1.
+
+### 2026-10-02 — Review round 10 (PR #4910)
+- Copilot review: the detached-waiter `_COMMAND` translation fix resolved;
+  four new findings. (1) High — `agent-index` has TWO separate preinstall
+  paths (a service venv and a separate engine venv, each installing its own
+  copy of the base package) in both `install.sh`/`install.ps1`; the plan
+  only covered one, which would leave the other's install broken; (2)
+  Medium — `run_token_command()`'s subprocess launch needs
+  `agent_procutil.no_window_kwargs()` so a headless consumer (e.g.
+  agent-index) never flashes a visible console on Windows; (3) Medium — the
+  new Windows CI job wasn't added to `pr-gate`'s `needs:` aggregator, so it
+  could fail without blocking the one required check branch protection
+  watches; (4) Low — the plan referenced a nonexistent
+  `AzureDevOpsSource` class name instead of the real
+  `AzureDevOpsConnector`. All four addressed: added the engine-venv
+  preinstall requirement alongside the service-venv one; added the
+  `no_window_kwargs()` requirement plus a headless-child test case; added
+  the `pr-gate` `needs:` wiring requirement; corrected the class name
+  throughout.
+
+### 2026-10-02 — Review round 11 (PR #4910)
+- Copilot review: four round-10 findings resolved; one new Medium finding
+  plus three previously-missed items. New: `token-resolve`'s own
+  `pyproject.toml` must declare its `agent_procutil` dependency as a
+  canonical-reference vendor pointer (matching `libs/ssh-manager`'s existing
+  pattern), not just assume a consumer already has it. Previously missed:
+  (1) `shlex.split(command, posix=False)` alone is insufficient for Windows
+  — it leaves literal quote characters in each token, which would make
+  `argv[0]` an unexecutable path-with-quotes; (2) the detached-waiter fix
+  should clear inherited local credentials FIRST, unconditionally, then
+  apply whichever shared mapping resolved — not clear conditionally as an
+  afterthought; (3) new env vars should be documented in the phase that
+  introduces them, not batched into a deferred final Phase 5. All four
+  addressed: added the `pyproject.toml`/`[tool.uv.sources]` requirement to
+  Phase 1; added explicit quote-stripping to the Windows parsing fix with
+  a dedicated quoted-path test case; reordered the detached-waiter fix to
+  clear-then-apply; moved each phase's own Docs sub-task inline (Phase 2
+  confirms no change needed since it's a pure refactor; Phase 3 documents
+  `AGENT_VAULT_CORE_TOKEN_COMMAND`; Phase 4 documents its three new vars),
+  leaving Phase 5 as a verification-only final sweep.
+
+### 2026-10-02 — Review round 12 (PR #4910)
+- Copilot review: the `agent_procutil` dependency-declaration fix resolved;
+  two findings remained. Medium — the extraction spec never named the
+  existing helper's 30-second subprocess timeout, so an implementation built
+  to spec could hang indefinitely on a failed/prompting credential command,
+  violating Phase 2's own no-behavior-change requirement. Low — the new
+  Windows job was wired unconditionally into `pr-gate`, paying a Windows
+  runner allocation on every PR regardless of relevance, where
+  `TESTING.md`'s own "gate specialized suites by changed paths" rule calls
+  for path-gating. Both addressed: added an explicit "preserve the 30s
+  timeout" requirement to the primitive's spec; added a path-gating
+  requirement (skip unless `libs/token-resolve/**` or its CI wiring
+  changed), following this workflow's existing `discover`-job changed-path
+  pattern, while confirming `pr-gate`'s own aggregator already tolerates a
+  "skipped" result so listing a path-gated job there remains safe.
+
+### 2026-10-02 — Review round 13 (PR #4910)
+- Copilot review: the timeout-preservation and Windows-path-gating fixes
+  resolved; one new Medium finding plus two previously-missed items.
+  New: `no_window_kwargs()` only hides the console, it doesn't contain the
+  process tree — a plain `subprocess.run(..., timeout=30)` only kills the
+  direct child, leaking a hung credential command's descendants. Previously
+  missed: (1) agent-dispatch's local-path dependency/preinstall logic
+  actually lives in `scripts/install.sh`/`install.ps1` (which also has the
+  separate stale-cache force-refresh arrays), not `init.sh`/`init.ps1` as
+  the plan said — agent-dispatch has both files, unlike agent-mcp which
+  only has `init.*`; (2) the Azure DevOps connector's existing
+  missing-credential error message only names the two pre-existing sources
+  and needs updating to mention the new `_COMMAND` path too. All three
+  addressed: added the job-object-based tree-containment requirement
+  (`spawn_in_kill_on_close_job`) with the sync/async bridging note and a
+  live-regression validation requirement per
+  `docs/patterns/windows-background-process-launch.md`; corrected the
+  agent-dispatch installer filename and added the stale-cache array
+  requirement; added the error-message update to the Azure DevOps
+  sub-task.
+
+### 2026-10-02 — Review round 14 (PR #4910)
+- Copilot review: the process-tree-containment fix resolved for the Windows
+  leg but review correctly caught that `spawn_in_kill_on_close_job` provides
+  ZERO containment on POSIX (a bare `asyncio.create_subprocess_exec` with no
+  process-group isolation) — a High-severity gap, since most agent-* hosts
+  in practice run POSIX. Also three carried-forward Low findings: drafted
+  doc content was missing for the agent-vault and agent-index `_COMMAND`
+  vars (the plan only said "document this," without the actual content),
+  and the unsafe-bind error message needed updating to mention the new
+  `_COMMAND` path. All four addressed: added an explicit POSIX containment
+  strategy (`start_new_session=True` + `os.killpg` on timeout) alongside the
+  Windows job-object path, plus treating a `None` `JobHandle` as a degraded
+  case to surface rather than silently accept; added a cross-platform live
+  regression requirement; added fully-drafted documentation entries for
+  `AGENT_VAULT_CORE_TOKEN_COMMAND`, `AGENT_DISPATCH_TOKEN_COMMAND`,
+  `AGENT_INDEX_ADO_TOKEN_COMMAND`, and `AGENT_INDEX_GITHUB_TOKEN_COMMAND`
+  directly in their introducing phases; added the unsafe-bind error-message
+  update to the `_cmd_serve` sub-task.
+
+### 2026-10-02 — Round 15, scoping pass (not a new review round)
+- 14 rounds of review had progressively dug into implementation-level detail
+  (exact subprocess-containment mechanics, line-by-line doc drafts) more
+  suited to Phase 1-5 *execution* than plan *review*. Per operator
+  direction, this pass condenses the plan's standing sections (Phase 1's
+  cross-platform containment spec, the architectural-pattern-reconciliation
+  paragraph, and the drafted env-var doc blocks) down to the essential
+  correctness requirements and precedent citations, trusting implementation
+  to work out exact mechanics against the cited docs rather than
+  re-deriving them here. No requirement was dropped, only the exposition
+  shortened (746 → 629 lines). This is the final scoping/fix pass for this
+  review cycle.

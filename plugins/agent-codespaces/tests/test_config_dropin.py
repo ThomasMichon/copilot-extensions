@@ -1149,8 +1149,17 @@ def test_doctor_human_and_json_report_same_config_findings(
         active_plugins=plugin_report,
         config_d=report,
     )
+    async def _github_ok(_account=None):
+        from agent_codespaces.auth_preflight import GithubCredentialPreflight
+
+        return GithubCredentialPreflight(ok=True, source="git-credential")
+
     monkeypatch.setattr(main, "scan_config_providers", lambda: reports)
     monkeypatch.setattr(main, "_gh_auth_preflight", lambda: ["gh auth missing scope"])
+    monkeypatch.setattr(
+        "agent_codespaces.auth_preflight.github_credential_preflight",
+        _github_ok,
+    )
 
     assert main._cmd_doctor() == 1
     human = capsys.readouterr()
@@ -1179,8 +1188,17 @@ def test_doctor_exposes_active_plugin_declaration_identity_path_and_reason(
     monkeypatch.setattr(cfg, "config_d_dir", lambda: tmp_path / "config.d")
     monkeypatch.setattr(cfg, "_PLUGIN_CONFIG_LAST_KNOWN", {})
     reports = cfg.scan_config_providers()
+    async def _github_ok(_account=None):
+        from agent_codespaces.auth_preflight import GithubCredentialPreflight
+
+        return GithubCredentialPreflight(ok=True, source="git-credential")
+
     monkeypatch.setattr(main, "scan_config_providers", lambda: reports)
     monkeypatch.setattr(main, "_gh_auth_preflight", lambda: [])
+    monkeypatch.setattr(
+        "agent_codespaces.auth_preflight.github_credential_preflight",
+        _github_ok,
+    )
 
     assert main._cmd_doctor(json_output=True) == 1
     payload = json.loads(capsys.readouterr().out)

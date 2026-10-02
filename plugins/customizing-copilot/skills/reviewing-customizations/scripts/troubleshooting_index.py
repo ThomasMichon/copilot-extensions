@@ -12,9 +12,9 @@ copies, never against skills): every declared category must have at least one
 of its ``markers`` strings actually present in the rendered body of one of the
 plugin's declared projection templates. A category that is claimed but not
 backed by any ambient pointer is exactly the failure mode
-``efforts/active/ambient-guidance-navigability`` calls a "dead end" -- content
-that exists only behind a skill trigger an agent has no reason to phrase-match
-into.
+``efforts/2026/10/02 ambient-guidance-navigability`` calls a "dead end" --
+content that exists only behind a skill trigger an agent has no reason to
+phrase-match into.
 
 This module is deliberately independent of ``instruction_projections.py``'s
 own (much larger) validation/render/sync machinery -- it only needs to read

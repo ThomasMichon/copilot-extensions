@@ -17,10 +17,12 @@ async def list_agents(request: Request):
     agents = await list_async() if callable(list_async) else []
     errors = getattr(resolver, "topology_errors", [])
     warnings = getattr(resolver, "topology_warnings", [])
+    incomplete = getattr(resolver, "incomplete_namespaces", [])
     return {
         "agents": agents,
         "topology_errors": errors if isinstance(errors, list) else [],
         "topology_warnings": warnings if isinstance(warnings, list) else [],
+        "incomplete_namespaces": incomplete if isinstance(incomplete, list) else [],
     }
 
 

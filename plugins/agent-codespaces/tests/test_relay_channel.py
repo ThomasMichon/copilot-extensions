@@ -10,6 +10,12 @@ import pytest
 from ssh_manager import SSHConfig, SupervisedRelayForward
 
 
+@pytest.fixture(autouse=True)
+def _plain_subprocess_spawn(monkeypatch) -> None:
+    """These relay-channel tests fake asyncio subprocesses directly."""
+    monkeypatch.setattr("agent_procutil._is_windows", lambda: False)
+
+
 class _FakeStderr:
     def __init__(self, data: bytes = b"") -> None:
         self._chunks = [data] if data else []
@@ -84,7 +90,7 @@ async def test_argv_shape_reverse_only(monkeypatch) -> None:
         return proc
 
     monkeypatch.setattr(
-        "ssh_manager.relay_channel.asyncio.create_subprocess_exec",
+        "ssh_manager.relay_channel.create_ssh_subprocess",
         fake_create,
     )
     relay = SupervisedRelayForward(_config(), 51234, ready_timeout=0.01)
@@ -130,7 +136,7 @@ async def test_self_heals_when_process_exits(monkeypatch) -> None:
         return procs[len(calls) - 1]
 
     monkeypatch.setattr(
-        "ssh_manager.relay_channel.asyncio.create_subprocess_exec",
+        "ssh_manager.relay_channel.create_ssh_subprocess",
         fake_create,
     )
     relay = SupervisedRelayForward(
@@ -194,7 +200,7 @@ async def test_serving_probe_false_reestablishes(monkeypatch) -> None:
         return probe_results.pop(0) if probe_results else True
 
     monkeypatch.setattr(
-        "ssh_manager.relay_channel.asyncio.create_subprocess_exec",
+        "ssh_manager.relay_channel.create_ssh_subprocess",
         fake_create,
     )
     relay = SupervisedRelayForward(
@@ -229,7 +235,7 @@ async def test_serving_probe_true_does_not_reestablish(monkeypatch) -> None:
         return True
 
     monkeypatch.setattr(
-        "ssh_manager.relay_channel.asyncio.create_subprocess_exec",
+        "ssh_manager.relay_channel.create_ssh_subprocess",
         fake_create,
     )
     relay = SupervisedRelayForward(
@@ -256,7 +262,7 @@ async def test_stop_cancels_monitor_and_process_idempotently(monkeypatch) -> Non
         return proc
 
     monkeypatch.setattr(
-        "ssh_manager.relay_channel.asyncio.create_subprocess_exec",
+        "ssh_manager.relay_channel.create_ssh_subprocess",
         fake_create,
     )
     relay = SupervisedRelayForward(
@@ -280,7 +286,7 @@ async def test_establish_failure_raises_with_stderr(monkeypatch) -> None:
         return proc
 
     monkeypatch.setattr(
-        "ssh_manager.relay_channel.asyncio.create_subprocess_exec",
+        "ssh_manager.relay_channel.create_ssh_subprocess",
         fake_create,
     )
     relay = SupervisedRelayForward(_config(), 51234, ready_timeout=0.01)
@@ -312,7 +318,7 @@ async def test_a_quiet_early_exit_is_retried_then_succeeds(monkeypatch) -> None:
         sleeps.append(delay)
 
     monkeypatch.setattr(
-        "ssh_manager.relay_channel.asyncio.create_subprocess_exec",
+        "ssh_manager.relay_channel.create_ssh_subprocess",
         fake_create,
     )
     relay = SupervisedRelayForward(_config(), 51234, ready_timeout=0.01, backoff_base=0.1)
@@ -341,7 +347,7 @@ async def test_establish_retries_remote_forward_failure_then_succeeds(
         sleeps.append(delay)
 
     monkeypatch.setattr(
-        "ssh_manager.relay_channel.asyncio.create_subprocess_exec",
+        "ssh_manager.relay_channel.create_ssh_subprocess",
         fake_create,
     )
     relay = SupervisedRelayForward(
@@ -375,7 +381,7 @@ async def test_establish_raises_after_bounded_remote_forward_failures(
         sleeps.append(delay)
 
     monkeypatch.setattr(
-        "ssh_manager.relay_channel.asyncio.create_subprocess_exec",
+        "ssh_manager.relay_channel.create_ssh_subprocess",
         fake_create,
     )
     relay = SupervisedRelayForward(
@@ -466,7 +472,7 @@ async def test_asymmetric_host_port_from_resolver(monkeypatch) -> None:
         return proc
 
     monkeypatch.setattr(
-        "ssh_manager.relay_channel.asyncio.create_subprocess_exec",
+        "ssh_manager.relay_channel.create_ssh_subprocess",
         fake_create,
     )
     relay = SupervisedRelayForward(
@@ -493,7 +499,7 @@ async def test_resolver_falsy_falls_back_to_listen_port(monkeypatch) -> None:
         return proc
 
     monkeypatch.setattr(
-        "ssh_manager.relay_channel.asyncio.create_subprocess_exec",
+        "ssh_manager.relay_channel.create_ssh_subprocess",
         fake_create,
     )
     relay = SupervisedRelayForward(
@@ -519,7 +525,7 @@ async def test_reestablishes_on_host_port_change(monkeypatch) -> None:
         return _FakeProcess()
 
     monkeypatch.setattr(
-        "ssh_manager.relay_channel.asyncio.create_subprocess_exec",
+        "ssh_manager.relay_channel.create_ssh_subprocess",
         fake_create,
     )
     relay = SupervisedRelayForward(

@@ -13,6 +13,7 @@ that pattern to this repository.
 | [Retire Dead-Letter Status](active/retire-dead-letter-status/README.md) | Draft | #4744 |
 | [Pivot Streaming Transport & Render Performance](active/pivot-streaming-transport/README.md) | Active | #4762 |
 | [agent-dispatch Recipe Library](active/agent-dispatch-recipe-library/README.md) | Draft | #4691 |
+| [Configurable token-command sourcing](active/token-command-sourcing/README.md) | Draft | _pending_ |
 | [CI Identifier Leak Guard](active/ci-identifier-leak-guard/README.md) | Active | #3923 |
 | [CI Reliability & Flakiness Telemetry](active/ci-flakiness-telemetry-and-reliability/README.md) | Active | _pending_ |
 | [Worktree/Effort Railroad Binding](active/worktree-effort-railroad-binding/README.md) | Draft | #3581 |
@@ -22,7 +23,6 @@ that pattern to this repository.
 | [Promotion-Failure Reactive Fix Agent](active/promotion-failure-reactive-fix-agent/README.md) | Active | _TBD_ |
 | [Vendor Pointer Generalization](active/vendor-pointer-generalization/README.md) | Draft | See effort |
 | [Full-Harness Startup Reliability](active/full-harness-startup-reliability/README.md) | Active | #3303 |
-| [Ambient Guidance Navigability](active/ambient-guidance-navigability/README.md) | Active | #3033 |
 | [Unified Skill Review](active/unified-skill-review/README.md) | Draft | #2847 |
 | [Handoff Cutover Lifecycle Journal](active/handoff-cutover-lifecycle-journal/README.md) | Draft | #2457 |
 | [Handoff Live Cutover](active/handoff-live-cutover/README.md) | Active | #2249† |

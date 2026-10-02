@@ -1571,7 +1571,7 @@ _ok "Directories: $INSTALL_DIR"
 if [[ "$CELL_MODE" == 0 ]]; then
     BIN_HOOK_DIR="$INSTALL_DIR/bin"
     mkdir -p "$BIN_HOOK_DIR"
-    for h in bootstrap-check.ps1 bootstrap-check.sh; do
+    for h in bootstrap-check.ps1 bootstrap-check.sh bootstrap-killswitch-guard.ps1 bootstrap-killswitch-guard.sh; do
         [ -f "$SCRIPT_DIR/$h" ] && cp -f "$SCRIPT_DIR/$h" "$BIN_HOOK_DIR/$h"
     done
     _ok "Session-start hook: $BIN_HOOK_DIR/bootstrap-check.sh"

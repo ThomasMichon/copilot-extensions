@@ -155,6 +155,91 @@ def test_list_agents_preserves_topology_diagnostics(cfg_dir: Path, monkeypatch):
     assert errors == ["stale: machines.yaml not found"]
 
 
+def test_list_agents_with_incomplete_reports_incomplete_namespaces(
+    cfg_dir: Path, monkeypatch,
+):
+    """A `--stream`/`--subscribe` consumer needs to know which namespace(s)
+    silently dropped their agents on THIS call, so it never reports a false
+    `removed` for them."""
+    client = BridgeClient.from_config()
+    monkeypatch.setattr(
+        client,
+        "_request",
+        lambda *args, **kwargs: {
+            "agents": [{"name": "local-agent"}],
+            "topology_errors": [],
+            "incomplete_namespaces": ["codespace"],
+        },
+    )
+    agents, errors, incomplete, known = client.list_agents_with_incomplete()
+    assert agents == [{"name": "local-agent"}]
+    assert errors == []
+    assert incomplete == ["codespace"]
+    assert known is True
+
+
+def test_list_agents_with_incomplete_unknown_capability_never_trusts_empty(
+    cfg_dir: Path, monkeypatch,
+):
+    """A daemon whose response omits ``incomplete_namespaces`` entirely must
+    report ``capability_known=False`` -- an empty `incomplete_namespaces`
+    read from a MISSING key is NOT proof the scan was complete; its
+    namespace resolvers may be silently dropping agents with no signal
+    whatsoever. Distinguish this from a daemon that explicitly reports zero
+    incomplete namespaces (the key present, just an empty list)."""
+    client = BridgeClient.from_config()
+    monkeypatch.setattr(
+        client,
+        "_request",
+        lambda *args, **kwargs: {"agents": [{"name": "a"}], "topology_errors": []},
+    )
+    agents, errors, incomplete, known = client.list_agents_with_incomplete()
+    assert agents == [{"name": "a"}]
+    assert errors == []
+    assert incomplete == []
+    assert known is False
+
+
+def test_list_agents_with_incomplete_true_when_key_present_but_empty(
+    cfg_dir: Path, monkeypatch,
+):
+    """The converse of the above: a capability-aware daemon that explicitly
+    reports zero incomplete namespaces (key present, empty list) must be
+    trusted -- `capability_known` is keyed on presence, not truthiness."""
+    client = BridgeClient.from_config()
+    monkeypatch.setattr(
+        client,
+        "_request",
+        lambda *args, **kwargs: {
+            "agents": [{"name": "a"}],
+            "topology_errors": [],
+            "incomplete_namespaces": [],
+        },
+    )
+    agents, errors, incomplete, known = client.list_agents_with_incomplete()
+    assert agents == [{"name": "a"}]
+    assert incomplete == []
+    assert known is True
+
+
+def test_list_agents_with_incomplete_defaults_empty_on_older_daemon(
+    cfg_dir: Path, monkeypatch,
+):
+    """An older daemon's response predates `incomplete_namespaces` -- must
+    default to empty, not raise/KeyError."""
+    client = BridgeClient.from_config()
+    monkeypatch.setattr(
+        client,
+        "_request",
+        lambda *args, **kwargs: {"agents": [{"name": "a"}], "topology_errors": []},
+    )
+    agents, errors, incomplete, known = client.list_agents_with_incomplete()
+    assert agents == [{"name": "a"}]
+    assert errors == []
+    assert incomplete == []
+    assert known is False
+
+
 def test_live_message_payload_includes_expected_session(cfg_dir: Path, monkeypatch):
     client = BridgeClient.from_config()
     calls = []
