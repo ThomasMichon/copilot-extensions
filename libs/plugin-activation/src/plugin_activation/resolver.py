@@ -446,6 +446,22 @@ def _same_file(left: Path, right: Path) -> bool:
         return left == right
 
 
+def _git_root(root: Path) -> Path:
+    """The repository root git reports for ``root``. A bare anchor (``core.bare``
+    with its linked worktrees elsewhere -- the worktree-class layout) has no work
+    tree to report, so ``--show-toplevel`` fails there; it is still ``root`` when
+    git confirms a bare repository whose git directory is ``root`` itself or its
+    ``.git``. Anything else re-raises the original failure."""
+    try:
+        return Path(_git(root, "rev-parse", "--show-toplevel")).resolve(strict=True)
+    except subprocess.CalledProcessError:
+        if _git(root, "rev-parse", "--is-bare-repository") == "true":
+            git_dir = Path(_git(root, "rev-parse", "--absolute-git-dir")).resolve(strict=True)
+            if _same_file(git_dir, root) or _same_file(git_dir.parent, root):
+                return root.resolve(strict=True)
+        raise
+
+
 def _verified_project_roots(
     agent_worktrees_home: Path,
 ) -> tuple[list[tuple[str, Path]], list[Finding], ScanAuthority]:
@@ -565,9 +581,7 @@ def _verified_project_roots(
             registry_indeterminate = True
             continue
         try:
-            top = Path(_git(canonical, "rev-parse", "--show-toplevel")).resolve(
-                strict=True
-            )
+            top = _git_root(canonical)
             actual_remote = _git(canonical, "remote", "get-url", "origin")
         except subprocess.CalledProcessError as exc:
             findings.append(
