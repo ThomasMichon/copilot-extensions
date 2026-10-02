@@ -1,3 +1,24 @@
+# --- bootstrap-killswitch guard (vendored; see libs/bootstrap-killswitch/README.md) ---
+# One shared, repo-wide switch (not per-plugin) that pauses EVERY adopting
+# plugin's reconcile-on-session-start at once, for when an operator/agent is
+# hand-diagnosing a venv/install and a background reconcile must not race it.
+# Legacy/default installation ONLY: a namespaced marketplace cell
+# (COPILOT_EXTENSIONS_CONTEXT set) reconciles through its own cell-scoped
+# mechanism, never this global state file -- crossing that installation-cell
+# boundary would let one marketplace's switch pause an unrelated,
+# independently-owned cell's reconcile (visions/plugin-services/
+# installation-cells). This guard is therefore a deliberate no-op under a
+# cell context, same as this hook's own existing cell-context exit below.
+if (-not $env:COPILOT_EXTENSIONS_CONTEXT) {
+  $_bksGuardDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+  $_bksGuard = Join-Path $_bksGuardDir "bootstrap-killswitch-guard.ps1"
+  if (Test-Path -LiteralPath $_bksGuard) {
+    & $_bksGuard check *>&2
+    if ($LASTEXITCODE -eq 0) { [Console]::Out.Write('{}'); exit 0 }
+  }
+}
+# --- end bootstrap-killswitch guard ---
+
 # Bootstrap hook -- runs on session start via hooks.json. hooks.json runs the
 # PLUGIN PAYLOAD copy first, falling back to the deployed ~/.agent-worktrees\bin
 # copy. Two jobs, both grace-window-cheap:

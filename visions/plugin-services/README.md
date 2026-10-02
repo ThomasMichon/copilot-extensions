@@ -240,6 +240,22 @@ and true-up alignment**, but a plugin **provisions and reconciles itself — and
 supervises its own daemon (see *platform-native-lifecycle*) — with that app
 entirely absent**.
 
+**Narrow, operator-invoked exception (bootstrap-killswitch):** an explicit,
+resettable, host-local switch lets an operator or agent pause this automatic
+reconcile for the **default (non-namespaced) installation only**, for the
+duration of a hand diagnosis of a venv/install path that a background reconcile
+would otherwise race. It is deliberately narrow: scoped to one shared state
+file outside every installation cell's own ownership boundary, so it never
+reaches into or is reachable from a namespaced marketplace cell's own
+independent reconcile (see the
+[Marketplace Installation Cells](installation-cells/README.md) child vision);
+fails open to
+"reconcile proceeds normally" on a missing or corrupt switch; and carries no
+automatic expiry, so turning it back off is the operator's own responsibility.
+It changes *when* self-reconcile is allowed to run, never *whether* an enabled
+runtime's payload-vs-deployed drift is itself detected or resolved once
+reconcile resumes.
+
 ### delegated-heavy-companion-runtime
 The self-provisioning contract has one narrow exception: an explicitly
 configured **optional companion capability** whose dependency footprint is too
@@ -789,3 +805,17 @@ an incomplete change, the same way an undocumented behavior change is.
   installer authority and remains inert when the capability or supervisor is
   absent. This preserves the default independent-plugin contract while giving
   genuinely heavyweight companions one explicit ownership boundary.
+
+- **2026-10-02** — Added a second, narrow exception to
+  **self-provisioning-runtime**: the **bootstrap-killswitch**. Unlike
+  *delegated-heavy-companion-runtime* (which changes *who* provisions), this
+  changes *when* an already-provisioning plugin's own self-reconcile is allowed
+  to run -- an operator/agent can pause it host-wide, for the default
+  (non-namespaced) installation only, for the duration of a hand diagnosis that
+  a background reconcile would otherwise race. Deliberately scoped outside
+  every installation cell's own ownership boundary (see *Marketplace
+  Installation Cells*) so the switch can never cross into or be reached from a
+  namespaced marketplace cell's independent reconcile; fails open on a missing
+  or corrupt switch; no automatic expiry. Realized by the
+  `libs/bootstrap-killswitch/` mechanism (vendored per-plugin guard +
+  `agent-machines bootstrap-killswitch` CLI).

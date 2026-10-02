@@ -10,6 +10,8 @@ Verbs:
 * ``restore``  -- converge the machine (``--dry-run`` prints the plan; apply lands in #4006)
 * ``self-update`` -- run unattended watchdog / sweep tiers
 * ``fleet-update`` -- run the unattended daily worktree-manager update sweep
+* ``bootstrap-killswitch`` -- pause/resume every plugin's sessionStart
+  reconcile at once (for hand-diagnosing a venv/install)
 * ``provision-playwright-cli`` -- converge the machine-local Playwright CLI workspace
 * ``capture`` / ``prune`` -- harvest / GC verbs (issue #4006)
 """
@@ -24,6 +26,7 @@ from pathlib import Path
 from . import cli_fleet_update
 from . import discover as _discover
 from . import identity as _identity
+from . import killswitch_cli
 from . import layout as _layout
 from . import playwright_cli as _playwright_cli
 from . import reconcile as _reconcile
@@ -847,6 +850,7 @@ def _build_parser() -> argparse.ArgumentParser:
         current.add_argument("--json", action="store_true", help="emit JSON")
         current.set_defaults(func=func)
     cli_fleet_update.register_parser(sub)
+    killswitch_cli.register_parser(sub)
     playwright = sub.add_parser("provision-playwright-cli")
     playwright.add_argument("--json", action="store_true", help="emit JSON")
     playwright_mode = playwright.add_mutually_exclusive_group()

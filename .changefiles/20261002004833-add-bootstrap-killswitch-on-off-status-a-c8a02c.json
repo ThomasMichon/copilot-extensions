@@ -1,0 +1,9 @@
+{
+  "comment": "Add 'bootstrap-killswitch {on,off,status}' -- a resettable, repo-wide switch to pause every plugin's sessionStart reconcile at once",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "minor"
+    }
+  ]
+}

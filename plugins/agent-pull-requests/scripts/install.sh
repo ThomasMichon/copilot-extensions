@@ -353,7 +353,7 @@ _git_info() {
 _install_hook_files() {
     local bin_hook_dir="$INSTALL_DIR/bin"
     mkdir -p "$bin_hook_dir"
-    for h in bootstrap-check.ps1 bootstrap-check.sh; do
+    for h in bootstrap-check.ps1 bootstrap-check.sh bootstrap-killswitch-guard.ps1 bootstrap-killswitch-guard.sh; do
         [[ -f "$SCRIPT_DIR/$h" ]] && cp -f "$SCRIPT_DIR/$h" "$bin_hook_dir/$h"
     done
     _ok "Session-start hook: $bin_hook_dir/bootstrap-check.sh"

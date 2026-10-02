@@ -2139,7 +2139,7 @@ Write-Ok "Directories: $InstallDir"
 if (-not $CellMode) {
     $BinHookDir = Join-Path $InstallDir 'bin'
     if (-not (Test-Path $BinHookDir)) { New-Item -ItemType Directory -Path $BinHookDir -Force | Out-Null }
-    foreach ($h in @('bootstrap-check.ps1', 'bootstrap-check.sh')) {
+    foreach ($h in @('bootstrap-check.ps1', 'bootstrap-check.sh', 'bootstrap-killswitch-guard.ps1', 'bootstrap-killswitch-guard.sh')) {
         $hSrc = Join-Path $PSScriptRoot $h
         if (Test-Path $hSrc) { Copy-Item $hSrc (Join-Path $BinHookDir $h) -Force }
     }

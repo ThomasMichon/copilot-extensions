@@ -1,0 +1,9 @@
+{
+  "comment": "Vendor the (unused) bootstrap-killswitch guard files alongside this plugin's no-op sessionStart hook, for a uniform opt-in criterion across the sync tool",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

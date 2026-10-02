@@ -1905,7 +1905,22 @@ commands; a desired flag or environment hint alone is insufficient.
 
 So every Python runtime plugin **self-reconciles at session start**: it declares
 a `sessionStart` hook that re-runs its own installer **only when the deployed
-version drifts** from the payload.
+version drifts** from the payload -- **unless the bootstrap-killswitch is
+active**, in which case that plugin's hook skips its own reconcile entirely for
+this session (see `libs/bootstrap-killswitch/README.md`; amends the
+*self-provisioning-runtime* vision in `visions/plugin-services/README.md`).
+Every adopting plugin's `bootstrap-check.{ps1,sh}` checks its vendored
+`bootstrap-killswitch-guard.{ps1,sh}` as its very first step, before any
+version comparison below, against one shared, cross-plugin state file
+(`~/.copilot-extensions/bootstrap-killswitch.json`) -- an operator/agent hand-
+diagnosing a venv or install path directly sets this switch so a background
+reconcile can never race that diagnosis; it fails open to "reconcile proceeds
+normally" on a missing or malformed state file. This switch applies **only to
+the default (non-namespaced) installation**: a namespaced marketplace cell's
+own `COPILOT_EXTENSIONS_CONTEXT` reconcile path is a deliberate no-op for this
+guard, so the switch can never cross an installation-cell boundary (see the
+[Marketplace Installation Cells](../visions/plugin-services/installation-cells/README.md)
+vision).
 
 - `plugin.json` sets `"hooks": "hooks.json"`.
 - `hooks.json` `hooks.sessionStart` runs the plugin's `scripts/bootstrap-check.{ps1,sh}`
