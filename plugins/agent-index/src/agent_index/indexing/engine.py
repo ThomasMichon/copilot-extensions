@@ -74,6 +74,40 @@ def _type_from_name(name: str) -> str:
     return head or "git"
 
 
+def _resolve_explicit_source_spec(
+    source: str, by_name: dict[str, "SourceSpec"]
+) -> "SourceSpec":
+    """Resolve one explicitly-named ``--source``/``{"source": ...}`` request.
+
+    Prefers the matching configured spec so its repo/auth resolve correctly.
+    ``git:<name>:commits`` is never itself a configured source -- a git
+    connector's commit history is a BYPRODUCT its ``discover()`` emits
+    alongside files, using whatever repo path its *file* source resolved. A
+    bare synthesized spec for it has no repo/repo_path, so it used to silently
+    fall back to ``GitRepoConnector``'s cwd/env default (virtually always the
+    wrong repo), surfacing only as an opaque ``git ls-files`` exit-128 deep in
+    a subprocess traceback. Resolve it against its parent file source's config
+    instead, so an explicit ``git:X:commits`` request indexes the right repo.
+    Any other unresolvable name synthesizes a bare spec, which
+    ``_connector_kwargs`` now raises loudly on (see its docstring) rather than
+    silently defaulting.
+    """
+    spec = by_name.get(source)
+    if spec is None and source.endswith(":commits"):
+        parent = by_name.get(source[: -len(":commits")])
+        if parent is not None:
+            spec = SourceSpec(
+                name=source,
+                type=parent.type,
+                repo=parent.repo,
+                auth_account=parent.auth_account,
+                trust_domain=parent.trust_domain,
+                repo_path=parent.repo_path,
+                ref=parent.ref,
+            )
+    return spec or SourceSpec(name=source, type=_type_from_name(source))
+
+
 def configured_source_specs() -> list[SourceSpec]:
     """Resolve the corpus source specs to index (dynamic; re-read each call).
 
@@ -166,7 +200,15 @@ def _connector_kwargs(spec: SourceSpec) -> dict[str, object]:
         path = _resolve_repo_path(spec)
         if path:
             kwargs["repo_path"] = path
-        elif spec.repo or spec.repo_path:
+        elif spec.name != "git":
+            # Any OTHER explicitly-named git source (including one synthesized
+            # for a name that doesn't match a configured spec) that still can't
+            # resolve a checkout path must fail loudly here -- never silently
+            # fall through to GitRepoConnector's cwd/env default, which is
+            # virtually always the WRONG repo (or no repo at all) for a named
+            # request and previously surfaced only as an opaque `git ls-files`
+            # exit-128 deep in a subprocess traceback (see the ``:commits``
+            # case this guards against, just below).
             raise RuntimeError(
                 f"git source {spec.name!r}: could not resolve a checkout path "
                 f"(repo={spec.repo!r}) via the agent-worktrees registry"
@@ -276,9 +318,7 @@ def run_reindex(
         # An explicit --source names one source: prefer its configured spec so
         # its repo/auth still resolve; otherwise synthesize a bare spec.
         by_name = {s.name: s for s in configured_source_specs()}
-        sources_to_index = [
-            by_name.get(source) or SourceSpec(name=source, type=_type_from_name(source))
-        ]
+        sources_to_index = [_resolve_explicit_source_spec(source, by_name)]
 
     total_chunks = 0
     total_deleted = 0

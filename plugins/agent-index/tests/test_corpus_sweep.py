@@ -86,6 +86,66 @@ def test_specs_resolve_correct_per_repo_paths(tmp_path, monkeypatch) -> None:
     assert engine._connector_kwargs(specs["github:owner/dotfiles"]) == {"token": "tok-someacct"}
 
 
+def test_explicit_commits_source_resolves_against_parent_repo(tmp_path, monkeypatch) -> None:
+    """A direct ``--source git:X:commits`` request (as a per-source full-reindex
+    task, not the ``source=None``/"all" sweep that naturally bundles commits
+    as a ``discover()`` byproduct of its parent) must resolve the SAME repo
+    path/ref/auth as its parent ``git:X`` file source -- not synthesize a bare,
+    repo-less spec that silently falls back to the wrong cwd (#1350)."""
+    dotfiles, ce = _registry(tmp_path, monkeypatch)
+    _write(dotfiles / ".agent-index" / "config.yaml", """\
+        corpus:
+          sources:
+            - name: git:dotfiles
+              repo: dotfiles
+            - name: git:copilot-extensions
+              repo: copilot-extensions
+              ref: origin/dev
+              auth: {account: someacct}
+    """)
+    monkeypatch.setattr(engine, "_resolve_gh_token", lambda account: f"tok-{account}")
+    by_name = {s.name: s for s in engine.configured_source_specs()}
+
+    spec = engine._resolve_explicit_source_spec("git:copilot-extensions:commits", by_name)
+    assert spec.name == "git:copilot-extensions:commits"
+    assert engine._connector_kwargs(spec) == {
+        "repo_path": str(ce),
+        "ref": "origin/dev",
+        "token": "tok-someacct",
+    }
+
+
+def test_unconfigured_commits_source_without_parent_raises(tmp_path, monkeypatch) -> None:
+    """A ``:commits`` request whose base name ISN'T a configured source either
+    (typo, stale name) still can't silently resolve to a bogus cwd default --
+    it must raise, same as any other unresolvable explicit source name."""
+    _registry(tmp_path, monkeypatch)
+    by_name = {s.name: s for s in engine.configured_source_specs()}
+
+    spec = engine._resolve_explicit_source_spec("git:nonexistent:commits", by_name)
+    assert spec.repo is None and spec.repo_path is None
+    try:
+        engine._connector_kwargs(spec)
+        raise AssertionError("expected RuntimeError for an unresolvable named source")
+    except RuntimeError as exc:
+        assert "git:nonexistent:commits" in str(exc)
+
+
+def test_unconfigured_named_source_raises_not_silent_cwd_fallback(tmp_path, monkeypatch) -> None:
+    """Any OTHER explicitly-named (non-``:commits``, non-bare-``git``) source
+    that fails to resolve a checkout path must also raise loudly -- not just
+    the narrower repo/repo_path-hinted case #1350 originally covered."""
+    _registry(tmp_path, monkeypatch)
+    by_name = {s.name: s for s in engine.configured_source_specs()}
+
+    spec = engine._resolve_explicit_source_spec("git:totally-unknown", by_name)
+    try:
+        engine._connector_kwargs(spec)
+        raise AssertionError("expected RuntimeError for an unresolvable named source")
+    except RuntimeError as exc:
+        assert "git:totally-unknown" in str(exc)
+
+
 def test_git_source_ref_override_and_authenticated_fetch(tmp_path, monkeypatch) -> None:
     """A ``git:`` source may declare ``ref:`` (index a branch other than the
     remote's default, e.g. a repo whose integration branch is ``dev`` not
