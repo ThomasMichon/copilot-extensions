@@ -733,3 +733,38 @@ attempt was reverted). Two genuinely new items:
   `plugins/agent-bridge/README.md:50` ("every two seconds" -> "every 45
   seconds") and this file's own streaming-architecture note above (now
   describes the 45s default instead of the superseded 2s one).
+
+**Review round 6 -- genuine bug: real CLI-backed namespace providers
+swallow failures that `incomplete_namespaces` was supposed to catch.**
+`AgentResolver.list_agents_async()`'s `incomplete_namespaces` tracking
+(round 2's fix) only records an exception that escapes a namespace
+resolver's `list()` call. The production manifest-backed providers are
+`CliNamespaceResolver`s (`agent_registry_namespace.py`) with no in-process
+fallback, and its `list()` converted a missing binstub, a non-zero exit,
+an execution error/timeout, or malformed JSON output into the *same*
+successful empty list -- so a genuine provider failure never escaped as
+an exception at all, leaving `incomplete_namespaces` empty and letting
+`--subscribe` emit a false `removed` frame for every agent in that
+namespace: exactly the bug the field exists to prevent.
+
+Fixed by splitting the two cases `CliNamespaceResolver.list()` was
+conflating: a missing binstub (the provider genuinely isn't installed on
+this machine -- a legitimate "contributes nothing" absence, checked via
+`shutil.which` on the resolved executable, the explicit `command` vector
+included) still degrades to `[]` with no fallback; anything after that --
+non-zero exit, an execution failure/timeout (`_run` returning `None`
+despite a found executable), or unparseable output -- now raises a new
+`NamespaceListIncomplete` (defined alongside the resolver) when there's no
+fallback to cover it, so it reaches `list_agents_async()`'s existing
+generic exception handling exactly like the test-double failure round 2
+already covered. A resolver *with* a fallback is unaffected -- the
+fallback still absorbs the failure as before. Deliberately left `_run()`
+itself untouched: it's shared by `resolve()`/`ensure_ready()`/
+`target_repo()`, whose own fallback-or-raise handling already treats a
+`None` return correctly, and widening its contract would have changed
+behavior for those unrelated call sites for no benefit here. Added 4 new
+`CliNamespaceResolver`-level tests (timeout, non-zero exit, unparseable
+output each raising with no fallback; the same non-zero-exit case still
+degrading gracefully through a fallback) plus one `AgentResolver`-level
+integration test using a real `CliNamespaceResolver` (not a test double)
+to close the loop the reviewer specifically asked for.

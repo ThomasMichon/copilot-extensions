@@ -22,6 +22,20 @@ _NS_NOT_FOUND_EXIT = 3
 _NS_BAD_STATE_EXIT = 4
 
 
+class NamespaceListIncomplete(RuntimeError):
+    """A namespace provider's enumeration could not be trusted as complete.
+
+    Raised by ``CliNamespaceResolver.list()`` for a genuine failure after
+    the binstub was found (execution error/timeout, non-zero exit,
+    unparseable output) -- never for a missing binstub, which is a
+    legitimate "this namespace contributes nothing on this machine"
+    absence and returns an empty list instead. ``AgentResolver.
+    list_agents_async()`` catches this (via its generic exception
+    handling) to mark the namespace incomplete rather than treating the
+    empty/partial result as an authoritative roster.
+    """
+
+
 class NamespaceResolver(ABC):
     """Pluggable resolver for a namespace of agents."""
 
@@ -142,7 +156,17 @@ class CliNamespaceResolver(NamespaceResolver):
         return await fn(*args, **kwargs)
 
     async def list(self, *, timeout: float | None = None) -> list[NamespaceAgentInfo]:
-        """Enumerate this namespace's agents."""
+        """Enumerate this namespace's agents.
+
+        A missing binstub (the provider isn't installed on this machine) is
+        a legitimate "this namespace contributes nothing here" absence and
+        returns an empty list without complaint. Any failure *after* that
+        -- a non-zero exit, an execution error/timeout (``_run`` returning
+        ``None`` despite a found executable), or unparseable output -- is a
+        genuine failure instead: it raises ``NamespaceListIncomplete`` (when
+        there's no in-process fallback to cover it) so a caller can't
+        mistake it for a clean, authoritative empty roster.
+        """
         from . import agent_registry as compat
 
         ttl = compat._namespace_list_ttl()
@@ -151,29 +175,44 @@ class CliNamespaceResolver(NamespaceResolver):
             if (time.monotonic() - stamped_at) <= ttl:
                 return cached
 
+        exe_candidate = self._command[0] if self._command else self._binstub
+        binstub_present = shutil.which(exe_candidate) is not None
         run_kwargs = {} if timeout is None else {"timeout": timeout}
         res = await self._run(["namespace-list"], **run_kwargs)
+
         if res is not None and res[0] == 0:
             try:
                 agents = [NamespaceAgentInfo(**doc) for doc in json.loads(res[1])]
-            except Exception:
+            except Exception as exc:
                 log.warning(
                     "namespace-list output unparseable (%s) -- falling back",
                     self._binstub,
                     exc_info=True,
                 )
-            else:
-                if ttl > 0:
-                    self._list_cache = (time.monotonic(), agents)
-                return agents
-        if self._fallback is None:
+                if self._fallback is None:
+                    raise NamespaceListIncomplete(
+                        f"{self._binstub} namespace-list produced unparseable "
+                        "output"
+                    ) from exc
+                return await self._fallback_or_raise("list")
+            if ttl > 0:
+                self._list_cache = (time.monotonic(), agents)
+            return agents
+
+        if not binstub_present:
             log.debug(
                 "namespace '%s:': provider '%s' unavailable and no in-process "
                 "fallback -- contributing no dynamic agents",
                 self._prefix,
                 self._binstub,
             )
-            return []
+            if self._fallback is None:
+                return []
+            return await self._fallback_or_raise("list")
+
+        reason = "failed to execute" if res is None else f"exited {res[0]}"
+        if self._fallback is None:
+            raise NamespaceListIncomplete(f"{self._binstub} namespace-list {reason}")
         return await self._fallback_or_raise("list")
 
     async def resolve(
