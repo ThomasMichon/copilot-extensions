@@ -260,17 +260,50 @@ ask, not a change in intent.
         for the existing `_COMMAND` pairs (deliberately *not* called from
         `load_config()`). `Config.token` stays the raw direct value; only
         actual use sites resolve the command-backed form.
+      - **Server-side consumers also need explicit resolution, not just
+        clients:** `coordinator_cli.py:_cmd_serve` builds
+        `effective_token = args.token or base.token` — `base.token` is
+        `load_config().token`, the deliberately-raw value above — and passes
+        it as `cfg.token` into `server.py`'s `build_app()`/`serve()`, where
+        it gates the unsafe-bind guard (`server.py:74-95`) and request
+        authentication (`server.py:308`). If an operator sets only
+        `AGENT_DISPATCH_TOKEN_COMMAND` (no direct value), the coordinator
+        would see no token at all even though `client_token()`-based clients
+        now resolve one — a functional mismatch, not just an inconsistency.
+        Fix: `_cmd_serve` resolves `effective_token` via the shared lib's
+        `resolve_direct_first()` directly (the same resolution
+        `client_token()` performs) **at this one specific server-startup
+        call site**, rather than through `load_config()`. This keeps
+        `load_config()` itself side-effect-free while ensuring the actual
+        point where the token gates bind safety and auth resolves the
+        command-backed form too.
       - `no_cli_prompts.py:92` generates a **standalone helper script** that
         independently resolves `AGENT_DISPATCH_TOKEN` in a separate process —
         it will NOT inherit `client_token()`'s changes automatically. Update
         the generated helper's own token-resolution logic to call the shared
         lib directly (or shell out to the same command), with its own test.
-      - `agent-codespaces`/`agent-containers`' peer env-var allowlists
-        forward today's named dispatch vars to spawned codespace/container
-        peers but do not yet know about `AGENT_DISPATCH_TOKEN_COMMAND` — add
-        the new var name to both allowlists so a command-sourced token
-        actually propagates to a spawned peer instead of silently arriving
-        tokenless.
+      - **Peer-launch propagation goes through the canonical source, not the
+        generated copies:** `_peer_launch.py` (and `agent-dispatch`'s own
+        `peer_launch.py`) in every consumer plugin (agent-bridge,
+        agent-dispatch, agent-codespaces, agent-containers, agent-worktrees,
+        agent-logger, agent-index, agent-machines) are byte-identical
+        generated copies of `libs/peer-launch/peer_launch.py`, synced via
+        `tools/sync-peer-launch.py` — editing a generated copy directly
+        breaks that sync guard. Add `AGENT_DISPATCH_TOKEN_COMMAND` to the
+        canonical `libs/peer-launch/peer_launch.py`'s `peer_environment()`
+        allowlist (following its own documented 3-step process: the mapping
+        entry, target-specific environment rebinding, and confirming
+        `tools/sync-installation-context.py` registration is unaffected),
+        then run `tools/sync-peer-launch.py` to regenerate every consumer
+        copy — never hand-edit a `_peer_launch.py`/`peer_launch.py` copy.
+      - **A separate, non-generated allowlist also needs the new var:**
+        `agent-containers`' `copilot_detach.py` has its own independent
+        `_DISPATCH_ENV_KEYS` tuple (lines ~24-35) governing which dispatch
+        vars forward into a detached container session; it already lists
+        `AGENT_DISPATCH_SHARED_TOKEN_COMMAND` but not a plain
+        `AGENT_DISPATCH_TOKEN_COMMAND`. Add it there too (lines ~161-164 is
+        where the tuple is consumed) — this is distinct from the
+        `peer-launch` sync above, not covered by it.
 - [ ] `agent-index`: add `AGENT_INDEX_ADO_TOKEN_COMMAND` via
       `resolve_direct_first()`, consumed by the Azure DevOps source
       (`azure_devops.py:62-66`). Confirm whether `agent-index`'s other
@@ -313,11 +346,14 @@ ask, not a change in intent.
       precedence** (the highest-risk migration step).
 - [ ] New agent-vault, agent-dispatch (`AGENT_DISPATCH_TOKEN` — covering the
       five consumption-site consolidations onto `client_token()`, the
-      standalone `no_cli_prompts.py` helper, and the
-      agent-codespaces/agent-containers peer allowlist propagation, but
-      explicitly *not* routing `config.py:231`'s `load_config()` read
-      through command resolution), and agent-index (`AGENT_INDEX_ADO_TOKEN`
-      and `AGENT_INDEX_GITHUB_TOKEN`) tests (Phase 4) pass, each proving:
+      explicit `_cmd_serve` server-side resolution, the standalone
+      `no_cli_prompts.py` helper, the canonical `libs/peer-launch/
+      peer_launch.py` sync (regenerating every consumer's `_peer_launch.py`/
+      `peer_launch.py` copy), and `agent-containers`' separate
+      `copilot_detach.py` `_DISPATCH_ENV_KEYS` tuple, but explicitly *not*
+      routing `config.py:231`'s `load_config()` read through command
+      resolution), and agent-index (`AGENT_INDEX_ADO_TOKEN` and
+      `AGENT_INDEX_GITHUB_TOKEN`) tests (Phase 4) pass, each proving:
       direct env wins (or loses, per the correct precedence for that call
       site) when both are set; command fetch works when only `_COMMAND` is
       set; absence of both resolves to `None`/not-configured, matching each
@@ -433,3 +469,28 @@ conventions to mirror) to be elaborated once this plan clears review._
   installability (no mandatory coordinator, no cross-plugin runtime
   dependency) — both already-established patterns, applied rather than
   reinvented.
+
+### 2026-10-02 — Review round 6 (PR #4910)
+- Copilot review: the pattern-reconciliation fix from round 5 resolved; two
+  Medium findings carried forward from an earlier pass that hadn't yet been
+  addressed: (1) the plan kept `config.py:231`'s `load_config().token` raw
+  (correctly, to avoid the `load_config()` side-effect risk), but never
+  added explicit resolution at the server's OWN consumption sites —
+  `coordinator_cli.py:_cmd_serve` builds `cfg.token` from that same raw
+  value, which then gates `server.py`'s unsafe-bind guard and request auth,
+  so a `_COMMAND`-only configuration would leave the coordinator itself
+  believing no token is set even though clients resolve one; (2) the
+  peer-propagation sub-task named only agent-codespaces/agent-containers,
+  but `_peer_launch.py` (`peer_launch.py` for agent-dispatch itself) is a
+  **generated, synced copy** in 8 different plugins
+  (`tools/sync-peer-launch.py`) — editing a copy directly breaks the sync
+  guard; the actual edit point is the canonical
+  `libs/peer-launch/peer_launch.py` source, followed by re-running the sync
+  tool. Also found a second, genuinely separate allowlist in
+  `agent-containers/copilot_detach.py`'s own `_DISPATCH_ENV_KEYS` tuple that
+  the peer-launch sync doesn't touch at all. Both addressed: added an
+  explicit `_cmd_serve`-level `resolve_direct_first()` call (not via
+  `load_config()`) for the server's own token resolution; corrected the
+  propagation sub-task to edit the canonical `peer_environment()` allowlist
+  and re-run the sync tool, plus a separate sub-task for
+  `copilot_detach.py`'s own tuple.
