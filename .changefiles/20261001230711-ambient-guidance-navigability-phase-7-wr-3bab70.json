@@ -3,7 +3,7 @@
   "changes": [
     {
       "plugin": "customizing-copilot",
-      "type": "patch"
+      "type": "dev"
     }
   ]
 }
