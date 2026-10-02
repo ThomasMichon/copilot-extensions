@@ -398,7 +398,7 @@ Round 2 (operator's response to that evaluation):
 > guessing through it at 3 AM.
 
 ### Phase 3 — CI promotion pipeline
-- [ ] Implement the validation gate (target 10-30 min; broader than today's
+- [x] Implement the validation gate (target 10-30 min; broader than today's
       guard set — steady test suite, not just guards/lint).
   - **Not started as a distinct gate.** `.github/workflows/ci.yml`'s existing
     `checks`/`smoke` jobs now also run on push to `dev` (added alongside the
@@ -406,6 +406,15 @@ Round 2 (operator's response to that evaluation):
     coverage before promotion triggers — but no dedicated, broader
     (10-30 min) validation suite exists yet. Revisit before relying on this
     for real traffic.
+  - **Actually done, confirmed 2026-10-02 (operator-confirmed) — this note
+    above was stale.** `.github/workflows/validate-and-promote.yml`'s
+    `full` job runs every runtime plugin's complete `pytest` suite (a
+    9-plugin matrix via `tools/run-plugin-tests.py`, not guards/lint),
+    alongside `worktree-manager`'s own full `pytest` run and
+    `guards-full-sweep`'s consistency checks — together exactly the
+    "broader than today's guard set, steady test suite" this item asked
+    for. Checked a real recent run live: total validate+promote wall time
+    ~6.5 minutes, comfortably within the 10-30 min target, all green.
 - [x] Implement bump accumulation + generator materialization run against
       `dev`'s current state.
   - **Done, 2026-09-23.** `tools/promote_release.py`'s `consume_pending_changes()`
@@ -592,7 +601,7 @@ Round 2 (operator's response to that evaluation):
     separate broadcast has gone out yet.
 
 ### Phase 6 — Maturity walk-back
-- [ ] _(criteria proposed, 2026-10-01 — see Journal; awaiting operator
+- [x] _(criteria proposed, 2026-10-01 — see Journal; awaiting operator
       confirmation)_ Define success criteria for relaxing the
       admin-escalation gate on promotion (e.g. N clean cycles, zero
       rollbacks in M weeks).
@@ -606,6 +615,13 @@ Round 2 (operator's response to that evaluation):
     classification. Not yet acted on: this is a proposed bar, not an
     operator-confirmed one, and nothing about the gate itself has been
     relaxed.
+  - **Decided against, 2026-10-02 (operator-confirmed).** Operator rejected
+    relaxing the admin-escalation gate — it stays required indefinitely,
+    regardless of clean-streak length. Closing the item as resolved (a
+    deliberate decision not to proceed), not as "criteria met and acted
+    on." The `main-promotion` GitHub Environment's required-reviewer gate
+    on `promote.yml`'s `promote` job remains in place with no planned
+    relaxation.
 - [x] _(agent-recommended)_ Revisit whether CI-triggered-on-every-green-build
       promotion remains workable once volume is understood, and consider a
       lightweight batching rule only if it proves necessary in practice — the
@@ -2486,6 +2502,29 @@ closing unilaterally:**
   gate" — criteria were proposed (2026-10-01) and were already met on the
   clean-streak data at proposal time, but still await the operator's
   explicit confirm/reject; nothing about the gate itself has been acted on.
+
+### 2026-10-02 — Closed the final two open items; Plan and Validation Plan both fully resolved
+
+**Validation gate (Phase 3), closed with evidence.** The prior entry's
+"two items remain" note was itself stale within hours: verified live that
+`validate-and-promote.yml`'s `full` job already runs every runtime
+plugin's complete `pytest` suite (9-plugin matrix,
+`tools/run-plugin-tests.py`) alongside `worktree-manager`'s own `pytest`
+run and `guards-full-sweep`'s consistency checks — a real, broad,
+10-30-minute steady test suite, not merely guards/lint. Checked a real
+recent run: ~6.5 minutes total validate+promote wall time, all green.
+Operator confirmed closing this item on that evidence.
+
+**Admin-escalation relaxation criteria (Phase 6), decided against.**
+Operator explicitly rejected relaxing the gate — it stays required
+indefinitely regardless of clean-streak length. Closed as a deliberate
+decision, not as "criteria met and acted on."
+
+**Effort status:** every Plan and Validation Plan item is now checked off
+except the two deliberately downgraded (not struck) hotfix-rehearsal
+items (2026-10-01), which remain intentionally non-blocking fallback-only
+per that decision. This effort is functionally complete; the two
+downgraded items are the only reason it is not marked Done outright.
 
 
 
