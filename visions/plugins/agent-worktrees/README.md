@@ -187,9 +187,13 @@ A family of `preToolUse` hooks (`anchor_write_guard`, `cross_repo_guard`,
 `statelessness_guard`) nudges an agent before it writes somewhere it
 shouldn't — the shared anchor checkout, a different agent-guarded repo, or
 personal state inside a stateless harness. Their harm model is **unreported
-drift**: a dirty anchor that blocks the next deployment pull, state that
-silently never lands anywhere durable — not a security boundary defending
-against a deliberately evasive adversary. They assume a cooperative agent
+drift or misrouted ownership**, not adversarial evasion: `anchor_write_guard`
+and `statelessness_guard` prevent a dirty anchor or orphaned state that
+silently never lands anywhere durable; `cross_repo_guard` keeps an edit
+routed through the guarded repo's own owning agent and its repository
+policy rather than letting it land from the wrong harness. Neither concern
+is a security boundary defending against a deliberately evasive adversary.
+They assume a cooperative agent
 that receives and acts on the reminder once it reaches the guard's covered
 path; exhaustively closing every exotic invocation that could evade
 pattern-matching is not the goal, and a gap of that kind is a coverage note,
