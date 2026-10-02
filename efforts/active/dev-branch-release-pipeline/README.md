@@ -6,7 +6,7 @@
   `dev` created 2026-09-23 (Phase 2, in progress — see Plan's sequencing note
   before assuming it's "live").
 - **Created:** 2026-09-22
-- **Status:** Active
+- **Status:** Done (2026-10-02)
 - **Vision:** none yet for the pipeline itself — this effort may spawn a
   `visions/release-pipeline` entry once the design settles; revisit at
   Phase 2/3 boundary. It is, however, the named realization vehicle for the
@@ -490,13 +490,18 @@ Round 2 (operator's response to that evaluation):
   - **Done, 2026-09-23 (cutover session).** `tools/rollback_release.py
     pause --reason "..." --push` lands first; `promote_release.py` refuses
     to run while paused (`PromotionPaused`, exit 0 -- not a CI failure).
-- [ ] _(downgraded, 2026-10-01 — see Journal)_ Document and rehearse the
+- [x] _(downgraded, 2026-10-01 — see Journal)_ Document and rehearse the
       hotfix flow: fork last-known-good `dev`, run the snapshot tool,
       hot-patch `main` directly, cherry-pick the fix back to `dev`. No
       longer a blocking obligation — retained only as a rare fallback for a
       scenario where the ordinary `dev`→`main` path is itself unavailable
       (e.g. a broken promotion pipeline); forward-fix-and-promote is the
       default incident response now that live latency is empirically fast.
+  - **Transferred, 2026-10-02 (operator-confirmed).** Closed out of this
+    effort and transferred to
+    ThomasMichon/copilot-extensions#4944 — a tracked future-idea issue:
+    rehearse/document the fallback hotfix flow only if it is ever actually
+    invoked for a real incident, not speculatively ahead of time.
 - [x] Document the rollback flow: pause CI, `git revert` the generated commit
       + re-tag, never force-push, then resume CI.
   - **Done, 2026-09-23 (cutover session), implemented differently than
@@ -712,11 +717,14 @@ Round 2 (operator's response to that evaluation):
     layer (`reconcile.py::_version_lt`/`_versions_equal`) independently
     uses real semver-aware comparison via `packaging.Version`, with a
     monotonic-never-downgrade guard.
-- [ ] _(downgraded, 2026-10-01 — see Journal)_ Simulate one full hotfix
+- [x] _(downgraded, 2026-10-01 — see Journal)_ Simulate one full hotfix
       cycle end-to-end (fork LKG → patch → cherry-pick back) — no longer
       gating reliance on the mechanism, since forward-fix-and-promote is
       now the default incident response; rehearse only if the fallback
       path is ever actually invoked for real.
+  - **Transferred, 2026-10-02 (operator-confirmed)** — same disposition as
+    the matching Plan item above: closed out of this effort and
+    transferred to ThomasMichon/copilot-extensions#4944.
 - [x] Simulate one rollback (revert generated commit, re-tag) and confirm CI's
       non-incremental-update guard actually blocks a bad subsequent promotion.
   - **Confirmed via synthetic-repo test, 2026-10-01.**
@@ -2525,6 +2533,27 @@ except the two deliberately downgraded (not struck) hotfix-rehearsal
 items (2026-10-01), which remain intentionally non-blocking fallback-only
 per that decision. This effort is functionally complete; the two
 downgraded items are the only reason it is not marked Done outright.
+
+### 2026-10-02 — Transferred the two remaining hotfix items; effort Done
+
+Operator confirmed closing out the two remaining downgraded hotfix-flow
+items (document/rehearse the fallback hotfix flow; simulate one full
+hotfix cycle) rather than leaving them open indefinitely in this effort.
+Filed ThomasMichon/copilot-extensions#4944 as a tracked future-idea issue
+— rehearse/document the fallback flow only if it's ever actually invoked
+for a real incident — and transferred both items to it. Every Plan and
+Validation Plan item in this effort is now either resolved or transferred
+to a named tracked objective. **Status: Done.**
+
+This effort delivered the full dev-branch release pipeline described in
+its Guiding Intent: a native changefile-driven version-accumulation
+system, a generator that wholesale-replaces `main`'s tree from `dev`'s
+processed state as a single generated commit, a merged validate-and-promote
+CI workflow with a rolling-queue concurrency guarantee and admin-escalation
+gate, a pause/revert rollback mechanism, the `main`→`dev` contributor-flow
+cutover (with a live migration guide and a pinned contributor announcement),
+and an extensive empirical validation record — all currently running in
+production with a 90%+ real-run success rate and zero rollbacks to date.
 
 
 
