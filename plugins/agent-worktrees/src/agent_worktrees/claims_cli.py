@@ -11,6 +11,7 @@ from . import (
     claims_annotate,
     claims_find_cli,
     claims_handoff_cli,
+    claims_history_cli,
     claims_owner,
     claims_transitive_cli,
     obligations,
@@ -75,7 +76,9 @@ def add_parsers(sub) -> None:
         "to list every unsettled obligation anywhere in a worktree's whole "
         "subtree (itself + every worktree it created, transitively) -- "
         "a diagnostic convenience, never a substitute for the per-hop "
-        "finalize gate",
+        "finalize gate, OR 'history <ref>' to list the durable, ordered "
+        "claim/release/settle event history recorded for a claimed "
+        "resource (today: pr-kind only)",
     )
     p.add_argument(
         "--remove",
@@ -291,6 +294,8 @@ def cmd_claims(args: argparse.Namespace) -> int:
         return claims_find_cli.cmd_claims_find(args, target[1:])
     if target and target[0] == "transitive":
         return _claims_transitive(args, target[1] if len(target) > 1 else None)
+    if target and target[0] == "history":
+        return _claims_history(args, target[1] if len(target) > 1 else None)
     worktree_id = target[0] if target else None
     return _claims_show(args, worktree_id)
 def _require_coordination_readiness(
@@ -979,4 +984,12 @@ def _claims_transitive(args: argparse.Namespace, worktree_id: str | None) -> int
         infer_worktree_id=_infer_worktree_id,
         json_error=_json_error,
         json_output=_json_output,
+    )
+
+
+def _claims_history(args: argparse.Namespace, ref: str | None) -> int:
+    """``claims history <ref>`` -- delegates to ``claims_history_cli``
+    (kept a separate module for the module-size cap)."""
+    return claims_history_cli.cmd_claims_history(
+        args, ref, json_error=_json_error, json_output=_json_output,
     )
