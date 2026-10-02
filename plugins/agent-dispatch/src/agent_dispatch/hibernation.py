@@ -98,7 +98,8 @@ def run_and_resume(
     to independently re-discover "nothing changed" would be pure waste -- and,
     observed in production, a source of redundant near-duplicate PR comments
     when a worker re-posted a status update on every such no-op wake
-    (ThomasMichon/copilot-extensions#2576, gim-home/odsp-web-harness#458). On a
+    (ThomasMichon/copilot-extensions#2576, also observed independently in a
+    consuming harness repo's own issue tracker). On a
     124, re-invoke ``runner`` again in place (the wait command re-arms itself
     against the same baseline/cursor) rather than resuming; only a genuine
     transition (0) or an actual error (anything else) escalates to a resume.

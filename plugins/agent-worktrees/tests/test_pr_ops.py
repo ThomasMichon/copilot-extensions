@@ -833,6 +833,72 @@ class TestCreatePRForkFlow:
         assert res["success"] is True, res
         assert res["pr_head"] == "explicit-owner:feature/work-2-aaaa"
 
+    def test_fork_mode_confirmed_records_consent_for_future_calls(
+        self, pr_repo, tmp_path, monkeypatch,
+    ):
+        """A successful ``confirm_fork=True`` call durably records the fork
+        target (ThomasMichon/copilot-extensions#4756), so a later call for
+        the same repo doesn't need ``--confirm-fork`` again."""
+        from agent_worktrees import fork_pr, pr_ops, registry_paths
+
+        config, wid, _wt_path, _remote_dir = pr_repo
+        config = self._fork_config(config, tmp_path)
+
+        fork_dir = tmp_path / "fork.git"
+        git_ops.git("init", "--bare", "-b", "master", str(fork_dir))
+        fake = self._fake_provider("theirfork", str(fork_dir))
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: fake,
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.providers.account_token_for_slug",
+            lambda *a, **k: None,
+        )
+
+        res = pr_ops.create_pr(wid, config, confirm_fork=True)
+        assert res["success"] is True, res
+
+        consent_path = registry_paths.registry_path("fork_consent.yaml")
+        assert consent_path.exists()
+        recorded = fork_pr.load_fork_consent()
+        assert recorded[res["repo"]]["remote"] == "fork"
+        assert recorded[res["repo"]]["owner"] == "theirfork"
+
+    def test_fork_mode_prior_consent_skips_reconfirmation(
+        self, pr_repo, tmp_path, monkeypatch,
+    ):
+        """Once a repo's fork flow was confirmed before (a prior confirmed
+        call), a later ``create_pr`` call with no ``confirm_fork`` -- as a
+        brand-new worktree for the same repo would make -- proceeds straight
+        to the fork instead of asking again."""
+        from agent_worktrees import pr_ops
+
+        config, wid, _wt_path, _remote_dir = pr_repo
+        config = self._fork_config(config, tmp_path)
+
+        fork_dir = tmp_path / "fork.git"
+        git_ops.git("init", "--bare", "-b", "master", str(fork_dir))
+        fake = self._fake_provider("theirfork", str(fork_dir))
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: fake,
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.providers.account_token_for_slug",
+            lambda *a, **k: None,
+        )
+
+        confirmed = pr_ops.create_pr(wid, config, confirm_fork=True)
+        assert confirmed["success"] is True, confirmed
+
+        # A later call (e.g. a fresh PR for the same repo) with no
+        # `confirm_fork` must not re-ask -- the prior confirmation already
+        # recorded consent for this repo.
+        res = pr_ops.create_pr(wid, config, new=True, branch="feature/second-fork-call")
+
+        assert res["success"] is True, res
+        assert "needs_confirmation" not in res
+        assert res["remote"] == "fork"
+
     def test_fork_mode_off_by_default(self, pr_repo):
         """A repo that never sets pr.fork/pr.roles is fully unaffected."""
         config, wid, _wt_path, _remote_dir = pr_repo

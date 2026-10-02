@@ -384,8 +384,27 @@ def _build_parser():
     return parser
 
 
+def _lower_own_priority() -> None:
+    """Host good-citizen throttle, applied once before the server starts.
+
+    On a CPU-only device this engine is the actual CPU-bound consumer during a
+    large reindex (continuous model inference) -- distinct from the index
+    worker's own ``indexer_nice`` throttle, which does not touch this process.
+    Best-effort and never raises; see ``IndexConfig.engine_nice`` for the
+    env var and default.
+    """
+    try:
+        from agent_index.index_config import IndexConfig
+        from agent_index.indexing.priority import lower_current_process_priority
+
+        lower_current_process_priority(IndexConfig().engine_nice)
+    except Exception:  # pragma: no cover - defensive; must never block startup
+        logger.debug("could not apply engine host-politeness throttle", exc_info=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the engine worker from the command line."""
+    _lower_own_priority()
     parser = _build_parser()
     args = parser.parse_args(argv)
     run_engine(host=args.host, port=args.port)

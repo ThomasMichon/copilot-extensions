@@ -305,6 +305,64 @@ separate status-only delta. When the effort lives in a **review-gated** repo and
 also drives a **directly-pushed** target, the reviewed intent (the effort/plan
 PR) lands **before** the unreviewed change that realizes it.
 
+## Keep internal specifics out of a public-facing effort
+
+An effort's Journal is a natural place to record *how* a decision was reached
+— what was investigated, what broke, what the fix was. When the effort's own
+repo is **public or externally-shareable**, that narrative can't carry the
+same level of concrete detail a private knowledge repo's effort would — this
+holds regardless of any private relationship between that repo and the
+systems being discussed; what matters is that the repo itself is public. A
+real **private/internal** repo or system name, a **private** cross-organization
+issue reference, device or account naming conventions, or a blow-by-blow
+internal-investigation narrative is exactly the kind of content that leaks
+when it's committed to a public tree, even inside an effort folder that
+otherwise looks like ordinary engineering notes. This is **not** a rule
+against cross-repo references in general — a fully-qualified reference to a
+genuinely public repo (upstream, downstream, a public dependency) is
+legitimate traceability and belongs in the Journal exactly as this guide's own
+*Cross-repo placement* and the skill's *Issues and sources* sections already
+expect; narrow the caution to references that would themselves reveal a
+private repo, system, or organization's existence or internals.
+
+- **Abstract, don't omit.** The *decision* and its *rationale* are still
+  worth capturing — generalize the specifics instead of deleting the entry.
+  "Investigated whether a dependent service could host X directly; confirmed
+  it couldn't without upstream changes, so built the control layer here
+  instead" preserves the lesson without naming the dependent service,
+  quoting its internal issue number, or walking through its source.
+- **Route the un-abstracted record to where it belongs.** If a precise,
+  unabstracted account is genuinely useful to keep somewhere, that record
+  belongs in a private knowledge repo (per that repo's own conventions), not
+  in the public effort — note generically, in prose, that a fuller private
+  record exists ("see the private incident record") rather than reproducing
+  it **or linking to it**: the one-way linking rule above (private links to
+  the canonical public effort, never the reverse) applies here too, and even
+  a "generic" resolvable link can expose the private repo's existence or
+  location to a public reader.
+- **This isn't unique to Journal entries.** The same bar applies to Context,
+  Request capture, and any sub-doc the effort links out to — anywhere an
+  agent might be tempted to paste a real cross-repo reference, an internal
+  codename, or incident specifics because that's what actually happened.
+- **Redaction is the one safety exception to verbatim capture** (Request, and
+  the `inception-transcript.md` sidecar) — but a name swap alone is not
+  always enough. Capture everything else verbatim and generalize only the
+  private part: replace the identifier with a generic placeholder *and*, if
+  the surrounding sentence would still describe the private system's
+  specific internals even with the name removed (its architecture, a
+  specific mechanism it lacks, an implementation detail), generalize that
+  narrative too using the same *abstract, don't omit* technique above —
+  never drop, paraphrase, or soften the surrounding *intent* to work around
+  it, only the private specifics that intent doesn't depend on. A verbatim
+  exchange that necessarily contains such content is captured in full in a
+  private knowledge repo's own sidecar instead of the public repo's
+  `inception-transcript.md`, with the public README noting generically (in
+  prose, no link) that a fuller private record exists elsewhere.
+- **When in doubt, treat the repo's own leak-guard conventions as the
+  bar**, if the repo has one (an identifier denylist, a scrub tool, a
+  stated acceptance boundary) — abstract anything that convention would
+  flag, not just what you personally recognize as sensitive.
+
 ## Adoption & the addendum
 
 The `planning-efforts` skill governs the canonical pattern above. An adopting

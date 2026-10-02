@@ -333,7 +333,7 @@ def test_account_map_round_trips(home: Path):
 def test_account_map_resolves_org_owned_repo(home: Path):
     """An org-owned repo resolves to the mapped login, not the org name."""
     repos.set_account_map("github", "ThomasMichon")
-    assert repos.account_for_github_slug("github/copilot-agent-runtime") == "ThomasMichon"
+    assert repos.account_for_github_slug("github/example-private-runtime") == "ThomasMichon"
     # A repo entry is not required for the map to apply.
     assert repos.account_for_github_owner("github") == "ThomasMichon"
 
@@ -396,7 +396,7 @@ def test_registration_org_owner_needs_clarify(home: Path):
     with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
          patch("agent_worktrees.repos.shutil.which", return_value="gh"):
         r = repos.resolve_registration_account(
-            "https://github.com/github/copilot-agent-runtime.git")
+            "https://github.com/github/example-private-runtime.git")
     assert r.source == "owner-fallback"
     assert r.owner == "github"
     assert r.needs_clarify is True
@@ -416,7 +416,7 @@ def test_registration_account_map_resolves(home: Path):
     with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
          patch("agent_worktrees.repos.shutil.which", return_value="gh"):
         r = repos.resolve_registration_account(
-            "https://github.com/github/copilot-agent-runtime.git")
+            "https://github.com/github/example-private-runtime.git")
     assert r.source == "account_map"
     assert r.login == "ThomasMichon"
     assert r.needs_clarify is False
@@ -440,7 +440,7 @@ def test_registration_sibling_explicit_resolves(home: Path):
     with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
          patch("agent_worktrees.repos.shutil.which", return_value="gh"):
         r = repos.resolve_registration_account(
-            "https://github.com/github/copilot-agent-runtime.git")
+            "https://github.com/github/example-private-runtime.git")
     assert r.source == "sibling"
     assert r.login == "ThomasMichon"
     assert r.needs_clarify is False
@@ -457,7 +457,7 @@ def test_registration_no_gh_never_nags(home: Path):
     # gh unavailable -> can't verify -> assume authenticated -> no clarify.
     with patch("agent_worktrees.repos.shutil.which", return_value=None):
         r = repos.resolve_registration_account(
-            "https://github.com/github/copilot-agent-runtime.git")
+            "https://github.com/github/example-private-runtime.git")
     assert r.needs_clarify is False
 
 

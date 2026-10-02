@@ -1430,8 +1430,8 @@ def test_no_plugins_emits_nothing(tmp_path: Path):
 
 def test_pr_roundtrip(tmp_path: Path):
     cfg = RelatedConfig(related={
-        "spark-transpile": RelatedEntry(
-            name="spark-transpile",
+        "example-transpile": RelatedEntry(
+            name="example-transpile",
             role="tooling",
             pr={
                 "enabled": True,
@@ -1445,7 +1445,7 @@ def test_pr_roundtrip(tmp_path: Path):
         ),
     })
     related.write_related(tmp_path, cfg)
-    got = related.read_related(tmp_path).related["spark-transpile"]
+    got = related.read_related(tmp_path).related["example-transpile"]
     assert got.pr == {
         "enabled": True,
         "required": True,

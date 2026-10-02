@@ -1,8 +1,9 @@
-# Stale / duplicate-daemon reap repro (#1612)
+# Stale / duplicate-daemon reap repro
 
 Reproduction / validation harness for the **duplicate/stale-daemon** half of
-[dotfiles#1612](https://github.com/owner_user_microsoft/dotfiles/issues/1612):
-after a crash or an abandoned cutover, agent-bridge left **orphaned / duplicate**
+an issue tracked in a private operator dotfiles repo (not publicly linked
+here): after a crash or an abandoned cutover, agent-bridge left **orphaned /
+duplicate**
 daemons holding `:9280`, and `service start` had *"no clean reap-and-rebind"* so
 it never recovered.
 

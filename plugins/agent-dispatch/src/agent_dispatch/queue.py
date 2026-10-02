@@ -107,6 +107,7 @@ from .queue_spawn_reservations import (  # noqa: F401 -- re-exported for existin
 from .queue_storage import QueueStorageMixin
 from .queue_steering import QueueSteeringMixin
 from .queue_suspend import QueueSuspendMixin
+from .queue_value_migrations import apply_status_value_migrations
 from .queue_verification_requests import QueueVerificationRequestsMixin
 from .registrations import (  # noqa: F401 -- re-exported for existing call sites/tests
     RegistrationError,
@@ -290,66 +291,11 @@ class TaskQueue(
                 "  applied_at REAL NOT NULL"
                 ")"
             )
-            status_rename = "2026-09-29-status-rename-submitted-completed"
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                renamed = conn.execute(
-                    "SELECT 1 FROM queue_migrations WHERE name = ?",
-                    (status_rename,),
-                ).fetchone()
-                if renamed is None:
-                    conn.execute(
-                        "UPDATE tasks SET status = CASE"
-                        " WHEN status = 'completed' THEN 'submitted'"
-                        " WHEN status = 'confirmed' THEN 'completed'"
-                        " ELSE status END"
-                        " WHERE status IN ('completed', 'confirmed')"
-                    )
-                    conn.execute(
-                        "UPDATE task_events SET"
-                        " from_status = CASE"
-                        "   WHEN from_status = 'completed' THEN 'submitted'"
-                        "   WHEN from_status = 'confirmed' THEN 'completed'"
-                        "   ELSE from_status END,"
-                        " to_status = CASE"
-                        "   WHEN to_status = 'completed' THEN 'submitted'"
-                        "   WHEN to_status = 'confirmed' THEN 'completed'"
-                        "   ELSE to_status END"
-                        " WHERE from_status IN ('completed', 'confirmed')"
-                        "    OR to_status IN ('completed', 'confirmed')"
-                    )
-                    conn.execute(
-                        "INSERT INTO queue_migrations(name, applied_at) VALUES (?, ?)",
-                        (status_rename, self._now(None)),
-                    )
-                conn.execute("COMMIT")
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
-            verification_flag = "2026-09-29-require-verification-flag"
-            conn.execute("BEGIN IMMEDIATE")
-            try:
-                migrated = conn.execute(
-                    "SELECT 1 FROM queue_migrations WHERE name = ?",
-                    (verification_flag,),
-                ).fetchone()
-                if migrated is None:
-                    try:
-                        conn.execute(
-                            "ALTER TABLE tasks ADD COLUMN require_verification "
-                            "INTEGER NOT NULL DEFAULT 0"
-                        )
-                    except sqlite3.OperationalError as exc:
-                        if "duplicate column name" not in str(exc).lower():
-                            raise
-                    conn.execute(
-                        "INSERT INTO queue_migrations(name, applied_at) VALUES (?, ?)",
-                        (verification_flag, self._now(None)),
-                    )
-                conn.execute("COMMIT")
-            except Exception:
-                conn.execute("ROLLBACK")
-                raise
+            # Status-value migrations (rename/retirement of a status constant)
+            # live in queue_value_migrations.py -- extracted to keep this
+            # module under its line-count cap (tools/check-module-size.py) as
+            # new ones accrue.
+            apply_status_value_migrations(conn, self._now)
             # Rows completed before ``completed_by`` existed retain their
             # original completing identity when the durable audit trail proves
             # exactly one owner.  A completion retry is a completed->completed

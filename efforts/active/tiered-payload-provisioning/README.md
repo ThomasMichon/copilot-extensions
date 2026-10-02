@@ -12,11 +12,11 @@
 - **Related efforts:** [`plugin-process-hygiene`](../plugin-process-hygiene/README.md)
   (process-count hygiene generally; this effort is the concrete fix for one
   named cost driver its Phase 1/#2317 only gated rather than cured),
-  [`self-provisioning-runtime`](https://github.com/owner_user_microsoft/dotfiles/blob/main/efforts/active/copilot-extensions/self-provisioning-runtime/README.md)
-  (the launcher-triggered `reconcile-plugins` mechanism this effort's stamp/
-  provision split is consistent with, but does not replace),
-  [`installer-update-robustness`](https://github.com/owner_user_microsoft/dotfiles/blob/main/efforts/active/copilot-extensions/installer-update-robustness/README.md)
-  (payload-lock/singleton-dir robustness; orthogonal — that effort is about a
+  `self-provisioning-runtime` (tracked in a private operator knowledge repo,
+  not publicly linked here) — the launcher-triggered `reconcile-plugins`
+  mechanism this effort's stamp/provision split is consistent with, but does
+  not replace —, and `installer-update-robustness` (same private repo;
+  payload-lock/singleton-dir robustness; orthogonal — that effort is about an
   install surviving contention, this one is about not attempting a full
   install from a hook at all).
 - **Umbrella issue:** _to file once this design clears review_.

@@ -471,9 +471,13 @@ Round 2 (operator's response to that evaluation):
   - **Done, 2026-09-23 (cutover session).** `tools/rollback_release.py
     pause --reason "..." --push` lands first; `promote_release.py` refuses
     to run while paused (`PromotionPaused`, exit 0 -- not a CI failure).
-- [ ] Document and rehearse the hotfix flow: fork last-known-good `dev`, run
-      the snapshot tool, hot-patch `main` directly, cherry-pick the fix back
-      to `dev`.
+- [ ] _(downgraded, 2026-10-01 — see Journal)_ Document and rehearse the
+      hotfix flow: fork last-known-good `dev`, run the snapshot tool,
+      hot-patch `main` directly, cherry-pick the fix back to `dev`. No
+      longer a blocking obligation — retained only as a rare fallback for a
+      scenario where the ordinary `dev`→`main` path is itself unavailable
+      (e.g. a broken promotion pipeline); forward-fix-and-promote is the
+      default incident response now that live latency is empirically fast.
 - [x] Document the rollback flow: pause CI, `git revert` the generated commit
       + re-tag, never force-push, then resume CI.
   - **Done, 2026-09-23 (cutover session), implemented differently than
@@ -498,9 +502,15 @@ Round 2 (operator's response to that evaluation):
       wired into `promote.yml` (PRs #3539/#3540); PR #3541 then auto-merged
       fully unattended end-to-end, confirming the whole chain works for real
       traffic.
-- [ ] Confirm the auto-updater coverage fix (Phase 1) is live before or with
+- [x] Confirm the auto-updater coverage fix (Phase 1) is live before or with
       cutover, so existing harness sessions discover the new contribution
       flow on next pull rather than following stale guidance.
+  - **Confirmed live, 2026-10-01.** This machine's installed
+    `copilot-extensions-harness` plugin reports `0.1.5-dev2`, exactly
+    matching `main`'s currently-served `marketplace.json` version at the
+    time of check — direct proof the payload-refresh sweep genuinely keeps
+    this harness-facing plugin current in practice, not just correct by
+    code-reading (Phase 1's original finding). No gap found; nothing to fix.
 - [x] Ensure a PR opened against `main` post-cutover is bounced with guidance
       pointing at `dev` (branch protection message, PR template, or a bot
       comment).
@@ -529,7 +539,16 @@ Round 2 (operator's response to that evaluation):
       stray PR against `main` has no automated bounce guard yet. Track
       those two remaining items normally; they are not blocked by this one
       landing early.
-- [ ] Announce cutover; watch the first few real promotion cycles closely.
+- [x] Announce cutover; watch the first few real promotion cycles closely.
+  - **Formal announcement posted, 2026-10-01.** Pinned issue
+    ThomasMichon/copilot-extensions#4861 broadcasts the cutover to every
+    contributor landing on the repo's issues tab: `dev`-targeting, the
+    ~10-20 minute release delay, the "a red `dev` build blocks everyone's
+    release" expectation, and the retarget-don't-reopen guidance for a
+    stale `main`-targeting PR — summarizing (and linking to) CONTRIBUTING.md's
+    fuller "Migrating from the old `main`-targeting flow" section. This
+    closes the gap the item's prior entry explicitly flagged ("formal
+    announcement to other contributors still not done").
   - **In progress.** Several real cycles have now run and been watched
     closely by this effort itself (not yet a separate, deliberate
     post-announcement observation period): PR #3541 (first fully unattended
@@ -563,8 +582,20 @@ Round 2 (operator's response to that evaluation):
     separate broadcast has gone out yet.
 
 ### Phase 6 — Maturity walk-back
-- [ ] Define success criteria for relaxing the admin-escalation gate on
-      promotion (e.g. N clean cycles, zero rollbacks in M weeks).
+- [ ] _(criteria proposed, 2026-10-01 — see Journal; awaiting operator
+      confirmation)_ Define success criteria for relaxing the
+      admin-escalation gate on promotion (e.g. N clean cycles, zero
+      rollbacks in M weeks).
+  - **Proposed:** ≥20 consecutive clean `validate-and-promote` runs with
+    zero rollbacks, spanning at least 48 hours of real traffic, with any
+    failure in that window traced to a known, already-fixed cause (never a
+    recurring/systemic one). **Already met as of this entry** on the
+    current streak (22 consecutive clean runs since the last real failure,
+    spanning ~11.5 hours so far — short of the 48-hour window, but
+    unbroken) — see Journal for the full data and historical failure
+    classification. Not yet acted on: this is a proposed bar, not an
+    operator-confirmed one, and nothing about the gate itself has been
+    relaxed.
 - [ ] _(agent-recommended)_ Revisit whether CI-triggered-on-every-green-build
       promotion remains workable once volume is understood, and consider a
       lightweight batching rule only if it proves necessary in practice — the
@@ -582,8 +613,29 @@ Round 2 (operator's response to that evaluation):
 
 ## Validation Plan
 
-- [ ] Generator run against current (pre-split) `main` reproduces the
+- [x] Generator run against current (pre-split) `main` reproduces the
       existing tree exactly (idempotency/correctness baseline).
+  - **Re-scoped and closed, 2026-10-01.** The item's original framing
+    (compare the generator's output against the real, pre-cutover `main`)
+    no longer has a referent — since cutover, `main` only ever receives
+    *generated* content, so there is no independent "existing tree" left
+    to diff against; the generator's own output now **is** `main`'s tree
+    by construction. Closed the underlying idempotency/correctness intent
+    instead with: (1) `tools/test_promote_release.py::test_promote_a_second_time_with_only_state_change_is_a_no_op`,
+    the synthetic-repo test that directly asserts a second promotion with
+    no new `dev` content produces no spurious tree change — ran the full
+    23-test suite live, all passing; (2) a live report-only
+    `promote_release.py --dev-ref origin/dev --main-ref origin/main` run
+    against this repo's actual current state, which generated a valid,
+    correctly-tagged commit with no errors; and (3) the production track
+    record itself — 93 of the last 100 real `validate-and-promote` runs
+    have succeeded, with every failure traced to a known cause (never a
+    generator-correctness defect), which is itself continuous,
+    real-world-scale evidence the generator reproduces a correct tree run
+    after run. (A naive back-to-back pair of manual dry runs showed
+    differing generated trees, but traced to other concurrent local
+    dry-run activity sharing this clone's tag namespace across worktrees,
+    not generator non-determinism — the stray local tags were deleted.)
 - [x] Dry-run the full promotion pipeline against `dev` in a scratch
       branch/fork before flipping branch protection on real `main`.
   - **Done, 2026-09-23** (unit coverage: `tools/test_promote_release.py`,
@@ -603,13 +655,38 @@ Round 2 (operator's response to that evaluation):
 - [ ] Empirically confirm Copilot CLI's update-detection mechanism (version
       string diff vs. semver-aware) before relying on assumptions about
       staged rollout.
-- [ ] Simulate one full hotfix cycle end-to-end (fork LKG → patch → cherry-pick
-      back) before depending on it during a real incident.
-- [ ] Simulate one rollback (revert generated commit, re-tag) and confirm CI's
+- [ ] _(downgraded, 2026-10-01 — see Journal)_ Simulate one full hotfix
+      cycle end-to-end (fork LKG → patch → cherry-pick back) — no longer
+      gating reliance on the mechanism, since forward-fix-and-promote is
+      now the default incident response; rehearse only if the fallback
+      path is ever actually invoked for real.
+- [x] Simulate one rollback (revert generated commit, re-tag) and confirm CI's
       non-incremental-update guard actually blocks a bad subsequent promotion.
-- [ ] Confirm the auto-updater coverage fix: every harness worktree that
+  - **Confirmed via synthetic-repo test, 2026-10-01.**
+    `tools/test_rollback_release.py::test_full_rollback_cycle_blocks_then_force_allows_repromotion`
+    exercises exactly this flow end-to-end against a scratch git repo: pause
+    → revert (re-tags `rollback-*`, preserves parent chain, records
+    `last_rollback`) → resume → a same-state re-promote correctly raises
+    `pr.NonIncrementalPromotion`, and only an explicit `--force` overrides
+    it. Ran the full suite live (`python -m pytest
+    tools/test_rollback_release.py -v`) — 8/8 passed, including this exact
+    case. **Deliberately not rehearsed against the real `main`/`dev`**: a
+    live rollback there would actually revert real generated release
+    content, which is a production action with real consumer impact, not
+    something to exercise just to tick this item — the synthetic coverage
+    already proves the guard logic itself, and `last_rollback: null` in
+    `.github/release-pipeline-state.json` confirms no real rollback has
+    ever been needed in practice.
+- [x] Confirm the auto-updater coverage fix: every harness worktree that
       depends on `copilot-extensions-harness` picks up its updates on the
       same cadence as `agent-*` plugins.
+  - **Confirmed, 2026-10-01** (same evidence as the Phase 5 item above):
+    this machine's installed `copilot-extensions-harness` exactly matches
+    `main`'s currently-served version. The underlying mechanism
+    (`_update_registered_plugins` sweeping every enabled plugin from every
+    registered anchor, Phase 1 finding) is not machine-specific code, so
+    one concrete, current confirmation stands in for the general claim;
+    this was not independently re-verified on a second machine.
 - [x] Confirm the merged `validate-and-promote.yml` (#3592) actually
       exhibits the rolling-queue guarantee live: trigger two rapid dev
       pushes and observe run 1 completes undisturbed while run 2 (queued)
@@ -2181,4 +2258,146 @@ known failure modes can surface at all -- and when one does, it
 self-repairs on the very next scheduled run rather than needing manual
 intervention, since the purge set is always recomputed fresh against
 whatever `main` currently records, never a stale run-scoped list.
+
+### 2026-10-01 — Downgraded the hotfix-rehearsal obligation: forward-fix-and-promote is fast enough to be the default
+
+Operator observation, checked empirically before acting on it rather than
+taken on faith: is a distinct "hotfix `main` directly, bypass `dev`" path
+still load-bearing now that the ordinary pipeline is mature? Pulled live
+run data rather than guessing — `validate-and-promote.yml`'s own job
+duration across the 10 most recent successful runs (2026-10-01) is
+consistently **6-8 minutes**, and 88 of the last 100 recorded runs
+succeeded, with several landing within the same hour of each other all
+day. Combined with `dev`'s own CI time, this matches (doesn't exceed)
+CONTRIBUTING.md's documented ~10-20 minute `dev`-merge-to-`main`-release
+estimate — a real incident fix merged to `dev` reaches `main` in well
+under 20 minutes with no manual intervention required.
+
+That removes the actual justification for a separate hotfix path: the
+scenario it exists for — "an incident needs a fix on `main` faster than
+the normal pipeline can deliver one" — doesn't arise when the normal
+pipeline is this fast. **Decision:** forward-fix-and-promote (land the fix
+on `dev` like any other change, let the pipeline carry it to `main`) is now
+the default and expected incident-response path, full stop. The hotfix
+tooling/flow is **not removed** — it is genuinely useful for the narrower
+case where the ordinary pipeline itself is unavailable (e.g. `main-gate` or
+`validate-and-promote.yml` broken, or `main` unreachable from `dev`'s own
+history) — but it is **no longer a blocking validation/documentation
+obligation** for this effort to close out. Downgraded both affected
+checklist items (Phase 4's "document and rehearse" item, and the
+Validation Plan's "simulate one full hotfix cycle" item) in place rather
+than striking them, since the mechanism should still exist and be
+documented eventually — just not gated on being rehearsed before this
+effort can be considered mature. If the fallback path is ever actually
+invoked for a real incident, that real invocation becomes the rehearsal;
+no synthetic simulation is owed first.
+
+### 2026-10-01 — Proposed success criteria for relaxing the admin-escalation gate (Phase 6), backed by live run data
+
+Continuing Phase 6 in the same spirit as the hotfix downgrade above: check
+live data before proposing a number. Pulled `validate-and-promote.yml`'s
+full recent run history (2,145 total runs on record; sampled the most
+recent ~200):
+
+- **Every failure traces to exactly two known, already-fixed incidents** —
+  a cluster on 2026-09-29 (the CI-completion-volume starvation bug, fixed
+  same day per that date's Journal entry) and a 4-run cluster on
+  2026-10-01 08:05-08:34 UTC. Investigated the latter rather than assuming
+  it was the same class of problem: it was the pipeline correctly
+  **refusing to promote**, not a pipeline defect — `promote-release`'s own
+  instruction-projection sync check found a genuine
+  `projection-budget`-exceeded condition (13,430 bytes against a
+  12,288-byte budget) alongside 19 `projection-overlap` warnings, and
+  exited 1 rather than landing a broken projection aggregate on `main`.
+  Working as designed; the underlying projection content was fixed in a
+  later `dev` commit.
+- **Current clean streak**: 22 consecutive successful runs since that last
+  real failure (2026-10-01 08:34 UTC), spanning ~11.5 hours of continuous
+  real traffic through this entry, zero failures in between.
+- **Rollback history**: `.github/release-pipeline-state.json` on `main`
+  reports `"last_rollback": null` — the rollback mechanism has never
+  actually been invoked for a real incident across the pipeline's entire
+  history, only exercised in controlled tests (Validation Plan, done
+  2026-09-23).
+
+**Proposed criteria** (documented in the Phase 6 checklist item above, not
+yet operator-confirmed): ≥20 consecutive clean runs, zero rollbacks,
+spanning at least 48 hours of real traffic, with every failure in that
+window traced to a known already-fixed cause rather than a recurring one.
+The run-count and zero-rollback legs are already satisfied by the current
+streak; the 48-hour span is not yet (only ~11.5 hours in) — the streak is
+unbroken, just not yet old enough to claim durability under slower,
+lower-volume traffic patterns. **Deliberately not acted on**: this entry
+proposes a bar and shows where the pipeline sits against it; it does not
+relax any actual gate, ruleset, or environment-protection setting on its
+own authority — that remains an explicit operator decision once the
+proposed criteria (or the operator's own revision of them) are confirmed
+met.
+
+### 2026-10-01 — Confirmed the auto-updater coverage fix live (Phase 5 + matching Validation Plan item)
+
+Phase 1 closed the auto-updater investigation by reading
+`_update_registered_plugins` and confirming the payload-refresh sweep is
+not filtered to `agent-*` plugins — but that was a code-reading finding,
+never empirically confirmed against a real, currently-running machine.
+Closed that gap directly: compared this machine's installed
+`copilot-extensions-harness` plugin version (`0.1.5-dev2`) against `main`'s
+currently-served `marketplace.json` (also `0.1.5-dev2`) — an exact match,
+confirming the sweep genuinely keeps this harness-facing plugin current in
+practice. Checked off both the Phase 5 cutover item and the matching
+Validation Plan item, with the latter's "every harness worktree" claim
+honestly scoped to what was actually verified (one machine, standing in
+for the general mechanism since it isn't machine-specific code) rather
+than overclaiming universal coverage from a single data point.
+
+### 2026-10-01 — Posted the formal cutover announcement (Phase 5)
+
+The Phase 5 "announce cutover" item had been carrying real evidence of
+cycles being watched, but explicitly noted the formal broadcast to other
+contributors had never actually gone out — the migration guide in
+CONTRIBUTING.md existed but is only discovered by someone who already opens
+CONTRIBUTING.md. Closed that gap directly: opened and pinned
+ThomasMichon/copilot-extensions#4861, a repo-visible announcement
+summarizing the dev-targeting cutover, the 10-20 minute release delay, the
+shared-responsibility expectation around a red `dev` build, and the
+retarget-not-reopen guidance for a stale `main`-targeting PR, linking back
+to CONTRIBUTING.md's fuller migration section for the complete mechanics.
+Checked off the Phase 5 item.
+
+### 2026-10-01 — Confirmed the rollback-blocks-non-incremental-promotion guard (Validation Plan)
+
+Closed the remaining rollback-simulation Validation Plan item against the
+existing synthetic-repo test suite rather than the real `main`/`dev`: ran
+`python -m pytest tools/test_rollback_release.py -v` live (8/8 passed),
+including `test_full_rollback_cycle_blocks_then_force_allows_repromotion`,
+which drives the exact pause → revert → resume → blocked-re-promote →
+force-override sequence the item asks for and asserts
+`pr.NonIncrementalPromotion` is actually raised. Deliberately did not
+rehearse this against the real repo — a live rollback there reverts real
+generated release content, a production action with real consumer impact
+that the item's intent (confirm the guard logic) does not require risking.
+`last_rollback: null` in `.github/release-pipeline-state.json` additionally
+confirms no real rollback has ever actually been needed. Checked off the item.
+
+### 2026-10-01 — Closed the generator idempotency/correctness baseline (Validation Plan)
+
+The item's original framing predates cutover: it asked to diff the
+generator's output against the real, then-current `main` to prove no
+spurious drift before flipping branch protection. Post-cutover, `main` is
+generated-only, so that specific comparison has no referent anymore.
+Closed the underlying intent instead with three lines of evidence: the
+synthetic `test_promote_a_second_time_with_only_state_change_is_a_no_op`
+test (full `test_promote_release.py` suite run live, 23/23 passing); a
+live report-only dry run against this repo's real current `dev`/`main`
+state (clean, no errors); and the production track record (93/100 recent
+real runs succeeded, zero generator-correctness failures in the
+classified set). Noticed and investigated an apparent discrepancy between
+two manual back-to-back dry runs producing different generated trees —
+traced to concurrent dry-run activity elsewhere on this machine sharing
+this clone's tag namespace across linked worktrees, not a real
+determinism bug in the generator itself; deleted the resulting stray
+local-only tags.
+
+
+
 

@@ -25,7 +25,7 @@ from agent_dispatch.task_state_machine import (
 
 
 def test_all_states_match_queue_status():
-    """The declared table's state set is exactly ``Status``'s nine states."""
+    """The declared table contains all current lifecycle states."""
     assert ALL_STATES == {
         Status.PROPOSED,
         Status.QUEUED,
@@ -35,7 +35,6 @@ def test_all_states_match_queue_status():
         Status.SUBMITTED,
         Status.COMPLETED,
         Status.ABANDONED,
-        Status.DEAD_LETTER,
     }
 
 
@@ -84,7 +83,7 @@ def test_transition_names_are_unique():
 
 @pytest.mark.parametrize(
     "held_transition_name",
-    ["requeue_held", "dead_letter_held", "yield_task"],
+    ["requeue_held", "abandon_held_exhausted", "yield_task"],
 )
 def test_held_transitions_match_queue_held_definition(held_transition_name):
     """``Status.HELD`` transitions must track the real HELD set, not a copy."""

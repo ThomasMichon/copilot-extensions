@@ -156,6 +156,7 @@ class GitRepoConnector:
         remote: str | None = None,
         ref: str | None = None,
         fetch: bool | None = None,
+        token: str | None = None,
     ):
         self._requested_source = source
         self.repo_path = Path(repo_path or os.environ.get("AGENT_INDEX_GIT_REPO") or os.getcwd())
@@ -176,6 +177,14 @@ class GitRepoConnector:
 
         self._ref = ref or os.environ.get("AGENT_INDEX_GIT_REF") or f"{self._remote}/HEAD"
         self._fetch = _env_flag("AGENT_INDEX_GIT_FETCH", True) if fetch is None else fetch
+        # Optional bearer token (e.g. a resolved ``gh auth token``) for the
+        # fetch step only, scoped to that one subprocess call via a transient
+        # ``-c http.extraheader=`` override -- never written to this repo's
+        # persistent git config, and never logged (see ``_fetch_remote``).
+        # Avoids depending on the ambient `gh`-backed credential helper's
+        # currently-ACTIVE account, which may not be the account this
+        # specific repo needs (an EMU org repo vs. a personal one, say).
+        self._token = token or None
 
         # Resolved lazily on first discovery. ``_use_worktree`` True means we fell
         # back to the local HEAD + on-disk working tree; otherwise ``_index_ref``
@@ -223,7 +232,7 @@ class GitRepoConnector:
             if self._fetch and self._has_remote(self._remote):
                 # Best effort: a failed fetch still lets us index prior
                 # remote-tracking state (stale-but-canonical beats the worktree).
-                self._git_quiet(["fetch", "--quiet", self._remote])
+                self._fetch_remote()
                 # Ensure <remote>/HEAD points at the remote's default branch.
                 self._git_quiet(["remote", "set-head", self._remote, "-a"])
             ref = self._resolve_ref()
@@ -246,6 +255,25 @@ class GitRepoConnector:
                 "git_repo: could not resolve %s; falling back to local HEAD/working tree",
                 self._ref,
             )
+
+    def _fetch_remote(self) -> None:
+        """Fetch ``self._remote``, authenticated with ``self._token`` when set.
+
+        The token is passed via a transient ``-c http.extraheader=`` override
+        on this ONE subprocess invocation only -- it is never written to the
+        repo's persistent git config and never appears in a log line (this
+        method never raises; ``_git_quiet`` swallows and discards stderr on
+        failure, so a bad/expired token degrades to stale-but-canonical
+        remote-tracking state, same as an offline fetch, rather than erroring
+        the whole crawl). This avoids depending on whichever account happens
+        to be ambient-active in the system's `gh`-backed git credential
+        helper, which may not be the account this specific repo needs.
+        """
+        args: list[str] = []
+        if self._token:
+            args.extend(["-c", f"http.extraheader=AUTHORIZATION: bearer {self._token}"])
+        args.extend(["fetch", "--quiet", self._remote])
+        self._git_quiet(args)
 
     def _resolve_ref(self) -> str | None:
         """Resolve the configured ref to a verifiable revision, or None."""

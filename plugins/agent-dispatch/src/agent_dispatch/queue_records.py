@@ -48,9 +48,8 @@ class Status:
     #: agent-dispatch vision's *The lifecycle* / *verify-the-completion-claim*.
     COMPLETED = "completed"
     ABANDONED = "abandoned"
-    #: Terminal failure: a held task requeued too many times (its owner kept
-    #: going gone) -- an actionable dead-letter end state rather than churning
-    #: crash -> gone -> requeue forever.
+    #: Retained for read compatibility with pre-migration audit/data rows.
+    #: New liveness-cap exhaustion resolves to ``ABANDONED``.
     DEAD_LETTER = "dead_letter"
 
     #: States a worker actively holds; recoverable by liveness GC (owner-gone).
@@ -64,7 +63,7 @@ class Status:
     #: that means "no agent will do further work on this" (the OLD meaning of
     #: "terminal" this constant used to carry, before ``COMPLETED`` existed)
     #: wants ``CONCLUDED`` below instead, not this.
-    TERMINAL = frozenset({COMPLETED, ABANDONED, DEAD_LETTER})
+    TERMINAL = frozenset({COMPLETED, ABANDONED})
     #: States in which no agent is actively working the task anymore --
     #: ``TERMINAL`` plus the provisional ``SUBMITTED``. This is what
     #: ``TERMINAL`` used to mean before ``COMPLETED`` existed; every call site
@@ -72,7 +71,7 @@ class Status:
     #: never about "is this durably, reviewably closed," should read this
     #: instead of ``TERMINAL`` now that the two questions have different
     #: answers for a submitted-but-not-yet-completed task.
-    CONCLUDED = frozenset({SUBMITTED, COMPLETED, ABANDONED, DEAD_LETTER})
+    CONCLUDED = frozenset({SUBMITTED, COMPLETED, ABANDONED})
     #: Non-terminal states from which an abandon (with permission) is allowed.
     #: Includes ``SUBMITTED`` (2026-09-25): the Completion Review card's
     #: Abandon action closes a submitted-but-not-yet-completed task the operator

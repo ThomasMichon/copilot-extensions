@@ -2764,8 +2764,8 @@ since prior rounds' verification):
   file, current PR body version/doc-impact) via direct inspection of the
   merged file contents -- stale review-thread carryovers, not live gaps.
 - **`tools/clean-room/scenarios/context-handoff-connection-race`** (the
-  same-session double-discovery repro for
-  github/copilot-agent-runtime#22266) confirmed reproducible on the Linux
+  same-session double-discovery repro for a known, privately tracked
+  Copilot CLI issue) confirmed reproducible on the Linux
   arm: 6/6 across two independent fresh-container runs, once two things
   were found: (a) `copilot -p` (headless) never loads the JS extension-host
   component at all -- only skills/hooks -- regardless of headed vs.
@@ -2816,7 +2816,7 @@ since prior rounds' verification):
     same-session double-discovery clash reproduce on Windows too (same
     mechanism, OS-portable), and separately, does the still-open
     ready-then-self-exit(1) mystery (this effort's other unresolved half,
-    tracked in copilot-agent-runtime#22266) show up on Windows as well --
+    tracked as a privately-filed Copilot CLI issue) show up on Windows as well --
     which would argue for a genuine Copilot CLI/runtime bug rather than
     anything specific to this plugin or to Linux.
 

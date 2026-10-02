@@ -437,7 +437,15 @@ class RegisteredPivotRuntime:
         demote the pivot back to ordinary repolling."""
         if self.pivot.subscribe:
             self._subscribe_live[machine] = True
-        argv = _resolve_argv((*self.pivot.list_cmd, "--stream"), ctx)
+        # The whole point of `subscribe` is a held channel receiving live
+        # deltas -- without `--subscribe` on argv, the provider runs its
+        # one-shot envelope and exits immediately, and every "termination"
+        # (a totally normal exit, not a drop) falls through to
+        # `_handle_subscribe_drop`'s reconnect path: the pivot ends up
+        # re-spawning the CLI on every backoff tick instead of ever holding
+        # one process open (#4840 review).
+        stream_flags = ("--stream", "--subscribe") if self.pivot.subscribe else ("--stream",)
+        argv = _resolve_argv((*self.pivot.list_cmd, *stream_flags), ctx)
         if not argv:
             self._subscribe_live[machine] = False
             self._finish(machine, ("error", [], "empty list command"), {})
@@ -522,6 +530,20 @@ class RegisteredPivotRuntime:
                 elif typ == "done":
                     saw_envelope = True
                     done = True
+                    if not ready:
+                        # A held `subscribe` channel keeps running past `done`
+                        # (it's not EOF) -- an empty initial board must still
+                        # publish now, or the pivot stays `loading` forever
+                        # waiting for a `row` that may never come (#4840
+                        # review). A non-empty board already published via
+                        # `row`/`delta` above. Deliberately does NOT set
+                        # `ready` -- that flag also drives `had_rows` for the
+                        # subscribe-reconnect retry budget (`_handle_
+                        # subscribe_drop`), which must still treat an
+                        # always-empty channel as never having delivered a
+                        # real row, so it exhausts normally rather than
+                        # reconnecting forever.
+                        publish()
                 elif typ == "error":
                     saw_envelope = True
                     err_frame = str(obj.get("message") or obj.get("error") or "stream error")

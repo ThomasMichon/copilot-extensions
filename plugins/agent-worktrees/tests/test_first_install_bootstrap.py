@@ -15,6 +15,7 @@ import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.guard
+_SH = shutil.which("sh")
 
 
 def test_session_start_prefers_payload_lifecycle_client_with_installed_fallback() -> None:
@@ -112,6 +113,7 @@ def _stub_direct_install(home: Path, dir_name: str, sentinel: str) -> Path:
     return install
 
 
+@pytest.mark.skipif(_SH is None, reason="POSIX sh not available")
 def test_posix_binstub_self_provisions_from_a_direct_install_layout(tmp_path: Path) -> None:
     """Regression test for a direct (non-marketplace) `copilot plugin
     install <repo>:<path>` install, whose `_direct/<owner>--<repo>--

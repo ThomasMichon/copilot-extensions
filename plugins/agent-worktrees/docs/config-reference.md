@@ -337,6 +337,21 @@ through ACP — a separate, tracked gap outside this mechanism's scope.
 | `env` | map(str→str) | `{}` | Environment variables exported for the session. Keys must be valid env-var identifiers. |
 | `copilot_args` | list[str] | `[]` | Extra arguments passed to `copilot`. |
 
+**Scope (known gap, tracked):** `profiles[0]` is used as a default only inside
+the **interactive Tab-cycle picker** flow (a bare binstub invocation with a
+TTY and no explicit worktree). `resolve --base`, `resolve --json
+--worktree-id <id>` (the path `embody`, `agent-bridge`, `agent-dispatch`, and
+any background/headless launcher goes through), and a plain resume/new call
+all resolve `profile=None` unless the caller passes an explicit `--profile
+<name>`. A declared `copilot_profiles` entry does **not** yet act as a
+universal default the way the persisted-settings mechanism above does — see
+[ThomasMichon/copilot-extensions#4849](https://github.com/ThomasMichon/copilot-extensions/issues/4849).
+Until that lands, prefer the persisted `~/.copilot/settings.json`
+`model`/`effortLevel`/`contextTier` mechanism above for a default that must
+survive every launch path; reach for a named `copilot_profiles` entry plus an
+explicit `--profile` when a specific call site needs it (e.g. a different
+backend/provider per profile, not just a model string).
+
 ### Balanced profile assignment — `profile_assignment`
 
 Profile assignment is an explicit, default-off policy over the existing named
@@ -431,7 +446,12 @@ in-repo overlay (below); the in-repo version wins when both are present.
 > calling agent relays this to the user, then re-runs `create-pr
 > --confirm-fork` (or `confirm_fork=True`) once they agree. Only that
 > confirmed call creates/verifies the fork (idempotent — a caller who already
-> has one is untouched) and points the local `fork` remote at it.
+> has one is untouched) and points the local `fork` remote at it. This
+> confirmation is asked **once per (operator, repo)**: a successful confirmed
+> call durably records the fork target in the machine-local
+> `fork_consent.yaml` registry (keyed by `owner/repo` slug), and every later
+> `create-pr` for that same repo skips straight to verifying/wiring the fork
+> remote — no `--confirm-fork` needed again, even in a brand-new worktree.
 
 > **Configured profile vs. effective actor profile.** The base `PRConfig`
 > always has a pure, network-free **configured profile**. `get pr-profile`

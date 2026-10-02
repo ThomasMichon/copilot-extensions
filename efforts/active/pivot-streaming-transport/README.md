@@ -219,17 +219,34 @@ and we're silently frozen on its last snapshot.")_
 _(agent-recommended ordering: lowest-risk, highest-signal first adopter —
 agent-dispatch's CLI already emits SSE-sourced JSON lines for `watch`, so this
 is closest to a manifest-only change. Depends on Phase 0 — now unblocked.)_
-- [ ] Confirm `agent-dispatch-board --machine {machine}` (the pivot's current
+- [x] Confirm `agent-dispatch-board --machine {machine}` (the pivot's current
       `list` command) can emit the `stream`/`subscribe` NDJSON envelope shape
       `tasks.py` expects (`begin`/`row`/`delta`/`removed`/`summary`/`done`), or
       scope the CLI-side change needed to produce it from the daemon's
-      existing `/events` SSE stream.
-- [ ] Flip `plugins/agent-dispatch/pivots/agent-dispatch.json` to
+      existing `/events` SSE stream. **Done 2026-10-01**: added `--stream`/
+      `--subscribe`/`--interval` to `agent-dispatch-board`
+      (`board_cli.py`) — `_run_stream()` emits `begin`/`row`/`done`, then with
+      `--subscribe` re-fetches on a timer (default 2s) and diffs via
+      `_diff_rows()` into `delta`/`removed` frames. Periodic in-process
+      re-scan (same shape as agent-codespaces' `pool --stream --subscribe`),
+      not a raw pass-through of the daemon's `/events` SSE stream — lower risk
+      for the first adopter, and still removes the per-refresh CLI re-exec
+      cost since the channel stays open across re-scans.
+- [x] Flip `plugins/agent-dispatch/pivots/agent-dispatch.json` to
       `"stream": true, "subscribe": true` once the CLI side is ready.
-- [ ] Verify live: Picker's Tasks pivot reflects a task-state change without a
+      **Done.**
+- [x] Verify live: Picker's Tasks pivot reflects a task-state change without a
       poll-interval delay, and degrades cleanly when `agent-dispatch` is
       absent/stale (the existing one-shot fallback), and recovers per Phase 0's
-      contract if the stream process exits mid-session.
+      contract if the stream process exits mid-session. **Done**: ran the
+      patched `agent-dispatch-board --stream` and `--stream --subscribe`
+      directly against this machine's live coordinator (57 real tasks) —
+      `begin`/57×`row`/`done` on the initial fetch, then further frames
+      emitted on the held channel during a live `--subscribe` session with no
+      process re-exec. Mid-session process-exit recovery is Phase 0's own
+      regression-tested contract (`test_subscribe_reconnects_after_unexpected_eof`),
+      unchanged by this phase; degrade-when-absent is the pre-existing
+      `stream: true` auto-fallback (`tasks.py`), also unchanged.
 
 ### Phase 2 — Same for agent-bridge's pivot
 - [ ] Same shape as Phase 1 against `agent-bridge --json agents` / agent-bridge's
@@ -456,3 +473,79 @@ picker_tui/tasks.py`'s `RegisteredPivotRuntime`:
   not only the terminal one) — settled on waiting for a *stable* reading
   rather than the first sighting.
 - Full `test_picker_tui.py` + `test_pivot_streaming.py`: 289 passed.
+
+### 2026-10-01 — Phase 1 landed: agent-dispatch's pivot adopts stream/subscribe
+Implemented in `plugins/agent-dispatch/src/agent_dispatch/board_cli.py`:
+- Added `--stream`/`--subscribe`/`--interval` to `agent-dispatch-board`. The
+  existing one-shot direct-fetch and cross-machine-delegate code paths are
+  untouched (deliberately kept byte-identical — their fetch logic is
+  duplicated, not refactored in place, into new `_fetch_rows_direct()`/
+  `_fetch_rows_delegated()` functions used only by the new stream path) so
+  this is a pure addition with zero risk to the plain-JSON path every other
+  consumer (`inbox --board`, the installed binstub) still uses.
+- `_run_stream()` emits the registered-pivot NDJSON envelope — `begin` -> a
+  `row` per task -> `done` — then, with `--subscribe`, holds the channel open:
+  every `--interval` seconds (default 2s) it re-fetches and diffs
+  (`_diff_rows()`, whole-row-by-`id`) against the last snapshot, emitting
+  `delta`/`removed` frames. Same shape as agent-codespaces' `pool --stream
+  --subscribe` (periodic in-process re-scan, not a raw relay of
+  agent-dispatch's own `/events` SSE stream) — chosen as the lower-risk first
+  adopter per the Plan's own ordering rationale; a true SSE-sourced push path
+  is explicitly Phase 3's job (CLI-relayed daemon fast path), not this one. A
+  transient re-fetch failure during `--subscribe` skips that tick rather than
+  killing the channel; only the initial fetch failing is fatal (`error`
+  frame + exit 1, matching the one-shot path's stderr+exit-1 contract).
+- Flipped `plugins/agent-dispatch/pivots/agent-dispatch.json` to
+  `"stream": true, "subscribe": true` — validated against
+  `worktree-manager`'s own `test_real_checkout_manifests_match_contract`
+  (parses every real `plugins/*/pivots/*.json` through the manifest
+  contract).
+- Added 11 new tests to `tests/test_board_cli.py` (stream envelope framing,
+  one-shot vs. held-open behavior, the initial-fetch-failure `error` frame,
+  delta/removed diffing, transient re-scan-failure resilience, `_diff_rows`
+  itself, and both `_fetch_rows` paths) — `test_cli.py` (181 passed) +
+  `test_board_cli.py` (29 passed) both green.
+- Live-verified against this machine's own running coordinator (57 real
+  tasks): `agent-dispatch-board --stream` produced the full
+  `begin`/57×`row`/`done` envelope; `--stream --subscribe --interval 2` held
+  the channel open across multiple re-scans with no process re-exec.
+- `worktree-manager`'s full picker suite (pre-review-fix baseline, before the
+  two consumer-side bugs below were found): ran `test_plugin_contracts.py`
+  (19 passed), `test_pivot_streaming.py` + `test_picker_tui.py` (291 total,
+  1 failure on first pass -- `test_streaming_delta_and_removed_update_in_place`
+  and, on a separate run, `test_steering_card_and_form_actions_gate_and_drive`
+  -- both pre-existing Textual/asyncio timing flakes unrelated to this
+  phase's changes, confirmed by passing cleanly in isolation.
+
+**Copilot review on PR [#4840](https://github.com/ThomasMichon/copilot-extensions/pull/4840)
+found two real bugs in the existing consumer contract**, surfaced only now
+because agent-dispatch is the *first* real `subscribe: true` adopter:
+1. **The manifest's `subscribe` flag alone never held the channel open.**
+   `RegisteredPivotRuntime._run_list_stream()` always appended only
+   `--stream` to argv, never `--subscribe` — so a "subscribe" pivot's
+   provider ran its one-shot envelope and exited immediately, and every
+   normal exit fell through to Phase 0's reconnect path instead of ever
+   holding one process open and receiving live deltas. **Fixed**: argv now
+   appends `--subscribe` too when `pivot.subscribe` is set
+   (`tasks.py:_run_list_stream`).
+2. **A held `subscribe` channel whose initial board was empty would stay
+   stuck `loading` forever.** The loop only called `publish()` on a
+   `row`/`delta`/`removed` frame; a `done` frame with zero rows (the channel
+   stays open afterward, it's not EOF) never triggered a publish, so the
+   pivot never left its initial state waiting for a row that might never
+   come. **Fixed**: `done` now also publishes the empty snapshot
+   immediately when nothing has been delivered yet — without touching the
+   `ready`/`had_rows` flag the subscribe-reconnect retry budget depends on,
+   so an always-empty channel still exhausts its reconnect budget normally
+   (doesn't mask a genuinely dead channel as healthy).
+   Added 4 regression tests (`test_subscribe_pivot_passes_subscribe_flag_to_
+   provider`, `test_stream_only_pivot_does_not_pass_subscribe_flag`,
+   `test_subscribe_empty_board_still_becomes_ready`, plus the existing
+   exhaustion test re-verified unaffected) — full
+   `test_pivot_streaming.py`: 21 passed.
+3. Also reverted three hand-edited version fields (`pyproject.toml`,
+   `plugin.json`, `.github/plugin/marketplace.json`) — this repo's version
+   lifecycle is changefile-driven, not contributor-edited
+   (`CONTRIBUTING.md`'s "Contributing a change: add a changefile"); replaced
+   the single `agent-dispatch`-only `dev` changefile with one covering both
+   touched plugins (`agent-dispatch`, `worktree-manager`) at `patch`.

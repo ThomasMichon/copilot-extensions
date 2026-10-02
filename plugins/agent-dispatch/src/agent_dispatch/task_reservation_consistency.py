@@ -64,7 +64,6 @@ ALL_TASK_STATUSES: frozenset[str] = frozenset(
         Status.SUBMITTED,
         Status.COMPLETED,
         Status.ABANDONED,
-        Status.DEAD_LETTER,
     }
 )
 
@@ -110,7 +109,7 @@ _CONSISTENT_PAIRS: frozenset[tuple[str, str]] = frozenset(
         # can hold one, plus every terminal/near-terminal status --
         # Supervisor.recover_gone() (SPAWNED-scoped) explicitly excludes
         # only _TERMINAL and SUSPENDED from its own gone/live liveness
-        # loop, explicitly handles DEAD_LETTER, and everything else
+        # loop, and everything else
         # (PROPOSED/QUEUED/CLAIMED/STARTED) falls through that same loop
         # -- so recover_gone() alone covers every status here except the
         # three now-widened _TERMINAL ones, which reconcile() covers
@@ -124,14 +123,12 @@ _CONSISTENT_PAIRS: frozenset[tuple[str, str]] = frozenset(
         (Status.SUBMITTED, SpawnState.SPAWNED),
         (Status.COMPLETED, SpawnState.SPAWNED),
         (Status.ABANDONED, SpawnState.SPAWNED),
-        (Status.DEAD_LETTER, SpawnState.SPAWNED),
         # COLD: only ever legitimately set while a task is SUSPENDED (see
         # Supervisor.cool_dormant_bodies's own status guard) -- the
-        # steady-state dormant shape. QUEUED/DEAD_LETTER/SUBMITTED/
-        # COMPLETED/ABANDONED are each covered by their own dedicated
+        # steady-state dormant shape. QUEUED/SUBMITTED/COMPLETED/ABANDONED
+        # are each covered by their own dedicated
         # sweep (recover_stranded_cold_reservations #4512,
-        # recover_dead_lettered_cold_reservations #4542, and reconcile()'s
-        # RESERVING/SPAWNED/COLD pool for the three _TERMINAL statuses).
+        # RESERVING/SPAWNED/COLD pool for the terminal statuses).
         # PROPOSED/CLAIMED/STARTED have NO known covering sweep today --
         # see _UNCOVERED_ANOMALIES; they are deliberately left classified
         # as ANOMALY (the default) below, not added here.
@@ -140,7 +137,6 @@ _CONSISTENT_PAIRS: frozenset[tuple[str, str]] = frozenset(
         (Status.SUBMITTED, SpawnState.COLD),
         (Status.COMPLETED, SpawnState.COLD),
         (Status.ABANDONED, SpawnState.COLD),
-        (Status.DEAD_LETTER, SpawnState.COLD),
     }
 )
 
@@ -281,4 +277,3 @@ def sweep(supervisor) -> dict[str, int]:
         "covered": covered,
         "uncovered": uncovered,
     }
-
