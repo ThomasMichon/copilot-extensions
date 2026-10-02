@@ -508,13 +508,18 @@ and the new sibling pattern doc,
       **Landed**:
       `test_render_local_cache_writes_sibling_without_touching_checked_in_or_lock`
       in `tests/test_instruction_projections.py`.
-- [ ] Negative-proof test: a write-incapable target directory (simulated
+- [x] Negative-proof test: a write-incapable target directory (simulated
       read-only) leaves the checked-in floor as the only available content,
       with no error raised to the caller and no partial/corrupt
-      `.local.instructions.md` file left behind. **Not yet covered** --
-      `test_render_local_cache_reports_root_error_without_raising` proves a
-      missing repo root reports a blocking finding without raising, but a
-      write-*denied* (as opposed to nonexistent) destination remains open.
+      `.local.instructions.md` file left behind. **Landed**:
+      `test_render_local_cache_write_incapable_destination_leaves_checked_in_floor`
+      in `tests/test_instruction_projections.py` -- occupies the local
+      cache destination with a directory (chmod read-only is not a
+      reliable write-blocker on Windows, but a directory in the way always
+      fails the atomic write's final `os.replace`), proving the checked-in
+      floor is left byte-identical, the call reports a blocking finding
+      rather than raising, and no stray temp file or corrupt sibling is
+      left behind.
 
 ## Validation Plan
 
@@ -573,30 +578,109 @@ and the new sibling pattern doc,
       at all and confirms it still succeeds. **Landed**:
       `test_render_local_cache_never_touches_git_and_is_idempotent` (runs
       against a `tmp_path` repo with no `.git` directory at all).
-- [ ] Phase 7's guard and negative-proof tests (see Plan) pass; the per-file
+- [x] Phase 7's guard and negative-proof tests (see Plan) pass; the per-file
       preamble and the repo-wide catch-all are each independently provable
       to drive an agent to the fresher content in a clean-room-style test
       matching the methodology `session-scoped-dynamic-guidance.md`'s own
-      evidence section used. **Partially covered:** every Plan item's own
-      guard/negative-proof unit and integration tests pass (preamble
-      placement/naming, local-cache self-reference exclusion, the
-      `skipLocalCache` opt-out and its schema validation, the aggregate-
-      budget fit, and the `agent-worktrees` create/resume/`sessionStart`
-      wiring, each with dedicated tests -- see the Journal for every
-      slice). The specific **clean-room, agent-driven proof** this item
-      asks for (an isolated sub-agent, given only a system-prompt snapshot
-      carrying both a checked-in projection and a divergent
-      `.local.instructions.md` sibling, demonstrably prefers the sibling's
-      content) has **not** been built -- it is a distinct, heavier
-      validation exercise (the navigability audit's own 3-sub-agent,
-      skill/tool-forbidden methodology), not yet attempted. This is the
-      one remaining item before Phase 7 can be marked Done.
+      evidence section used. Every Plan item's own guard/negative-proof
+      unit and integration tests pass (preamble placement/naming,
+      local-cache self-reference exclusion, the `skipLocalCache` opt-out
+      and its schema validation, the aggregate-budget fit, and the
+      `agent-worktrees` create/resume/`sessionStart` wiring, each with
+      dedicated tests -- see the Journal for every slice). **Landed**: the
+      clean-room, agent-driven proof this item asked for -- the
+      navigability audit's own 3-sub-agent, skill/tool-forbidden
+      methodology, run against two frozen-snapshot scenarios built with the
+      real `render_projection()`/`ProjectionSpec` machinery (byte-identical
+      marker/preamble/frontmatter to the shipped mechanism, not hand-faked):
+      **Scenario A** (per-file preamble) -- a checked-in
+      `retry-policy.instructions.md` carrying the real preamble and a stale
+      value (3), beside a divergent `retry-policy.local.instructions.md`
+      with no preamble and a fresh value (11), simulating sync-lag between
+      last-synced and currently-installed payload. **Scenario B**
+      (repo-wide catch-all) -- the real, verbatim shipped
+      `local-cache-catchall.instructions.md` beside a *never-synced-in*
+      source's lone `activation-code.local.instructions.md` (no checked-in
+      sibling at all). 3 independent `explore` sub-agents per scenario (6
+      total), each given only the frozen snapshot directory, explicitly
+      forbidden from invoking any skill or tool beyond read-only file
+      inspection scoped to that directory, and forbidden from using prior
+      knowledge of this repo's own conventions -- asked to find the
+      "current" fact and name the source file. **Result: 6/6 PASS.** Every
+      Scenario A run reported the fresh value (11) from
+      `retry-policy.local.instructions.md`, citing the checked-in file's own
+      preamble as the reason for preferring it over the stale 3. Every
+      Scenario B run reported the correct code (`QUASAR-77`) from
+      `activation-code.local.instructions.md`, citing the catch-all's own
+      directive to scan `**/*.local.instructions.md` as how it found a file
+      with no checked-in sibling at all. Combined with the write-incapable
+      negative-proof test landed in the Plan above, every Phase 7 Plan and
+      Validation Plan item is now resolved -- **Phase 7 is Done.**
 
 ## Proposal
 
 _Pending._
 
 ## Journal
+
+### 2026-10-01 (cont.) -- Phase 7's last two open items closed; Phase 7 is Done
+Picked up by handoff from the PR #4809 session, whose own leg ended with
+"Phase 7's Plan is now fully landed... the one remaining item before Phase 7
+can be marked Done" (the clean-room Validation Plan proof). Closed that item,
+then found and closed one more the handoff hadn't flagged: a still-open Plan
+item (the write-incapable negative-proof test) sitting right below the
+clean-room one in the same file.
+
+- **The clean-room, agent-driven proof** (Validation Plan): built two
+  frozen-snapshot scenarios with the *real* `render_projection()`/
+  `ProjectionSpec` machinery (byte-identical marker/preamble/frontmatter to
+  the shipped mechanism -- nothing hand-faked), then ran the navigability
+  audit's own methodology against them (3 independent `explore` sub-agents
+  per scenario, each given only the frozen snapshot directory, forbidden
+  from invoking any skill or tool beyond read-only file inspection scoped
+  to that directory, and forbidden from using prior knowledge of this
+  repo's own conventions):
+  - **Scenario A (per-file preamble):** a checked-in
+    `retry-policy.instructions.md` carrying the real "prefer local"
+    preamble and a stale fact (max retry count: 3), beside a divergent
+    `retry-policy.local.instructions.md` with no preamble and a fresh fact
+    (11) -- simulating sync-lag between the last-synced payload and the
+    currently-installed one. Asked each sub-agent "what is the current
+    value, and which file did it come from."
+  - **Scenario B (repo-wide catch-all):** the real, verbatim shipped
+    `local-cache-catchall.instructions.md` beside a source that was
+    *never* synced in at all -- only a lone `activation-code.local.
+    instructions.md` exists, no checked-in sibling. Asked each sub-agent
+    the same shape of question (a fictional "gizmo activation code").
+  - **Result: 6/6 PASS.** Every Scenario A run reported the fresh value
+    (11) from the `.local.instructions.md` sibling, explicitly citing the
+    checked-in file's own preamble as the reason for preferring it over
+    the stale value. Every Scenario B run reported the correct code
+    (`QUASAR-77`) from the lone local-only file, explicitly citing the
+    catch-all's own scan directive as how it found a file with no
+    checked-in sibling at all. Both mechanisms are now proven to actually
+    drive a real (sub-)agent to the fresher content, not just to pass a
+    unit test of the rendering code. Generator script and raw transcripts
+    live in session scratch space (not committed -- this is a one-time
+    validation exercise, not a repeatable fixture the repo needs to carry
+    forward); this Journal entry is the durable record.
+- **The write-incapable negative-proof test** (Plan, last item, not
+  flagged by the inbound handoff): added
+  `test_render_local_cache_write_incapable_destination_leaves_checked_in_floor`
+  in `tests/test_instruction_projections.py`. Occupies the local-cache
+  destination path with a directory (chmod read-only is not a reliable
+  write-blocker on Windows, but a directory in the way always fails the
+  atomic write's final `os.replace`) and proves: the checked-in floor is
+  left byte-identical, `render_local_cache` reports a blocking finding
+  rather than raising, and no stray atomic-write temp file or corrupt
+  sibling is left behind. `tools/run-plugin-tests.py customizing-copilot`:
+  308 passed, 8 skipped -- no regressions.
+- **Every Phase 7 Plan and Validation Plan item is now resolved -- Phase 7
+  is Done.** The effort overall stays **Active**: Phase 2's two remaining
+  Validation Plan items are pre-existing, already-scoped states (one an
+  explicit operator decision not to extend the resolver further, the other
+  partially covered pending adopting-repo-specific scheduler/bypass-profile
+  work), not something this session touched or re-opened.
 
 ### 2026-10-01 (cont.) -- Phase 7 slice 5: `agent-worktrees` wiring (last Plan item)
 - Picked up the last unstarted Plan item: wired `customizing-copilot`'s

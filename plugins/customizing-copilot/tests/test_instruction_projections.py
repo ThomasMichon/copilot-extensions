@@ -309,6 +309,48 @@ def test_render_local_cache_reports_root_error_without_raising(
     assert result.changed == []
 
 
+def test_render_local_cache_write_incapable_destination_leaves_checked_in_floor(
+    tmp_path: Path,
+) -> None:
+    """A write-incapable local-cache destination must report a blocking
+    finding and leave the checked-in floor as the only available content --
+    no exception raised to the caller, and no partial/corrupt sibling file
+    left behind. The destination is occupied by a directory (rather than
+    chmod'd read-only) so the simulated failure is reliable across
+    platforms -- a read-only *attribute* does not reliably block writes on
+    Windows, but a directory in the way always fails the atomic write's
+    final ``os.replace``."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    specs, _unknown = projections._load_specs(
+        repo, [source], projections.Result(operation="test")
+    )
+    checked_in = _projection(repo, "policy")
+    checked_in.parent.mkdir(parents=True, exist_ok=True)
+    checked_in_content = projections.render_projection(specs[0]).content
+    checked_in.write_bytes(checked_in_content)
+
+    local_path = checked_in.parent / "fallback.local.instructions.md"
+    local_path.mkdir()
+
+    result = projections.render_local_cache(repo, lambda: [source])
+
+    assert result.blocking >= 1
+    assert result.changed == []
+    # The checked-in floor -- the only available content -- is untouched.
+    assert checked_in.read_bytes() == checked_in_content
+    # No partial/corrupt sibling was left behind: the occupying directory
+    # is still exactly a directory, and no stray atomic-write temp file
+    # remains beside it.
+    assert local_path.is_dir()
+    assert list(local_path.iterdir()) == []
+    leftovers = [p.name for p in checked_in.parent.iterdir()]
+    assert not any(
+        name.startswith(".fallback.local.instructions.md.") for name in leftovers
+    )
+
+
 def test_render_local_cache_reconciles_stale_siblings_when_source_disabled(
     tmp_path: Path,
 ) -> None:
