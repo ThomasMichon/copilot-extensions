@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 
 from .client import DispatchError
 from .loop_commands import _resolve_cli_module
+from .queue_common import worker_id_for
 
 
 def _core():
@@ -336,6 +338,77 @@ def _cmd_payload(args: argparse.Namespace) -> int:
         return 0
     return _core()._emit(result)
 
+def _task_is_handoff(task: dict) -> bool:
+    """A task is a *handoff* baton (exactly-once, spent-aware) iff it carries
+    the ``handoff`` label or originates from ``context-handoff`` -- shared by
+    the initial-snapshot check and the refreshed-re-fetch check below so both
+    apply the identical classification rather than drifting apart."""
+    return ("handoff" in (task.get("labels") or [])) or (
+        task.get("source") == "context-handoff"
+    )
+
+def _fence_consumer_session(
+    c, task_id: str, owner: str, *, expected_generation: int | None
+) -> int | None:
+    """Bind this invocation's durable per-session identity exclusively to
+    ``task_id`` via a generation-fenced CAS.
+
+    Matching ``owner`` to a resolved ``machine/worktree`` worker_id never
+    proves THIS invocation is the one that claimed/holds the task: worker_id
+    is shared by every session running in the same machine/worktree, so a
+    second, concurrently-running successor session resolves to the
+    identical worker_id and can start/complete/replay the same task's
+    payload too -- whether it raced in on the original claim (claiming
+    clears ``owner_session_id``, leaving the binding open) or found the task
+    already claimed/started at its own first ``get()``. Binds exclusively in
+    both cases via the same CAS: the first invocation to bind wins
+    (idempotent on a genuine retry by the same session, since it re-binds
+    the same identity), and a second, distinct session's bind is refused.
+
+    Returns ``None`` to proceed normally, or an exit code: ``3`` if a
+    concurrent session already won the bind (a CAS conflict, HTTP 409 --
+    refuse exactly like a lost claim race, never replay the payload), or
+    ``1`` for any other bind failure (a missing task, a coordinator error --
+    a real error, not evidence of a lost race). No identity available
+    (``COPILOT_AGENT_SESSION_ID`` unset, e.g. a bare CLI invocation outside a
+    tracked session) leaves this unfenced, same as before this check
+    existed.
+    """
+    session_identity = os.environ.get("COPILOT_AGENT_SESSION_ID")
+    if not session_identity:
+        return None
+    try:
+        c.bind_owner_session(
+            task_id,
+            owner,
+            session_identity,
+            expected_generation=expected_generation,
+        )
+    except DispatchError as exc:
+        if exc.status_code == 409:
+            print(
+                f"[agent-dispatch] Handoff task {task_id} is already bound "
+                f"to a different session than this one -- a concurrent "
+                f"successor session in the same worktree won the race. NOT "
+                f"replaying the brief. Do NOT act on this task; end your "
+                f"turn.\n"
+                f"If this is unexpected, inspect with: agent-dispatch show "
+                f"{task_id}"
+            )
+            print(
+                f"agent-dispatch: handoff {task_id} bound to a different "
+                f"session ({exc}); not replayed",
+                file=sys.stderr,
+            )
+            return 3
+        print(
+            f"agent-dispatch: could not bind handoff task {task_id} to this "
+            f"session: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+    return None
+
 def _consume_already_spent(task_id: str, task: dict) -> int:
     """Refuse to replay a spent handoff baton.
 
@@ -393,20 +466,31 @@ def _cmd_consume(args: argparse.Namespace) -> int:
       ``submitted`` means *the work is done*, not *the baton was handed over*.
 
     Ordinary transitions are best-effort and idempotent: an already-advanced
-    task just prints its payload. Suspended pickup is stricter: deferred mode
-    atomically adopts the task into the successor's current session, while
-    baton mode completes only the exact suspended incarnation that was read.
-    If either fence loses a race, the payload is not replayed.
+    task just prints its payload. A **claim race** is stricter: if a
+    concurrent claimant already won it, the payload is refused (not
+    replayed) to the losing caller -- see the replay-debounce note below,
+    the same exactly-once contract applies here too. Suspended pickup is
+    stricter in the same way: deferred mode atomically adopts the task into
+    the successor's current session, while baton mode completes only the
+    exact suspended incarnation that was read. If either fence loses a race,
+    the payload is not replayed.
 
-    **Replay debounce (a *spent handoff* is spent).** A handoff is a baton:
-    once it has been picked up and its work driven to ``submitted``, re-consuming
-    it must NOT re-deliver the brief as if it were fresh. A live-cutover (or any
-    re-seeded successor) that re-runs ``consume <id>`` on an already-spent
-    handoff would otherwise redo finished work. So a completed *handoff* is
-    refused here with a clear stop notice (exit ``3``) instead of its payload --
-    the single chokepoint every task-backed resume seed flows through. A
-    still-in-flight handoff (``started`` -- e.g. a legitimate takeover recovery)
-    is unaffected; only ``submitted`` is treated as spent.
+    **Replay debounce (a *spent handoff* is spent, and a *lost race* is not
+    yours).** A handoff is a baton: once it has been picked up and its work
+    driven to ``submitted``, re-consuming it must NOT re-deliver the brief as
+    if it were fresh. A live-cutover (or any re-seeded successor) that
+    re-runs ``consume <id>`` on an already-spent handoff would otherwise redo
+    finished work. So a completed *handoff* is refused here with a clear
+    stop notice (exit ``3``) instead of its payload -- the single chokepoint
+    every task-backed resume seed flows through. The same exit ``3`` refusal
+    applies when this invocation loses a claim race to a concurrent
+    claimant: replaying the brief to the loser as well as the winner would
+    let two successors both believe they are the one continuing a baton
+    meant for exactly one. A still-in-flight handoff (``started`` -- e.g. a
+    legitimate takeover recovery) is unaffected; only ``submitted`` is
+    treated as spent. A genuine failure to claim at all (no owner, no
+    concurrent claimant either) is a real error (exit ``1``), never a silent
+    success.
     """
     task_id = args.task_id
     defer = getattr(args, "defer_complete", False)
@@ -423,9 +507,7 @@ def _cmd_consume(args: argparse.Namespace) -> int:
             return 1
         status = task.get("status")
         # Debounce a spent baton: a submitted/completed handoff is never replayed.
-        is_handoff = ("handoff" in (task.get("labels") or [])) or (
-            task.get("source") == "context-handoff"
-        )
+        is_handoff = _task_is_handoff(task)
         if is_handoff and status in ("submitted", "completed"):
             return _core()._consume_already_spent(task_id, task)
         if status not in ("submitted", "completed", "abandoned"):
@@ -437,6 +519,7 @@ def _cmd_consume(args: argparse.Namespace) -> int:
                 except DispatchError:
                     pass
             if status in ("queued", "proposed"):
+                claim_exc: DispatchError | None = None
                 try:
                     claimed = c.claim(
                         worker_id=args.worker_id,
@@ -446,10 +529,151 @@ def _cmd_consume(args: argparse.Namespace) -> int:
                         task_id=task_id,
                     )
                     owner = (claimed or {}).get("owner")
-                except DispatchError:
+                except DispatchError as exc:
                     owner = None
+                    claim_exc = exc
+                if not owner:
+                    # A claim that fails -- whether by raising, or by
+                    # returning an ownerless 200 (the coordinator is
+                    # draining, or the task was no longer claimable;
+                    # DispatchClient.claim() can legitimately return None
+                    # with no exception in either case) -- is only ever
+                    # benign when a *legitimate* concurrent claimant already
+                    # won the race (the docstring's "ordinary transitions
+                    # are idempotent" contract). Confirm that via a re-fetch
+                    # before deciding: if nobody else owns it either, this
+                    # is a genuine failure (real error, exit 1); if a
+                    # concurrent claimant does, refuse to replay the payload
+                    # to this losing caller (exit 3, below).
+                    try:
+                        refreshed = c.get(task_id)
+                    except DispatchError:
+                        refreshed = None
+                    refreshed_status = (refreshed or {}).get("status")
+                    if refreshed_status in ("submitted", "completed", "abandoned"):
+                        # The winning consumer already drove the race all the
+                        # way to completion (or abandonment) by the time of
+                        # this re-fetch -- baton-mode completion/abandonment
+                        # clears the owner, so checking ownership alone would
+                        # misread this exact case as a genuine claim failure
+                        # instead of the terminal state it actually is.
+                        if refreshed_status != "abandoned" and _task_is_handoff(
+                            refreshed
+                        ):
+                            return _core()._consume_already_spent(task_id, refreshed)
+                        # Either a non-handoff submitted/completed task, or
+                        # an abandoned task (never treated as a spent
+                        # handoff baton, matching the initial-snapshot check
+                        # above, which only debounces submitted/completed):
+                        # the documented contract is idempotent payload
+                        # delivery (the same path a terminal task takes when
+                        # observed terminal from the very first get() above),
+                        # never the handoff's exit-3 replay refusal.
+                        result = c.payload(task_id)
+                        content = result.get("payload")
+                        if content is None:
+                            print(
+                                f"agent-dispatch: task {task_id} has no "
+                                "resolvable payload",
+                                file=sys.stderr,
+                            )
+                            return 4
+                        sys.stdout.write(content)
+                        if not content.endswith("\n"):
+                            sys.stdout.write("\n")
+                        return 0
+                    if not (refreshed and refreshed.get("owner")):
+                        detail = f": {claim_exc}" if claim_exc is not None else ""
+                        print(
+                            f"agent-dispatch: could not claim handoff task "
+                            f"{task_id}{detail}",
+                            file=sys.stderr,
+                        )
+                        return 1
+                    # A legitimate concurrent claimant now owns this task --
+                    # this invocation lost the race. For an exactly-once
+                    # handoff baton, replaying the payload to the LOSING
+                    # caller is itself a duplicate-delivery bug: the losing
+                    # caller's own consumer (consumeDispatchHandoffTask)
+                    # treats a zero exit as "taskConsumed" and records
+                    # itself as the consuming session regardless of who
+                    # actually holds the task, so two racing successors
+                    # could both receive and act on the same baton. Refuse
+                    # exactly like an already-spent handoff rather than
+                    # falling through to print a payload this invocation
+                    # never actually earned.
+                    print(
+                        f"[agent-dispatch] Handoff task {task_id} is owned by "
+                        f"{refreshed.get('owner')!r}, not this caller -- a "
+                        f"concurrent claimant won the race. NOT replaying the "
+                        f"brief. Do NOT act on this task; end your turn.\n"
+                        f"If this is unexpected, inspect with: agent-dispatch "
+                        f"show {task_id}"
+                    )
+                    print(
+                        f"agent-dispatch: handoff {task_id} claimed by a "
+                        "concurrent owner; not replayed",
+                        file=sys.stderr,
+                    )
+                    return 3
+                # The claim succeeded under this invocation's worker_id --
+                # but claiming clears owner_session_id, and worker_id is
+                # shared by every session in this machine/worktree, so a
+                # second session resolving to the identical worker_id can
+                # race in right here (its own claim() call succeeding too,
+                # since the coordinator can't distinguish them by worker_id
+                # either) before either reaches start()/complete(). Fence
+                # the freshly claimed snapshot the same way an
+                # already-claimed task is fenced below.
+                fence = _fence_consumer_session(
+                    c, task_id, owner, expected_generation=(claimed or {}).get("generation")
+                )
+                if fence is not None:
+                    return fence
             elif status in ("claimed", "started", "suspended"):
                 owner = task.get("owner")
+                # This invocation never actually claimed the task itself in
+                # this branch (it was already claimed/started/suspended by
+                # the time of the very first get() above) -- so 'owner'
+                # here is just whatever this stale snapshot says, not proof
+                # this invocation is the one that holds it. Refuse exactly
+                # like a lost claim race unless the owner actually matches
+                # this invocation's own resolved identity; otherwise this
+                # would start/complete the task *as* a different owner and
+                # replay the payload to a caller that never won anything.
+                this_worker_id = args.worker_id or (
+                    worker_id_for(machine, worktree) if machine and worktree else None
+                )
+                if owner != this_worker_id:
+                    print(
+                        f"[agent-dispatch] Handoff task {task_id} is owned by "
+                        f"{owner!r}, not this caller ({this_worker_id!r}) -- "
+                        f"it was already claimed by someone else before this "
+                        f"invocation even started. NOT replaying the brief. "
+                        f"Do NOT act on this task; end your turn.\n"
+                        f"If this is unexpected, inspect with: agent-dispatch "
+                        f"show {task_id}"
+                    )
+                    print(
+                        f"agent-dispatch: handoff {task_id} owned by a "
+                        "different consumer; not replayed",
+                        file=sys.stderr,
+                    )
+                    return 3
+                if status in ("claimed", "started"):
+                    # Matching worker_id is still not proof THIS invocation
+                    # performed the claim: worker_id is derived from
+                    # machine+worktree and is shared by every session
+                    # running in the same worktree, so a second,
+                    # concurrently-running successor session resolves to
+                    # the identical worker_id and passes the check above
+                    # despite never claiming anything itself. Fence it the
+                    # same way the freshly claimed snapshot above is fenced.
+                    fence = _fence_consumer_session(
+                        c, task_id, owner, expected_generation=task.get("generation")
+                    )
+                    if fence is not None:
+                        return fence
             if owner:
                 if status == "suspended":
                     if defer:
@@ -480,18 +704,33 @@ def _cmd_consume(args: argparse.Namespace) -> int:
                             print(f"agent-dispatch: {exc}", file=sys.stderr)
                             return 1
                 else:
+                    # Unlike the claim above, we already hold this task's
+                    # ownership by this point -- a start/complete failure here
+                    # is never a benign lost race (nothing else can legitimately
+                    # race an owned task) and must surface as a real error, not
+                    # silently print a payload the caller believes it now owns.
                     try:
                         c.start(task_id, owner)
-                    except DispatchError:
-                        pass
+                    except DispatchError as exc:
+                        print(
+                            f"agent-dispatch: could not start handoff task "
+                            f"{task_id}: {exc}",
+                            file=sys.stderr,
+                        )
+                        return 1
                     # Deferred pickup stops at 'started': the successor completes
                     # explicitly when the work is done. Baton mode completes now.
                     if not defer:
                         result_ref = args.result_ref or f"consumed:{worktree or 'successor'}"
                         try:
                             c.complete(task_id, owner, result_ref=result_ref)
-                        except DispatchError:
-                            pass
+                        except DispatchError as exc:
+                            print(
+                                f"agent-dispatch: could not complete handoff "
+                                f"task {task_id}: {exc}",
+                                file=sys.stderr,
+                            )
+                            return 1
         result = c.payload(task_id)
     content = result.get("payload")
     if content is None:

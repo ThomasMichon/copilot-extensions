@@ -1,0 +1,9 @@
+{
+  "comment": "Fix 'agent-dispatch consume' silently reporting success when claim/start/complete fails",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
