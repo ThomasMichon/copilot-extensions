@@ -39,14 +39,23 @@ daemon's existence through the plugin's own operation, but never talks to it
 directly, and still re-spawns a cold CLI process on every refresh instead.
 
 This effort's intent is to make the Picker's data-fetch path **capability-
-aware**: prefer the fastest channel a pivot can actually offer — a direct
-HTTP/SSE/WebSocket connection to a pivot's own live daemon when one is
-discoverable and reachable, degrading to the CLI's own streaming/NDJSON mode
-when no daemon exists, degrading further to the original one-shot JSON call
-only as the safety-net floor — and to make the Picker's own render path
-genuinely incremental (diff incoming state, write only the layout regions that
-actually changed) rather than redrawing more than it needs to on every update.
-This closes the loop opened by the render-perf investigations landed in the
+aware**: prefer the fastest channel a pivot's own CLI can actually offer,
+behind the CLI-owned client boundary the Picker already talks to — a CLI
+whose own `--stream`/`--subscribe` implementation internally relays its
+already-running daemon's live feed (direct HTTP/SSE to that daemon, chosen
+and owned entirely by the CLI, never by the Picker) when one is discoverable
+and reachable, degrading to the CLI's own poll-and-diff streaming mode when
+no daemon exists or isn't reachable, degrading further to the original
+one-shot JSON call only as the safety-net floor — and to make the Picker's
+own render path genuinely incremental (diff incoming state, write only the
+layout regions that actually changed) rather than redrawing more than it
+needs to on every update. The Picker itself never grows a new transport or a
+direct daemon connection of its own (per Copilot review on this effort's own
+plan PR #4764, confirmed and detailed further by Phase 3's own design
+review — see `phase-3-design.md` — this keeps the Picker inside the
+vision's stated engine boundary, "reaches each engine only by invoking its
+machine-readable CLI verbs," `visions/picker/README.md:332-336`). This
+closes the loop opened by the render-perf investigations landed in the
 `worktrees-pivot-ux-overhaul` effort (2026-09-30): those fixed two *concrete*
 staleness/latency bugs, but both investigations surfaced the same underlying
 shape — a slow, synchronous, no-caching round trip standing in for a channel
@@ -428,9 +437,12 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
         level staleness also being absent — and a discovery result that
         reports a per-manifest construction failure, not only a raised
         scan exception, must count as a failed attempt that does not
-        advance the generation).
-- [ ] **Phase 4:** a regression test asserting only the expected segment(s)
-      refresh for a given cause (cosmetic pulse vs. nav vs. reload vs. pivot
+        advance the generation), **and a zero-downtime daemon-generation
+        cutover** (a new generation is never promoted — or traffic routed
+        to it — before its own cache has completed a first authoritative
+        scan, or the retiring generation's cache state is transferred,
+        whichever this design implements; prove the cutover itself never
+        introduces a new `503` blip a pre-3b cutover wouldn't have had).
 - [ ] **Phase 4:** a regression test asserting only the expected segment(s)
       refresh for a given cause (cosmetic pulse vs. nav vs. reload vs. pivot
       switch), plus confirmation (via the same real-timer profiling method
@@ -1455,5 +1467,33 @@ design doc's own internals honest with each other:
   explicit discovery-result distinguishing a raised scan, a completed scan
   with one or more per-manifest construction failures, and a genuinely
   clean pass — only the clean-pass case advances the generation.
+
+All three replied-to inline.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 16: a cutover gap 3b itself would introduce, a doc-generation duplication bug, and a stale Guiding Intent
+Three findings — one genuine new design gap, two documentation-quality bugs
+in this session's own output:
+
+- **Medium: 3b's background cache has no defined readiness/cutover seam.**
+  Today's daemon-generation promotion gate marks a new generation ready once
+  its resolvers are *constructed*, not once its cache has completed a first
+  authoritative scan — those stop being the same moment once the scan moves
+  to a background task. A zero-downtime cutover could therefore promote a
+  generation whose cache is still fully uninitialized right as the old,
+  warm-cache generation retires — a brand-new `503` blip this design itself
+  would introduce, not a pre-existing one. Fixed by requiring promotion
+  readiness to gate on cache warm-up (or an equivalent cache-state transfer
+  from the retiring generation), plus a dedicated Validation Plan cutover
+  test.
+- **Low: the Validation Plan's Phase 4 entry had been accidentally
+  duplicated with a truncated first copy** (an artifact of this session's
+  own earlier programmatic edit extracting the Phase 3 detail into the
+  sibling doc). Collapsed into the single complete item.
+- **Low: the Guiding Intent section still described the superseded
+  "direct HTTP/SSE/WebSocket to the daemon" hierarchy**, left over from
+  before Phase 3's own design review settled on the CLI-owned relay shape —
+  two incompatible guiding intents in the same effort. Updated to describe
+  the CLI-owned daemon relay this design actually implements, with a
+  pointer to `phase-3-design.md` for the full rationale.
 
 All three replied-to inline.

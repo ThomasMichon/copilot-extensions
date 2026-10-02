@@ -320,6 +320,24 @@ phase) is considered.
       concurrent Pickers now sharing one scan instead of paying for N. The
       CLI's `--subscribe` loop keeps its current shape (poll on
       `--interval`, diff, emit) — only what each tick costs changes.
+  - [ ] **A zero-downtime daemon-generation cutover must not promote a
+        generation whose cache hasn't warmed up yet:** today's readiness
+        gate (`app.py:471-508`) marks a new generation ready once its
+        resolvers are *constructed*, not once its cache has completed a
+        first authoritative scan — those are no longer the same moment
+        once the scan moves to a background task. Promoting on
+        construction alone would let traffic route to a new generation
+        whose cache is still fully uninitialized right as the *old*
+        generation (which had a warm cache) is retired, turning a
+        previously-seamless cutover into a new, self-inflicted `503` blip
+        this design itself would not have had before 3b existed. Fixed by
+        gating promotion readiness on the cache's own warm-up (don't mark
+        the new generation ready until its background scan has completed
+        at least once per already-known namespace), **or** transferring the
+        retiring generation's authoritative cache state to the new
+        generation as part of the handoff — either closes the gap; a
+        dedicated cutover regression test belongs in the Validation Plan
+        either way.
   - [ ] **Preserve the initial-scan recovery contract — including what
         happens if every forced rescan still fails:**
         `_fetch_complete_initial_rows()` relies on each retried
