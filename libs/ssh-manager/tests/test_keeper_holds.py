@@ -176,6 +176,24 @@ def test_prune_probes_outside_lock_and_compare_deletes(tmp_path, monkeypatch):
     assert holds.read_state("repo-1")["holds"]["race"]["updated_at"] == 2000.0
 
 
+def test_a_stale_probe_never_drops_a_hold_a_concurrent_probe_just_confirmed(tmp_path, monkeypatch):
+    """A concurrent successful probe refreshes only confirmed_at (updated_at is
+    unchanged); this probe's stale 'gone' result must not delete that hold."""
+    holds = _holds(tmp_path)
+    monkeypatch.setattr("ssh_manager.keeper_holds.time.time", lambda: 2000.0)
+    holds.store.write("repo-1", {"pid": 100, "holds": {
+        "race": {"mux": "wt-race", "updated_at": 1000.0, "confirmed_at": 1500.0}}})
+
+    def probe(_mux):
+        state = holds.read_state("repo-1")
+        state["holds"]["race"]["confirmed_at"] = 1999.0  # the other probe saw it alive
+        holds.store.write("repo-1", state)
+        return False
+
+    assert set(holds.list_holds("repo-1", probe=probe)) == {"race"}
+    assert holds.read_state("repo-1")["holds"]["race"]["confirmed_at"] == 1999.0
+
+
 def test_retiring_keeper_removes_own_empty_state(tmp_path, monkeypatch):
     holds = _holds(tmp_path)
     monkeypatch.setattr("ssh_manager.keeper_holds.os.getpid", lambda: 100)

@@ -304,20 +304,14 @@ class KeeperHoldStore:
         with self.lock(key):
             current = self.read_state(key) or {}
             current_holds = self.read_holds(current)
+            # Compare each whole snapshotted hold: a concurrent probe that only
+            # moved confirmed_at (not updated_at) must win over this stale result.
             for hold_id, stale_hold in stale.items():
-                current_hold = current_holds.get(hold_id)
-                if (
-                    current_hold
-                    and current_hold.get("updated_at") == stale_hold.get("updated_at")
-                ):
+                if current_holds.get(hold_id) == stale_hold:
                     current_holds.pop(hold_id, None)
             for hold_id, refreshed_hold in refreshed.items():
-                original = holds.get(hold_id) or {}
                 current_hold = current_holds.get(hold_id)
-                if (
-                    current_hold
-                    and current_hold.get("updated_at") == original.get("updated_at")
-                ):
+                if current_hold and current_hold == holds.get(hold_id):
                     current_holds[hold_id] = {**current_hold, **refreshed_hold}
             if current:
                 if not current_holds and int(current.get("pid") or 0) == owner_pid:
