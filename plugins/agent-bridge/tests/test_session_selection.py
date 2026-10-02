@@ -648,7 +648,10 @@ def test_live_sender_label_matches_reply_to_worktree_handle(monkeypatch):
     # default "prompt" kind) would otherwise hit a non-resolvable path.
     monkeypatch.setattr(
         m, "_worktrees_get",
-        lambda key: r"D:\Src\proj.worktrees\wt-abc123" if key == "worktree-dir" else None,
+        # Forward slashes: os.path.basename only splits on "/" on POSIX, so a
+        # Windows-style "D:\...\wt-abc123" fixture would pass locally but fail
+        # this exact assertion on Linux CI.
+        lambda key: "D:/Src/proj.worktrees/wt-abc123" if key == "worktree-dir" else None,
     )
     args = argparse.Namespace()
     assert m._live_sender_label(args) == "wt-abc123"
