@@ -290,14 +290,24 @@ def restricted_policy_errors(
     workspace_folder: str,
     exec_user: str,
     inspected: dict | None = None,
+    migrating: bool = False,
 ) -> list[str]:
-    """Inspect and validate the effective Docker boundary for a restricted fleet."""
+    """Inspect and validate the effective Docker boundary for a restricted fleet.
+
+    ``migrating`` skips only the checks that compare against ``fleet`` (the
+    CURRENT containers.yaml config) -- image, policy fingerprint, explicit
+    environment, network, memory/cpu/pids/tmpfs sizing -- which a deliberate
+    restricted->trusted migration necessarily no longer matches. Every FIXED
+    security invariant about the observed container's own build (profile
+    label, home/uid/gid, no bind mounts, no privileged/extra capabilities,
+    read-only rootfs, no host device/namespace/port exposure, no
+    credential-shaped env) still applies unconditionally.
+    """
     errors: list[str] = []
     try:
         fleet.validate_restricted()
     except RuntimeError as exc:
         errors.append(str(exc))
-    expected_policy = fleet.security_policy_fingerprint(workspace_folder, exec_user)
     doc = inspected or inspect_container(info.name)
     host = doc.get("HostConfig") or {}
     container = doc.get("Config") or {}
@@ -308,19 +318,23 @@ def restricted_policy_errors(
 
     if labels.get(SECURITY_PROFILE_LABEL) != "restricted":
         errors.append("security profile label is not restricted")
-    if labels.get(SECURITY_POLICY_LABEL) != expected_policy:
-        errors.append("security policy fingerprint is stale")
-    if container.get("Image") != fleet.image:
-        errors.append("container image differs from configured image")
-    if labels.get(SECURITY_IMAGE_ID_LABEL) != doc.get("Image"):
-        errors.append("container image ID differs from provisioned image ID")
-    current_image = _docker(
-        ["image", "inspect", "--format", "{{.Id}}", fleet.image],
-        timeout=30,
-    )
-    current_image_id = current_image.stdout.strip() if current_image.returncode == 0 else ""
-    if not current_image_id or current_image_id != doc.get("Image"):
-        errors.append("configured image reference differs from running image ID")
+    if not migrating:
+        expected_policy = fleet.security_policy_fingerprint(workspace_folder, exec_user)
+        if labels.get(SECURITY_POLICY_LABEL) != expected_policy:
+            errors.append("security policy fingerprint is stale")
+        if container.get("Image") != fleet.image:
+            errors.append("container image differs from configured image")
+        if labels.get(SECURITY_IMAGE_ID_LABEL) != doc.get("Image"):
+            errors.append("container image ID differs from provisioned image ID")
+        current_image = _docker(
+            ["image", "inspect", "--format", "{{.Id}}", fleet.image],
+            timeout=30,
+        )
+        current_image_id = (
+            current_image.stdout.strip() if current_image.returncode == 0 else ""
+        )
+        if not current_image_id or current_image_id != doc.get("Image"):
+            errors.append("configured image reference differs from running image ID")
     if not home or not str(home).startswith("/"):
         errors.append("restricted home label is missing or invalid")
     try:
@@ -339,9 +353,12 @@ def restricted_policy_errors(
     }
     if home and f"HOME={home}" not in env:
         errors.append("HOME does not target the restricted writable home")
-    for name, expected in fleet.environment.items():
-        if env_map.get(name) != expected:
-            errors.append(f"explicit environment '{name}' differs from configuration")
+    if not migrating:
+        for name, expected in fleet.environment.items():
+            if env_map.get(name) != expected:
+                errors.append(
+                    f"explicit environment '{name}' differs from configuration"
+                )
     sensitive = sorted(
         name for name in env_map if is_sensitive_environment_name(name)
     )
@@ -379,6 +396,9 @@ def restricted_policy_errors(
         errors.append("published ports are present")
     if host.get("ExtraHosts"):
         errors.append("extra host mappings are present")
+
+    if migrating:
+        return errors
 
     expected_network = fleet.effective_network()
     if host.get("NetworkMode") != expected_network:

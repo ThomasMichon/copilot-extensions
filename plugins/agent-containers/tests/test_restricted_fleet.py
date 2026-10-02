@@ -555,6 +555,112 @@ def test_restricted_policy_inspects_effective_docker_boundary(monkeypatch):
     assert "an unconfined security profile is present" in errors
 
 
+def test_restricted_policy_migrating_skips_only_current_config_checks(monkeypatch):
+    """copilot-extensions#4933 follow-up: ``migrating=True`` exempts the
+    CURRENT-config comparisons (image/policy/environment/network/memory/
+    cpu/pids/tmpfs sizing) a deliberate profile migration necessarily no
+    longer matches, while every FIXED security invariant about the
+    container's own build still applies."""
+    old_fleet = FleetConfig(
+        image="example/agent:latest",
+        security_profile="restricted",
+        acp_command="minimal-agent --stdio",
+    )
+    policy = old_fleet.security_policy_fingerprint("/workspace", "agent")
+    info = DockerContainerInfo(
+        name="sandbox-1",
+        container_id="cid",
+        image="example/agent:latest",
+        state="running",
+        status="Up",
+        fleet="sandbox",
+        security_profile="restricted",
+        security_policy=policy,
+    )
+    doc = {
+        "Config": {
+            "Image": "example/agent:latest",
+            "Env": ["HOME=/home/agent"],
+            "Labels": {
+                "agent-containers.security-profile": "restricted",
+                "agent-containers.security-policy": policy,
+                "agent-containers.security-home": "/home/agent",
+                "agent-containers.security-uid": "1000",
+                "agent-containers.security-gid": "1000",
+                "agent-containers.security-image-id": "sha256:image",
+            },
+        },
+        "Image": "sha256:image",
+        "HostConfig": {
+            "ReadonlyRootfs": True,
+            "Privileged": False,
+            "CapDrop": ["ALL"],
+            "CapAdd": None,
+            "SecurityOpt": ["no-new-privileges"],
+            "Binds": None,
+            "Devices": [],
+            "DeviceRequests": None,
+            "PidMode": "",
+            "IpcMode": "private",
+            "UTSMode": "",
+            "UsernsMode": "",
+            "PortBindings": {},
+            "PublishAllPorts": False,
+            "ExtraHosts": None,
+            "NetworkMode": "none",
+            "Memory": 4 * 1024**3,
+            "MemorySwap": 4 * 1024**3,
+            "NanoCpus": 2_000_000_000,
+            "PidsLimit": 256,
+            "Tmpfs": {
+                "/workspace": "rw,nosuid,nodev,exec,size=2g,uid=1000,gid=1000,mode=0700",
+                "/home/agent": "rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000,mode=0700",
+                "/tmp": "rw,nosuid,nodev,size=512m",  # noqa: S108
+                "/run": "rw,nosuid,nodev,size=64m",
+            },
+        },
+        "Mounts": [],
+        "NetworkSettings": {"Networks": {"none": {}}},
+    }
+    monkeypatch.setattr(
+        "agent_containers.lifecycle.inspect_container",
+        lambda name: doc,
+    )
+    monkeypatch.setattr(
+        "agent_containers.lifecycle._docker",
+        lambda args, timeout=30: _ok("sha256:image\n"),
+    )
+
+    # The CURRENT (now-trusted) fleet config: image, environment, and
+    # network/memory/cpu/pids all necessarily differ from the restricted-
+    # built container's own real values -- none of that should block a
+    # migration.
+    new_fleet = FleetConfig(
+        image="example/agent:v2",
+        security_profile="trusted",
+        environment={"SOME_VAR": "changed"},
+    )
+
+    assert restricted_policy_errors(
+        info,
+        new_fleet,
+        workspace_folder="/workspace",
+        exec_user="agent",
+        migrating=True,
+    ) == []
+
+    # A FIXED invariant violation still blocks, even with migrating=True.
+    doc["HostConfig"]["Privileged"] = True
+    errors = restricted_policy_errors(
+        info,
+        new_fleet,
+        workspace_folder="/workspace",
+        exec_user="agent",
+        migrating=True,
+    )
+    assert "container is privileged" in errors
+
+
 def test_start_restricted_validates_before_start(monkeypatch):
     config = ContainersConfig()
     config.fleets["sandbox"] = FleetConfig(

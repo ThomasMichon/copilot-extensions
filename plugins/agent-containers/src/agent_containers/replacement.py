@@ -218,18 +218,19 @@ def destroy_drifted_restricted_members(
     operation: str,
     force_abandon: bool,
 ):
-    """Recreate each restricted-observed member whose profile has drifted off
-    its (now non-restricted) fleet's current configuration.
+    """Recreate each member whose discovered profile has drifted off its (now
+    non-restricted) fleet's current configuration.
 
-    Every member here is, by construction, still ``security_profile ==
-    "restricted"`` (``fleet.reconcile_up`` only reaches this helper from its
-    non-restricted branch, where the fleet's configured profile is the only
-    other possible value) -- so each goes through the full restricted
-    rescue/liveness pipeline via ``destroy_restricted_member(...,
-    migrating=True)``, never a lightweight lease-only path. Independent per
-    member (one bad apple never blocks the rest). Returns a
-    ``fleet.FleetOperationResult`` with ``removed``/``deferred``/``rescues``/
-    ``telemetry_abandoned`` populated (other fields left at their defaults).
+    Most members here are restricted-observed (the common migration case),
+    routed through the full restricted rescue/liveness pipeline via
+    ``destroy_restricted_member(..., migrating=True)`` -- never a
+    lightweight lease-only path. An unlabeled legacy member (discovered
+    ``security_profile == "unknown"``) has no supported migration path and
+    is deferred rather than passed to a helper that only accepts restricted
+    members. Independent per member (one bad apple never blocks the rest).
+    Returns a ``fleet.FleetOperationResult`` with
+    ``removed``/``deferred``/``rescues``/``telemetry_abandoned`` populated
+    (other fields left at their defaults).
     """
     from .fleet import FleetOperationResult
 
@@ -239,6 +240,12 @@ def destroy_drifted_restricted_members(
             result.deferred[member.name] = (
                 f"container fleet label {member.fleet!r} conflicts with "
                 f"requested fleet {fleet_name!r}"
+            )
+            continue
+        if member.security_profile != RESTRICTED_PROFILE:
+            result.deferred[member.name] = (
+                f"discovered security profile {member.security_profile!r} "
+                "has no supported migration path; recreate it manually"
             )
             continue
         decision = destroy_restricted_member(
@@ -359,16 +366,13 @@ def _restricted_member_action(
                     "deferred",
                     f"container execution generation is unknown: {exc}",
                 )
-            policy_errors = (
-                []
-                if migrating
-                else restricted_policy_errors(
-                    current,
-                    fleet,
-                    workspace_folder=fleet.workspace_folder or config.workspace_folder,
-                    exec_user=user,
-                    inspected=inspected,
-                )
+            policy_errors = restricted_policy_errors(
+                current,
+                fleet,
+                workspace_folder=fleet.workspace_folder or config.workspace_folder,
+                exec_user=user,
+                inspected=inspected,
+                migrating=migrating,
             )
             unsafe_policy_errors = [
                 error

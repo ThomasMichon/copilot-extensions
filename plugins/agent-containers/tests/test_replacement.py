@@ -1209,10 +1209,10 @@ def test_migrating_member_still_blocks_on_active_session(monkeypatch):
     assert "active Copilot session-state lock" in (result.reason or "")
 
 
-def test_migrating_member_skips_current_policy_conformance(monkeypatch):
-    """The member no longer matches the fleet's CURRENT (trusted) policy by
-    definition during a migration -- that mismatch must not block removal,
-    while rescue/liveness still run."""
+def test_migrating_member_forwards_migrating_flag_to_policy_check(monkeypatch):
+    """The CURRENT-config conformance checks must be skipped (``migrating``
+    forwarded to ``restricted_policy_errors``), while rescue/liveness still
+    run in full."""
     config, fleet = _migrated_config()
     info = _member()
     _safe_defaults(monkeypatch, info)
@@ -1221,13 +1221,11 @@ def test_migrating_member_skips_current_policy_conformance(monkeypatch):
         "probe_session_liveness",
         lambda *_args, **_kwargs: replacement.SessionLiveness("idle", [], []),
     )
+    policy_calls = []
     monkeypatch.setattr(
         replacement,
         "restricted_policy_errors",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("current-policy conformance must not be checked "
-                           "during a migration")
-        ),
+        lambda *_args, **kwargs: policy_calls.append(kwargs.get("migrating")) or [],
     )
     rescued = []
     monkeypatch.setattr(
@@ -1256,6 +1254,46 @@ def test_migrating_member_skips_current_policy_conformance(monkeypatch):
     assert result.status == "removed"
     assert removed == [info.container_id]
     assert rescued == [True]
+    assert policy_calls == [True]
+
+
+def test_migrating_member_still_blocks_on_fixed_security_invariant(monkeypatch):
+    """A migration only exempts CURRENT-config comparisons -- a FIXED
+    invariant violation (e.g. a privileged container) must still block
+    destruction even with ``migrating=True``."""
+    config, fleet = _migrated_config()
+    info = _member()
+    _safe_defaults(monkeypatch, info)
+    monkeypatch.setattr(
+        replacement,
+        "probe_session_liveness",
+        lambda *_args, **_kwargs: replacement.SessionLiveness("idle", [], []),
+    )
+    monkeypatch.setattr(
+        replacement,
+        "restricted_policy_errors",
+        lambda *_args, **_kwargs: ["container is privileged"],
+    )
+    monkeypatch.setattr(
+        replacement,
+        "remove_container",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("a fixed-invariant violation must not be removed")
+        ),
+    )
+
+    result = replacement.destroy_restricted_member(
+        config,
+        fleet,
+        info,
+        operation="recreate",
+        force_remove=True,
+        force_abandon=False,
+        migrating=True,
+    )
+
+    assert result.status == "deferred"
+    assert "container is privileged" in (result.reason or "")
 
 
 def test_destroy_drifted_restricted_members_reports_independent_outcomes(monkeypatch):
@@ -1281,3 +1319,36 @@ def test_destroy_drifted_restricted_members_reports_independent_outcomes(monkeyp
     assert result.deferred == {
         "sandbox-2": "active Copilot session-state lock present"
     }
+
+
+def test_destroy_drifted_restricted_members_defers_unknown_profile(monkeypatch):
+    """An unlabeled legacy member (discovered security_profile == 'unknown')
+    has no supported migration path -- it must be deferred per-member, not
+    crash the whole reconciliation by hitting destroy_restricted_member's
+    restricted-only guard (copilot-extensions#4933 follow-up)."""
+    config, fleet = _migrated_config()
+    unknown = DockerContainerInfo(
+        name="sandbox-1",
+        container_id="sandbox-1-instance",
+        image="example/agent",
+        state="running",
+        status="Up",
+        fleet="sandbox",
+        security_profile="unknown",
+    )
+    monkeypatch.setattr(
+        replacement,
+        "destroy_restricted_member",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("an unknown-profile member must never reach "
+                           "destroy_restricted_member")
+        ),
+    )
+
+    result = replacement.destroy_drifted_restricted_members(
+        config, fleet, "sandbox", [unknown],
+        operation="recreate", force_abandon=False,
+    )
+
+    assert result.removed == []
+    assert "no supported migration path" in result.deferred["sandbox-1"]
