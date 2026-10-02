@@ -434,7 +434,8 @@ def test_install_sh_update_checks_forward_before_lifecycle_actions():
     revalidate_at = body.index('_update_lifecycle_drain_stop "$predecessor_signature"')
     start_at = body.index('_update_lifecycle_start "$predecessor_signature"')
     assert forward_at < revalidate_at < start_at
-    assert helper.index("_update_lifecycle_still_targets_predecessor") < helper.index("_drain_service") < helper.index("do_stop")
+    assert helper.index("_update_lifecycle_still_targets_predecessor") < helper.index("_drain_service") \
+        < helper.rindex("_update_lifecycle_still_targets_predecessor") < helper.index("do_stop")
     assert 'if [[ "$active_forward" == true ]]; then' in body
     assert 'Forwarded host bridge route still active -- not starting a local daemon' in body
     assert 'Forwarded host bridge route appeared during update -- skipping drain/stop/start' in text
@@ -483,6 +484,40 @@ def test_install_sh_update_start_accepts_the_route_its_own_stop_cleared(current,
     out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout
     assert ("STARTED" in out) is starts
     assert ("STOPPED" in out) is stops
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a POSIX bash environment is needed")
+@pytest.mark.parametrize(
+    ("after", "forward", "stops"),
+    [
+        ("sig", False, True),     # still the pinned predecessor after the drain
+        ("", False, True),        # the drained predecessor exited and cleared its route
+        ("other", False, False),  # another daemon took the route during the drain
+        ("sig", True, False),     # a venue forward published during the drain
+    ],
+)
+def test_install_sh_update_drain_stop_revalidates_the_route_after_draining(after, forward, stops, tmp_path):
+    """The drain can block for its full timeout; a forward published meanwhile
+    must not be stopped by the update's last-resort port cleanup."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    helpers = text.split("_update_lifecycle_still_targets_predecessor() {", 1)[1].split(
+        "\n}\n\n_active_host", 1)[0]
+    marker = tmp_path / "drained"
+    script = (
+        f"_drained() {{ [[ -e '{marker.as_posix()}' ]]; }}\n"
+        f"_active_is_forward() {{ _drained && {'true' if forward else 'false'}; }}\n"
+        f"_active_signature() {{ if _drained; then printf '%s' '{after}'; else printf sig; fi; }}\n"
+        "_step() { :; }\n_warn() { :; }\n"
+        f"_drain_service() {{ touch '{marker.as_posix()}'; echo DRAINED; }}\n"
+        "do_stop() { echo STOPPED; }\ndo_start() { :; }\n"
+        "_update_lifecycle_still_targets_predecessor() {" + helpers + "\n}\n"
+        "_pinned_base_url() { echo http://127.0.0.1:9280; }\n"
+        "_update_lifecycle_drain_stop sig && echo RESULT=0 || echo RESULT=1\n"
+    )
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout
+    assert "DRAINED" in out
+    assert ("STOPPED" in out) is stops
+    assert ("RESULT=0" in out) is stops
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a POSIX bash environment is needed")

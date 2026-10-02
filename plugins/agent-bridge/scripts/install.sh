@@ -783,6 +783,12 @@ _update_lifecycle_drain_stop() {
     else
         _warn "Cannot pin the drain to the validated bridge -- skipping drain"
     fi
+    # The drain can block for its full timeout; a venue forward may publish or
+    # bind meanwhile. Re-check right before stopping so the stop's last-resort
+    # $PORT cleanup never kills it.
+    if ! _update_lifecycle_still_targets_predecessor "$pinned" allow-absent; then
+        return 1
+    fi
     do_stop
 }
 

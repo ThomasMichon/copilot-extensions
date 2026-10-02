@@ -1305,6 +1305,11 @@ function Invoke-UpdateDrainStop {
         return $false
     }
     Invoke-Drain -TimeoutSec $TimeoutSec -BaseUrl (Get-SignatureBaseUrl -Signature $Signature)
+    # The drain can take minutes; a venue forward may publish or bind meanwhile.
+    # Re-check right before stopping so the stop's port cleanup never kills it.
+    if (-not (Test-UpdateLifecycleStillTargetsPredecessor -Signature $Signature -AllowAbsent)) {
+        return $false
+    }
     Invoke-Stop
     return $true
 }

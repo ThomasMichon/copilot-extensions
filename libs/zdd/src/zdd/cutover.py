@@ -220,14 +220,16 @@ class CutoverOrchestrator:
                 return False
             self.sleep(poll)
 
+    def _raw_active(self) -> dict | None:
+        """The routing table's own ``active`` row -- never healed to ``previous``."""
+        table = self.routing.read_table(self.config_dir)
+        active_raw = table.get("active") if isinstance(table, dict) else None
+        return active_raw if isinstance(active_raw, dict) else None
+
     def _refuse_current_old(self, result: CutoverResult) -> bool:
         if self.refuse_old is None:
             return False
-        table = self.routing.read_table(self.config_dir)
-        active_raw = table.get("active") if isinstance(table, dict) else None
-        if not isinstance(active_raw, dict):
-            active_raw = None
-        refusal = self.refuse_old(active_raw)
+        refusal = self.refuse_old(self._raw_active())
         if not refusal:
             return False
         result.error = refusal
@@ -312,9 +314,11 @@ class CutoverOrchestrator:
             pass
         if self._refuse_current_old(result):
             return result
-        old_for_cas = self.routing.read_active_endpoint(
-            self.config_dir, verify_listener=False,
-        )
+        # The CAS expectation is the raw ``active`` row only: a clean shutdown
+        # leaves active absent with the old claim demoted to ``previous``, and
+        # the guarded publish compares against the raw row.
+        raw_active = self._raw_active()
+        old_for_cas = Endpoint.from_dict(raw_active) if raw_active else None
         old = self.routing.read_active_endpoint(self.config_dir)
         result.old_endpoint = old
 
