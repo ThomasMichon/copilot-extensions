@@ -296,8 +296,20 @@ this phase) is considered.)_
       replace the `--subscribe` branch's `time.sleep(interval)` poll-and-diff
       loop with: keep the existing initial `begin`/`row`/`done` fetch
       unchanged, then open `DispatchClient.stream_events()` (`GET /events`)
-      and translate each lifecycle event into `delta`/`removed` frames
-      instead of re-polling on a timer.
+      and use **any** event received as a wake trigger for an immediate full
+      `_fetch_rows_direct()` + `_diff_rows()` pass — the exact same
+      full-board re-fetch-and-diff the poll loop already does, just woken by
+      a real event instead of a timer tick, **not** a per-event row
+      transform. (Revised from an earlier per-event-transform draft: a
+      partial, event-sourced row can't correctly maintain a `--limit`-capped,
+      newest-first set — see the dedicated bullet below — and a full re-fetch
+      sidesteps that class of bug entirely by construction, at the cost of
+      one full fetch per wake instead of a cheaper partial update.)
+  - [ ] **Debounce the wake:** a burst of events (several task mutations in
+        quick succession) must coalesce into a single pending re-fetch, not
+        one re-fetch per event — if a fetch is already in flight or already
+        scheduled, a newly arriving event extends/no-ops rather than queuing
+        a second one.
   - [ ] **Scope to the direct (local) path only:**
         `_fetch_rows()` already branches to `_fetch_rows_delegated()` for a
         cross-machine `--machine`. The local coordinator's `/events` stream
@@ -327,40 +339,50 @@ this phase) is considered.)_
         reasonable complementary hardening but is not required to make this
         design correct — an unbounded client-side read timeout is sufficient
         on its own and needs no coordinator change.)
-  - [ ] Filter to events carrying a `task` payload (ignore `spawn.*`,
-        `routing.*`, and other non-task bus traffic the same `/events` feed
-        interleaves); re-derive each row through the **same transform**
-        `_fetch_rows`/`_fetch_rows_direct` already apply to a raw task dict
-        (not a hand-rolled reshaping) so an event-sourced row can never drift
-        from a polled one in field shape or filtering (`--label`,
-        `--recent-mins`, `--limit`).
-  - [ ] A task whose lifecycle event moves it outside the board's current
-        filter window (aged out of `--recent-mins`, no longer matching
-        `--label`, past `--limit`) emits `removed`, not `delta`.
-  - [ ] **Every board-visible mutation needs an event, across every mutation
-        entry point, not only `coordinator_tasks.py`'s `_guard()` calls:**
-        `POST /tasks/{id}/activity` and `POST /tasks/{id}/heartbeat` both
-        call `_guard()` with no `event_type`, so neither publishes anything
-        today — yet `activity`/`activity_updated_at` drive `wt_live` and the
-        subtitle, and the heartbeat's `lease_expires_at`/`updated_at` drive
-        row sort order (`_build()`), all currently refreshed on the existing
-        2s poll. The same gap exists outside that one file: the MCP
-        heartbeat path (`mcp_http.py`'s own `_mutate(..., None)` call) and
-        the background reconcilers (`coordinator_loops.py`'s liveness/
-        cooldown/orphan/run-waiter sweeps, `coordinator.py`'s run-waiter
-        recovery) all mutate task state but publish only aggregate `task.*`
-        *count* events with no `task` payload — exactly the traffic the
-        relay's task-payload filter above silently drops. Relaying only
-        today's named lifecycle events would regress every one of these
-        fields/mutations to the 30-60s reconcile cadence. Requirement: audit
-        every queue-mutation entry point (not just one file) and either (a)
-        add a per-task event carrying enough identity for the relay to act
-        on — ideally the same row-shaped payload existing events already
-        use — or (b), only where a reconciler is genuinely batch-oriented
-        and can't reasonably emit per-task events, document that specific
-        mutation class as intentionally covered by the reconcile interval
-        rather than silently relying on the general safety net to paper over
-        an unaudited gap.
+  - [ ] **A `--limit`-capped, newest-first board can't be maintained from a
+        single event's own row in isolation:** `/tasks` applies `--limit` to
+        the whole result set before `_build()` — it is not a per-task filter.
+        When a mutation would add a task to an already-full capped set,
+        another row must be displaced; when a task leaves the visible set,
+        a previously-untracked row may need to be backfilled in. Neither
+        direction is discoverable from one event's own payload. This is
+        exactly why the wake-trigger model above always re-fetches the whole
+        board rather than attempting to patch one row: the full fetch
+        recomputes the true capped newest-N set every time, so membership
+        changes (additions, displacements, backfills) are handled by
+        construction, the same as the poll loop already handles them today
+        — there is no separate membership-maintenance logic to get right.
+  - [ ] **Every board-visible mutation must publish *some* bus event, even
+        content-free, since this design only needs a wake signal, not row
+        identity:** because any event now only triggers a full re-fetch (not
+        a per-event transform), the event-coverage bar is much lower than a
+        payload-carrying requirement — existence is sufficient. Most
+        mutation paths already publish *something* (including the
+        aggregate, no-`task`-payload `task.reconciled`/`task.reaped`/etc.
+        events the background reconcilers already emit — those work fine as
+        pure wake signals even without task identity). The genuine gaps are
+        the mutation endpoints that publish **nothing at all** today:
+        `POST /tasks/{id}/activity` and `POST /tasks/{id}/heartbeat`
+        (`coordinator_tasks.py`, `_guard()` called with no `event_type`) and
+        the MCP heartbeat path's own `_mutate(..., None)` call
+        (`mcp_http.py`). Add an event — any `event_type`, e.g.
+        `task.activity_updated`/`task.heartbeat` — to each of these specific
+        call sites; no other audit is needed once every mutation path
+        publishes at least one event, since the relay no longer depends on
+        that event's contents.
+  - [ ] **Time-derived fields change with no mutation and no event at all,
+        and need their own refresh path, not a daemon round-trip:**
+        `_build()` expires `activity` after `ACTIVITY_TTL_SECONDS` and
+        advances the "stalled Nm" text purely from `time.time()` — neither
+        is triggered by any task mutation, so neither the event relay above
+        nor a 30-60s reconcile is a sufficient refresh cadence (the current
+        2s poll happens to mask this today only because it's frequent enough
+        to feel live). Fixed by a **separate, local, no-network recompute
+        tick** on a short cadence (comparable to today's 2s, e.g. 1-2s):
+        recalculates only these time-derived display fields from the
+        already-cached rows' own stored timestamps, emitting a `delta` for
+        any row whose *displayed* text changed purely from clock
+        advancement — zero daemon load, since it never re-fetches.
   - [ ] **Reconnect-gap safety net (non-negotiable, not an optimization):**
         `EventBus.subscribe()` (`events.py`) is a live, in-memory, non-replay
         broadcast — an event published during a dropped/reconnecting SSE
@@ -372,18 +394,17 @@ this phase) is considered.)_
         not a return to 2s polling) that re-diffs the complete board against
         the tracked snapshot the same way `--subscribe` already does today,
         catching anything the event stream missed.
-  - [ ] **Serialize the reconcile against the live event stream:** running
-        the background reconcile's fetch/diff/emit
-        concurrently with the SSE consumer risks a race — if the reconcile's
-        snapshot is fetched *before* a mutation, but an event for that same
-        mutation is applied *after* the fetch and *before* the reconcile's
-        diff/emit runs, the reconcile's stale view would re-emit the row's
-        *old* state, visibly reverting it in the Picker until the next
-        reconcile pass. Fixed by a single snapshot-owner lock: the reconcile
-        holds one serialization guard across its entire fetch → diff → emit
-        sequence; any event the SSE consumer receives while that guard is
-        held is queued and applied only after the reconcile releases it,
-        never interleaved mid-reconcile.
+  - [ ] **Serialize every full re-fetch (event-woken, reconcile, or debounce
+        flush) against the others:** more than one of these can be triggered
+        close together (an event wakes a fetch just as the long reconcile's
+        own timer also fires); running them concurrently risks the same
+        stale-overwrite race either way — a slower fetch that started
+        earlier finishing *after* a faster, later one would re-emit the
+        older state, visibly reverting a row until the next pass. Fixed by a
+        single snapshot-owner lock: exactly one fetch-diff-emit sequence
+        runs at a time; a trigger arriving while one is in flight queues
+        (coalescing with any already-pending debounced wake) rather than
+        running concurrently.
   - [ ] **Degradation is the existing code, not a new path:** if
         `stream_events()` raises (coordinator unreachable, non-2xx, stream
         error) at any point — including after already running for a while —
@@ -476,6 +497,24 @@ this phase) is considered.)_
         expires the daemon reports it incomplete on its own, giving the old
         CLI's existing retry-on-incomplete logic something real to react to
         without needing the new parameter at all.
+  - [ ] **Concurrent refreshes of the same namespace must not race each
+        other, and must not recreate the N-scan cost this cache exists to
+        remove:** the periodic timer, a forced refresh, and concurrent
+        initial-scan subscribers can all end up triggering a scan of the
+        same namespace at once. Without coordination, two real risks follow:
+        a slower scan that started earlier can finish *after* a faster,
+        later one and overwrite its newer result and freshness timestamp
+        with older data; and each concurrent caller naively triggering its
+        own scan reintroduces the exact N-callers-pay-for-N-scans cost this
+        cache is meant to eliminate. Fixed by **per-namespace single-flight
+        refresh** (a namespace already being scanned has at most one
+        in-flight scan; any other caller/trigger that arrives meanwhile
+        awaits that same in-flight result rather than starting a second
+        one) plus **generation-guarded publication** (each namespace tracks
+        a monotonic generation counter; a scan only publishes its result if
+        its starting generation is still current when it completes,
+        discarding — not overwriting with — a result that lost the race to
+        a newer one).
 - [ ] **3c — agent-bridge roster-change SSE (deferred; do not start until 3b
       is shipped and measured insufficient):** add a genuine
       `GET /api/v1/agents/stream` daemon route that pushes `delta`/`removed`
@@ -1119,3 +1158,81 @@ modes worked through before it's actually complete.
 
 All five replied-to inline with the concrete fix and the exact README
 section revised, continuing the same review-response convention.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 3: timeless-prose violation + incomplete event-coverage scope
+Two findings:
+- **Timeless-prose violation in the Plan.** The Plan section had accumulated
+  "(round-1 review finding)"/"(round-2 review finding)" annotations directly
+  in its bullet text — `CONTRIBUTING.md`'s timeless-prose rule reserves
+  review-round history for the dated Journal, which already records all of
+  it. Fixed by stripping every such annotation from the Plan prose (8
+  occurrences across the Phase 3 section); the Journal entries above are
+  the sole place this review's history is recorded.
+- **Event-coverage audit was scoped to one file.** Round 2's "audit every
+  `_guard()` call" requirement only named `coordinator_tasks.py`. Two more
+  entry points mutate task state with no event at all: the MCP heartbeat
+  path (`mcp_http.py`'s own `_mutate(..., None)`) and the background
+  reconcilers (`coordinator_loops.py`'s liveness/cooldown/orphan/run-waiter
+  sweeps, `coordinator.py`'s run-waiter recovery) — the latter publish only
+  aggregate, no-`task`-payload count events, which the then-current design's
+  task-payload filter would have silently dropped as pure noise. Folded into
+  the broader requirement below (see round 4) once the relay's own event
+  model changed to no longer need task-identity-carrying events at all.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 4: the per-event-transform model itself had a gap no patch could close — redesigned 3a around a simpler model
+Round 4 found something more fundamental than a missing detail: the
+per-event row-transform model from rounds 1-3 **cannot correctly maintain a
+`--limit`-capped board** — `/tasks` applies `--limit` to the whole result
+set, not per task, so a single event's own payload can never tell the relay
+whether adding/removing that one task should displace or backfill another
+row. Patching this within the per-event-transform model would mean teaching
+the relay to reconstruct whole-set membership logic the daemon itself
+already owns — solving the same problem twice, in two places, with two
+chances to disagree.
+
+Redesigned 3a around a simpler model instead of patching this one bullet:
+**every event is now treated as a pure wake signal that triggers an
+immediate full `_fetch_rows_direct()` + `_diff_rows()` pass** — the exact
+same full-board re-fetch-and-diff the existing poll loop already performs
+correctly today, just woken by a real event instead of a timer. This single
+change collapses several findings at once rather than requiring four more
+patches:
+- **The `--limit`/membership problem disappears by construction** — a full
+  re-fetch always recomputes the true capped, newest-first set, the same
+  way the poll loop already handles additions, displacements, and backfills
+  today. No separate membership-maintenance logic to write or get wrong.
+- **The event-coverage bar drops from "needs task identity" to "needs to
+  exist at all"** — since the relay no longer parses event payloads into
+  rows, an aggregate count event (no `task` field) is just as good a wake
+  signal as a full lifecycle event. This resolves round 3's reconciler
+  concern directly: `coordinator_loops.py`'s/`coordinator.py`'s aggregate
+  events work fine as-is. Only the handful of mutation endpoints that
+  publish **nothing at all** today (`activity`, `heartbeat`,
+  `mcp_http.py`'s `_mutate(..., None)`) still need an event added — a much
+  smaller, purely mechanical fix than the earlier "carry correct task
+  identity" requirement.
+- **Debouncing becomes necessary** (new requirement): a burst of events must
+  coalesce into one pending re-fetch, not one re-fetch per event, to avoid
+  hammering the coordinator on a busy board.
+
+Two further, independent findings from the same round:
+- **Time-derived fields (the `activity` TTL expiry, the "stalled Nm" text)
+  change with no mutation and no event at all** — `_build()` derives them
+  from `time.time()` directly. Neither the event relay nor the 30-60s
+  reconcile would refresh them at a cadence close to today's. Fixed by a
+  separate, local, no-network recompute tick (comparable to today's 2s)
+  that only recalculates these display fields from already-cached
+  timestamps — never a daemon round-trip.
+- **3b's background refresh has its own concurrency race**: a periodic
+  scan, a forced scan, and concurrent initial-scan subscribers can all
+  target the same namespace at once; an earlier-started-but-slower scan
+  finishing after a later one would overwrite the newer result, and naive
+  concurrent triggering reintroduces the N-scan cost the cache exists to
+  remove. Fixed by per-namespace single-flight refresh (concurrent
+  callers await the one in-flight scan) plus generation-guarded publication
+  (a scan only publishes if its starting generation is still current).
+
+All three replied-to inline (one reply per thread; the `--limit` finding and
+the time-derived-fields finding and the concurrency finding each had a
+duplicate noted on a second line in the same file, addressed by the same
+single design change rather than two separate patches).
