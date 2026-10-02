@@ -316,9 +316,12 @@ class CutoverOrchestrator:
             return result
         # The CAS expectation is the raw ``active`` row only: a clean shutdown
         # leaves active absent with the old claim demoted to ``previous``, and
-        # the guarded publish compares against the raw row.
-        raw_active = self._raw_active()
-        old_for_cas = Endpoint.from_dict(raw_active) if raw_active else None
+        # the guarded publish compares against the raw row. Only the guarded
+        # flip uses it, so an unguarded routing stand-in needs no read_table.
+        old_for_cas = None
+        if self.refuse_old is not None:
+            raw_active = self._raw_active()
+            old_for_cas = Endpoint.from_dict(raw_active) if raw_active else None
         old = self.routing.read_active_endpoint(self.config_dir)
         result.old_endpoint = old
 

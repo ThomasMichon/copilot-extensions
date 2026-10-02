@@ -205,12 +205,17 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
         "there is no local daemon to deploy"
     )
     core = _core()
-    if core._active_endpoint_is_forward() and not getattr(args, "json", False):
+    if core._active_endpoint_is_forward() and not getattr(args, "recover", False):
         # The routed "old daemon" is the host's bridge, through the forward:
         # a cutover would take the route over, then drain and shut it down.
-        print(
-            f"[SKIP] agent-bridge deploy: {forwarded_skip}",
-        )
+        # Skip before any recovery or reap, the same way in both output modes
+        # (an output flag never selects lifecycle mutations); ``--recover``
+        # alone continues, to clean up an aborted cutover's breadcrumb.
+        if getattr(args, "json", False):
+            core._json_out({"ok": False, "error": forwarded_skip, "skipped": True,
+                            "steps": [f"refused: {forwarded_skip}"]})
+        else:
+            print(f"[SKIP] agent-bridge deploy: {forwarded_skip}")
         return
     cfg = load_config()
     token = load_or_create_auth_token()

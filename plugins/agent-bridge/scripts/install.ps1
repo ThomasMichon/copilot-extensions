@@ -1270,13 +1270,14 @@ function Test-UpdateLifecycleStillTargetsPredecessor {
         Write-Step 'Forwarded host bridge route appeared during update -- skipping drain/stop/start'
         return $false
     }
-    if (-not [string]::IsNullOrWhiteSpace($Signature)) {
-        $current = Get-ActiveSignature
-        if ($AllowAbsent -and [string]::IsNullOrWhiteSpace($current)) { return $true }
-        if ($current -ne $Signature) {
-            Write-Step 'Active route changed during update -- skipping drain/stop/start'
-            return $false
-        }
+    # An empty pin is the legacy fixed-port predecessor with no route: it must
+    # stay empty. -AllowAbsent relaxes only a pinned predecessor that exited.
+    $current = [string](Get-ActiveSignature)
+    $pinned = [string]$Signature
+    if ($AllowAbsent -and $pinned -and -not $current) { return $true }
+    if ($current -ne $pinned) {
+        Write-Step 'Active route changed during update -- skipping drain/stop/start'
+        return $false
     }
     return $true
 }

@@ -738,15 +738,15 @@ _update_lifecycle_still_targets_predecessor() {
         _step "Forwarded host bridge route appeared during update -- skipping drain/stop/start"
         return 1
     fi
-    if [[ -n "$pinned" ]]; then
-        current="$(_active_signature 2>/dev/null || true)"
-        if [[ "$allow_absent" == allow-absent && -z "$current" ]]; then
-            return 0
-        fi
-        if [[ "$current" != "$pinned" ]]; then
-            _step "Active route changed during update -- skipping drain/stop/start"
-            return 1
-        fi
+    # An empty pin is the legacy fixed-port predecessor with no route: it must
+    # stay empty. allow-absent relaxes only a pinned predecessor that exited.
+    current="$(_active_signature 2>/dev/null || true)"
+    if [[ "$allow_absent" == allow-absent && -n "$pinned" && -z "$current" ]]; then
+        return 0
+    fi
+    if [[ "$current" != "$pinned" ]]; then
+        _step "Active route changed during update -- skipping drain/stop/start"
+        return 1
     fi
     return 0
 }

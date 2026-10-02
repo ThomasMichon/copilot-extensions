@@ -270,30 +270,44 @@ def test_deploy_forward_skip_is_structured_json(tmp_path, monkeypatch, capsys):
     import zdd.breadcrumb
 
     monkeypatch.setattr(zdd.breadcrumb, "read_breadcrumb", lambda _d: None)
-    monkeypatch.setattr(
-        zdd.breadcrumb,
-        "recover_stale_cutover",
-        lambda *_a, **_k: {"recovered": False, "reason": "clean"},
-    )
+    recovered: list[bool] = []
 
-    args = type(
-        "Args",
-        (),
-        {
-            "health_timeout": 1,
-            "drain_timeout": 1,
-            "force": False,
-            "json": True,
-            "recover": False,
-        },
-    )()
-    with pytest.raises(SystemExit) as exc:
-        venue_cli._cmd_deploy(args)
-    assert exc.value.code == 0
+    def _recover(*_a, **_k):
+        recovered.append(True)
+        return {"recovered": False, "reason": "clean"}
+
+    monkeypatch.setattr(zdd.breadcrumb, "recover_stale_cutover", _recover)
+
+    def _args(*, json_out: bool, recover: bool):
+        return type(
+            "Args",
+            (),
+            {
+                "health_timeout": 1,
+                "drain_timeout": 1,
+                "force": False,
+                "json": json_out,
+                "recover": recover,
+            },
+        )()
+
+    # The output flag never selects lifecycle work: both modes skip before
+    # stale-cutover recovery and passive reaping.
+    venue_cli._cmd_deploy(_args(json_out=True, recover=False))
     payload = json.loads(capsys.readouterr().out)
     assert payload["skipped"] is True
     assert payload["ok"] is False
     assert "no local daemon to deploy" in payload["error"]
+    venue_cli._cmd_deploy(_args(json_out=False, recover=False))
+    assert "no local daemon to deploy" in capsys.readouterr().out
+    assert recovered == []
+    # ``--recover`` is the one mode that continues: in both output modes.
+    for json_out in (True, False):
+        with pytest.raises(SystemExit) as exc:
+            venue_cli._cmd_deploy(_args(json_out=json_out, recover=True))
+        assert exc.value.code == 0
+    assert recovered == [True, True]
+    capsys.readouterr()
 
 
 def test_deploy_rechecks_forward_inside_cutover(tmp_path, monkeypatch, capsys):
@@ -518,6 +532,31 @@ def test_install_sh_update_drain_stop_revalidates_the_route_after_draining(after
     assert "DRAINED" in out
     assert ("STOPPED" in out) is stops
     assert ("RESULT=0" in out) is stops
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a POSIX bash environment is needed")
+@pytest.mark.parametrize(("after", "acts"), [("", True), ('{"port":41000}', False)])
+def test_install_sh_an_empty_pin_expects_the_route_to_stay_empty(after, acts, tmp_path):
+    """An empty pin is the legacy fixed-port predecessor with no route; a daemon
+    that publishes one during the drain is a successor and is never stopped (and
+    allow-absent never lets a start run over it)."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    helpers = text.split("_update_lifecycle_still_targets_predecessor() {", 1)[1].split(
+        "\n}\n\n_active_host", 1)[0]
+    marker = tmp_path / "drained"
+    script = (
+        f"_drained() {{ [[ -e '{marker.as_posix()}' ]]; }}\n"
+        "_active_is_forward() { return 1; }\n"
+        f"_active_signature() {{ if _drained; then printf '%s' '{after}'; fi; }}\n"
+        "_step() { :; }\n_warn() { :; }\nPORT=9280\n"
+        f"_drain_service() {{ touch '{marker.as_posix()}'; }}\n"
+        "do_stop() { echo STOPPED; }\ndo_start() { echo STARTED; }\n"
+        "_update_lifecycle_still_targets_predecessor() {" + helpers + "\n}\n"
+        "_update_lifecycle_drain_stop '' || true\n_update_lifecycle_start '' || true\n"
+    )
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout
+    assert ("STOPPED" in out) is acts
+    assert ("STARTED" in out) is acts
 
 
 @pytest.mark.skipif(os.name == "nt", reason="a POSIX bash environment is needed")

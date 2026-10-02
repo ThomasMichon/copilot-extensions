@@ -216,6 +216,33 @@ Write-Host "RESULT=$r"
     assert f"RESULT={stops}" in result.stdout
 
 
+@pytest.mark.parametrize(("after", "acts"), [("", True), ("127.0.0.1|41000|7|3", False)])
+def test_an_empty_pin_expects_the_route_to_stay_empty(
+    tmp_path: Path, after: str, acts: bool,
+) -> None:
+    """An empty pin is the legacy fixed-port predecessor with no route; a daemon
+    that publishes one during the drain is a successor and is never stopped (and
+    -AllowAbsent never lets a start run over it)."""
+    (tmp_path / "agent-bridge").mkdir()
+    result = _run_harness(
+        tmp_path,
+        ["Test-UpdateLifecycleStillTargetsPredecessor", "Get-SignatureBaseUrl",
+         "Invoke-UpdateDrainStop", "Invoke-UpdateStart"],
+        f"""
+$script:drained = $false
+function Test-ActiveIsForward {{ return $false }}
+function Get-ActiveSignature {{ if ($script:drained) {{ return '{after}' }} return '' }}
+function Invoke-Drain {{ param($TimeoutSec, $BaseUrl) $script:drained = $true }}
+function Invoke-Stop {{ Write-Host 'STOPPED' }}
+function Invoke-Start {{ Write-Host 'STARTED' }}
+$null = Invoke-UpdateDrainStop -Signature ''
+$null = Invoke-UpdateStart -Signature ''
+""",
+    )
+    assert ("STOPPED" in result.stdout) is acts
+    assert ("STARTED" in result.stdout) is acts
+
+
 @pytest.mark.parametrize(
     ("signature", "url"),
     [
