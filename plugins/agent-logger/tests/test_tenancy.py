@@ -242,6 +242,71 @@ def test_resolve_tenant_applies_machine_override_and_lock_name(tmp_path):
     assert other.config.sync_repo_allowlist_fail_closed is False
 
 
+def test_resolve_tenant_namespaces_change_tracker_db_for_source_role(tmp_path):
+    """A source-role tenant gets its own change-tracker db under home, so
+    multiple tenants syncing the same ~/.copilot never share "already
+    synced" state."""
+    block = tenancy.parse_tenant_block(
+        {"tenant": {"id": "private-downstream-repo", "roles": ["source"]}},
+        source="x",
+        default_id="private-downstream-repo",
+    )
+    resolved = tenancy.resolve_tenant(
+        block,
+        repo_name="private-downstream-repo",
+        repo_path=tmp_path / "repo",
+        config_path=tmp_path / "repo" / ".agent-logger.yaml",
+        machine="book2",
+        home=tmp_path / "home",
+    )
+    db_path = resolved.config.sync_change_tracking["db_path"]
+    assert db_path == str(tmp_path / "home" / "sync-state-private-downstream-repo.db")
+
+
+def test_resolve_tenant_change_tracker_db_honors_explicit_override(tmp_path):
+    """An explicit ``sync.change_tracking.db_path`` in the tenant block wins
+    over the per-tenant default namespacing."""
+    block = tenancy.parse_tenant_block(
+        {
+            "tenant": {
+                "id": "private-downstream-repo",
+                "roles": ["source"],
+                "sync": {"change_tracking": {"db_path": "/custom/tracker.db"}},
+            }
+        },
+        source="x",
+        default_id="private-downstream-repo",
+    )
+    resolved = tenancy.resolve_tenant(
+        block,
+        repo_name="private-downstream-repo",
+        repo_path=tmp_path / "repo",
+        config_path=tmp_path / "repo" / ".agent-logger.yaml",
+        machine="book2",
+        home=tmp_path / "home",
+    )
+    assert resolved.config.sync_change_tracking["db_path"] == "/custom/tracker.db"
+
+
+def test_resolve_tenant_sink_role_does_not_get_change_tracker_db(tmp_path):
+    """A sink-only tenant (no ``source`` role) must not get a change-tracker
+    db_path injected -- it never pushes, so the setting is meaningless."""
+    block = tenancy.parse_tenant_block(
+        {"tenant": {"id": "sink-only", "roles": ["sink"]}},
+        source="x",
+        default_id="sink-only",
+    )
+    resolved = tenancy.resolve_tenant(
+        block,
+        repo_name="sink-only",
+        repo_path=tmp_path / "repo",
+        config_path=tmp_path / "repo" / ".agent-logger.yaml",
+        machine="book2",
+        home=tmp_path / "home",
+    )
+    assert resolved.config.sync_change_tracking["db_path"] is None
+
+
 def test_resolve_tenant_layers_machine_local_supplement(tmp_path):
     home = tmp_path / "home"
     (home / tenancy.TENANT_SUPPLEMENT_DIR).mkdir(parents=True)

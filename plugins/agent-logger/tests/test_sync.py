@@ -2131,6 +2131,133 @@ def test_engine_dry_run_makes_no_dest(tmp_path: Path) -> None:
     assert not dest.exists()
 
 
+def test_engine_run_sync_second_run_skips_push_when_unchanged(
+    monkeypatch, capsys, tmp_path: Path,
+) -> None:
+    """Change tracking is enabled by default: after a first (full) sync, a
+    second run with no local changes must not invoke the target's push at
+    all."""
+    src = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    assert engine.run_sync(cfg) == 0
+    capsys.readouterr()
+
+    calls: list[object] = []
+    real_push = LocalTarget.push
+
+    def _tracking_push(self, *a, **k):
+        calls.append((a, k))
+        return real_push(self, *a, **k)
+
+    monkeypatch.setattr(LocalTarget, "push", _tracking_push)
+
+    assert engine.run_sync(cfg, verbose=True) == 0
+    assert calls == []
+    assert "no session changes detected" in capsys.readouterr().out
+
+
+def test_engine_run_sync_repushes_modified_session(tmp_path: Path) -> None:
+    src = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    assert engine.run_sync(cfg) == 0
+    (src / "session-state" / "abc-123" / "events.jsonl").write_text(
+        '{"ts": 2}\n', encoding="utf-8"
+    )
+
+    assert engine.run_sync(cfg) == 0
+    machine_dir = next(dest.iterdir())
+    assert (
+        machine_dir / "session-state" / "abc-123" / "events.jsonl"
+    ).read_text(encoding="utf-8") == '{"ts": 2}\n'
+
+
+def test_engine_run_sync_full_flag_forces_reconciliation_detail(
+    capsys, tmp_path: Path,
+) -> None:
+    src = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    assert engine.run_sync(cfg) == 0
+    capsys.readouterr()
+
+    assert engine.run_sync(cfg, full=True) == 0
+    assert "full reconciliation" in capsys.readouterr().out
+
+
+def test_engine_run_sync_change_tracking_disabled_pushes_every_run(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    """``sync.change_tracking.enabled: false`` restores the pre-feature
+    behavior: every run pushes via the plain ``include`` set, with no
+    incremental skip and no segmented batching."""
+    src = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+    cfg._data["sync"]["change_tracking"] = {"enabled": False}
+
+    calls: list[object] = []
+    real_push = LocalTarget.push
+
+    def _tracking_push(self, *a, **k):
+        calls.append((a, k))
+        return real_push(self, *a, **k)
+
+    monkeypatch.setattr(LocalTarget, "push", _tracking_push)
+
+    assert engine.run_sync(cfg) == 0
+    assert len(calls) == 1
+    assert calls[0][0][-1] is None  # include=None, the legacy single-call shape
+
+    assert engine.run_sync(cfg) == 0
+    assert len(calls) == 2
+
+
+def test_engine_run_sync_batches_full_reconciliation(tmp_path: Path) -> None:
+    """A from-scratch full sync with more sessions than ``batch_size`` must
+    still land every session, split across multiple bounded pushes."""
+    src = tmp_path / "copilot"
+    for i in range(5):
+        sess = src / "session-state" / f"sess-{i}"
+        sess.mkdir(parents=True)
+        (sess / "events.jsonl").write_text(f'{{"ts": {i}}}\n', encoding="utf-8")
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+    cfg._data["sync"]["change_tracking"] = {"batch_size": 2}
+
+    assert engine.run_sync(cfg, verbose=True) == 0
+    machine_dir = next(dest.iterdir())
+    for i in range(5):
+        assert (
+            machine_dir / "session-state" / f"sess-{i}" / "events.jsonl"
+        ).is_file()
+
+
+def test_engine_run_sync_forgets_vanished_session_on_full_sync(
+    tmp_path: Path,
+) -> None:
+    import shutil
+
+    src = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    assert engine.run_sync(cfg) == 0
+
+    from agent_logger.sync.change_tracker import ChangeTracker, resolve_db_path
+
+    tracker = ChangeTracker(resolve_db_path(cfg.sync_change_tracking["db_path"], cfg.home))
+    assert tracker.known_session_ids() == {"abc-123"}
+
+    shutil.rmtree(src / "session-state" / "abc-123")
+    assert engine.run_sync(cfg, full=True) == 0
+    assert tracker.known_session_ids() == set()
+
+
 def test_hub_compaction_fails_closed_when_tracked_lookup_unresolved(
     monkeypatch, capsys, tmp_path: Path,
 ) -> None:

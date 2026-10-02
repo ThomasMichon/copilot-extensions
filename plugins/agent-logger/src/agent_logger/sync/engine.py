@@ -82,12 +82,106 @@ def _included_sessions(source, allowlist: list[str],
     return included
 
 
+def _all_session_ids(source: Path) -> list[str]:
+    session_state = source / "session-state"
+    if not session_state.is_dir():
+        return []
+    return sorted(d.name for d in session_state.iterdir() if d.is_dir())
+
+
+def _push_incremental(
+    cfg: Config,
+    target,
+    source: Path,
+    machine: str,
+    include: set[str] | None,
+    *,
+    force_full: bool,
+    verbose: bool,
+):
+    """Resolve the actual push(es) for one sync pass via the change tracker.
+
+    Incremental by default: only sessions whose local signature changed
+    since the last successful sync are included -- the common case does not
+    invoke the target's transport at all. Falls back to a full, segmented
+    reconciliation (bounded-size batches, so one rsync invocation never has
+    to walk the whole corpus) on a from-scratch tracker db, when
+    *force_full* is set (``run --full``), or on the configured periodic
+    cadence. Change tracking itself is opt-out (``sync.change_tracking.enabled:
+    false`` reverts to always pushing everything, exactly as before this
+    existed).
+    """
+    from agent_logger.sync.change_tracker import ChangeTracker, chunked, resolve_db_path
+    from agent_logger.sync.targets.base import PushResult
+
+    settings = cfg.sync_change_tracking
+    if not settings["enabled"]:
+        return target.push(source, machine, include)
+
+    tracker = ChangeTracker(resolve_db_path(settings["db_path"], cfg.home))
+    do_full = force_full or tracker.should_full_sync(settings["full_sync_interval_hours"])
+
+    if not do_full:
+        changed = tracker.changed_sessions(source, include)
+        final_include = changed if include is None else (changed & include)
+        if not final_include:
+            return PushResult(ok=True, detail="no session changes detected")
+        result = target.push(source, machine, final_include)
+        if result.ok:
+            tracker.record(source, final_include)
+        return result
+
+    all_ids = _all_session_ids(source)
+    if include is not None:
+        all_ids = [sid for sid in all_ids if sid in include]
+
+    total_files = 0
+    total_excluded_files = 0
+    total_excluded_bytes = 0
+    excluded_roots: list[str] = []
+    measurement_complete = True
+    batch_count = 0
+    for batch in chunked(all_ids, settings["batch_size"]):
+        batch_count += 1
+        if verbose:
+            print(f"session-sync: full sync batch {batch_count} ({len(batch)} session(s))")
+        result = target.push(source, machine, set(batch))
+        if not result.ok:
+            return result
+        total_files += result.file_count
+        total_excluded_files += result.excluded_file_count
+        total_excluded_bytes += result.excluded_byte_count
+        excluded_roots.extend(result.excluded_roots)
+        measurement_complete = measurement_complete and result.excluded_measurement_complete
+        tracker.record(source, batch)
+
+    vanished = tracker.vanished_sessions(source)
+    if vanished:
+        tracker.forget(vanished)
+    tracker.mark_full_sync()
+
+    detail = (
+        f"full reconciliation: {len(all_ids)} session(s) in {batch_count} batch(es)"
+        if all_ids else "full reconciliation: nothing to push"
+    )
+    return PushResult(
+        ok=True,
+        detail=detail,
+        file_count=total_files,
+        excluded_file_count=total_excluded_files,
+        excluded_byte_count=total_excluded_bytes,
+        excluded_roots=tuple(excluded_roots),
+        excluded_measurement_complete=measurement_complete,
+    )
+
+
 def run_sync(
     cfg: Config,
     *,
     dry_run: bool = False,
     prune: bool = False,
     verbose: bool = False,
+    full: bool = False,
 ) -> int:
     """Execute one sync pass. Returns a process exit code."""
     if _automation_disabled():
@@ -175,7 +269,9 @@ def run_sync(
                     file=sys.stderr,
                 )
 
-        result = target.push(source, machine, include)
+        result = _push_incremental(
+            cfg, target, source, machine, include, force_full=full, verbose=verbose
+        )
         if not result.ok:
             print(f"session-sync: push failed: {result.detail}", file=sys.stderr)
             return 1
@@ -532,6 +628,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--prune", action="store_true", help="prune old sessions after sync")
     p_run.add_argument("--verbose", action="store_true", help="verbose output")
     p_run.add_argument(
+        "--full",
+        action="store_true",
+        help="force a full, segmented reconciliation pass now (ignores the "
+        "periodic cadence and any incremental change-tracking state) -- the "
+        "operator escape hatch for local/upstream drift",
+    )
+    p_run.add_argument(
         "--detach",
         action="store_true",
         help="stage the package to a temp dir and run the sync in a detached, "
@@ -648,7 +751,8 @@ def main(argv: list[str] | None = None) -> int:
 
                 return spawn.spawn_detached_sync(cfg, prune=args.prune)
             return run_sync(
-                cfg, dry_run=args.dry_run, prune=args.prune, verbose=args.verbose
+                cfg, dry_run=args.dry_run, prune=args.prune, verbose=args.verbose,
+                full=args.full,
             )
         if args.command == "push":
             return run_push(

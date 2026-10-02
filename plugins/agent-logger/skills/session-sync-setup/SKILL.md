@@ -341,6 +341,58 @@ installed runtime.
 Both `compact` and `compact-hub` are idempotent and take the sync lock, so they
 never race the scheduled push. Add `--dry-run` to preview.
 
+## Change tracking (incremental sync)
+
+A large corpus (thousands of sessions) makes every scheduled push expensive if
+it has to re-walk/re-diff the whole tree through a slow transport bridge (e.g.
+WSL's DrvFS view of a Windows path) -- expensive enough to exceed the engine's
+own rsync subprocess timeout. **Change tracking is on by default** to fix
+this: a local, stat-only SQLite record (`<home>/sync-state.db`, or
+per-tenant `sync-state-<tenant_id>.db`) remembers each session's last-synced
+content signature, so a routine run only pushes sessions that actually
+changed -- and skips the push entirely when nothing did.
+
+```yaml
+sync:
+  change_tracking:
+    enabled: true                  # false restores pre-feature behavior
+    full_sync_interval_hours: 24   # periodic full reconciliation cadence
+    batch_size: 100                # sessions per push call during a full pass
+    db_path: null                  # null => <home>/sync-state.db
+```
+
+A **full reconciliation** pass (first run ever, the periodic cadence, or an
+explicit `run --full`) still happens, but **segmented**: sessions are pushed
+in `batch_size`-sized groups so one invocation never has to walk the entire
+corpus, and each batch's signatures are recorded as it lands.
+
+> **Known tradeoff: `--delete-excluded` no longer fires.** A full/segmented
+> pass always narrows to an explicit (even if complete) set of session ids --
+> it never passes `include_sessions=None` to the target. `--delete-excluded`
+> only applies when `include_sessions is None`, so it is no longer triggered
+> by any `run` invocation once change tracking is enabled (the default).
+> Plain `--delete` still cleans up content within directories rsync actually
+> visits; what's lost is the narrower case of previously-synced detritus that
+> became newly excluded by a repo-scope change. Destination-side cleanup of
+> sessions that no longer exist locally at all is unaffected -- that's
+> `Target.prune`'s job (age-based, run via `run --prune`), not deletion
+> semantics on the push itself.
+
+**Doctor / drift realignment.** The tracker is a local optimization, never a
+second source of truth -- the destination is always authoritative. If the
+local db ever drifts (corrupted, stale after manual destination surgery, or
+just suspect), realign it from scratch:
+
+```
+<agent-logger catalog "session-sync" argv[0]> run --full
+```
+
+This forces a full, segmented reconciliation against the real destination
+regardless of the periodic cadence and rebuilds every signature from what
+that reconciliation actually pushed. There is no separate `reset` CLI verb;
+deleting the tracker db file (`sync-state*.db`) and re-running `run --full`
+achieves the same from-scratch rebuild if the db itself is suspect.
+
 ## Troubleshoot
 
 - **Runtime not ready:** run
