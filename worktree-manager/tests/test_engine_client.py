@@ -1056,11 +1056,11 @@ def test_resolve_bare_resume_retry_preserves_seed(monkeypatch):
 
 
 def test_importing_engine_execution_leg_directly_before_engine_client_works():
-    """A genuine cold-import-order regression test (Copilot review finding
-    on the lazy `__getattr__` re-export): every OTHER test in this suite
-    (including this file's own `from worktree_manager import engine_client`
-    at module scope) already imports `engine_client` first, so none of them
-    would catch a regression back to a top-level `from .engine_execution_leg
+    """A genuine cold-import-order regression test for the lazy
+    `__getattr__` re-export: every OTHER test in this suite (including this
+    file's own `from worktree_manager import engine_client` at module
+    scope) already imports `engine_client` first, so none of them would
+    catch a regression back to a top-level `from .engine_execution_leg
     import ...` in `engine_client.py` -- that shape only deadlocks when
     `engine_execution_leg` is the FIRST of the two modules actually
     imported. A fresh subprocess is the only way to force that cold order;
