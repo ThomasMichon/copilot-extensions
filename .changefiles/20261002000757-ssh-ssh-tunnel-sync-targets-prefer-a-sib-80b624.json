@@ -1,9 +1,0 @@
-{
-  "comment": "ssh/ssh-tunnel sync targets: prefer a sibling ssh binary next to the resolved rsync on Windows, avoiding an MSYS2/Cygwin-runtime rsync corrupting its protocol handshake when it spawns a different-runtime (native Win32 OpenSSH) ssh child.",
-  "changes": [
-    {
-      "plugin": "agent-logger",
-      "type": "patch"
-    }
-  ]
-}

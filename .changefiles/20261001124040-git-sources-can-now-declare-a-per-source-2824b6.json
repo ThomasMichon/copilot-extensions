@@ -1,9 +1,0 @@
-{
-  "comment": "git: sources can now declare a per-source ref (e.g. 'origin/dev' instead of the remote's default branch) and authenticate their fetch via auth.account, matching github: sources -- checkouts stay actively pulled forward without depending on the ambient gh-credential-helper account.",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "minor"
-    }
-  ]
-}

@@ -1,9 +1,0 @@
-{
-  "comment": "fix stale _FALLBACK_VERSION constant drift (pre-existing, found while validating an unrelated PR)",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

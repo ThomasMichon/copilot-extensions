@@ -1118,6 +1118,32 @@ class TestAgentRoutes:
         assert resp.json()["topology_errors"] == []
         assert resp.json()["topology_warnings"] == []
 
+    def test_list_agents_reports_incomplete_namespaces(self, client, app) -> None:
+        """The route must actually serialize `incomplete_namespaces` through
+        to the wire -- a resolver-level unit test alone can't catch a typo'd
+        or accidentally-dropped field name in the route handler itself."""
+        class _FailingResolver:
+            @property
+            def prefix(self) -> str:
+                return "broken"
+
+            async def list(self):
+                raise RuntimeError("boom")
+
+            async def resolve(self, name):  # pragma: no cover - unused here
+                raise NotImplementedError
+
+            async def ensure_ready(self, name):  # pragma: no cover - unused
+                raise NotImplementedError
+
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(_FailingResolver())
+        app.state.resolver = resolver
+
+        resp = client.get("/api/v1/agents")
+        assert resp.status_code == 200
+        assert resp.json()["incomplete_namespaces"] == ["broken"]
+
     def test_machine_routes_include_static_metadata(self, client, app) -> None:
         machine = MachineConfig(
             key="host-a",

@@ -619,15 +619,29 @@ class BridgeClient(CliModeClientMixin, WorktreeRestartMixin):
         agents, _errors = self.list_agents_with_diagnostics()
         return agents
 
-    def list_agents_with_diagnostics(
-        self,
-    ) -> tuple[list[dict[str, Any]], list[str]]:
+    def list_agents_with_diagnostics(self) -> tuple[list[dict[str, Any]], list[str]]:
         """GET /api/v1/agents, including invalid-topology diagnostics."""
+        agents, errors, _incomplete, _known = self.list_agents_with_incomplete()
+        return agents, errors
+
+    def list_agents_with_incomplete(
+        self,
+    ) -> tuple[list[dict[str, Any]], list[str], list[str], bool]:
+        """GET /api/v1/agents incl. topology errors, namespaces incomplete
+        this call, and whether the response carries the key at all (an
+        older daemon omits it entirely rather than sending an empty list --
+        key *presence* is the capability signal, no protocol negotiation
+        needed)."""
         resp = self._request("GET", "/api/v1/agents")
         if not resp:
-            return [], []
+            return [], [], [], False
+        capability_known = "incomplete_namespaces" in resp
         errors = [str(e) for e in resp.get("topology_errors", [])]
-        return resp.get("agents", []), errors
+        incomplete = (
+            [str(p) for p in resp.get("incomplete_namespaces", [])]
+            if capability_known else []
+        )
+        return resp.get("agents", []), errors, incomplete, capability_known
 
     def get_agent(
         self, name: str, *, include_unaddressable: bool = False

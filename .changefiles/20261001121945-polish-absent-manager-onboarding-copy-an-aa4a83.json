@@ -1,9 +1,0 @@
-{
-  "comment": "Polish absent-Manager onboarding copy and guard POSIX bootstrap test",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

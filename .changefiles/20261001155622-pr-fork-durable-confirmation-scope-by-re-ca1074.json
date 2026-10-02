@@ -1,9 +1,0 @@
-{
-  "comment": "pr.fork durable confirmation: scope by (repo, account) + remote, non-mutating owner pre-check, restrict to default GitHub authority, forks CLI for pre-seeding",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

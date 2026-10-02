@@ -6,6 +6,7 @@ import argparse
 import json
 import subprocess
 import sys
+import time
 from typing import Any
 
 
@@ -78,6 +79,8 @@ def _listing_project(args: argparse.Namespace) -> str | None:
 
 
 def _cmd_agents(args: argparse.Namespace) -> None:
+    if getattr(args, "stream", False):
+        sys.exit(_run_agents_stream(args))
     core = _core()
     client = core._get_client()
     agents, topology_errors = client.list_agents_with_diagnostics()
@@ -122,6 +125,205 @@ def _cmd_agents(args: argparse.Namespace) -> None:
     if project and total > len(agents) and not args.json and agents:
         print(f"\n({total - len(agents)} other-project agent(s) hidden; use --all-projects)")
     _report_topology_errors(topology_errors)
+
+
+def _fetch_agent_rows(args: argparse.Namespace) -> tuple[list[dict], list[str], bool]:
+    """Fetch + project-filter the agent roster -- the same selection logic
+    as the plain ``agents`` path above, factored out so the ``--stream``/
+    ``--subscribe`` loop can call it repeatedly from inside one long-lived
+    process. Raises (``BridgeClientError``/``BridgeConnectionError`` or a
+    topology-profile error, via :class:`RuntimeError`) rather than printing
+    and exiting -- the caller frames that as an ``error`` envelope instead.
+
+    Returns ``(rows, incomplete_namespaces, capability_known)``: a namespace
+    resolver that times out/fails on this call silently drops its agents
+    from ``rows`` (upstream behavior, `agent_registry_resolver.py`) -- not a
+    hard failure, but the caller must not treat that absence as a real
+    removal. ``capability_known`` is False against a daemon too old to
+    advertise which namespace(s) were incomplete at all; the caller must
+    then treat every namespaced agent's removal as unconfirmed, not just
+    the ones named in ``incomplete_namespaces``."""
+    core = _core()
+    client = core._get_client()
+    agents, topology_errors, incomplete_namespaces, capability_known = (
+        client.list_agents_with_incomplete()
+    )
+    if topology_errors:
+        raise RuntimeError("; ".join(topology_errors)[:200])
+    project = _listing_project(args)
+    if project:
+        project_key = project.casefold()
+        agents = [
+            agent
+            for agent in agents
+            if agent.get("project") is None or str(agent.get("project")).casefold() == project_key
+        ]
+    return agents, incomplete_namespaces, capability_known
+
+
+def _emit_frame(obj: dict, out) -> bool:
+    """Write one NDJSON frame, flushing immediately so the Picker paints
+    progressively. Returns False (never raises) once the reader has closed
+    the pipe, so the caller can stop cleanly instead of crashing on a broken
+    pipe. Mirrors agent-dispatch's own ``board_cli._emit_frame`` -- not
+    shared across plugins, which live in separate venvs."""
+    try:
+        out.write(json.dumps(obj, default=str) + "\n")
+        out.flush()
+        return True
+    except (BrokenPipeError, OSError):
+        return False
+
+
+def _diff_agent_rows(
+    prev: list[dict], curr: list[dict], *, id_key: str = "name"
+) -> tuple[list[dict], list[str]]:
+    """Diff two agent-roster snapshots by ``id_key`` (the pivot manifest's
+    ``entry.id`` is ``name``) for a ``--subscribe`` re-scan. Returns
+    ``(deltas, removed_ids)`` -- whole-row ``delta`` entries for ids that are
+    new or whose content changed, and ids present before but gone now."""
+    prev_by = {str(r.get(id_key)): r for r in prev if r.get(id_key) is not None}
+    curr_by = {str(r.get(id_key)): r for r in curr if r.get(id_key) is not None}
+    deltas = [
+        r for r in curr
+        if r.get(id_key) is not None and prev_by.get(str(r.get(id_key))) != r
+    ]
+    removed = [rid for rid in prev_by if rid not in curr_by]
+    return deltas, removed
+
+
+def _suppress_incomplete_removals(
+    removed: list[str], curr: list[dict], prev: list[dict],
+    *, incomplete: list[str], capability_known: bool,
+) -> tuple[list[str], list[dict]]:
+    """Filter ``removed`` down to ids this tick's scan can actually confirm
+    gone, carrying forward any suppressed id's last-known row into ``curr``
+    so neither this tick nor a later comparison treats it as removed on a
+    transient gap alone.
+
+    Against a daemon too old to report ``incomplete_namespaces`` at all
+    (``capability_known`` is False), no namespaced (``prefix:name``) removal
+    can be confirmed -- the daemon may be silently dropping any namespace's
+    agents with no signal whatsoever, so every namespaced id is suppressed.
+    Against a capability-aware daemon, only ids whose namespace prefix is
+    actually named in ``incomplete`` this tick are suppressed."""
+    if not removed:
+        return removed, curr
+    if capability_known:
+        incomplete_set = set(incomplete)
+        suppressed = {rid for rid in removed if rid.split(":", 1)[0] in incomplete_set}
+    else:
+        suppressed = {rid for rid in removed if ":" in rid}
+    if not suppressed:
+        return removed, curr
+    removed = [rid for rid in removed if rid not in suppressed]
+    prev_by_id = {str(r.get("name")): r for r in prev}
+    curr = curr + [prev_by_id[rid] for rid in suppressed if rid in prev_by_id]
+    return removed, curr
+
+
+#: Default seconds between ``--subscribe`` re-scans. Unlike agent-dispatch's
+#: cheap single coordinator call, ``/api/v1/agents`` invokes every registered
+#: namespace resolver (`AgentResolver.list_agents_async()`) -- CodeSpaces
+#: enumeration alone is documented at 4-10s, backed by only a 12s per-resolver
+#: cache (`AGENT_BRIDGE_NAMESPACE_LIST_TTL`, `docs/architecture.md`). A 2s
+#: interval would trigger that expensive scan far more often than the
+#: Picker's prior one-shot repoll cadence (45s, `engine_runtime.py`'s
+#: `POLL_SECS`) ever did; match that existing cadence instead of
+#: agent-dispatch's human-interaction-speed default.
+DEFAULT_SUBSCRIBE_INTERVAL = 45.0
+
+
+#: Bounded retries for an incomplete INITIAL scan (a fresh process -- first
+#: launch or a Phase 0 reconnect -- has no prior snapshot to diff against,
+#: so the subscribe loop's removal-suppression can't help it: if it published
+#: an incomplete roster as authoritative, the Picker would replace its whole
+#: cache with the smaller set, silently "removing" the missing namespaced
+#: agents with no removed frame at all). A short, bounded retry gives a
+#: transient namespace-resolver hiccup a chance to clear before that
+#: publish. Capability-unknown (an old daemon) can't be retried into
+#: certainty -- there is no signal to wait for -- so it publishes as-is.
+INITIAL_SCAN_MAX_RETRIES = 3
+INITIAL_SCAN_RETRY_BACKOFF_SECS = 0.5
+
+
+def _fetch_complete_initial_rows(args: argparse.Namespace) -> list[dict]:
+    """The initial-scan fetch with bounded retry-until-complete (or
+    retries-exhausted) -- see :data:`INITIAL_SCAN_MAX_RETRIES`. Raises
+    whatever :func:`_fetch_agent_rows` raises on the final attempt."""
+    rows, incomplete, _capability_known = _fetch_agent_rows(args)
+    attempt = 0
+    while incomplete and attempt < INITIAL_SCAN_MAX_RETRIES:
+        time.sleep(INITIAL_SCAN_RETRY_BACKOFF_SECS)
+        rows, incomplete, _capability_known = _fetch_agent_rows(args)
+        attempt += 1
+    return rows
+
+
+def _run_agents_stream(args: argparse.Namespace) -> int:
+    """Emit the Bridges agent roster as the registered-pivot NDJSON envelope
+    (D2): ``begin`` -> a ``row`` per agent -> ``done``. With ``--subscribe``
+    the channel is then held open: every ``--interval`` seconds the roster is
+    re-fetched and the diff vs. the last snapshot is emitted as
+    ``delta``/``removed`` frames, so an open pivot live-updates without a
+    poll-interval-driven CLI re-exec. A transient re-fetch failure during
+    ``--subscribe`` skips that tick rather than killing the channel; only the
+    initial fetch failing is fatal (``error`` frame + exit 1, matching the
+    plain ``agents`` path's stderr+exit-1 contract via ``BridgeClientError``
+    handling in ``main()``). The initial scan itself retries (bounded) past a
+    detected incomplete namespace before publishing -- see
+    :func:`_fetch_complete_initial_rows` -- since a fresh process (first
+    launch or a reconnect) has no prior snapshot the subscribe loop's own
+    removal-suppression could otherwise fall back on."""
+    out = sys.__stdout__
+    try:
+        rows = _fetch_complete_initial_rows(args)
+    except Exception as exc:
+        _emit_frame({"type": "error", "message": str(exc)[:200]}, out)
+        return 1
+    if not _emit_frame({"type": "begin", "count": len(rows)}, out):
+        return 0
+    for row in rows:
+        if not _emit_frame({"type": "row", "entry": row}, out):
+            return 0
+    if not _emit_frame({"type": "done", "count": len(rows)}, out):
+        return 0
+
+    if not getattr(args, "subscribe", False):
+        return 0
+
+    interval = max(
+        0.5,
+        float(
+            getattr(args, "interval", DEFAULT_SUBSCRIBE_INTERVAL)
+            or DEFAULT_SUBSCRIBE_INTERVAL
+        ),
+    )
+    prev = rows
+    try:
+        while True:
+            time.sleep(interval)
+            try:
+                curr, incomplete, capability_known = _fetch_agent_rows(args)
+            except Exception:
+                # A transient re-fetch failure (bridge hiccup, topology
+                # reload) must not kill the live channel -- skip this tick
+                # and try again next time.
+                continue
+            deltas, removed = _diff_agent_rows(prev, curr)
+            removed, curr = _suppress_incomplete_removals(
+                removed, curr, prev,
+                incomplete=incomplete, capability_known=capability_known,
+            )
+            for entry in deltas:
+                if not _emit_frame({"type": "delta", "entry": entry}, out):
+                    return 0
+            for rid in removed:
+                if not _emit_frame({"type": "removed", "id": rid}, out):
+                    return 0
+            prev = curr
+    except KeyboardInterrupt:
+        return 0
 
 
 def _live_session_summary_line(s: dict[str, Any]) -> str:
@@ -445,6 +647,23 @@ def register_inventory_commands(sub: argparse._SubParsersAction) -> None:
 
     agents_p = sub.add_parser("agents", help="List registered agents")
     agents_p.add_argument("--all-projects", action="store_true", help="Show the fleet-wide catalog instead of the cwd/--project scope")
+    agents_p.add_argument(
+        "--stream", action="store_true",
+        help="Emit the registered-pivot NDJSON envelope (begin -> row per "
+             "agent -> done) so the Picker's Bridges pivot paints "
+             "progressively (D2).",
+    )
+    agents_p.add_argument(
+        "--subscribe", action="store_true",
+        help="With --stream, hold the channel open and emit live "
+             "delta/removed frames from a periodic re-scan so an open pivot "
+             "updates in place (D2).",
+    )
+    agents_p.add_argument(
+        "--interval", type=float, default=DEFAULT_SUBSCRIBE_INTERVAL,
+        help=f"Seconds between --subscribe re-scans "
+             f"(default: {DEFAULT_SUBSCRIBE_INTERVAL}).",
+    )
     agents_p.set_defaults(func=_cmd_agents)
 
     machines_p = sub.add_parser("machines", help="List topology machines")

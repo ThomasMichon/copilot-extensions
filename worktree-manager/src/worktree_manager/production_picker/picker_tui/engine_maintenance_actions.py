@@ -9,16 +9,15 @@ from .engine_live_screens import ProgressScreen
 from .seed_prompt_screen import SeedPromptScreen
 
 # picker-new-session-prompt-and-composer Phase A: the prompt collected here
-# is persisted (`agent-worktrees create`/`resolve --new --seed`) but the
-# Picker's OWN launch path doesn't deliver it end-to-end yet.
-# engine_client.resolve_launch_plan() now forwards --seed (the
-# module-size-cap seam closed); the remaining gate is
-# launch-session.{ps1,sh} never calling `agent-worktrees embody` after
-# creating a worktree's pane to trigger delivery (see the effort's Journal
-# for the concrete hook point identified). Keep the screen OFF the live
-# flow (exercised directly by its own tests) until that seam is complete
-# too, rather than show a prompt the Picker silently discards.
-_SEED_PROMPT_ENABLED = False
+# is persisted (`agent-worktrees create`/`resolve --new --seed`) and
+# delivered end-to-end: `engine_client.resolve_launch_plan()` forwards
+# `--seed`, and `launch-session.{ps1,sh}` call `agent-worktrees embody
+# --worktree-id` right after creating a worktree's FIRST live mux session,
+# triggering embody's own "already embodies this worktree" resume branch to
+# claim + deliver any pending seed. Not delivered for No Mux (direct launch,
+# no mux pane for embody to find) or Bare (no Copilot bootstrap at all) --
+# `_open_optmenu()` skips the prompt screen entirely for either.
+_SEED_PROMPT_ENABLED = True
 
 class PickerScreenMaintenanceActionsMixin:
     def _confirm_new_worktree(self, dlg, seed_prompt: str = ""):
@@ -447,10 +446,23 @@ class PickerScreenMaintenanceActionsMixin:
             if not confirmed:
                 return
             on = {o["label"] for o in dlg["opts"] if o["on"]}
-            if not _SEED_PROMPT_ENABLED or "Bare" in on:
+            is_remote = (tm, te) != self.src.LOCAL
+            if (
+                not _SEED_PROMPT_ENABLED or "Bare" in on or "No Mux" in on
+                or "Anchor repo" in on or is_remote
+            ):
                 # A bare worktree gets no Copilot bootstrap at all -- nothing
-                # to seed, so skip the prompt screen entirely and behave
-                # exactly as before this screen existed.
+                # to seed. A No-Mux worktree launches Copilot directly,
+                # bypassing the mux pane `embody`'s delivery depends on
+                # entirely -- a typed prompt would be persisted as
+                # `pending_seed` and never delivered (or delivered
+                # unexpectedly later if a mux session is created
+                # afterward). Anchor-repo and remote-machine targets resolve
+                # via `--base`/`--machine`, and the engine's own `resolve`
+                # CLI rejects `--seed` alongside either -- forwarding a typed
+                # prompt there would fail the whole launch request. Skip the
+                # prompt screen for all four and behave exactly as before
+                # this screen existed.
                 self._confirm_new_worktree(dlg)
                 return
 

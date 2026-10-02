@@ -1,9 +1,0 @@
-{
-  "comment": "related_briefing: a self-referential entry (the current checkout's own repo) never contradicts the session's observable checkout; new related_machine_presence.record_local_presence eagerly records a repo's local presence into the bound knowledge repo's related.yaml on register (closes a live staleness bug the vision's generated briefings surfaced)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

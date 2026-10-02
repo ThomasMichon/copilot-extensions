@@ -1,9 +1,0 @@
-{
-  "comment": "Fix the agent-bridge skill's quick-reference CLI examples: --json is a top-level flag that must precede the subcommand (agent-bridge --json machines), not a trailing suffix -- the misleading (--json) suffix notation was causing repeated invocation errors.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "dev"
-    }
-  ]
-}

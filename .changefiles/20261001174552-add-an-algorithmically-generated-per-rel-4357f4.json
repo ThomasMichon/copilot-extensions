@@ -1,9 +1,0 @@
-{
-  "comment": "add an algorithmically generated per-related-repo operating-guide briefing (related_briefing.py), written to session state and surfaced via the session-guidance pointer; fulfills the stateless-harness/related-repo-briefing vision's first slice",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

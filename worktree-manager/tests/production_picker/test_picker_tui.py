@@ -4397,6 +4397,9 @@ def test_new_worktree_decision_exits():
             assert all(not o["on"] for o in dlg._dlg["opts"])
             await pilot.press("enter")      # confirm Create, no options
             await pilot.pause()
+            await pilot.press("enter")      # SeedPromptScreen: textarea -> buttons
+            await pilot.press("enter")      # activate Launch (blank prompt)
+            await pilot.pause()
         assert app.result is not None
         assert app.result["action"] == "new"
         assert app.result["is_local"] is True
@@ -4413,9 +4416,10 @@ def test_new_worktree_bare_skips_seed_prompt(monkeypatch):
     """#4778-ish (picker-new-session-prompt-and-composer Phase A item 3): a
     Bare worktree gets no Copilot bootstrap at all -- nothing to seed -- so
     confirming Create with Bare selected must go straight to the launch
-    decision, never opening SeedPromptScreen. Exercises the integration with
-    ``_SEED_PROMPT_ENABLED`` forced on (off by default until the Picker's own
-    delivery seam is complete -- see the effort's Journal)."""
+    decision, never opening SeedPromptScreen. ``_SEED_PROMPT_ENABLED`` is on
+    by default now that both delivery seams (engine_client's --seed forward
+    + launch-session.{ps1,sh}'s post-create `embody` call) are closed; this
+    monkeypatch is now a no-op defensive pin, not a feature-gate override."""
     from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
     monkeypatch.setattr(ema, "_SEED_PROMPT_ENABLED", True)
     src = _fixture_source()
@@ -4442,6 +4446,44 @@ def test_new_worktree_bare_skips_seed_prompt(monkeypatch):
         assert app.result is not None
         assert app.result["action"] == "new"
         assert app.result["options"]["bare"] is True
+        assert app.result["options"]["seed_prompt"] == ""
+
+    asyncio.run(run())
+
+
+def test_new_worktree_no_mux_skips_seed_prompt(monkeypatch):
+    """A No-Mux worktree launches Copilot directly, bypassing the mux pane
+    that `agent-worktrees embody`'s pending_seed delivery depends on
+    entirely -- a typed prompt would be persisted but never delivered (or
+    delivered unexpectedly later, if a mux session is created afterward).
+    Confirming Create with No Mux selected must go straight to the launch
+    decision, never opening SeedPromptScreen, mirroring the Bare path."""
+    from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
+    monkeypatch.setattr(ema, "_SEED_PROMPT_ENABLED", True)
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 0
+            scr.btn_idx = 0
+            scr.sel = ("BTN", 0)
+            scr._activate()
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            labels = [o["label"] for o in dlg._dlg["opts"]]
+            no_mux = labels.index("No Mux")
+            await pilot.press("tab")
+            for _ in range(no_mux):
+                await pilot.press("down")
+            await pilot.press("space")          # toggle No Mux on
+            await pilot.press("tab")
+            await pilot.press("enter")          # confirm Create
+            await pilot.pause()
+        assert app.result is not None
+        assert app.result["action"] == "new"
+        assert app.result["options"]["no_mux"] is True
         assert app.result["options"]["seed_prompt"] == ""
 
     asyncio.run(run())
@@ -4510,6 +4552,9 @@ def test_new_worktree_no_mux_option():
             await pilot.press("tab")            # options -> button group
             await pilot.press("enter")          # confirm Create
             await pilot.pause()
+            # No Mux bypasses the mux pane `embody`'s delivery depends on
+            # entirely, so the seed-prompt screen is skipped -- this must
+            # go straight to the launch decision, same as Bare.
         assert app.result["action"] == "new"
         assert app.result["options"]["no_mux"] is True
 
@@ -4538,6 +4583,9 @@ def test_new_worktree_ahp_option_defaults_off_and_toggles():
             await pilot.press("space")
             await pilot.press("tab")
             await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("enter")      # SeedPromptScreen: textarea -> buttons
+            await pilot.press("enter")      # activate Launch (blank prompt)
             await pilot.pause()
         assert app.result["options"]["ahp"] is True
         assert app.result["options"]["no_mux"] is False
@@ -4573,6 +4621,8 @@ def test_new_worktree_modifiers_can_be_combined():
             await pilot.press("tab")
             await pilot.press("enter")
             await pilot.pause()
+            # No Mux bypasses the mux pane `embody`'s delivery depends on
+            # entirely, so the seed-prompt screen is skipped here too.
         assert app.result["options"]["no_mux"] is True
         assert app.result["options"]["ahp"] is True
 
@@ -4624,8 +4674,42 @@ def test_new_worktree_anchor_option_shows_selected_state():
             await pilot.press("tab")
             await pilot.press("enter")
             await pilot.pause()
+            # Anchor resolves via `--base`, which the engine's own resolve
+            # CLI rejects alongside `--seed` -- the seed-prompt screen is
+            # skipped here too, same as Bare/No Mux.
         assert app.result["action"] == "new"
         assert app.result["options"]["anchor"] is True
+        assert app.result["options"]["seed_prompt"] == ""
+
+    asyncio.run(run())
+
+
+def test_new_worktree_remote_target_skips_seed_prompt(monkeypatch):
+    """A remote-machine target resolves via `--machine`, which the engine's
+    own resolve CLI also rejects alongside `--seed`. Confirming Create for a
+    remote target must go straight to the launch decision, never opening
+    SeedPromptScreen -- same class of gap as Anchor/Bare/No Mux."""
+    from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
+    monkeypatch.setattr(ema, "_SEED_PROMPT_ENABLED", True)
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.create_target = lambda: ("remote-host", "WSL")
+            scr._open_optmenu()
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            assert dlg is not None
+            from worktree_manager.production_picker.picker_tui.engine import FocusGroup
+            assert dlg.query_one("#scope-buttons", FocusGroup).has_focus
+            await pilot.press("enter")          # confirm Create, no options
+            await pilot.pause()
+        assert app.result is not None
+        assert app.result["action"] == "new"
+        assert app.result["machine"] == "remote-host"
+        assert app.result["options"]["seed_prompt"] == ""
 
     asyncio.run(run())
 

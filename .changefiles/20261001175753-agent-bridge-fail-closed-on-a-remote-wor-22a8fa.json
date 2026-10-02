@@ -1,9 +1,0 @@
-{
-  "comment": "agent-bridge: fail closed on a remote worktree resolve failure (or an incomplete resolve plan) during connect, instead of degrading to a direct launch in an unmanaged, non-worktree directory.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

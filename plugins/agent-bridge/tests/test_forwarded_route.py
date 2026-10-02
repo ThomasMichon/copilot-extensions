@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -211,6 +213,23 @@ def test_service_stop_over_a_forward_still_stops_a_local_fixed_port_daemon(tmp_p
     assert killed == [7777]
 
 
+def test_service_stop_over_a_same_port_forward_still_stops_the_stray_daemon(tmp_path, monkeypatch):
+    """The forward was published on the local daemon's own configured port;
+    the stray daemon (no pid file) still holds that port's singleton lock."""
+    _forward_down(tmp_path, monkeypatch)
+    killed = []
+    _stop_setup(monkeypatch, killed)
+    same = m._service_port()  # the forwarded port
+    monkeypatch.setattr(m, "_configured_port", lambda: same)
+    alive = {7777}
+    monkeypatch.setattr(m, "_pid_from_lock",
+                        lambda port: 7777 if port == same and 7777 in alive else None)
+    monkeypatch.setattr(m, "_pid_is_agent_bridge", lambda pid, *_a: pid in alive)
+    monkeypatch.setattr(m, "_kill_pid", lambda pid: (killed.append(pid), alive.discard(pid)))
+    m._service_stop()
+    assert killed == [7777]  # never 4242, the ssh session holding the forward
+
+
 def test_service_stop_kills_a_port_listener_only_if_it_is_a_bridge(tmp_path, monkeypatch):
     _route(tmp_path, monkeypatch, {"bind": "127.0.0.1", "port": 39881, "generation": 1})
     killed = []
@@ -253,30 +272,44 @@ def test_deploy_forward_skip_is_structured_json(tmp_path, monkeypatch, capsys):
     import zdd.breadcrumb
 
     monkeypatch.setattr(zdd.breadcrumb, "read_breadcrumb", lambda _d: None)
-    monkeypatch.setattr(
-        zdd.breadcrumb,
-        "recover_stale_cutover",
-        lambda *_a, **_k: {"recovered": False, "reason": "clean"},
-    )
+    recovered: list[bool] = []
 
-    args = type(
-        "Args",
-        (),
-        {
-            "health_timeout": 1,
-            "drain_timeout": 1,
-            "force": False,
-            "json": True,
-            "recover": False,
-        },
-    )()
-    with pytest.raises(SystemExit) as exc:
-        venue_cli._cmd_deploy(args)
-    assert exc.value.code == 0
+    def _recover(*_a, **_k):
+        recovered.append(True)
+        return {"recovered": False, "reason": "clean"}
+
+    monkeypatch.setattr(zdd.breadcrumb, "recover_stale_cutover", _recover)
+
+    def _args(*, json_out: bool, recover: bool):
+        return type(
+            "Args",
+            (),
+            {
+                "health_timeout": 1,
+                "drain_timeout": 1,
+                "force": False,
+                "json": json_out,
+                "recover": recover,
+            },
+        )()
+
+    # The output flag never selects lifecycle work: both modes skip before
+    # stale-cutover recovery and passive reaping.
+    venue_cli._cmd_deploy(_args(json_out=True, recover=False))
     payload = json.loads(capsys.readouterr().out)
     assert payload["skipped"] is True
     assert payload["ok"] is False
     assert "no local daemon to deploy" in payload["error"]
+    venue_cli._cmd_deploy(_args(json_out=False, recover=False))
+    assert "no local daemon to deploy" in capsys.readouterr().out
+    assert recovered == []
+    # ``--recover`` is the one mode that continues: in both output modes.
+    for json_out in (True, False):
+        with pytest.raises(SystemExit) as exc:
+            venue_cli._cmd_deploy(_args(json_out=json_out, recover=True))
+        assert exc.value.code == 0
+    assert recovered == [True, True]
+    capsys.readouterr()
 
 
 def test_deploy_rechecks_forward_inside_cutover(tmp_path, monkeypatch, capsys):
@@ -409,6 +442,34 @@ def test_install_sh_forward_classifier(active, expected, tmp_path):
     assert _install_sh_active_is_forward(active, tmp_path) is expected
 
 
+@pytest.mark.skipif(os.name == "nt", reason="a POSIX bash environment is needed")
+@pytest.mark.parametrize(
+    ("active", "runtime", "expected"),
+    [
+        (FORWARD, True, True),
+        (BOUND_PIDLESS, True, False),
+        (BOUND_PIDLESS, False, True),  # nothing can read the table: fail closed
+    ],
+)
+def test_install_sh_forward_guard_uses_the_managed_runtime(active, runtime, expected, tmp_path):
+    """Before this run's slot exists, the guard still reads the route through the
+    managed runtime resolver; with no interpreter at all it fails closed."""
+    install_dir = tmp_path / "agent-bridge"
+    install_dir.mkdir()
+    (install_dir / "active.json").write_text(json.dumps({"active": active}))
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    fn = text.split("_active_is_forward() {", 1)[1].split("\n}\n\n_active_host", 1)[0]
+    rt = f"printf '%s' '{sys.executable}'" if runtime else "return 1"
+    script = (
+        f"INSTALL_DIR={install_dir!s}; VENV_DIR={tmp_path!s}/missing; PATH=/nonexistent\n"
+        f"_rt_python() {{ {rt}; }}\n_bootstrap_python() {{ return 1; }}\n"
+        "_active_is_forward() {" + fn + "\n}\n_active_is_forward\n"
+    )
+    bash = shutil.which("bash")
+    result = subprocess.run([bash, "-c", script], capture_output=True, text=True)
+    assert (result.returncode == 0) is expected
+
+
 def test_install_sh_update_checks_forward_before_lifecycle_actions():
     text = _INSTALL_SH.read_text(encoding="utf-8")
     helper = text.split("_update_lifecycle_drain_stop() {", 1)[1].split("\n}\n\n_update_lifecycle_start", 1)[0]
@@ -417,7 +478,8 @@ def test_install_sh_update_checks_forward_before_lifecycle_actions():
     revalidate_at = body.index('_update_lifecycle_drain_stop "$predecessor_signature"')
     start_at = body.index('_update_lifecycle_start "$predecessor_signature"')
     assert forward_at < revalidate_at < start_at
-    assert helper.index("_update_lifecycle_still_targets_predecessor") < helper.index("_drain_service") < helper.index("do_stop")
+    assert helper.index("_update_lifecycle_still_targets_predecessor") < helper.index("_drain_service") \
+        < helper.rindex("_update_lifecycle_still_targets_predecessor") < helper.index("do_stop")
     assert 'if [[ "$active_forward" == true ]]; then' in body
     assert 'Forwarded host bridge route still active -- not starting a local daemon' in body
     assert 'Forwarded host bridge route appeared during update -- skipping drain/stop/start' in text
@@ -466,3 +528,92 @@ def test_install_sh_update_start_accepts_the_route_its_own_stop_cleared(current,
     out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout
     assert ("STARTED" in out) is starts
     assert ("STOPPED" in out) is stops
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a POSIX bash environment is needed")
+@pytest.mark.parametrize(
+    ("after", "forward", "stops"),
+    [
+        ("sig", False, True),     # still the pinned predecessor after the drain
+        ("", False, True),        # the drained predecessor exited and cleared its route
+        ("other", False, False),  # another daemon took the route during the drain
+        ("sig", True, False),     # a venue forward published during the drain
+    ],
+)
+def test_install_sh_update_drain_stop_revalidates_the_route_after_draining(after, forward, stops, tmp_path):
+    """The drain can block for its full timeout; a forward published meanwhile
+    must not be stopped by the update's last-resort port cleanup."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    helpers = text.split("_update_lifecycle_still_targets_predecessor() {", 1)[1].split(
+        "\n}\n\n_active_host", 1)[0]
+    marker = tmp_path / "drained"
+    script = (
+        f"_drained() {{ [[ -e '{marker.as_posix()}' ]]; }}\n"
+        f"_active_is_forward() {{ _drained && {'true' if forward else 'false'}; }}\n"
+        f"_active_signature() {{ if _drained; then printf '%s' '{after}'; else printf sig; fi; }}\n"
+        "_step() { :; }\n_warn() { :; }\n"
+        f"_drain_service() {{ touch '{marker.as_posix()}'; echo DRAINED; }}\n"
+        "do_stop() { echo STOPPED; }\ndo_start() { :; }\n"
+        "_update_lifecycle_still_targets_predecessor() {" + helpers + "\n}\n"
+        "_pinned_base_url() { echo http://127.0.0.1:9280; }\n"
+        "_update_lifecycle_drain_stop sig && echo RESULT=0 || echo RESULT=1\n"
+    )
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout
+    assert "DRAINED" in out
+    assert ("STOPPED" in out) is stops
+    assert ("RESULT=0" in out) is stops
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a POSIX bash environment is needed")
+@pytest.mark.parametrize(("after", "acts"), [("", True), ('{"port":41000}', False)])
+def test_install_sh_an_empty_pin_expects_the_route_to_stay_empty(after, acts, tmp_path):
+    """An empty pin is the legacy fixed-port predecessor with no route; a daemon
+    that publishes one during the drain is a successor and is never stopped (and
+    allow-absent never lets a start run over it)."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    helpers = text.split("_update_lifecycle_still_targets_predecessor() {", 1)[1].split(
+        "\n}\n\n_active_host", 1)[0]
+    marker = tmp_path / "drained"
+    script = (
+        f"_drained() {{ [[ -e '{marker.as_posix()}' ]]; }}\n"
+        "_active_is_forward() { return 1; }\n"
+        f"_active_signature() {{ if _drained; then printf '%s' '{after}'; fi; }}\n"
+        "_step() { :; }\n_warn() { :; }\nPORT=9280\n"
+        f"_drain_service() {{ touch '{marker.as_posix()}'; }}\n"
+        "do_stop() { echo STOPPED; }\ndo_start() { echo STARTED; }\n"
+        "_update_lifecycle_still_targets_predecessor() {" + helpers + "\n}\n"
+        "_update_lifecycle_drain_stop '' || true\n_update_lifecycle_start '' || true\n"
+    )
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout
+    assert ("STOPPED" in out) is acts
+    assert ("STARTED" in out) is acts
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a POSIX bash environment is needed")
+@pytest.mark.parametrize(
+    ("signature", "url"),
+    [
+        ('{"bind":"127.0.0.1","generation":7,"pid":123,"port":41000}', "http://127.0.0.1:41000"),
+        ('{"bind":"0.0.0.0","generation":null,"pid":null,"port":41000}', "http://127.0.0.1:41000"),
+        ('{"bind":"::","generation":null,"pid":null,"port":41000}', "http://[::1]:41000"),
+        ("", "http://127.0.0.1:9280"),  # no route: the fixed-port daemon
+    ],
+)
+def test_install_sh_update_drain_is_pinned_to_the_validated_predecessor(signature, url):
+    """A route rewritten (e.g. to a forward) after validation can't redirect the
+    drain: it targets the predecessor's own endpoint via AGENT_BRIDGE_BASE_URL."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    helpers = text.split("_pinned_base_url() {", 1)[1].split("\n}\n\n_update_lifecycle_start", 1)[0]
+    script = (
+        "PORT=9280\n"
+        "_update_lifecycle_still_targets_predecessor() { return 0; }\n"
+        '_drain_service() { echo "DRAIN=${AGENT_BRIDGE_BASE_URL:-}"; }\n'
+        "do_stop() { :; }\n_warn() { echo \"WARN $*\"; }\n"
+        f"_route_python() {{ printf '%s' '{sys.executable}'; }}\n"
+        "_pinned_base_url() {" + helpers + "\n}\n"
+        f"_update_lifecycle_drain_stop '{signature}'\n"
+        'echo "AFTER=${AGENT_BRIDGE_BASE_URL:-unset}"\n'
+    )
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout
+    assert f"DRAIN={url}" in out
+    assert "AFTER=unset" in out  # pinned only for the drain itself

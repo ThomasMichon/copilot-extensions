@@ -136,6 +136,7 @@ def test_install_ps1_update_checks_forward_before_lifecycle_actions() -> None:
     assert (
         helper.index("Test-UpdateLifecycleStillTargetsPredecessor")
         < helper.index("Invoke-Drain")
+        < helper.rindex("Test-UpdateLifecycleStillTargetsPredecessor")
         < helper.index("Invoke-Stop")
     )
     assert "$wasRunning = (-not $activeForward) -and" in body
@@ -165,12 +166,12 @@ def test_update_start_accepts_the_route_its_own_stop_cleared(
     result = _run_harness(
         tmp_path,
         ["Test-UpdateLifecycleStillTargetsPredecessor", "Invoke-UpdateStart",
-         "Invoke-UpdateDrainStop"],
+         "Get-SignatureBaseUrl", "Invoke-UpdateDrainStop"],
         f"""
 function Test-ActiveIsForward {{ return ${str(forward).lower()} }}
 function Get-ActiveSignature {{ return '{current}' }}
 function Invoke-Start {{ Write-Host 'STARTED' }}
-function Invoke-Drain {{ param($TimeoutSec) }}
+function Invoke-Drain {{ param($TimeoutSec, $BaseUrl) }}
 function Invoke-Stop {{ Write-Host 'STOPPED' }}
 $null = Invoke-UpdateStart -Signature 'sig'
 $null = Invoke-UpdateDrainStop -Signature 'sig'
@@ -179,3 +180,92 @@ $null = Invoke-UpdateDrainStop -Signature 'sig'
     assert ("STARTED" in result.stdout) is starts
     # Drain/stop stays strict: it never stops anything but the pinned route.
     assert ("STOPPED" in result.stdout) is (current == "sig" and not forward)
+
+
+@pytest.mark.parametrize(
+    ("after", "forward", "stops"),
+    [
+        ("sig", False, True),     # still the pinned predecessor after the drain
+        ("", False, True),        # the drained predecessor exited and cleared its route
+        ("other", False, False),  # another daemon took the route during the drain
+        ("sig", True, False),     # a venue forward published during the drain
+    ],
+)
+def test_update_drain_stop_revalidates_the_route_after_draining(
+    tmp_path: Path, after: str, forward: bool, stops: bool,
+) -> None:
+    """The drain can run for minutes; a forward published meanwhile must not be
+    stopped by the update's port cleanup."""
+    (tmp_path / "agent-bridge").mkdir()
+    result = _run_harness(
+        tmp_path,
+        ["Test-UpdateLifecycleStillTargetsPredecessor", "Get-SignatureBaseUrl",
+         "Invoke-UpdateDrainStop"],
+        f"""
+$script:drained = $false
+function Test-ActiveIsForward {{ return ($script:drained -and ${str(forward).lower()}) }}
+function Get-ActiveSignature {{ if ($script:drained) {{ return '{after}' }} return 'sig' }}
+function Invoke-Drain {{ param($TimeoutSec, $BaseUrl) $script:drained = $true; Write-Host 'DRAINED' }}
+function Invoke-Stop {{ Write-Host 'STOPPED' }}
+$r = Invoke-UpdateDrainStop -Signature 'sig'
+Write-Host "RESULT=$r"
+""",
+    )
+    assert "DRAINED" in result.stdout
+    assert ("STOPPED" in result.stdout) is stops
+    assert f"RESULT={stops}" in result.stdout
+
+
+@pytest.mark.parametrize(("after", "acts"), [("", True), ("127.0.0.1|41000|7|3", False)])
+def test_an_empty_pin_expects_the_route_to_stay_empty(
+    tmp_path: Path, after: str, acts: bool,
+) -> None:
+    """An empty pin is the legacy fixed-port predecessor with no route; a daemon
+    that publishes one during the drain is a successor and is never stopped (and
+    -AllowAbsent never lets a start run over it)."""
+    (tmp_path / "agent-bridge").mkdir()
+    result = _run_harness(
+        tmp_path,
+        ["Test-UpdateLifecycleStillTargetsPredecessor", "Get-SignatureBaseUrl",
+         "Invoke-UpdateDrainStop", "Invoke-UpdateStart"],
+        f"""
+$script:drained = $false
+function Test-ActiveIsForward {{ return $false }}
+function Get-ActiveSignature {{ if ($script:drained) {{ return '{after}' }} return '' }}
+function Invoke-Drain {{ param($TimeoutSec, $BaseUrl) $script:drained = $true }}
+function Invoke-Stop {{ Write-Host 'STOPPED' }}
+function Invoke-Start {{ Write-Host 'STARTED' }}
+$null = Invoke-UpdateDrainStop -Signature ''
+$null = Invoke-UpdateStart -Signature ''
+""",
+    )
+    assert ("STOPPED" in result.stdout) is acts
+    assert ("STARTED" in result.stdout) is acts
+
+
+@pytest.mark.parametrize(
+    ("signature", "url"),
+    [
+        ("127.0.0.1|41000|123|7", "http://127.0.0.1:41000"),
+        ("0.0.0.0|41000||", "http://127.0.0.1:41000"),
+        ("::|41000||", "http://[::1]:41000"),
+        ("", "http://127.0.0.1:9280"),  # no route: the fixed-port daemon
+    ],
+)
+def test_update_drain_is_pinned_to_the_validated_predecessor(
+    tmp_path: Path, signature: str, url: str,
+) -> None:
+    """A route rewritten (e.g. to a forward) after validation can't redirect the
+    drain: it targets the predecessor's own endpoint via AGENT_BRIDGE_BASE_URL."""
+    (tmp_path / "agent-bridge").mkdir()
+    result = _run_harness(
+        tmp_path,
+        ["Get-SignatureBaseUrl", "Invoke-UpdateDrainStop"],
+        f"""
+function Test-UpdateLifecycleStillTargetsPredecessor {{ param($Signature) return $true }}
+function Invoke-Drain {{ param($TimeoutSec, $BaseUrl) Write-Host "DRAIN=$BaseUrl" }}
+function Invoke-Stop {{ }}
+$null = Invoke-UpdateDrainStop -Signature '{signature}'
+""",
+    )
+    assert f"DRAIN={url}" in result.stdout

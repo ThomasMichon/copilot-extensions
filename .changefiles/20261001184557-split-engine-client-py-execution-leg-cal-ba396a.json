@@ -1,9 +1,0 @@
-{
-  "comment": "Split engine_client.py (execution-leg calls -> engine_execution_leg.py) and forward --seed to resolve_launch_plan (Phase A seam 1 of picker-new-session-prompt-and-composer).",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

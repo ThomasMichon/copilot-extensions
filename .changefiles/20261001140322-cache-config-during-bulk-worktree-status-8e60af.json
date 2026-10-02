@@ -1,9 +1,0 @@
-{
-  "comment": "Cache config during bulk worktree status/list rendering",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

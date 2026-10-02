@@ -1,9 +1,0 @@
-{
-  "comment": "Add durable pr-kind claim ownership history ledger ('claims history <ref>'); Plan Phase 3b partial slice",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
