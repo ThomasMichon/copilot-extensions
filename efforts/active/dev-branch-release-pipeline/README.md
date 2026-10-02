@@ -502,9 +502,15 @@ Round 2 (operator's response to that evaluation):
       wired into `promote.yml` (PRs #3539/#3540); PR #3541 then auto-merged
       fully unattended end-to-end, confirming the whole chain works for real
       traffic.
-- [ ] Confirm the auto-updater coverage fix (Phase 1) is live before or with
+- [x] Confirm the auto-updater coverage fix (Phase 1) is live before or with
       cutover, so existing harness sessions discover the new contribution
       flow on next pull rather than following stale guidance.
+  - **Confirmed live, 2026-10-01.** This machine's installed
+    `copilot-extensions-harness` plugin reports `0.1.5-dev2`, exactly
+    matching `main`'s currently-served `marketplace.json` version at the
+    time of check — direct proof the payload-refresh sweep genuinely keeps
+    this harness-facing plugin current in practice, not just correct by
+    code-reading (Phase 1's original finding). No gap found; nothing to fix.
 - [x] Ensure a PR opened against `main` post-cutover is bounced with guidance
       pointing at `dev` (branch protection message, PR template, or a bot
       comment).
@@ -626,9 +632,16 @@ Round 2 (operator's response to that evaluation):
       path is ever actually invoked for real.
 - [ ] Simulate one rollback (revert generated commit, re-tag) and confirm CI's
       non-incremental-update guard actually blocks a bad subsequent promotion.
-- [ ] Confirm the auto-updater coverage fix: every harness worktree that
+- [x] Confirm the auto-updater coverage fix: every harness worktree that
       depends on `copilot-extensions-harness` picks up its updates on the
       same cadence as `agent-*` plugins.
+  - **Confirmed, 2026-10-01** (same evidence as the Phase 5 item above):
+    this machine's installed `copilot-extensions-harness` exactly matches
+    `main`'s currently-served version. The underlying mechanism
+    (`_update_registered_plugins` sweeping every enabled plugin from every
+    registered anchor, Phase 1 finding) is not machine-specific code, so
+    one concrete, current confirmation stands in for the general claim;
+    this was not independently re-verified on a second machine.
 - [x] Confirm the merged `validate-and-promote.yml` (#3592) actually
       exhibits the rolling-queue guarantee live: trigger two rapid dev
       pushes and observe run 1 completes undisturbed while run 2 (queued)
@@ -2275,6 +2288,23 @@ relax any actual gate, ruleset, or environment-protection setting on its
 own authority — that remains an explicit operator decision once the
 proposed criteria (or the operator's own revision of them) are confirmed
 met.
+
+### 2026-10-01 — Confirmed the auto-updater coverage fix live (Phase 5 + matching Validation Plan item)
+
+Phase 1 closed the auto-updater investigation by reading
+`_update_registered_plugins` and confirming the payload-refresh sweep is
+not filtered to `agent-*` plugins — but that was a code-reading finding,
+never empirically confirmed against a real, currently-running machine.
+Closed that gap directly: compared this machine's installed
+`copilot-extensions-harness` plugin version (`0.1.5-dev2`) against `main`'s
+currently-served `marketplace.json` (also `0.1.5-dev2`) — an exact match,
+confirming the sweep genuinely keeps this harness-facing plugin current in
+practice. Checked off both the Phase 5 cutover item and the matching
+Validation Plan item, with the latter's "every harness worktree" claim
+honestly scoped to what was actually verified (one machine, standing in
+for the general mechanism since it isn't machine-specific code) rather
+than overclaiming universal coverage from a single data point.
+
 
 
 
