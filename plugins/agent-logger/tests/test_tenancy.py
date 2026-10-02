@@ -307,6 +307,34 @@ def test_resolve_tenant_sink_role_does_not_get_change_tracker_db(tmp_path):
     assert resolved.config.sync_change_tracking["db_path"] is None
 
 
+def test_resolve_tenant_null_db_path_treated_as_unspecified(tmp_path):
+    """An explicit ``db_path: null`` (the shipped config examples' spelling
+    for "use the default") must not collapse onto the shared db -- it still
+    gets this tenant's own namespaced default."""
+    block = tenancy.parse_tenant_block(
+        {
+            "tenant": {
+                "id": "private-downstream-repo",
+                "roles": ["source"],
+                "sync": {"change_tracking": {"db_path": None}},
+            }
+        },
+        source="x",
+        default_id="private-downstream-repo",
+    )
+    resolved = tenancy.resolve_tenant(
+        block,
+        repo_name="private-downstream-repo",
+        repo_path=tmp_path / "repo",
+        config_path=tmp_path / "repo" / ".agent-logger.yaml",
+        machine="book2",
+        home=tmp_path / "home",
+    )
+    assert resolved.config.sync_change_tracking["db_path"] == str(
+        tmp_path / "home" / "sync-state-private-downstream-repo.db"
+    )
+
+
 def test_resolve_tenant_layers_machine_local_supplement(tmp_path):
     home = tmp_path / "home"
     (home / tenancy.TENANT_SUPPLEMENT_DIR).mkdir(parents=True)

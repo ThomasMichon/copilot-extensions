@@ -95,6 +95,37 @@ def write_sync_meta(
             pass
 
 
+def heartbeat_sync_meta(dest: Path, machine: str, transport: str, fallback_session_count: int) -> None:
+    """Re-stamp an existing ``sync-meta.json``'s ``last_sync_utc`` without
+    requiring any transfer -- a no-change fast path still needs the
+    destination's own health metadata to reflect a just-verified-current
+    pass, or a routine health check would see only the last real *transfer*
+    (which may predate the periodic full-reconciliation window) and report a
+    healthy, unchanged destination as stale. Best-effort, like
+    :func:`write_sync_meta` itself. *fallback_session_count* is used only
+    when no prior metadata exists to copy a session count from.
+    """
+    try:
+        previous = read_sync_meta(dest)
+    except OSError:
+        previous = None
+    previous = previous or {}
+    write_sync_meta(
+        dest,
+        machine,
+        transport,
+        str(previous.get("status", "ok")),
+        int(previous.get("session_count", 0)) or fallback_session_count,
+        deferred_files=previous.get("deferred_files", []),
+        excluded_roots=previous.get("excluded_detritus_roots", []),
+        excluded_file_count=previous.get("excluded_detritus_file_count", 0),
+        excluded_byte_count=previous.get("excluded_detritus_byte_count", 0),
+        excluded_measurement_complete=previous.get(
+            "excluded_detritus_measurement_complete", True
+        ),
+    )
+
+
 def read_sync_meta(dest: Path) -> dict | None:
     """Read one bounded machine sync metadata object."""
     meta_file = dest / "sync-meta.json"

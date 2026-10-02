@@ -63,15 +63,24 @@ CREATE TABLE IF NOT EXISTS sync_meta (
 """
 
 _LAST_FULL_SYNC_KEY = "last_full_sync_at"
+_TRACKER_IDENTITY_KEY = "tracker_identity"
+#: Sentinel relpath for the provenance sidecar's own stat entry -- distinct
+#: from any real in-tree relative path, so it can never collide.
+_PROVENANCE_ENTRY = "\0provenance"
 
 
-def compute_signature(session_dir: Path) -> str:
+def compute_signature(session_dir: Path, provenance_file: Path | None = None) -> str:
     """Cheap content signature: sha256 over every file's sorted (relpath,
-    size, mtime_ns).
+    size, mtime_ns), plus *provenance_file*'s own stat when it exists.
 
     Stat-only -- never reads file content -- so this stays fast even over a
     slow filesystem bridge. Changes whenever a file is added, removed, or
     its size/mtime changes (covers appends, truncations, and touches).
+    *provenance_file* covers the push contract's per-session
+    ``provenance/<id>.json`` sidecar (transferred alongside
+    ``session-state/<id>``, see :func:`~agent_logger.sync.targets.base.
+    rsync_session_filters`): without it, updating only the sidecar would
+    leave the signature unchanged and the update would never be detected.
     """
     hasher = hashlib.sha256()
     entries: list[tuple[str, int, int]] = []
@@ -84,6 +93,15 @@ def compute_signature(session_dir: Path) -> str:
             continue
         rel = path.relative_to(session_dir).as_posix()
         entries.append((rel, stat_result.st_size, stat_result.st_mtime_ns))
+    if provenance_file is not None:
+        try:
+            stat_result = provenance_file.stat()
+        except OSError:
+            pass
+        else:
+            entries.append(
+                (_PROVENANCE_ENTRY, stat_result.st_size, stat_result.st_mtime_ns)
+            )
     for rel, size, mtime_ns in sorted(entries):
         hasher.update(f"{rel}\0{size}\0{mtime_ns}\n".encode())
     return hasher.hexdigest()
@@ -148,6 +166,7 @@ class ChangeTracker:
         session_state = source / "session-state"
         if not session_state.is_dir():
             return set()
+        provenance_dir = source / "provenance"
         candidates = (
             [session_state / sid for sid in session_ids]
             if session_ids is not None
@@ -158,7 +177,9 @@ class ChangeTracker:
             for candidate in candidates:
                 if not candidate.is_dir():
                     continue
-                signature = compute_signature(candidate)
+                signature = compute_signature(
+                    candidate, provenance_dir / f"{candidate.name}.json"
+                )
                 row = conn.execute(
                     "SELECT signature FROM session_signatures WHERE session_id = ?",
                     (candidate.name,),
@@ -168,15 +189,46 @@ class ChangeTracker:
         return changed
 
     def record(self, source: Path, session_ids: Iterable[str]) -> None:
-        """Persist the current signature for each of *session_ids* as synced."""
+        """Persist the current signature for each of *session_ids* as synced.
+
+        Recomputes each signature *now* -- fine for direct/manual use, but a
+        push caller should prefer :meth:`snapshot` (before the transfer) +
+        :meth:`record_signatures` (after it succeeds) so a signature recorded
+        as synced can never reflect content that only arrived during/after
+        the transfer (see :meth:`record_signatures`).
+        """
+        self.record_signatures(self.snapshot(source, session_ids))
+
+    def snapshot(self, source: Path, session_ids: Iterable[str]) -> dict[str, str]:
+        """Capture each of *session_ids*'s current signature.
+
+        Call this **before** invoking the target's transport, then persist
+        the result via :meth:`record_signatures` only after the push
+        succeeds. Recomputing the signature *after* the transfer instead
+        (as a naive ``record()`` would) can capture a live session's append
+        that happened during the push but was never actually transferred --
+        permanently marking it "synced" until some other change or a full
+        reconciliation happens to catch it.
+        """
         session_state = source / "session-state"
+        provenance_dir = source / "provenance"
+        signatures: dict[str, str] = {}
+        for session_id in session_ids:
+            session_dir = session_state / session_id
+            if not session_dir.is_dir():
+                continue
+            signatures[session_id] = compute_signature(
+                session_dir, provenance_dir / f"{session_id}.json"
+            )
+        return signatures
+
+    def record_signatures(self, signatures: dict[str, str]) -> None:
+        """Persist pre-captured signatures (see :meth:`snapshot`) as synced."""
+        if not signatures:
+            return
         now = time.time()
         with _connect(self.db_path) as conn:
-            for session_id in session_ids:
-                session_dir = session_state / session_id
-                if not session_dir.is_dir():
-                    continue
-                signature = compute_signature(session_dir)
+            for session_id, signature in signatures.items():
                 conn.execute(
                     "INSERT INTO session_signatures (session_id, signature, synced_at) "
                     "VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET "
@@ -241,6 +293,36 @@ class ChangeTracker:
                 "INSERT INTO sync_meta (key, value) VALUES (?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (_LAST_FULL_SYNC_KEY, str(time.time())),
+            )
+
+    def identity_changed(self, identity: str) -> bool:
+        """Whether *identity* (the effective source/destination/machine this
+        tracker's signatures were last recorded against) differs from what
+        was last recorded here.
+
+        A db keyed only by its own filename (e.g. a reused ``db_path``, or a
+        config's ``sync.target``/path changed in place) can otherwise reuse
+        stale signatures and a stale full-sync timestamp for a *different*
+        destination than the one they actually describe, silently skipping
+        sessions at the new destination that were never really synced there.
+        A from-scratch db (no identity ever recorded) reports no change --
+        the caller is expected to still record the identity once this pass
+        completes.
+        """
+        with _connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT value FROM sync_meta WHERE key = ?", (_TRACKER_IDENTITY_KEY,)
+            ).fetchone()
+        return row is not None and row[0] != identity
+
+    def record_identity(self, identity: str) -> None:
+        """Record the source/destination/machine identity this tracker's
+        signatures currently describe."""
+        with _connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO sync_meta (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (_TRACKER_IDENTITY_KEY, identity),
             )
 
     def reset(self) -> None:

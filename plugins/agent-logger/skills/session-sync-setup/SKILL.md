@@ -364,7 +364,14 @@ sync:
 A **full reconciliation** pass (first run ever, the periodic cadence, or an
 explicit `run --full`) still happens, but **segmented**: sessions are pushed
 in `batch_size`-sized groups so one invocation never has to walk the entire
-corpus, and each batch's signatures are recorded as it lands.
+corpus, and each batch's signatures are recorded as it lands. Every
+tracker-driven push (incremental or segmented-full) passes `batch_mode=True`
+to the target whenever the repo scope itself is unfiltered -- this still
+transfers the global `session-store.db` index and defers (rather than
+hard-fails on) a locked in-use file, exactly like a legacy unfiltered push
+would, even though any one call only carries a transport-size slice of
+sessions. A genuine repo-allowlist/denylist filter is unaffected: it still
+goes through the atomic rescue/replace path with the index excluded.
 
 > **Known tradeoff: `--delete-excluded` no longer fires.** A full/segmented
 > pass always narrows to an explicit (even if complete) set of session ids --
@@ -392,6 +399,13 @@ regardless of the periodic cadence and rebuilds every signature from what
 that reconciliation actually pushed. There is no separate `reset` CLI verb;
 deleting the tracker db file (`sync-state*.db`) and re-running `run --full`
 achieves the same from-scratch rebuild if the db itself is suspect.
+
+A full reconciliation also triggers **automatically**, regardless of
+cadence, the first time a changed `sync.target`/path or machine name is
+detected -- the tracker binds its signatures to the effective
+source/destination/machine identity, so pointing the same db at a different
+destination forces one full reconciliation rather than silently
+reusing stale "already synced" state from the old one.
 
 ## Troubleshoot
 

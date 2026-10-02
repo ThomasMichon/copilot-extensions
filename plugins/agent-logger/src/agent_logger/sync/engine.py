@@ -106,8 +106,12 @@ def _push_incremental(
     invoke the target's transport at all. Falls back to a full, segmented
     reconciliation (bounded-size batches, so one rsync invocation never has
     to walk the whole corpus) on a from-scratch tracker db, when
-    *force_full* is set (``run --full``), or on the configured periodic
-    cadence. Change tracking itself is opt-out (``sync.change_tracking.enabled:
+    *force_full* is set (``run --full``), on the configured periodic
+    cadence, or when the tracker's recorded source/destination/machine
+    identity no longer matches this run (a changed target/path/machine makes
+    its stored signatures describe a different destination -- see
+    :meth:`~agent_logger.sync.change_tracker.ChangeTracker.identity_changed`).
+    Change tracking itself is opt-out (``sync.change_tracking.enabled:
     false`` reverts to always pushing everything, exactly as before this
     existed).
     """
@@ -119,16 +123,33 @@ def _push_incremental(
         return target.push(source, machine, include)
 
     tracker = ChangeTracker(resolve_db_path(settings["db_path"], cfg.home))
-    do_full = force_full or tracker.should_full_sync(settings["full_sync_interval_hours"])
+    # The repo-scope business filter (allowlist/denylist), not a transport
+    # batching artifact -- `batch_mode` on target.push tells the target "this
+    # explicit session set is only a size-bounded slice of what would
+    # otherwise be an unfiltered push", so it still transfers the global
+    # index and defers (rather than hard-fails) a locked file, exactly like
+    # an unfiltered push would.
+    unfiltered = include is None
+    identity = f"{source}|{target.describe()}|{machine}"
+    do_full = (
+        force_full
+        or tracker.identity_changed(identity)
+        or tracker.should_full_sync(settings["full_sync_interval_hours"])
+    )
 
     if not do_full:
         changed = tracker.changed_sessions(source, include)
         final_include = changed if include is None else (changed & include)
         if not final_include:
+            target.heartbeat(machine)
             return PushResult(ok=True, detail="no session changes detected")
-        result = target.push(source, machine, final_include)
+        # Snapshot before the transfer, not after: a signature recomputed
+        # post-push could capture a live append that happened during the
+        # push but was never actually transferred, permanently masking it.
+        snapshot = tracker.snapshot(source, final_include)
+        result = target.push(source, machine, final_include, batch_mode=unfiltered)
         if result.ok:
-            tracker.record(source, final_include)
+            tracker.record_signatures(snapshot)
         return result
 
     all_ids = _all_session_ids(source)
@@ -145,7 +166,8 @@ def _push_incremental(
         batch_count += 1
         if verbose:
             print(f"session-sync: full sync batch {batch_count} ({len(batch)} session(s))")
-        result = target.push(source, machine, set(batch))
+        snapshot = tracker.snapshot(source, batch)
+        result = target.push(source, machine, set(batch), batch_mode=unfiltered)
         if not result.ok:
             return result
         total_files += result.file_count
@@ -153,12 +175,13 @@ def _push_incremental(
         total_excluded_bytes += result.excluded_byte_count
         excluded_roots.extend(result.excluded_roots)
         measurement_complete = measurement_complete and result.excluded_measurement_complete
-        tracker.record(source, batch)
+        tracker.record_signatures(snapshot)
 
     vanished = tracker.vanished_sessions(source)
     if vanished:
         tracker.forget(vanished)
     tracker.mark_full_sync()
+    tracker.record_identity(identity)
 
     detail = (
         f"full reconciliation: {len(all_ids)} session(s) in {batch_count} batch(es)"
@@ -749,7 +772,9 @@ def main(argv: list[str] | None = None) -> int:
             if getattr(args, "detach", False):
                 from agent_logger.sync import spawn
 
-                return spawn.spawn_detached_sync(cfg, prune=args.prune)
+                return spawn.spawn_detached_sync(
+                    cfg, prune=args.prune, full=args.full
+                )
             return run_sync(
                 cfg, dry_run=args.dry_run, prune=args.prune, verbose=args.verbose,
                 full=args.full,

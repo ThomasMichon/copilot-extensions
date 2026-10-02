@@ -2258,6 +2258,78 @@ def test_engine_run_sync_forgets_vanished_session_on_full_sync(
     assert tracker.known_session_ids() == set()
 
 
+def test_engine_run_sync_forces_full_when_destination_target_changes(
+    tmp_path: Path,
+) -> None:
+    """Changing the sync target/path after the tracker has already recorded
+    signatures against the old one must trigger a fresh full reconciliation,
+    not silently skip pushing to the new destination."""
+    src = _make_source(tmp_path)
+    dest_a = tmp_path / "dest-a"
+    cfg = _cfg(tmp_path / "home", src, dest_a)
+
+    assert engine.run_sync(cfg) == 0
+    assert (dest_a / next(dest_a.iterdir()).name / "session-state" / "abc-123").is_dir()
+
+    dest_b = tmp_path / "dest-b"
+    cfg._data["sync"]["targets"]["local"]["path"] = str(dest_b)
+
+    assert engine.run_sync(cfg) == 0
+    machine_dir = next(dest_b.iterdir())
+    assert (
+        machine_dir / "session-state" / "abc-123" / "events.jsonl"
+    ).is_file()
+
+
+def test_engine_run_sync_heartbeats_destination_on_no_change_skip(
+    tmp_path: Path,
+) -> None:
+    """A skipped (no-change) push must still refresh the destination's own
+    health metadata, or a routine health check reports a perfectly healthy,
+    unchanged destination as stale between full-reconciliation passes."""
+    from agent_logger.sync import meta
+
+    src = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    assert engine.run_sync(cfg) == 0
+    machine_dir = next(dest.iterdir())
+    first_meta = meta.read_sync_meta(machine_dir)
+    assert first_meta is not None
+
+    import time as time_module
+
+    time_module.sleep(1.1)
+    assert engine.run_sync(cfg) == 0
+    second_meta = meta.read_sync_meta(machine_dir)
+    assert second_meta is not None
+    assert second_meta["last_sync_utc"] != first_meta["last_sync_utc"]
+
+
+def test_engine_run_sync_preserves_index_for_unfiltered_incremental_push(
+    tmp_path: Path,
+) -> None:
+    """An unfiltered incremental/segmented push must still eventually
+    refresh the global session-store.db index, even though any one call
+    only carries a transport-size batch of sessions."""
+    src = _make_source(tmp_path)
+    (src / "session-store.db").write_text("index-v1", encoding="utf-8")
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    assert engine.run_sync(cfg) == 0
+    machine_dir = next(dest.iterdir())
+    assert (machine_dir / "session-store.db").read_text(encoding="utf-8") == "index-v1"
+
+    (src / "session-store.db").write_text("index-v2", encoding="utf-8")
+    (src / "session-state" / "abc-123" / "events.jsonl").write_text(
+        '{"ts": 2}\n', encoding="utf-8"
+    )
+    assert engine.run_sync(cfg) == 0
+    assert (machine_dir / "session-store.db").read_text(encoding="utf-8") == "index-v2"
+
+
 def test_hub_compaction_fails_closed_when_tracked_lookup_unresolved(
     monkeypatch, capsys, tmp_path: Path,
 ) -> None:

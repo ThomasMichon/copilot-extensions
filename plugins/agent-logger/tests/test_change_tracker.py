@@ -214,3 +214,87 @@ def test_reset_clears_signatures_and_full_sync_marker(tmp_path: Path) -> None:
     tracker.reset()
     assert tracker.known_session_ids() == set()
     assert tracker.should_full_sync(24) is True
+
+
+def test_changed_sessions_detects_provenance_only_change(tmp_path: Path) -> None:
+    """Updating only the provenance sidecar (session-state content untouched)
+    must still be detected -- the push contract transfers it too."""
+    source = tmp_path / "copilot"
+    _make_session(source, "abc-123")
+    provenance_dir = source / "provenance"
+    provenance_dir.mkdir()
+    (provenance_dir / "abc-123.json").write_text("{}", encoding="utf-8")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record(source, {"abc-123"})
+    assert tracker.changed_sessions(source) == set()
+
+    (provenance_dir / "abc-123.json").write_text('{"changed": true}', encoding="utf-8")
+    assert tracker.changed_sessions(source) == {"abc-123"}
+
+
+def test_snapshot_then_record_signatures_matches_record(tmp_path: Path) -> None:
+    source = tmp_path / "copilot"
+    _make_session(source, "abc-123")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    snapshot = tracker.snapshot(source, {"abc-123"})
+    assert set(snapshot) == {"abc-123"}
+    tracker.record_signatures(snapshot)
+    assert tracker.changed_sessions(source) == set()
+
+
+def test_record_signatures_ignores_content_that_changes_after_snapshot(
+    tmp_path: Path,
+) -> None:
+    """The whole point of snapshot-before-push: a signature recorded as
+    synced must never silently absorb content that arrived after the
+    snapshot was taken (e.g. during the transfer itself)."""
+    source = tmp_path / "copilot"
+    _make_session(source, "abc-123")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    snapshot = tracker.snapshot(source, {"abc-123"})
+
+    # Simulate a live append happening after the snapshot but before the
+    # (here, simulated) transfer completes and the snapshot is recorded.
+    (source / "session-state" / "abc-123" / "events.jsonl").write_text(
+        "appended content", encoding="utf-8"
+    )
+    tracker.record_signatures(snapshot)
+
+    # The append was never actually captured by the recorded signature, so
+    # the next pass must still see it as changed.
+    assert tracker.changed_sessions(source) == {"abc-123"}
+
+
+def test_snapshot_skips_missing_session_directory(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    assert tracker.snapshot(tmp_path / "copilot", {"nonexistent"}) == {}
+
+
+def test_record_signatures_empty_is_a_noop(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record_signatures({})
+    assert tracker.known_session_ids() == set()
+
+
+def test_identity_changed_false_for_fresh_db(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    assert tracker.identity_changed("source|target|machine") is False
+
+
+def test_identity_changed_false_when_matching(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record_identity("source|target|machine")
+    assert tracker.identity_changed("source|target|machine") is False
+
+
+def test_identity_changed_true_when_destination_changes(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record_identity("source|target-a|machine")
+    assert tracker.identity_changed("source|target-b|machine") is True
+
+
+def test_reset_clears_identity(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record_identity("source|target|machine")
+    tracker.reset()
+    assert tracker.identity_changed("source|target-b|machine") is False
