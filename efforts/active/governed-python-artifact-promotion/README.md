@@ -73,36 +73,38 @@ gate that keeps a promoted release installable under real-world feed lag.
   gate that accounts for feed propagation lag instead of locking to
   not-yet-available versions; and verified artifact consumption with a
   correct source-build fallback when no matching artifact exists.
-- **Feed model constraint (review finding, 2026-10-01):** promotion runs on
-  GitHub-hosted `ubuntu-latest` runners
+- **Feed model.** Promotion runs on GitHub-hosted `ubuntu-latest` runners
   (`.github/workflows/validate-and-promote.yml:445-446`), which can reach
   only a public reference index, not any particular consumer's private
   governed-feed mirror or its propagation state. A promotion-side check
-  therefore **cannot** certify "this closure is installable from *your*
-  governed feed right now" for every consumer. Promotion's own gate is
-  reframed accordingly: it resolves and pins an exact, reproducible
-  dependency closure against a public reference index and records it in the
-  manifest; it does **not** claim governed-feed installability for any
-  specific consumer. The actual governed-feed-lag-aware admission check is a
-  **consumer-side, install-time** responsibility (Phase 3) run against that
-  machine's own governed feed, with a safe from-source fallback when that
-  specific machine's feed doesn't yet carry the pinned closure.
-- **Trust/authentication gap (review finding, 2026-10-01):** a digest and
-  provenance record are not self-authenticating if both the wheel and the
-  manifest live in the same, equally-mutable artifact store — replacing both
-  together defeats the check. The manifest's expected digest must be rooted
-  in something an attacker can't co-replace with the artifact, e.g.
-  committed into promoted, branch-protected repository metadata (so forging
-  it requires forging a reviewed commit, not just an artifact-store write),
-  or a signed attestation verified against a pinned, out-of-band verifier
-  key. Phase 2 must pick one and specify it concretely, not defer it.
-- **Fail-closed-on-tamper gap (review finding, 2026-10-01):** "no verified
-  match" must not conflate two different states: an artifact that was never
-  published for this tuple (safe to fall back to from-source) versus a
-  published artifact whose digest/provenance verification **failed** (must
-  fail closed with diagnostics — falling back there would silently mask
-  corruption or tampering and defeat the whole admission signal). Phase 3's
-  consumption logic and Validation Plan must treat these as distinct cases.
+  therefore cannot certify "this closure is installable from *your*
+  governed feed right now" for every consumer. Promotion's own gate
+  resolves and pins an exact, reproducible dependency closure against a
+  public reference index and records it in the manifest; it does **not**
+  claim governed-feed installability for any specific consumer. The actual
+  governed-feed-lag-aware admission check is a **consumer-side, install-time**
+  responsibility (Phase 3) run against that machine's own governed feed,
+  with a safe from-source fallback when that specific machine's feed
+  doesn't yet carry the pinned closure.
+- **Trust root.** The manifest's expected digest is **committed into
+  promoted, branch-protected repository metadata** (the manifest itself is
+  a file checked into the promotion commit on `main`/`dev`, protected by
+  the same branch-protection rules as source code) — not merely a value
+  sitting next to the artifact in the same, equally-mutable artifact store.
+  An attacker who can write to the artifact store cannot also forge a
+  branch-protected commit, so replacing both the wheel and its digest
+  together is not possible without compromising repository review controls
+  directly. This is the chosen trust root; a signed attestation against a
+  separately pinned verifier key was considered and rejected for this
+  effort's scope as unnecessary added key-management surface given the
+  branch-protection guarantee already available.
+- **Fallback vs. fail-closed.** "No usable artifact" must not conflate two
+  different states: an artifact that was never published for this tuple
+  (safe to fall back to from-source) versus a published artifact whose
+  digest/provenance verification **failed** (must fail closed with
+  diagnostics — falling back there would silently mask corruption or
+  tampering and defeat the whole admission signal). Phase 3's consumption
+  logic and the Validation Plan treat these as distinct cases.
 - Baseline measurements (directional, to be re-validated with this effort's
   own spike rather than assumed): representative Windows ZIP sizes around
   12–25 MiB for most plugins and roughly 320 MiB for agent-index's full
@@ -157,11 +159,12 @@ gate that keeps a promoted release installable under real-world feed lag.
       against a public reference index at promotion time (see the feed
       model constraint above); record it in the manifest as the closure a
       consumer must later validate against their own governed feed.
-- [ ] Specify and implement the manifest's trust root concretely (see the
-      trust/authentication gap above): either a digest committed into
-      branch-protected repository metadata, or a signed attestation
-      verified against a pinned verifier key. Define how installers obtain
-      and pin that verifier/trust anchor.
+- [ ] Specify and implement the manifest's trust root per the committed
+      decision above: the manifest's expected digest is committed into
+      promoted, branch-protected repository metadata. Implement the
+      installer-side check that reads the digest from that
+      branch-protected commit (not from the artifact store) before trusting
+      any downloaded artifact/manifest pair.
 
 ### Phase 3 — Verified consumption with correct fallback
 
@@ -202,11 +205,11 @@ gate that keeps a promoted release installable under real-world feed lag.
       *this machine's* governed feed, succeeds once the feed carries it,
       and never silently substitutes a public-index candidate.
 - [ ] Manifest/trust-root tests reject a wrong payload/ABI/platform, an
-      altered artifact digest, a missing or unverifiable provenance
-      attestation, or a mismatched dependency closure before activation —
-      and specifically prove that replacing *both* the artifact and its
-      manifest at the artifact store (without forging the committed/signed
-      trust root) is still rejected.
+      altered artifact digest, or a mismatched dependency closure before
+      activation — and specifically prove that replacing *both* the
+      artifact and its manifest at the artifact store (without also
+      forging a branch-protected commit to the repository's trust-root
+      metadata) is still rejected.
 - [ ] A dedicated test distinguishes the two "no usable artifact" cases:
       **absence** (no artifact published for this tuple) results in a safe
       from-source fallback; **verification failure** (published artifact,
@@ -255,4 +258,26 @@ _Pending Phase 1 spike evidence._
      that fails verification (must fail closed with diagnostics, never
      fall back). Phase 3 and the Validation Plan now treat these as
      distinct, separately tested cases.
+
+### 2026-10-01 — Second review pass: concrete decision + contract consistency
+
+- A second review round on the first fixup found the prior pass incomplete:
+  1. **Trust root left as an open choice, not a decision.** Committed to one
+     concrete option: the manifest's expected digest is committed into
+     promoted, branch-protected repository metadata (not a signed
+     attestation against a separately pinned verifier key — rejected as
+     unneeded key-management surface given branch protection already
+     covers the same guarantee). Phase 2 and the Validation Plan now name
+     this exact mechanism.
+  2. **Umbrella issue contract mismatch.** The effort's refined admission
+     model (promotion pins against a public reference index; the
+     machine-specific governed-feed check moved to install time) silently
+     diverged from umbrella issue #4876's original wording ("promotion
+     fails before publishing ... when the closure is not governed-feed
+     resolvable"). Updated #4876 to match the effort's single, now-
+     authoritative contract.
+  3. **Dated qualifiers in durable Context.** Removed "(review finding,
+     2026-10-01)" labels from the Context section — that section describes
+     the current system contract, not a review-history artifact; the
+     review trail belongs only here in the Journal.
 
