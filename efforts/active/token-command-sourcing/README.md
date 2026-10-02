@@ -195,6 +195,33 @@ corrections to the same original ask, not a change in intent.
         headless background service, and a plain subprocess launch can flash
         a visible console window on Windows. Add a headless-child test case
         alongside the POSIX/Windows parsing cases.
+        **The timeout must own the complete process tree, not just the
+        direct child:** `no_window_kwargs()` only hides the console — it
+        does not contain descendants, and a plain
+        `subprocess.run(..., timeout=30)` only kills the direct child on
+        timeout, leaking any descendant a misbehaving/hanging credential
+        command spawned. Per
+        `docs/patterns/windows-background-process-launch.md`'s launch-kind
+        matrix ("timeout owns the complete tree"), this is a "short-lived
+        child with captured/redirected stdio" launch kind: use
+        `agent_procutil`'s job-object-based containment
+        (`spawn_in_kill_on_close_job`, which returns a `JobHandle` bound to
+        a kill-on-close Windows Job Object) rather than a bare
+        `subprocess.run`, so a timeout/cancellation terminates the whole
+        tree, not just the root PID. Note during implementation that
+        `spawn_in_kill_on_close_job` is `async`
+        (`asyncio.subprocess.Process`-based) while `run_token_command()`'s
+        existing call sites are synchronous — resolve this bridging
+        (e.g. a small sync wrapper running its own short-lived event loop,
+        or an equivalent sync containment primitive if one already exists)
+        as part of Phase 1, rather than silently reverting to a
+        non-tree-owning `subprocess.run`. Validation per the pattern doc's
+        own "Review and validation" section: a mocked-flags/ordinary
+        subprocess test proves wiring, not behavior — add a focused live
+        regression (real console-child + any descendant, timeout forced,
+        full tree exit observed over ≥2 cycles with Win32 window
+        enumeration) kept out of the fast required CI lane (a Windows host
+        is needed), per the doc's own guidance.
       - `resolve_direct_first(direct_var, command_var) -> str | None` —
         direct env wins, else fetch via command. Mirrors
         `resolve_control_token()`'s existing precedence.
@@ -277,9 +304,18 @@ corrections to the same original ask, not a change in intent.
       behavior for: command present+succeeds, command present+fails, command
       absent+direct value present, both absent.
 - [ ] Add `agent-dispatch` as a consumer of the new lib: `pyproject.toml`
-      dependency + `[tool.uv.sources]` entry, plus the matching preinstall
-      addition in its own `scripts/init.sh`/`init.ps1` if it has an
-      equivalent non-uv fallback list (confirm during this phase).
+      dependency + `[tool.uv.sources]` entry. The actual local-path
+      dependency/preinstall logic for agent-dispatch lives in
+      **`scripts/install.sh`/`install.ps1`** (not `init.sh`/`init.ps1`,
+      which is a separate script) — add the new lib there. It must **also**
+      join the stale-cache force-refresh arrays
+      (`_STALE_CACHE_REFRESH_PACKAGES` in `install.sh:~739-747`, and the
+      equivalent PowerShell array in `install.ps1:~1040-1065`) alongside
+      `agent-procutil`/`agent-zdd`/etc. — these exist specifically because
+      `uv`'s local-path build cache is keyed by source path, not content
+      (copilot-extensions#2863), so a new local-path dependency left out of
+      this list risks deploying a stale cached wheel instead of a fresh
+      build, exactly the bug class this mechanism exists to prevent.
 - [ ] No behavior change for existing agent-dispatch deployments — this is a
       pure refactor; existing tests must continue to pass unmodified in
       intent (updates only for the new call shape).
@@ -624,3 +660,24 @@ conventions to mirror) to be elaborated once this plan clears review._
   changed), following this workflow's existing `discover`-job changed-path
   pattern, while confirming `pr-gate`'s own aggregator already tolerates a
   "skipped" result so listing a path-gated job there remains safe.
+
+### 2026-10-02 — Review round 13 (PR #4910)
+- Copilot review: the timeout-preservation and Windows-path-gating fixes
+  resolved; one new Medium finding plus two previously-missed items.
+  New: `no_window_kwargs()` only hides the console, it doesn't contain the
+  process tree — a plain `subprocess.run(..., timeout=30)` only kills the
+  direct child, leaking a hung credential command's descendants. Previously
+  missed: (1) agent-dispatch's local-path dependency/preinstall logic
+  actually lives in `scripts/install.sh`/`install.ps1` (which also has the
+  separate stale-cache force-refresh arrays), not `init.sh`/`init.ps1` as
+  the plan said — agent-dispatch has both files, unlike agent-mcp which
+  only has `init.*`; (2) the Azure DevOps connector's existing
+  missing-credential error message only names the two pre-existing sources
+  and needs updating to mention the new `_COMMAND` path too. All three
+  addressed: added the job-object-based tree-containment requirement
+  (`spawn_in_kill_on_close_job`) with the sync/async bridging note and a
+  live-regression validation requirement per
+  `docs/patterns/windows-background-process-launch.md`; corrected the
+  agent-dispatch installer filename and added the stale-cache array
+  requirement; added the error-message update to the Azure DevOps
+  sub-task.

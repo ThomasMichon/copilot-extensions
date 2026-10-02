@@ -135,7 +135,13 @@ risk profiles:
   full resolution order must become **explicit constructor `token=` arg →
   `AGENT_INDEX_ADO_TOKEN` (direct env) → `AGENT_INDEX_ADO_TOKEN_COMMAND`** —
   never let the new command resolver run ahead of an explicitly-passed
-  `token=`. Confirm whether `agent-index`'s other tokens
+  `token=`. **Update the missing-credential error message too:** the
+  constructor's `ValueError("Azure DevOps source requires
+  AGENT_INDEX_ADO_TOKEN or token=...")` only names the two pre-existing
+  sources — after adding the third (`_COMMAND`), update the message to
+  mention it too, or a user hitting this error gets misdirected remediation
+  advice for the exact case this effort exists to fix. Confirm whether
+  `agent-index`'s other tokens
   (`CELL_TRANSACTION_TOKEN`/`CELL_LOCK_TOKEN`/`CELL_START_TOKEN`) are
   genuinely internally-generated (as currently assumed, hence out of scope
   per the main README's Context) before closing this phase — re-verify,
