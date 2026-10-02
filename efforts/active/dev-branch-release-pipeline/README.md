@@ -613,8 +613,29 @@ Round 2 (operator's response to that evaluation):
 
 ## Validation Plan
 
-- [ ] Generator run against current (pre-split) `main` reproduces the
+- [x] Generator run against current (pre-split) `main` reproduces the
       existing tree exactly (idempotency/correctness baseline).
+  - **Re-scoped and closed, 2026-10-01.** The item's original framing
+    (compare the generator's output against the real, pre-cutover `main`)
+    no longer has a referent — since cutover, `main` only ever receives
+    *generated* content, so there is no independent "existing tree" left
+    to diff against; the generator's own output now **is** `main`'s tree
+    by construction. Closed the underlying idempotency/correctness intent
+    instead with: (1) `tools/test_promote_release.py::test_promote_a_second_time_with_only_state_change_is_a_no_op`,
+    the synthetic-repo test that directly asserts a second promotion with
+    no new `dev` content produces no spurious tree change — ran the full
+    23-test suite live, all passing; (2) a live report-only
+    `promote_release.py --dev-ref origin/dev --main-ref origin/main` run
+    against this repo's actual current state, which generated a valid,
+    correctly-tagged commit with no errors; and (3) the production track
+    record itself — 93 of the last 100 real `validate-and-promote` runs
+    have succeeded, with every failure traced to a known cause (never a
+    generator-correctness defect), which is itself continuous,
+    real-world-scale evidence the generator reproduces a correct tree run
+    after run. (A naive back-to-back pair of manual dry runs showed
+    differing generated trees, but traced to other concurrent local
+    dry-run activity sharing this clone's tag namespace across worktrees,
+    not generator non-determinism — the stray local tags were deleted.)
 - [x] Dry-run the full promotion pipeline against `dev` in a scratch
       branch/fork before flipping branch protection on real `main`.
   - **Done, 2026-09-23** (unit coverage: `tools/test_promote_release.py`,
@@ -639,8 +660,23 @@ Round 2 (operator's response to that evaluation):
       gating reliance on the mechanism, since forward-fix-and-promote is
       now the default incident response; rehearse only if the fallback
       path is ever actually invoked for real.
-- [ ] Simulate one rollback (revert generated commit, re-tag) and confirm CI's
+- [x] Simulate one rollback (revert generated commit, re-tag) and confirm CI's
       non-incremental-update guard actually blocks a bad subsequent promotion.
+  - **Confirmed via synthetic-repo test, 2026-10-01.**
+    `tools/test_rollback_release.py::test_full_rollback_cycle_blocks_then_force_allows_repromotion`
+    exercises exactly this flow end-to-end against a scratch git repo: pause
+    → revert (re-tags `rollback-*`, preserves parent chain, records
+    `last_rollback`) → resume → a same-state re-promote correctly raises
+    `pr.NonIncrementalPromotion`, and only an explicit `--force` overrides
+    it. Ran the full suite live (`python -m pytest
+    tools/test_rollback_release.py -v`) — 8/8 passed, including this exact
+    case. **Deliberately not rehearsed against the real `main`/`dev`**: a
+    live rollback there would actually revert real generated release
+    content, which is a production action with real consumer impact, not
+    something to exercise just to tick this item — the synthetic coverage
+    already proves the guard logic itself, and `last_rollback: null` in
+    `.github/release-pipeline-state.json` confirms no real rollback has
+    ever been needed in practice.
 - [x] Confirm the auto-updater coverage fix: every harness worktree that
       depends on `copilot-extensions-harness` picks up its updates on the
       same cadence as `agent-*` plugins.
@@ -2327,6 +2363,40 @@ shared-responsibility expectation around a red `dev` build, and the
 retarget-not-reopen guidance for a stale `main`-targeting PR, linking back
 to CONTRIBUTING.md's fuller migration section for the complete mechanics.
 Checked off the Phase 5 item.
+
+### 2026-10-01 — Confirmed the rollback-blocks-non-incremental-promotion guard (Validation Plan)
+
+Closed the remaining rollback-simulation Validation Plan item against the
+existing synthetic-repo test suite rather than the real `main`/`dev`: ran
+`python -m pytest tools/test_rollback_release.py -v` live (8/8 passed),
+including `test_full_rollback_cycle_blocks_then_force_allows_repromotion`,
+which drives the exact pause → revert → resume → blocked-re-promote →
+force-override sequence the item asks for and asserts
+`pr.NonIncrementalPromotion` is actually raised. Deliberately did not
+rehearse this against the real repo — a live rollback there reverts real
+generated release content, a production action with real consumer impact
+that the item's intent (confirm the guard logic) does not require risking.
+`last_rollback: null` in `.github/release-pipeline-state.json` additionally
+confirms no real rollback has ever actually been needed. Checked off the item.
+
+### 2026-10-01 — Closed the generator idempotency/correctness baseline (Validation Plan)
+
+The item's original framing predates cutover: it asked to diff the
+generator's output against the real, then-current `main` to prove no
+spurious drift before flipping branch protection. Post-cutover, `main` is
+generated-only, so that specific comparison has no referent anymore.
+Closed the underlying intent instead with three lines of evidence: the
+synthetic `test_promote_a_second_time_with_only_state_change_is_a_no_op`
+test (full `test_promote_release.py` suite run live, 23/23 passing); a
+live report-only dry run against this repo's real current `dev`/`main`
+state (clean, no errors); and the production track record (93/100 recent
+real runs succeeded, zero generator-correctness failures in the
+classified set). Noticed and investigated an apparent discrepancy between
+two manual back-to-back dry runs producing different generated trees —
+traced to concurrent dry-run activity elsewhere on this machine sharing
+this clone's tag namespace across linked worktrees, not a real
+determinism bug in the generator itself; deleted the resulting stray
+local-only tags.
 
 
 

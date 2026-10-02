@@ -12,7 +12,31 @@ PLUGIN = Path(__file__).resolve().parents[1]
 INSTALLER = PLUGIN / "scripts" / "install.ps1"
 SHELL_INSTALLER = PLUGIN / "scripts" / "install.sh"
 PWSH = shutil.which("pwsh")
-BASH = shutil.which("bash")
+# A bare shutil.which("bash") can resolve to a Windows App Execution Alias
+# stub or the classic `C:\Windows\System32\bash.exe` WSL launcher (both
+# invoke an actual WSL distro rather than running this script in the
+# environment under test). Prefer the real Git Bash location when present;
+# otherwise filter both known WSL-launcher locations out of PATH before
+# falling back to shutil.which, so this never silently selects one. See the
+# agent-bridge/agent-codespaces sibling tests for the same pattern.
+_GIT_BASH = Path(r"C:\Program Files\Git\bin\bash.exe")
+
+
+def _resolve_bash() -> str | None:
+    if _GIT_BASH.is_file():
+        return str(_GIT_BASH)
+    path = os.environ.get("PATH")
+    if not path:
+        return None
+    filtered = os.pathsep.join(
+        part for part in path.split(os.pathsep)
+        if "windowsapps" not in part.lower()
+        and part.rstrip("\\").lower() != r"c:\windows\system32"
+    )
+    return shutil.which("bash", path=filtered)
+
+
+BASH = _resolve_bash()
 
 pytestmark = pytest.mark.guard
 
@@ -189,6 +213,10 @@ def test_shell_pip_fallback_includes_vendored_dependencies(tmp_path: Path) -> No
     assert str(plugin) in fallback_args
 
 
+@pytest.mark.skipif(
+    os.name == "nt" or BASH is None,
+    reason="POSIX shell installer coverage",
+)
 def test_shell_pip_fallback_resolves_canonical_when_local_copy_absent(tmp_path: Path) -> None:
     """vendor-pointer-generalization effort, Phase 1: ssh-manager and
     agent-procutil are `uv`-editable canonical references, so a real
