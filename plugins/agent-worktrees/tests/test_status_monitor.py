@@ -283,6 +283,64 @@ def test_sweep_serves_live_registered_and_prunes_gone(tmp_path, monkeypatch):
     assert not any(s in ("wt-gone", "other") for s, _, _ in calls)
 
 
+def test_sweep_reuses_project_config_cache_for_served_sessions(tmp_path, monkeypatch):
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a")
+    m._register_session_for_monitor("wt-b", "/w/b")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": 1, "wt-b": 1})
+
+    def _activate(path, *, force=False):
+        m.cfg.set_active_project("proj")
+
+    monkeypatch.setattr(m, "_activate_project_for_path", _activate)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_monitor_maybe_trigger_handoff_cutover", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_warm_list_cache_for_active_project", lambda **k: 0)
+    monkeypatch.setattr(m.tracking, "list_records", lambda *a, **k: [])
+    calls = _capture_set(monkeypatch)
+
+    loads = {"n": 0}
+
+    def _load_config_once(*args, **kwargs):
+        loads["n"] += 1
+        return types.SimpleNamespace(machine="host")
+
+    def _render_segment(*args, **kwargs):
+        m.cfg.load_config(include_control_plane_related_pr=False)
+        return "SEG"
+
+    cache_sessions: dict[str, m.cfg.ConfigCacheSession] = {}
+
+    def _cache_for_project(project: str):
+        return cache_sessions.setdefault(project, m.cfg.ConfigCacheSession(ttl=60))
+
+    monkeypatch.setattr(m.cfg, "_load_config_uncached", _load_config_once)
+    monkeypatch.setattr(m, "_render_status_segment", _render_segment)
+    from agent_worktrees import config_cache
+
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(config_cache.time, "monotonic", lambda: clock["t"])
+
+    def _sweep():
+        return m._monitor_sweep(
+            "tmux", "TOK", "PFX", set(), config_cache_for_project=_cache_for_project,
+        )
+
+    assert _sweep() == 2
+    assert loads["n"] == 1
+    assert ("wt-a", "@aw_seg", "SEG") in calls
+    assert ("wt-b", "@aw_seg", "SEG") in calls
+
+    clock["t"] += 30  # next sweep, still inside the 60 s TTL: same cache, no reload
+    assert _sweep() == 2
+    assert loads["n"] == 1
+
+    clock["t"] += 61  # past the TTL: the next sweep reloads once
+    assert _sweep() == 2
+    assert loads["n"] == 2
+
+
 def test_sweep_unions_managed_mux_cache_into_served_sessions(tmp_path, monkeypatch):
     """Step 4: Manager-owned sessions join the served set via the managed-mux
     cache, so reconciliation sees the same union the writer loop serves."""

@@ -3229,9 +3229,10 @@ def _monitor_sweep(
     lifecycle_priority=None,
     governance=None,
     managed_mux_cache=None,
+    config_cache_for_project=None,
 ) -> int:
     """One coalescing pass over the Step 4 served-session union."""
-    from . import list_cli as _list_cli, mux_status_link as _mux_status_link, status_bar_cli as _status_bar_cli, status_monitor_runtime as _smr, status_updater_cli as _status_updater_cli
+    from . import config_cache as _config_cache, list_cli as _list_cli, mux_status_link as _mux_status_link, status_bar_cli as _status_bar_cli, status_monitor_runtime as _smr, status_updater_cli as _status_updater_cli
 
     _monitor_list_sessions = _self_override("_monitor_list_sessions", _smr._monitor_list_sessions)
     _monitor_registry_dir = _self_override("_monitor_registry_dir", _smr._monitor_registry_dir)
@@ -3325,30 +3326,32 @@ def _monitor_sweep(
                 warm_projects.setdefault(project, path)
             except Exception:
                 pass
-            if sess not in ctx_done:
+            config_scope = _config_cache.project_scope(config_cache_for_project, project)
+            with config_scope:
+                if sess not in ctx_done:
+                    try:
+                        context_value = _render_status_context(path, plain=False)
+                    except Exception:
+                        pass
                 try:
-                    context_value = _render_status_context(path, plain=False)
-                except Exception:
-                    pass
-            try:
-                if segment_cache is not None:
-                    segment_value = segment_cache.get(path)
-                else:
-                    _status_monitor_recheck(governance, "pre-mutation:render-status")
-                    segment_value = _render_status_segment(
-                        path, fetch=False, plain=False, no_title=False, persist_title=True
-                    )
-            except _StatusMonitorGovernanceDeferred:
-                raise
-            except Exception:
-                pass
-            if mux_bin:
-                try:
-                    _monitor_maybe_trigger_handoff_cutover(path, governance=governance)
+                    if segment_cache is not None:
+                        segment_value = segment_cache.get(path)
+                    else:
+                        _status_monitor_recheck(governance, "pre-mutation:render-status")
+                        segment_value = _render_status_segment(
+                            path, fetch=False, plain=False, no_title=False, persist_title=True
+                        )
                 except _StatusMonitorGovernanceDeferred:
                     raise
                 except Exception:
                     pass
+                if mux_bin:
+                    try:
+                        _monitor_maybe_trigger_handoff_cutover(path, governance=governance)
+                    except _StatusMonitorGovernanceDeferred:
+                        raise
+                    except Exception:
+                        pass
 
         def _publish(option: str, value: str, session: str = sess) -> bool:
             key = (session, option)
@@ -3410,27 +3413,32 @@ def _monitor_sweep(
             with project_lock if project_lock is not None else contextlib.nullcontext():
                 try:
                     cfg.set_active_project(project)
-                    for record in tracking.list_records(cfg.tracking_dir()):
-                        worktree_path = getattr(record, "worktree_path", None)
-                        if worktree_path:
-                            try:
-                                if (
-                                    os.path.normcase(os.path.realpath(worktree_path))
-                                    in served_path_keys
-                                ):
+                    config_scope = _config_cache.project_scope(config_cache_for_project, project)
+                    # One per-project config cache for the listing AND the handoff
+                    # processing below (a cutover spawn loads config per record).
+                    with config_scope:
+                        records = tracking.list_records(cfg.tracking_dir())
+                        for record in records:
+                            worktree_path = getattr(record, "worktree_path", None)
+                            if worktree_path:
+                                try:
+                                    if (
+                                        os.path.normcase(os.path.realpath(worktree_path))
+                                        in served_path_keys
+                                    ):
+                                        continue
+                                except (OSError, ValueError):
+                                    pass
+                            if not record.pending_handoffs:
+                                retire_request = _monitor_pending_handoff_predecessor_retire(record)
+                                if retire_request is None:
                                     continue
-                            except (OSError, ValueError):
-                                pass
-                        if not record.pending_handoffs:
-                            retire_request = _monitor_pending_handoff_predecessor_retire(record)
-                            if retire_request is None:
+                            try:
+                                if not sessions.has_mux_session(record.worktree_id):
+                                    continue
+                            except Exception:
                                 continue
-                        try:
-                            if not sessions.has_mux_session(record.worktree_id):
-                                continue
-                        except Exception:
-                            continue
-                        _monitor_maybe_process_handoff_record(record, governance=governance)
+                            _monitor_maybe_process_handoff_record(record, governance=governance)
                 except _StatusMonitorGovernanceDeferred:
                     raise
                 except Exception:
@@ -3441,7 +3449,9 @@ def _monitor_sweep(
             try:
                 _status_monitor_recheck(governance, "pre-mutation:warm-list-cache")
                 cfg.set_active_project(project)
-                _warm_list_cache_for_active_project(interval=interval)
+                config_scope = _config_cache.project_scope(config_cache_for_project, project)
+                with config_scope:
+                    _warm_list_cache_for_active_project(interval=interval)
             except _StatusMonitorGovernanceDeferred:
                 raise
             except Exception:

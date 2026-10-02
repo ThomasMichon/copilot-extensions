@@ -230,24 +230,25 @@ def _cmd_list_stream(args: argparse.Namespace, records) -> int:
         }
         for rec in records
     ])
-    for rec in records:
-        wt = to_dict(rec, None)
-        wt.update(delegate_overlay.get(rec.worktree_id, {}))
-        emit({"type": "worktree", "phase": "fast", "wt": wt})
-    if getattr(args, "classify", False):
-        config = cfg.load_config()
-        repo = config.default_repo
-        active_paths = _build_active_paths(records, session_ctx)
-        from .picker_support.data_local import _stamp_from_raw
-
+    with cfg.cached_load_config_scope():
         for rec in records:
-            info = _classify_one_record(
-                rec, repo=repo, active_paths=active_paths, session_ctx=session_ctx
-            )
-            wt = to_dict(rec, info)
-            _stamp_from_raw(rec, wt, session_ctx)
+            wt = to_dict(rec, None)
             wt.update(delegate_overlay.get(rec.worktree_id, {}))
-            emit({"type": "worktree", "phase": "classified", "wt": wt})
+            emit({"type": "worktree", "phase": "fast", "wt": wt})
+        if getattr(args, "classify", False):
+            config = cfg.load_config()
+            repo = config.default_repo
+            active_paths = _build_active_paths(records, session_ctx)
+            from .picker_support.data_local import _stamp_from_raw
+
+            for rec in records:
+                info = _classify_one_record(
+                    rec, repo=repo, active_paths=active_paths, session_ctx=session_ctx
+                )
+                wt = to_dict(rec, info)
+                _stamp_from_raw(rec, wt, session_ctx)
+                wt.update(delegate_overlay.get(rec.worktree_id, {}))
+                emit({"type": "worktree", "phase": "classified", "wt": wt})
     emit({"type": "done", "count": len(records)})
     return 0
 
@@ -363,32 +364,33 @@ def _build_list_json_payload(
             bridge_live_wts = reclaim.live_bridge_worktrees()
         except Exception:
             bridge_live_wts = None
-    worktrees = [
-        _worktree_to_dict(
-            rec,
-            mux_info=mux_map.get(rec.worktree_id),
-            session_ctx=session_ctx,
-            state_info=state_map.get(rec.worktree_id),
-            bare_orphan_wts=bare_orphan_wts,
-            bridge_live_wts=bridge_live_wts,
-            include_profile_assignment_history=getattr(args, "profile_assignment_history", False),
-        )
-        for rec in records
-    ]
-    for wt_dict, rec in zip(worktrees, records, strict=True):
-        title = wt_dict.get("title")
-        if not title or title == "null":
-            norm = _normalize_path(rec.worktree_path)
-            title = session_ctx.latest_summary.get(norm)
-        wt_dict["title"] = title
-    from . import delegate_cli
-
-    delegate_cli.annotate_delegate_graph(worktrees)
-    if getattr(args, "classify", False) and stamp_session_state:
-        from .picker_support.data_local import _stamp_from_raw
-
+    with cfg.cached_load_config_scope():
+        worktrees = [
+            _worktree_to_dict(
+                rec,
+                mux_info=mux_map.get(rec.worktree_id),
+                session_ctx=session_ctx,
+                state_info=state_map.get(rec.worktree_id),
+                bare_orphan_wts=bare_orphan_wts,
+                bridge_live_wts=bridge_live_wts,
+                include_profile_assignment_history=getattr(args, "profile_assignment_history", False),
+            )
+            for rec in records
+        ]
         for wt_dict, rec in zip(worktrees, records, strict=True):
-            _stamp_from_raw(rec, wt_dict, session_ctx)
+            title = wt_dict.get("title")
+            if not title or title == "null":
+                norm = _normalize_path(rec.worktree_path)
+                title = session_ctx.latest_summary.get(norm)
+            wt_dict["title"] = title
+        from . import delegate_cli
+
+        delegate_cli.annotate_delegate_graph(worktrees)
+        if getattr(args, "classify", False) and stamp_session_state:
+            from .picker_support.data_local import _stamp_from_raw
+
+            for wt_dict, rec in zip(worktrees, records, strict=True):
+                _stamp_from_raw(rec, wt_dict, session_ctx)
     return {"worktrees": worktrees}
 
 
@@ -410,9 +412,10 @@ def _warm_list_cache_for_active_project(*, interval: float = 15) -> int:
             **shape,
         )
         records = _core_helper("_list_records_for_args", _list_records_for_args)(args)
-        payload = _core_helper("_build_list_json_payload", _build_list_json_payload)(
-            args, records, stamp_session_state=False
-        )
+        with cfg.cached_load_config_scope():
+            payload = _core_helper("_build_list_json_payload", _build_list_json_payload)(
+                args, records, stamp_session_state=False
+            )
         list_cache.write(
             demand["key"],
             payload,
@@ -462,17 +465,18 @@ def cmd_list(args: argparse.Namespace) -> int:
             from . import delegate_cli
 
             worktrees = []
-            for rec in records:
-                raw = _worktree_to_dict(
-                    rec,
-                    include_profile_assignment_history=getattr(
-                        args, "profile_assignment_history", False
-                    ),
-                )
-                if rec.session_summary and not (raw.get("title") and raw["title"] != "null"):
-                    raw["title"] = rec.session_summary
-                _overlay_cached_state(raw, rec)
-                worktrees.append(raw)
+            with cfg.cached_load_config_scope():
+                for rec in records:
+                    raw = _worktree_to_dict(
+                        rec,
+                        include_profile_assignment_history=getattr(
+                            args, "profile_assignment_history", False
+                        ),
+                    )
+                    if rec.session_summary and not (raw.get("title") and raw["title"] != "null"):
+                        raw["title"] = rec.session_summary
+                    _overlay_cached_state(raw, rec)
+                    worktrees.append(raw)
             delegate_cli.annotate_delegate_graph(worktrees)
             _json_output({"worktrees": worktrees})
             return 0
@@ -504,7 +508,10 @@ def cmd_list(args: argparse.Namespace) -> int:
                 _json_output(_cached)
                 return 0
         profile_assignment.maintain()
-        _payload = _core_helper("_build_list_json_payload", _build_list_json_payload)(args, records)
+        with cfg.cached_load_config_scope():
+            _payload = _core_helper("_build_list_json_payload", _build_list_json_payload)(
+                args, records
+            )
         if _lc_key:
             list_cache.write(_lc_key, _payload)
         _json_output(_payload)
