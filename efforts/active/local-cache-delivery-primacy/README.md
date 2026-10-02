@@ -39,9 +39,8 @@ is downgraded in framing to being purely the fallback that exists to
 handle two cases -- which, in turn, means the precedence *mechanism*
 itself needs one real fix (not just reframing) to actually deserve that
 trust: a fallback that a stale leftover local file can silently outrank
-is not a safe fallback (see Phase 1's stale-sibling item below, caught by
-this effort's own plan-review PR). With that fix landed, the mechanism
-serves:
+is not a safe fallback (see Phase 1's stale-sibling item below). With
+that fix landed, the mechanism serves:
 
 1. A launch path where no lifecycle hook runs at all before the session
    starts (a fully headless/hookless/sandboxed invocation).
@@ -150,10 +149,8 @@ explicitly named follow-on slices; no other pre-session boundary besides
       any framing that would now read inconsistently with this
       reprioritization (it covers a different, per-session-computed-facts
       case, so likely needs no change -- confirm rather than assume).
-- [ ] **Design and land a stale-sibling invalidation check** (caught by
-      PR #4926's own review, a real gap in the *existing* precedence
-      mechanism that this reframing makes load-bearing rather than
-      cosmetic): today a local sibling is preferred purely by existence
+- [ ] **Design and land a stale-sibling invalidation check**: today a
+      local sibling is preferred purely by existence
       (`instruction_projections.py`'s `render_projection` preamble), and
       is only ever reconciled when `render_local_cache()` itself runs
       (`_render_local_cache_locked`'s stale-removal pass, which only
@@ -163,24 +160,31 @@ explicitly named follow-on slices; no other pre-session boundary besides
       pre-session render succeeds (hookless boot, a bounded-timeout miss,
       or any other render failure) -- precisely the boot this effort's
       reframing says must fall back safely to the checked-in copy.
-      **Design direction (corrected after review round 3 caught a flawed
-      first draft):** a render *timestamp* cannot establish freshness --
-      an older/regressed installed payload rendered *after* the sync
-      worker commits a newer checked-in projection would still carry the
-      later timestamp and win, recreating the exact bug this item fixes;
-      a changing timestamp field would also break `render_projection()`'s
+      **Design:** a render *timestamp* cannot establish freshness -- an
+      older/regressed installed payload rendered *after* the sync worker
+      commits a newer checked-in projection would still carry the later
+      timestamp and win, recreating the exact bug this item fixes; a
+      changing timestamp field would also break `render_projection()`'s
       deterministic output and the local cache's own byte-idempotence
       check (`current == rendered.content`). Use the **stable provenance
       the markers already carry** instead -- `pluginVersion` and
       `templateSha256`, no new field needed -- comparing the checked-in
       projection's marker against the local cache's own marker for the
       same source, with the numerically newer `pluginVersion` winning.
-      This is a real code change to `instruction_projections.py` (the
-      preamble/catch-all directive text the reading agent follows), not
-      pure prose -- land it as part of this phase's own PR, with full
-      regression coverage against every existing preamble/marker test,
-      *and* a dedicated case for a stale/regressed payload rendered
-      *after* the checked-in update (not only one rendered before it).
+      **Equal-version fail-safe:** a version string is not an immutable
+      source identity (`projection_reflect.py`'s own documented caveat) --
+      a dirty/local-checkout payload can differ without a version bump,
+      so an equal `pluginVersion` with a differing `templateSha256` is a
+      genuinely ambiguous case with no reliable "newer" signal. Fail safe
+      toward the checked-in copy (the reviewed, git-tracked source) in
+      exactly this case, rather than guessing. This is a real code change
+      to `instruction_projections.py` (the preamble/catch-all directive
+      text the reading agent follows), not pure prose -- land it as part
+      of this phase's own PR, with full regression coverage against every
+      existing preamble/marker test, a dedicated case for a stale/
+      regressed payload rendered *after* the checked-in update (not only
+      one rendered before it), and a dedicated case for the equal-version/
+      differing-hash fail-safe.
 
 ### Phase 2 -- `agent-bridge` local spawn-path wiring
 - [ ] Add an `agent_bridge`-side equivalent of
@@ -233,14 +237,15 @@ explicitly named follow-on slices; no other pre-session boundary besides
       checked-in copy is stale -- not just that the unit-level render call
       fires -- and that the render's latency stays within Phase 2's
       defined budget.
-- [ ] **Stale-sibling-boot negative-proof** (the gap PR #4926's review
-      caught): a `.local.instructions.md` sibling rendered from an older
-      installed payload, left in place while the *checked-in* projection
-      is subsequently updated to a genuinely newer version (the scheduled
-      sync worker advanced it independently of this worktree's own local
-      render), must be superseded by the checked-in copy on a boot where
-      no render runs at all -- proven against the real marker-comparison
-      logic Phase 1 lands, not asserted by inspection.
+- [ ] **Stale-sibling-boot negative-proof**: a `.local.instructions.md`
+      sibling rendered from an older installed payload, left in place
+      while the *checked-in* projection is subsequently updated to a
+      genuinely newer version (the scheduled sync worker advanced it
+      independently of this worktree's own local render), must be
+      superseded by the checked-in copy on a boot where no render runs at
+      all -- proven against the real marker-comparison logic Phase 1
+      lands, not asserted by inspection. Includes the equal-version/
+      differing-hash fail-safe case.
 
 ## Proposal
 
@@ -266,8 +271,8 @@ _Pending._
     committed them. Untracked them (`git rm --cached`) and added the
     ignore rule here too (also landing separately via #4930, found and
     fixed as its own atomic pre-existing-issue commit the moment the gap
-    was identified; both repos this operator-identified gap touched --
-    `copilot-extensions` and `aperture-labs` -- now have the rule).
+    was identified; a private downstream consumer repo with the same
+    gap got the equivalent fix too, outside this repo's own history).
   - The Plan's own "local/command" framing was wrong: `target.type ==
     "command"` is a generic spawn-command shape that also covers
     Codespaces, containers, elevated relays, and other providers, often
