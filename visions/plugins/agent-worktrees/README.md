@@ -190,9 +190,11 @@ personal state inside a stateless harness. Their harm model is **unreported
 drift or misrouted ownership**, not adversarial evasion: `anchor_write_guard`
 and `statelessness_guard` prevent a dirty anchor or orphaned state that
 silently never lands anywhere durable; `cross_repo_guard` keeps an edit
-routed through the guarded repo's own owning agent and its repository
-policy rather than letting it land from the wrong harness. Neither concern
-is a security boundary defending against a deliberately evasive adversary.
+routed through the guarded repo's own owning agent so the change actually
+follows *that* repo's own rules — its instructions, skills, and contribution
+posture — rather than landing under the launching harness's rules instead.
+Neither concern is a security boundary defending against a deliberately
+evasive adversary.
 They assume a cooperative agent
 that receives and acts on the reminder once it reaches the guard's covered
 path; exhaustively closing every exotic invocation that could evade
