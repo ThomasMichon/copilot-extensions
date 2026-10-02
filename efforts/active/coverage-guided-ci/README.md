@@ -381,12 +381,11 @@ like the `agent-containers` environment gap two entries up, so it's
 tracked as a follow-up rather than rushed into this enrollment PR.
 
 **Not yet done:** the `baseline.py` chunking fix for large suites (tracked
-via a Gitea issue in the `aperture-labs` repo, cited from the enrollment
-PR, since this effort's own issue tracking lives there); watching a real
-promotion land both new baselines on `main`; and the operator's next
-choice of which plugin(s) to enroll from the 4 still remaining
-(`agent-bridge`, `agent-dispatch`, `agent-mcp` itself once the chunking
-fix lands, `agent-worktrees`).
+externally, in whichever adopter's own issue tracker this effort's
+downstream consumers use); watching a real promotion land both new
+baselines on `main`; and the operator's next choice of which plugin(s) to
+enroll from the 4 still remaining (`agent-bridge`, `agent-dispatch`,
+`agent-mcp` itself once the chunking fix lands, `agent-worktrees`).
 
 ### 2026-10-02 (later) — Phase 1: enroll `agent-codespaces` and `agent-containers`
 Operator chose the next two Phase 1 plugins to wire ("incrementally work

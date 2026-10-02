@@ -250,8 +250,8 @@ jobs:
         # and a suite this large/subprocess-heavy (it ships its own
         # watchdog/process-management tests) likely needs the same
         # chunking `baseline.py` doesn't yet have. Tracked as a follow-up
-        # rather than rushed into this PR (see the tracking issue this PR
-        # links). Independent
+        # rather than fixed here (a chunking rework, not a one-line fix).
+        # Independent
         # of, and in addition to, the trusted `run-plugin-tests.py` run
         # above -- this step's own failure never fails this job (see
         # `continue-on-error` below): a baseline is optional evidence
