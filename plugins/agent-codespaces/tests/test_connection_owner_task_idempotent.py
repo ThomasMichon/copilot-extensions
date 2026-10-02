@@ -93,7 +93,7 @@ def test_connection_owner_service_posix_unknown_preserves_existing_unit() -> Non
     enabled = _sh_function_body("_owner_enabled")
     sync = _sh_function_body("_sync_owner_service")
 
-    assert 'print("enabled" if json.load(sys.stdin).get("enabled") else "disabled")' in enabled
+    assert 'isinstance(enabled, bool) else "unknown"' in enabled
     assert 'print("unknown")' in enabled
     assert '|| echo "unknown"' not in enabled
     assert 'json="$(PYTHONUTF8=1 "$LINK_PYTHON" -m agent_codespaces owner --status' in enabled
@@ -142,6 +142,15 @@ def test_connection_owner_posix_status_query_executes_under_strict_mode(tmp_path
                         printf '%s\\n' '{{"enabled": false}}'
                         exit 7
                         ;;
+                    empty)
+                        printf '%s\\n' '{{}}'
+                        ;;
+                    null)
+                        printf '%s\\n' 'null'
+                        ;;
+                    stringly)
+                        printf '%s\\n' '{{"enabled": "false"}}'
+                        ;;
                     *)
                         exit 64
                         ;;
@@ -173,6 +182,9 @@ def test_connection_owner_posix_status_query_executes_under_strict_mode(tmp_path
         "disabled": "disabled",
         "enabled": "enabled",
         "json_then_fail": "unknown",
+        "empty": "unknown",
+        "null": "unknown",
+        "stringly": "unknown",
     }
     for case, output in expected.items():
         result = subprocess.run(
@@ -185,3 +197,31 @@ def test_connection_owner_posix_status_query_executes_under_strict_mode(tmp_path
         )
         assert result.stdout == f"{output}\n"
         assert result.stderr == ""
+
+
+@pytest.mark.parametrize(
+    ("payload", "known", "enabled"),
+    [
+        ('{"enabled": false}', True, False),
+        ('{"enabled": true, "reconcile_interval": 30}', True, True),
+        ("{}", False, False),
+        ("null", False, False),
+        ('{"enabled": "false"}', False, False),
+    ],
+)
+def test_owner_config_is_known_only_for_a_boolean_enabled(tmp_path: Path, payload, known, enabled) -> None:
+    pwsh = shutil.which("pwsh")
+    if not pwsh:
+        pytest.skip("pwsh is unavailable")
+    stub = tmp_path / "python-stub.ps1"
+    stub.write_text(f"Write-Output '{payload}'\nexit 0\n", encoding="utf-8")
+    harness = tmp_path / "harness.ps1"
+    harness.write_text(
+        f"$LinkPython = '{stub}'\n"
+        + "function Get-ConnectionOwnerConfig" + _ps1_function_body("Get-ConnectionOwnerConfig") + "\n}\n"
+        + "$r = Get-ConnectionOwnerConfig\nWrite-Output \"KNOWN=$($r.Known) ENABLED=$($r.Enabled)\"\n",
+        encoding="utf-8",
+    )
+    out = subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+                         capture_output=True, text=True, timeout=60).stdout
+    assert f"KNOWN={known} ENABLED={enabled}" in out

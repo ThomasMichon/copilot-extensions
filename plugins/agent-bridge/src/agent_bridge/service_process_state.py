@@ -39,8 +39,16 @@ def _active_endpoint_port() -> int | None:
     if endpoint is not None and endpoint.port:
         return int(endpoint.port)
     # A venue launcher's forwarded route may predate ``bind`` in its entry.
-    if _active_endpoint_is_forward():
-        return int(_active_route()["port"])
+    # Classify and read the port from ONE snapshot: a concurrent replacement
+    # between two reads must not yield a missing row or another row's port.
+    from .routing_state import active_route_is_forward
+
+    route = _active_route()
+    if active_route_is_forward(route):
+        try:
+            return int(route["port"])
+        except (KeyError, TypeError, ValueError):
+            return None
     return None
 
 

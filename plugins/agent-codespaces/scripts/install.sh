@@ -904,7 +904,10 @@ _owner_enabled() {
     }
     printf '%s\n' "$json" | "$LINK_PYTHON" -c 'import sys, json
 try:
-    print("enabled" if json.load(sys.stdin).get("enabled") else "disabled")
+    data = json.load(sys.stdin)
+    enabled = data.get("enabled") if isinstance(data, dict) else None
+    # Only a real boolean decides; {} / null / a schema mismatch stays unknown.
+    print(("enabled" if enabled else "disabled") if isinstance(enabled, bool) else "unknown")
 except Exception:
     print("unknown")' 2>/dev/null
 }

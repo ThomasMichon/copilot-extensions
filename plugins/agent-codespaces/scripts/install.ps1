@@ -1116,9 +1116,16 @@ function Get-ConnectionOwnerConfig {
         $json = & $LinkPython -m agent_codespaces owner --status 2>$null
         if ($LASTEXITCODE -eq 0 -and $json) {
             $obj = (($json | Out-String).Trim() | ConvertFrom-Json)
-            $result.Known = $true
-            $result.Enabled = [bool]$obj.enabled
-            if ($obj.reconcile_interval) { $result.Interval = [double]$obj.reconcile_interval }
+            # Known only for an object with a real boolean ``enabled`` (and a
+            # convertible interval): ``{}``, ``null`` or a truncated payload stays
+            # unknown, so it can never unregister an existing Owner task.
+            if ($obj -is [psobject] -and $obj.PSObject.Properties['enabled'] -and $obj.enabled -is [bool]) {
+                $interval = $result.Interval
+                if ($obj.reconcile_interval) { $interval = [double]$obj.reconcile_interval }
+                $result.Enabled = $obj.enabled
+                $result.Interval = $interval
+                $result.Known = $true
+            }
         }
     } catch { }
     $ErrorActionPreference = $prevEAP
