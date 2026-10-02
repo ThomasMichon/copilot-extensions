@@ -39,16 +39,17 @@ from . import registry_paths
 def _quote(value: str) -> str:
     """Render *value* as an always-safe YAML double-quoted scalar -- never
     misparsed as a bool/null/number, and every character YAML's own
-    double-quoted-scalar grammar requires escaping (backslash, double quote,
-    and EVERY C0 control character -- not just newline/tab/carriage-return)
-    is escaped, so a value containing e.g. an embedded ESC (``\\x1b``, as in
-    an ANSI escape sequence passed via ``--notes``) can never corrupt the
-    hand-written file or make it unparsable. An unparsable file would make
-    ``read_registry`` return an EMPTY catalog, silently losing every
-    previously stored confirmation on the very next write.
+    double-quoted-scalar grammar requires escaping (backslash, double
+    quote, every C0 control character AND the C1 range U+0080-U+009F --
+    not just newline/tab/carriage-return) is escaped, so a value containing
+    e.g. an embedded ESC (``\\x1b``) or a C1 control (``\\x9b``) can never
+    corrupt the hand-written file or make it unparsable. An unparsable file
+    would make ``read_registry`` return an EMPTY catalog, silently losing
+    every previously stored confirmation on the very next write.
     """
     out = []
     for ch in value:
+        code = ord(ch)
         if ch == "\\":
             out.append("\\\\")
         elif ch == '"':
@@ -59,8 +60,8 @@ def _quote(value: str) -> str:
             out.append("\\r")
         elif ch == "\t":
             out.append("\\t")
-        elif ord(ch) < 0x20 or ord(ch) == 0x7F:
-            out.append(f"\\x{ord(ch):02x}")
+        elif code < 0x20 or code == 0x7F or 0x80 <= code <= 0x9F:
+            out.append(f"\\x{code:02x}")
         else:
             out.append(ch)
     return '"' + "".join(out) + '"'
@@ -120,7 +121,17 @@ def _locked_registry_file():
 
 @dataclass
 class ForkEntry:
-    """A single confirmed fork-publish target in the catalog."""
+    """A single confirmed fork-publish target in the catalog.
+
+    ``owner`` is the login used to build the PR head (``<owner>:<branch>``)
+    -- when ``pr.fork.owner`` overrides it, this is the OVERRIDE value, not
+    necessarily who actually authenticated. ``real_owner`` is the actual
+    authenticated identity ``provider.resolve_fork_owner``/``ensure_fork``
+    returned BEFORE any override was applied -- equal to ``owner`` whenever
+    no override is configured. Tracked separately so the live-owner
+    pre-check can validate the identity that actually forks/pushes even
+    when an override makes the PR-head login static.
+    """
 
     repo: str
     owner: str
@@ -128,6 +139,7 @@ class ForkEntry:
     account: str = ""
     confirmed_at: str = ""
     notes: str = ""
+    real_owner: str = ""
 
 
 @dataclass
@@ -185,6 +197,10 @@ def read_registry() -> ForkRegistry:
                         account=account_str,
                         confirmed_at=str(entry.get("confirmed_at", "") or ""),
                         notes=str(entry.get("notes", "") or ""),
+                        # Absent in an older (pre-override-tracking) or
+                        # hand-edited entry -- falls back to `owner` itself,
+                        # matching the no-override case where they're equal.
+                        real_owner=str(entry.get("real_owner", "") or "") or owner,
                     )
         return ForkRegistry(forks=forks)
     except Exception:
@@ -225,6 +241,8 @@ def write_registry(registry: ForkRegistry) -> None:
                     lines.append(f"      confirmed_at: {_quote(e.confirmed_at)}")
                 if e.notes:
                     lines.append(f"      notes: {_quote(e.notes)}")
+                if e.real_owner and e.real_owner != e.owner:
+                    lines.append(f"      real_owner: {_quote(e.real_owner)}")
     # Same-directory temp file + os.replace so a lock-FREE reader
     # (is_confirmed/find_fork/list_forks) always observes either the
     # complete old file or complete new one -- never a partial write.
@@ -277,6 +295,7 @@ def record_confirmation(
     remote: str = "fork",
     account: str = "",
     notes: str | None = None,
+    real_owner: str = "",
 ) -> ForkEntry:
     """Record (or refresh) a confirmed fork for ``repo_slug``+``account``.
 
@@ -297,6 +316,7 @@ def record_confirmation(
             account=account or "",
             confirmed_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             notes=notes if notes is not None else (existing.notes if existing else ""),
+            real_owner=real_owner or owner,
         )
         registry.forks[key] = entry
         write_registry(registry)
@@ -439,11 +459,15 @@ def _ensure_fork_and_remote(
     """Ensure the caller's fork of ``repo_slug`` exists and a local git
     remote (``prcfg.fork.remote``) points at it.
 
-    Returns ``{"owner": <fork-owner>}`` on success, or ``{"error": <message>}``
-    on any failure (never raises) -- GitHub-only. An explicit
-    ``prcfg.fork.owner`` overrides the owner login used to build the PR
-    head. ``token`` is the SAME value :func:`_resolve_fork_credential`
-    resolved for the confirmation scope.
+    Returns ``{"owner": <pr-head login>, "real_owner": <actual authenticated
+    login>}`` on success, or ``{"error": <message>}`` on any failure (never
+    raises) -- GitHub-only. An explicit ``prcfg.fork.owner`` overrides
+    ``owner`` (used to build the PR head) but NEVER ``real_owner`` -- the
+    actual identity the provider authenticated as and forked/pushed under,
+    needed so a later call can validate that identity independently of the
+    override (see :func:`resolve_fork_publish`). ``token`` is the SAME
+    value :func:`_resolve_fork_credential` resolved for the confirmation
+    scope.
     """
     if prcfg.provider != "github":
         return {"error": (
@@ -471,15 +495,14 @@ def _ensure_fork_and_remote(
             f"Could not create/verify a fork of '{repo_slug}' (no 'gh' auth, "
             f"an API error, or an unsupported provider)."
         )}
-    owner, clone_url = fork
-    if prcfg.fork.owner:
-        owner = prcfg.fork.owner
+    real_owner, clone_url = fork
+    owner = prcfg.fork.owner or real_owner
     if not git_ops.ensure_remote(prcfg.fork.remote, clone_url, cwd=worktree_path):
         return {"error": (
             f"Could not point local git remote '{prcfg.fork.remote}' at "
             f"'{clone_url}'."
         )}
-    return {"owner": owner}
+    return {"owner": owner, "real_owner": real_owner}
 
 
 def resolve_fork_publish(
@@ -538,27 +561,32 @@ def resolve_fork_publish(
     already_confirmed = confirmed_entry is not None and (
         not prcfg.fork.owner or prcfg.fork.owner == confirmed_entry.owner
     ) and prcfg.fork.remote == confirmed_entry.remote
-    # A stored confirmation's owner can diverge from the actually resolved
-    # fork owner (a typo at 'forks set' time, or a genuine upstream change)
-    # when NO static pr.fork.owner override exists to check against ahead
-    # of time. Validate it NON-MUTATINGLY, before _ensure_fork_and_remote's
-    # mutating POST/remote-repoint can run. An explicit confirm_fork=True
-    # this call is itself a fresh, live approval and skips this pre-check.
-    # A FAILED/inconclusive lookup must ALSO fail closed.
-    if already_confirmed and not confirm_fork and not prcfg.fork.owner:
-        live_owner = _resolve_live_fork_owner(prcfg, fork_token)
-        if live_owner != confirmed_entry.owner:
+    # The live-owner pre-check validates the ACTUAL AUTHENTICATED identity
+    # (real_owner) -- it must run regardless of whether pr.fork.owner is
+    # configured. The override only changes which login names the PR head;
+    # it does NOT change which account actually authenticates, forks, and
+    # pushes. Skipping this check whenever an override is set would let a
+    # silent account switch fork/push to an unapproved identity while the
+    # PR head still displays the originally-approved (overridden) owner.
+    # Validate it NON-MUTATINGLY, before _ensure_fork_and_remote's mutating
+    # POST/remote-repoint can run. An explicit confirm_fork=True this call
+    # is itself a fresh, live approval and skips this pre-check. A
+    # FAILED/inconclusive lookup must ALSO fail closed.
+    if already_confirmed and not confirm_fork:
+        live_real_owner = _resolve_live_fork_owner(prcfg, fork_token)
+        expected_real_owner = confirmed_entry.real_owner or confirmed_entry.owner
+        if live_real_owner != expected_real_owner:
             return {
                 "needs_confirmation": "fork_setup",
                 "repo": default_pr_repo,
                 "fork_remote": prcfg.fork.remote,
                 "message": (
-                    f"Could not verify the previously confirmed fork owner "
-                    f"for '{default_pr_repo}' ('{confirmed_entry.owner}') "
-                    f"still matches the actual resolved fork owner "
-                    f"({live_owner!r}). Ask the user to confirm publishing "
-                    f"there, then re-run create-pr with --confirm-fork "
-                    f"(or confirm_fork=True)."
+                    f"Could not verify the previously confirmed fork "
+                    f"identity for '{default_pr_repo}' ('{expected_real_owner}') "
+                    f"still matches the actual authenticated identity "
+                    f"({live_real_owner!r}). Ask the user to confirm "
+                    f"publishing there, then re-run create-pr with "
+                    f"--confirm-fork (or confirm_fork=True)."
                 ),
             }
     if not confirm_fork and not already_confirmed:
@@ -580,37 +608,43 @@ def resolve_fork_publish(
     if fork_setup.get("error"):
         return {"error": fork_setup["error"]}
     fork_owner = fork_setup["owner"]
+    real_owner = fork_setup["real_owner"]
     # The non-mutating pre-check above and this mutating bootstrap are two
     # SEPARATE calls -- with ambient `gh` auth (token=None), a concurrent
     # identity switch between them (another process re-authenticating) can
-    # make them resolve to two DIFFERENT real owners, even though the
+    # make them resolve to two DIFFERENT real identities, even though the
     # pre-check itself passed moments earlier. Treat that divergence as
     # itself requiring a fresh, EXPLICIT confirm_fork=True this call -- a
     # silent skip (already_confirmed, no confirm_fork) must never let such
-    # a race silently re-point the stored approval at an owner nobody
+    # a race silently re-point the stored approval at an identity nobody
     # actually confirmed this call.
-    owner_changed = confirmed_entry is not None and confirmed_entry.owner != fork_owner
-    if owner_changed and already_confirmed and not confirm_fork:
+    identity_changed = confirmed_entry is not None and (
+        confirmed_entry.owner != fork_owner
+        or (confirmed_entry.real_owner or confirmed_entry.owner) != real_owner
+    )
+    if identity_changed and already_confirmed and not confirm_fork:
         return {"error": (
-            f"The fork owner for '{default_pr_repo}' resolved to "
-            f"'{fork_owner}' during setup, which no longer matches the "
-            f"previously confirmed owner ('{confirmed_entry.owner}') -- "
+            f"The fork identity for '{default_pr_repo}' resolved to "
+            f"'{real_owner}' during setup, which no longer matches the "
+            f"previously confirmed identity "
+            f"('{confirmed_entry.real_owner or confirmed_entry.owner}') -- "
             f"likely a concurrent identity change. The fork/remote may "
-            f"already be set up for '{fork_owner}'; re-run create-pr with "
+            f"already be set up for '{real_owner}'; re-run create-pr with "
             f"--confirm-fork (or confirm_fork=True) to approve recording "
-            f"that as the new confirmed owner."
+            f"that as the new confirmed identity."
         )}
     result = {"publish_remote": prcfg.fork.remote, "fork_owner": fork_owner}
     # Re-persist whenever this is the first confirmation OR an EXPLICIT
     # confirm_fork=True call's result differs from what was stored (the
     # self-heal path for a stale entry the pre-check above caught on a
     # PRIOR call) -- never on a silent skip, which the check above already
-    # guards against reaching here with owner_changed still True.
-    if (not already_confirmed or owner_changed) and effective_account:
+    # guards against reaching here with identity_changed still True.
+    if (not already_confirmed or identity_changed) and effective_account:
         try:
             record_confirmation(
                 default_pr_repo, fork_owner,
                 remote=prcfg.fork.remote, account=effective_account,
+                real_owner=real_owner,
             )
         except OSError as exc:
             result["warning"] = f"Could not persist fork confirmation: {exc}"

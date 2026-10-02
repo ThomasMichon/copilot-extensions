@@ -265,6 +265,22 @@ def _dispatch_sub(sub: str, rest: list[str], fork_pr, _opt) -> int:
             _token, account = fork_pr._resolve_fork_credential(
                 repo, cfg.PRConfig(provider="github"),
             )
+        if not account:
+            # An empty scope can never be looked up later --
+            # resolve_fork_publish only consults the registry when
+            # effective_account is truthy, so an entry recorded here would
+            # be permanently dead weight: create-pr would still ask again
+            # every time, while this command just reported success,
+            # implying the opposite. Reject rather than silently
+            # pre-approve a scope nothing can ever match.
+            output.err(
+                f"forks set: could not resolve an account/identity for "
+                f"'{repo}' (no mapped account, no active 'gh' login) -- "
+                f"this entry could never be matched by create-pr's gate. "
+                f"Pass --account <login> explicitly, or --token-stdin if "
+                f"this repo binds pr.token_command/token_env."
+            )
+            return 1
         fork_pr.record_confirmation(
             repo,
             owner,

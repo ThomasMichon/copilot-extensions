@@ -44,6 +44,25 @@ def test_set_resolves_account_by_default(monkeypatch, capfd):
     assert payload["forks"][0]["confirmed_at"]
 
 
+def test_set_rejects_unresolvable_empty_account(monkeypatch, capfd):
+    """An entry recorded under an empty account scope can never be looked
+    up later -- resolve_fork_publish only consults the registry when
+    effective_account is truthy -- so it would be permanently dead weight
+    while 'forks set' falsely reports success. Must reject instead."""
+    monkeypatch.setattr(
+        "agent_worktrees.fork_pr._resolve_fork_credential",
+        lambda slug, prcfg: (None, ""),
+    )
+    rc = forks_cli.cmd_forks_dispatch(
+        ["set", "octo-org/widgets", "--owner", "octocat"],
+    )
+    assert rc == 1
+    assert "could not resolve an account" in capfd.readouterr().out
+
+    from agent_worktrees import fork_pr
+    assert fork_pr.find_forks_for_repo("octo-org/widgets") == []
+
+
 def test_set_explicit_account_overrides_resolution(monkeypatch, capfd):
     monkeypatch.setattr(
         "agent_worktrees.fork_pr._resolve_fork_credential",
@@ -182,12 +201,10 @@ def test_extra_positional_is_rejected(capfd):
     assert "unexpected extra argument" in capfd.readouterr().out
 
 
-def test_list_json_and_text(monkeypatch, capfd):
-    monkeypatch.setattr(
-        "agent_worktrees.fork_pr._resolve_fork_credential",
-        lambda slug, prcfg: (None, ""),
+def test_list_json_and_text(capfd):
+    forks_cli.cmd_forks_dispatch(
+        ["set", "octo-org/widgets", "--owner", "octocat", "--account", "octocat"],
     )
-    forks_cli.cmd_forks_dispatch(["set", "octo-org/widgets", "--owner", "octocat"])
     capfd.readouterr()
 
     rc = forks_cli.cmd_forks_dispatch(["list", "--json"])
@@ -214,12 +231,10 @@ def test_show_unknown_repo_fails(capfd):
     assert "No confirmed fork" in capfd.readouterr().out
 
 
-def test_remove(monkeypatch, capfd):
-    monkeypatch.setattr(
-        "agent_worktrees.fork_pr._resolve_fork_credential",
-        lambda slug, prcfg: (None, ""),
+def test_remove(capfd):
+    forks_cli.cmd_forks_dispatch(
+        ["set", "octo-org/widgets", "--owner", "octocat", "--account", "octocat"],
     )
-    forks_cli.cmd_forks_dispatch(["set", "octo-org/widgets", "--owner", "octocat"])
     capfd.readouterr()
 
     rc = forks_cli.cmd_forks_dispatch(["remove", "octo-org/widgets"])

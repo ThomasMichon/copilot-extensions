@@ -977,6 +977,90 @@ class TestCreatePRForkFlow:
         assert res["success"] is True, res
         assert res["pr_head"] == "preseeded-owner:feature/work-2-aaaa"
 
+    def test_owner_override_does_not_bypass_live_identity_check(
+        self, pr_repo, tmp_path, monkeypatch,
+    ):
+        """pr.fork.owner only overrides the login used to build the PR
+        head -- it must NOT exempt the underlying authenticated identity
+        from the live-owner pre-check. If the real identity silently
+        switches (e.g. ambient `gh` auth re-authenticates as someone else)
+        while the override keeps displaying the ORIGINALLY-approved name,
+        a silent skip must still catch that and re-prompt -- otherwise a
+        fork/push could go to an unapproved account while the PR head
+        keeps naming the approved one."""
+        config, wid, _wt_path, _remote_dir = pr_repo
+        config = self._fork_config(config, tmp_path, owner="alice")
+
+        fork_dir = tmp_path / "fork-override-identity.git"
+        git_ops.git("init", "--bare", "-b", "master", str(fork_dir))
+
+        class _MutableIdentityProvider:
+            name = "github"
+            real_owner = "alice-real-login"
+
+            def authority_endpoint(self, api_base=""):
+                return "github.com"
+
+            def ensure_fork(self, repo, *, api_base="", token=None):
+                return (self.real_owner, str(fork_dir))
+
+            def resolve_fork_owner(self, *, api_base="", token=None):
+                return self.real_owner
+
+        identity_provider = _MutableIdentityProvider()
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: identity_provider,
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.providers.account_token_for_slug",
+            lambda *a, **k: None,
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.fork_pr._resolve_fork_credential",
+            lambda slug, prcfg: (None, "override-login"),
+        )
+
+        from agent_worktrees import fork_pr
+        repo = "acme/override-identity-repo"
+
+        first = pr_ops.create_pr(
+            wid, config, confirm_fork=True, target_repo=repo,
+        )
+        assert first["success"] is True, first
+        assert first["pr_head"] == "alice:feature/work-2-aaaa"
+        entry = fork_pr.find_fork(repo, "override-login")
+        assert entry.owner == "alice"
+        assert entry.real_owner == "alice-real-login"
+
+        # A later call with no confirm_fork, identity unchanged -- the
+        # override must NOT skip the check so aggressively that a genuine
+        # match still works.
+        second = pr_ops.create_pr(
+            wid, config, target_repo=repo,
+            branch="feature/work-2-aaaa-override-2",
+        )
+        assert "needs_confirmation" not in second, second
+        assert second["success"] is True, second
+        assert second["pr_head"] == "alice:feature/work-2-aaaa-override-2"
+
+        # Now the REAL authenticated identity silently switches -- the
+        # override still names "alice" for display, but the actual account
+        # that would authenticate/fork/push is now someone else entirely.
+        identity_provider.real_owner = "bob-real-login"
+
+        third = pr_ops.create_pr(
+            wid, config, target_repo=repo,
+            branch="feature/work-2-aaaa-override-3",
+        )
+        assert third["success"] is False, third
+        assert third["needs_confirmation"] == "fork_setup", third
+        assert "alice-real-login" in third["message"]
+        assert "bob-real-login" in third["message"]
+        # The stored entry must still name the ORIGINAL identity -- nothing
+        # was silently re-approved for Bob.
+        entry2 = fork_pr.find_fork(repo, "override-login")
+        assert entry2.real_owner == "alice-real-login"
+
     def test_configured_owner_mismatch_forces_reconfirmation(
         self, pr_repo, tmp_path, monkeypatch,
     ):
