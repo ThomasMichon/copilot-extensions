@@ -280,13 +280,71 @@ invocation — invisible to the Picker, which is unaffected by where the CLI's
 own implementation gets its data. This also resolves Phase 0's EOF/reconnect
 concern for the daemon-backed case specifically: the CLI process, not the
 Picker, owns reconnecting to its own daemon.)_
-- [ ] For agent-dispatch and agent-bridge (Phases 1-2 already proved the NDJSON
-      shape against their CLIs): change each plugin's own `--stream`
-      implementation to detect its daemon is live (the same discovery each
-      plugin's CLI already uses for its own non-Picker commands — e.g.
-      `~/.agent-bridge/active.json`) and relay the daemon's live feed through
-      stdout instead of a cold poll-and-diff loop, while keeping the exact
-      same NDJSON envelope shape the Picker already consumes.
+_(Design reviewed 2026-10-02, per this phase's own Validation Plan gate — see
+the 2026-10-02 journal entry for the full finding. Summary: agent-dispatch and
+agent-bridge are **not symmetric** here. agent-dispatch's coordinator already
+publishes a genuine roster-relevant event feed (`EventBus`/`GET /events`,
+lifecycle events like `task.submitted`/`task.completed` carrying the full task
+dict) that a CLI-side relay can consume directly. agent-bridge's daemon has
+**no existing roster-change event stream** — its SSE routes
+(`routes/live_sessions.py`, `routes/remote.py`, `routes/sessions.py`) are all
+per-session event logs, not an aggregate "the agent roster changed" feed. The
+plan below splits accordingly; agent-bridge's own daemon-side cache (3b) must
+land and be validated before any agent-bridge SSE relay (deferred, not part of
+this phase) is considered.)_
+- [ ] **3a — agent-dispatch relay:** in `board_cli.py`'s `_run_stream()`,
+      replace the `--subscribe` branch's `time.sleep(interval)` poll-and-diff
+      loop with: keep the existing initial `begin`/`row`/`done` fetch
+      unchanged, then open `DispatchClient.stream_events()` (`GET /events`)
+      and translate each lifecycle event into `delta`/`removed` frames
+      instead of re-polling on a timer.
+  - [ ] Filter to events carrying a `task` payload (ignore `spawn.*`,
+        `routing.*`, and other non-task bus traffic the same `/events` feed
+        interleaves); re-derive each row through the **same transform**
+        `_fetch_rows`/`_fetch_rows_direct` already apply to a raw task dict
+        (not a hand-rolled reshaping) so an event-sourced row can never drift
+        from a polled one in field shape or filtering (`--label`,
+        `--recent-mins`, `--limit`).
+  - [ ] A task whose lifecycle event moves it outside the board's current
+        filter window (aged out of `--recent-mins`, no longer matching
+        `--label`, past `--limit`) emits `removed`, not `delta`.
+  - [ ] **Reconnect-gap safety net (non-negotiable, not an optimization):**
+        `EventBus.subscribe()` (`events.py`) is a live, in-memory, non-replay
+        broadcast — an event published during a dropped/reconnecting SSE
+        connection is gone forever, which would silently desync the board
+        (a completed task never marked `removed`, or a new one never
+        appearing) until the next full resync. Run a **background full
+        reconcile re-fetch** on a long interval (default on the order of the
+        existing poll cadence's upper end, e.g. 30-60s — "trust but verify,"
+        not a return to 2s polling) that re-diffs the complete board against
+        the tracked snapshot the same way `--subscribe` already does today,
+        catching anything the event stream missed.
+  - [ ] **Degradation is the existing code, not a new path:** if
+        `stream_events()` raises (coordinator unreachable, non-2xx, stream
+        error) at any point — including after already running for a while —
+        fall back to today's unmodified poll-and-diff loop (`_fetch_rows` +
+        `time.sleep(interval)`) for the rest of the channel's life, the exact
+        branch Phase 1 shipped. No third code path.
+- [ ] **3b — agent-bridge daemon-side cache (land first; smaller, no new
+      failure mode):** `AgentResolver`'s per-call resolver scan is the actual
+      cost (Phase 2's `incomplete_namespaces` work was about tolerating its
+      partial-failure shape, not removing the cost). Move that scan **into
+      the daemon**, on its own background refresh timer, maintaining an
+      in-memory roster cache; `GET /api/v1/agents` becomes an O(1) cache read
+      for every caller (CLI `--subscribe` tick included) instead of a fresh
+      multi-resolver scan per poll, with N concurrent Pickers now sharing one
+      scan instead of paying for N. The CLI's `--subscribe` loop keeps its
+      current shape (poll on `--interval`, diff, emit) — only what each tick
+      costs changes.
+- [ ] **3c — agent-bridge roster-change SSE (deferred; do not start until 3b
+      is shipped and measured insufficient):** add a genuine
+      `GET /api/v1/agents/stream` daemon route that pushes `delta`/`removed`
+      when the background cache refresh (3b) detects a roster change, so the
+      CLI can relay it the same way 3a does for agent-dispatch. This
+      duplicates Phase 2's client-side roster-diffing logic on the daemon
+      side and introduces the daemon-connection failure mode this phase's
+      Validation Plan gate is about — scope it as its own reviewed increment
+      if 3b's win doesn't suffice, not folded into this pass.
 - [ ] Preserve graceful degradation **inside the CLI**: daemon unreachable →
       the CLI's own existing poll-and-diff `--stream` implementation; CLI
       doesn't support `--stream` at all → the Picker's own existing one-shot
@@ -768,3 +826,57 @@ output each raising with no fallback; the same non-zero-exit case still
 degrading gracefully through a fallback) plus one `AgentResolver`-level
 integration test using a real `CliNamespaceResolver` (not a test double)
 to close the loop the reviewer specifically asked for.
+
+### 2026-10-02 — Phase 3 design review: agent-dispatch and agent-bridge are not symmetric
+Read both daemons' actual SSE/event surfaces before writing any Phase 3 code,
+per this phase's own Validation Plan gate ("each plugin's own daemon-relay
+change must be reviewed before landing"). Finding: the Plan's framing (both
+plugins "already running a persistent daemon with its own SSE stream") is only
+half true for the specific feed a roster relay needs.
+
+- **agent-dispatch**: `DispatchClient.stream_events()` (`client.py:1103`,
+  `GET /events`) already yields the coordinator's real lifecycle event bus
+  (`EventBus.publish`/`subscribe`, `events.py`) -- `task.submitted`,
+  `task.completed`, `task.abandoned`, etc., each carrying the full task dict
+  under `"task"`. This is directly relayable: a CLI-side `--subscribe` loop
+  can consume it instead of polling.
+- **agent-bridge**: grepped every SSE route in the plugin
+  (`routes/live_sessions.py`, `routes/remote.py`, `routes/sessions.py`) --
+  all of them are **per-session** event logs (a represented live session's
+  own translated SDK events, or a remote-forwarded session's stream). There
+  is **no existing aggregate "the agent roster changed" feed** to relay.
+  Phase 2's `AgentResolver`/`CliNamespaceResolver` scan is a pure poll; the
+  daemon does not push roster deltas to anyone today.
+
+Revised the Phase 3 plan (above) into three parts instead of one undifferentiated
+checklist:
+- **3a (agent-dispatch):** relay `stream_events()` directly, filtered to
+  task-bearing events, re-using the *existing* row transform
+  (`_fetch_rows`/`_fetch_rows_direct`) so an event-sourced row can't drift
+  from a polled one in shape or filter semantics. Because `EventBus.subscribe()`
+  is a live, non-replay broadcast (nothing buffers an event published during a
+  dropped connection), this is paired with a **mandatory background full
+  reconcile** on a long interval (trust-but-verify, not a return to tight
+  polling) -- without it, a reconnect gap would silently and permanently desync
+  the board rather than self-heal on the next tick. Degradation on any stream
+  failure is literally Phase 1's existing poll-and-diff code, unmodified, not
+  a new third path.
+- **3b (agent-bridge, land first):** move the resolver scan into the daemon
+  as a background-refreshed in-memory cache; `GET /api/v1/agents` becomes an
+  O(1) cache read. No new failure mode (the HTTP call shape is unchanged),
+  and it is the one change both the real cost (N Pickers each separately
+  paying for a 4-10s CodeSpaces enumeration) and this effort's "CLI relays a
+  live feed" intent reduce to "CLI polls a now-cheap endpoint" -- a smaller,
+  safer slice than inventing a new SSE route first.
+- **3c (agent-bridge roster SSE, deferred):** only pursue a genuine
+  `GET /api/v1/agents/stream` push route -- which *would* introduce the new
+  daemon-connection failure mode this phase's Validation Plan gate is
+  actually about -- if 3b's measured win doesn't suffice. Scoping it out now
+  keeps this design review's surface area matched to what's actually being
+  built next, rather than pre-approving a daemon-push architecture that may
+  never be needed.
+
+No code changed in this session leg -- this is the design-review artifact
+itself (effort README revision), landed as its own reviewed PR per the gate's
+own wording ("must be reviewed before landing"), before any Phase 3
+implementation PR opens.
