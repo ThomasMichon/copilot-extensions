@@ -32,13 +32,21 @@ def sanitize_hold_forwards(hold: Any) -> None:
         hold.assigned_local_forwards = _matching_assigned(hold)
 
 
-def set_hold_forwards(hold: Any, reverse: Any = None, local: Any = None) -> None:
-    """Replace each extra forward map that was given (``None`` keeps it)."""
+def set_hold_forwards(
+    hold: Any, reverse: Any = None, local: Any = None, assigned: Any = None,
+) -> None:
+    """Replace each extra forward map that was given (``None`` keeps it).
+
+    ``assigned`` (with ``local``) restores a snapshot of the dynamic-port
+    provenance, e.g. when a failed rejoin puts the prior forwards back.
+    """
     if reverse is not None:
         hold.reverse_forwards = sanitize_reverse_forwards(reverse)
     if local is not None:
         hold.local_forwards = sanitize_local_forwards(local)
         if hasattr(hold, "assigned_local_forwards"):
+            if assigned is not None:
+                hold.assigned_local_forwards = sanitize_local_forwards(assigned)
             hold.assigned_local_forwards = _matching_assigned(hold)
 
 

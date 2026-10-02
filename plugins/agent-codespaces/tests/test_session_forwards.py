@@ -1054,6 +1054,30 @@ def test_restore_puts_back_the_exact_prior_entry(store):
     assert back == old
 
 
+def test_failed_rejoin_restore_puts_back_dynamic_local_forward_provenance(store):
+    from agent_codespaces.owner_local_forwards import record_assigned_local_forward
+
+    owner.hold("cs-1", "cli:a", mux_session="wt-a", local_forwards={0: 5000})
+    assert record_assigned_local_forward(
+        "cs-1", requested_host_port=0, assigned_host_port=41909, venue_port=5000,
+    )
+    held = owner.get_hold("cs-1")
+    old = dict(held.sessions["cli:a"])
+    prior_local, prior_assigned = dict(held.local_forwards), dict(held.assigned_local_forwards)
+    assert prior_assigned == {"41909": 5000}
+    # The rejoin asks for different forwards, which drops the old provenance ...
+    owner.hold("cs-1", "cli:a", mux_session="wt-a", fresh=True, local_forwards={6000: 6000})
+    assert owner.get_hold("cs-1").assigned_local_forwards == {}
+    # ... and its failure rollback must restore it, not just the port map.
+    back = owner.hold(
+        "cs-1", "cli:a", mux_session="wt-a",
+        restore={**old, "assigned_local_forwards": prior_assigned}, local_forwards=prior_local,
+    )
+    assert back.local_forwards == {"41909": 5000}
+    assert back.assigned_local_forwards == {"41909": 5000}
+    assert "assigned_local_forwards" not in back.sessions["cli:a"]
+
+
 def test_release_with_a_stale_generation_leaves_the_new_launch(store):
     old = owner.hold("cs-1", "cli:a", mux_session="wt-a", confirmed=True).sessions["cli:a"]["generation"]
     owner.hold("cs-1", "cli:a", mux_session="wt-a", fresh=True)

@@ -729,7 +729,8 @@ def cmd_detach(
                 # running: put its tenant back exactly as it was.
                 owner.hold(
                     args.name, plan["tenant"], daemon_port=daemon_port,
-                    mux_session=prior_session["mux_session"], restore=prior_session,
+                    mux_session=prior_session["mux_session"],
+                    restore={**prior_session, "assigned_local_forwards": prior_assigned_local},
                     reverse_forwards=prior_forwards,
                     local_forwards=prior_local,
                 )

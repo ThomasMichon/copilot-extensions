@@ -328,7 +328,7 @@ def hold(
     generation (unconfirmed, new lease), so nothing -- neither an older
     session's confirmation nor an in-flight probe of it -- can release the new
     launch; ``restore`` puts back a session entry exactly as it was before a
-    failed relaunch. ``reverse_forwards`` / ``local_forwards``, when given, replace the
+    failed relaunch (its ``assigned_local_forwards`` key, too). ``reverse_forwards`` / ``local_forwards`` replace the
     hold's extra forwards of that direction.
     """
     if not codespace:
@@ -364,7 +364,7 @@ def hold(
             existing.daemon_port = port
         from .owner_local_forwards import reuse_assigned_local_forwards
         local_forwards = reuse_assigned_local_forwards(existing, local_forwards)
-        set_hold_forwards(existing, reverse_forwards, local_forwards)
+        set_hold_forwards(existing, reverse_forwards, local_forwards, (restore or {}).get("assigned_local_forwards"))
         _write_holds(holds)
         return existing
 

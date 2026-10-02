@@ -728,6 +728,20 @@ def test_failed_rejoin_restores_the_sessions_local_forwards(seams, monkeypatch, 
     assert restore[0]["local_forwards"] == {"41909": 41909}
 
 
+def test_failed_rejoin_restores_assigned_local_forward_provenance(seams, monkeypatch, capsys):
+    prior = {"mux_session": "wt-anchor-example-web", "confirmed": True,
+             "expires_at": 123.0, "generation": "g-old"}
+    held = types.SimpleNamespace(sessions={"cli:anchor-example-web@cs-1": prior},
+                                 local_forwards={"41909": 5000},
+                                 assigned_local_forwards={"41909": 5000})
+    monkeypatch.setattr(owner, "get_hold", lambda *a, **k: held)
+    monkeypatch.setattr(detach, "_bridge_path_ok", lambda n, p: False)
+    detach.cmd_detach(_args(local_forwards=["6000"]), ssh_session=_ssh(seams))
+    restore = [k for _a, k in seams.holds if k.get("restore") is not None]
+    assert restore[0]["restore"]["assigned_local_forwards"] == {"41909": 5000}
+    assert restore[0]["local_forwards"] == {"41909": 5000}
+
+
 def test_host_port_probe_reports_a_port_that_never_binds(monkeypatch):
     monkeypatch.setattr(detach.time, "sleep", lambda s: None)
     assert detach._host_ports_listening([1], attempts=2) == {1: False}
