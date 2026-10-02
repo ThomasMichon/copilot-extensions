@@ -20,7 +20,7 @@ that pattern to this repository.
 | [Worktree/Effort Railroad Binding](active/worktree-effort-railroad-binding/README.md) | Draft | #3581 |
 | [Worktree Head-Succession Hardening](active/worktree-head-succession-hardening/README.md) | Draft | #3584 |
 | [Picker Creature Comforts](active/picker-creature-comforts/README.md) | Draft | #3586 |
-| [Dev/Main Release Pipeline](active/dev-branch-release-pipeline/README.md) | Draft | #3336 |
+| [Dev/Main Release Pipeline](active/dev-branch-release-pipeline/README.md) | Done; pending archive | #3336 |
 | [Promotion-Failure Reactive Fix Agent](active/promotion-failure-reactive-fix-agent/README.md) | Active | _TBD_ |
 | [Vendor Pointer Generalization](active/vendor-pointer-generalization/README.md) | Draft | See effort |
 | [Full-Harness Startup Reliability](active/full-harness-startup-reliability/README.md) | Active | #3303 |
