@@ -1,0 +1,13 @@
+{
+  "comment": "plugin-activation: a bare worktree-class anchor is a verified project root (vendored copy / editable consumer)",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

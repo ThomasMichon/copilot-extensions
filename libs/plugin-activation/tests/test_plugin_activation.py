@@ -308,6 +308,21 @@ def test_a_bare_repository_elsewhere_never_authorizes_the_registered_path(tmp_pa
     assert "demo@local" not in report.active
 
 
+def test_a_redirected_gitfile_never_authorizes_the_registered_path(tmp_path):
+    """Only exactly ``root`` or ``root/.git`` counts: a ``.git`` gitfile pointing
+    at some other directory under the root (made bare) does not."""
+    repo = tmp_path / "src" / "demo-repo"
+    remote = "https://github.com/example/demo-repo.git"
+    _register_project(tmp_path, "demo-repo", repo, remote)
+    (repo / ".git").rename(repo / "metadata")
+    (repo / ".git").write_text("gitdir: metadata\n", encoding="utf-8")
+    _git(repo, "config", "core.bare", "true")
+    _plugin(repo, "local", "demo")
+    _settings(repo, "local", "demo")
+    report = resolve_active_plugins(home=tmp_path)
+    assert "demo@local" not in report.active
+
+
 def test_wrong_registered_remote_cannot_authorize(tmp_path):
     repo = tmp_path / "src" / "demo-repo"
     _register_project(
