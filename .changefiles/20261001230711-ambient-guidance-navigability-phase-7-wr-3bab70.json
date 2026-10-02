@@ -1,0 +1,9 @@
+{
+  "comment": "ambient-guidance-navigability Phase 7: write-incapable local-cache negative-proof test",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}
