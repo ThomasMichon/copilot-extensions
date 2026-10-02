@@ -1376,3 +1376,50 @@ Three new findings plus three previously-missed:
 
 All findings addressed via the content fixes above (now partly in
 `phase-3-design.md`); the three new discussion threads replied-to inline.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 14: the 503 fix needed widening in two directions, ready-frame skew cut both ways, and the sibling doc inherited the timeless-prose problem it was meant to avoid
+Five findings, all in `phase-3-design.md` now that the design lives there:
+
+- **High: the fallback poller is a fourth snapshot writer that wasn't in
+  the serialization lock, and the reconnect handoff could race it.** It can
+  read stale state and publish it *after* a reconnect's reconcile already
+  published newer state unless it shares the same lock and is explicitly
+  quiesced before reconnect promotion runs, not just left running alongside
+  it. Fixed by adding the fallback poller to the shared snapshot-owner lock
+  and requiring its current tick to finish (with no next tick scheduled)
+  before the reconnect's promotion reconcile runs.
+- **Medium: the ready-frame fix only handled new-client-vs-old-daemon, not
+  the reverse.** A new daemon would still emit the ready frame to an
+  already-installed **old** `DispatchClient.stream_events()`, which parses
+  purely by `data:` prefix regardless of `event:` field — any SSE framing
+  trick an old parser might "structurally ignore" doesn't actually apply
+  here, so the control frame would leak straight into `agent-dispatch
+  watch` output. Fixed by making the frame **opt-in via the request itself**
+  (e.g. a query parameter only a new relay sends): an old client never asks
+  for it and therefore never receives it from any daemon, regardless of
+  daemon version — version skew resolved by what's requested, not by what
+  the daemon happens to be running.
+- **Medium: the 503 condition was narrower than the mixed-cache case.** A
+  namespace with last-known-good data alongside a *different*,
+  newly-added-or-replaced namespace still uninitialized after its own
+  joined scan fails would still return `200` under the prior wording.
+  Fixed by triggering `503` whenever **any** known namespace lacks an
+  authoritative value after a refresh attempt, not only the all-or-nothing
+  case.
+- **Medium: discovery-generation expiry needs to force `503`
+  independently**, not only as a fallback when namespace-level
+  last-known-good is also absent — a stale discovery generation means
+  additions/removals/replacements are unknown, and `incomplete_namespaces`
+  can't name a namespace that was never discovered, so even "existing
+  namespaces still look fine" isn't enough to call the roster complete.
+  Fixed by making discovery-generation expiry its own independent `503`
+  trigger.
+- **Low: the newly-extracted sibling doc immediately re-accumulated the
+  same PR/review-round chronology problem the extraction was meant to
+  solve.** Per `CONTRIBUTING.md`'s timeless-prose rule, that history
+  belongs only in this dated Journal. Fixed by rewriting
+  `phase-3-design.md`'s introduction to describe the design's current
+  state without "revised per review on #N" framing, at every location the
+  finding named.
+
+All five replied-to inline.

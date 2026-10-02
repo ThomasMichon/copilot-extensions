@@ -1,40 +1,34 @@
 # Phase 3 — CLI-relayed daemon fast path (detailed design)
 
 Extracted from [`README.md`](README.md)'s Plan per `efforts/README.md`'s
-"extract substantial phase designs into sibling documents" convention — the
-Phase 3 design review (PR #4928) accumulated enough detail across its review
-rounds that it no longer belonged inline in the shared coordination document.
-The README keeps a concise checklist and links here; this file is the
+"extract substantial phase designs into sibling documents" convention. The
+README keeps a concise checklist and links here; this file is the
 authoritative detail for 3a/3b/3c. Review-round history for this design
-remains in the README's own dated Journal, not duplicated here.
+lives in the README's own dated Journal, not here.
 
-## Phase 3 — CLI-relayed daemon fast path (the new capability, revised)
-_(Revised per Copilot review on #4764: the original shape — the Picker
-connecting directly to a pivot's daemon over HTTP, bypassing the CLI — directly
-contradicts the Picker vision's stated boundary, "reaches each engine **only by
-invoking its machine-readable CLI verbs**" (`visions/picker/README.md:332-336`).
-Rather than propose a vision change for this, the fast path stays **behind the
-CLI-owned client boundary** the reviewer suggested: the Picker still only ever
-invokes `list --stream`/`subscribe`; the SPEEDUP comes from that CLI's own
-`--stream` implementation choosing, internally, to relay its already-running
-daemon's live feed (e.g. `agent-dispatch`'s own `/events` SSE stream) through
-its stdout NDJSON instead of re-deriving the same data from scratch on each
-invocation — invisible to the Picker, which is unaffected by where the CLI's
-own implementation gets its data. This also resolves Phase 0's EOF/reconnect
-concern for the daemon-backed case specifically: the CLI process, not the
-Picker, owns reconnecting to its own daemon.)_
-_(Design reviewed 2026-10-02, per this phase's own Validation Plan gate — see
-the 2026-10-02 journal entry for the full finding. Summary: agent-dispatch and
-agent-bridge are **not symmetric** here. agent-dispatch's coordinator already
-publishes a genuine roster-relevant event feed (`EventBus`/`GET /events`,
-lifecycle events like `task.submitted`/`task.completed` carrying the full task
-dict) that a CLI-side relay can consume directly. agent-bridge's daemon has
-**no existing roster-change event stream** — its SSE routes
-(`routes/live_sessions.py`, `routes/remote.py`, `routes/sessions.py`) are all
-per-session event logs, not an aggregate "the agent roster changed" feed. The
-plan below splits accordingly; agent-bridge's own daemon-side cache (3b) must
-land and be validated before any agent-bridge SSE relay (deferred, not part of
-this phase) is considered.)_
+## Phase 3 — CLI-relayed daemon fast path (the new capability)
+The fast path stays **behind the CLI-owned client boundary**: the Picker
+still only ever invokes `list --stream`/`subscribe`; the speedup comes from
+that CLI's own `--stream` implementation choosing, internally, to relay its
+already-running daemon's live feed (e.g. `agent-dispatch`'s own `/events`
+SSE stream) through its stdout NDJSON instead of re-deriving the same data
+from scratch on each invocation — invisible to the Picker, which is
+unaffected by where the CLI's own implementation gets its data. This also
+resolves Phase 0's EOF/reconnect concern for the daemon-backed case
+specifically: the CLI process, not the Picker, owns reconnecting to its own
+daemon.
+
+agent-dispatch and agent-bridge are **not symmetric** here. agent-dispatch's
+coordinator already publishes a genuine roster-relevant event feed
+(`EventBus`/`GET /events`, lifecycle events like `task.submitted`/
+`task.completed` carrying the full task dict) that a CLI-side relay can
+consume directly. agent-bridge's daemon has **no existing roster-change
+event stream** — its SSE routes (`routes/live_sessions.py`,
+`routes/remote.py`, `routes/sessions.py`) are all per-session event logs,
+not an aggregate "the agent roster changed" feed. The plan below splits
+accordingly; agent-bridge's own daemon-side cache (3b) must land and be
+validated before any agent-bridge SSE relay (deferred, not part of this
+phase) is considered.
 - [ ] **3a — agent-dispatch relay:** in `board_cli.py`'s `_run_stream()`,
       replace the `--subscribe` branch's `time.sleep(interval)` poll-and-diff
       loop with: keep the existing initial `begin`/`row`/`done` fetch
@@ -43,9 +37,9 @@ this phase) is considered.)_
       `_fetch_rows_direct()` + `_diff_rows()` pass — the exact same
       full-board re-fetch-and-diff the poll loop already does, just woken by
       a real event instead of a timer tick, **not** a per-event row
-      transform. (Revised from an earlier per-event-transform draft: a
-      partial, event-sourced row can't correctly maintain a `--limit`-capped,
-      newest-first set — see the dedicated bullet below — and a full re-fetch
+      transform. (A partial, event-sourced row can't correctly maintain a
+      `--limit`-capped, newest-first set — see the dedicated bullet below —
+      and a full re-fetch
       sidesteps that class of bug entirely by construction, at the cost of
       one full fetch per wake instead of a cheaper partial update.)
   - [ ] **Debounce the wake, but never drop an event that arrives mid-fetch
@@ -83,15 +77,26 @@ this phase) is considered.)_
         reconcile right after `stream_events()` returns can still race the
         exact gap this bullet means to close. Fixed by having the route
         emit an explicit **ready frame** immediately after queue
-        registration (before yielding any real event), with its own
-        version-skew handling (agent-dispatch has no existing
-        protocol-version module like agent-bridge's `protocol.py` — this
-        introduces a minimal, purpose-built capability signal rather than
-        importing that machinery): the coordinator advertises support for
-        the ready frame on `/health` (the same place it already advertises
-        other capabilities); the client checks that advertisement before
-        relying on the frame at all. Against a daemon that advertises
-        support, wait for the ready frame (bounded — if it doesn't arrive
+        registration (before yielding any real event) — **opt-in via the
+        request, not unconditional:** an SSE named-`event:` field or any
+        other framing an already-installed old client might structurally
+        ignore doesn't actually help here, since `DispatchClient.
+        stream_events()` parses purely by `data:` prefix and would forward
+        any new frame type to its caller regardless of its `event:` field —
+        a new daemon talking to an **already-installed old client** would
+        otherwise leak this control frame straight into `agent-dispatch
+        watch` output. The route only emits the ready frame when the
+        request itself asks for it (e.g. `GET /events?ready_frame=1`); an
+        old client never sends that parameter and therefore never receives
+        the frame from any daemon, old or new — version skew is resolved by
+        what the request opts into, not by the daemon's own version. A new
+        client that does request it still gates on the daemon's advertised
+        support (`/health`, the same place it already advertises other
+        capabilities) before *waiting* for the frame: if the daemon doesn't
+        advertise support, assume it will also not honor the request
+        parameter, and treat this exactly like the lazy-generator case
+        below. Against a daemon that both advertises support and honors the
+        request, wait for the ready frame (bounded — if it doesn't arrive
         within a short timeout despite being advertised, treat that as a
         stream failure and fall back to polling, never wait forever).
         Against a daemon that doesn't advertise it, there is **no observable
@@ -104,7 +109,9 @@ this phase) is considered.)_
         this case: fall back to the **unmodified Phase 1 poll-and-diff
         loop, in its entirety**, for that connection's whole lifetime — the
         same degraded path a genuine stream failure uses elsewhere in this
-        design, not a half-optimized relay with an unclosed race. **The filtering must live in `stream_events()`
+        design, not a half-optimized relay with an unclosed race.
+
+        **The filtering must live in `stream_events()`
         itself, not only in the relay's own consumer:** `task_query_cli.
         _cmd_watch()` already iterates the same `DispatchClient.
         stream_events()` API, which today yields every SSE `data:` frame —
@@ -200,8 +207,8 @@ this phase) is considered.)_
         event — any `event_type`, e.g. `task.activity_updated`/
         `task.heartbeat`/`task.recovered`/`task.steer_taken`/
         `task.run_waiter_registered` — to each of these specific call
-        sites; **treat this list itself as provisional, not closed** — it
-        has already grown across three separate review rounds — require the
+        sites; **treat this list itself as provisional, not closed** —
+        require the
         implementer to audit every `queue`-mutating route across
         `coordinator_tasks.py`, `mcp_http.py`, **and
         `coordinator_verification.py`** for a missing `event_type` before
@@ -245,7 +252,8 @@ this phase) is considered.)_
         the tracked snapshot the same way `--subscribe` already does today,
         catching anything the event stream missed.
   - [ ] **Serialize every writer of the tracked snapshot against the
-        others, including the time-derived recompute tick above:** more
+        others, including the time-derived recompute tick above and the
+        fallback poller below:** more
         than one of these can run close together (an event wakes a fetch
         just as the long reconcile's own timer also fires, or the fast
         local recompute tick fires mid-fetch) — running any two
@@ -255,23 +263,33 @@ this phase) is considered.)_
         fields the recompute tick never touched, if it reads a stale cached
         row while a full fetch is publishing newer task state). Fixed by a
         single snapshot-owner lock shared by **every** writer — the
-        event-woken full re-fetch, the long reconcile, and the local
-        recompute tick's own read-recompute-diff-emit sequence all take the
-        same lock; a trigger arriving while another writer holds it queues
-        (coalescing with any already-pending debounced wake) rather than
-        running concurrently.
+        event-woken full re-fetch, the long reconcile, the local
+        recompute tick's own read-recompute-diff-emit sequence, **and the
+        fallback poll-and-diff loop itself** (see the next bullet — it is a
+        fourth writer, not exempt from this lock just because it's a
+        degraded path) all take the same lock; a trigger arriving while
+        another writer holds it queues (coalescing with any already-pending
+        debounced wake) rather than running concurrently.
   - [ ] **A transient SSE failure degrades to polling temporarily, not
         permanently, and reconnecting means a genuinely fresh client, not a
-        retried stale one:** falling back to poll-and-diff forever on the
+        retried stale one — and the fallback poller itself is a writer that
+        must be quiesced, not just another source running alongside the
+        others:** falling back to poll-and-diff forever on the
         very first `stream_events()` failure contradicts this design's own
         stated goal (the CLI, not the Picker, owns reconnecting to its
         daemon) and means one transient blip or a routine daemon-generation
         cutover disables the Phase 3 speedup for the rest of a long-lived
         Picker channel. Instead: on failure, fall back to poll-and-diff
-        immediately (correctness first), but keep retrying the SSE
+        immediately (correctness first) — **taking the same snapshot-owner
+        lock as every other writer for each of its own fetch-diff-emit
+        ticks**, since it can otherwise read stale state and publish it
+        after a reconnect's reconcile has already published newer state —
+        but keep retrying the SSE
         connection with bounded backoff in the background; on a successful
-        reconnect, run one full reconcile pass (catching anything missed
-        while on the poll fallback) and resume the event-woken relay. Only
+        reconnect, **quiesce the fallback poller first** (let its current
+        tick finish and stop scheduling a next one) before running the
+        promotion reconcile pass, rather than letting the two race each
+        other across the handoff. Only
         settle into *permanent* polling once reconnect retries are
         genuinely exhausted (a bounded cap, not indefinite retry either) —
         not on the first failure. Critically, each reconnect attempt must
@@ -339,10 +357,19 @@ this phase) is considered.)_
         `_fetch_complete_initial_rows()` — a new client's longer wait
         cannot retroactively protect an old one. The fix therefore has to
         be **server-side and version-independent**: when the daemon has
-        genuinely nothing authoritative to serve (no namespace has ever
-        completed a scan, or every forced rescan has failed with no
-        last-known-good anywhere), `GET /api/v1/agents` responds with a
-        **non-2xx status** (e.g. `503`) instead of a normal `200` body —
+        genuinely nothing authoritative to serve for **any known
+        namespace** — not only the narrower "no namespace anywhere has a
+        last-known-good value" case: a mixed cache (namespace A has
+        last-known-good, newly-added/replaced namespace B is still
+        uninitialized after its own joined scan fails) must trigger this
+        the same way, since an old client's bounded retry loop would
+        otherwise still retrieve and accept A's rows as if the roster were
+        complete while B is silently missing. `GET /api/v1/agents` responds
+        with a **non-2xx status** (e.g. `503`) instead of a normal `200`
+        body whenever **any** known namespace lacks an authoritative value
+        after a refresh attempt (uninitialized, or last-known-good expired
+        past its freshness deadline with the opportunistic refresh also
+        failing) — not gated on the all-or-nothing case —
         every caller's existing HTTP-error handling already has to react to
         a non-2xx response somehow (old or new, since this is not a new
         failure shape a client has to learn about, just an existing one
@@ -357,8 +384,8 @@ this phase) is considered.)_
         needs no protocol-version bump and no new response schema either;
         a `200` response's `incomplete_namespaces` only ever names
         namespaces that genuinely exist and are currently incomplete, and
-        a `503` is what covers "there is nothing to name yet, or nothing
-        authoritative survived the retries."
+        a `503` is what covers "any known namespace has nothing
+        authoritative to report, or there is nothing to name yet at all."
   - [ ] **A stalled or crashed refresh task must not serve a stale roster as
         complete forever, and the recovery can't be merely passive — and
         this applies to the provider-discovery scan itself, not only to an
@@ -404,12 +431,19 @@ this phase) is considered.)_
         provider-registry removal/replacement discovery is failing. Fixed
         by tracking discovery itself as its own generation/freshness state,
         separate from any individual namespace's: a failed discovery
-        attempt must not advance that generation, and that generation
-        going stale past its own deadline — with no previously-discovered
-        namespace retaining a usable last-known-good either — means the
-        route responds `503` under the same server-side, version-independent
-        contract defined above, rather than continuing to report a stale
-        roster as complete.
+        attempt must not advance that generation, and that generation going
+        stale past its own deadline forces `503` **independently of
+        whether existing namespaces still retain a last-known-good
+        value** — a stale discovery generation means additions, removals,
+        and replacements are unknown, and `incomplete_namespaces` has no
+        way to name a namespace that hasn't even been discovered yet, so
+        conditioning the response only on "do known namespaces have
+        last-known-good data" would still let a resolver set that's
+        actually gone stale serve as a successful, complete-looking roster.
+        Discovery-generation expiry is therefore its own independent
+        trigger for the same server-side, version-independent `503`
+        contract defined above, not merely a fallback for when namespace-
+        level last-known-good is also absent.
   - [ ] **The "nothing authoritative to serve" state must exist before
         daemon startup even discovers which namespaces exist at all, not
         only per already-known namespace:** production startup serves a
