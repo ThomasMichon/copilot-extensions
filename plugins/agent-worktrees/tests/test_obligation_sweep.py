@@ -190,7 +190,7 @@ def test_cli_sweep_apply_feeds_claim_history_for_pr_kind(tmp_path, monkeypatch, 
     from agent_worktrees import claim_history
     events = claim_history.history_for_ref("o/r#1")
     assert [e["event"] for e in events] == ["released"]
-    assert events[0]["note"] == "abandoned"
+    assert events[0]["note"] == "merged"
     assert events[0]["machine"] == "record-machine"
 
 

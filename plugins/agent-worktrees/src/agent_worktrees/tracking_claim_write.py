@@ -100,7 +100,7 @@ def apply_claim_add(args: dict) -> dict:
     )
     claim_history.record_event(
         kind=kind, ref=ref, worktree_id=worktree_id, machine=record.machine,
-        event="claimed",
+        event="claimed", session_id=args.get("session_id"),
     )
     return {
         "ok": True,
@@ -147,7 +147,7 @@ def apply_claim_release(args: dict) -> dict:
     )
     claim_history.record_event(
         kind=kind, ref=ref, worktree_id=worktree_id, machine=record.machine,
-        event=action,
+        event=action, session_id=args.get("session_id"),
     )
     return {"ok": True, "action": action}
 
@@ -218,8 +218,7 @@ def apply_claim_settle(args: dict) -> dict:
     )
     claim_history.record_event(
         kind=settled.kind, ref=ref, worktree_id=worktree_id, machine=record.machine,
-        event="settled",
-        note=disposition,
+        event="settled", note=disposition, session_id=args.get("session_id"),
     )
     return {"ok": True, "kind": settled.kind, "disposition": disposition}
 

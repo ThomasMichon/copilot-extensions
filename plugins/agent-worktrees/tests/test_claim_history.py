@@ -106,10 +106,27 @@ def test_record_event_never_raises_on_write_failure(monkeypatch):
         raise OSError("disk full")
 
     monkeypatch.setattr(claim_history.handoff_trace, "_append_lock", _boom)
+    before = claim_history.write_failure_count()
     # Must not raise -- best-effort, same contract as activity.log_event.
     claim_history.record_event(
         kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m", event="claimed",
     )
+    # ... but a failed write is still observable, not silently lost.
+    assert claim_history.write_failure_count() == before + 1
+
+
+def test_history_for_ref_tolerates_invalid_utf8(tmp_path: Path, monkeypatch):
+    """Invalid UTF-8 raises UnicodeDecodeError, not OSError -- a naive
+    strict-decode read would crash `claims history` instead of skipping
+    the damaged line and returning the readable ones."""
+    path = tmp_path / "claim-history.jsonl"
+    with open(path, "wb") as handle:
+        handle.write(b"\xff\xfe not valid utf-8\n")
+        handle.write(json.dumps({"ref": "o/r#1", "event": "claimed"}).encode() + b"\n")
+    monkeypatch.setattr(claim_history, "history_path", lambda: path)
+    events = claim_history.history_for_ref("o/r#1")
+    assert len(events) == 1
+    assert events[0]["event"] == "claimed"
 
 
 def test_current_session_id_reads_the_env_var(monkeypatch):
@@ -158,6 +175,19 @@ def test_claim_add_feeds_history_for_pr_kind(record_path):
     assert events[0]["event"] == "claimed"
     assert events[0]["worktree_id"] == "wt-claim"
     assert events[0]["machine"] == "machine-x"
+
+
+def test_claim_add_uses_the_caller_supplied_session_id(record_path):
+    """The verb normally runs in the resident daemon, whose own
+    environment explicitly strips COPILOT_AGENT_SESSION_ID -- the CLI
+    caller's session must therefore be threaded through `args`, not
+    re-resolved inside the verb from (the daemon's own) environment."""
+    tracking_claim_write.apply_claim_add({
+        "worktree_id": "wt-claim", "yaml_path": str(record_path),
+        "kind": "pr", "ref": "o/r#9", "session_id": "caller-session-123",
+    })
+    events = claim_history.history_for_ref("o/r#9")
+    assert events[0]["session_id"] == "caller-session-123"
 
 
 def test_claim_add_does_not_feed_history_for_non_pr_kind(record_path):

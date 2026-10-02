@@ -493,6 +493,7 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
                 "kind": kind,
                 "ref": ref,
                 "note": getattr(args, "note", "") or "",
+                "session_id": claim_history.current_session_id(),
             },
         )
     except tracking_write.AmbiguousWriteOutcome as exc:
@@ -588,6 +589,7 @@ def _claims_release(args: argparse.Namespace, ref: str) -> int:
                 "yaml_path": str(rec_path),
                 "ref": ref,
                 "remove": bool(getattr(args, "remove", False)),
+                "session_id": claim_history.current_session_id(),
             },
         )
     except tracking_write.AmbiguousWriteOutcome as exc:
@@ -660,6 +662,7 @@ def _claims_settle(args: argparse.Namespace, ref: str) -> int:
                 "yaml_path": str(rec_path),
                 "ref": ref,
                 "disposition": disposition,
+                "session_id": claim_history.current_session_id(),
             },
         )
     except tracking_write.AmbiguousWriteOutcome as exc:
@@ -737,7 +740,12 @@ def _claims_sweep(args: argparse.Namespace) -> int:
                     for c in flipped:
                         claim_history.record_event(
                             kind=c.kind, ref=c.ref, worktree_id=rec.worktree_id,
-                            machine=rec.machine, event="released", note="abandoned",
+                            machine=rec.machine, event="released",
+                            # A `pr`-kind claim swept this way is a clean,
+                            # provably-merged hand-back (RELEASED), never
+                            # an involuntary reclaim -- only a non-pr kind
+                            # is genuinely `abandoned` here.
+                            note="merged" if c.state == obligations.RELEASED else "abandoned",
                         )
         else:
             before = {c.ref: c.state for c in rec.resources}

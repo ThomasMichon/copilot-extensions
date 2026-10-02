@@ -59,12 +59,28 @@ recorded, each one truthfully after its own save succeeded" rather than
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import config as cfg
 from . import handoff_trace
+
+log = logging.getLogger("agent-worktrees")
+
+#: Count of record_event() calls that failed to write, for observability
+#: without breaking the never-raise contract -- mirrors
+#: ``activity.log_event_failure_count()``.
+_write_failures = 0
+
+
+def write_failure_count() -> int:
+    """Return how many :func:`record_event` calls have failed to write in
+    this process -- a failed append is never raised, but must still be
+    detectable rather than silently and permanently lost."""
+    return _write_failures
+
 
 #: Claim kinds this ledger records. Any other kind is a silent no-op in
 #: :func:`record_event`, so callers never need to pre-filter kind
@@ -101,7 +117,9 @@ def record_event(
     :data:`SUPPORTED_KINDS` or on any write failure (disk full,
     permissions, ...) -- a diagnostic/history record must never perturb
     the claim-lifecycle operation it observes, mirroring
-    ``activity.log_event``'s own never-raises contract.
+    ``activity.log_event``'s own never-raises contract. A write failure is
+    never silently *invisible* though -- it bumps :func:`write_failure_count`
+    and logs a debug line, exactly like ``activity.log_event_failure_count``.
     """
     if kind not in SUPPORTED_KINDS:
         return
@@ -126,8 +144,11 @@ def record_event(
             path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
-    except Exception:
-        pass
+    except Exception as exc:
+        global _write_failures
+        _write_failures += 1
+        log.debug("claim_history.record_event(%r, ref=%r) failed to write: %s",
+                  event, ref, exc)
 
 
 def record_claim_released(claim, *, worktree_id: str, machine: str, note: str = "") -> None:
@@ -172,7 +193,11 @@ def history_for_ref(ref: str) -> list[dict]:
     if not path.exists():
         return out
     try:
-        with open(path, encoding="utf-8") as handle:
+        # errors="replace" (matching handoff_trace.read_trace) so one
+        # damaged/invalid-UTF-8 byte downgrades to an unparseable (and thus
+        # skipped) line instead of raising UnicodeDecodeError and aborting
+        # the whole read -- later valid lines remain readable.
+        with open(path, encoding="utf-8", errors="replace") as handle:
             for raw in handle:
                 raw = raw.strip()
                 if not raw:
