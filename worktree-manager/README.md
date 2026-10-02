@@ -61,7 +61,11 @@ even without `git`. It amends the current session's `PATH` and prompts for a
 restart when it can't. Set
 `WORKTREE_MANAGER_ROOT` to relocate the install root. Inspect/repair the versioned
 install with `worktree-manager self-install` (dry-run) / `--apply`, and see it in
-`worktree-manager doctor`.
+`worktree-manager doctor`. A successful self-install also refreshes the
+`agent-worktrees` front door registration at
+`~/.agent-worktrees/control-plane-providers.d/worktree-manager.json`, so a bare
+project binstub discovers this Manager through the generic control-plane-provider
+registry rather than a literal `worktree-manager` PATH probe.
 
 Registered project binstubs enter the interactive front door as
 `worktree-manager --project <name>`; that project-only form launches the Picker.

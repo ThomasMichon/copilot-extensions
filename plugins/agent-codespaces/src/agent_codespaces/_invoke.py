@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
+from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 _PACKAGE = "agent_codespaces"
+_DIST_NAME = "agent-codespaces"
 
 #: Slot-interpreter subpaths, POSIX then Windows (matches agent-dispatch's
 #: ``procutil._SLOT_PYTHON_SUBPATHS`` / ``resolve-runtime.ps1``).
@@ -122,8 +127,75 @@ def module_argv() -> list[str]:
     return [_venv_python(), "-m", _PACKAGE]
 
 
+def _deploy_manifest_source_root() -> Path | None:
+    manifest = _runtime_root() / "deploy-manifest.json"
+    if not manifest.is_file():
+        return None
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, TypeError):
+        return None
+    source_path = str((data or {}).get("source", {}).get("path") or "").strip()
+    if not source_path:
+        return None
+    candidate = Path(source_path).expanduser()
+    if candidate.is_dir() and (candidate / "plugin.json").is_file():
+        return candidate.resolve()
+    return None
+
+
+def _direct_url_source_root() -> Path | None:
+    try:
+        payload_dist = distribution(_DIST_NAME)
+    except PackageNotFoundError:
+        return None
+    try:
+        payload = payload_dist.read_text("direct_url.json")
+    except FileNotFoundError:
+        return None
+    if not payload:
+        return None
+    try:
+        data = json.loads(payload)
+    except (ValueError, TypeError):
+        return None
+    url = str((data or {}).get("url") or "").strip()
+    if not url:
+        return None
+    candidate = _path_from_file_url(url)
+    if candidate is None:
+        return None
+    if candidate.is_dir() and (candidate / "plugin.json").is_file():
+        return candidate.resolve()
+    return None
+
+
+def _path_from_file_url(url: str) -> Path | None:
+    parsed = urlparse(url)
+    if parsed.scheme != "file":
+        return None
+    path = url2pathname(parsed.path)
+    if parsed.netloc and parsed.netloc.casefold() != "localhost":
+        return Path(f"//{parsed.netloc}{path}")
+    return Path(path)
+
+
 def _payload_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    env_payload = os.environ.get("COPILOT_PLUGIN_ROOT", "").strip()
+    if env_payload:
+        candidate = Path(env_payload).expanduser()
+        if candidate.is_dir() and (candidate / "plugin.json").is_file():
+            return candidate.resolve()
+    candidate = Path(__file__).resolve().parents[2]
+    if candidate.is_dir() and (candidate / "plugin.json").is_file():
+        return candidate
+    direct_url_root = _direct_url_source_root()
+    if direct_url_root is not None:
+        return direct_url_root
+    manifest_root = _deploy_manifest_source_root()
+    if manifest_root is not None:
+        return manifest_root
+    return candidate
 
 
 def binstub() -> str | None:

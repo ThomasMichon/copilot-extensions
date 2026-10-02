@@ -239,7 +239,19 @@ jobs:
         # with agent-ssh (smallest, 16 test files, but still a real
         # dependency-having plugin -- proves the `project_dir`
         # editable-install path, not just a dependency-free script
-        # plugin), then agent-codespaces and agent-containers. Independent
+        # plugin), then agent-codespaces, agent-containers, agent-vault,
+        # and agent-logger. `agent-mcp` was deliberately skipped this
+        # round: its full 54-file suite reproducibly fails baseline
+        # collection (a bare `exit 1` with no pytest output at all, just
+        # one stray log line) even though `run-plugin-tests.py`'s own
+        # chunked sub-suite runner passes it cleanly -- `baseline.py`
+        # collects a plugin's entire suite as one single pytest process,
+        # unlike the trusted runner's own 25-file sub-suite chunking,
+        # and a suite this large/subprocess-heavy (it ships its own
+        # watchdog/process-management tests) likely needs the same
+        # chunking `baseline.py` doesn't yet have. Tracked as a follow-up
+        # rather than fixed here (a chunking rework, not a one-line fix).
+        # Independent
         # of, and in addition to, the trusted `run-plugin-tests.py` run
         # above -- this step's own failure never fails this job (see
         # `continue-on-error` below): a baseline is optional evidence
@@ -254,7 +266,7 @@ jobs:
         # confirmed for every plugin enrolled so far) rather than
         # hardcoded per plugin, so enrolling the next one only ever touches
         # this `if:` list and the `promote` job's matching one below.
-        if: contains(fromJSON('["agent-ssh","agent-codespaces","agent-containers"]'), matrix.plugin)
+        if: contains(fromJSON('["agent-ssh","agent-codespaces","agent-containers","agent-vault","agent-logger"]'), matrix.plugin)
         continue-on-error: true
         run: |
           plugin="${{ matrix.plugin }}"
@@ -266,7 +278,7 @@ jobs:
             --measured-commit "${{ needs.gate.outputs.sha }}" \
             --out "${plugin}.json"
       - name: Upload coverage baseline - ${{ matrix.plugin }}
-        if: contains(fromJSON('["agent-ssh","agent-codespaces","agent-containers"]'), matrix.plugin)
+        if: contains(fromJSON('["agent-ssh","agent-codespaces","agent-containers","agent-vault","agent-logger"]'), matrix.plugin)
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
@@ -648,7 +660,7 @@ jobs:
         # that's the single other place a plugin gets "enrolled".
         run: |
           missing=()
-          for plugin in agent-ssh agent-codespaces agent-containers; do
+          for plugin in agent-ssh agent-codespaces agent-containers agent-vault agent-logger; do
             if [ ! -f "coverage-baselines/${plugin}.json" ]; then
               missing+=("$plugin")
             fi

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import os
 import platform
@@ -513,6 +514,9 @@ _WORKTREE_MANAGER_BIN = "worktree-manager"
 _WORKTREE_MANAGER_MIN_PICKER_VERSION = (0, 1, 0, 21)
 _WORKTREE_MANAGER_ENGINE_ARGV_ENV = "WORKTREE_MANAGER_ENGINE_ARGV"
 _WORKTREE_MANAGER_ROOT_ENV = "WORKTREE_MANAGER_ROOT"
+_CONTROL_PLANE_PROVIDERS_SUBDIR = "control-plane-providers.d"
+_CONTROL_PLANE_PROVIDERS_DIR_ENV = "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR"
+_CONTROL_PLANE_PROVIDER_ENV = "AGENT_WORKTREES_CONTROL_PLANE_PROVIDER"
 _WORKTREE_MANAGER_REPO_URL = "https://github.com/ThomasMichon/copilot-extensions"
 _WORKTREE_MANAGER_INSTALL_SH = (
     "curl -fsSL https://raw.githubusercontent.com/ThomasMichon/"
@@ -524,9 +528,123 @@ _WORKTREE_MANAGER_INSTALL_PS1 = (
 )
 
 
+@dataclass(frozen=True)
+class _ControlPlaneProviderManifest:
+    provider: str
+    command: tuple[str, ...]
+    minimum_version: tuple[int, int, int, int]
+    minimum_version_text: str
+    description: str = ""
+    provider_root: str = ""
+    source_path: str = ""
+
+
+_CONTROL_PLANE_PROVIDER_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _parse_comparable_version(text: str) -> tuple[int, int, int, int] | None:
+    match = re.search(r"\b(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?\b", text)
+    if match is None:
+        return None
+    major, minor, patch = (int(match.group(i)) for i in range(1, 4))
+    dev = int(match.group(4)) if match.group(4) is not None else 1_000_000
+    return (major, minor, patch, dev)
+
+
+def _control_plane_providers_dir() -> Path:
+    configured = os.environ.get(_CONTROL_PLANE_PROVIDERS_DIR_ENV, "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    return cfg.install_dir() / _CONTROL_PLANE_PROVIDERS_SUBDIR
+
+
+def _parse_control_plane_provider_manifest(
+    payload: object, *, source_path: str
+) -> _ControlPlaneProviderManifest:
+    if not isinstance(payload, dict):
+        raise ValueError("manifest root must be a JSON object")
+    schema_version = payload.get("schema_version")
+    if isinstance(schema_version, bool) or schema_version != 1:
+        raise ValueError("`schema_version` must be the integer 1")
+    provider = payload.get("provider")
+    if not isinstance(provider, str) or not _CONTROL_PLANE_PROVIDER_TOKEN_RE.fullmatch(provider):
+        raise ValueError("`provider` must be a safe-token string")
+    command = payload.get("command")
+    if (
+        not isinstance(command, list)
+        or not command
+        or any(not isinstance(part, str) or not part for part in command)
+    ):
+        raise ValueError("`command` must be a non-empty array of strings")
+    minimum_version_text = payload.get("minimum_version")
+    if not isinstance(minimum_version_text, str) or not minimum_version_text.strip():
+        raise ValueError("`minimum_version` must be a non-empty version string")
+    minimum_version = _parse_comparable_version(minimum_version_text.strip())
+    if minimum_version is None:
+        raise ValueError("`minimum_version` must parse as MAJOR.MINOR.PATCH[-devN]")
+    description = payload.get("description", "")
+    if not isinstance(description, str):
+        raise ValueError("`description` must be a string when present")
+    provider_root = payload.get("provider_root", "")
+    if not isinstance(provider_root, str):
+        raise ValueError("`provider_root` must be a string when present")
+    return _ControlPlaneProviderManifest(
+        provider=provider,
+        command=tuple(command),
+        minimum_version=minimum_version,
+        minimum_version_text=minimum_version_text.strip(),
+        description=description,
+        provider_root=provider_root,
+        source_path=source_path,
+    )
+
+
+def _discover_control_plane_provider_manifests() -> dict[str, _ControlPlaneProviderManifest]:
+    manifests: dict[str, _ControlPlaneProviderManifest] = {}
+    root = _core_helper("_control_plane_providers_dir", _control_plane_providers_dir)()
+    try:
+        entries = sorted(root.glob("*.json"))
+    except OSError:
+        return manifests
+    for path in entries:
+        try:
+            manifest = _parse_control_plane_provider_manifest(
+                json.loads(path.read_text(encoding="utf-8")),
+                source_path=str(path),
+            )
+        except (OSError, ValueError, TypeError):
+            continue
+        manifests.setdefault(manifest.provider, manifest)
+    return manifests
+
+
+def _select_control_plane_provider_manifest() -> _ControlPlaneProviderManifest | None:
+    manifests = _core_helper(
+        "_discover_control_plane_provider_manifests",
+        _discover_control_plane_provider_manifests,
+    )()
+    selected = os.environ.get(_CONTROL_PLANE_PROVIDER_ENV, "").strip()
+    if selected:
+        return manifests.get(selected)
+    if len(manifests) == 1:
+        return next(iter(manifests.values()))
+    return None
+
+
+def _provider_command_display_name(
+    manifest: _ControlPlaneProviderManifest,
+) -> tuple[str, str]:
+    if manifest.provider == _WORKTREE_MANAGER_BIN:
+        return f"'{_WORKTREE_MANAGER_BIN}'", "on PATH"
+    return f"registered control-plane provider '{manifest.provider}'", f"via {manifest.source_path}"
+
+
 def _worktree_manager_path() -> str | None:
-    """Locate the out-of-plugin Worktree Manager binstub on PATH, if installed."""
-    return shutil.which(_WORKTREE_MANAGER_BIN)
+    """Compatibility wrapper: the selected provider command's argv[0], if any."""
+    manifest = _core_helper(
+        "_select_control_plane_provider_manifest", _select_control_plane_provider_manifest
+    )()
+    return manifest.command[0] if manifest is not None else None
 
 
 def _launch_probe_env() -> dict[str, str]:
@@ -553,37 +671,36 @@ def _probe_worktree_manager_version(
         return None, None
     if proc.returncode != 0:
         return None, proc
-    match = re.search(
-        r"\b(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?\b",
-        proc.stdout or "",
-    )
-    if match is None:
+    version = _parse_comparable_version(proc.stdout or "")
+    if version is None:
         return None, proc
-    major, minor, patch = (int(match.group(i)) for i in range(1, 4))
-    dev = int(match.group(4)) if match.group(4) is not None else 1_000_000
-    return (major, minor, patch, dev), proc
+    return version, proc
 
 
-def _usable_worktree_manager() -> str | None:
-    """The Manager binstub, but only if it is actually invocable (DQ8 guard)."""
+def _usable_worktree_manager() -> tuple[str, ...] | None:
+    """The selected control-plane provider command, when invocable (DQ8 guard)."""
     override = _core_helper("_usable_worktree_manager", _usable_worktree_manager)
     if override is not _usable_worktree_manager:
         return override()
-    mgr = _core_helper("_worktree_manager_path", _worktree_manager_path)()
-    if not mgr:
+    manifest = _core_helper(
+        "_select_control_plane_provider_manifest", _select_control_plane_provider_manifest
+    )()
+    if manifest is None:
         return None
     version, proc = _core_helper(
         "_probe_worktree_manager_version", _probe_worktree_manager_version
-    )([mgr, "--version"])
+    )([*manifest.command, "--version"])
+    display_name, display_source = _provider_command_display_name(manifest)
+    command0 = manifest.command[0]
     if proc is None:
         output.err(
-            f"Ignoring an unusable '{_WORKTREE_MANAGER_BIN}' on PATH ({mgr}): "
+            f"Ignoring an unusable {display_name} {display_source} ({command0}): "
             "it could not be run. Falling back to the bundled picker."
         )
         return None
     if version is None and proc.returncode != 0:
         output.err(
-            f"Ignoring a broken '{_WORKTREE_MANAGER_BIN}' on PATH ({mgr}): it "
+            f"Ignoring a broken {display_name} {display_source} ({command0}): it "
             f"failed a --version health check (exit {proc.returncode}). This is "
             "usually a stale binstub from an old install; reinstall or remove "
             "it. Falling back to the bundled picker."
@@ -591,19 +708,19 @@ def _usable_worktree_manager() -> str | None:
         return None
     if version is None:
         output.err(
-            f"Ignoring an incompatible '{_WORKTREE_MANAGER_BIN}' on PATH ({mgr}): "
+            f"Ignoring an incompatible {display_name} {display_source} ({command0}): "
             "its --version output did not include a supported version. Falling "
             "back to the bundled picker."
         )
         return None
-    if version < _WORKTREE_MANAGER_MIN_PICKER_VERSION:
+    if version < manifest.minimum_version:
         output.err(
-            f"Ignoring an older '{_WORKTREE_MANAGER_BIN}' on PATH ({mgr}): "
-            f"production Picker handoff requires 0.1.0-dev21 or newer. "
+            f"Ignoring an older {display_name} {display_source} ({command0}): "
+            f"production Picker handoff requires {manifest.minimum_version_text} or newer. "
             "Falling back to the bundled picker."
         )
         return None
-    return mgr
+    return manifest.command
 
 
 def _worktree_manager_root() -> Path:
@@ -775,10 +892,10 @@ def _run_direct_launch_fallback(project: str | None, passthrough: list[str]) -> 
 
 
 def _exec_worktree_manager(
-    mgr: str, project: str | None, *, subcommand: list[str] | None = None
+    mgr: str | tuple[str, ...] | list[str], project: str | None, *, subcommand: list[str] | None = None
 ) -> int:
     """Hand an invocation off to the Worktree Manager (the seam)."""
-    argv = [mgr]
+    argv = [mgr] if isinstance(mgr, str) else list(mgr)
     if subcommand:
         argv += list(subcommand)
     if project:
@@ -798,7 +915,7 @@ def _exec_worktree_manager(
                 proc.kill()
                 rc = 130
         sys.exit(rc)
-    os.execvpe(mgr, argv, env)
+    os.execvpe(argv[0], argv, env)
     return 1
 
 

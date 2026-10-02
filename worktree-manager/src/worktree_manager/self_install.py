@@ -18,6 +18,7 @@ payload version is a no-op; a newer payload publishes a new slot + marker.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -30,6 +31,8 @@ import worktree_manager
 MARKER = "current-version"
 VERSIONS_DIR = "versions"
 STAGING_DIR = "staging"
+CONTROL_PLANE_PROVIDERS_SUBDIR = "control-plane-providers.d"
+CONTROL_PLANE_PROVIDERS_DIR_ENV = "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR"
 _VERSION_RE = re.compile(r'__version__\s*=\s*"([^"]+)"')
 
 
@@ -131,6 +134,14 @@ def local_bin() -> Path:
     return home / ".local" / "bin"
 
 
+def control_plane_providers_dir() -> Path:
+    override = os.environ.get(CONTROL_PLANE_PROVIDERS_DIR_ENV)
+    if override:
+        return Path(override).expanduser()
+    home = Path(os.environ.get("USERPROFILE") or os.path.expanduser("~"))
+    return home / ".agent-worktrees" / CONTROL_PLANE_PROVIDERS_SUBDIR
+
+
 def running_payload_dir() -> Path:
     """The project dir of the currently-running payload (has pyproject.toml)."""
     # .../worktree-manager/src/worktree_manager/self_install.py -> parents[2] == project.
@@ -165,6 +176,67 @@ def _binstub_files() -> list[str]:
     if os.name == "nt":
         return ["worktree-manager.cmd", "worktree-manager.ps1", "worktree-manager"]
     return ["worktree-manager"]
+
+
+def _primary_binstub_name() -> str:
+    return "worktree-manager.cmd" if os.name == "nt" else "worktree-manager"
+
+
+def _provider_manifest_template_path(payload_dir: Path | None = None) -> Path:
+    candidate = (payload_dir or running_payload_dir()) / "references" / "control-plane-provider.json"
+    if candidate.is_file():
+        return candidate
+    return running_payload_dir() / "references" / "control-plane-provider.json"
+
+
+def _expected_control_plane_provider_manifest(
+    payload_dir: Path | None = None, *, root: Path | None = None
+) -> dict[str, object]:
+    template = json.loads(
+        _provider_manifest_template_path(payload_dir).read_text(encoding="utf-8")
+    )
+    template["command"] = [str((local_bin() / _primary_binstub_name()).resolve())]
+    template["provider_root"] = str((root or default_root()).resolve())
+    return template
+
+
+def _control_plane_provider_manifest_path(
+    payload_dir: Path | None = None, *, root: Path | None = None
+) -> Path:
+    provider = str(
+        _expected_control_plane_provider_manifest(payload_dir, root=root).get("provider") or ""
+    ).strip()
+    return control_plane_providers_dir() / f"{provider}.json"
+
+
+def _control_plane_provider_manifest_is_stale(
+    payload_dir: Path | None = None, *, root: Path | None = None
+) -> bool:
+    path = _control_plane_provider_manifest_path(payload_dir, root=root)
+    try:
+        current = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return True
+    return current != _expected_control_plane_provider_manifest(payload_dir, root=root)
+
+
+def _write_control_plane_provider_manifest(
+    payload_dir: Path | None = None, *, root: Path | None = None
+) -> Path:
+    path = _control_plane_provider_manifest_path(payload_dir, root=root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(
+        json.dumps(
+            _expected_control_plane_provider_manifest(payload_dir, root=root),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    os.replace(tmp, path)
+    return path
 
 
 def binstub_present() -> Path | None:
@@ -252,6 +324,7 @@ def needs_install(version: str, root: Path | None = None) -> bool:
         and version_slot(version, r).is_dir()
         and binstub_present() is not None
         and not _binstubs_are_stale()
+        and not _control_plane_provider_manifest_is_stale(root=r)
     )
 
 
@@ -671,6 +744,7 @@ def self_install(
                                  slot=str(slot), reason=str(e), cleaned=cleaned)
     stubs = _deploy_binstubs()
     _write_marker(r, version)  # publish last, so the marker only names a ready slot
+    _write_control_plane_provider_manifest(pd, root=r)
     return SelfInstallResult(
         version=version, action="installed", root=str(r), slot=str(slot),
         marker=version, binstubs=tuple(str(s) for s in stubs), cleaned=cleaned,

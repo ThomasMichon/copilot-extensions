@@ -10,8 +10,40 @@ time `scripts/stamp_build_info.py` bakes it (plus git provenance) into
 from __future__ import annotations
 
 import importlib.metadata
+import json
+from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 import agent_dispatch
+
+
+def _source_plugin_root() -> Path:
+    try:
+        payload = importlib.metadata.distribution("agent-dispatch").read_text("direct_url.json")
+    except (importlib.metadata.PackageNotFoundError, FileNotFoundError):
+        payload = None
+    if payload:
+        try:
+            data = json.loads(payload)
+        except (TypeError, ValueError):
+            data = None
+        url = str((data or {}).get("url") or "").strip()
+        if url:
+            candidate = _path_from_file_url(url)
+            if candidate and candidate.is_dir() and (candidate / "scripts" / "stamp_build_info.py").is_file():
+                return candidate.resolve()
+    return Path(agent_dispatch.__file__).resolve().parent.parent.parent
+
+
+def _path_from_file_url(url: str) -> Path | None:
+    parsed = urlparse(url)
+    if parsed.scheme != "file":
+        return None
+    path = url2pathname(parsed.path)
+    if parsed.netloc and parsed.netloc.casefold() != "localhost":
+        return Path(f"//{parsed.netloc}{path}")
+    return Path(path)
 
 
 def test_version_matches_packaged_metadata_when_unstamped():
@@ -32,11 +64,16 @@ def test_build_info_placeholder_is_empty_so_it_falls_through():
     assert BUILD_INFO["version"] == ""
 
 
+def test_path_from_file_url_preserves_unc_authority():
+    assert _path_from_file_url("file://server/share/agent-dispatch") == Path(
+        "//server/share/agent-dispatch"
+    )
+
+
 def test_stamp_build_info_writes_pyproject_version(tmp_path):
     """The deploy-time stamper reads the version from pyproject.toml and writes
     a valid `_build_info.py` that `_resolve_version()` would then prefer."""
     import runpy
-    from pathlib import Path
 
     # Minimal fake plugin dir with a pyproject the stamper can read.
     plugin_dir = tmp_path / "plugins" / "agent-dispatch"
@@ -47,10 +84,7 @@ def test_stamp_build_info_writes_pyproject_version(tmp_path):
     pkg_dir = tmp_path / "site" / "agent_dispatch"
     pkg_dir.mkdir(parents=True)
 
-    stamper = (
-        Path(agent_dispatch.__file__).resolve().parent.parent.parent
-        / "scripts" / "stamp_build_info.py"
-    )
+    stamper = _source_plugin_root() / "scripts" / "stamp_build_info.py"
     mod = runpy.run_path(str(stamper))
     out = mod["stamp"](pkg_dir, plugin_dir, None)
 

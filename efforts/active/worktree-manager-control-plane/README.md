@@ -766,16 +766,42 @@ worktree-manager.
       §`first-run-onboarding-entry` and installer
       §`onboards-from-empty-gracefully`; it does **not** claim the broader
       Manager-side setup-first/home experience is done here.
-- [ ] **Open question, not yet designed:** the bare-invocation seam currently
-      health-probes specifically for a `worktree-manager` binstub on `PATH` --
-      it is not yet a generic, pluggable **registration** a third-party
-      control-plane provider could satisfy without being named `worktree-manager`
-      literally. If the seam is meant to stay open to a future alternative
-      Picker/control-plane provider (not just the one shipped here), this needs
-      an explicit registration contract (e.g. a well-known marker file/env var/
-      capability probe any conforming provider can satisfy), not a hardcoded
-      binstub-name check. Until that's decided, the seam is de facto
-      single-provider.
+- [x] **Generic control-plane-provider registration contract.** Landed via
+      [`phase-4-control-plane-provider-registration.md`](phase-4-control-plane-provider-registration.md)
+      (design) plus the implementation PR: the bare-invocation seam no longer
+      health-probes a literal `worktree-manager` binstub on `PATH`. It now
+      discovers providers through a consumer-owned manifest registry at
+      `~/.agent-worktrees/control-plane-providers.d/<provider>.json`
+      (test/operator override:
+      `AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR`), each manifest declaring
+      a stable `provider` identity, an absolute `command` argv (no `PATH`
+      lookup), and a `minimum_version` compatibility floor. Selection is
+      explicit-one-active-provider: `AGENT_WORKTREES_CONTROL_PLANE_PROVIDER`
+      names one, else exactly one valid manifest is used, else the seam fails
+      closed to the existing bundled-Picker/install-trigger fallback --
+      deliberately not a speculative multi-provider marketplace.
+      `worktree-manager` is the **reference implementation**: its own
+      `self_install.py` writes the manifest on install/update, so it is
+      discovered through the same generic path a third-party provider would
+      use, not a separate hardcoded special case living alongside it. All
+      existing diagnostics (broken/incompatible/older-provider rejection,
+      falling back to the bundled Picker) are preserved verbatim, just
+      parameterized over the selected manifest instead of a literal binstub
+      name. The separate `_usable_worktree_manager_launcher_dir()` probe
+      (locating the relocated Mux/AHP launcher scripts, a different Phase 3b
+      concern) is explicitly out of scope and unchanged. Proven generic with
+      a synthetic, differently-named registered provider test, not just the
+      shipped Manager. Validation: `plugins/agent-worktrees/tests/test_cli_routing.py`
+      full suite (122 passed); `worktree-manager/tests/test_self_install.py`
+      full suite (23 passed, 2 skipped -- pre-existing Windows
+      symlink-privilege gaps); full `worktree-manager` suite (1400 passed, 9
+      failed -- all pre-existing Windows symlink-privilege/unrelated-timing
+      gaps, same established baseline); full `agent-worktrees` suite (6348
+      passed, 52 skipped, 1 failed -- the one failure is an unrelated
+      `test_status_monitor_cutover_helper.py` file-rename `Access is denied`
+      race against this machine's own live background status-monitor/mux-
+      daemon processes, not touched by this change). `ruff`, install-contract,
+      version-bump, version-consistency, and changefile-presence all pass.
 - [ ] **Clarifying note (not a gap):** worktree creation does **not** need a
       callback *from* agent-worktrees *into* Worktree Manager to set up Mux.
       The interactive path already inverts that: Worktree Manager itself drives
@@ -894,6 +920,61 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-10-02** — Landed Phase 4's generic control-plane-provider
+  registration contract (claimed 2026-10-01). Resumed a prior session's
+  interrupted work rather than restarting: found 11 real, well-sequenced
+  commits already in place (design doc, provider manifest template,
+  `self_install.py` registration on install, `front_door_cli.py`'s registry-
+  based discovery replacing the literal `worktree-manager` PATH probe,
+  synthetic-provider + Windows-hardening tests, version bumps) but the
+  effort docs/Journal were never finished and no PR had been opened.
+  Reviewed the full diff end to end against the design doc
+  ([`phase-4-control-plane-provider-registration.md`](phase-4-control-plane-provider-registration.md))
+  before trusting it: confirmed the manifest schema, discovery/selection
+  rule, and preserved diagnostic quality all matched the documented design,
+  and that `worktree-manager` consumes its own registry entry as the
+  reference implementation rather than keeping a parallel hardcoded path.
+  Rebased onto `origin/dev` twice (a large volume of unrelated repo activity
+  landed during the gap), resolving a 3-file version-number conflict by
+  re-bumping past the now-current `dev283` to `dev284`. Validation was
+  unusually difficult on this run: this machine is heavily loaded with many
+  long-lived background `agent-worktrees`/`worktree-manager` daemons
+  (status-monitor, mux-daemon instances across several installed versions),
+  which produced two classes of environment-level flakiness unrelated to
+  this change -- a stuck prior test process surviving a multi-hour machine
+  idle/suspend gap (0.02s CPU after 15+ wall-clock hours, force-killed), and
+  intermittent `git` subprocess hangs inside unrelated test fixtures
+  (`test_hooks.py`'s commit, `conftest.py`'s `pr_repo` push) when running the
+  full suite as a single long session. Isolated the one chronically-slow
+  file (`test_ext_reload_warning_retirement.py`'s preview-materialize test)
+  and proved it passes cleanly on its own (8/8, 111s) before it was ever
+  blamed as a regression. Eventually got one full, clean `agent-worktrees`
+  run to completion (1:04:10 wall-clock, genuinely CPU-active throughout, not
+  stuck): **6348 passed, 52 skipped, 1 failed** -- the sole failure
+  (`test_status_monitor_cutover_helper.py::test_activate_after_update_cuts_over_and_converges`)
+  is an unrelated Windows file-rename `Access is denied` race against this
+  machine's own live status-monitor processes, not a file this change
+  touches. Full `worktree-manager` suite: 1400 passed, 9 failed (all
+  pre-existing Windows symlink-privilege gaps), 4 skipped. Targeted
+  new-feature suites (`test_cli_routing.py` 122/122;
+  `worktree-manager/tests/test_self_install.py` 23/25, 2 skipped for the
+  same symlink-privilege reason) both fully green. `ruff`, install-contract,
+  version-bump, version-consistency, and changefile-presence checks all
+  pass. Landed as a single PR (the work was already a coherent, additive-
+  then-cutover-in-one unit by the time it was resumed -- not re-split into
+  per-step PRs since no intermediate state needed independent landing).
+
+- **2026-10-01** — Claiming Phase 4's "Open question, not yet designed"
+  item: the bare-invocation seam's hardcoded `worktree-manager`-binstub
+  health-probe should become a generic, pluggable **registration contract**
+  (marker file/env var/capability probe) any conforming third-party
+  Picker/control-plane provider could satisfy. **Operator direction
+  (2026-10-01): design and implement the generic contract now** (explicitly
+  chosen over the alternative of formally closing this as
+  intentionally-single-provider). Working solo per standing operator
+  directive; recorded here per this effort's own Coordination-section
+  claiming discipline since #352 is closed.
 
 - **2026-10-01** — Closed the Phase 4 **absent-Manager onboarding polish**
   item via [#4838](https://github.com/ThomasMichon/copilot-extensions/pull/4838),
