@@ -310,16 +310,19 @@ def test_render_local_cache_reports_root_error_without_raising(
 
 
 def test_render_local_cache_write_incapable_destination_leaves_checked_in_floor(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A write-incapable local-cache destination must report a blocking
     finding and leave the checked-in floor as the only available content --
     no exception raised to the caller, and no partial/corrupt sibling file
-    left behind. The destination is occupied by a directory (rather than
-    chmod'd read-only) so the simulated failure is reliable across
-    platforms -- a read-only *attribute* does not reliably block writes on
-    Windows, but a directory in the way always fails the atomic write's
-    final ``os.replace``."""
+    left behind. The write failure (e.g. a read-only target directory) is
+    injected by monkeypatching ``_atomic_write`` to raise ``OSError`` for
+    this one destination -- chmod'ing a real directory read-only is not a
+    reliable write-blocker on Windows, and occupying the destination path
+    with a directory is rejected earlier, by the existing-file
+    regular-file check, before the write is ever attempted; this instead
+    makes the atomic write itself fail, which is the path this test is
+    actually proving."""
     repo = tmp_path / "repo"
     repo.mkdir()
     _plugin, source = _write_plugin(tmp_path, "market", "policy")
@@ -332,7 +335,14 @@ def test_render_local_cache_write_incapable_destination_leaves_checked_in_floor(
     checked_in.write_bytes(checked_in_content)
 
     local_path = checked_in.parent / "fallback.local.instructions.md"
-    local_path.mkdir()
+    real_atomic_write = projections._atomic_write
+
+    def _write_incapable(path: Path, content: bytes) -> None:
+        if path == local_path:
+            raise OSError(13, "Permission denied: simulated write-incapable target")
+        real_atomic_write(path, content)
+
+    monkeypatch.setattr(projections, "_atomic_write", _write_incapable)
 
     result = projections.render_local_cache(repo, lambda: [source])
 
@@ -340,11 +350,11 @@ def test_render_local_cache_write_incapable_destination_leaves_checked_in_floor(
     assert result.changed == []
     # The checked-in floor -- the only available content -- is untouched.
     assert checked_in.read_bytes() == checked_in_content
-    # No partial/corrupt sibling was left behind: the occupying directory
-    # is still exactly a directory, and no stray atomic-write temp file
-    # remains beside it.
-    assert local_path.is_dir()
-    assert list(local_path.iterdir()) == []
+    # No partial/corrupt sibling was left behind: the destination never
+    # came into existence at all, and no stray atomic-write temp file
+    # remains beside it (the real _atomic_write's own finally-unlink
+    # never even ran, since the injected failure replaces it entirely).
+    assert not local_path.exists()
     leftovers = [p.name for p in checked_in.parent.iterdir()]
     assert not any(
         name.startswith(".fallback.local.instructions.md.") for name in leftovers

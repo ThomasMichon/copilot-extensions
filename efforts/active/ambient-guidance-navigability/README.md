@@ -513,13 +513,14 @@ and the new sibling pattern doc,
       with no error raised to the caller and no partial/corrupt
       `.local.instructions.md` file left behind. **Landed**:
       `test_render_local_cache_write_incapable_destination_leaves_checked_in_floor`
-      in `tests/test_instruction_projections.py` -- occupies the local
-      cache destination with a directory (chmod read-only is not a
-      reliable write-blocker on Windows, but a directory in the way always
-      fails the atomic write's final `os.replace`), proving the checked-in
-      floor is left byte-identical, the call reports a blocking finding
-      rather than raising, and no stray temp file or corrupt sibling is
-      left behind.
+      in `tests/test_instruction_projections.py` -- injects a write failure
+      by monkeypatching `_atomic_write` to raise `OSError` for the local
+      cache destination (chmod read-only is not a reliable write-blocker
+      on Windows, and occupying the destination with a directory is
+      rejected earlier by the existing-file regular-file check, before
+      the write is ever attempted), proving the checked-in floor is left
+      byte-identical, the call reports a blocking finding rather than
+      raising, and no stray temp file or corrupt sibling is left behind.
 
 ## Validation Plan
 
@@ -667,14 +668,18 @@ clean-room one in the same file.
 - **The write-incapable negative-proof test** (Plan, last item, not
   flagged by the inbound handoff): added
   `test_render_local_cache_write_incapable_destination_leaves_checked_in_floor`
-  in `tests/test_instruction_projections.py`. Occupies the local-cache
-  destination path with a directory (chmod read-only is not a reliable
-  write-blocker on Windows, but a directory in the way always fails the
-  atomic write's final `os.replace`) and proves: the checked-in floor is
-  left byte-identical, `render_local_cache` reports a blocking finding
-  rather than raising, and no stray atomic-write temp file or corrupt
-  sibling is left behind. `tools/run-plugin-tests.py customizing-copilot`:
-  308 passed, 8 skipped -- no regressions.
+  in `tests/test_instruction_projections.py`. Injects a write failure by
+  monkeypatching `_atomic_write` to raise `OSError` for the local-cache
+  destination (chmod read-only is not a reliable write-blocker on Windows,
+  and occupying the destination with a directory is rejected earlier by
+  the existing-file regular-file check, before the write is ever
+  attempted -- an earlier draft of this test made exactly that mistake,
+  caught and fixed per PR #4898's own Copilot review round 1) and proves:
+  the checked-in floor is left byte-identical, `render_local_cache`
+  reports a blocking finding rather than raising, and no stray
+  atomic-write temp file or corrupt sibling is left behind.
+  `tools/run-plugin-tests.py customizing-copilot`: 308 passed, 8 skipped --
+  no regressions.
 - **Every Phase 7 Plan and Validation Plan item is now resolved -- Phase 7
   is Done.** The effort overall stays **Active**: Phase 2's two remaining
   Validation Plan items are pre-existing, already-scoped states (one an
