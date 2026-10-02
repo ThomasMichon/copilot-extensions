@@ -292,12 +292,18 @@ class PRConfig:
     # - ``allow_stale_approval`` -- may an approval submitted against an older
     #   head still authorize completion when the live PR is otherwise mergeable?
     #   False by default; enable only where repository policy permits it.
+    # - ``dismiss_stale_reviews`` -- does THIS repo's branch protection
+    #   dismiss an approval on head movement? ``None`` (default) = unknown;
+    #   ``adopt`` writes ``true``/``false`` from a live read. Confirmed
+    #   ``false`` lets an approval survive a clean rebase (copilot-extensions
+    #   #2060) -- layered under ``allow_stale_approval``, not a replacement.
     # - ``squash`` / ``delete_source_branch`` -- ADO auto-complete options.
     # - ``bypass_policy`` / ``bypass_reason`` -- complete PAST branch policies
     #   (for a default branch whose policy never auto-satisfies for our own PRs,
     #   e.g. a central governance status policy). ADO-only; ignored elsewhere.
     approval_required: bool = True
     allow_stale_approval: bool = False
+    dismiss_stale_reviews: bool | None = None
     squash: bool = True
     delete_source_branch: bool = True
     bypass_policy: bool = False
@@ -1820,6 +1826,10 @@ def _parse_pr(raw: Any) -> PRConfig:
         wip_title_prefixes=_str_tuple(raw.get("wip_title_prefixes", ())),
         approval_required=bool(raw.get("approval_required", True)),
         allow_stale_approval=bool(raw.get("allow_stale_approval", False)),
+        dismiss_stale_reviews=(
+            bool(raw["dismiss_stale_reviews"])
+            if raw.get("dismiss_stale_reviews") is not None else None
+        ),
         squash=bool(raw.get("squash", True)),
         delete_source_branch=bool(raw.get("delete_source_branch", True)),
         bypass_policy=bool(raw.get("bypass_policy", False)),

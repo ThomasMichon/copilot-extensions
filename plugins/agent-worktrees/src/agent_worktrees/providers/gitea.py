@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import time
 from email.utils import parsedate_to_datetime
+from urllib.parse import quote
 
 from ..pr_contract import Comment, CommentThread, PRSnapshot, Review, ThreadsResult
 from .base import ProviderError, PRScope, PullResult, run_cli
@@ -870,11 +871,20 @@ class GiteaProvider:
         One read: ``GET /repos/{repo}`` returns both the repo's merge-method
         settings and a ``permissions`` object (``admin``/``push``/``pull``
         booleans) for the **authenticated identity** -- whoever's token this
-        is, not a config value. Branch-protection detail (required reviews /
-        status checks) is not read here (Gitea's protection API needs admin
-        rights the acting token may not hold); those fields stay ``None``.
-        Never raises: a failed read yields ``RepoPolicy(supported=False,
-        error=...)``.
+        is, not a config value. Required-reviews / required-status-checks
+        detail is not read here (Gitea's protection API needs admin rights the
+        acting token may not hold); those fields stay ``None``.
+
+        A second, best-effort read -- ``GET
+        /repos/{repo}/branch_protections/{default_branch}`` -- fills in
+        ``dismiss_stale_reviews`` from Gitea's ``dismiss_stale_approvals``
+        setting (copilot-extensions#2060; read access suffices, so this
+        works for the lower-privilege collaborator token too). A 404 (no
+        protection rule) means nothing dismisses -> ``False``; any other
+        failure leaves the field ``None`` (unknown) rather than guessing.
+
+        Never raises: a failed primary read yields
+        ``RepoPolicy(supported=False, error=...)``.
         """
         from ..pr_contract import RepoPolicy
 
@@ -905,12 +915,40 @@ class GiteaProvider:
             v = data.get(key)
             return bool(v) if isinstance(v, bool) else None
 
+        dismiss_stale_reviews: bool | None = None
+        if default_branch:
+            try:
+                pstatus, pbody = self._curl(
+                    "GET",
+                    self._api(
+                        api_base,
+                        f"/repos/{repo}/branch_protections/"
+                        f"{quote(default_branch, safe='')}",
+                    ),
+                    token,
+                )
+            except ProviderError:
+                pstatus, pbody = 0, ""
+            if pstatus == 404:
+                dismiss_stale_reviews = False  # no rule -> nothing dismisses
+            elif pstatus == 200:
+                try:
+                    prot = json.loads(pbody)
+                except json.JSONDecodeError:
+                    prot = None
+                if isinstance(prot, dict):
+                    dsa = prot.get("dismiss_stale_approvals")
+                    if isinstance(dsa, bool):
+                        dismiss_stale_reviews = dsa
+            # else (403/5xx/unreachable): leave None (unknown).
+
         return RepoPolicy(
             supported=True,
             allow_squash=_b("allow_squash_merge"),
             allow_merge_commit=_b("allow_merge_commits"),
             allow_rebase=_b("allow_rebase"),
             delete_branch_on_merge=_b("default_delete_branch_after_merge"),
+            dismiss_stale_reviews=dismiss_stale_reviews,
             viewer_permission=_gitea_viewer_permission(data.get("permissions")),
         )
 

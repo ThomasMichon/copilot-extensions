@@ -765,13 +765,14 @@ class GitHubProvider:
 
         Two reads: ``gh api repos/<repo>`` (merge methods, native auto-merge,
         delete-branch-on-merge) and, best-effort, the default branch's
-        protection (required approving reviews, required status checks).
-        Both explicitly target ``authority_endpoint(api_base)`` rather than
-        gh's ambient default host -- required for ``viewer_permission`` to
-        describe the acting identity's access on *this* repo's real host.
-        Never raises: a failed settings read yields
-        ``RepoPolicy(supported=False, error=...)``; an unreadable/absent
-        protection leaves those fields ``None``.
+        protection (required approving reviews, required status checks,
+        ``dismiss_stale_reviews`` -- copilot-extensions#2060). Both target
+        ``authority_endpoint(api_base)`` rather than gh's ambient default
+        host -- required for ``viewer_permission`` to describe the acting
+        identity's access on *this* repo's real host. Never raises: a failed
+        settings read yields ``RepoPolicy(supported=False, error=...)``; an
+        unreadable protection response leaves those fields ``None`` (a
+        confirmed-absent protection reports ``dismiss_stale_reviews=False``).
         """
         from ..pr_contract import RepoPolicy
 
@@ -799,6 +800,7 @@ class GitHubProvider:
 
         req_reviews: int | None = None
         req_checks: bool | None = None
+        dismiss_stale_reviews: bool | None = None
         if default_branch:
             pproc = run_cli(
                 ["gh", "api", "--hostname", host,
@@ -815,11 +817,15 @@ class GitHubProvider:
                     if isinstance(rpr, dict):
                         cnt = rpr.get("required_approving_review_count")
                         req_reviews = int(cnt) if isinstance(cnt, int) else 0
+                        dsr = rpr.get("dismiss_stale_reviews")
+                        if isinstance(dsr, bool):
+                            dismiss_stale_reviews = dsr
                     rsc = prot.get("required_status_checks")
                     req_checks = bool(rsc)
             elif "Not Found" in (pproc.stderr + pproc.stdout):
                 # No protection configured on the default branch -> nothing gates.
                 req_reviews, req_checks = 0, False
+                dismiss_stale_reviews = False
 
         return RepoPolicy(
             supported=True,
@@ -830,6 +836,7 @@ class GitHubProvider:
             delete_branch_on_merge=_b("delete_branch_on_merge"),
             required_approving_reviews=req_reviews,
             has_required_status_checks=req_checks,
+            dismiss_stale_reviews=dismiss_stale_reviews,
             viewer_permission=viewer_permission,
         )
 

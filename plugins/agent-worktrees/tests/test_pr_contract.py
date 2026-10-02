@@ -205,6 +205,41 @@ class TestEffectiveVerdict:
         reviews = (_rev(1, "APPROVED", commit_id="old"),)
         assert pc.effective_verdict(reviews, "new", "author") == ""
 
+    def test_stale_approval_on_old_head_ignored_when_dismiss_policy_unknown(self):
+        """``dismiss_stale_reviews`` unset (``None``) keeps the pre-existing
+        conservative deny: no policy evidence either way, so a raw head
+        movement still invalidates the approval -- unchanged default
+        behavior for providers/repos we have no policy read for."""
+        reviews = (_rev(1, "APPROVED", commit_id="old"),)
+        assert pc.effective_verdict(
+            reviews, "new", "author", dismiss_stale_reviews=None,
+        ) == ""
+
+    def test_stale_approval_on_old_head_ignored_when_dismiss_policy_confirmed_true(self):
+        reviews = (_rev(1, "APPROVED", commit_id="old"),)
+        assert pc.effective_verdict(
+            reviews, "new", "author", dismiss_stale_reviews=True,
+        ) == ""
+
+    def test_stale_approval_survives_when_dismiss_policy_confirmed_false(self):
+        """copilot-extensions#2060: a repo whose branch protection does NOT
+        dismiss stale reviews must not have its approval invalidated by a
+        raw commit-SHA mismatch alone (e.g. a clean rebase with no content
+        change) -- only the provider's own ``review.dismissed`` signal
+        (already filtered upstream by ``_latest_verdict``) should govern."""
+        reviews = (_rev(1, "APPROVED", commit_id="old"),)
+        assert pc.effective_verdict(
+            reviews, "new", "author", dismiss_stale_reviews=False,
+        ) == "APPROVED"
+
+    def test_dismiss_policy_confirmed_false_still_honors_provider_dismissed_flag(self):
+        """A confirmed non-dismissing policy only skips the raw-SHA deny; a
+        review the provider itself marked ``dismissed`` is still excluded."""
+        reviews = (_rev(1, "APPROVED", commit_id="old", dismissed=True),)
+        assert pc.effective_verdict(
+            reviews, "new", "author", dismiss_stale_reviews=False,
+        ) == ""
+
     def test_stale_approval_can_be_retained_by_policy(self):
         reviews = (
             _rev(
@@ -736,6 +771,19 @@ class TestDerivePolicyMatrix:
     def test_unknown_settings_omitted(self):
         # All-None settings speak to nothing -> no keys emitted (defaults apply).
         assert pc.derive_policy_matrix(pc.RepoPolicy()) == {}
+
+    def test_dismiss_stale_reviews_mirrors_confirmed_setting(self):
+        assert pc.derive_policy_matrix(
+            pc.RepoPolicy(dismiss_stale_reviews=True)
+        )["dismiss_stale_reviews"] is True
+        assert pc.derive_policy_matrix(
+            pc.RepoPolicy(dismiss_stale_reviews=False)
+        )["dismiss_stale_reviews"] is False
+
+    def test_dismiss_stale_reviews_omitted_when_unknown(self):
+        assert "dismiss_stale_reviews" not in pc.derive_policy_matrix(
+            pc.RepoPolicy(dismiss_stale_reviews=None)
+        )
 
 
 # ---------------------------------------------------------------------------

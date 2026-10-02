@@ -1902,6 +1902,7 @@ def _live_pr_state(
             active.head_observed_at if evidence_matches_endpoint else ""
         ),
         review_blocking=bool(getattr(prcfg, "review_blocking", False)),
+        dismiss_stale_reviews=getattr(prcfg, "dismiss_stale_reviews", None),
     )
     self_merge_note = None
     if st.merge_state not in ("merged", "closed") and not st.wip and not st.held:

@@ -386,17 +386,26 @@ def effective_verdict(
     stale_approval_head_sha: str = "",
     stale_approval_head_observed_at: str = "",
     review_blocking: bool = True,
+    dismiss_stale_reviews: bool | None = None,
 ) -> str:
     """Reduce a PR's reviews to one effective verdict at ``head_sha``.
 
     Considers only *submitted*, non-dismissed reviews that are not the PR
-    author's own.  The latest such review (by id) wins.  An ``APPROVED``
-    review normally counts only if it was submitted against the current head.
-    When ``allow_stale_approval`` is true, a stale approval remains effective
-    only when provider-clock evidence proves the exact live head was observed
-    before the approval was submitted. Every plugin-mediated push clears and
-    reacquires that evidence, so a later mediated push cannot inherit an older
-    approval. Callers still expose staleness through :class:`PRState`.
+    author's own (a review the provider itself marked ``dismissed`` is
+    already filtered out by :func:`_latest_verdict`). The latest wins.
+
+    An ``APPROVED`` review at an older head is discarded by a raw
+    commit-SHA mismatch unless ``dismiss_stale_reviews`` is confirmed
+    ``False`` (the repo's branch protection does not dismiss stale
+    reviews), in which case ``review.dismissed`` governs instead -- a
+    non-dismissing policy never transitions the review server-side
+    (copilot-extensions#2060: a clean rebase with no content change was
+    stripping approvals policy never asked to invalidate). ``True`` or
+    unknown (``None``, the default) preserves the prior deny-by-default.
+    ``allow_stale_approval`` layers a narrower allowance on top: a stale
+    approval remains effective only when provider-clock evidence proves the
+    live head was observed before submission (cleared/reacquired on every
+    mediated push). Callers still expose staleness via :class:`PRState`.
 
     ``review_blocking`` (default ``True``, unchanged behavior) selects
     :data:`VERDICT_STATES`; ``False`` selects
@@ -415,6 +424,7 @@ def effective_verdict(
         and head_sha
         and latest_commit
         and latest_commit != head_sha
+        and dismiss_stale_reviews is not False
         and not _stale_approval_is_authoritative(
             latest,
             head_sha=head_sha,
@@ -628,6 +638,7 @@ def classify_state(
     stale_approval_head_sha: str = "",
     stale_approval_head_observed_at: str = "",
     review_blocking: bool = True,
+    dismiss_stale_reviews: bool | None = None,
 ) -> PRState:
     """Map a provider snapshot onto the unified :class:`PRState`.
 
@@ -678,6 +689,7 @@ def classify_state(
         stale_approval_head_sha=stale_approval_head_sha,
         stale_approval_head_observed_at=stale_approval_head_observed_at,
         review_blocking=review_blocking,
+        dismiss_stale_reviews=dismiss_stale_reviews,
     )
     ms = merge_state(snap)
     consent_present = bool(automerge_label) and automerge_label.lower() in label_set
@@ -760,6 +772,7 @@ def merge_readiness(
     stale_approval_head_sha: str = "",
     stale_approval_head_observed_at: str = "",
     review_blocking: bool = True,
+    dismiss_stale_reviews: bool | None = None,
 ) -> dict:
     """A caller-facing "what stands between this PR and merge" summary.
 
@@ -795,6 +808,7 @@ def merge_readiness(
         stale_approval_head_sha=stale_approval_head_sha,
         stale_approval_head_observed_at=stale_approval_head_observed_at,
         review_blocking=review_blocking,
+        dismiss_stale_reviews=dismiss_stale_reviews,
     )
     return occupancy_from_readiness({
         "verdict": st.verdict,
@@ -1371,6 +1385,13 @@ class RepoPolicy:
     delete_branch_on_merge: bool | None = None
     required_approving_reviews: int | None = None
     has_required_status_checks: bool | None = None
+    dismiss_stale_reviews: bool | None = None
+    """Does the repo's branch protection dismiss an approval on head
+    movement (GitHub ``dismiss_stale_reviews`` / Gitea
+    ``dismiss_stale_approvals``)? ``None`` when unreadable/unconfigured --
+    :func:`effective_verdict` keeps its conservative deny-on-stale-head
+    default. A confirmed ``False`` lets a non-dismissing repo's approvals
+    survive a bare head movement (copilot-extensions#2060)."""
     viewer_permission: str = ""
     """The acting identity's own live permission level on the repo, normalized
     to a lowercase provider-neutral token (``"admin"`` / ``"maintain"`` /
@@ -1424,6 +1445,11 @@ def derive_policy_matrix(policy: RepoPolicy) -> dict:
         blocking_signals.append(bool(policy.has_required_status_checks))
     if blocking_signals:
         out["review_blocking"] = any(blocking_signals)
+
+    # dismiss_stale_reviews: mirror the confirmed branch-protection setting
+    # (copilot-extensions#2060); omitted when unread/unknown.
+    if policy.dismiss_stale_reviews is not None:
+        out["dismiss_stale_reviews"] = bool(policy.dismiss_stale_reviews)
 
     return out
 

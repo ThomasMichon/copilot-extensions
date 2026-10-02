@@ -46,6 +46,7 @@ def decorate_events(
     stale_approval_head_sha: str = "",
     stale_approval_head_observed_at: str = "",
     review_blocking: bool = True,
+    dismiss_stale_reviews: bool | None = None,
 ) -> dict:
     """Wrap the raw transition list into the final result payload.
 
@@ -87,6 +88,7 @@ def decorate_events(
             stale_approval_head_sha=stale_approval_head_sha,
             stale_approval_head_observed_at=stale_approval_head_observed_at,
             review_blocking=review_blocking,
+            dismiss_stale_reviews=dismiss_stale_reviews,
         )
     )
     return payload
@@ -109,6 +111,7 @@ def run_wait(
     stale_approval_head_sha: str = "",
     stale_approval_head_observed_at: str = "",
     review_blocking: bool = True,
+    dismiss_stale_reviews: bool | None = None,
     now: Callable[[], float] | None = None,
     sleep: Callable[[float], None] | None = None,
     on_poll: Callable[[pc.PRSnapshot], None] | None = None,
@@ -146,6 +149,7 @@ def run_wait(
             stale_approval_head_sha=stale_approval_head_sha,
             stale_approval_head_observed_at=stale_approval_head_observed_at,
             review_blocking=review_blocking,
+            dismiss_stale_reviews=dismiss_stale_reviews,
         )
 
     deadline = now() + timeout if timeout > 0 else None
@@ -191,7 +195,9 @@ def run_wait(
                 if base.approved is None:
                     base = replace(base, approved=(
                         pc.effective_verdict(
-                            snap.reviews, snap.head_sha, snap.author) == "approved"
+                            snap.reviews, snap.head_sha, snap.author,
+                            dismiss_stale_reviews=dismiss_stale_reviews,
+                        ) == "approved"
                     ))
                 events = pc.compute_events(base, snap, until)
                 if events:
