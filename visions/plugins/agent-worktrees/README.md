@@ -187,18 +187,21 @@ A family of `preToolUse` hooks (`anchor_write_guard`, `cross_repo_guard`,
 `statelessness_guard`) nudges an agent before it writes somewhere it
 shouldn't — the shared anchor checkout, a different agent-guarded repo, or
 personal state inside a stateless harness. Their harm model is **unreported
-drift or misrouted ownership**, not adversarial evasion: `anchor_write_guard`
-and `statelessness_guard` prevent a dirty anchor or orphaned state that
-silently never lands anywhere durable; `cross_repo_guard` keeps an edit
+drift, misrouted ownership, or accidental disclosure**, not adversarial
+evasion: `anchor_write_guard` prevents a dirty anchor that silently never
+lands anywhere durable; `statelessness_guard` keeps personal state (which
+the harness's own binding guidance treats as sensitive) out of a shareable
+stateless harness repo, where a missed case could strand or even publish it
+rather than merely leave it non-durable; `cross_repo_guard` keeps an edit
 routed through the guarded repo's own owning agent so the change actually
 follows *that* repo's own rules — its instructions, skills, and contribution
 posture — rather than landing under the launching harness's rules instead.
 An edit made under the wrong repo's rules doesn't fail quietly either way —
 it surfaces downstream as PR review friction and churn once the target
-repo's own reviewer (human or automated) catches the mismatch — so the
-guard exists to save that wasted round-trip, not to enforce compliance
-against a bad actor. Neither concern is a security boundary defending
-against a deliberately evasive adversary.
+repo's own reviewer (human or automated) catches the mismatch — so that
+guard specifically exists to save the wasted round-trip, not to enforce
+compliance against a bad actor. None of the three is a security boundary
+defending against a deliberately evasive adversary.
 They assume a cooperative agent
 that receives and acts on the reminder once it reaches the guard's covered
 path; exhaustively closing every exotic invocation that could evade
