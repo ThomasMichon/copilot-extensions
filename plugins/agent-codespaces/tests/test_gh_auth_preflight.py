@@ -163,12 +163,44 @@ def test_credential_account_for_ambient_codespace_uses_active_gh_account(monkeyp
     from agent_codespaces import gh_account
 
     monkeypatch.setattr(
+        "agent_codespaces.account_binding.bound_account_or_raise", lambda name: None,
+    )
+    monkeypatch.setattr(
         "agent_codespaces.lifecycle.account_for_codespace",
         lambda name: None,
     )
     monkeypatch.setattr(gh_account, "active_account", lambda **_kw: "active-user")
 
     assert gh_account.credential_account_for_codespace("ambient-cs") == "active-user"
+
+
+def test_credential_account_never_guesses_when_the_binding_is_unreadable(monkeypatch):
+    from agent_codespaces import account_binding, gh_account
+
+    def contended(_name):
+        raise RuntimeError("Could not acquire account binding lock (held by another process)")
+
+    def must_not_call(*_a, **_kw):
+        raise AssertionError("must not fall back to the resolver or ambient account")
+
+    monkeypatch.setattr(account_binding, "bound_account_or_raise", contended)
+    monkeypatch.setattr("agent_codespaces.lifecycle.account_for_codespace", must_not_call)
+    monkeypatch.setattr(gh_account, "active_account", must_not_call)
+    assert gh_account.credential_account_for_codespace("cs-a") is None
+
+
+def test_credential_account_prefers_the_binding(monkeypatch):
+    from agent_codespaces import gh_account
+
+    def must_not_call(*_a, **_kw):
+        raise AssertionError("must not probe when a binding exists")
+
+    monkeypatch.setattr(
+        "agent_codespaces.account_binding.bound_account_or_raise", lambda name: "bound-user",
+    )
+    monkeypatch.setattr("agent_codespaces.lifecycle.account_for_codespace", must_not_call)
+    monkeypatch.setattr(gh_account, "active_account", must_not_call)
+    assert gh_account.credential_account_for_codespace("cs-1") == "bound-user"
 
 
 def test_active_account_reads_gh_json(monkeypatch):

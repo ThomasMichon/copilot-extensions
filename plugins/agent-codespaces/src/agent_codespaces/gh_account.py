@@ -165,9 +165,21 @@ def active_account(host: str = "github.com", *, timeout: float = 10.0) -> str | 
 def credential_account_for_codespace(name: str) -> str | None:
     """Account to pass as github.com credential username for this connection.
 
-    Uses the existing CodeSpace resolver first. ``None`` there means this
-    CodeSpace is operated through ambient gh auth, so use gh's active account.
+    The persisted binding is authoritative: an unreadable binding (lock
+    contention) is unknown, not absent, so this returns None rather than guess
+    the ambient account (matching :func:`fast_credential_account_for_codespace`).
+    With no binding, the existing CodeSpace resolver runs; ``None`` there means
+    this CodeSpace is operated through ambient gh auth, so use gh's active account.
     """
+    from . import account_binding
+
+    try:
+        bound = account_binding.bound_account_or_raise(name)
+    except Exception:
+        log.warning("CodeSpace %s account binding is unavailable; not guessing an account", name)
+        return None
+    if bound:
+        return bound
     try:
         from .lifecycle import account_for_codespace
 

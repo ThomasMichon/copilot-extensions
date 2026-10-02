@@ -1182,7 +1182,7 @@ def _ssh_session(
     from .worktrees import ContextRefused
 
     source = CodespaceSource(args.name, account=account_for_codespace(args.name))
-    github_account = credential_account_for_codespace(args.name)
+    github_account = None if args.no_relay else credential_account_for_codespace(args.name)
     config = load_merged_config()
     from .relay_launch import effective_relay_port
     relay_port = effective_relay_port(config)
@@ -2461,9 +2461,9 @@ def _interactive_ssh(
     # then overlay the relay vars. Start from the account env so GH_TOKEN is set
     # even when no relay vars are present.
     account = lifecycle.account_for_codespace(codespace_name)
-    github_account = gh_account.credential_account_for_codespace(codespace_name)
     env = gh_account.env_for_account(account) if account else None
     if relay_port is not None:
+        github_account = gh_account.credential_account_for_codespace(codespace_name)
         env = {
             **(env if env is not None else os.environ),
             "LC_GIT_CREDENTIAL_RELAY": str(relay_port),
