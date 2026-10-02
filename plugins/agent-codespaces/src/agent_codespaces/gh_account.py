@@ -143,8 +143,8 @@ def active_account(host: str = "github.com", *, timeout: float = 10.0) -> str | 
         )
     except Exception:
         return None
-    if result.returncode != 0:
-        return None
+    # A failed API check can make gh exit nonzero while its JSON still names
+    # the active login, so parse whatever it printed.
     try:
         data = json.loads(result.stdout or "{}")
     except Exception:
@@ -153,7 +153,10 @@ def active_account(host: str = "github.com", *, timeout: float = 10.0) -> str | 
     for entry in entries:
         if not isinstance(entry, dict):
             continue
-        if entry.get("active") is True and entry.get("state") == "success":
+        # The configured active login, even if gh's API check timed out or
+        # errored: account selection must not depend on that probe (the
+        # credential preflight reports whether the account is usable).
+        if entry.get("active") is True:
             login = str(entry.get("login") or "").strip()
             return login or None
     return None

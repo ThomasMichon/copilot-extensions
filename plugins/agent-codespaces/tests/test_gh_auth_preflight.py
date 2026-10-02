@@ -186,6 +186,51 @@ def test_active_account_reads_gh_json(monkeypatch):
     assert "--active" in run.call_args.args[0]
 
 
+def test_active_account_survives_a_failed_api_check(monkeypatch):
+    from agent_codespaces import gh_account
+
+    for state in ("timeout", "error"):
+        payload = json.dumps({"hosts": {"github.com": [
+            {"state": state, "active": True, "login": "active-user"}]}})
+        with patch("subprocess.run") as run:
+            run.return_value = MagicMock(returncode=1, stdout=payload, stderr="")
+            assert gh_account.active_account() == "active-user"
+
+
+def test_preflight_ignores_an_unrelated_account_that_failed_to_log_in():
+    status = _STATUS + """
+  X Failed to log in to github.com account carol (keyring)
+  - The token in keyring is invalid.
+"""
+    with patch("subprocess.run") as run, \
+         patch("agent_codespaces.auth_preflight.codespace_scope_accounts",
+               return_value=(("alice",), False)):
+        run.return_value = MagicMock(returncode=1, stdout=status, stderr="")
+        assert m._gh_auth_preflight() == []
+
+
+def test_preflight_reports_a_codespace_account_that_failed_to_log_in():
+    status = _STATUS + """
+  X Failed to log in to github.com account carol (keyring)
+  - The token in keyring is invalid.
+"""
+    with patch("subprocess.run") as run, \
+         patch("agent_codespaces.auth_preflight.codespace_scope_accounts",
+               return_value=(("carol",), False)), \
+         patch("agent_codespaces.__main__._account_login_remedy",
+               return_value="run: gh auth login"):
+        run.return_value = MagicMock(returncode=1, stdout=status, stderr="")
+        msgs = m._gh_auth_preflight()
+    assert any("carol" in msg and "not logged in" in msg for msg in msgs)
+
+
+def test_preflight_unauthenticated_when_no_account_parses():
+    with patch("subprocess.run") as run:
+        run.return_value = MagicMock(returncode=1, stdout="",
+                                     stderr="You are not logged into any GitHub hosts.")
+        assert m._gh_auth_preflight() == ["gh is not authenticated -- run: gh auth login"]
+
+
 def test_fast_credential_account_uses_binding_without_active_probe(monkeypatch):
     from agent_codespaces import gh_account
 

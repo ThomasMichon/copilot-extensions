@@ -60,6 +60,15 @@ def parse_gh_account_scopes(status_text: str) -> dict[str, set[str]]:
     return accounts
 
 
+def failed_gh_accounts(status_text: str) -> set[str]:
+    """Accounts ``gh auth status`` reports it failed to log in to (e.g. an
+    invalid or expired token); plain ``gh auth status`` exits nonzero for these."""
+    return set(re.findall(
+        r"failed to log in to \S+ account\s+([A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?)",
+        status_text, re.IGNORECASE,
+    ))
+
+
 def codespace_scope_accounts() -> tuple[tuple[str, ...], bool]:
     """``(explicit_accounts, uses_ambient)`` for CodeSpace operations."""
     accounts: list[str] = []
@@ -118,11 +127,16 @@ def gh_auth_preflight(status_func, account_login_remedy) -> list[str]:
         return ["gh CLI not found -- install from https://cli.github.com/ then run: gh auth login"]
     if rc == -2:
         return ["gh auth status timed out -- check your network / gh install."]
-    if rc != 0 or "not logged" in combined.lower():
-        return ["gh is not authenticated -- run: gh auth login"]
-
     per_account = parse_gh_account_scopes(combined)
-    lowered = {login.casefold(): scopes for login, scopes in per_account.items()}
+    # A nonzero exit can come from any one stored account failing; only the
+    # accounts selected below matter, so judge per account, not by exit code.
+    if not per_account:
+        return ["gh is not authenticated -- run: gh auth login"]
+    failed = {login.casefold() for login in failed_gh_accounts(combined)}
+    lowered = {
+        login.casefold(): scopes for login, scopes in per_account.items()
+        if login.casefold() not in failed
+    }
     accounts, uses_ambient = codespace_scope_accounts()
     if not accounts:
         msgs.extend(_active_scope_findings(lowered, combined))

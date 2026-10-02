@@ -797,6 +797,33 @@ class TestNamespaceSeams:
         assert bound == [("cs-a", "alice", "example-org/example")]
 
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("already_bound, raises", [(None, True), ("alice", False)])
+    async def test_namespace_ensure_ready_surfaces_a_lost_account_binding(
+        self, monkeypatch, already_bound, raises,
+    ):
+        from agent_codespaces.resolver import CodespaceResolver
+
+        monkeypatch.setattr(
+            "agent_codespaces.resolver.list_codespaces",
+            lambda: [types.SimpleNamespace(
+                name="cs-a", display_name="cs-a", repository="example-org/example",
+                branch="main", state="Available", account="alice")],
+        )
+
+        def _bind(*_a, **_k):
+            raise RuntimeError("Could not acquire account binding lock")
+
+        monkeypatch.setattr("agent_codespaces.account_binding.bind", _bind)
+        monkeypatch.setattr("agent_codespaces.account_binding.bound_account",
+                            lambda name: already_bound)
+        if raises:
+            with pytest.raises(RuntimeError, match="alice.*couldn't be recorded"):
+                await CodespaceResolver().ensure_ready("cs-a")
+        else:
+            await CodespaceResolver().ensure_ready("cs-a")
+
+
 class TestRecycleSafetyGate:
     """`finalize --delete` is gated on the cleanliness beacon (venue-pool
     Phase 3): a box is deletable only with a live, known, clean verdict; unknown
