@@ -60,13 +60,23 @@ def parse_gh_account_scopes(status_text: str) -> dict[str, set[str]]:
     return accounts
 
 
-def failed_gh_accounts(status_text: str) -> set[str]:
-    """Accounts ``gh auth status`` reports it failed to log in to (e.g. an
-    invalid or expired token); plain ``gh auth status`` exits nonzero for these."""
-    return set(re.findall(
-        r"failed to log in to \S+ account\s+([A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?)",
+def gh_account_failures(status_text: str) -> dict[str, str]:
+    """``{login (casefolded): "failed" | "timeout"}`` for the accounts ``gh auth
+    status`` couldn't verify: a failed login (an invalid or expired token) or a
+    timeout reaching GitHub. Plain ``gh auth status`` exits nonzero for either."""
+    out: dict[str, str] = {}
+    for kind, login in re.findall(
+        r"(failed to|timeout trying to) log in to \S+ account\s+"
+        r"([A-Za-z0-9_](?:[A-Za-z0-9_-]*[A-Za-z0-9_])?)",
         status_text, re.IGNORECASE,
-    ))
+    ):
+        out[login.casefold()] = "timeout" if kind.lower().startswith("timeout") else "failed"
+    return out
+
+
+def _timeout_finding(login: str) -> str:
+    return (f"couldn't verify gh account '{login}': gh auth status timed out reaching "
+            "GitHub -- retry once GitHub is reachable")
 
 
 def codespace_scope_accounts() -> tuple[tuple[str, ...], bool]:
@@ -100,11 +110,13 @@ def codespace_scope_accounts() -> tuple[tuple[str, ...], bool]:
 
 
 def _active_scope_findings(
-    lowered: dict[str, set[str]], combined: str
+    lowered: dict[str, set[str]], combined: str, failures: dict[str, str] | None = None
 ) -> list[str]:
     from . import gh_account
 
     active = gh_account.active_account()
+    if active and (failures or {}).get(active.casefold()) == "timeout":
+        return [_timeout_finding(active)]
     scopes = lowered.get(active.casefold()) if active else None
     if active and "codespace" not in {scope.casefold() for scope in (scopes or set())}:
         return [
@@ -132,20 +144,22 @@ def gh_auth_preflight(status_func, account_login_remedy) -> list[str]:
     # accounts selected below matter, so judge per account, not by exit code.
     if not per_account:
         return ["gh is not authenticated -- run: gh auth login"]
-    failed = {login.casefold() for login in failed_gh_accounts(combined)}
+    failures = gh_account_failures(combined)
     lowered = {
         login.casefold(): scopes for login, scopes in per_account.items()
-        if login.casefold() not in failed
+        if login.casefold() not in failures
     }
     accounts, uses_ambient = codespace_scope_accounts()
     if not accounts:
-        msgs.extend(_active_scope_findings(lowered, combined))
+        msgs.extend(_active_scope_findings(lowered, combined, failures))
         return msgs
     if uses_ambient:
-        msgs.extend(_active_scope_findings(lowered, combined))
+        msgs.extend(_active_scope_findings(lowered, combined, failures))
     for login in accounts:
         scopes = lowered.get(login.casefold())
-        if scopes is None:
+        if failures.get(login.casefold()) == "timeout":
+            msgs.append(_timeout_finding(login))
+        elif scopes is None:
             msgs.append(f"CodeSpace gh account '{login}' is not logged in -- {account_login_remedy(login)}")
         elif "codespace" not in {scope.casefold() for scope in scopes}:
             msgs.append(
@@ -295,6 +309,10 @@ async def github_credential_preflight(
     Mirrors the runtime relay order for CodeSpaces: non-interactive Git
     Credential Manager with the per-connection username when available.
     """
+    import asyncio
+    import time
+
+    deadline = time.monotonic() + timeout
     login = (account or "").strip() or None
     fields = {"protocol": "https", "host": "github.com"}
     if login:
@@ -303,7 +321,12 @@ async def github_credential_preflight(
     sources = [git_source or GitCredentialSource(github_username=login)]
     for source in sources:
         try:
-            response = await source.resolve("get", dict(fields), timeout=timeout)
+            # Bounded and cancellable: a hung helper is killed at the deadline
+            # (the relay's own resolve allows itself longer).
+            response = await asyncio.wait_for(
+                source.resolve("get", dict(fields), timeout=timeout),
+                timeout=max(0.1, deadline - time.monotonic()),
+            )
         except Exception:
             log.debug(
                 "github.com credential preflight source %s raised",
@@ -318,7 +341,10 @@ async def github_credential_preflight(
                 account=login,
             )
 
-    accounts = gcm_accounts if gcm_accounts is not None else gcm_github_accounts()
+    remaining = deadline - time.monotonic()
+    accounts = gcm_accounts if gcm_accounts is not None else (
+        gcm_github_accounts(timeout=remaining) if remaining > 0.5 else []
+    )
     if not login and len(accounts) > 1:
         return GithubCredentialPreflight(
             ok=False,

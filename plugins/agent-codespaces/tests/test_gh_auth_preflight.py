@@ -231,11 +231,55 @@ def test_preflight_unauthenticated_when_no_account_parses():
         assert m._gh_auth_preflight() == ["gh is not authenticated -- run: gh auth login"]
 
 
+def test_preflight_reports_a_status_timeout_as_a_timeout_not_a_missing_scope():
+    status = _STATUS + """
+  X Timeout trying to log in to github.com account carol (keyring)
+"""
+    with patch("subprocess.run") as run, \
+         patch("agent_codespaces.auth_preflight.codespace_scope_accounts",
+               return_value=(("carol",), False)):
+        run.return_value = MagicMock(returncode=1, stdout=status, stderr="")
+        msgs = m._gh_auth_preflight()
+    assert len(msgs) == 1 and "timed out" in msgs[0] and "carol" in msgs[0]
+    assert "scope" not in msgs[0]
+
+
+def test_fast_credential_account_never_guesses_when_the_binding_is_unreadable(monkeypatch):
+    from agent_codespaces import account_binding, gh_account
+
+    def contended(_name):
+        raise RuntimeError("Could not acquire account binding lock (held by another process)")
+
+    monkeypatch.setattr(account_binding, "bound_account_or_raise", contended)
+    monkeypatch.setattr(gh_account, "active_account",
+                        lambda **_kw: (_ for _ in ()).throw(AssertionError("must not guess ambient")))
+    assert gh_account.fast_credential_account_for_codespace("cs-a") is None
+
+
+def test_github_credential_preflight_honors_its_timeout():
+    import asyncio
+    import time
+
+    from agent_codespaces.auth_preflight import github_credential_preflight
+
+    class Hung:
+        name = "git-credential"
+
+        async def resolve(self, *_a, **_k):
+            await asyncio.sleep(30)
+
+    started = time.monotonic()
+    result = asyncio.run(github_credential_preflight(
+        "alice", git_source=Hung(), gcm_accounts=[], timeout=0.3))
+    assert not result.ok
+    assert time.monotonic() - started < 5
+
+
 def test_fast_credential_account_uses_binding_without_active_probe(monkeypatch):
     from agent_codespaces import gh_account
 
     monkeypatch.setattr(
-        "agent_codespaces.account_binding.bound_account",
+        "agent_codespaces.account_binding.bound_account_or_raise",
         lambda name: "bound-user",
     )
     monkeypatch.setattr(
@@ -251,7 +295,7 @@ def test_fast_credential_account_falls_back_to_active(monkeypatch):
     from agent_codespaces import gh_account
 
     monkeypatch.setattr(
-        "agent_codespaces.account_binding.bound_account",
+        "agent_codespaces.account_binding.bound_account_or_raise",
         lambda name: None,
     )
     monkeypatch.setattr(gh_account, "active_account", lambda **_kw: "active-user")

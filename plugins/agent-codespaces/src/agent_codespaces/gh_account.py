@@ -182,14 +182,18 @@ def credential_account_for_codespace(name: str) -> str | None:
 def fast_credential_account_for_codespace(
     name: str, *, timeout: float = 3.0
 ) -> str | None:
-    """Fast account for launch env: binding only, then bounded active gh."""
+    """Fast account for launch env: the binding, else (no binding) the bounded
+    active gh account. An unreadable binding (lock contention) is unknown, not
+    absent: it returns None rather than guess the ambient account, so the relay
+    never asks GCM for the wrong account."""
     deadline = time.monotonic() + max(0.1, timeout)
-    try:
-        from . import account_binding
+    from . import account_binding
 
-        account = account_binding.bound_account(name)
+    try:
+        account = account_binding.bound_account_or_raise(name)
     except Exception:
-        account = None
+        log.warning("CodeSpace %s account binding is unavailable; not guessing an account", name)
+        return None
     if account:
         return account
     remaining = max(0.1, deadline - time.monotonic())

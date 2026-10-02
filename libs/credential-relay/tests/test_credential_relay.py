@@ -930,3 +930,29 @@ class TestFailFast:
             assert server.stats.failfast_responses == 0
         finally:
             await server.stop()
+
+
+
+def test_git_credential_kills_a_helper_that_times_out(monkeypatch):
+    import asyncio
+
+    from credential_relay.sources import git_credential as gc
+
+    killed = []
+
+    class HungProc:
+        returncode = None
+
+        async def communicate(self, input=None):
+            await asyncio.sleep(30)
+
+        def kill(self):
+            killed.append(True)
+
+    async def fake_exec(*_a, **_k):
+        return HungProc()
+
+    monkeypatch.setattr(gc.asyncio, "create_subprocess_exec", fake_exec)
+    src = gc.GitCredentialSource()
+    out = asyncio.run(src._run_directly("fill", "protocol=https\nhost=github.com\n", timeout=0.1))
+    assert out is None and killed == [True]

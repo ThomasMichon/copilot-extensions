@@ -10,6 +10,7 @@ GCM roundtrips.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
 import shutil
@@ -261,7 +262,8 @@ class GitCredentialSource:
     async def _run_directly(
         self, action: str, credential_input: str, *, timeout: float = 30.0,
     ) -> str | None:
-        """Run git credential directly."""
+        """Run git credential directly; a timed-out or cancelled helper is killed."""
+        proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 "git", "credential", action,
@@ -281,6 +283,10 @@ class GitCredentialSource:
         except FileNotFoundError:
             log.error("git not found on PATH")
             return None
+        finally:
+            if proc is not None and proc.returncode is None:
+                with contextlib.suppress(ProcessLookupError, OSError):
+                    proc.kill()
 
         if proc.returncode != 0:
             log.error(
