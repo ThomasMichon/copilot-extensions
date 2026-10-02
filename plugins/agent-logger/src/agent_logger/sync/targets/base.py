@@ -19,11 +19,15 @@ Concrete targets:
 
 from __future__ import annotations
 
+import platform
+import shutil
+import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from agent_procutil import no_window_kwargs
+
 from agent_logger.sync.detritus import rsync_exclude
 
 # On Windows, child processes (rsync, ssh) launched from a windowless parent --
@@ -33,6 +37,88 @@ from agent_logger.sync.detritus import rsync_exclude
 # no console is spawned. Spread into every external-tool subprocess call as
 # ``**NO_WINDOW_KWARGS``.
 NO_WINDOW_KWARGS: dict = no_window_kwargs()
+
+_IS_WINDOWS = platform.system() == "Windows"
+_WSL_PROBE_TIMEOUT = 15
+
+
+def wsl_rsync_available() -> bool:
+    """Whether a usable WSL distro with ``rsync``+``ssh`` is reachable.
+
+    Windows has no native rsync distribution; the practical options are an
+    MSYS2/Cygwin-runtime ``rsync.exe``, or running rsync inside WSL. WSL is
+    strongly preferred when present: rsync and ssh both run in the *same*
+    Linux runtime there, sidestepping two distinct MSYS2/Cygwin-class bugs --
+    a cross-runtime ``-e ssh`` child corrupting the rsync protocol handshake,
+    and the rsync argument parser misreading a bare ``C:\\...`` local source
+    path as a ``host:path`` remote spec. Always ``False`` on POSIX (nothing
+    to prefer over the system rsync already on ``PATH``).
+    """
+    if not _IS_WINDOWS:
+        return False
+    if shutil.which("wsl.exe") is None:
+        return False
+    try:
+        proc = subprocess.run(
+            ["wsl.exe", "--", "sh", "-c", "command -v rsync && command -v ssh"],
+            capture_output=True,
+            timeout=_WSL_PROBE_TIMEOUT,
+            check=False,
+            **NO_WINDOW_KWARGS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0
+
+
+def wsl_posix_path(path: Path) -> str | None:
+    """Convert a Windows path to its WSL POSIX form via the authoritative ``wslpath``.
+
+    Returns ``None`` on any failure so callers can fall back rather than hand
+    rsync a malformed argument.
+    """
+    try:
+        proc = subprocess.run(
+            ["wsl.exe", "--", "wslpath", "-u", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=_WSL_PROBE_TIMEOUT,
+            check=False,
+            **NO_WINDOW_KWARGS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    converted = proc.stdout.strip()
+    if proc.returncode != 0 or not converted:
+        return None
+    return converted
+
+
+@dataclass
+class RsyncRuntime:
+    """Where/how to run rsync for one push: native, or WSL-wrapped on Windows.
+
+    Resolved once per push (rather than re-probed per call site) so a single
+    push only pays for the WSL availability/``wslpath`` subprocess probes
+    once.
+    """
+
+    command_prefix: list[str]
+    use_wsl: bool
+
+    def source_arg(self, source: Path) -> str:
+        """Render *source* as an rsync source argument, trailing slash included."""
+        if self.use_wsl:
+            converted = wsl_posix_path(source)
+            if converted:
+                return converted.rstrip("/") + "/"
+        return f"{source}/"
+
+
+def resolve_rsync_runtime() -> RsyncRuntime:
+    """Resolve the rsync runtime to use for this push: WSL-wrapped when available."""
+    use_wsl = wsl_rsync_available()
+    return RsyncRuntime(command_prefix=["wsl.exe", "--"] if use_wsl else [], use_wsl=use_wsl)
 
 
 @dataclass

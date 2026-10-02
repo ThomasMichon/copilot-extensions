@@ -1107,6 +1107,7 @@ def test_ssh_executable_is_plain_ssh_on_posix(monkeypatch, tmp_path: Path):
 def test_ssh_target_push_uses_sibling_ssh_in_command(monkeypatch, tmp_path: Path):
     """End-to-end: push()'s constructed rsync -e command must carry the
     resolved sibling ssh path, not a bare "ssh"."""
+    from agent_logger.sync.targets import base as sync_base
     from agent_logger.sync.targets import ssh as ssh_mod
 
     bin_dir = tmp_path / "msys64" / "usr" / "bin"
@@ -1119,6 +1120,10 @@ def test_ssh_target_push_uses_sibling_ssh_in_command(monkeypatch, tmp_path: Path
 
     monkeypatch.setattr(ssh_mod, "_IS_WINDOWS", True)
     monkeypatch.setattr(ssh_mod.shutil, "which", lambda _name: str(rsync_exe))
+    # This exercises the native-Windows (no WSL) sibling-ssh fallback
+    # specifically -- disable the WSL-preferred path so the test is
+    # deterministic regardless of whether the test host actually has WSL.
+    monkeypatch.setattr(sync_base, "wsl_rsync_available", lambda: False)
 
     captured_commands: list[list[str]] = []
 
@@ -1170,6 +1175,7 @@ def test_ssh_target_push_quotes_sibling_path_with_spaces(monkeypatch, tmp_path: 
     """The constructed `-e` command string must quote a sibling ssh path
     that contains a space (rsync re-splits that string on whitespace to
     build the command it execs)."""
+    from agent_logger.sync.targets import base as sync_base
     from agent_logger.sync.targets import ssh as ssh_mod
 
     bin_dir = tmp_path / "Program Files" / "msys64" / "usr" / "bin"
@@ -1182,6 +1188,7 @@ def test_ssh_target_push_quotes_sibling_path_with_spaces(monkeypatch, tmp_path: 
 
     monkeypatch.setattr(ssh_mod, "_IS_WINDOWS", True)
     monkeypatch.setattr(ssh_mod.shutil, "which", lambda _name: str(rsync_exe))
+    monkeypatch.setattr(sync_base, "wsl_rsync_available", lambda: False)
 
     captured_commands: list[list[str]] = []
 
@@ -1225,6 +1232,10 @@ def test_rsync_children_suppress_console_window(monkeypatch, tmp_path: Path) -> 
         return _Proc()
 
     monkeypatch.setattr("shutil.which", lambda _name: "rsync")
+    # Keep this test's NO_WINDOW_KWARGS/filter-arg assertions independent of
+    # whether the test host actually has WSL -- it exercises the native
+    # rsync invocation, not the WSL-wrapped one (covered separately).
+    monkeypatch.setattr(base, "wsl_rsync_available", lambda: False)
 
     monkeypatch.setattr(ssh.subprocess, "run", _fake_run)
     SshTarget({"host": "user@example", "remote_path": "/srv"}).push(
@@ -1243,6 +1254,231 @@ def test_rsync_children_suppress_console_window(monkeypatch, tmp_path: Path) -> 
     assert "--include=provenance/abc-123.json" in captured_commands[-1]
     assert "--exclude=*.hold" in captured_commands[-1]
     assert "--delete-excluded" not in captured_commands[-1]
+
+
+def test_wsl_rsync_available_false_on_posix(monkeypatch) -> None:
+    from agent_logger.sync.targets import base
+
+    monkeypatch.setattr(base, "_IS_WINDOWS", False)
+    assert base.wsl_rsync_available() is False
+
+
+def test_wsl_rsync_available_false_without_wsl_exe(monkeypatch) -> None:
+    from agent_logger.sync.targets import base
+
+    monkeypatch.setattr(base, "_IS_WINDOWS", True)
+    monkeypatch.setattr(base.shutil, "which", lambda _name: None)
+    assert base.wsl_rsync_available() is False
+
+
+def test_wsl_rsync_available_true_when_probe_succeeds(monkeypatch) -> None:
+    from agent_logger.sync.targets import base
+
+    monkeypatch.setattr(base, "_IS_WINDOWS", True)
+    monkeypatch.setattr(base.shutil, "which", lambda _name: r"C:\Windows\System32\wsl.exe")
+
+    class _Proc:
+        returncode = 0
+
+    monkeypatch.setattr(base.subprocess, "run", lambda *a, **k: _Proc())
+    assert base.wsl_rsync_available() is True
+
+
+def test_wsl_rsync_available_false_when_probe_fails(monkeypatch) -> None:
+    """wsl.exe exists but has no distro with both rsync and ssh on PATH."""
+    from agent_logger.sync.targets import base
+
+    monkeypatch.setattr(base, "_IS_WINDOWS", True)
+    monkeypatch.setattr(base.shutil, "which", lambda _name: r"C:\Windows\System32\wsl.exe")
+
+    class _Proc:
+        returncode = 1
+
+    monkeypatch.setattr(base.subprocess, "run", lambda *a, **k: _Proc())
+    assert base.wsl_rsync_available() is False
+
+
+def test_resolve_rsync_runtime_prefers_wsl_when_available(monkeypatch) -> None:
+    from agent_logger.sync.targets import base
+
+    monkeypatch.setattr(base, "wsl_rsync_available", lambda: True)
+    runtime = base.resolve_rsync_runtime()
+    assert runtime.use_wsl is True
+    assert runtime.command_prefix == ["wsl.exe", "--"]
+
+
+def test_resolve_rsync_runtime_native_without_wsl(monkeypatch) -> None:
+    from agent_logger.sync.targets import base
+
+    monkeypatch.setattr(base, "wsl_rsync_available", lambda: False)
+    runtime = base.resolve_rsync_runtime()
+    assert runtime.use_wsl is False
+    assert runtime.command_prefix == []
+
+
+def test_rsync_runtime_source_arg_converts_via_wslpath(monkeypatch, tmp_path: Path) -> None:
+    from agent_logger.sync.targets import base
+
+    class _Proc:
+        returncode = 0
+        stdout = "/mnt/c/Users/someuser/.copilot\n"
+
+    monkeypatch.setattr(base.subprocess, "run", lambda *a, **k: _Proc())
+    runtime = base.RsyncRuntime(command_prefix=["wsl.exe", "--"], use_wsl=True)
+    assert runtime.source_arg(tmp_path) == "/mnt/c/Users/someuser/.copilot/"
+
+
+def test_rsync_runtime_source_arg_falls_back_when_wslpath_fails(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from agent_logger.sync.targets import base
+
+    class _Proc:
+        returncode = 1
+        stdout = ""
+
+    monkeypatch.setattr(base.subprocess, "run", lambda *a, **k: _Proc())
+    runtime = base.RsyncRuntime(command_prefix=["wsl.exe", "--"], use_wsl=True)
+    assert runtime.source_arg(tmp_path) == f"{tmp_path}/"
+
+
+def test_rsync_runtime_source_arg_noop_without_wsl(tmp_path: Path) -> None:
+    from agent_logger.sync.targets import base
+
+    runtime = base.RsyncRuntime(command_prefix=[], use_wsl=False)
+    assert runtime.source_arg(tmp_path) == f"{tmp_path}/"
+
+
+def test_ssh_target_push_uses_wsl_wrapped_rsync(monkeypatch, tmp_path: Path) -> None:
+    """When WSL is available, push() must run rsync wrapped in `wsl.exe --`,
+    with a bare "ssh" (WSL's own, no cross-runtime sibling needed) and the
+    source path converted via wslpath instead of a raw Windows path."""
+    from agent_logger.sync.targets import base as sync_base
+    from agent_logger.sync.targets import ssh as ssh_mod
+
+    source = _make_source(tmp_path / "home")
+
+    monkeypatch.setattr(sync_base, "wsl_rsync_available", lambda: True)
+    monkeypatch.setattr(
+        sync_base, "wsl_posix_path", lambda _p: "/mnt/c/Users/someuser/.copilot"
+    )
+
+    captured_commands: list[list[str]] = []
+
+    class _Proc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def _fake_run(cmd, **kwargs):
+        captured_commands.append(cmd)
+        return _Proc()
+
+    monkeypatch.setattr(ssh_mod.subprocess, "run", _fake_run)
+    result = SshTarget({"host": "user@example", "remote_path": "/srv"}).push(source, "m1")
+
+    assert result.ok
+    cmd = captured_commands[-1]
+    assert cmd[:3] == ["wsl.exe", "--", "rsync"]
+    ssh_arg_index = cmd.index("-e") + 1
+    assert cmd[ssh_arg_index].startswith("ssh ")
+    assert "/mnt/c/Users/someuser/.copilot/" in cmd
+
+
+def test_ingest_target_push_uses_wsl_wrapped_rsync(monkeypatch, tmp_path: Path) -> None:
+    from agent_logger.sync.targets import base as sync_base
+    from agent_logger.sync.targets import ingest as ingest_mod
+
+    source = _make_source(tmp_path / "home")
+
+    monkeypatch.setattr(sync_base, "wsl_rsync_available", lambda: True)
+    monkeypatch.setattr(
+        sync_base, "wsl_posix_path", lambda _p: "/mnt/c/Users/someuser/.copilot"
+    )
+
+    captured_commands: list[list[str]] = []
+
+    class _Proc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def _fake_run(cmd, **kwargs):
+        captured_commands.append(cmd)
+        return _Proc()
+
+    monkeypatch.setattr(ingest_mod.subprocess, "run", _fake_run)
+    result = IngestTarget({"url": "rsync://h/mod"}).push(source, "m1")
+
+    assert result.ok
+    cmd = captured_commands[-1]
+    assert cmd[:3] == ["wsl.exe", "--", "rsync"]
+    assert "/mnt/c/Users/someuser/.copilot/" in cmd
+
+
+def test_ingest_target_push_converts_password_file_path_under_wsl(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A WSL-wrapped rsync reads its own filesystem view, so a configured
+    native Windows password-file path must be converted the same way as the
+    source -- otherwise rsync looks for it on a path that doesn't exist
+    inside WSL."""
+    from agent_logger.sync.targets import base as sync_base
+    from agent_logger.sync.targets import ingest as ingest_mod
+
+    source = _make_source(tmp_path / "home")
+    pw_file = tmp_path / "secret.txt"
+    pw_file.write_text("hunter2", encoding="utf-8")
+
+    monkeypatch.setattr(sync_base, "wsl_rsync_available", lambda: True)
+
+    def _fake_wsl_posix_path(path: Path) -> str:
+        if str(path) == str(pw_file):
+            return "/mnt/c/secret.txt"
+        return "/mnt/c/Users/someuser/.copilot"
+
+    monkeypatch.setattr(sync_base, "wsl_posix_path", _fake_wsl_posix_path)
+
+    captured_commands: list[list[str]] = []
+
+    class _Proc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def _fake_run(cmd, **kwargs):
+        captured_commands.append(cmd)
+        return _Proc()
+
+    monkeypatch.setattr(ingest_mod.subprocess, "run", _fake_run)
+    IngestTarget({"url": "rsync://h/mod", "password_file": str(pw_file)}).push(source, "m1")
+
+    assert "--password-file=/mnt/c/secret.txt" in captured_commands[-1]
+
+
+def test_ssh_target_doctor_reports_wsl_rsync(monkeypatch) -> None:
+    from agent_logger.sync.targets import base as sync_base
+    from agent_logger.sync.targets import ssh as ssh_mod
+
+    monkeypatch.setattr(sync_base, "wsl_rsync_available", lambda: True)
+
+    class _Proc:
+        returncode = 0
+
+    monkeypatch.setattr(ssh_mod.subprocess, "run", lambda *a, **k: _Proc())
+    result = SshTarget({"host": "user@example", "remote_path": "/srv"}).doctor()
+    detail_by_name = {name: detail for name, _ok, detail in result.checks}
+    assert detail_by_name["rsync present"] == "via WSL"
+    assert detail_by_name["ssh present"] == "via WSL"
+
+
+def test_ingest_target_doctor_reports_wsl_rsync(monkeypatch) -> None:
+    from agent_logger.sync.targets import base as sync_base
+
+    monkeypatch.setattr(sync_base, "wsl_rsync_available", lambda: True)
+    result = IngestTarget({"url": "rsync://h/mod"}).doctor()
+    detail_by_name = {name: detail for name, _ok, detail in result.checks}
+    assert detail_by_name["rsync present"] == "via WSL"
 
 
 def _cfg(home: Path, source: Path, dest: Path) -> Config:

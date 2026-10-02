@@ -17,6 +17,7 @@ import subprocess
 from pathlib import Path
 
 from agent_logger.sync.detritus import discover_session_detritus
+from agent_logger.sync.targets import base as sync_base
 from agent_logger.sync.targets.base import (
     NO_WINDOW_KWARGS,
     DoctorResult,
@@ -99,16 +100,23 @@ class SshTarget(Target):
         host = self._host()
         if not host:
             return PushResult(ok=False, detail="ssh target requires a host")
-        if shutil.which("rsync") is None:
+        runtime = sync_base.resolve_rsync_runtime()
+        if not runtime.use_wsl and shutil.which("rsync") is None:
             return PushResult(ok=False, detail="rsync not found on PATH")
         try:
             detritus = discover_session_detritus(source, include_sessions)
         except OSError as exc:
             return PushResult(ok=False, detail=f"detritus discovery failed: {exc}")
         remote = f"{host}:{self._remote_path()}/{machine}/"
-        ssh_cmd = _quote_executable(_ssh_executable()) + " " + " ".join(self._ssh_opts())
+        # A WSL-wrapped rsync runs ssh inside the same WSL runtime -- a bare
+        # "ssh" there is WSL's own, never a cross-runtime mismatch -- so the
+        # sibling-ssh resolution below only applies to the native-Windows
+        # fallback (no WSL available).
+        ssh_exe = "ssh" if runtime.use_wsl else _ssh_executable()
+        ssh_cmd = _quote_executable(ssh_exe) + " " + " ".join(self._ssh_opts())
         for _ in range(2):
             cmd = [
+                *runtime.command_prefix,
                 "rsync",
                 "-az",
                 "--delete",
@@ -116,7 +124,7 @@ class SshTarget(Target):
                 *rsync_session_filters(include_sessions, detritus.roots),
                 "-e",
                 ssh_cmd,
-                f"{source}/",
+                runtime.source_arg(source),
                 remote,
             ]
             try:
@@ -160,14 +168,23 @@ class SshTarget(Target):
     def doctor(self) -> DoctorResult:
         result = DoctorResult(ok=True)
         result.add("host configured", bool(self._host()), self._host())
-        result.add("rsync present", shutil.which("rsync") is not None, "")
-        ssh_exe = _ssh_executable()
-        ssh_present = ssh_exe != "ssh" or shutil.which("ssh") is not None
-        result.add("ssh present", ssh_present, "")
+        use_wsl = sync_base.wsl_rsync_available()
+        if use_wsl:
+            result.add("rsync present", True, "via WSL")
+            ssh_exe = "ssh"
+            ssh_cmd = ["wsl.exe", "--", ssh_exe]
+            ssh_present = True
+            result.add("ssh present", True, "via WSL")
+        else:
+            result.add("rsync present", shutil.which("rsync") is not None, "")
+            ssh_exe = _ssh_executable()
+            ssh_cmd = [ssh_exe]
+            ssh_present = ssh_exe != "ssh" or shutil.which("ssh") is not None
+            result.add("ssh present", ssh_present, "")
         if self._host() and ssh_present:
             try:
                 proc = subprocess.run(
-                    [ssh_exe, *self._ssh_opts(), self._host(), "true"],
+                    [*ssh_cmd, *self._ssh_opts(), self._host(), "true"],
                     capture_output=True,
                     timeout=15,
                     check=False,

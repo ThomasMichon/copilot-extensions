@@ -1,0 +1,9 @@
+{
+  "comment": "Windows ssh/ingest sync targets: run rsync wrapped in WSL when available (same-runtime rsync+ssh, authoritative wslpath source-path conversion) instead of relying on a native MSYS2/Cygwin rsync distribution",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

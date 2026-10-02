@@ -19,6 +19,7 @@ from pathlib import Path
 
 from agent_logger.sync.detritus import discover_session_detritus
 from agent_logger.sync.notify import post_notify
+from agent_logger.sync.targets import base as sync_base
 from agent_logger.sync.targets.base import (
     NO_WINDOW_KWARGS,
     DoctorResult,
@@ -58,7 +59,8 @@ class IngestTarget(Target):
         url = self._url()
         if not url:
             return PushResult(ok=False, detail="ingest target requires a url")
-        if shutil.which("rsync") is None:
+        runtime = sync_base.resolve_rsync_runtime()
+        if not runtime.use_wsl and shutil.which("rsync") is None:
             return PushResult(ok=False, detail="rsync not found on PATH")
         try:
             detritus = discover_session_detritus(source, include_sessions)
@@ -66,8 +68,14 @@ class IngestTarget(Target):
             return PushResult(ok=False, detail=f"detritus discovery failed: {exc}")
         dest = f"{url}/{machine}/"
         pw = self._password_file()
+        pw_arg = pw
+        if pw and runtime.use_wsl:
+            # A WSL-wrapped rsync reads its own filesystem view -- convert the
+            # native Windows password-file path the same way as the source.
+            pw_arg = sync_base.wsl_posix_path(Path(pw)) or pw
         for _ in range(2):
             cmd = [
+                *runtime.command_prefix,
                 "rsync",
                 "-az",
                 "--delete",
@@ -75,8 +83,8 @@ class IngestTarget(Target):
                 *rsync_session_filters(include_sessions, detritus.roots),
             ]
             if pw:
-                cmd += [f"--password-file={pw}"]
-            cmd += [f"{source}/", dest]
+                cmd += [f"--password-file={pw_arg}"]
+            cmd += [runtime.source_arg(source), dest]
             try:
                 proc = subprocess.run(
                     cmd,
@@ -130,7 +138,10 @@ class IngestTarget(Target):
     def doctor(self) -> DoctorResult:
         result = DoctorResult(ok=True)
         result.add("url configured", bool(self._url()), self._url())
-        result.add("rsync present", shutil.which("rsync") is not None, "")
+        if sync_base.wsl_rsync_available():
+            result.add("rsync present", True, "via WSL")
+        else:
+            result.add("rsync present", shutil.which("rsync") is not None, "")
         pw = self._password_file()
         if pw:
             result.add("password file exists", Path(pw).is_file(), pw)
