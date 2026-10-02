@@ -1778,3 +1778,40 @@ def test_remove_fleet_recreates_drifted_restricted_member(monkeypatch):
     assert result.removed == ["worker-1"]
     assert result.deferred == {}
     assert captured_calls == [True]
+
+
+def test_remove_fleet_defers_unknown_profile_member_not_direct_remove(monkeypatch):
+    """An unlabeled legacy member (discovered security_profile == 'unknown')
+    must be deferred through the guarded path, never fall through to the
+    unguarded direct-removal branch that skips all lease/liveness checks
+    (copilot-extensions#4933 follow-up)."""
+    config = ContainersConfig()
+    config.fleets["worker"] = FleetConfig(
+        image="example/agent",
+        security_profile="trusted",
+    )
+    unknown = DockerContainerInfo(
+        name="worker-1",
+        container_id="old-instance",
+        image="example/agent",
+        state="running",
+        status="Up",
+        fleet="worker",
+        security_profile="unknown",
+    )
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: [unknown])
+    monkeypatch.setattr(
+        fleet_mod,
+        "remove_container",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError(
+                "an unknown-profile drifted member must be deferred, never "
+                "force-removed directly"
+            )
+        ),
+    )
+
+    result = fleet_mod.remove_fleet(config, "worker", force=True)
+
+    assert result.removed == []
+    assert "no supported migration path" in result.deferred["worker-1"]

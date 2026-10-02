@@ -445,11 +445,10 @@ def reconcile_up(
     fleet image is rebuilt (or the policy changes) a still-running member no
     longer matches and dispatch is refused. Without ``recreate`` such drift
     raises (the historical behavior); with it, the drifted members are removed
-    and re-provisioned fresh on the current image/policy -- including a
-    fleet's ``security_profile`` itself relaxing (e.g. restricted->trusted;
-    see ``replacement.destroy_drifted_restricted_members``). Active, unknown,
-    or leased members remain running and are reported as deferred. Container
-    names are
+    and re-provisioned on the current image/policy -- including a fleet's
+    ``security_profile`` itself relaxing (restricted->trusted). Active,
+    unknown, or leased members remain running and are reported as deferred.
+    Container names are
     deterministic, but replacement is admitted only after any lease is
     released.
     """
@@ -551,22 +550,18 @@ def reconcile_up(
         else:
             result = FleetOperationResult()
     else:
-        # A fleet's security_profile can relax (e.g. restricted->trusted)
-        # while a member built under the old profile is still live
-        # (copilot-extensions#4933); detect that drift too.
+        # A fleet's security_profile can relax while a member built under
+        # the old profile is still live (copilot-extensions#4933).
         drifted = [c for c in existing if c.security_profile != fleet.security_profile]
         if drifted:
             if not recreate:
                 raise RuntimeError(
-                    f"Fleet '{fleet_name}' has containers whose discovered "
-                    f"security profile no longer matches its configured profile "
-                    f"({fleet.security_profile!r}): "
-                    f"{', '.join(c.name for c in drifted)}. "
-                    "Recreate them before dispatch (pass recreate=True / "
-                    "`up --recreate`)."
+                    f"Fleet '{fleet_name}' has containers whose discovered security "
+                    f"profile no longer matches its configured profile "
+                    f"({fleet.security_profile!r}): {', '.join(c.name for c in drifted)}. "
+                    "Recreate them before dispatch (pass recreate=True / `up --recreate`)."
                 )
             from .replacement import destroy_drifted_restricted_members
-
             result = destroy_drifted_restricted_members(
                 config, fleet, fleet_name, drifted,
                 operation="recreate", force_abandon=force_abandon,
@@ -921,15 +916,22 @@ def remove_fleet(
             )
             continue
         fleet = requested_fleet
-        if (fleet and fleet.restricted) or c.security_profile == "restricted":
+        profile_drifted = fleet is not None and c.security_profile != fleet.security_profile
+        if (fleet and fleet.restricted) or c.security_profile == "restricted" or profile_drifted:
             if fleet is None or not fleet.restricted:
-                if fleet is not None and c.security_profile != fleet.security_profile:
-                    # Still restricted-BUILT despite the fleet relaxing to
-                    # trusted -- full rescue/liveness pipeline, migrating=True
-                    # (copilot-extensions#4933).
+                if profile_drifted and c.security_profile != "restricted":
+                    # No migration path (e.g. unlabeled "unknown") -- defer,
+                    # don't fall to the unguarded removal below (#4933).
+                    result.deferred[c.name] = (
+                        f"discovered security profile {c.security_profile!r} has no "
+                        "supported migration path; recreate it manually"
+                    )
+                    continue
+                if profile_drifted:
+                    # Still restricted-BUILT -- full rescue/liveness,
+                    # migrating=True.
                     from .replacement import destroy_restricted_member
                     from .rescue import RescueError
-
                     try:
                         decision = destroy_restricted_member(
                             config, fleet, c, operation="remove",
