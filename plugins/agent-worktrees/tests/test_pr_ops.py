@@ -2535,9 +2535,7 @@ class TestReconcileActivePrSelfHeal:
     ):
         """A PR claim released then re-observed open must be reactivated,
         SAVED, and feed claim_history -- not silently skipped just because
-        a (now-stale) claim entry already existed for that ref (#review
-        finding: the old `had_claim`-by-ref-presence gate missed exactly
-        this reactivation case)."""
+        a (now-stale) claim entry already exists for that ref."""
         rec = self._record(tmp_path, monkeypatch)
         rec.resources = [
             tracking.ResourceClaim(kind="pr", ref="o/r#7", state=obligations.RELEASED),
