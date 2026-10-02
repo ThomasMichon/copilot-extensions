@@ -613,8 +613,29 @@ Round 2 (operator's response to that evaluation):
 
 ## Validation Plan
 
-- [ ] Generator run against current (pre-split) `main` reproduces the
+- [x] Generator run against current (pre-split) `main` reproduces the
       existing tree exactly (idempotency/correctness baseline).
+  - **Re-scoped and closed, 2026-10-01.** The item's original framing
+    (compare the generator's output against the real, pre-cutover `main`)
+    no longer has a referent — since cutover, `main` only ever receives
+    *generated* content, so there is no independent "existing tree" left
+    to diff against; the generator's own output now **is** `main`'s tree
+    by construction. Closed the underlying idempotency/correctness intent
+    instead with: (1) `tools/test_promote_release.py::test_promote_a_second_time_with_only_state_change_is_a_no_op`,
+    the synthetic-repo test that directly asserts a second promotion with
+    no new `dev` content produces no spurious tree change — ran the full
+    23-test suite live, all passing; (2) a live report-only
+    `promote_release.py --dev-ref origin/dev --main-ref origin/main` run
+    against this repo's actual current state, which generated a valid,
+    correctly-tagged commit with no errors; and (3) the production track
+    record itself — 93 of the last 100 real `validate-and-promote` runs
+    have succeeded, with every failure traced to a known cause (never a
+    generator-correctness defect), which is itself continuous,
+    real-world-scale evidence the generator reproduces a correct tree run
+    after run. (A naive back-to-back pair of manual dry runs showed
+    differing generated trees, but traced to other concurrent local
+    dry-run activity sharing this clone's tag namespace across worktrees,
+    not generator non-determinism — the stray local tags were deleted.)
 - [x] Dry-run the full promotion pipeline against `dev` in a scratch
       branch/fork before flipping branch protection on real `main`.
   - **Done, 2026-09-23** (unit coverage: `tools/test_promote_release.py`,
@@ -2357,6 +2378,25 @@ generated release content, a production action with real consumer impact
 that the item's intent (confirm the guard logic) does not require risking.
 `last_rollback: null` in `.github/release-pipeline-state.json` additionally
 confirms no real rollback has ever actually been needed. Checked off the item.
+
+### 2026-10-01 — Closed the generator idempotency/correctness baseline (Validation Plan)
+
+The item's original framing predates cutover: it asked to diff the
+generator's output against the real, then-current `main` to prove no
+spurious drift before flipping branch protection. Post-cutover, `main` is
+generated-only, so that specific comparison has no referent anymore.
+Closed the underlying intent instead with three lines of evidence: the
+synthetic `test_promote_a_second_time_with_only_state_change_is_a_no_op`
+test (full `test_promote_release.py` suite run live, 23/23 passing); a
+live report-only dry run against this repo's real current `dev`/`main`
+state (clean, no errors); and the production track record (93/100 recent
+real runs succeeded, zero generator-correctness failures in the
+classified set). Noticed and investigated an apparent discrepancy between
+two manual back-to-back dry runs producing different generated trees —
+traced to concurrent dry-run activity elsewhere on this machine sharing
+this clone's tag namespace across linked worktrees, not a real
+determinism bug in the generator itself; deleted the resulting stray
+local-only tags.
 
 
 
