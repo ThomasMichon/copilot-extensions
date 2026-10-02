@@ -7,8 +7,9 @@ import types
 from pathlib import Path
 
 from agent_worktrees import __main__ as m
+from agent_worktrees import claim_history
 from agent_worktrees import config as cfg
-from agent_worktrees import git_ops, pr_ops, tracking
+from agent_worktrees import git_ops, obligations, pr_ops, tracking
 
 # ---------------------------------------------------------------------------
 # Pure helpers
@@ -2421,6 +2422,45 @@ class TestPrClaimHelpers:
         pr_ops._release_pr_claim(rec, tracking.PRRecord(number=5, repo="o/r"))
         assert rec.resources == []
 
+    def test_ensure_pr_claim_returns_ref_on_a_real_new_claim(self, tmp_path, monkeypatch):
+        """Save-ordering contract: `_ensure_pr_claim` never feeds
+        claim_history itself (it always runs with `save=False`) -- it
+        returns the ref only for a genuinely NEW claim, so the caller can
+        record history after ITS OWN save is confirmed."""
+        rec = self._rec(tmp_path, monkeypatch)
+        pr = tracking.PRRecord(number=5, repo="o/r", state="open")
+        assert pr_ops._ensure_pr_claim(rec, pr) == "o/r#5"
+        assert claim_history.history_for_ref("o/r#5") == []
+
+    def test_ensure_pr_claim_returns_none_for_an_idempotent_no_op(self, tmp_path, monkeypatch):
+        """A reconciliation re-observing an already-active claim is not a
+        real transition -- must not be reported as a fresh 'claimed' event
+        by the caller."""
+        rec = self._rec(tmp_path, monkeypatch)
+        pr = tracking.PRRecord(number=5, repo="o/r", state="open")
+        pr_ops._ensure_pr_claim(rec, pr)
+        assert pr_ops._ensure_pr_claim(rec, pr) is None
+
+    def test_release_pr_claim_returns_ref_on_a_real_release(self, tmp_path, monkeypatch):
+        rec = self._rec(tmp_path, monkeypatch)
+        pr = tracking.PRRecord(number=5, repo="o/r", state="open")
+        pr_ops._ensure_pr_claim(rec, pr)
+        assert pr_ops._release_pr_claim(rec, pr) == "o/r#5"
+        assert claim_history.history_for_ref("o/r#5") == []
+
+    def test_release_pr_claim_returns_none_for_an_already_released_claim(
+        self, tmp_path, monkeypatch,
+    ):
+        rec = self._rec(tmp_path, monkeypatch)
+        pr = tracking.PRRecord(number=5, repo="o/r", state="open")
+        pr_ops._ensure_pr_claim(rec, pr)
+        pr_ops._release_pr_claim(rec, pr)
+        assert pr_ops._release_pr_claim(rec, pr) is None
+
+    def test_release_without_existing_claim_returns_none(self, tmp_path, monkeypatch):
+        rec = self._rec(tmp_path, monkeypatch)
+        assert pr_ops._release_pr_claim(rec, tracking.PRRecord(number=5, repo="o/r")) is None
+
 
 class TestReconcileActivePrSelfHeal:
     """#1375/#1703: reconcile heals a zombie open PR whose content already merged."""
@@ -2489,6 +2529,26 @@ class TestReconcileActivePrSelfHeal:
         self._patch(monkeypatch, fake)
         pr_ops._reconcile_active_pr(rec, self._config())
         assert rec.active_pr().state == "open"
+
+    def test_reactivated_released_claim_is_persisted_and_feeds_history(
+        self, tmp_path, monkeypatch,
+    ):
+        """A PR claim released then re-observed open must be reactivated,
+        SAVED, and feed claim_history -- not silently skipped just because
+        a (now-stale) claim entry already exists for that ref."""
+        rec = self._record(tmp_path, monkeypatch)
+        rec.resources = [
+            tracking.ResourceClaim(kind="pr", ref="o/r#7", state=obligations.RELEASED),
+        ]
+        tracking.save_record(rec)
+        fake = self._fake_provider(merged=False, contained=False)
+        self._patch(monkeypatch, fake)
+        pr_ops._reconcile_active_pr(rec, self._config())
+        assert rec.resources[0].state == obligations.ACTIVE
+        reloaded = tracking.load_record(rec.yaml_path)
+        assert reloaded.resources[0].state == obligations.ACTIVE
+        events = claim_history.history_for_ref("o/r#7")
+        assert [e["event"] for e in events] == ["claimed"]
 
     def test_unknown_containment_leaves_open(self, tmp_path, monkeypatch):
         rec = self._record(tmp_path, monkeypatch)

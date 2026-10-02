@@ -373,6 +373,102 @@ def _write_pipeline_state_into_scratch(scratch: Path, state: dict) -> None:
     path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+# Mirrors `tools/coverage_guided_selection/correlation.py`'s own
+# `BASELINE_DIR_ON_MAIN` constant -- duplicated here (not imported) so this
+# script's own dependency surface stays exactly what `_REQUIRED_TOOLS`
+# already captures for the scratch worktree bundle, rather than growing a
+# new cross-package import for the release tool. Keep both constants in
+# sync if this path ever changes.
+COVERAGE_BASELINES_DIR = ".github/coverage-baselines"
+
+
+def _seed_coverage_baselines_from_main(scratch: Path, main_head: str, *, repo: Path) -> int:
+    """Copy every existing ``COVERAGE_BASELINES_DIR/*.json`` file already
+    committed on ``main`` into the scratch worktree, BEFORE any freshly
+    collected baseline for this run is overlaid on top.
+
+    Mirrors ``_seed_versions_from_main``'s own reasoning: ``scratch`` starts
+    as a plain checkout of ``dev``, which has never had a baseline
+    committed into it at all (baselines only ever land on `main`, via this
+    very function's caller) -- so without this seed step, a promotion round
+    with no freshly-collected baseline for some already-enrolled plugin
+    (a transient collection/upload/download failure, or simply a plugin not
+    in this run's artifact set) would wholesale-replace `main`'s tree
+    *without* that plugin's last-known-good baseline at all, silently
+    discarding real evidence a past promotion already recorded -- the exact
+    regression class #3542 named for version numbers, recurring here for
+    coverage baselines.
+
+    Returns the count of files seeded (for the promotion report/log).
+    """
+    listing = _git(
+        ["ls-tree", "-r", "--name-only", main_head, "--", COVERAGE_BASELINES_DIR],
+        cwd=repo, check=False,
+    )
+    if not listing:
+        return 0
+    dest_dir = scratch / COVERAGE_BASELINES_DIR
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    seeded = 0
+    for path in listing.splitlines():
+        raw = _git(["show", f"{main_head}:{path}"], cwd=repo, check=False)
+        if not raw:
+            continue
+        (scratch / path).parent.mkdir(parents=True, exist_ok=True)
+        (scratch / path).write_text(raw + "\n", encoding="utf-8")
+        seeded += 1
+    return seeded
+
+
+def _write_coverage_baselines_into_scratch(
+    scratch: Path, baselines_dir: Path | None, *, dev_head: str
+) -> list[str]:
+    """Copy every ``*.json`` baseline file from ``baselines_dir`` into the
+    scratch worktree's own ``COVERAGE_BASELINES_DIR``, verifying each one's
+    own ``measured_commit`` matches ``dev_head`` first.
+
+    Call ``_seed_coverage_baselines_from_main`` first (see its own
+    docstring) so this only ever OVERLAYS this run's freshly collected
+    baselines on top of whatever `main` already has, never replaces the
+    whole directory.
+
+    The promotion's own ``full`` matrix jobs already embed ``measured_commit``
+    when collecting (see ``coverage_guided_selection.baseline.collect_baseline``'s
+    own ``measured_commit`` parameter); a mismatch here means a stale or
+    mis-targeted artifact was downloaded (e.g. a leftover from a prior,
+    already-superseded run), and must fail the promotion loudly rather than
+    be silently checked in as if it were this promotion's own evidence --
+    the same "the correlation loop never silently breaks" Behavior the
+    vision requires.
+
+    Returns the sorted list of plugin names actually written (for the
+    promotion report/log), or an empty list if ``baselines_dir`` is
+    ``None``/absent/empty -- coverage-baseline collection is optional, and a
+    promotion with none attached is still a valid promotion, just without
+    this evidence (e.g. before the `full` matrix is instrumented for every
+    plugin).
+    """
+    if baselines_dir is None or not baselines_dir.is_dir():
+        return []
+    dest_dir = scratch / COVERAGE_BASELINES_DIR
+    written: list[str] = []
+    for src in sorted(baselines_dir.glob("*.json")):
+        data = json.loads(src.read_text())
+        measured_commit = data.get("measured_commit")
+        if measured_commit != dev_head:
+            raise PromotionError(
+                f"coverage baseline {src.name!r} was measured against "
+                f"{measured_commit!r}, not this promotion's own dev head "
+                f"{dev_head!r} -- refusing to check in a mismatched baseline"
+            )
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        (dest_dir / src.name).write_text(
+            json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        written.append(src.stem)
+    return written
+
+
 class PromotionPaused(PromotionError):
     pass
 
@@ -431,11 +527,13 @@ def format_promotion_message(
 
 
 def _tree_excluding_state(tree_sha: str, *, repo: Path) -> str:
-    """Return a tree identical to ``tree_sha`` but with
-    ``PIPELINE_STATE_PATH`` removed, via a throwaway index -- so comparing
-    it against the scratch worktree's own (state-file-free) tree is a fair,
-    content-only comparison that never treats a mere bookkeeping update as
-    a real promotion."""
+    """Return a tree identical to ``tree_sha`` but with ``PIPELINE_STATE_PATH``
+    and ``COVERAGE_BASELINES_DIR`` removed, via a throwaway index -- so
+    comparing it against the scratch worktree's own (state/baseline-free,
+    since both are only written *after* this comparison -- see ``promote()``)
+    tree is a fair, content-only comparison that never treats a mere
+    bookkeeping update (pipeline state) or a freshly re-collected coverage
+    baseline with no real code change behind it as a real promotion."""
     with tempfile.TemporaryDirectory() as tmp:
         index_file = Path(tmp) / "index"
         env = {**os.environ, "GIT_INDEX_FILE": str(index_file)}
@@ -445,6 +543,11 @@ def _tree_excluding_state(tree_sha: str, *, repo: Path) -> str:
         )
         subprocess.run(
             ["git", "rm", "--cached", "-q", "--ignore-unmatch", PIPELINE_STATE_PATH],
+            cwd=str(repo), env=env, check=True, capture_output=True,
+        )
+        subprocess.run(
+            ["git", "rm", "--cached", "-q", "-r", "--ignore-unmatch",
+             COVERAGE_BASELINES_DIR],
             cwd=str(repo), env=env, check=True, capture_output=True,
         )
         result = subprocess.run(
@@ -463,6 +566,7 @@ def promote(
     force: bool = False,
     tag_prefix: str = "promote",
     candidate_branch: str | None = None,
+    coverage_baselines_dir: Path | None = None,
 ) -> dict:
     """Run one full promotion cycle. Returns a report dict; never raises for
     "nothing to promote" (reported via ``report["promoted"] is False``).
@@ -481,7 +585,18 @@ def promote(
     on ``main``, not this pre-merge candidate, whose sha a squash-merge
     replaces. Without ``candidate_branch``, the original direct-push
     behavior is unchanged (used by the test suite and any trusted/
-    unprotected repo)."""
+    unprotected repo).
+
+    ``coverage_baselines_dir``, when given, is a local directory of
+    pre-collected ``<plugin>.json`` coverage-baseline files (see
+    ``coverage_guided_selection.baseline.collect_baseline``) that this
+    promotion checks into the generated commit's own tree at
+    ``COVERAGE_BASELINES_DIR`` -- see
+    ``_write_coverage_baselines_into_scratch``'s own docstring for the
+    ``measured_commit`` consistency check this performs before accepting
+    any of them. Written only after the no-op content check (alongside the
+    pipeline state file), so a baseline update alone -- with no real `dev`
+    content change -- never forces a vacuous promotion."""
     dev_head = _rev_parse(dev_ref, cwd=repo)
     if dev_head is None:
         raise PromotionError(f"cannot resolve dev ref: {dev_ref!r}")
@@ -568,6 +683,10 @@ def promote(
             "promoted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         _write_pipeline_state_into_scratch(scratch, new_state)
+        _seed_coverage_baselines_from_main(scratch, main_head, repo=repo)
+        baselines_written = _write_coverage_baselines_into_scratch(
+            scratch, coverage_baselines_dir, dev_head=dev_head
+        )
         new_tree = build_promotion_tree(scratch)
 
         commit = _git(
@@ -594,6 +713,7 @@ def promote(
             "dev_head": dev_head,
             "pushed": push,
             "candidate_branch": candidate_branch if (push and candidate_branch) else None,
+            "coverage_baselines_written": baselines_written,
             **summary,
         }
     finally:
@@ -616,6 +736,12 @@ def main(argv: list[str] | None = None) -> int:
         help="push the candidate commit here instead of main directly, for a "
              "caller (validate-and-promote.yml) to land via a real PR + merge",
     )
+    ap.add_argument(
+        "--coverage-baselines-dir", type=Path, default=None,
+        help="directory of pre-collected <plugin>.json coverage-baseline files "
+             "(coverage_guided_selection.baseline.collect_baseline) to check "
+             "into this promotion's own commit at COVERAGE_BASELINES_DIR",
+    )
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="default: do not push")
     mode.add_argument("--push", action="store_true", help="push the generated commit + tag")
@@ -625,6 +751,7 @@ def main(argv: list[str] | None = None) -> int:
         report = promote(
             repo=args.repo, dev_ref=args.dev_ref, main_ref=args.main_ref,
             push=args.push, force=args.force, candidate_branch=args.candidate_branch,
+            coverage_baselines_dir=args.coverage_baselines_dir,
         )
     except PromotionPaused as exc:
         # A pause is an expected, intentional operator action (part of the
@@ -667,6 +794,8 @@ def main(argv: list[str] | None = None) -> int:
         # Confirms the version-drift sweep (#3378-recurrence) actually
         # re-rendered something this run, not just ran silently.
         print(f"  projection-synced: {path}")
+    for plugin in report.get("coverage_baselines_written", []):
+        print(f"  coverage-baseline-checked-in: {plugin}")
     if report.get("candidate_branch"):
         print(f"  pushed candidate branch: {report['candidate_branch']} "
               "(land it on main via a real PR + merge; tag the actual merged commit)")

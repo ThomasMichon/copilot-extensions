@@ -1054,6 +1054,153 @@ def test_ssh_target_describe_and_doctor() -> None:
     assert not SshTarget({}).doctor().ok
 
 
+def test_ssh_executable_prefers_sibling_of_rsync_on_windows(monkeypatch, tmp_path: Path):
+    """An MSYS2/Cygwin-runtime rsync.exe (the only rsync distribution
+    generally available on Windows) that spawns a *different-runtime* ssh
+    for its own `-e ssh` child -- e.g. the native Win32 OpenSSH client --
+    corrupts the rsync protocol handshake across that runtime boundary
+    (reproduced live: the ssh session itself completes and exchanges bytes,
+    but rsync reports "connection unexpectedly closed (0 bytes received so
+    far)"). A sibling ssh binary in the same directory as the resolved
+    rsync shares its runtime, so it must be preferred."""
+    from agent_logger.sync.targets import ssh
+
+    rsync_dir = tmp_path / "msys64" / "usr" / "bin"
+    rsync_dir.mkdir(parents=True)
+    rsync_exe = rsync_dir / "rsync.exe"
+    rsync_exe.write_text("", encoding="utf-8")
+    ssh_exe = rsync_dir / "ssh.exe"
+    ssh_exe.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(ssh, "_IS_WINDOWS", True)
+    monkeypatch.setattr(ssh.shutil, "which", lambda _name: str(rsync_exe))
+    assert ssh._ssh_executable() == str(ssh_exe)
+
+
+def test_ssh_executable_falls_back_without_sibling(monkeypatch, tmp_path: Path):
+    from agent_logger.sync.targets import ssh
+
+    rsync_dir = tmp_path / "some-other-rsync-dist"
+    rsync_dir.mkdir(parents=True)
+    rsync_exe = rsync_dir / "rsync.exe"
+    rsync_exe.write_text("", encoding="utf-8")
+    # No sibling ssh.exe written here.
+
+    monkeypatch.setattr(ssh, "_IS_WINDOWS", True)
+    monkeypatch.setattr(ssh.shutil, "which", lambda _name: str(rsync_exe))
+    assert ssh._ssh_executable() == "ssh"
+
+
+def test_ssh_executable_is_plain_ssh_on_posix(monkeypatch, tmp_path: Path):
+    from agent_logger.sync.targets import ssh
+
+    rsync_dir = tmp_path / "usr" / "bin"
+    rsync_dir.mkdir(parents=True)
+    (rsync_dir / "rsync").write_text("", encoding="utf-8")
+    (rsync_dir / "ssh").write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(ssh, "_IS_WINDOWS", False)
+    monkeypatch.setattr(ssh.shutil, "which", lambda _name: str(rsync_dir / "rsync"))
+    assert ssh._ssh_executable() == "ssh"
+
+
+def test_ssh_target_push_uses_sibling_ssh_in_command(monkeypatch, tmp_path: Path):
+    """End-to-end: push()'s constructed rsync -e command must carry the
+    resolved sibling ssh path, not a bare "ssh"."""
+    from agent_logger.sync.targets import ssh as ssh_mod
+
+    bin_dir = tmp_path / "msys64" / "usr" / "bin"
+    bin_dir.mkdir(parents=True)
+    rsync_exe = bin_dir / "rsync.exe"
+    rsync_exe.write_text("", encoding="utf-8")
+    ssh_exe = bin_dir / "ssh.exe"
+    ssh_exe.write_text("", encoding="utf-8")
+    source = _make_source(tmp_path / "home")
+
+    monkeypatch.setattr(ssh_mod, "_IS_WINDOWS", True)
+    monkeypatch.setattr(ssh_mod.shutil, "which", lambda _name: str(rsync_exe))
+
+    captured_commands: list[list[str]] = []
+
+    class _Proc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def _fake_run(cmd, **kwargs):
+        captured_commands.append(cmd)
+        return _Proc()
+
+    monkeypatch.setattr(ssh_mod.subprocess, "run", _fake_run)
+    SshTarget({"host": "user@example", "remote_path": "/srv"}).push(source, "m1")
+
+    ssh_arg_index = captured_commands[-1].index("-e") + 1
+    # Compare against the quoted form, not the bare path: push() quotes
+    # whenever the (test-generated, potentially space-containing) tmp_path
+    # happens to contain a space or apostrophe -- independent of the
+    # temporary directory's own name.
+    from agent_logger.sync.targets.ssh import _quote_executable
+
+    assert captured_commands[-1][ssh_arg_index].startswith(
+        _quote_executable(str(ssh_exe))
+    )
+
+
+def test_ssh_executable_quoting_handles_spaces_in_path():
+    from agent_logger.sync.targets.ssh import _quote_executable
+
+    assert _quote_executable("ssh") == "ssh"
+    assert _quote_executable(r"C:\no-spaces\ssh.exe") == r"C:\no-spaces\ssh.exe"
+    quoted = _quote_executable(r"C:\Program Files\msys64\usr\bin\ssh.exe")
+    assert quoted == r'"C:\Program Files\msys64\usr\bin\ssh.exe"'
+
+
+def test_ssh_executable_quoting_handles_apostrophe_in_path():
+    """An apostrophe needs quoting even with no space: rsync's `-e` parser
+    treats it as an opening quote and rejects the command for having no
+    closing one."""
+    from agent_logger.sync.targets.ssh import _quote_executable
+
+    path = r"C:\Users\O'Brien\msys64\usr\bin\ssh.exe"
+    assert _quote_executable(path) == f'"{path}"'
+
+
+
+def test_ssh_target_push_quotes_sibling_path_with_spaces(monkeypatch, tmp_path: Path):
+    """The constructed `-e` command string must quote a sibling ssh path
+    that contains a space (rsync re-splits that string on whitespace to
+    build the command it execs)."""
+    from agent_logger.sync.targets import ssh as ssh_mod
+
+    bin_dir = tmp_path / "Program Files" / "msys64" / "usr" / "bin"
+    bin_dir.mkdir(parents=True)
+    rsync_exe = bin_dir / "rsync.exe"
+    rsync_exe.write_text("", encoding="utf-8")
+    ssh_exe = bin_dir / "ssh.exe"
+    ssh_exe.write_text("", encoding="utf-8")
+    source = _make_source(tmp_path / "home")
+
+    monkeypatch.setattr(ssh_mod, "_IS_WINDOWS", True)
+    monkeypatch.setattr(ssh_mod.shutil, "which", lambda _name: str(rsync_exe))
+
+    captured_commands: list[list[str]] = []
+
+    class _Proc:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def _fake_run(cmd, **kwargs):
+        captured_commands.append(cmd)
+        return _Proc()
+
+    monkeypatch.setattr(ssh_mod.subprocess, "run", _fake_run)
+    SshTarget({"host": "user@example", "remote_path": "/srv"}).push(source, "m1")
+
+    ssh_arg_index = captured_commands[-1].index("-e") + 1
+    assert captured_commands[-1][ssh_arg_index].startswith(f'"{ssh_exe}"')
+
+
 def test_rsync_children_suppress_console_window(monkeypatch, tmp_path: Path) -> None:
     """ssh/ingest pushes must pass the windowless kwargs to their rsync child.
 
