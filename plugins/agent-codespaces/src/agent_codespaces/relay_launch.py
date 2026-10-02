@@ -249,6 +249,28 @@ def build_identity_env_exports(var_names) -> str:
     return out
 
 
+def build_relay_portmap_publish(
+    relay_port: int,
+    relay_token: str | None,
+    *,
+    ado_host: str | None = None,
+    github_account: str | None = None,
+) -> str:
+    """Standalone command that publishes only the relay port-mapping file.
+
+    For a connection whose remote shell never runs the launch prelude (an
+    interactive ``gh codespace ssh`` after skipped warm-up/provisioning): ssh
+    does not carry the local ``LC_*`` relay env across, so the auth helpers
+    must discover the token and GitHub account from this file instead.
+    """
+    env = f"export LC_GIT_CREDENTIAL_RELAY_TOKEN={shlex.quote(relay_token or '')}; "
+    if ado_host:
+        env += f"export LC_GIT_CREDENTIAL_RELAY_ADO_HOST={shlex.quote(ado_host)}; "
+    if github_account:
+        env += f"export LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT={shlex.quote(github_account)}; "
+    return env + build_relay_portmap_write(relay_port)
+
+
 def build_relay_env(
     relay_port: int,
     relay_token: str | None,

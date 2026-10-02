@@ -1537,7 +1537,16 @@ def _ssh_session(
                 return result_sink(result)
             return _emit_remote_cmd_result(result, args.timeout)
 
-        # Interactive SSH -- fall through to gh codespace ssh
+        # Interactive SSH -- fall through to gh codespace ssh. ssh drops the
+        # local LC_* relay env, so publish the port map (token + account) now.
+        if not args.no_relay:
+            publish = relay_launch.build_relay_portmap_publish(
+                relay_port, relay_token, github_account=github_account,
+                ado_host=getattr(config.credentials, "ado_host", None))
+            try:
+                await exec_with_retry(manager, args.name, publish, timeout=20)
+            except Exception as exc:  # noqa: BLE001 -- best-effort, like warm-up
+                log.debug("Relay port-map publish on %s failed: %s", args.name, exc)
         await manager.disconnect(args.name)
         return _interactive_ssh(
             args.name,

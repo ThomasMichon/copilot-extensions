@@ -1,0 +1,9 @@
+{
+  "comment": "Interactive ssh publishes the relay port map (token + GitHub account) even without warm-up or provisioning",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "dev"
+    }
+  ]
+}

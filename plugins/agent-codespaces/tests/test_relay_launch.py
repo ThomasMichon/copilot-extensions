@@ -460,3 +460,17 @@ def test_effective_relay_port_honors_configured_pin(monkeypatch, tmp_path):
 def test_credentials_config_relay_port_defaults_to_dynamic_sentinel():
     from agent_codespaces.config import CredentialsConfig
     assert CredentialsConfig().relay_port == 0
+
+def test_build_relay_portmap_publish_carries_token_and_account_without_the_prelude():
+    from agent_codespaces.relay_launch import build_relay_portmap_publish
+
+    cmd = build_relay_portmap_publish(
+        41000, "tok", ado_host="ado.example", github_account="alice",
+    )
+    assert "export LC_GIT_CREDENTIAL_RELAY_TOKEN=tok;" in cmd
+    assert "export LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT=alice;" in cmd
+    assert "export LC_GIT_CREDENTIAL_RELAY_ADO_HOST=ado.example;" in cmd
+    assert "relay-ports" in cmd and "/41000.json" in cmd
+    # Only the port map: no PAT scrub, feed-token mint or helper shim.
+    assert "get-access-token" not in cmd and "unset " not in cmd
+    assert "export LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT" not in build_relay_portmap_publish(41000, "tok")
