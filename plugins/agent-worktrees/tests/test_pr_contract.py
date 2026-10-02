@@ -205,17 +205,19 @@ class TestEffectiveVerdict:
         reviews = (_rev(1, "APPROVED", commit_id="old"),)
         assert pc.effective_verdict(reviews, "new", "author") == ""
 
-    def test_stale_approval_on_old_head_ignored_when_dismiss_policy_unknown(self):
+    def test_stale_approval_denied_when_dismiss_policy_unknown(self):
         """``dismiss_stale_reviews`` unset (``None``) keeps the pre-existing
         conservative deny: no policy evidence either way, so a raw head
         movement still invalidates the approval -- unchanged default
-        behavior for providers/repos we have no policy read for."""
+        behavior for providers/repos we have no policy read for. This is
+        the fail-closed baseline ``allow_stale_approval`` narrowly
+        overrides with proof, never a default this gate assumes open."""
         reviews = (_rev(1, "APPROVED", commit_id="old"),)
         assert pc.effective_verdict(
             reviews, "new", "author", dismiss_stale_reviews=None,
         ) == ""
 
-    def test_stale_approval_on_old_head_ignored_when_dismiss_policy_confirmed_true(self):
+    def test_stale_approval_denied_when_dismiss_policy_confirmed_true(self):
         reviews = (_rev(1, "APPROVED", commit_id="old"),)
         assert pc.effective_verdict(
             reviews, "new", "author", dismiss_stale_reviews=True,

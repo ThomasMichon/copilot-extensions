@@ -243,7 +243,9 @@ class Baseline:
     not yet known. A True->dismissed regression fires ``approval_dismissed``."""
 
     @classmethod
-    def from_snapshot(cls, snap: PRSnapshot) -> Baseline:
+    def from_snapshot(
+        cls, snap: PRSnapshot, *, dismiss_stale_reviews: bool | None = None,
+    ) -> Baseline:
         return cls(
             max_review_id=snap.max_review_id,
             merged=snap.merged,
@@ -251,8 +253,10 @@ class Baseline:
             mergeable=snap.mergeable,
             checks_state=snap.checks_state,
             approved=(
-                effective_verdict(snap.reviews, snap.head_sha, snap.author)
-                == "approved"
+                effective_verdict(
+                    snap.reviews, snap.head_sha, snap.author,
+                    dismiss_stale_reviews=dismiss_stale_reviews,
+                ) == "APPROVED"
             ),
         )
 
@@ -288,7 +292,8 @@ class Baseline:
 # ---------------------------------------------------------------------------
 
 def compute_events(
-    baseline: Baseline, snap: PRSnapshot, until: Iterable[str]
+    baseline: Baseline, snap: PRSnapshot, until: Iterable[str],
+    *, dismiss_stale_reviews: bool | None = None,
 ) -> list[dict]:
     """Return the target transitions present in ``snap`` relative to ``baseline``.
 
@@ -350,8 +355,10 @@ def compute_events(
         # and leaves no dismissed approval), so the two never double-fire.
         if baseline.approved is True and "approval_dismissed" in want:
             snap_approved = (
-                effective_verdict(snap.reviews, snap.head_sha, snap.author)
-                == "approved"
+                effective_verdict(
+                    snap.reviews, snap.head_sha, snap.author,
+                    dismiss_stale_reviews=dismiss_stale_reviews,
+                ) == "APPROVED"
             )
             dismissed_approval = any(
                 r.dismissed and r.state.upper() == "APPROVED" for r in snap.reviews
@@ -395,17 +402,19 @@ def effective_verdict(
     already filtered out by :func:`_latest_verdict`). The latest wins.
 
     An ``APPROVED`` review at an older head is discarded by a raw
-    commit-SHA mismatch unless ``dismiss_stale_reviews`` is confirmed
-    ``False`` (the repo's branch protection does not dismiss stale
-    reviews), in which case ``review.dismissed`` governs instead -- a
+    commit-SHA mismatch unless ``dismiss_stale_reviews`` is **confirmed**
+    ``False`` (the repo's branch protection, read live, does NOT dismiss
+    stale reviews) -- then ``review.dismissed`` governs instead, since a
     non-dismissing policy never transitions the review server-side
     (copilot-extensions#2060: a clean rebase with no content change was
     stripping approvals policy never asked to invalidate). ``True`` or
-    unknown (``None``, the default) preserves the prior deny-by-default.
-    ``allow_stale_approval`` layers a narrower allowance on top: a stale
-    approval remains effective only when provider-clock evidence proves the
-    live head was observed before submission (cleared/reacquired on every
-    mediated push). Callers still expose staleness via :class:`PRState`.
+    unknown (``None``, the default) preserve the fail-closed
+    deny-by-default ``allow_stale_approval`` narrowly overrides with proof,
+    not a default this gate assumes open. ``allow_stale_approval`` layers
+    that narrower allowance on top: a stale approval remains effective
+    only when provider-clock evidence proves the live head was observed
+    before submission (cleared/reacquired on every mediated push). Callers
+    still expose staleness via :class:`PRState`.
 
     ``review_blocking`` (default ``True``, unchanged behavior) selects
     :data:`VERDICT_STATES`; ``False`` selects
@@ -1390,8 +1399,9 @@ class RepoPolicy:
     movement (GitHub ``dismiss_stale_reviews`` / Gitea
     ``dismiss_stale_approvals``)? ``None`` when unreadable/unconfigured --
     :func:`effective_verdict` keeps its conservative deny-on-stale-head
-    default. A confirmed ``False`` lets a non-dismissing repo's approvals
-    survive a bare head movement (copilot-extensions#2060)."""
+    default. A **confirmed** ``False`` is what lets a genuinely
+    non-dismissing repo's approvals survive a bare head movement
+    (copilot-extensions#2060)."""
     viewer_permission: str = ""
     """The acting identity's own live permission level on the repo, normalized
     to a lowercase provider-neutral token (``"admin"`` / ``"maintain"`` /

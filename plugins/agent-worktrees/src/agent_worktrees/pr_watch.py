@@ -174,12 +174,20 @@ def run_wait(
                 # / already-closed PR fires immediately (pre-existing reviews and
                 # not-yet-computed mergeability do NOT fire; only terminal does).
                 first_base = replace(
-                    pc.Baseline.from_snapshot(snap), merged=False, closed=False
+                    pc.Baseline.from_snapshot(
+                        snap, dismiss_stale_reviews=dismiss_stale_reviews,
+                    ),
+                    merged=False, closed=False,
                 )
-                events = pc.compute_events(first_base, snap, until)
+                events = pc.compute_events(
+                    first_base, snap, until,
+                    dismiss_stale_reviews=dismiss_stale_reviews,
+                )
                 if events:
                     return WaitResult(True, _decorate(events, snap))
-                base = pc.Baseline.from_snapshot(snap)
+                base = pc.Baseline.from_snapshot(
+                    snap, dismiss_stale_reviews=dismiss_stale_reviews,
+                )
             else:
                 # Lazily complete a not-yet-known mergeable baseline: the provider
                 # may compute the flag asynchronously (and a --since re-arm starts
@@ -197,9 +205,12 @@ def run_wait(
                         pc.effective_verdict(
                             snap.reviews, snap.head_sha, snap.author,
                             dismiss_stale_reviews=dismiss_stale_reviews,
-                        ) == "approved"
+                        ) == "APPROVED"
                     ))
-                events = pc.compute_events(base, snap, until)
+                events = pc.compute_events(
+                    base, snap, until,
+                    dismiss_stale_reviews=dismiss_stale_reviews,
+                )
                 if events:
                     return WaitResult(True, _decorate(events, snap))
 

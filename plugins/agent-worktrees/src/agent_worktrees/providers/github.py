@@ -820,6 +820,10 @@ class GitHubProvider:
                         dsr = rpr.get("dismiss_stale_reviews")
                         if isinstance(dsr, bool):
                             dismiss_stale_reviews = dsr
+                    elif rpr is None:
+                        # Protection exists but required-review protection is
+                        # disabled -> no review rule to dismiss anything.
+                        req_reviews, dismiss_stale_reviews = 0, False
                     rsc = prot.get("required_status_checks")
                     req_checks = bool(rsc)
             elif "Not Found" in (pproc.stderr + pproc.stdout):
