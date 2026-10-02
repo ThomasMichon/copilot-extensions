@@ -822,7 +822,7 @@ Any registrar declaration file (not just `repository-issue-loop`/
 spelling out every field directly:
 
 ```yaml
-extends: "global:<name>"                 # plugin-shipped recipe (none shipped yet)
+extends: "global:<name>"                 # plugin-shipped recipe (see below for the four shipped today)
 # or
 extends: "./recipes/my-loop.yaml"        # repo-local, relative to the repo root
 # or
@@ -882,10 +882,70 @@ against the repo root when known, otherwise the declaration file's own
 directory), read with the same suffix contract (`.yaml`/`.yml`/`.json`)
 every other declaration file uses; a `global:<name>` ref looks up a
 plugin-shipped recipe built into
-`agent_dispatch.registrar_recipes.GLOBAL_RECIPES` (currently empty -- no
-built-in recipes ship yet). There is no path-traversal hardening on a
-file-path ref today; a declaration author is already a trusted party for
-the repo's own registrar declarations.
+`agent_dispatch.registrar_recipes.GLOBAL_RECIPES`.
+
+**Shipped global recipes (Sub-PR 2).** Four named recipes ship today, each
+covering the fields real adopters already repeat verbatim (shared
+exclude-label conventions, the headless pool body type, the archetype's
+standing-conduct charter) while leaving everything genuinely repo-specific
+(target repo, forge producer login, task label, emitter discovery command,
+evaluator verdict-application policy) for the declaration itself to supply:
+
+| `global:` name | Resolves to | What it supplies by default |
+|---|---|---|
+| `repository-issue-loop` | `kind: repository-issue-loop` | The common `exclude_labels` set (`bootstrap`/`wontfix`/`invalid`/`duplicate`/`question`) and `pool.body.type: headless`. Genuinely thin -- what the loop is *for* varies completely per adopter, so no charter/identity default is supplied. |
+| `goal-driven` | `kind: repository-issue-loop` | The same defaults as above, plus `worker_identity: goal-driven` (a built-in identity: drive the assigned issue's stated goal to completion through one or more pull requests, suspend/resume on external waits, never supersede another contributor's open PR). The standing-loop counterpart of this package's ad-hoc `goal-driven` CLI recipe -- same standing-conduct clauses, reused rather than duplicated. |
+| `reviewer` | `kind: reviewer-loop` | `pool.body.type: headless` plus a default `pool.body.charter`: a generalized (no `{repo}`/`{pr}` placeholders -- those vary per discovered PR and live in that PR's own task, not this static charter) standing-reviewer charter covering the `land=self`/`land=author` landing models, suspend/resume, never superseding another author's PR, and stagnation handling. |
+| `conflict-resolution` | `kind: reviewer-loop` | Same pool defaults as `reviewer`, with a charter specialized to taking a stuck, conflict-producer-opened PR the last mile: rebase, resolve, force-push back over the same PR head, never open a second PR. |
+
+A declaration can still override any of these defaults outright (an
+ordinary scalar/mapping override replaces the template's value, same
+deep-merge rule as everywhere else) -- e.g. `extends: "global:reviewer"`
+plus its own `pool.body.charter` to replace the shipped default charter
+entirely, or its own `worker_identity`/`exclude_labels` to replace
+`global:goal-driven`'s or `global:repository-issue-loop`'s defaults.
+
+There is no path-traversal hardening on a file-path ref today; a
+declaration author is already a trusted party for the repo's own registrar
+declarations.
+
+**Worked migration example.** A hand-written `repository-issue-loop`
+declaration:
+
+```yaml
+name: my-backlog
+kind: repository-issue-loop
+exclude_labels: [bootstrap, wontfix, invalid, duplicate, question]
+repo: owner/name
+source: my-backlog
+cadence_seconds: 28800
+task_label: my-backlog-work
+forge: {provider: github, producer_login: my-bot}
+reservation: {label: agent-reserved}
+pool:
+  max_active_processes: 1
+  body: {type: headless, agent: my-worker}
+```
+
+becomes, with `extends:`, the same five genuinely repo-specific fields and
+nothing else:
+
+```yaml
+name: my-backlog
+extends: "global:repository-issue-loop"
+repo: owner/name
+source: my-backlog
+task_label: my-backlog-work
+cadence_seconds: 28800
+forge: {provider: github, producer_login: my-bot}
+reservation: {label: agent-reserved}
+pool: {max_active_processes: 1, body: {agent: my-worker}}
+```
+
+(`exclude_labels` and `pool.body.type` are dropped entirely -- the recipe
+already supplies them; every field that *is* still spelled out is
+genuinely repo-specific, matching exactly what the sub-plan calls the
+"fields a real declaration commonly varies".)
 
 ### Reactive webhook producer (`agent-dispatch webhook`)
 

@@ -1,0 +1,9 @@
+{
+  "comment": "registrar: ship the four global extends: recipes (reviewer, conflict-resolution, goal-driven, repository-issue-loop)",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    }
+  ]
+}
