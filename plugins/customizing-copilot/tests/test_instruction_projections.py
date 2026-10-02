@@ -327,7 +327,12 @@ def test_render_local_cache_write_incapable_destination_leaves_checked_in_floor(
     ``finally`` cleanup still unlinks that temp file on the injected
     failure -- so this test genuinely exercises that cleanup path rather
     than asserting a tautology about a destination that was never
-    attempted."""
+    attempted. The patched branch's own invocation is tracked explicitly
+    (``replace_calls``) and the resulting finding is asserted exactly,
+    rather than merely ``blocking >= 1`` -- an early-return from some
+    unrelated blocking condition could otherwise satisfy every other
+    assertion in this test without the injected failure path ever having
+    run at all."""
     repo = tmp_path / "repo"
     repo.mkdir()
     _plugin, source = _write_plugin(tmp_path, "market", "policy")
@@ -341,9 +346,11 @@ def test_render_local_cache_write_incapable_destination_leaves_checked_in_floor(
 
     local_path = checked_in.parent / "fallback.local.instructions.md"
     real_replace = projections.os.replace
+    replace_calls: list[Path] = []
 
     def _replace_write_incapable(src: object, dst: object) -> None:
         if Path(dst) == local_path:
+            replace_calls.append(Path(dst))
             raise OSError(13, "Permission denied: simulated write-incapable target")
         real_replace(src, dst)
 
@@ -351,7 +358,13 @@ def test_render_local_cache_write_incapable_destination_leaves_checked_in_floor(
 
     result = projections.render_local_cache(repo, lambda: [source])
 
-    assert result.blocking >= 1
+    # The injected failure branch genuinely ran exactly once -- proves this
+    # test exercises the real writer's replace call, not some unrelated
+    # earlier blocking path that happens to satisfy the assertions below.
+    assert replace_calls == [local_path]
+    assert result.blocking == 1
+    assert [f.check for f in result.findings] == ["projection-local-cache"]
+    assert "could not write local cache" in result.findings[0].message
     assert result.changed == []
     # The checked-in floor -- the only available content -- is untouched.
     assert checked_in.read_bytes() == checked_in_content
