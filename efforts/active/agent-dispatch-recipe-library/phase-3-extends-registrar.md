@@ -97,23 +97,52 @@ risk, and already delivers the effort's motivating operational finding
    `read_declaration_file_set`), repo-local and cross-repo path refs only
    (no global recipes shipped yet — test with a synthetic template
    fixture). This is the foundational, highest-value, lowest-risk slice.
-2. **Ship the four global recipes** (`global:reviewer`,
-   `global:conflict-resolution`, `global:goal-driven`,
-   `global:repository-issue-loop`) as concrete templates in
-   `registrar_recipes.py`'s built-in registry, each covering the fields a
+2. **Ship the two global recipes that already have a registrar `kind:`**
+   (`global:reviewer`, `global:repository-issue-loop`) as concrete templates
+   in `registrar_recipes.py`'s built-in registry, each covering the fields a
    real declaration commonly varies (target repo, forge producer login,
    worker identity/guidance, pool target) and templating the rest from the
-   archetype's sensible default.
+   archetype's sensible default. **Landed.** `global:conflict-resolution`
+   and `global:goal-driven` are **re-sequenced, not dropped** (operator
+   direction, 2026-10-02): per the vision's own framing (§*The recipe — an
+   emitter/evaluator template*), a recipe is a template for an **emitter/
+   evaluator pair**, and those two archetypes have no emitter/evaluator pair
+   today -- only the ad-hoc `agent_dispatch.recipes` CLI-kick path
+   (`recipes/registry.py` + `recipes_cli.py`), which the operator has
+   directed be retired in favor of emitter-native task authoring (every
+   "loop kind" extends from being an emitter; emitters emit tasks directly
+   from a declared schema, not via a CLI-kick shim). Shipping a
+   `global:conflict-resolution`/`global:goal-driven` template ahead of that
+   refactor would mean inventing a throwaway emitter/evaluator shape for
+   them, then redoing it once the unification lands -- so their global
+   recipes now depend on item 4 below (reordered ahead of items 3), not the
+   other way around. `reviewer`/`repository-issue-loop` needed no such wait:
+   both already expand to a concrete emitter/evaluator/pool triple via their
+   existing `kind:` sugar (`reviewer_loops.py`/`repository_issue_loops.py`),
+   so templating them required no new engine.
 3. **Migration note + doc** (`plugins/agent-dispatch/README.md`): document
    `extends:`, the three ref kinds, and a worked migration example (a
    hand-written `repository-issue-loop` declaration → its `extends:`
    equivalent) — this closes Phase 9's migration-note item early for this
-   piece.
-4. **(Separate, not blocking)** the single-`emitter`-primitive taxonomy
-   refactor (Phase 3 bullet 1) and cross-repo ref hardening (symlink/path
-   traversal safety for a ref outside the repo root) — track as their own
-   follow-on slices once 1-3 land and the extends: shape is proven against
-   a real migrated declaration.
+   piece. **Landed** (folded into sub-PR 2, since the global-recipes
+   doc section is also the natural worked-example location).
+4. **The single-`emitter`-primitive taxonomy refactor** (Phase 3 bullet 1)
+   and cross-repo ref hardening (symlink/path traversal safety for a ref
+   outside the repo root) — **re-sequenced ahead of item 5**, per operator
+   direction (2026-10-02): this is no longer a deferred cleanup, it is the
+   prerequisite that gives `conflict-resolution`/`goal-driven` a genuine
+   emitter/evaluator pair to template. Collapses `reviewer-loop`/
+   `repository-issue-loop`'s own specialized `kind:` sugar down to the
+   single `kind: emitter` primitive (schedule/webhook/websocket as emitter
+   *triggers*, not separate `kind`s), and retires the ad-hoc
+   `agent_dispatch.recipes` CLI-kick path (`recipes/registry.py` +
+   `recipes_cli.py`) in favor of emitter-native task authoring
+   (*side-load-through-an-emitter*: an emitter's own declared schema emits
+   the task directly, no CLI-kick shim in between).
+5. **Ship `global:conflict-resolution` and `global:goal-driven`** once item
+   4 lands and each archetype has a genuine emitter/evaluator pair to
+   template -- the same "cover the commonly-varied fields, default the
+   rest" treatment item 2 gave `reviewer`/`repository-issue-loop`.
 
 ## Validation
 

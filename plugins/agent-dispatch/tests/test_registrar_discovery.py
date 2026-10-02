@@ -555,6 +555,109 @@ def test_read_declaration_file_set_without_extends_is_unaffected(tmp_path):
     assert declaration.name == "plain"
 
 
+def test_extends_global_reviewer_matches_an_equivalent_hand_written_reviewer_loop(
+    tmp_path,
+):
+    """`extends: "global:reviewer"` templates the structural boilerplate
+    (evaluator ruleset, pool shape, emitter cadence/output) a reviewer-loop
+    declaration commonly repeats -- a declaration still supplies its own
+    irreducibly domain-specific fields (name/repo/task_label, the emitter's
+    discovery command, the worker identity). Resolving it must produce the
+    exact same emitter/evaluator/pool triple a fully hand-written
+    declaration with the same effective fields does."""
+    extends_path = tmp_path / "extends.json"
+    extends_path.write_text(
+        json.dumps(
+            {
+                "extends": "global:reviewer",
+                "name": "example-review",
+                "repo": "github.com/example/project",
+                "task_label": "external-review",
+                "emitter": {
+                    "command": ["python", "tools/reviews.py", "discover"],
+                },
+                "pool": {"body": {"agent": "reviewer"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    direct_path = tmp_path / "direct.json"
+    direct_path.write_text(
+        json.dumps(
+            {
+                "name": "example-review",
+                "kind": "reviewer-loop",
+                "repo": "github.com/example/project",
+                "task_label": "external-review",
+                "emitter": {
+                    "command": ["python", "tools/reviews.py", "discover"],
+                    "interval_seconds": 300,
+                    "task_output": "json",
+                },
+                "evaluator": {"evaluator_spec": {"rules": []}},
+                "pool": {
+                    "max_active_processes": 1,
+                    "body": {"type": "headless", "agent": "reviewer"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    resolved = read_declaration_file_set(extends_path)
+    direct = read_declaration_file_set(direct_path)
+
+    assert resolved == direct
+
+
+def test_extends_global_repository_issue_loop_matches_an_equivalent_hand_written_declaration(
+    tmp_path,
+):
+    extends_path = tmp_path / "extends.json"
+    extends_path.write_text(
+        json.dumps(
+            {
+                "extends": "global:repository-issue-loop",
+                "name": "repository-backlog",
+                "repo": "owner/project",
+                "task_label": "repository-issue-work",
+                "forge": {"producer_login": "issue-bot"},
+                "pool": {"body": {"agent": "repository-issue-worker"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    direct_path = tmp_path / "direct.json"
+    direct_path.write_text(
+        json.dumps(
+            {
+                "name": "repository-backlog",
+                "kind": "repository-issue-loop",
+                "repo": "owner/project",
+                "source": "repository-backlog",
+                "cadence_seconds": 21600,
+                "quiet_period_seconds": 1800,
+                "include_labels": ["ready"],
+                "exclude_labels": ["bootstrap", "wontfix"],
+                "batch_size": 1,
+                "task_label": "repository-issue-work",
+                "forge": {"provider": "github", "producer_login": "issue-bot"},
+                "reservation": {"label": "agent-reserved", "comment": True},
+                "pool": {
+                    "max_active_processes": 1,
+                    "body": {"type": "headless", "agent": "repository-issue-worker"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    resolved = read_declaration_file_set(extends_path)
+    direct = read_declaration_file_set(direct_path)
+
+    assert resolved == direct
+
+
 def test_read_location_scans_sorted_and_stamps_owner(tmp_path):
     (tmp_path / "b.json").write_text(json.dumps({"name": "b"}), encoding="utf-8")
     (tmp_path / "a.yaml").write_text("name: a\n", encoding="utf-8")

@@ -19,10 +19,71 @@ from typing import Any
 from .registrar import RegistrarError
 
 #: Built-in, plugin-shipped recipe templates, keyed by name (referenced as
-#: ``extends: "global:<name>"``). Currently empty: no built-in recipes ship
-#: yet, so every ``global:`` ref fails loud rather than silently matching
-#: nothing.
-GLOBAL_RECIPES: dict[str, Mapping[str, Any]] = {}
+#: ``extends: "global:<name>"``).
+#:
+#: Only ``reviewer`` and ``repository-issue-loop`` ship here today -- both
+#: already have a dedicated registrar ``kind:`` (``reviewer-loop`` /
+#: ``repository-issue-loop``) that expands to a concrete emitter/evaluator/pool
+#: triple (see ``reviewer_loops.py`` / ``repository_issue_loops.py``), so
+#: templating them requires no new engine: the template supplies the
+#: structural defaults (evaluator ruleset, pool shape, cadence/label/reservation
+#: defaults); a declaration still supplies its own irreducibly domain-specific
+#: fields (``name``, ``repo``, ``task_label``, the emitter's discovery
+#: ``command``, ``forge.producer_login``, ``pool.body.agent``) -- there is no
+#: sensible generic default for those.
+#:
+#: ``conflict-resolution`` and ``goal-driven`` (the other two archetypes
+#: documented in ``recipes/registry.py`` and
+#: ``visions/plugins/agent-dispatch/README.md``'s *The recipe*) are **not**
+#: shipped yet: per the vision's own updated framing, a recipe there is "a
+#: template for an emitter/evaluator pair", and today those two archetypes
+#: have no emitter/evaluator pair at all -- only the ad-hoc
+#: ``agent_dispatch.recipes`` CLI-kick path (``recipes/registry.py`` +
+#: ``recipes_cli.py``), which is itself slated for retirement in favor of
+#: emitter-native task authoring (*side-load-through-an-emitter*) once the
+#: single-``emitter``-primitive taxonomy refactor (Phase 3's own first
+#: bullet, tracked as sub-plan item 4) lands. Shipping a
+#: ``global:conflict-resolution``/``global:goal-driven`` template ahead of
+#: that refactor would mean inventing a throwaway emitter/evaluator shape for
+#: them, then redoing it once the unification lands -- see
+#: ``efforts/active/agent-dispatch-recipe-library/phase-3-extends-registrar.md``
+#: for the full re-sequencing rationale.
+GLOBAL_RECIPES: dict[str, Mapping[str, Any]] = {
+    "reviewer": {
+        "kind": "reviewer-loop",
+        "emitter": {
+            "interval_seconds": 300,
+            "task_output": "json",
+        },
+        "evaluator": {
+            "evaluator_spec": {"rules": []},
+        },
+        "pool": {
+            "max_active_processes": 1,
+            "body": {"type": "headless"},
+        },
+    },
+    "repository-issue-loop": {
+        "kind": "repository-issue-loop",
+        "source": "repository-backlog",
+        "cadence_seconds": 21600,
+        "quiet_period_seconds": 1800,
+        "include_labels": ["ready"],
+        "exclude_labels": ["bootstrap", "wontfix"],
+        "batch_size": 1,
+        "forge": {
+            "provider": "github",
+        },
+        "reservation": {
+            "label": "agent-reserved",
+            "comment": True,
+        },
+        "pool": {
+            "max_active_processes": 1,
+            "body": {"type": "headless"},
+        },
+    },
+}
 
 #: Recipe files are declaration documents (YAML/JSON), same suffix contract
 #: `registrar_discovery.py` enforces for every other declaration file.

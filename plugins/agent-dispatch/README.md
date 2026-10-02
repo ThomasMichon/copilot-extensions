@@ -882,10 +882,40 @@ against the repo root when known, otherwise the declaration file's own
 directory), read with the same suffix contract (`.yaml`/`.yml`/`.json`)
 every other declaration file uses; a `global:<name>` ref looks up a
 plugin-shipped recipe built into
-`agent_dispatch.registrar_recipes.GLOBAL_RECIPES` (currently empty -- no
-built-in recipes ship yet). There is no path-traversal hardening on a
-file-path ref today; a declaration author is already a trusted party for
-the repo's own registrar declarations.
+`agent_dispatch.registrar_recipes.GLOBAL_RECIPES`. There is no
+path-traversal hardening on a file-path ref today; a declaration author is
+already a trusted party for the repo's own registrar declarations.
+
+**Shipped global recipes.** `global:reviewer` and
+`global:repository-issue-loop` template the structural boilerplate their
+matching `kind: reviewer-loop` / `kind: repository-issue-loop` declaration
+commonly repeats (default evaluator ruleset, pool shape, emitter cadence/
+output) -- a declaration still supplies its own irreducibly domain-specific
+fields (`name`, `repo`, `task_label`, the emitter's discovery `command`,
+`forge.producer_login`, `pool.body.agent`), since no generic default makes
+sense for those:
+
+```yaml
+extends: "global:repository-issue-loop"
+name: repository-backlog
+repo: owner/project
+task_label: repository-issue-work
+forge:
+  producer_login: issue-bot
+pool:
+  body:
+    agent: repository-issue-worker
+```
+
+`global:conflict-resolution` and `global:goal-driven` (the other two
+archetypes named in *Recipes (loop archetypes)* below) are **not** shipped
+yet: per the vision's own framing, a recipe is "a template for an emitter/
+evaluator pair", and those two archetypes have no emitter/evaluator pair
+today -- only the ad-hoc `agent-dispatch recipes kick` path below, itself
+slated for retirement in favor of emitter-native task authoring once the
+single-`emitter`-primitive taxonomy refactor lands. See
+`efforts/active/agent-dispatch-recipe-library/phase-3-extends-registrar.md`
+for the full sequencing rationale.
 
 ### Reactive webhook producer (`agent-dispatch webhook`)
 

@@ -255,8 +255,14 @@ below — read it before starting any Phase 3 work).
 
 - [ ] Introduce the single `emitter` producer primitive, with schedule/
       webhook/websocket as emitter *triggers* rather than separate `kind`
-      values. **Tracked as its own follow-on slice** (sub-plan §*Sub-PRs*,
-      item 4) — not a blocking dependency for `extends:` itself.
+      values, and retire the ad-hoc `agent_dispatch.recipes` CLI-kick path
+      in favor of emitter-native task authoring. **Re-sequenced ahead of
+      the `conflict-resolution`/`goal-driven` global recipes below**
+      (operator direction, 2026-10-02; sub-plan §*Sub-PRs* item 4,
+      reordered ahead of item 5) — it is now the prerequisite that gives
+      those two archetypes a genuine emitter/evaluator pair to template, not
+      a deferred cleanup. `global:reviewer`/`global:repository-issue-loop`
+      needed no such wait (see next item).
 - [x] Introduce `extends:` in a registrar declaration: a reference to a
       global (plugin-shipped), repo-local, or cross-repo recipe, plus a
       `emitter:`/`evaluator:` block of template-injected or direct param
@@ -273,14 +279,22 @@ below — read it before starting any Phase 3 work).
       unresolved placeholders left intact), then the declaration's keys are
       deep-merged over the result. `global:` recipe refs resolve against an
       (currently empty) in-code registry — see the next item.
-- [ ] Ship the four already-existing archetypes (reviewer,
-      conflict-resolution, goal-driven, repository-issue-loop) as
+- [x] Ship `global:reviewer` and `global:repository-issue-loop` as
       `extends:`-able global recipes under this model, with no behavior
       change to their existing direct-declaration path (backward
-      compatible). **Not yet started** — the resolution mechanism above
-      supports `global:` refs structurally, but `GLOBAL_RECIPES` ships no
-      entries yet (sub-plan §*Sub-PRs* item 2).
-- [ ] Tests: an `extends:`-based declaration referencing each existing
+      compatible). **Landed** -- both already expand to a concrete
+      emitter/evaluator/pool triple via their existing `kind:` sugar, so
+      templating them needed no new engine; each template covers the
+      structural boilerplate (evaluator ruleset, pool shape, emitter
+      cadence/output) and leaves the irreducibly domain-specific fields
+      (name/repo/task_label, the emitter's discovery command, forge
+      producer login, worker identity) for the declaration to supply.
+      `global:conflict-resolution`/`global:goal-driven` remain **not yet
+      started** -- re-sequenced (not dropped) behind the single-emitter-
+      primitive refactor above, since those two archetypes have no
+      emitter/evaluator pair to template until that refactor lands
+      (sub-plan §*Sub-PRs* item 5).
+- [x] Tests: an `extends:`-based declaration referencing each existing
       archetype behaves identically to today's direct `kind:` declaration
       with the same effective params; a repo-local and a cross-repo recipe
       reference both resolve correctly. **Repo-local/cross-repo path-ref
@@ -297,7 +311,12 @@ below — read it before starting any Phase 3 work).
       `test_registrar_registry.py` proving a transient recipe-file I/O
       failure is classified indeterminate (not invalid) and that a
       plugin-contributed declaration's `extends:` ref resolves against the
-      plugin root, not the registrar subdirectory).
+      plugin root, not the registrar subdirectory). **Global-recipe
+      coverage landed** (4 more tests: 2 unit in `test_registrar_recipes.py`
+      asserting each shipped template's shape, 2 integration in
+      `test_registrar_discovery.py` proving `extends: "global:reviewer"` /
+      `"global:repository-issue-loop"` resolve to the identical
+      `ProfileDeclaration` tuple a fully hand-written equivalent produces).
       Left **unchecked**: the "each existing archetype" half is blocked on
       the global-recipes item above and is not complete until that lands.
 

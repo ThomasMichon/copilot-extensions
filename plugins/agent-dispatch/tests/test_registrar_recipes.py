@@ -361,6 +361,43 @@ def test_substitute_placeholders_rejects_a_cycle_that_passes_through_a_tuple():
         substitute_placeholders(cyclic, {})
 
 
+# -- shipped GLOBAL_RECIPES entries -------------------------------------------
+
+def test_global_reviewer_recipe_templates_the_reviewer_loop_kind():
+    recipe = GLOBAL_RECIPES["reviewer"]
+    assert recipe["kind"] == "reviewer-loop"
+    assert recipe["emitter"] == {"interval_seconds": 300, "task_output": "json"}
+    assert recipe["evaluator"] == {"evaluator_spec": {"rules": []}}
+    assert recipe["pool"] == {
+        "max_active_processes": 1,
+        "body": {"type": "headless"},
+    }
+    # Irreducibly domain-specific fields have no sensible generic default and
+    # must stay absent, so a declaration omitting them gets the registrar's
+    # own clear "required" error rather than a silently-wrong template value.
+    assert "name" not in recipe
+    assert "repo" not in recipe
+    assert "task_label" not in recipe
+    assert "command" not in recipe["emitter"]
+    assert "agent" not in recipe["pool"]["body"]
+
+
+def test_global_repository_issue_loop_recipe_templates_the_matching_kind():
+    recipe = GLOBAL_RECIPES["repository-issue-loop"]
+    assert recipe["kind"] == "repository-issue-loop"
+    assert recipe["forge"] == {"provider": "github"}
+    assert recipe["reservation"] == {"label": "agent-reserved", "comment": True}
+    assert recipe["pool"] == {
+        "max_active_processes": 1,
+        "body": {"type": "headless"},
+    }
+    assert "name" not in recipe
+    assert "repo" not in recipe
+    assert "task_label" not in recipe
+    assert "producer_login" not in recipe["forge"]
+    assert "agent" not in recipe["pool"]["body"]
+
+
 def test_resolve_extends_rejects_a_non_mapping_recipe_document(tmp_path, monkeypatch):
     # A file-path ref already can't produce a non-mapping (the decoder itself
     # enforces a mapping document); this guards the `global:` path, where a
