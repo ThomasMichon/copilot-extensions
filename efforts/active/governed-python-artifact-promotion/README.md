@@ -67,6 +67,22 @@ gate that keeps a promoted release installable under real-world feed lag.
     this split; if this effort's artifact format changes how agent-index's
     server/engine package is built or distributed, extend those efforts
     directly instead of re-deriving the split here.
+- **Vendored first-party library closure.** A plugin's own promotion
+  already **materializes** its `tool.uv.sources` path dependencies on
+  shared `libs/<lib>` packages (`tools/materialize_main.py`): the
+  referenced lib tree is physically copied into the plugin's own directory
+  and its `pyproject.toml` entry rewritten from an external editable
+  reference to a local, non-editable path dependency (e.g. agent-bridge
+  depends on several `agent-*` libs this way — see
+  `plugins/agent-bridge/pyproject.toml`). These vendored libs have **no
+  governed-feed identity at all** — they are first-party, not third-party —
+  so a first-party artifact for one plugin is not just that plugin's own
+  wheel: it is the **complete first-party closure**, the plugin wheel plus
+  a wheel for every vendored `libs/<lib>` path dependency it still declares
+  after materialization. The governed-feed admission gate and the
+  seasoned-version constraint apply only to the genuinely third-party
+  closure; the first-party closure is built, verified, and consumed
+  together as a set, never resolved against any package index.
 - **What is genuinely missing** (this effort's actual scope): promotion-time
   first-party wheel/manifest generation keyed to payload hash + platform +
   architecture + Python ABI; a governed-feed dependency-closure admission
@@ -174,6 +190,12 @@ gate that keeps a promoted release installable under real-world feed lag.
       plugin payload hash, platform, architecture, and Python ABI, with
       artifact digests and build provenance. Keep first-party payload
       identity separate from third-party dependency-closure identity.
+- [ ] Build the **complete first-party closure**, not just the top-level
+      plugin wheel: after `materialize_main.py` vendors a plugin's
+      `libs/<lib>` path dependencies, build and verify a wheel for each
+      vendored lib alongside the plugin's own wheel, as one set covered by
+      the same manifest. Never attempt to resolve a vendored lib through
+      the governed feed or any package index.
 - [ ] Resolve and pin a reproducible third-party dependency closure against
       a public reference index at promotion time, **constrained to
       seasoned versions** (see the lag-tolerant closure selection decision
@@ -195,12 +217,13 @@ gate that keeps a promoted release installable under real-world feed lag.
       feed; treat feed propagation lag as distinct from a genuinely
       unavailable package/version.
 - [ ] Teach installers (via the shared installer engine, not a parallel
-      mechanism) to locate, verify, and consume a matching artifact.
-      Distinguish, and handle separately: (a) **no artifact published** for
-      this payload/platform/arch/ABI tuple — fall back safely to the
-      existing from-source path; (b) **a published artifact whose
-      digest/provenance verification fails** — fail closed with
-      diagnostics; never silently fall back, since that would mask
+      mechanism) to locate, verify, and consume a matching artifact **set**
+      — the plugin wheel together with every vendored first-party lib
+      wheel it requires. Distinguish, and handle separately: (a) **no
+      artifact published** for this payload/platform/arch/ABI tuple — fall
+      back safely to the existing from-source path; (b) **a published
+      artifact whose digest/provenance verification fails** — fail closed
+      with diagnostics; never silently fall back, since that would mask
       corruption or tampering. Preserve existing immutable-slot assembly,
       health gates, activation, and rollback.
 - [ ] Validate across supported platform/architecture/Python-ABI
@@ -230,6 +253,11 @@ gate that keeps a promoted release installable under real-world feed lag.
       it is otherwise the newest compatible version, confirming the fast
       path is actually reachable on a representative lagging governed feed
       rather than only in a best-case same-day scenario.
+- [ ] A representative vendored-lib install test builds and installs a
+      plugin with at least one `tool.uv.sources` path dependency (e.g.
+      agent-bridge's vendored `agent-*` libs) entirely from the promoted
+      first-party artifact set, with no attempt to resolve any vendored lib
+      against a package index.
 - [ ] Manifest/trust-root tests reject a wrong payload/ABI/platform, an
       altered artifact digest, or a mismatched dependency closure before
       activation — and specifically prove that replacing *both* the
@@ -324,4 +352,20 @@ _Pending Phase 1 spike evidence._
   install-time probe remains the authoritative confirmation for the
   residual cases. Phase 1 now measures real feed lag to tune the default;
   Phase 2 and the Validation Plan name the constraint explicitly.
+
+### 2026-10-01 — Fourth review pass: vendored first-party lib closure was missing entirely
+
+- A fourth review round found the plan never accounted for a plugin's own
+  vendored first-party dependencies: `tools/materialize_main.py` copies a
+  plugin's `tool.uv.sources` `libs/<lib>` path dependencies into its own
+  tree during promotion (e.g. agent-bridge's several `agent-*` libs), and
+  these have no governed-feed identity at all. A first-party artifact
+  covering only the top-level plugin wheel would leave installers asking
+  the governed feed for internal-only distributions and failing (or
+  resolving an unintended same-named package). Fixed by scoping Phase 2/3
+  to the **complete first-party closure** — a wheel for the plugin plus a
+  wheel for every vendored lib it still declares after materialization,
+  built, verified, and consumed together as one set, never resolved
+  against any package index. Added a representative vendored-lib install
+  test to the Validation Plan.
 
