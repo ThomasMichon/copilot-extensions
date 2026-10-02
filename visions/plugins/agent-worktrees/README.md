@@ -181,28 +181,25 @@ worktrees, pull requests, environments, sessions, connections, and other
 scarce resources. Exclusive access is fenced, ownership is answerable in both
 directions, and finalization is gated on settlement or an explicit transfer.
 
-### Write guards protect the cooperative path, not every adversarial escape
+### Write guards are hygiene nudges, named for their plain, mundane reason
 
 A family of `preToolUse` hooks (`anchor_write_guard`, `cross_repo_guard`,
 `statelessness_guard`) nudges an agent before it writes somewhere it
 shouldn't — the shared anchor checkout, a different agent-guarded repo, or
-personal state inside a stateless harness. Their harm model is **unreported
-drift, misrouted ownership, or accidental disclosure**, not adversarial
-evasion: `anchor_write_guard` prevents a dirty anchor that silently never
-lands anywhere durable; `statelessness_guard` keeps personal state (which
-the harness's own binding guidance treats as sensitive) out of a shareable
-stateless harness repo, where a missed case could strand or even publish it
-rather than merely leave it non-durable; `cross_repo_guard` keeps an edit
-routed through the guarded repo's own owning agent so the change actually
-follows *that* repo's own rules — its instructions, skills, and contribution
-posture — rather than landing under the launching harness's rules instead.
-An edit made under the wrong repo's rules can also surface downstream as PR
-review friction and churn, if and when the target repo's own reviewer
-(human or automated) happens to catch the mismatch — review is not a
-guaranteed backstop, so that guard exists to reduce uncaught misrouting and
-save that wasted round-trip up front, not to enforce compliance against a
-bad actor. None of the three is a security boundary defending against a
-deliberately evasive adversary.
+personal state inside a stateless harness. Each exists for an ordinary,
+practical reason, stated plainly rather than dressed up as safety or
+security, so a reviewer doesn't treat an uncovered edge case as more urgent
+than it is: `anchor_write_guard` keeps the anchor clean so a later
+deployment `pull` isn't blocked by dirty, unreported agent edits;
+`statelessness_guard` keeps one party's personal state out of the shared
+stateless harness repo so the harness *stays reusable* — a harness loaded
+down with one party's knowledge no longer works well for another party who
+adopts it; `cross_repo_guard` routes an edit through the guarded repo's own
+owning agent so the change follows *that* repo's own rules instead of the
+launching harness's, which otherwise tends to surface later as wasted
+back-and-forth once that repo's own reviewer notices the mismatch — not a
+guarantee, just a worthwhile thing to avoid up front. None of the three
+polices a deliberately evasive adversary.
 They assume a cooperative agent
 that receives and acts on the reminder once it reaches the guard's covered
 path; exhaustively closing every exotic invocation that could evade
