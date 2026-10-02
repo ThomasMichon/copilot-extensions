@@ -21,7 +21,6 @@ import json
 import os
 import shlex
 import subprocess
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -402,185 +401,19 @@ def repository_token(
     ).strip()
 
 
-def execution_leg_get(
-    project: str,
-    worktree_id: str,
-    *,
-    timeout: int = _DEFAULT_TIMEOUT,
-) -> dict:
-    try:
-        return run_json(
-            project,
-            ["execution-leg", "get", "--worktree-id", worktree_id, "--json"],
-            timeout=timeout,
-        )
-    except EngineError as error:
-        detail = _engine_error_detail(error).casefold()
-        unsupported = (
-            ("invalid choice" in detail and "execution-leg" in detail)
-            or ("unrecognized arguments" in detail and "execution-leg" in detail)
-            or ("unknown command" in detail and "execution-leg" in detail)
-        )
-        if unsupported:
-            raise EngineFeatureUnavailable(
-                "installed engine does not support execution-leg inspection"
-            ) from error
-        raise
-
-
-def execution_leg_set(
-    project: str,
-    worktree_id: str,
-    *,
-    provider: str,
-    state: str,
-    binding_revision: int,
-    blob: dict[str, object],
-    if_match_revision: int,
-    reservation_token: str | None = None,
-    timeout: int = _DEFAULT_TIMEOUT,
-) -> dict:
-    path = ""
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            suffix=".json",
-            delete=False,
-        ) as handle:
-            json.dump(blob, handle, separators=(",", ":"))
-            path = handle.name
-        args = [
-            "execution-leg",
-            "set",
-            "--worktree-id",
-            worktree_id,
-            "--provider",
-            provider,
-            "--state",
-            state,
-            "--binding-revision",
-            str(binding_revision),
-            "--blob-file",
-            path,
-            "--if-match-revision",
-            str(if_match_revision),
-        ]
-        if reservation_token:
-            args += ["--reservation-token", reservation_token]
-        return run_json(
-            project,
-            args + ["--json"],
-            timeout=timeout,
-        )
-    finally:
-        if path:
-            try:
-                Path(path).unlink()
-            except OSError:
-                pass
-
-
-def execution_leg_clear(
-    project: str,
-    worktree_id: str,
-    *,
-    if_match_revision: int,
-    timeout: int = _DEFAULT_TIMEOUT,
-) -> dict:
-    return run_json(
-        project,
-        [
-            "execution-leg",
-            "clear",
-            "--worktree-id",
-            worktree_id,
-            "--if-match-revision",
-            str(if_match_revision),
-            "--json",
-        ],
-        timeout=timeout,
-    )
-
-
-def execution_leg_reserve(
-    project: str,
-    worktree_id: str,
-    *,
-    provider: str,
-    operation: str,
-    owner: str,
-    owner_pid: int | None = None,
-    owner_start_time: str | None = None,
-    lease_seconds: int = 300,
-    timeout: int = _DEFAULT_TIMEOUT,
-) -> dict:
-    args = [
-        "execution-leg",
-        "reserve",
-        "--worktree-id",
-        worktree_id,
-        "--provider",
-        provider,
-        "--operation",
-        operation,
-        "--reservation-owner",
-        owner,
-        "--lease-seconds",
-        str(lease_seconds),
-    ]
-    if owner_pid is not None:
-        args += ["--reservation-owner-pid", str(owner_pid)]
-    if owner_start_time:
-        args += ["--reservation-owner-start-time", owner_start_time]
-    return run_json(project, args + ["--json"], timeout=timeout)
-
-
-def execution_leg_renew(
-    project: str,
-    worktree_id: str,
-    *,
-    reservation_token: str,
-    lease_seconds: int = 300,
-    timeout: int = _DEFAULT_TIMEOUT,
-) -> dict:
-    return run_json(
-        project,
-        [
-            "execution-leg",
-            "renew",
-            "--worktree-id",
-            worktree_id,
-            "--reservation-token",
-            reservation_token,
-            "--lease-seconds",
-            str(lease_seconds),
-            "--json",
-        ],
-        timeout=timeout,
-    )
-
-
-def execution_leg_release(
-    project: str,
-    worktree_id: str,
-    *,
-    reservation_token: str,
-    timeout: int = _DEFAULT_TIMEOUT,
-) -> dict:
-    return run_json(
-        project,
-        [
-            "execution-leg",
-            "release",
-            "--worktree-id",
-            worktree_id,
-            "--reservation-token",
-            reservation_token,
-            "--json",
-        ],
-        timeout=timeout,
-    )
+# Execution-leg CLI calls (get/set/clear/reserve/renew/release) moved to
+# engine_execution_leg.py purely to control this module's size (module-size
+# gate); imported here (after run_json/EngineError/etc. are defined, to avoid
+# a circular-import ordering issue) and re-exported so every existing
+# `engine_client.execution_leg_*` caller is unaffected.
+from .engine_execution_leg import (  # noqa: E402
+    execution_leg_clear,  # noqa: F401 -- re-export
+    execution_leg_get,  # noqa: F401 -- re-export
+    execution_leg_release,  # noqa: F401 -- re-export
+    execution_leg_renew,  # noqa: F401 -- re-export
+    execution_leg_reserve,  # noqa: F401 -- re-export
+    execution_leg_set,  # noqa: F401 -- re-export
+)
 
 
 @dataclass(frozen=True)
@@ -725,6 +558,7 @@ def resolve_launch_plan(
     target_machine: str | None = None,
     target_environment: str | None = None,
     target_no_mux: bool = False,
+    seed: str | None = None,
     timeout: int = _DEFAULT_TIMEOUT,
 ) -> LaunchPlan:
     """Fetch a launch plan via ``agent-worktrees resolve --json`` (process boundary).
@@ -732,7 +566,11 @@ def resolve_launch_plan(
     Exactly one of ``worktree_id`` (resume the worktree), ``new`` (create +
     launch a fresh worktree), or ``base`` (launch the anchor checkout) must be
     given. ``target_machine`` asks the engine to return an environment-specific
-    remote SSH handoff plan for that same selection.
+    remote SSH handoff plan for that same selection. ``seed`` is an optional
+    prompt queued as the fresh session's first interactive turn (picker-new-
+    session-prompt-and-composer Phase A); only meaningful with ``new=True`` --
+    the engine's own CLI already rejects it otherwise (and alongside
+    ``target_machine``), so this is intentionally NOT re-validated here.
 
     Version-skew tolerant: an older engine that does not know ``--bare-resume`` is
     retried as a plain resume (degrade the feature, don't fail) -- the same contract
@@ -759,6 +597,8 @@ def resolve_launch_plan(
             args += ["--environment", target_environment]
         if target_no_mux:
             args.append("--target-no-mux")
+    if seed:
+        args += ["--seed", seed]
 
     try:
         obj = run_json(project, args, timeout=timeout)
@@ -769,7 +609,7 @@ def resolve_launch_plan(
                 project, worktree_id=worktree_id, new=new,
                 base=base, target_machine=target_machine,
                 target_environment=target_environment,
-                target_no_mux=target_no_mux,
+                target_no_mux=target_no_mux, seed=seed,
                 bare_resume=False, timeout=timeout)
         if target_machine and any(
             flag in detail

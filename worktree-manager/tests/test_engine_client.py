@@ -837,6 +837,28 @@ def test_resolve_new_sends_new_flag(monkeypatch):
     assert plan.is_exec
 
 
+def test_resolve_new_with_seed_forwards_seed_flag(monkeypatch):
+    def handler(cmd, kw):
+        assert "--new" in cmd
+        assert "--seed" in cmd
+        assert cmd[cmd.index("--seed") + 1] == "fix the thing"
+        return _fake_completed(cmd, stdout=json.dumps(_RESUME_PLAN))
+
+    _install_fake(monkeypatch, handler)
+    plan = ec.resolve_launch_plan("dotfiles", new=True, seed="fix the thing")
+    assert plan.is_exec
+
+
+def test_resolve_without_seed_omits_seed_flag(monkeypatch):
+    def handler(cmd, kw):
+        assert "--seed" not in cmd
+        return _fake_completed(cmd, stdout=json.dumps(_RESUME_PLAN))
+
+    _install_fake(monkeypatch, handler)
+    ec.resolve_launch_plan("dotfiles", new=True, seed=None)
+    ec.resolve_launch_plan("dotfiles", new=True, seed="")
+
+
 def test_resolve_base_sends_base_flag(monkeypatch):
     def handler(cmd, kw):
         assert "--base" in cmd
