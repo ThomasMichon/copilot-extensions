@@ -596,10 +596,20 @@ Round 2 (operator's response to that evaluation):
     classification. Not yet acted on: this is a proposed bar, not an
     operator-confirmed one, and nothing about the gate itself has been
     relaxed.
-- [ ] _(agent-recommended)_ Revisit whether CI-triggered-on-every-green-build
+- [x] _(agent-recommended)_ Revisit whether CI-triggered-on-every-green-build
       promotion remains workable once volume is understood, and consider a
       lightweight batching rule only if it proves necessary in practice — the
       decided default (Phase 3) is untriggered-by-schedule.
+  - **Resolved, 2026-10-01 (operator-confirmed): no batching rule needed.**
+    Promote-on-every-green-build continues to hold up at real volume — 92
+    of the last 100 real `validate-and-promote` runs have succeeded, and
+    the merged rolling-queue mechanism (Validation Plan item, confirmed
+    2026-09-25: a superseded queued run is cancelled rather than running
+    stale content) already absorbs rapid successive `dev` pushes without
+    needing an explicit batching window. The operator confirmed this is
+    working well in practice; closing without adding a batching rule —
+    the Phase 3 untriggered-by-schedule default stands as both the
+    original and the final design.
 - [x] Make `main-gate` content-aware so admin-bypass is never needed for a
       legitimate landing on `main`, closing the gap that let an unrelated PR
       (#3622) admin-merge directly onto `main` and strand content `dev`
@@ -2420,6 +2430,15 @@ not a real second harness-relevant workstation — the prior
 Journal entry's "this machine's (`atlas-core`)" phrasing was a
 misattribution. Closed the item rather than leaving it open against a
 machine that doesn't exist.
+
+### 2026-10-01 — Closed the CI-batching reconsideration item (Phase 6)
+
+Operator confirmed promote-on-every-green-build is working well in
+practice at real volume (92/100 recent real runs succeeded), and the
+already-merged rolling-queue mechanism absorbs rapid successive `dev`
+pushes by cancelling superseded queued runs rather than needing an
+explicit batching window. Closed the item with no batching rule added —
+the Phase 3 untriggered-by-schedule default stands unchanged.
 
 
 
