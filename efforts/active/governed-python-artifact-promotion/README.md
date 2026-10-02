@@ -79,13 +79,28 @@ gate that keeps a promoted release installable under real-world feed lag.
   governed-feed mirror or its propagation state. A promotion-side check
   therefore cannot certify "this closure is installable from *your*
   governed feed right now" for every consumer. Promotion's own gate
-  resolves and pins an exact, reproducible dependency closure against a
-  public reference index and records it in the manifest; it does **not**
-  claim governed-feed installability for any specific consumer. The actual
-  governed-feed-lag-aware admission check is a **consumer-side, install-time**
-  responsibility (Phase 3) run against that machine's own governed feed,
-  with a safe from-source fallback when that specific machine's feed
-  doesn't yet carry the pinned closure.
+  resolves and pins a reproducible dependency closure against a public
+  reference index and records it in the manifest; it does **not** claim
+  governed-feed installability for any specific consumer. The actual
+  governed-feed-lag-aware admission check is a **consumer-side,
+  install-time** responsibility (Phase 3) run against that machine's own
+  governed feed, with a safe from-source fallback when that specific
+  machine's feed doesn't yet carry the pinned closure.
+- **Lag-tolerant closure selection.** Resolving against "newest compatible"
+  on a public reference index would routinely pin versions a real governed
+  feed (which lags public releases by about a week) doesn't carry yet —
+  defeating the fast path in the common case, not just at the edges, and
+  directly reproducing the excessive-version-lock problem the original
+  request called out. Promotion's resolver is therefore constrained to
+  **seasoned** versions only: candidates must already be at least a fixed
+  minimum age (default 14 days, chosen conservatively above the known ~1
+  week governed-feed propagation window; tune from Phase 1's measured feed
+  lag rather than this default) at resolution time, never simply "newest
+  compatible." This makes the pinned closure very likely already mirrored
+  on a real governed feed by the time any consumer installs it; the
+  install-time admission probe remains the authoritative confirmation and
+  absorbs the residual cases (a feed temporarily further behind than the
+  seasoning window, an unusually slow mirror, etc.).
 - **Trust root.** The manifest's expected digest is **committed into
   promoted, branch-protected repository metadata** (the manifest itself is
   a file checked into the promotion commit on `main`/`dev`, protected by
@@ -142,6 +157,10 @@ gate that keeps a promoted release installable under real-world feed lag.
       actually answers "is this pinned closure available from *this*
       machine's governed feed right now," distinguishing transient
       propagation lag from a genuinely absent package/version.
+- [ ] Measure actual governed-feed propagation lag (how long after public
+      publication a version typically becomes available) to set and
+      validate the seasoned-version minimum age used by closure selection
+      (see Context) instead of leaving it at the untested 14-day default.
 - [ ] Compare a from-source install against a verified first-party-wheel
       install, cold governed cache vs. warm shared cache, recording wall
       time, network activity, and physical disk use (careful not to
@@ -155,10 +174,12 @@ gate that keeps a promoted release installable under real-world feed lag.
       plugin payload hash, platform, architecture, and Python ABI, with
       artifact digests and build provenance. Keep first-party payload
       identity separate from third-party dependency-closure identity.
-- [ ] Resolve and pin an exact, reproducible third-party dependency closure
-      against a public reference index at promotion time (see the feed
-      model constraint above); record it in the manifest as the closure a
-      consumer must later validate against their own governed feed.
+- [ ] Resolve and pin a reproducible third-party dependency closure against
+      a public reference index at promotion time, **constrained to
+      seasoned versions** (see the lag-tolerant closure selection decision
+      above — never simply "newest compatible"); record it in the manifest
+      as the closure a consumer must later validate against their own
+      governed feed.
 - [ ] Specify and implement the manifest's trust root per the committed
       decision above: the manifest's expected digest is committed into
       promoted, branch-protected repository metadata. Implement the
@@ -204,6 +225,11 @@ gate that keeps a promoted release installable under real-world feed lag.
       show it blocks consumption of a pinned closure not yet available on
       *this machine's* governed feed, succeeds once the feed carries it,
       and never silently substitutes a public-index candidate.
+- [ ] A seasoned-closure test proves promotion's resolver rejects a
+      candidate version younger than the configured minimum age even when
+      it is otherwise the newest compatible version, confirming the fast
+      path is actually reachable on a representative lagging governed feed
+      rather than only in a best-case same-day scenario.
 - [ ] Manifest/trust-root tests reject a wrong payload/ABI/platform, an
       altered artifact digest, or a mismatched dependency closure before
       activation — and specifically prove that replacing *both* the
@@ -280,4 +306,22 @@ _Pending Phase 1 spike evidence._
      2026-10-01)" labels from the Context section — that section describes
      the current system contract, not a review-history artifact; the
      review trail belongs only here in the Journal.
+
+### 2026-10-01 — Third review pass: closure selection was not actually lag-tolerant
+
+- A third review round found the deepest gap yet: resolving "newest
+  compatible" against a public reference index — even with the install-time
+  admission probe added — would routinely pin versions a real governed feed
+  doesn't carry yet, since governed feeds lag public releases by about a
+  week. The probe only *detects* that mismatch and falls back to the slow
+  source path; it never actually made the fast path reachable in the common
+  case, directly failing to satisfy the original request's explicit
+  concern about excessive version lock. Fixed by adding a **seasoned-version
+  constraint** to promotion's closure resolver (reject any candidate
+  younger than a configurable minimum age, default 14 days; never simply
+  "newest compatible"), so the pinned closure is very likely already
+  mirrored on a real governed feed by the time of consumption. The
+  install-time probe remains the authoritative confirmation for the
+  residual cases. Phase 1 now measures real feed lag to tune the default;
+  Phase 2 and the Validation Plan name the constraint explicitly.
 
