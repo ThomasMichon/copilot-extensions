@@ -99,6 +99,43 @@ class TestInteractiveSshReverseForwardsAndRemoteCommand:
         assert "-t" in argv
         assert argv.index("-t") > argv.index("--")
 
+    def test_remote_command_carries_the_relay_github_account(self) -> None:
+        """ssh drops local LC_* vars, so the attached path must export the
+        selected account inside the remote command itself (never the token)."""
+        with (
+            patch("agent_codespaces.lifecycle.account_for_codespace", return_value=None),
+            patch(
+                "agent_codespaces.gh_account.credential_account_for_codespace",
+                return_value="octo-user",
+            ),
+            patch("subprocess.call", return_value=0) as call,
+        ):
+            _interactive_ssh(
+                "cs-example", [], relay_port=9857, relay_token="secret-tok",
+                remote_command="agent-worktrees copilot --anchor",
+            )
+        argv = call.call_args.args[0]
+        assert argv[-1] == (
+            "export LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT=octo-user; "
+            "agent-worktrees copilot --anchor"
+        )
+        assert not any("secret-tok" in a for a in argv)
+        assert call.call_args.kwargs["env"]["LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT"] == "octo-user"
+
+    def test_remote_command_unchanged_without_relay_account(self) -> None:
+        with (
+            patch("agent_codespaces.lifecycle.account_for_codespace", return_value=None),
+            patch(
+                "agent_codespaces.gh_account.credential_account_for_codespace",
+                return_value=None,
+            ),
+            patch("subprocess.call", return_value=0) as call,
+        ):
+            _interactive_ssh(
+                "cs-example", [], relay_port=9857, remote_command="echo hi",
+            )
+        assert call.call_args.args[0][-1] == "echo hi"
+
     def test_no_forwards_or_command_keeps_prior_bare_argv(self) -> None:
         """Existing behavior for a plain interactive connect is unchanged."""
         with (

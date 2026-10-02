@@ -1182,7 +1182,7 @@ def _ssh_session(
     from .worktrees import ContextRefused
 
     source = CodespaceSource(args.name, account=account_for_codespace(args.name))
-    github_account = None if args.no_relay else credential_account_for_codespace(args.name)
+    github_account = None if getattr(args, "no_relay", False) else credential_account_for_codespace(args.name)
     config = load_merged_config()
     from .relay_launch import effective_relay_port
     relay_port = effective_relay_port(config)
@@ -2473,6 +2473,13 @@ def _interactive_ssh(
             env["LC_GIT_CREDENTIAL_RELAY_TOKEN"] = relay_token
         if github_account:
             env["LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT"] = github_account
+            if remote_command:
+                # ssh drops local LC_* vars; carry the (non-secret) account in
+                # the command so the remote auth helpers inherit it.
+                remote_command = (
+                    f"export LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT={shlex.quote(github_account)}; "
+                    + remote_command
+                )
 
     args = ["gh", "codespace", "ssh", "-c", codespace_name]
     if port_forwards or remote_command:
