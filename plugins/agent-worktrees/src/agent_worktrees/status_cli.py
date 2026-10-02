@@ -156,33 +156,34 @@ def cmd_status(args: argparse.Namespace) -> int:
                     tracking.record_repo_fetch_confirmed(_r)
 
     results: list[dict] = []
-    for rec in records:
-        info = git_ops.classify_worktree(
-            rec.worktree_path,
-            rec.branch,
-            fetch=False,
-            remote=repo.remote,
-            default_branch=repo.default_branch,
-            active_paths=active_paths,
-        )
-        info = _core()._apply_tracking_override(rec, info)
-        result_entry = _core()._worktree_to_dict(
-            rec,
-            state_info=info,
-            mux_info=mux_map.get(rec.worktree_id),
-            session_ctx=session_ctx,
-        )
-        # Add display helpers for table output
-        short_id = rec.worktree_id[-4:] if len(rec.worktree_id) > 4 else rec.worktree_id
-        result_entry["short_id"] = short_id
-        display_title = rec.title if (rec.title and rec.title != "null") else None
-        if not display_title:
-            norm = _core()._normalize_path(rec.worktree_path)
-            display_title = session_ctx.latest_summary.get(norm)
-        if not display_title:
-            display_title = info.title or "(none)"
-        result_entry["title"] = display_title
-        results.append(result_entry)
+    with cfg.cached_load_config_scope():
+        for rec in records:
+            info = git_ops.classify_worktree(
+                rec.worktree_path,
+                rec.branch,
+                fetch=False,
+                remote=repo.remote,
+                default_branch=repo.default_branch,
+                active_paths=active_paths,
+            )
+            info = _core()._apply_tracking_override(rec, info)
+            result_entry = _core()._worktree_to_dict(
+                rec,
+                state_info=info,
+                mux_info=mux_map.get(rec.worktree_id),
+                session_ctx=session_ctx,
+            )
+            # Add display helpers for table output
+            short_id = rec.worktree_id[-4:] if len(rec.worktree_id) > 4 else rec.worktree_id
+            result_entry["short_id"] = short_id
+            display_title = rec.title if (rec.title and rec.title != "null") else None
+            if not display_title:
+                norm = _core()._normalize_path(rec.worktree_path)
+                display_title = session_ctx.latest_summary.get(norm)
+            if not display_title:
+                display_title = info.title or "(none)"
+            result_entry["title"] = display_title
+            results.append(result_entry)
 
     if args.json:
         _core()._json_output({"worktrees": results})

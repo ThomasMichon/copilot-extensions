@@ -6,6 +6,8 @@ import argparse
 import os
 import sys
 
+from . import config as cfg
+
 #: Bounded grace period a shutdown/handoff (runtime superseded, a newer
 #: monitor taking ownership, or the empty-strike idle-exit path) waits for
 #: an in-flight tracking-write compute to finish before closing the
@@ -204,6 +206,16 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         cache_ttl = float(os.environ.get("AGENT_WORKTREES_STATUS_CACHE_SECONDS", "60"))
     except ValueError:
         cache_ttl = 60.0
+    config_cache_ttl = max(60.0, float(interval))
+    config_cache_sessions: dict[str, cfg.ConfigCacheSession] = {}
+
+    def _config_cache_for_project(project: str):
+        session = config_cache_sessions.get(project)
+        if session is None:
+            session = cfg.ConfigCacheSession(ttl=config_cache_ttl)
+            config_cache_sessions[project] = session
+        return session
+
     segment_cache = status_segment_cache_type(cache_ttl)
     wake_event = threading.Event()
     resident_push.bind(wake_event, segment_cache)
@@ -573,6 +585,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     lifecycle_priority=lifecycle_priority,
                     governance=governance,
                     managed_mux_cache=managed_mux_runtime.cache,
+                    config_cache_for_project=_config_cache_for_project,
                 )
                 wait_for_lifecycle_priority(lifecycle_priority)
                 with state_lock:

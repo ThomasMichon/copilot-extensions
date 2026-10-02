@@ -24,6 +24,8 @@ import yaml
 
 from . import git_ops
 
+_OFFLINE_GIT_TIMEOUT = 15
+
 
 def parse_yaml_text_safe(text: str) -> dict[str, Any]:
     """Parse a YAML string into a dict, returning ``{}`` on any problem.
@@ -44,7 +46,7 @@ def _offline_remote_head_branch(anchor: Path, remote: str) -> str | None:
     try:
         proc = git_ops.git(
             "symbolic-ref", "-q", f"refs/remotes/{remote}/HEAD",
-            cwd=anchor, check=False, capture=True, timeout=3,
+            cwd=anchor, check=False, capture=True, timeout=_OFFLINE_GIT_TIMEOUT,
         )
     except Exception:
         return None
@@ -61,7 +63,7 @@ def _offline_remote_branch_exists(anchor: Path, remote: str, branch: str) -> boo
     try:
         proc = git_ops.git(
             "show-ref", "--verify", "--quiet", f"refs/remotes/{remote}/{branch}",
-            cwd=anchor, check=False, capture=True, timeout=3,
+            cwd=anchor, check=False, capture=True, timeout=_OFFLINE_GIT_TIMEOUT,
         )
     except Exception:
         return False
@@ -76,7 +78,9 @@ def _read_committed_blob(
     working tree or index. ``None`` if the ref or path doesn't exist."""
     spec = f"{remote}/{branch}:{rel_path.as_posix()}"
     try:
-        proc = git_ops.git("show", spec, cwd=anchor, check=False, capture=True, timeout=5)
+        proc = git_ops.git(
+            "show", spec, cwd=anchor, check=False, capture=True, timeout=_OFFLINE_GIT_TIMEOUT
+        )
     except Exception:
         return None
     return proc.stdout if proc.returncode == 0 else None
