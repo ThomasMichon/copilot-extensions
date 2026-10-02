@@ -63,6 +63,16 @@ def main(argv: list[str] | None = None) -> int:
         json.dump(entries(), sys.stdout)
         sys.stdout.write("\n")
         return 0
+    if verb == "create":
+        # Phase B's pivot-level create_action (picker-new-session-prompt-
+        # and-composer): a harmless, side-effect-free acknowledgment so a
+        # --demo render can exercise the full Confirm -> run_resolved round
+        # trip without ever touching anything real. Matches demo_engine's
+        # own "obviously synthetic, prints and exits" contract.
+        rest = [a for a in args if a != "create" and not a.startswith("--")]
+        title = rest[0] if rest else "(untitled)"
+        print(f"Example Labs: filed test request {title!r} -- for science.")
+        return 0
     json.dump({"error": f"demo pivot has no verb {verb!r}"}, sys.stdout)
     sys.stdout.write("\n")
     return 2

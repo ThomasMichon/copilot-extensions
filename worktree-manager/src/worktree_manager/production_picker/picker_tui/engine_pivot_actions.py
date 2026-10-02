@@ -6,6 +6,7 @@ import logging
 import threading
 
 from .engine_dialogs import CfgMenuScreen, ScopeDlgScreen, TaskMenuScreen
+from .create_action_screen import CreateActionScreen
 from .steering import PivotCardScreen, PivotFormScreen, SubmitErrorScreen, _normalize_form_fields, _steer_draft_path
 
 log = logging.getLogger("agent-worktrees.picker")
@@ -480,6 +481,67 @@ class PickerScreenPivotActionsMixin:
                 self.app.push_screen(
                     SubmitErrorScreen(action.label, msg or short, draft_path)
                 )
+
+        self._run_bg(action.label, _work, _done)
+    def _open_create_action(self):
+        """Open the pivot-level ``create_action`` modal (Phase B,
+        picker-new-session-prompt-and-composer) -- the registered-pivot
+        counterpart to ``_open_pivot_form``, minus the row/card: there is no
+        selected entry to resolve fields/tokens against, so ``fields`` comes
+        straight from the manifest's own static ``create_action.fields``."""
+        reg = self._reg_pivot()
+        if reg is None or reg.create_action is None:
+            return
+        action = reg.create_action
+
+        def _after(values):
+            if values is None:
+                self.debug = f"{action.label} · cancelled"
+                return
+            self._run_create_action(reg, action, values)
+
+        self.app.push_screen(
+            CreateActionScreen(action.label, list(action.fields), confirm=action.confirm),
+            _after,
+        )
+    def _run_create_action(self, reg, action, values):
+        """Run a submitted ``create_action`` (Phase B): substitute
+        ``{field.<name>}``/``{fields}`` tokens (no entry tokens -- there is no
+        row) and run the command via the pivot runtime, off the render flow
+        (:meth:`_run_bg`) exactly like the row-scoped form action. Invalidates
+        the cached list on success so the new entry shows up without waiting
+        on the idle poll tick."""
+        from . import pivots as _pivots
+
+        rt = self._pivot_runtime(reg)
+        argv = _pivots.format_form_template(action.run, {}, values)
+
+        def _work():
+            try:
+                ok, msg = rt.run_resolved(argv)
+            except Exception as exc:  # never let a delivery attempt vanish silently
+                ok, msg = False, f"{type(exc).__name__}: {exc}"
+            else:
+                if ok:
+                    try:
+                        rt.invalidate()
+                    except Exception:
+                        pass
+            return ok, msg
+
+        def _done(result):
+            ok, msg = result
+            short = (msg or "").splitlines()[0][:80] if msg else ""
+            if ok:
+                try:
+                    rt.ensure(self._pivot_scope_key())
+                except Exception:
+                    pass
+                self.refresh()
+                self.debug = f"{action.label} · created" + (f" — {short}" if short else "")
+            else:
+                self.debug = f"{action.label} failed · {short or 'see command output'}"
+                self.app.push_screen(SubmitErrorScreen(action.label, msg or short, None))
 
         self._run_bg(action.label, _work, _done)
     def _run_pivot_form_draft_save(self, reg, ctx, title, values):

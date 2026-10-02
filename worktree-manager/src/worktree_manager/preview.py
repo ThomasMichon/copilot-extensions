@@ -68,6 +68,19 @@ _DEMO_PIVOT_MANIFEST: dict[str, object] = {
     ],
     "empty_hint": "No demo requests.",
     "actions": [],
+    # Phase B (picker-new-session-prompt-and-composer): exercises the
+    # generic pivot-level "create" affordance with the preview's own fixture
+    # data, per this project's "render early, render often" convention --
+    # a preview that never populates a new field verifies nothing.
+    "create_action": {
+        "label": "New test request",
+        "fields": [
+            {"name": "title", "type": "text"},
+            {"name": "prompt", "type": "textarea"},
+        ],
+        "run": [sys.executable, "-m", "worktree_manager.demo_pivot", "create",
+                "{field.title}", "--prompt", "{field.prompt}"],
+    },
 }
 
 _active_tmp_dir: tempfile.TemporaryDirectory | None = None

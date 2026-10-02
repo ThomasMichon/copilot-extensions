@@ -730,16 +730,22 @@ class TasksView:
         ``add(..., new_section=...)`` so this component never touches the
         closure's ``cur_section``/``vrows``.
 
-        Split into ``build_chrome`` (the machine-scope row -- Tasks has no button
-        region) and ``build_data`` (the status line + the scrolling task list) so
-        the concerns render into separate widgets; ``build`` emits both in order,
-        byte-identically (#88 NF3)."""
+        Split into ``build_chrome`` (the machine-scope row, plus the
+        data-driven "New …" button when the manifest declares a
+        ``create_action``, Phase B) and ``build_data`` (the status line +
+        the scrolling task list) so the concerns render into separate
+        widgets; ``build`` emits both in order, byte-identically (#88 NF3)."""
         self.build_chrome(add, width, sel)
         self.build_data(add, width, sel)
 
     def build_chrome(self, add, width, sel):
         eng = self._eng
         add(eng.tab_bar(width, sel == ("M", 0)))
+        reg = eng._reg_pivot()
+        if reg is not None and reg.create_action is not None:
+            add(Text(""))  # breathing room above the button
+            add(eng.registered_create_row(reg, width, sel == ("BTN", 0)),
+                stop=("BTN", 0))
         add(Text(""))
 
     def build_data(self, add, width, sel):

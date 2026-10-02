@@ -91,6 +91,7 @@ from .engine_sessions_actions import PickerScreenSessionsActionsMixin
 from .engine_views import MaintenanceView, TasksView, WorktreesView
 from .engine_worker_actions import PickerScreenWorkerActionsMixin
 from .engine_worktree_actions import PickerScreenWorktreeActionsMixin
+from .create_action_screen import CreateActionScreen  # noqa: F401 -- re-export for tests
 from .listview import ListView
 from .seed_prompt_screen import SeedPromptScreen  # noqa: F401 -- re-export for tests
 from .selection import ListSelection
@@ -114,6 +115,7 @@ __all__ = [
     "CLEAN_SPECS",
     "C_STATE",
     "CfgMenuScreen",
+    "CreateActionScreen",
     "FocusGroup",
     "HTABS",
     "IDLE_TIMEOUT_SECS",

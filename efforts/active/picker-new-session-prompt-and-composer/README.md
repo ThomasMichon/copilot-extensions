@@ -25,7 +25,13 @@ Picker has no separate end-user reference doc of its own beyond its
 in-app hints (the options dialog's own hint strings, unchanged by this
 PR). This effort's own README (here) remains the authoritative
 in-progress record of what's implemented vs. outstanding, kept current in
-its Plan/Journal each session.
+its Plan/Journal each session. 2026-10-02 (Phase B engine wiring):
+`worktree-manager/README.md`'s own "Developing a pivot: render early,
+render often" section already documents the `--demo`/preview render
+workflow this change's own validation followed -- no update needed there.
+Extended `demo_pivot.py`/`preview.py` (the preview fixture itself, not a
+doc) so that workflow now exercises the new `create_action` affordance for
+any future pivot change.
 
 ## Guiding Intent
 
@@ -307,22 +313,84 @@ real code, not assumption:
       (re-ran clean after every review round). Module-size gate: OK
       (`pivot_manifest.py` 922 lines, under the 1000-line cap with room;
       `pivot_create_action.py` 163 lines).
-- [ ] Engine wiring: a UI affordance to trigger it when the registered
+- [x] Engine wiring: a UI affordance to trigger it when the registered
       pivot's list has focus but no row is meaningfully selected (mirror
       Worktrees' "N" button row, but data-driven -- reuse Phase A's
-      extracted field-rendering helper for the widget types). **Not started
-      this session -- see the Journal for a concrete recommended shape**
-      (mirroring Phase A item 4's own "investigated, not rushed" precedent):
-      submission reuses `_run_pivot_form_submit`'s existing
-      `format_form_template(action.run, ctx, values)` +
-      `rt.run_resolved(argv)` plumbing verbatim (no entry `ctx` tokens
-      available, just `{field.<name>}`); the genuinely new work is the
-      affordance itself (keybinding/button + a lean `CreateActionScreen`
-      mirroring `SeedPromptScreen`'s shape, built from `create_action.fields`
-      instead of a single hardcoded textarea) and where in the registered-
-      pivot list's render/selection state machine (`engine_views.py`'s
-      `TasksView`, `engine_selection.py`, `engine.py`'s `sel`/`stops()`) a
-      "no row focused, pivot focused" state already exists or needs adding.
+      extracted field-rendering helper for the widget types). **Done
+      2026-10-02:** `button_set()` (`engine_model.py`) returns `["NC"]` for
+      a "registered" pivot whose `reg.create_action` is set, else `[]`
+      (unconditionally empty before this); `stops()`/`region_heads()` add a
+      conditional `("BTN", 0)` stop right after the machine sub-nav, before
+      the task rows. `TasksView.build_chrome` (`engine_views.py`) renders a
+      new data-driven `registered_create_row()` (`engine_selection.py`) --
+      the button's own label comes straight from `create_action.label`, no
+      hardcoded per-pivot text table (mirrors `new_worktree_row()`'s
+      rendering shape, simplified to one chip since there's only ever one).
+      `_activate()`'s `BTN` branch (`engine_maintenance_actions.py`) routes
+      `btn == "NC"` to a new `_open_create_action()`
+      (`engine_pivot_actions.py`), which pushes the new
+      `CreateActionScreen` (below) and, on Confirm, calls a new
+      `_run_create_action()` -- confirmed reusing
+      `_run_pivot_form_submit`'s exact `format_form_template(action.run, {},
+      values)` + `rt.run_resolved(argv)` + `rt.invalidate()`/`rt.ensure()`
+      plumbing verbatim, `ctx={}` since there is no row to resolve entry
+      tokens against.
+
+      **`CreateActionScreen`** (new module `create_action_screen.py`)
+      mirrors `SeedPromptScreen`'s shape (lean, Confirm/Cancel only, no
+      draft) but renders `create_action.fields` (any mix of
+      text/textarea/choice/multichoice, `show_when` conditionals, tabs when
+      >1 field) instead of one hardcoded textarea. `create_action.confirm:
+      true` shows an inline are-you-sure (mirroring `ResetConfirmScreen`'s
+      FocusGroup pattern, swapped into the same frame rather than a second
+      pushed screen) before the collected values are actually
+      dismissed/submitted -- Cancel is the initial choice.
+
+      **Shared extraction, not duplication:** `CreateActionScreen` needs the
+      exact same multi-field tab/conditional-visibility/advance-on-Enter/
+      value-collection mechanics `PivotFormScreen` (the Steer surface)
+      already has, so rather than copy ~150 lines of subtle logic, extracted
+      a new `FieldQuestionsMixin` (`field_questions.py`) from
+      `PivotFormScreen` first (mechanical, mirroring `field_widgets.py`'s own
+      precedent -- confirmed byte-identical: full suite re-ran clean before
+      touching anything else), with one override point
+      (`_focus_final_control()`) for what to focus once Enter advances past
+      the last question. Both screens mix it in now.
+
+      **Tests:** 4 new engine-wiring tests
+      (`test_registered_pivot_create_action_button_appears_and_absent`,
+      `_opens_and_submits`, `_cancel_does_not_submit`, `_confirm_gate`) plus
+      a new manifest-writer test helper
+      (`_write_tasks_manifest_with_create`). A genuine (pre-existing, not
+      new) gap surfaced while writing these: a plain `text`-type field has
+      no Enter/Ctrl+Right-to-advance mechanic of its own (only
+      textarea/choice/multichoice do, via `field_widgets`' custom widgets --
+      `Input`'s native word-cursor binding claims Ctrl+Right first), so those
+      two tests switch tabs via `screen._activate_tab()` directly for that
+      one field, the same way a mouse click on the tab header would.
+
+      **Render-verified, not just unit-tested** (per this project's own
+      "render early, render often" README mandate): extended the official
+      `--demo`/preview fixtures first -- `demo_pivot.py` gained a `create`
+      verb (a harmless synthetic acknowledgment) and `preview.py`'s
+      `_DEMO_PIVOT_MANIFEST` gained a matching `create_action` (title +
+      prompt fields) -- then captured real screenshots
+      (`picker screenshot --demo --pivot "Demo Queue"` for the button row;
+      a short driven script using `picker_tui.capture`'s own
+      `capture_modal_async`/`export_screenshot` seam for the modal states)
+      at each milestone. **This caught a real bug unit tests missed
+      entirely:** the inline are-you-sure prompt's dynamically-mounted
+      `FocusGroup` rendered with zero height (no CSS rule gave it one) --
+      invisible in a screenshot, yet still fully queryable/interactable in
+      a headless Pilot test, so all 4 new tests passed while the actual
+      rendered UI was broken. Fixed by generalizing `#create-buttons {
+      height: 1; ... }` to a screen-wide `FocusGroup { height: 1; ... }`
+      rule (now covers the dynamically-mounted confirm-prompt group too).
+      Full `production_picker` + `test_launch_session_unwrap.py` +
+      `test_picker_preview_mode.py` suite: 913 passed, 1 skipped (one
+      different pre-existing Textual-pilot timing flake confirmed
+      isolated-pass, same class observed throughout this session's earlier
+      PR too).
 - [ ] `agent-dispatch`'s manifest declares its own `create_action` (title +
       prompt/goal textarea + a tags/criteria picker -- see the Tasks-pane
       effort's own Phase 10 Plan for the exact field list and the pool-
@@ -346,16 +414,17 @@ real code, not assumption:
       `run_resolved` path the row-scoped `kind:"form"` action already uses --
       no two-step orchestration, no propose-id-capture-then-queue chaining,
       needs inventing at the picker layer.
-- [ ] Tests: the new manifest field parses correctly (and degrades
+- [~] Tests: the new manifest field parses correctly (and degrades
       gracefully for a pivot that doesn't declare one); the UI affordance
       appears/is absent correctly; a synthetic pivot's create action renders
       and submits via the generic mechanism (mirroring
       `test_registered_pivot_*` patterns already in
       `test_picker_tui.py`); `agent-dispatch`'s own composer round-trips
       title/prompt/tags into the exact `propose`/`queue` call shape. The
-      manifest-parsing half is done (18 tests, see above); the engine-wiring
-      and agent-dispatch-manifest halves remain, blocked on the two items
-      above.
+      manifest-parsing half is done (18 tests) and the engine-wiring half is
+      now done too (4 new tests, see above, render-verified against the
+      `--demo` fixture); the `agent-dispatch`-manifest half remains, blocked
+      on the tags/criteria vocabulary lookup above.
 
 ## Validation Plan
 
@@ -1390,3 +1459,97 @@ first turn) -- see the updated Validation Plan entry for the precise
 remaining gap. Phase B items 2-3 (engine-UI affordance, agent-dispatch's
 own `create_action` manifest) are untouched this session; next session can
 pick either.
+
+### 2026-10-02 (later) — Phase B engine wiring: the data-driven "New …" affordance, built and render-verified
+Picked up Phase B item 2 directly (no handoff gap to re-read -- the prior
+PR had just merged). Read the manifest schema (`pivot_create_action.py`,
+merged previous session) and the existing Worktrees "N" button precedent
+(`engine_model.py`'s `button_set()`/`stops()`, `engine_selection.py`'s
+`new_worktree_row()`, `engine_maintenance_actions.py`'s `_activate()`)
+before writing anything, per this effort's own established "investigate
+the real wiring before touching it" discipline.
+
+**Extraction first:** `CreateActionScreen` needs the identical multi-field
+tab/conditional-visibility/advance-on-Enter/collect mechanics
+`PivotFormScreen` (Steer) already has. Rather than duplicate ~150 lines of
+genuinely subtle logic (conditional `show_when` tab sync in particular),
+extracted `FieldQuestionsMixin` into a new `field_questions.py` first,
+mirroring this codebase's own `field_widgets.py` precedent exactly. Verified
+byte-identical with the full suite before building anything new on top
+(897 passed, 1 skipped -- matching the pre-extraction baseline).
+
+**Engine wiring, end to end:** `button_set()` returns `["NC"]` only when
+the current registered pivot declares `create_action`; `stops()`/
+`region_heads()` add the matching conditional `("BTN", 0)` stop.
+`registered_create_row()` renders the button's label straight from the
+manifest (no hardcoded per-pivot text table, unlike Worktrees' `N`/`K`/`SY`
+-- any pivot can declare one). `_activate()` routes the new `NC` button id
+to `_open_create_action()`, which pushes `CreateActionScreen` and, on
+Confirm, reuses `_run_pivot_form_submit`'s exact
+`format_form_template`/`run_resolved`/`invalidate`/`ensure` plumbing
+verbatim (confirmed: no new orchestration needed at the picker layer, just
+as the Plan predicted) with an empty `ctx` (no row, so no entry tokens).
+
+**The confirm gate:** `create_action.confirm: true` shows an inline
+are-you-sure by swapping the frame's own content (mirroring
+`ResetConfirmScreen`'s FocusGroup shape) rather than pushing a second
+screen -- Cancel is the initial choice, matching the "never submit on a
+reflexive Enter" precedent already established for Reset.
+
+**Render-verified, not just unit-tested -- and it caught a real bug:**
+followed `worktree-manager/README.md`'s own "render early, render often"
+discipline literally. First extended the OFFICIAL `--demo`/preview
+fixtures (`demo_pivot.py` gained a harmless `create` verb; `preview.py`'s
+`_DEMO_PIVOT_MANIFEST` gained a matching `create_action`) rather than
+building a one-off throwaway fixture, so this capability is now exercisable
+by anyone running `picker screenshot --demo` and by the preview-mode test
+suite. Captured the button row live
+(`picker screenshot --demo --pivot "Demo Queue" --wait 3 --format text`)
+and the modal states (title tab, prompt tab filled, button row focused) via
+a short driven script using `picker_tui.capture`'s own
+`capture_modal_async`/`export_screenshot` seam, converted to PNG via
+`scripts/picker-snapshot/svg2png.mjs`. The button row and the two-tab
+fields-filled frame rendered correctly on the first try -- but the
+confirm-gate frame showed the are-you-sure TEXT with **no Create/Cancel
+buttons visible at all**, even though all 4 new Pilot tests already passed
+clean, including one that specifically queries and clicks that exact
+button group. The headless test could `query_one` the dynamically-mounted
+`FocusGroup` and post real Activated messages to it -- Textual doesn't
+require a widget to have nonzero composited height to be interactable --
+but nothing in `CreateActionScreen`'s CSS gave it one (the main button
+row's rule was scoped to `#create-buttons` specifically, never generalized
+to `FocusGroup` itself the way `ResetConfirmScreen`'s CSS does). Fixed by
+widening that one rule to `CreateActionScreen FocusGroup { height: 1; ...
+}`; re-rendered and confirmed both buttons now visible, Cancel
+highlighted. This is exactly the failure class the README's own
+"a unit test's string assertion can miss while still passing" warning
+describes, caught only because the render step wasn't skipped.
+
+**Tests:** 4 new (`test_registered_pivot_create_action_button_appears_and_
+absent`, `_opens_and_submits`, `_cancel_does_not_submit`,
+`_confirm_gate`) plus a new `_write_tasks_manifest_with_create` manifest
+helper. Surfaced one genuine (pre-existing, not new) UI gap while writing
+them: a plain `text` field has no Enter/Ctrl+Right advance mechanic of its
+own (`Input`'s native word-cursor binding claims Ctrl+Right before the
+screen's own tab-cycle action ever sees it; only the custom
+`_AutoExpandTextArea`/`_SteerRadioSet`/`_SteerSelectionList` widgets wire
+that). Worked around it in the two affected tests via
+`screen._activate_tab()` (the same effect a mouse click on the tab header
+would have) rather than pretending a keyboard-only flow already works for
+every field type -- left as a known, pre-existing limitation, not
+something this Phase B item needs to fix.
+
+**Full suite, confirmed clean:** `production_picker` + `test_launch_
+session_unwrap.py` + `test_picker_preview_mode.py`, 913 passed, 1 skipped,
+0 failed (isolated reruns). A different single test flickered red across
+two of several runs during this session
+(`test_registered_pivot_action_menu_runs_and_invalidates`,
+`test_steering_card_and_form_actions_gate_and_drive`,
+`test_actions_menu_liveness_verify_is_offloaded` each at different points)
+-- same pre-existing Textual-pilot timing-flake class as before, confirmed
+pass-in-isolation each time, not a regression.
+
+**Not done this session:** Phase B item 3 (`agent-dispatch`'s own
+`create_action` manifest) remains blocked on the tags/criteria vocabulary
+lookup noted above; the literal Picker end-to-end click-through from Phase
+A's Validation Plan also remains open.

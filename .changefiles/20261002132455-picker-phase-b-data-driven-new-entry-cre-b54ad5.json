@@ -1,0 +1,9 @@
+{
+  "comment": "Picker Phase B: data-driven New-entry create-action engine wiring for registered pivots (CreateActionScreen, FieldQuestionsMixin extraction); extends the --demo preview fixture to exercise it.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "minor"
+    }
+  ]
+}

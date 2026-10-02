@@ -370,6 +370,9 @@ class PickerScreenMaintenanceActionsMixin:
             if btn == "N":
                 # New worktree… opens the options dialog directly (#1346).
                 self._open_optmenu()
+            elif btn == "NC":
+                # A registered pivot's data-driven "New …" affordance (Phase B).
+                self._open_create_action()
             elif btn == "TH":
                 self.show_hidden = not self.show_hidden
                 n = self._hidden_count()
