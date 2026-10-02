@@ -138,13 +138,14 @@ class Locus:
 
     preferred: str = ""
     machines: list[str] = field(default_factory=list)
+    # Machines opted out of related_machine_presence auto-registration.
+    excluded_machines: list[str] = field(default_factory=list)
     codespace: dict[str, Any] = field(default_factory=dict)
     container: dict[str, Any] = field(default_factory=dict)
 
     def is_empty(self) -> bool:
-        return not (
-            self.preferred or self.machines or self.codespace or self.container
-        )
+        return not (self.preferred or self.machines or self.excluded_machines
+                    or self.codespace or self.container)
 
 
 @dataclass
@@ -328,20 +329,16 @@ def _parse_venue(raw: Any) -> dict[str, Any]:
             out[str(k)] = str(v)
     return out
 
+def _parse_str_list(raw: Any) -> list[str]:
+    return [str(m).strip() for m in raw if str(m).strip()] if isinstance(raw, list) else []
 
 def _parse_locus(raw: Any) -> Locus:
     if not isinstance(raw, dict):
         return Locus()
-    preferred = str(raw.get("preferred", "")).strip()
-    raw_machines = raw.get("machines", [])
-    machines = (
-        [str(m).strip() for m in raw_machines if str(m).strip()]
-        if isinstance(raw_machines, list)
-        else []
-    )
     return Locus(
-        preferred=preferred,
-        machines=machines,
+        preferred=str(raw.get("preferred", "")).strip(),
+        machines=_parse_str_list(raw.get("machines", [])),
+        excluded_machines=_parse_str_list(raw.get("excluded_machines", [])),
         codespace=_parse_venue(raw.get("codespace", {})),
         container=_parse_venue(raw.get("container", {})),
     )
@@ -527,8 +524,10 @@ def _emit_locus(lines: list[str], locus: Locus, indent: str) -> None:
     if locus.preferred:
         lines.append(f"{inner}preferred: {_quote(locus.preferred)}")
     if locus.machines:
-        rendered = ", ".join(_quote(m) for m in locus.machines)
-        lines.append(f"{inner}machines: [{rendered}]")
+        lines.append(f"{inner}machines: [{', '.join(_quote(m) for m in locus.machines)}]")
+    if locus.excluded_machines:
+        rendered = ', '.join(_quote(m) for m in locus.excluded_machines)
+        lines.append(f"{inner}excluded_machines: [{rendered}]")
     if locus.codespace:
         lines.append(f"{inner}{_emit_venue('codespace', locus.codespace)}")
     if locus.container:
