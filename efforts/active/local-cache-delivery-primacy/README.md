@@ -54,14 +54,21 @@ Operationally, this means two things:
 - **Every pre-session boundary that *can* render the local cache before a
   session starts should do so** -- today, only `agent-worktrees`
   (create/resume/`sessionStart`) is wired. `agent-bridge` spawns Copilot
-  sessions through several distinct paths (local/command, containers,
-  GitHub Codespaces, an SSH/remote mesh) and currently wires none of them.
-  This effort's first slice closes the **local/command** spawn path (the
-  one with the same direct-filesystem access `agent-worktrees`' own
-  wiring relies on); container/codespace/SSH paths are explicitly
-  out-of-scope follow-on slices (confirmed with the operator), since each
-  needs a *remote-exec* variant of the render call rather than a direct
-  filesystem call.
+  sessions through several distinct paths -- `target.type == "local"`
+  (direct same-filesystem spawn via a Session-Host), containers, GitHub
+  Codespaces, an SSH/remote mesh, and `target.type == "command"` (a
+  generic spawn-command shape that *also* covers Codespaces, containers,
+  elevated relays, and other providers with no `target.cwd` at all,
+  per `session_start.py`/`agent_registry_resolver.py`) -- and currently
+  wires none of them. This effort's first slice closes **only
+  `target.type == "local"`** (the one path proven to have the same
+  direct-filesystem access to an explicitly daemon-local `target.cwd`
+  that `agent-worktrees`' own wiring relies on -- **not** "command",
+  which is not a reliable proxy for locality); every other target type,
+  including `command`, is an explicitly out-of-scope follow-on slice
+  (confirmed with the operator), since each needs a *remote-exec* variant
+  of the render call rather than a direct filesystem call, or simply has
+  no local `cwd` to render against at all.
 
 ## Participants
 
@@ -91,13 +98,17 @@ directly amends).
 `plugins/agent-bridge/src/agent_bridge/session_start.py`
 (`SessionStartCore.start_session`, called from
 `routes/sessions.py:start_session` and `routes/worktrees.py:resume_worktree`).
-The local/command path resolves a `target.cwd` directly on the same
+Only `target.type == "local"` resolves a `target.cwd` directly on the same
 filesystem the agent-bridge daemon itself runs on -- directly analogous to
 `agent-worktrees`' own `worktree_creation._create_worktree_core` /
-`resolve_launch_cli._resolve_resume_context` call sites. Container,
-Codespace, and SSH-mesh spawn paths resolve a *remote* `cwd` the daemon has
-no direct filesystem access to; rendering there needs a remote-exec call
-(a follow-on slice, not this effort's Phase 2).
+`resolve_launch_cli._resolve_resume_context` call sites. Every other target
+type -- container, Codespace, SSH-mesh, and the generic `"command"` shape
+(which itself also covers Codespaces, containers, elevated relays, and
+other providers, often with **no** `target.cwd` at all per
+`session_start.py`/`agent_registry_resolver.py`) -- resolves a *remote* cwd
+(or none) the daemon has no direct filesystem access to; rendering there
+needs a remote-exec call, or simply does not apply (a follow-on slice, not
+this effort's Phase 2).
 
 ## Request
 
@@ -110,9 +121,12 @@ like what agent-worktrees (and agent-bridge) can provide."
 
 Scoping follow-up, confirmed by the operator: the vision reframing is
 exactly as proposed (no additional nuance to the scheduled sync-worker's
-own cadence); `agent-bridge` wiring is scoped to the local/command spawn
-path first, with container/codespace/SSH as explicitly named follow-on
-slices; no other pre-session boundary besides `agent-bridge` was flagged.
+own cadence); `agent-bridge` wiring is scoped to the local spawn path
+first (`target.type == "local"` specifically -- narrowed from an initial,
+incorrect "local/command" framing, since `"command"` is not a reliable
+proxy for locality; see the Journal), with every other target type as
+explicitly named follow-on slices; no other pre-session boundary besides
+`agent-bridge` was flagged.
 
 ## Plan
 
@@ -133,24 +147,43 @@ slices; no other pre-session boundary besides `agent-bridge` was flagged.
       reprioritization (it covers a different, per-session-computed-facts
       case, so likely needs no change -- confirm rather than assume).
 
-### Phase 2 -- `agent-bridge` local/command spawn-path wiring
+### Phase 2 -- `agent-bridge` local spawn-path wiring
 - [ ] Add an `agent_bridge`-side equivalent of
       `agent_worktrees.local_cache_refresh` (resolve customizing-copilot's
       declared `render-local-cache` CLI the same bounded-timeout,
       never-raising, global-activation-scoped way Phase 7's
       `agent_worktrees.local_cache_refresh` does -- no cross-plugin
       reach-around; see `docs/patterns/a-la-carte-independence.md`).
-- [ ] Call it from `session_start.py`'s local/command spawn path, after
-      the target's `cwd` is resolved and before the Copilot CLI process is
-      actually spawned, best-effort (never raises, never gates/delays the
-      spawn on a slow or failing render).
+- [ ] Eligibility is **`target.type == "local"` only** -- never `"command"`
+      (that shape also covers Codespaces, containers, elevated relays, and
+      other providers, often with no `target.cwd` at all; see
+      `session_start.py`/`agent_registry_resolver.py`). Confirm the
+      resolved `target.cwd` is a real, local, trusted directory before
+      calling the renderer.
+- [ ] Call it from `session_start.py`'s `target.type == "local"` branch,
+      after `target.cwd` is resolved and before the Copilot CLI process is
+      actually spawned, bounded by a **short, explicit latency budget**
+      (a few seconds -- sized against this plugin's own existing
+      `SESSIONSTART_MAX_TIMEOUT_S`-style precedent, not the create/resume
+      path's more generous 30s default, since this sits directly in the
+      spawn's own critical path) -- completing the render before spawn
+      necessarily gates spawn for up to that bound; it is never
+      unbounded, and a timeout or any other render failure is absorbed
+      (spawn proceeds against whatever the checked-in floor already has)
+      rather than failing the spawn itself.
 - [ ] Guard test: a synthetic repo with a stale checked-in projection and
       a divergent installed payload gets its `.local.instructions.md`
-      sibling refreshed by a local-spawn `start_session` call, proven
-      against the real `render_local_cache()` call (not a stub).
+      sibling refreshed by a local-spawn (`target.type == "local"`)
+      `start_session` call, proven against the real `render_local_cache()`
+      call (not a stub), completing within the defined latency budget.
 - [ ] Negative-proof test: customizing-copilot not installed, the repo not
-      yet trusted, or a render failure must never block or delay a
-      local-spawn session start.
+      yet trusted, or a render failure must never fail the spawn itself,
+      and the render call is proven bounded by the defined latency budget
+      (not merely asserted zero-delay, which is unachievable for a
+      synchronous pre-spawn render).
+- [ ] Negative-proof test: a `target.type == "command"` (or any non-local)
+      spawn never invokes the local renderer at all, including the
+      specific case of a `"command"` target with no `target.cwd` present.
 
 ## Validation Plan
 
@@ -160,9 +193,11 @@ slices; no other pre-session boundary besides `agent-bridge` was flagged.
       `check-docs-consistency` clean on every PR.
 - [ ] A clean-room-style proof (matching the methodology
       `ambient-guidance-navigability`'s own Phase 7 used) that a
-      local-spawned `agent-bridge` session actually sees the fresher
-      `.local.instructions.md` content when the checked-in copy is stale --
-      not just that the unit-level render call fires.
+      local-spawned (`target.type == "local"`) `agent-bridge` session
+      actually sees the fresher `.local.instructions.md` content when the
+      checked-in copy is stale -- not just that the unit-level render call
+      fires -- and that the render's latency stays within Phase 2's
+      defined budget.
 
 ## Proposal
 
@@ -179,3 +214,24 @@ _Pending._
   `agent-bridge` wiring scoped to local/command spawn path first,
   container/codespace/SSH as named follow-on slices; no other pre-session
   boundary flagged). Effort created, premise captured.
+- **PR #4926 review caught two real issues, fixed same-session:**
+  - This worktree's own `agent-worktrees` lifecycle wiring rendered 7 real
+    `.local.instructions.md` siblings for this repo's own consumed
+    sources (the exact dirty-tree gap the operator flagged live, in
+    conversation, independently of this PR) -- and since this repo had no
+    `.github/instructions/.gitignore` yet, `git add -A` picked them up and
+    committed them. Untracked them (`git rm --cached`) and added the
+    ignore rule here too (also landing separately via #4930, found and
+    fixed as its own atomic pre-existing-issue commit the moment the gap
+    was identified; both repos this operator-identified gap touched --
+    `copilot-extensions` and `aperture-labs` -- now have the rule).
+  - The Plan's own "local/command" framing was wrong: `target.type ==
+    "command"` is a generic spawn-command shape that also covers
+    Codespaces, containers, elevated relays, and other providers, often
+    with no `target.cwd` at all -- not a reliable proxy for "same
+    filesystem as the daemon." Narrowed Phase 2's eligibility to
+    `target.type == "local"` only, added an explicit negative-proof item
+    for non-local target types, and replaced the "never gates/delays the
+    spawn" claim (internally contradictory for a synchronous pre-spawn
+    render) with a defined short latency budget modeled on this plugin's
+    own `SESSIONSTART_MAX_TIMEOUT_S` precedent.
