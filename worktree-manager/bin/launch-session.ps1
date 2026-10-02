@@ -1610,7 +1610,11 @@ function Invoke-SeedDeliverySafe {
             $embodyArgs += @('--project', [string]$script:LaunchProject)
         }
         $embodyArgs += @('embody', '--worktree-id', $WorktreeId, '--json')
-        Start-Process -FilePath $script:VenvPython -ArgumentList $embodyArgs `
+        # conhost --headless: -WindowStyle Hidden alone is ignored by the
+        # DefTerm handoff and can flash a console (windows-launch-hardening
+        # #786) -- mirrors Write-ActivityLog's own dispatch above.
+        Start-Process -FilePath 'conhost.exe' `
+            -ArgumentList (@('--headless', "`"$script:VenvPython`"") + $embodyArgs) `
             -WindowStyle Hidden -ErrorAction Stop | Out-Null
     } catch {
         Write-SetupLog "psmux: seed-delivery embody dispatch failed: $($_.Exception.Message)" 'WARN'
