@@ -202,8 +202,19 @@ genuinely the same absolute path for every machine in the fleet (a shared NAS
 mount) rather than a per-machine choice. Under `log:`, only `root`,
 `path_template`, `timezone`, `note_marker`, `template`, `narration_style`,
 `exemplars`, and `closing_remark` are accepted. Invalid YAML, unknown
-fields/placeholders, unsupported schema versions, unsafe paths, and invalid
-timezones fail explicitly.
+fields/placeholders, unsupported schema versions, and invalid timezones fail
+explicitly.
+
+**Unsafe paths fail explicitly only on a machine whose own resolved
+`sync.target` is `local`.** A mixed Windows/POSIX fleet has no single
+`local_path` string that's a native absolute path on every platform, so the
+host-native absoluteness check is deferred until the final target is known:
+on a machine targeting `local`, a bad/foreign-platform value still fails the
+config load exactly as before; on any other target (`ssh`, `onedrive`,
+`ingest`, ...) it's inapplicable there and is silently dropped back to
+whatever `sync.targets.local.path` that machine's own `~/.agent-logger/config.yaml`
+set (or the default), rather than failing the whole load over a value it
+never consumes.
 
 Repo-local config of any kind is honored only for a checkout that is both a
 project registered with `agent-worktrees` and currently on that project's
