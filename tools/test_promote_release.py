@@ -359,12 +359,12 @@ def test_promote_without_coverage_baselines_dir_writes_nothing(repo: Path):
 def test_promote_preserves_an_existing_main_baseline_when_no_fresh_one_is_collected(
     tmp_path: Path, repo: Path,
 ):
-    """Review finding (PR #4902): a transient collection/upload/download
-    failure (or simply a plugin not yet enrolled this run) must never drop
-    an already-published baseline from a prior promotion -- `scratch` starts
-    from `dev`, which has never had a baseline committed into it at all, so
-    skipping the seed-from-main step would silently wholesale-replace
-    `main`'s tree without it."""
+    """A transient collection/upload/download failure (or simply a plugin
+    not yet enrolled this run) must never drop an already-published
+    baseline from a prior promotion -- `scratch` starts from `dev`, which
+    has never had a baseline committed into it at all, so skipping the
+    seed-from-main step would silently wholesale-replace `main`'s tree
+    without it."""
     first_baselines_dir = tmp_path / "first-baselines"
     first_baselines_dir.mkdir()
 

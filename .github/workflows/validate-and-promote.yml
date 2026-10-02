@@ -257,14 +257,23 @@ jobs:
             --plugin "${{ matrix.plugin }}" \
             --project-dir "plugins/${{ matrix.plugin }}" \
             --measured-commit "${{ needs.gate.outputs.sha }}" \
-            --out "coverage-baseline-${{ matrix.plugin }}.json"
+            --out "${{ matrix.plugin }}.json"
       - name: Upload coverage baseline - ${{ matrix.plugin }}
         if: matrix.plugin == 'agent-ssh'
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
+          # The ARTIFACT's own name carries the `coverage-baseline-` prefix
+          # `download-artifact`'s own `pattern:` matches against below; the
+          # uploaded FILE's name is deliberately just `<plugin>.json` --
+          # `download-artifact --merge-multiple` preserves each artifact's
+          # own uploaded file name verbatim, and `promote_release.py`'s own
+          # `_write_coverage_baselines_into_scratch` keys each plugin by
+          # that file's name (`<plugin>.json`), so the two must match
+          # exactly (review finding: they didn't, and every promotion would
+          # have silently failed verification as a result).
           name: coverage-baseline-${{ matrix.plugin }}
-          path: coverage-baseline-${{ matrix.plugin }}.json
+          path: ${{ matrix.plugin }}.json
           if-no-files-found: ignore
           retention-days: 7
 
