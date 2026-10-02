@@ -183,6 +183,12 @@ corrections to the same original ask, not a change in intent.
       - `run_token_command(command: str) -> str | None` — the low-level
         primitive (parses with `shlex.split`, runs without a shell, returns
         stripped stdout), lifted from agent-dispatch's `_run_token_command()`.
+        **Launch it consoleless:** pass `agent_procutil`'s
+        `**no_window_kwargs()` to the `subprocess.run(...)` call (a no-op off
+        Windows) — several consumers (e.g. `agent-index`) run this from a
+        headless background service, and a plain subprocess launch can flash
+        a visible console window on Windows. Add a headless-child test case
+        alongside the POSIX/Windows parsing cases.
       - `resolve_direct_first(direct_var, command_var) -> str | None` —
         direct env wins, else fetch via command. Mirrors
         `resolve_control_token()`'s existing precedence.
@@ -217,7 +223,11 @@ corrections to the same original ask, not a change in intent.
       `bootstrap-killswitch-powershell-5-1` — checkout, `setup-python`, `pip
       install pytest`, then `python -m pytest -q libs/token-resolve/tests`
       only) so the Windows branch has real CI coverage, not just local
-      developer-machine testing.
+      developer-machine testing. **Wire it into the required gate:** add the
+      new job's name to `pr-gate`'s own `needs:` list
+      (`.github/workflows/ci.yml:~772-780`) — a job that exists but isn't
+      listed there can fail silently without blocking the one aggregate
+      check branch protection actually watches.
 
 ### Phase 2 — Migrate agent-dispatch onto the shared lib
 - [ ] Replace `agent-dispatch`'s own `resolve_control_token()` with a thin
@@ -275,8 +285,10 @@ working this phase). Summary:
       existing explicit-constructor-override precedence ahead of both the
       direct env and the new command resolver; re-verify the
       internally-generated-token exclusion for agent-index's other tokens.
-- [ ] Packaging for agent-index, following the same per-plugin pattern as
-      Phase 3.
+- [ ] Packaging for agent-index covers **both** its service venv AND its
+      separate engine venv (`ENGINE_VENV_PYTHON`) preinstall paths in
+      `install.sh`/`install.ps1` — adding the new lib to only one leaves the
+      other's install broken.
 
 ### Phase 5 — Docs
 - [ ] Each touched plugin's own docs/README gains every new `_COMMAND`
@@ -505,3 +517,22 @@ conventions to mirror) to be elaborated once this plan clears review._
   the detached-waiter sub-task, with a dedicated regression test requirement;
   added a small dedicated `windows-latest` CI job (following the existing
   narrow-scope `windows-hooks` pattern) to Phase 1.
+
+### 2026-10-02 — Review round 10 (PR #4910)
+- Copilot review: the detached-waiter `_COMMAND` translation fix resolved;
+  four new findings. (1) High — `agent-index` has TWO separate preinstall
+  paths (a service venv and a separate engine venv, each installing its own
+  copy of the base package) in both `install.sh`/`install.ps1`; the plan
+  only covered one, which would leave the other's install broken; (2)
+  Medium — `run_token_command()`'s subprocess launch needs
+  `agent_procutil.no_window_kwargs()` so a headless consumer (e.g.
+  agent-index) never flashes a visible console on Windows; (3) Medium — the
+  new Windows CI job wasn't added to `pr-gate`'s `needs:` aggregator, so it
+  could fail without blocking the one required check branch protection
+  watches; (4) Low — the plan referenced a nonexistent
+  `AzureDevOpsSource` class name instead of the real
+  `AzureDevOpsConnector`. All four addressed: added the engine-venv
+  preinstall requirement alongside the service-venv one; added the
+  `no_window_kwargs()` requirement plus a headless-child test case; added
+  the `pr-gate` `needs:` wiring requirement; corrected the class name
+  throughout.

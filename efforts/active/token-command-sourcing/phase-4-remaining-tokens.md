@@ -123,7 +123,7 @@ risk profiles:
 
 - Add `AGENT_INDEX_ADO_TOKEN_COMMAND` via `resolve_direct_first()`, consumed
   by the Azure DevOps source (`azure_devops.py:62-66`). **Preserve the
-  existing constructor-override precedence:** `AzureDevOpsSource.__init__`
+  existing constructor-override precedence:** `AzureDevOpsConnector.__init__`
   already accepts an explicit `token: str | None = None` parameter that wins
   over the env read (`self._token = token or
   os.environ.get("AGENT_INDEX_ADO_TOKEN")`, `azure_devops.py:45-66`). The
@@ -149,5 +149,14 @@ risk profiles:
   ambient `GH_TOKEN`/`GITHUB_TOKEN` names themselves — those are shared,
   external-tool-owned conventions outside this plugin's own credential
   surface.
-- Packaging for agent-index, following the same per-plugin pattern as
-  Phase 3.
+- **Packaging for agent-index covers TWO separate venv install paths, not
+  one:** unlike the other consumers, `agent-index` has both a **service**
+  venv and a separate **engine** venv (`ENGINE_VENV_PYTHON`) in both
+  `install.sh` (~lines 1475-1495) and `install.ps1` (~lines 1825-1848) — the
+  engine path installs its own copy of the base `agent-index` package (and
+  `agent-index/server`) independently of the service path. Add the new
+  shared lib's `pyproject.toml`/`[tool.uv.sources]` entry once (shared by
+  both), but add the preinstall-list entry to **both** the service-venv and
+  engine-venv preinstall blocks in each installer script — adding it only to
+  the service path (the mistake this finding caught) leaves the engine
+  install failing to resolve the new dependency.
