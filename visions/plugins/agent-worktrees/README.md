@@ -196,12 +196,13 @@ rather than merely leave it non-durable; `cross_repo_guard` keeps an edit
 routed through the guarded repo's own owning agent so the change actually
 follows *that* repo's own rules — its instructions, skills, and contribution
 posture — rather than landing under the launching harness's rules instead.
-An edit made under the wrong repo's rules doesn't fail quietly either way —
-it surfaces downstream as PR review friction and churn once the target
-repo's own reviewer (human or automated) catches the mismatch — so that
-guard specifically exists to save the wasted round-trip, not to enforce
-compliance against a bad actor. None of the three is a security boundary
-defending against a deliberately evasive adversary.
+An edit made under the wrong repo's rules can also surface downstream as PR
+review friction and churn, if and when the target repo's own reviewer
+(human or automated) happens to catch the mismatch — review is not a
+guaranteed backstop, so that guard exists to reduce uncaught misrouting and
+save that wasted round-trip up front, not to enforce compliance against a
+bad actor. None of the three is a security boundary defending against a
+deliberately evasive adversary.
 They assume a cooperative agent
 that receives and acts on the reminder once it reaches the guard's covered
 path; exhaustively closing every exotic invocation that could evade
