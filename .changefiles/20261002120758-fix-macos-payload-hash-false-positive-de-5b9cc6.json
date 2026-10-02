@@ -1,0 +1,9 @@
+{
+  "comment": "Fix macOS payload-hash false positive (devfs descriptor device-id mismatch in _payload_hash)",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

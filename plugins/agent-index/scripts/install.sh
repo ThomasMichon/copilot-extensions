@@ -518,7 +518,7 @@ _payload_hash() {
         local __sha_kind __kernel __work __before_index __before_state
         local __after_index __after_state __records __path __relative
         local __encoded __kind __metadata __size __count __total __fd
-        local __descriptor __opened __opened_after __current __file_digest
+        local __opened __opened_after __current __file_digest
         local __digest __find_fd __find_pid
         local LC_ALL=C
         [[ -d "$PLUGIN_DIR" && ! -L "$PLUGIN_DIR" ]] || {
@@ -575,6 +575,60 @@ _payload_hash() {
             [[ "${1%%|*}" == "regular file" ||
                "${1%%|*}" == "regular empty file" ||
                "${1%%|*}" == "Regular File" ]]
+        }
+        __payload_fstat() {
+            # A real fstat(2) on an already-open file descriptor, bypassing
+            # the path-based /dev/fd (or /proc/<pid>/fd) lookup entirely. On
+            # Darwin, `stat -L` on the synthetic /dev/fd/<n> devfs node does
+            # NOT behave like fstat(2): devfs can report its own device
+            # number for that node rather than passing through the real
+            # underlying file's device -- confirmed by a direct probe (type,
+            # inode, size, mtime, and ctime all matched a pathname read;
+            # only the device field differed). That harmless-looking
+            # mismatch false-positived "payload content changed during
+            # hashing" for an untouched file on every macOS install. Simply
+            # dropping the device field from the comparison would silently
+            # remove real replacement-race protection (inode numbers are
+            # only unique within one device, so a cross-filesystem swap with
+            # a matching inode could then pass undetected). Instead, redirect
+            # the inherited descriptor to this helper's own stdin so Python's
+            # os.fstat(0) inspects the SAME open file description and
+            # returns its REAL device/inode -- identical to a pathname read
+            # of the same untouched file on every platform, with no
+            # devfs/procfs layer in between.
+            local __fd="$1" __py
+            __py="$(_bootstrap_python)" || {
+                _fail "Cannot locate a Python interpreter for descriptor fstat verification"
+                return 1
+            }
+            "$__py" -c '
+import os, stat, sys
+st = os.fstat(0)
+if stat.S_ISDIR(st.st_mode):
+    kind = "Directory"
+elif stat.S_ISREG(st.st_mode):
+    kind = "Regular File"
+else:
+    kind = "Other"
+print(f"{kind}|{st.st_dev}|{st.st_ino}|{st.st_size}|{int(st.st_mtime)}|{int(st.st_ctime)}")
+' <&"$__fd"
+        }
+        __payload_descriptor_stat() {
+            # Stat an already-open descriptor in the SAME tuple format
+            # __payload_stat uses for a pathname read, so the two remain
+            # directly comparable with a plain string equality -- the real
+            # identity/mutation proof this function relies on. Linux's
+            # /proc/<pid>/fd/<n> entry already passes fstat(2)-equivalent
+            # values through a path lookup correctly (the macOS false
+            # positive this guards against never reproduced there), so keep
+            # that cheaper path-stat on Linux and reserve the real-fstat
+            # helper for Darwin, where it does not.
+            local __fd="$1"
+            if [[ "$__kernel" == Darwin ]]; then
+                __payload_fstat "$__fd"
+            else
+                __payload_stat "/proc/$BASHPID/fd/$__fd" true
+            fi
         }
         __payload_size() {
             local __rest="${1#*|}"
@@ -713,9 +767,7 @@ _payload_hash() {
                 _fail "Cannot open payload content: $__relative"
                 exit 1
             }
-            __descriptor="/proc/$BASHPID/fd/$__fd"
-            [[ -e "$__descriptor" ]] || __descriptor="/dev/fd/$__fd"
-            __opened="$(__payload_stat "$__descriptor" true)" || {
+            __opened="$(__payload_descriptor_stat "$__fd")" || {
                 exec {__fd}<&-
                 _fail "Cannot inspect opened payload content: $__relative"
                 exit 1
@@ -730,7 +782,7 @@ _payload_hash() {
                 shasum) __file_digest="$(shasum -a 256 <&"$__fd" | awk '{print $1}')" ;;
                 openssl) __file_digest="$(openssl dgst -sha256 <&"$__fd" | awk '{print $NF}')" ;;
             esac
-            __opened_after="$(__payload_stat "$__descriptor" true)" || true
+            __opened_after="$(__payload_descriptor_stat "$__fd")" || true
             exec {__fd}<&-
             __current="$(__payload_stat "$__path")" || true
             [[ "$__opened_after" == "$__opened" &&
