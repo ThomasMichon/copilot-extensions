@@ -50,11 +50,10 @@ one-shot JSON call only as the safety-net floor — and to make the Picker's
 own render path genuinely incremental (diff incoming state, write only the
 layout regions that actually changed) rather than redrawing more than it
 needs to on every update. The Picker itself never grows a new transport or a
-direct daemon connection of its own (per Copilot review on this effort's own
-plan PR #4764, confirmed and detailed further by Phase 3's own design
-review — see `phase-3-design.md` — this keeps the Picker inside the
-vision's stated engine boundary, "reaches each engine only by invoking its
-machine-readable CLI verbs," `visions/picker/README.md:332-336`). This
+direct daemon connection of its own — see `phase-3-design.md` for the
+detailed rationale — staying inside the vision's stated engine boundary,
+"reaches each engine only by invoking its machine-readable CLI verbs,"
+`visions/picker/README.md:332-336`. This
 closes the loop opened by the render-perf investigations landed in the
 `worktrees-pivot-ux-overhaul` effort (2026-09-30): those fixed two *concrete*
 staleness/latency bugs, but both investigations surfaced the same underlying
@@ -1497,3 +1496,31 @@ in this session's own output:
   pointer to `phase-3-design.md` for the full rationale.
 
 All three replied-to inline.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 17: replacement needed to be transactional, and the Guiding Intent fix itself broke the timeless-prose rule it was supposed to satisfy
+Two new findings, plus the round-16 Guiding Intent finding resurfacing
+because its own fix introduced the same class of problem:
+
+- **Medium: a same-namespace provider replacement's construction failure
+  still created an immediate, generation-independent gap.** Reconciliation
+  unregisters the old resolver *before* constructing the new one; if that
+  construction fails, the namespace disappears immediately while the
+  discovery generation (governed by its own, separate freshness deadline)
+  can stay "fresh" for a while longer — a false-success `200` missing that
+  namespace, until the deadline eventually catches up. The discovery-result
+  signal from round 15 doesn't close this specific window on its own.
+  Fixed by making replacement **transactional**: construct the new resolver
+  first, and only unregister the old one once construction succeeds — a
+  failed construction now leaves the previous resolver and its
+  last-known-good cache entry in place, never creating an immediate gap at
+  all, consistent with this design's "last-known-good over briefly serving
+  nothing" preference everywhere else.
+- **Low: round 16's own Guiding Intent fix reintroduced review chronology
+  into current-state prose** — "per Copilot review on this effort's own
+  plan PR #4764, confirmed and detailed further by Phase 3's own design
+  review" is exactly the timeless-prose violation the Plan section was
+  already cleaned of twice before (rounds 3 and 13). Fixed by keeping the
+  vision-boundary rationale and the sibling-document link, removing every
+  "per Copilot review"/"design review" phrase.
+
+Both replied-to inline; the resurfaced thread addressed by the same fix.

@@ -449,17 +449,32 @@ phase) is considered.
         exception is caught and the reconciliation loop continues past it
         (`agent_registry_resolver.py:245-252`), so even a successful-looking
         overall scan can still have silently dropped one namespace's
-        resolver. "A failed discovery attempt must not advance the
-        generation" therefore first requires the method to **report** a
-        real result: change it to return an explicit discovery-result
-        object (or equivalent) that distinguishes (a) the scan itself
-        raising, (b) completing with one or more per-manifest construction
-        failures, and (c) a genuinely clean pass with every manifest
-        resolved — the discovery-generation only advances on (c); both
-        (a) and (b) count as a failed discovery attempt for freshness
-        purposes, since a namespace whose manifest silently failed to
-        construct is exactly the kind of gap this tracking exists to catch.
-        With that signal in place: a failed discovery attempt does not
+        resolver. **A discovery-result signal alone is not enough to close
+        this for a same-namespace replacement specifically:** reconciliation
+        today unregisters the old resolver *before* constructing the new one
+        (`agent_registry_resolver.py:223-251`) — if that construction then
+        fails, the namespace is gone immediately, while the discovery
+        generation (governed by its own freshness deadline, not by this
+        one event) can remain "fresh" for a while longer, letting
+        `GET /api/v1/agents` return a false-success `200` missing that
+        namespace until the deadline eventually catches up. Fixed by making
+        replacement **transactional**: construct the new resolver first,
+        and only unregister the old one once construction succeeds — a
+        failed construction leaves the *previous* resolver (and its
+        last-known-good cache entry) in place rather than creating an
+        immediate gap, consistent with how every other failure path in
+        this design prefers "keep serving the last-known-good value" over
+        "briefly serve nothing." "A failed discovery attempt must not
+        advance the generation" then also requires the method to
+        **report** a real result: change it to return an explicit
+        discovery-result object (or equivalent) that distinguishes (a) the
+        scan itself raising, (b) completing with one or more per-manifest
+        construction failures, and (c) a genuinely clean pass with every
+        manifest resolved — the discovery-generation only advances on (c);
+        both (a) and (b) count as a failed discovery attempt for freshness
+        purposes. With both fixes in place: a transactional replacement
+        failure never creates an immediate gap at all, and a failed
+        discovery attempt does not
         advance the generation, and that generation going
         stale past its own deadline forces `503` **independently of
         whether existing namespaces still retain a last-known-good
