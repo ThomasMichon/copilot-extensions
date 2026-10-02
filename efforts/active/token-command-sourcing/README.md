@@ -183,6 +183,12 @@ corrections to the same original ask, not a change in intent.
       - `run_token_command(command: str) -> str | None` — the low-level
         primitive (parses with `shlex.split`, runs without a shell, returns
         stripped stdout), lifted from agent-dispatch's `_run_token_command()`.
+        **Preserve the existing 30-second subprocess timeout**
+        (`timeout=30` in the agent-dispatch original) — the extraction must
+        carry this over explicitly, not silently drop it; without it, a
+        failed or interactively-prompting credential command could hang the
+        caller indefinitely, which is exactly the kind of behavior-change
+        Phase 2's "no behavior change" requirement means to rule out.
         **Launch it consoleless:** pass `agent_procutil`'s
         `**no_window_kwargs()` to the `subprocess.run(...)` call (a no-op off
         Windows) — several consumers (e.g. `agent-index`) run this from a
@@ -241,11 +247,23 @@ corrections to the same original ask, not a change in intent.
       `bootstrap-killswitch-powershell-5-1` — checkout, `setup-python`, `pip
       install pytest`, then `python -m pytest -q libs/token-resolve/tests`
       only) so the Windows branch has real CI coverage, not just local
-      developer-machine testing. **Wire it into the required gate:** add the
-      new job's name to `pr-gate`'s own `needs:` list
-      (`.github/workflows/ci.yml:~772-780`) — a job that exists but isn't
-      listed there can fail silently without blocking the one aggregate
-      check branch protection actually watches.
+      developer-machine testing. **Path-gate it** (per `TESTING.md:139-140`'s
+      "gate specialized suites by changed paths so unrelated pull requests
+      do not pay their cost" rule): the job must skip unless
+      `libs/token-resolve/**` or its own CI wiring in
+      `.github/workflows/ci.yml` changed, following this workflow's existing
+      changed-path-gating approach (e.g. the `discover` job's
+      `--changed`-mode plugin detection that `worktrees-windows-launch`
+      conditions on via `needs.discover.outputs.heavy`) rather than running
+      an unconditional Windows runner allocation on every PR regardless of
+      relevance. **Wire it into the required gate:** add the new job's name
+      to `pr-gate`'s own `needs:` list (`.github/workflows/ci.yml:~772-780`)
+      — a job that exists but isn't listed there can fail silently without
+      blocking the one aggregate check branch protection actually watches;
+      a path-gated job that's conditionally skipped is still safe to list
+      there (`pr-gate`'s own check already tolerates "skipped" results, per
+      its own `bad = ... if info["result"] not in ("success", "skipped")`
+      logic).
 
 ### Phase 2 — Migrate agent-dispatch onto the shared lib
 - [ ] Replace `agent-dispatch`'s own `resolve_control_token()` with a thin
@@ -590,3 +608,19 @@ conventions to mirror) to be elaborated once this plan clears review._
   confirms no change needed since it's a pure refactor; Phase 3 documents
   `AGENT_VAULT_CORE_TOKEN_COMMAND`; Phase 4 documents its three new vars),
   leaving Phase 5 as a verification-only final sweep.
+
+### 2026-10-02 — Review round 12 (PR #4910)
+- Copilot review: the `agent_procutil` dependency-declaration fix resolved;
+  two findings remained. Medium — the extraction spec never named the
+  existing helper's 30-second subprocess timeout, so an implementation built
+  to spec could hang indefinitely on a failed/prompting credential command,
+  violating Phase 2's own no-behavior-change requirement. Low — the new
+  Windows job was wired unconditionally into `pr-gate`, paying a Windows
+  runner allocation on every PR regardless of relevance, where
+  `TESTING.md`'s own "gate specialized suites by changed paths" rule calls
+  for path-gating. Both addressed: added an explicit "preserve the 30s
+  timeout" requirement to the primitive's spec; added a path-gating
+  requirement (skip unless `libs/token-resolve/**` or its CI wiring
+  changed), following this workflow's existing `discover`-job changed-path
+  pattern, while confirming `pr-gate`'s own aggregator already tolerates a
+  "skipped" result so listing a path-gated job there remains safe.
