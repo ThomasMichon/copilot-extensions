@@ -168,8 +168,8 @@ def read_active_local_forwards(*, now: float | None = None) -> dict[str, dict[in
         return {}
     from . import connection_owner as owner
 
-    live = owner.read_liveness()
-    if live is None or not live.is_fresh(now):
+    live = owner._live_snapshot(now)  # fresh beacon AND a pid not provably dead
+    if live is None:
         return {}
     if (time.time() if now is None else now) - heartbeat > live.staleness_threshold():
         return {}

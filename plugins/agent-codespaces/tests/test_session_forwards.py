@@ -454,6 +454,26 @@ def test_active_local_forward_beacon_requires_live_matching_owner(store):
     assert olf.read_active_local_forwards() == {}
 
 
+def test_active_local_forward_beacon_rejects_a_dead_owner_pid(store, monkeypatch):
+    owner._write_liveness(15.0)
+    olf.write_active_local_forwards({"cs-1": {49152: 3000}})
+    assert olf.read_active_local_forwards() == {"cs-1": {49152: 3000}}
+
+    monkeypatch.setattr(owner, "_pid_alive", lambda _pid: False)
+    assert olf.read_active_local_forwards() == {}
+
+
+def test_active_local_forward_beacon_ignores_a_provably_dead_owner(store, monkeypatch):
+    """A crashed Owner's beacon can stay fresh for minutes; a dead pid still
+    means no process owns these forwards."""
+    owner._write_liveness(300.0)
+    olf.write_active_local_forwards({"cs-1": {49152: 3000}})
+    assert olf.read_active_local_forwards() == {"cs-1": {49152: 3000}}
+
+    monkeypatch.setattr(owner, "_pid_alive", lambda pid: False)
+    assert olf.read_active_local_forwards() == {}
+
+
 def test_a_superseded_owner_never_publishes_or_clears_the_live_owners_file(store, monkeypatch):
     owner._write_liveness(15.0)
     olf.write_active_local_forwards({"cs-1": {49152: 3000}})
