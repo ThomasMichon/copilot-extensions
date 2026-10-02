@@ -174,7 +174,7 @@ def _launch_cli_mode_session(
     runner = run or subprocess.run
     try:
         result = runner(argv, capture_output=True, text=True)
-    except Exception:
+    except BaseException:  # an interrupt too: release, then re-raise
         _release_unclaimed_cli_mode_reservation(client, worktree_id, reservation)
         raise
     embody_out: dict[str, Any] = {}
@@ -192,7 +192,7 @@ def _launch_cli_mode_session(
             malformed_output = True
     try:
         final = client.get_cli_mode_reservation(worktree_id) or reservation
-    except Exception:
+    except BaseException:
         _release_unclaimed_cli_mode_reservation(client, worktree_id, reservation)
         raise
     session = embody_out.get("session")

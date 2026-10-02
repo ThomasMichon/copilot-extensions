@@ -162,6 +162,17 @@ def test_launch_releases_reservation_when_embody_raises() -> None:
     assert client.release_calls == [("wt-A", "r1", True)]
 
 
+def test_launch_releases_reservation_when_interrupted() -> None:
+    client = _FakeClient(reservation={"reservation_id": "r1"})
+
+    def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        _launch_cli_mode_session(client, "wt-A", run=fake_run)
+    assert client.release_calls == [("wt-A", "r1", True)]
+
+
 def test_launch_tolerates_non_json_embody_stdout_and_releases_reservation() -> None:
     client = _FakeClient(reservation={"reservation_id": "r1"})
 

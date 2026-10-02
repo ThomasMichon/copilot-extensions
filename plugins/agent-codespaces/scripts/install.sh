@@ -897,19 +897,23 @@ SYSTEMD_OWNER_UNIT="agent-codespaces-owner.service"
 # Echo "enabled", "disabled", or "unknown" for the merged Connection Owner config.
 # Unknown means leave any existing unit untouched: only affirmative disabled removes.
 _owner_enabled() {
-    local json
+    local json state
     json="$(PYTHONUTF8=1 "$LINK_PYTHON" -m agent_codespaces owner --status 2>/dev/null)" || {
         echo "unknown"
         return 0
     }
-    printf '%s\n' "$json" | "$LINK_PYTHON" -c 'import sys, json
+    state="$(printf '%s\n' "$json" | "$LINK_PYTHON" -c 'import sys, json
 try:
     data = json.load(sys.stdin)
     enabled = data.get("enabled") if isinstance(data, dict) else None
     # Only a real boolean decides; {} / null / a schema mismatch stays unknown.
     print(("enabled" if enabled else "disabled") if isinstance(enabled, bool) else "unknown")
 except Exception:
-    print("unknown")' 2>/dev/null
+    print("unknown")' 2>/dev/null)" || state="unknown"
+    case "$state" in
+        enabled|disabled) echo "$state" ;;
+        *) echo "unknown" ;;
+    esac
 }
 
 _remove_owner_service() {
