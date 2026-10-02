@@ -25,6 +25,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.guard
+
 _PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 _PS1 = _PLUGIN_ROOT / "scripts" / "install.ps1"
 _SH = _PLUGIN_ROOT / "scripts" / "install.sh"

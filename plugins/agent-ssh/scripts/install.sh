@@ -643,7 +643,7 @@ if [[ "$KIND" == "local" ]]; then
     read -r _c _b _d <<< "$(_git_info "$REPO_ROOT")"
     COMMIT="\"$_c\""; BRANCH="\"$_b\""; DIRTY="$_d"
 fi
-# #935/#<issue>: when self-staged, $PLUGIN_DIR is a throwaway per-invocation
+# #935/#4874: when self-staged, $PLUGIN_DIR is a throwaway per-invocation
 # copy under .install-stage/<ts>-<pid>/ that is eventually reaped -- persisting
 # it as source.path permanently freezes future version-drift detection against
 # that one-time snapshot (bootstrap-check.* reads THIS path's pyproject.toml to
