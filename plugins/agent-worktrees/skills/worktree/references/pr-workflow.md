@@ -13,6 +13,7 @@ rules.
 ## Contents
 - Check the target repo's PR flow first (profiles + verb applicability)
 - Detecting PR mode + where PR config lives (machine-local vs in-repo)
+- Auto-complete/auto-merge is not a bypass -- prefer it, keep watching
 - Default conduct: drive every PR through to merge (waiting policy + sanctioned deviations)
 - `create-pr` (auto-open, attribution marker, labels) -- for tracing a PR you
   didn't open, see [pr-attribution.md](pr-attribution.md) instead
@@ -100,6 +101,33 @@ So an **ADO repo** (e.g. `example-marketplace`) binds `automerge_label: auto-com
 - `bypass_policy: true` -- complete **past** a branch policy that never
   auto-satisfies for our own PRs (e.g. a central governance status policy);
   otherwise ADO auto-complete would wait forever.
+
+**Auto-complete/auto-merge is not the same thing as a bypass merge, and
+arming it is not itself a self-merge/bypass act.** Requesting auto-complete
+(this whole "Request auto-complete" mechanism, on any provider) is a
+hands-off *completion* mechanic: the platform merges automatically **only
+once every required review and status-check gate the PR would need anyway is
+satisfied** -- it grants no gate, skips no approval, and a submitter cannot
+use it to force their own unapproved PR through. That is categorically
+different from an actual bypass/admin merge (the `bypass_policy` knob above,
+or an equivalent "complete past a policy" action on another provider), which
+deliberately overrides a gate rather than waiting for it -- keep those two
+concepts distinct in any guidance you write or give.
+
+- **Prefer requesting auto-complete/auto-merge whenever the provider offers
+  it**, on any repo, independent of whether this identity holds self-merge or
+  bypass authority there. It is the normal low-friction path once a PR is
+  ready for its gates to run -- not a privileged shortcut reserved for
+  maintainers, and not something to disable out of caution on a
+  human-review-gated repo. Arming it there is still correct and expected,
+  precisely because it cannot complete until a human actually approves.
+- **Requesting it is not "driving the PR to merge" by itself.** A submitter
+  (and any agent reviewing the PR) must keep watching an auto-complete-armed
+  PR until it actually merges -- a late conflict with the target branch, a
+  needed rebase, or a reviewer (human or automated) raising a new finding
+  after a later push can all reopen gates auto-complete was waiting on. Don't
+  treat the PR as unattended just because the affordance is set; see
+  "Default conduct" below.
 
 The natural "wait for the auto-review, then complete" loop is
 `pr-watch` (blocks until the reviewer weighs in / mergeability settles) →
