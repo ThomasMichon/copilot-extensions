@@ -346,6 +346,52 @@ future module added to this package needs a quick stdlib-name collision
 check before landing, not just a local test pass (the fast test suite *did*
 pass before this incident, since it only ever imports the package normally).
 
+### 2026-10-02 (yet later) — `baseline.py` chunking fix; `agent-mcp` enrolled
+Operator asked to fix the scaling limitation from the previous entry
+directly (unblock `agent-mcp`) rather than continuing to the next
+unrelated plugin.
+
+**Root-caused the real failure mode precisely, not just the process-count
+theory from the previous entry.** Teaching `baseline.py` to chunk a large
+suite the same way `run-plugin-tests.py` does (`_plan_chunks`, splitting
+into sequential 25-file groups via the same `partition` helper, one pytest
+process per chunk, results merged via a new `_merge_chunk_results` --
+durations union plus a genuine per-line test-name union for any source
+file touched by tests from more than one chunk) changed the failure from a
+silent crash into real, readable pytest output -- which showed the actual
+cause: `OSError: AF_UNIX path too long`. `agent-mcp`'s own real-socket
+cutover tests create Unix-domain sockets under pytest's `tmp_path`
+fixture, and without an explicit `--basetemp`, that fixture nests under
+whatever `TMPDIR` `_subprocess_env`'s `isolated_environment` redirects to
+-- deep enough (`.../sandbox/tmp/pytest-of-<user>/pytest-<n>/...`) to
+exceed `AF_UNIX`'s 108-byte `sun_path` limit. `run-plugin-tests.py` never
+hits this because it always passes its own short, explicit `--basetemp`;
+`baseline.py` never did. Added the same explicit `--basetemp` (one per
+chunk, directly under the ephemeral collection tempdir, well short of the
+limit) to the driver script.
+
+**Verified directly**, not just reasoned about: `agent-mcp`'s full suite
+(634 tests, 48 covered files) now collects a clean baseline end to end.
+Re-ran every already-enrolled plugin (`agent-ssh`, `agent-codespaces`,
+`agent-containers`, `agent-vault`, `agent-logger`) after the change and
+all five still collect cleanly -- the single-chunk path for a suite within
+the limit is bit-for-bit the same invocation as before chunking existed.
+Added fast, mocked unit tests for `_plan_chunks` (small suite stays
+unsplit; a single file stays unsplit; a large suite splits into the
+expected bounded groups) and `_merge_chunk_results` (duration union;
+coverage-line union across chunks), plus a new real, opt-in
+end-to-end integration test that forces a tiny `max_files_per_chunk` and
+confirms a shared module's coverage is genuinely attributed to tests from
+every chunk, not just whichever one happened to run first.
+
+`agent-mcp` is now enrolled in this same change -- the whole point of the
+fix. Phase 1 now covers 6 of 9 plugins total.
+
+**Not yet done:** watching a real promotion land `agent-mcp`'s baseline
+(and the still-pending `agent-vault`/`agent-logger` ones) on `main`; the
+operator's next choice of which plugin(s) to enroll from the 3 still
+remaining (`agent-bridge`, `agent-dispatch`, `agent-worktrees`).
+
 ### 2026-10-02 (later still) — Phase 1: enroll `agent-vault` and `agent-logger`; `agent-mcp` deferred
 Operator chose the next three Phase 1 plugins out of the 6 remaining:
 `agent-mcp`, `agent-vault`, `agent-logger`.

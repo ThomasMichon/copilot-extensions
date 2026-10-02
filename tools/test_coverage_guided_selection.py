@@ -324,6 +324,81 @@ class TestCorrelation:
             correlation.require_measured_commit(baseline)
 
 
+class TestPlanChunks:
+    """Fast, pure-function tests for `_plan_chunks` -- no real subprocess."""
+
+    def test_small_suite_stays_a_single_unsplit_chunk(self, tmp_path: Path) -> None:
+        tests_dir = tmp_path / "tests"
+        tests_dir.mkdir()
+        for i in range(3):
+            (tests_dir / f"test_{i}.py").write_text("def test_x(): pass\n")
+
+        chunks = baseline_mod._plan_chunks(tmp_path, "tests", max_files_per_chunk=25)
+
+        # Exactly the original, unsplit `test_path` -- confirms collection
+        # behavior for every suite within the limit is bit-for-bit
+        # identical to before chunking existed.
+        assert chunks == [["tests"]]
+
+    def test_a_single_file_test_path_stays_a_single_chunk(self, tmp_path: Path) -> None:
+        chunks = baseline_mod._plan_chunks(
+            tmp_path, "tests/test_one.py", max_files_per_chunk=25
+        )
+        assert chunks == [["tests/test_one.py"]]
+
+    def test_large_suite_splits_into_bounded_chunks(self, tmp_path: Path) -> None:
+        tests_dir = tmp_path / "tests"
+        tests_dir.mkdir()
+        names = [f"test_{i:02d}.py" for i in range(7)]
+        for name in names:
+            (tests_dir / name).write_text("def test_x(): pass\n")
+
+        chunks = baseline_mod._plan_chunks(tmp_path, "tests", max_files_per_chunk=3)
+
+        assert [len(c) for c in chunks] == [3, 3, 1]
+        # Every discovered file appears in exactly one chunk, and chunk
+        # order matches sorted discovery order (stable, reproducible
+        # chunking across runs).
+        flattened = [path for chunk in chunks for path in chunk]
+        assert flattened == sorted(f"tests/{name}" for name in names)
+
+
+class TestMergeChunkResults:
+    """Fast, pure-function tests for `_merge_chunk_results` -- no real
+    subprocess."""
+
+    def test_durations_union_across_chunks(self) -> None:
+        chunks = [
+            {"durations": {"tests/test_a.py::test_1": 0.1}, "coverage": {}},
+            {"durations": {"tests/test_b.py::test_2": 0.2}, "coverage": {}},
+        ]
+        merged = baseline_mod._merge_chunk_results(chunks)
+        assert merged["durations"] == {
+            "tests/test_a.py::test_1": 0.1,
+            "tests/test_b.py::test_2": 0.2,
+        }
+
+    def test_coverage_lines_union_when_a_shared_file_spans_chunks(self) -> None:
+        # A shared helper module touched by tests from two different
+        # chunks must have both chunks' own attributed tests present on
+        # the same line, not one silently clobbering the other.
+        chunks = [
+            {
+                "durations": {},
+                "coverage": {"src/helper.py": {"10": ["tests/test_a.py::test_1"]}},
+            },
+            {
+                "durations": {},
+                "coverage": {"src/helper.py": {"10": ["tests/test_b.py::test_2"]}},
+            },
+        ]
+        merged = baseline_mod._merge_chunk_results(chunks)
+        assert merged["coverage"]["src/helper.py"]["10"] == [
+            "tests/test_a.py::test_1",
+            "tests/test_b.py::test_2",
+        ]
+
+
 class TestBaselineCollectionErrorContract:
     """Fast, mocked tests for the two non-clean collection outcomes --
     neither spawns a real subprocess, so both run in the always-on
@@ -377,13 +452,15 @@ class TestBaselineCollectionErrorContract:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         # Mocked, no real subprocess: the driver's own out-file argument is
-        # the 6th positional arg after the driver script path (see
-        # _DRIVER_SCRIPT's own argv unpacking), so a fake "subprocess" just
-        # has to write valid merged JSON there and report success.
+        # the 6th of 7 positional args after the driver script path (see
+        # _DRIVER_SCRIPT's own argv unpacking: test_paths, cov_source, cwd,
+        # cov_data_file, json_report_file, out_file, basetemp), so a fake
+        # "subprocess" just has to write valid merged JSON there and
+        # report success.
         import json as json_module
 
         def _fake_run(args, **kwargs):
-            out_file = Path(args[-1])
+            out_file = Path(args[-2])
             out_file.write_text(
                 json_module.dumps({"durations": {}, "coverage": {}})
             )
@@ -604,3 +681,69 @@ def test_collect_baseline_with_project_dir_resolves_real_plugin_dependencies() -
         for tests in file_coverage.values():
             for test_id in tests:
                 assert test_id in result["tests"]
+
+
+def test_collect_baseline_chunks_a_large_suite_and_merges_the_results(
+    tmp_path: Path,
+) -> None:
+    # Real, opt-in end-to-end proof of the chunking fix this effort's
+    # agent-mcp enrollment surfaced the need for: constructs a synthetic
+    # suite larger than `max_files_per_chunk` (forced down to 2 here, so
+    # this stays fast) with a module shared across every test file, and
+    # confirms `collect_baseline` genuinely runs more than one pytest
+    # process (not just one covering everything) yet still returns a
+    # single, correctly merged baseline -- every test's own duration
+    # present, and the shared module's coverage attributed to tests from
+    # every chunk, not just whichever chunk happened to run first.
+    if os.environ.get("CGS_RUN_INTEGRATION_TEST") != "1":
+        pytest.skip(
+            "opt-in only: set CGS_RUN_INTEGRATION_TEST=1 to run the real "
+            "uv/coverage subprocess integration test"
+        )
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "__init__.py").write_text("")
+    (src_dir / "shared.py").write_text(
+        "def shared_line():\n    return 'touched by every chunk'\n"
+    )
+
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    test_names = [f"test_chunk_{i}.py" for i in range(5)]
+    for name in test_names:
+        (tests_dir / name).write_text(
+            "import sys\n"
+            "sys.path.insert(0, str((__import__('pathlib').Path(__file__)."
+            "parent.parent / 'src')))\n"
+            "from shared import shared_line\n"
+            "\n\n"
+            f"def test_{name[:-3]}():\n"
+            "    assert shared_line()\n"
+        )
+
+    result = baseline_mod.collect_baseline(
+        cwd=tmp_path,
+        test_path="tests",
+        cov_source="src",
+        plugin="chunking-regression",
+        timeout_s=60.0,
+        max_files_per_chunk=2,
+    )
+
+    assert len(result["tests"]) == len(test_names), (
+        "every test across every chunk must round-trip into the merged "
+        "duration map"
+    )
+    shared_file = "src/shared.py"
+    assert shared_file in result["coverage"]
+    attributed_tests = {
+        test_id
+        for tests in result["coverage"][shared_file].values()
+        for test_id in tests
+    }
+    assert len(attributed_tests) == len(test_names), (
+        "the shared module's coverage must be attributed to a test from "
+        f"every chunk, not just one; got {sorted(attributed_tests)!r}"
+    )
+
