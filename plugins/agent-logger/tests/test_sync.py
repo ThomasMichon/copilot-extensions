@@ -1327,7 +1327,7 @@ def test_resolve_rsync_runtime_prefers_wsl_when_available(monkeypatch) -> None:
     monkeypatch.setattr(base, "wsl_rsync_available", lambda **_kwargs: True)
     runtime = base.resolve_rsync_runtime()
     assert runtime.use_wsl is True
-    assert runtime.command_prefix == ["wsl.exe", "--"]
+    assert runtime.command_prefix == ["wsl.exe", "-e"]
 
 
 def test_resolve_rsync_runtime_native_without_wsl(monkeypatch) -> None:
@@ -1347,7 +1347,7 @@ def test_rsync_runtime_source_arg_converts_via_wslpath(monkeypatch, tmp_path: Pa
         stdout = "/mnt/c/Users/someuser/.copilot\n"
 
     monkeypatch.setattr(base.subprocess, "run", lambda *a, **k: _Proc())
-    runtime = base.RsyncRuntime(command_prefix=["wsl.exe", "--"], use_wsl=True)
+    runtime = base.RsyncRuntime(command_prefix=["wsl.exe", "-e"], use_wsl=True)
     assert runtime.source_arg(tmp_path) == "/mnt/c/Users/someuser/.copilot/"
 
 
@@ -1364,8 +1364,76 @@ def test_rsync_runtime_source_arg_is_none_when_wslpath_fails(
         stdout = ""
 
     monkeypatch.setattr(base.subprocess, "run", lambda *a, **k: _Proc())
-    runtime = base.RsyncRuntime(command_prefix=["wsl.exe", "--"], use_wsl=True)
+    runtime = base.RsyncRuntime(command_prefix=["wsl.exe", "-e"], use_wsl=True)
     assert runtime.source_arg(tmp_path) is None
+
+
+def test_stage_wsl_secret_file_passes_content_as_stdin_and_sets_perms(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Content must flow to the WSL-native staged file via stdin (never a
+    converted DrvFS path), with 0600 permissions set inside the same call."""
+    from agent_logger.sync.targets import base
+
+    secret = tmp_path / "secret.txt"
+    secret.write_bytes(b"hunter2")
+
+    captured_kwargs: dict = {}
+
+    class _Proc:
+        returncode = 0
+        stdout = b"/tmp/tmp.abc123\n"
+
+    def _fake_run(cmd, **kwargs):
+        captured_kwargs.update(kwargs)
+        return _Proc()
+
+    monkeypatch.setattr(base.subprocess, "run", _fake_run)
+    assert base.stage_wsl_secret_file(str(secret)) == "/tmp/tmp.abc123"
+    assert captured_kwargs.get("input") == b"hunter2"
+
+
+def test_stage_wsl_secret_file_none_when_staging_fails(monkeypatch, tmp_path: Path) -> None:
+    from agent_logger.sync.targets import base
+
+    secret = tmp_path / "secret.txt"
+    secret.write_bytes(b"hunter2")
+
+    class _Proc:
+        returncode = 1
+        stdout = b""
+
+    monkeypatch.setattr(base.subprocess, "run", lambda *a, **k: _Proc())
+    assert base.stage_wsl_secret_file(str(secret)) is None
+
+
+def test_cleanup_wsl_staged_file_invokes_rm(monkeypatch) -> None:
+    from agent_logger.sync.targets import base
+
+    captured_commands: list[list[str]] = []
+
+    class _Proc:
+        returncode = 0
+
+    def _fake_run(cmd, **kwargs):
+        captured_commands.append(cmd)
+        return _Proc()
+
+    monkeypatch.setattr(base.subprocess, "run", _fake_run)
+    base.cleanup_wsl_staged_file("/tmp/tmp.abc123")
+    assert captured_commands[-1][-2:] == ["-f", "/tmp/tmp.abc123"]
+
+
+def test_cleanup_wsl_staged_file_swallows_errors(monkeypatch) -> None:
+    """Cleanup is best-effort -- a failure here must never raise and mask the
+    push's own result."""
+    from agent_logger.sync.targets import base
+
+    def _raise(*_a, **_k):
+        raise OSError("wsl.exe not found")
+
+    monkeypatch.setattr(base.subprocess, "run", _raise)
+    base.cleanup_wsl_staged_file("/tmp/tmp.abc123")  # must not raise
 
 
 def test_rsync_runtime_source_arg_noop_without_wsl(tmp_path: Path) -> None:
@@ -1405,8 +1473,9 @@ def test_ssh_target_push_uses_wsl_wrapped_rsync(monkeypatch, tmp_path: Path) -> 
 
     assert result.ok
     cmd = captured_commands[-1]
-    assert cmd[:3] == ["wsl.exe", "--", "rsync"]
-    ssh_arg_index = cmd.index("-e") + 1
+    assert cmd[:3] == ["wsl.exe", "-e", "rsync"]
+    # Search for rsync's own -e flag past the wsl.exe -e prefix (index 1).
+    ssh_arg_index = cmd.index("-e", 2) + 1
     assert cmd[ssh_arg_index].startswith("ssh ")
     assert "/mnt/c/Users/someuser/.copilot/" in cmd
 
@@ -1465,17 +1534,18 @@ def test_ingest_target_push_uses_wsl_wrapped_rsync(monkeypatch, tmp_path: Path) 
 
     assert result.ok
     cmd = captured_commands[-1]
-    assert cmd[:3] == ["wsl.exe", "--", "rsync"]
+    assert cmd[:3] == ["wsl.exe", "-e", "rsync"]
     assert "/mnt/c/Users/someuser/.copilot/" in cmd
 
 
-def test_ingest_target_push_converts_password_file_path_under_wsl(
+def test_ingest_target_push_stages_password_file_under_wsl(
     monkeypatch, tmp_path: Path
 ) -> None:
-    """A WSL-wrapped rsync reads its own filesystem view, so a configured
-    native Windows password-file path must be converted the same way as the
-    source -- otherwise rsync looks for it on a path that doesn't exist
-    inside WSL."""
+    """A WSL-wrapped rsync must use a restrictive-permission copy of a
+    configured native Windows password-file staged inside WSL's own
+    filesystem -- DrvFS normally exposes the raw Windows file as
+    group/world-readable, which rsync refuses for --password-file -- and
+    that staged file must be cleaned up afterward."""
     from agent_logger.sync.targets import base as sync_base
     from agent_logger.sync.targets import ingest as ingest_mod
 
@@ -1484,13 +1554,16 @@ def test_ingest_target_push_converts_password_file_path_under_wsl(
     pw_file.write_text("hunter2", encoding="utf-8")
 
     monkeypatch.setattr(sync_base, "wsl_rsync_available", lambda **_kwargs: True)
-
-    def _fake_wsl_posix_path(path: Path) -> str:
-        if str(path) == str(pw_file):
-            return "/mnt/c/secret.txt"
-        return "/mnt/c/Users/someuser/.copilot"
-
-    monkeypatch.setattr(sync_base, "wsl_posix_path", _fake_wsl_posix_path)
+    monkeypatch.setattr(
+        sync_base, "wsl_posix_path", lambda _p: "/mnt/c/Users/someuser/.copilot"
+    )
+    monkeypatch.setattr(
+        sync_base, "stage_wsl_secret_file", lambda _p: "/tmp/staged-secret"
+    )
+    cleanup_calls: list[str] = []
+    monkeypatch.setattr(
+        sync_base, "cleanup_wsl_staged_file", cleanup_calls.append
+    )
 
     captured_commands: list[list[str]] = []
 
@@ -1504,12 +1577,16 @@ def test_ingest_target_push_converts_password_file_path_under_wsl(
         return _Proc()
 
     monkeypatch.setattr(ingest_mod.subprocess, "run", _fake_run)
-    IngestTarget({"url": "rsync://h/mod", "password_file": str(pw_file)}).push(source, "m1")
+    result = IngestTarget(
+        {"url": "rsync://h/mod", "password_file": str(pw_file)}
+    ).push(source, "m1")
 
-    assert "--password-file=/mnt/c/secret.txt" in captured_commands[-1]
+    assert result.ok
+    assert "--password-file=/tmp/staged-secret" in captured_commands[-1]
+    assert cleanup_calls == ["/tmp/staged-secret"]
 
 
-def test_ingest_target_push_fails_explicitly_when_password_file_conversion_fails(
+def test_ingest_target_push_fails_explicitly_when_password_file_staging_fails(
     monkeypatch, tmp_path: Path
 ) -> None:
     from agent_logger.sync.targets import base as sync_base
@@ -1520,13 +1597,10 @@ def test_ingest_target_push_fails_explicitly_when_password_file_conversion_fails
     pw_file.write_text("hunter2", encoding="utf-8")
 
     monkeypatch.setattr(sync_base, "wsl_rsync_available", lambda **_kwargs: True)
-
-    def _fake_wsl_posix_path(path: Path) -> str | None:
-        if str(path) == str(pw_file):
-            return None  # the password-file conversion fails
-        return "/mnt/c/Users/someuser/.copilot"
-
-    monkeypatch.setattr(sync_base, "wsl_posix_path", _fake_wsl_posix_path)
+    monkeypatch.setattr(
+        sync_base, "wsl_posix_path", lambda _p: "/mnt/c/Users/someuser/.copilot"
+    )
+    monkeypatch.setattr(sync_base, "stage_wsl_secret_file", lambda _p: None)
 
     captured_commands: list[list[str]] = []
     monkeypatch.setattr(
@@ -1539,7 +1613,7 @@ def test_ingest_target_push_fails_explicitly_when_password_file_conversion_fails
     ).push(source, "m1")
 
     assert not result.ok
-    assert "convert" in result.detail
+    assert "stage" in result.detail
     assert not captured_commands
 
 

@@ -77,57 +77,72 @@ class IngestTarget(Target):
         dest = f"{url}/{machine}/"
         pw = self._password_file()
         pw_arg = pw
+        staged_pw_path: str | None = None
         if pw and runtime.use_wsl:
-            # A WSL-wrapped rsync reads its own filesystem view -- convert the
-            # native Windows password-file path the same way as the source.
-            pw_arg = sync_base.wsl_posix_path(Path(pw))
-            if pw_arg is None:
+            # DrvFS (the /mnt/c/... bridge) normally exposes a Windows file
+            # as group/world-readable regardless of its Windows ACL; rsync
+            # refuses a --password-file with permissions looser than
+            # owner-only. Stage a 0600 copy inside WSL's own filesystem
+            # instead of just converting the path.
+            staged_pw_path = sync_base.stage_wsl_secret_file(pw)
+            if staged_pw_path is None:
                 return PushResult(
                     ok=False,
-                    detail="failed to convert password-file path for WSL rsync",
+                    detail="failed to stage password-file for WSL rsync",
                 )
-        for _ in range(2):
-            cmd = [
-                *runtime.command_prefix,
-                "rsync",
-                "-az",
-                "--delete",
-                *(["--delete-excluded"] if include_sessions is None else []),
-                *rsync_session_filters(include_sessions, detritus.roots),
-            ]
-            if pw:
-                cmd += [f"--password-file={pw_arg}"]
-            cmd += [source_arg, dest]
-            try:
-                proc = subprocess.run(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=_TIMEOUT,
-                    env=self._rsync_env(),
-                    check=False,
-                    **NO_WINDOW_KWARGS,
+            pw_arg = staged_pw_path
+        try:
+            for _ in range(2):
+                cmd = [
+                    *runtime.command_prefix,
+                    "rsync",
+                    "-az",
+                    "--delete",
+                    *(["--delete-excluded"] if include_sessions is None else []),
+                    *rsync_session_filters(include_sessions, detritus.roots),
+                ]
+                if pw:
+                    cmd += [f"--password-file={pw_arg}"]
+                cmd += [source_arg, dest]
+                # The WSL-wrapped process always emits UTF-8; text=True's
+                # locale decoder can raise UnicodeDecodeError on non-ASCII
+                # diagnostics there, so decode explicitly for that case.
+                decode_kwargs = (
+                    {"encoding": "utf-8"} if runtime.use_wsl else {"text": True}
                 )
-            except (OSError, subprocess.TimeoutExpired) as exc:
-                return PushResult(ok=False, detail=f"rsync failed: {exc}")
-            if proc.returncode != 0:
-                return PushResult(ok=False, detail=proc.stderr.strip()[:300])
-            try:
-                latest = discover_session_detritus(source, include_sessions)
-            except OSError as exc:
-                return PushResult(
-                    ok=False,
-                    detail=f"detritus revalidation failed: {exc}",
-                )
-            if latest.roots == detritus.roots:
+                try:
+                    proc = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        timeout=_TIMEOUT,
+                        env=self._rsync_env(),
+                        check=False,
+                        **decode_kwargs,
+                        **NO_WINDOW_KWARGS,
+                    )
+                except (OSError, subprocess.TimeoutExpired) as exc:
+                    return PushResult(ok=False, detail=f"rsync failed: {exc}")
+                if proc.returncode != 0:
+                    return PushResult(ok=False, detail=proc.stderr.strip()[:300])
+                try:
+                    latest = discover_session_detritus(source, include_sessions)
+                except OSError as exc:
+                    return PushResult(
+                        ok=False,
+                        detail=f"detritus revalidation failed: {exc}",
+                    )
+                if latest.roots == detritus.roots:
+                    detritus = latest
+                    break
                 detritus = latest
-                break
-            detritus = latest
-        else:
-            return PushResult(
-                ok=False,
-                detail="source detritus changed during publication; retry",
-            )
+            else:
+                return PushResult(
+                    ok=False,
+                    detail="source detritus changed during publication; retry",
+                )
+        finally:
+            if staged_pw_path:
+                sync_base.cleanup_wsl_staged_file(staged_pw_path)
 
         self._notify(machine)
         return PushResult(

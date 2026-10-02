@@ -41,6 +41,14 @@ NO_WINDOW_KWARGS: dict = no_window_kwargs()
 _IS_WINDOWS = platform.system() == "Windows"
 _WSL_PROBE_TIMEOUT = 15
 
+# Every wsl.exe invocation below uses -e (direct exec), never --: without -e,
+# wsl.exe rejoins everything after the command name into a single string and
+# re-parses it through the default distro shell, silently losing argv
+# boundaries for any invocation with more than one positional argument
+# (confirmed live: a multi-arg sh -c '...' "$@" script, and rsync's own -e
+# "ssh ..." string, both lost their extra arguments under --). -e execs the
+# given argv directly, preserving each element exactly.
+
 
 def wsl_rsync_available(*, require_ssh: bool = True) -> bool:
     """Whether a usable WSL distro with the required tools is reachable.
@@ -67,7 +75,7 @@ def wsl_rsync_available(*, require_ssh: bool = True) -> bool:
     check = "command -v rsync" + (" && command -v ssh" if require_ssh else "")
     try:
         proc = subprocess.run(
-            ["wsl.exe", "--", "sh", "-c", check],
+            ["wsl.exe", "-e", "sh", "-c", check],
             capture_output=True,
             timeout=_WSL_PROBE_TIMEOUT,
             check=False,
@@ -83,12 +91,16 @@ def wsl_posix_path(path: Path) -> str | None:
 
     Returns ``None`` on any failure so callers can treat the conversion as a
     hard error rather than silently handing rsync a malformed argument.
+    ``wslpath`` always writes UTF-8 regardless of the host's active code
+    page, so decode explicitly as UTF-8 rather than ``text=True``'s
+    locale-dependent decoder (which can raise ``UnicodeDecodeError`` on a
+    path containing characters outside that code page).
     """
     try:
         proc = subprocess.run(
-            ["wsl.exe", "--", "wslpath", "-u", str(path)],
+            ["wsl.exe", "-e", "wslpath", "-u", str(path)],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             timeout=_WSL_PROBE_TIMEOUT,
             check=False,
             **NO_WINDOW_KWARGS,
@@ -99,6 +111,58 @@ def wsl_posix_path(path: Path) -> str | None:
     if proc.returncode != 0 or not converted:
         return None
     return converted
+
+
+def stage_wsl_secret_file(path: str) -> str | None:
+    """Copy *path*'s content into a restrictive-permission WSL-native temp file.
+
+    A Windows file reached through DrvFS (the ``/mnt/c/...`` bridge WSL uses
+    for native paths) is normally exposed as group/world-readable regardless
+    of its Windows ACL, unless the distro's ``/etc/wsl.conf`` opts into
+    ``[automount] options = "metadata"``. rsync refuses to use a
+    ``--password-file`` with permissions looser than owner-only, so handing
+    it the DrvFS-converted path directly makes an otherwise-correct
+    conversion fail at the password check. Staging a copy inside WSL's own
+    filesystem with ``chmod 600`` sidesteps that regardless of the distro's
+    mount configuration.
+
+    Returns the staged WSL-native path (the caller must remove it via
+    :func:`cleanup_wsl_staged_file` once done), or ``None`` on any failure.
+    """
+    try:
+        content = Path(path).read_bytes()
+    except OSError:
+        return None
+    stage_script = 'f=$(mktemp) && cat > "$f" && chmod 600 "$f" && printf %s "$f"'
+    try:
+        proc = subprocess.run(
+            ["wsl.exe", "-e", "sh", "-c", stage_script],
+            input=content,
+            capture_output=True,
+            timeout=_WSL_PROBE_TIMEOUT,
+            check=False,
+            **NO_WINDOW_KWARGS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if proc.returncode != 0:
+        return None
+    staged = proc.stdout.decode("utf-8", errors="replace").strip()
+    return staged or None
+
+
+def cleanup_wsl_staged_file(staged_path: str) -> None:
+    """Best-effort removal of a file staged by :func:`stage_wsl_secret_file`."""
+    try:
+        subprocess.run(
+            ["wsl.exe", "-e", "rm", "-f", staged_path],
+            capture_output=True,
+            timeout=_WSL_PROBE_TIMEOUT,
+            check=False,
+            **NO_WINDOW_KWARGS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
 
 
 @dataclass
@@ -136,7 +200,7 @@ def resolve_rsync_runtime(*, require_ssh: bool = True) -> RsyncRuntime:
     ``False`` for a target (``ingest``) that never shells out to ssh.
     """
     use_wsl = wsl_rsync_available(require_ssh=require_ssh)
-    return RsyncRuntime(command_prefix=["wsl.exe", "--"] if use_wsl else [], use_wsl=use_wsl)
+    return RsyncRuntime(command_prefix=["wsl.exe", "-e"] if use_wsl else [], use_wsl=use_wsl)
 
 
 @dataclass

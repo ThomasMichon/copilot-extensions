@@ -133,12 +133,18 @@ class SshTarget(Target):
                 remote,
             ]
             try:
+                # The WSL-wrapped process always emits UTF-8; text=True's
+                # locale decoder can raise UnicodeDecodeError on non-ASCII
+                # diagnostics there, so decode explicitly for that case.
+                decode_kwargs = (
+                    {"encoding": "utf-8"} if runtime.use_wsl else {"text": True}
+                )
                 proc = subprocess.run(
                     cmd,
                     capture_output=True,
-                    text=True,
                     timeout=_TIMEOUT,
                     check=False,
+                    **decode_kwargs,
                     **NO_WINDOW_KWARGS,
                 )
             except (OSError, subprocess.TimeoutExpired) as exc:

@@ -50,8 +50,13 @@ the same layout. Configuration lives at `~/.agent-logger/config.yaml` <!-- marke
 > **Windows:** there is no native rsync distribution. When a working WSL
 > distro is reachable (`rsync` on its `PATH` for every target; `ssh` too for
 > `ssh`/`ssh-tunnel`), these targets automatically run the whole rsync
-> invocation wrapped in `wsl.exe --`, converting the local source path (and
-> a configured `ingest` `password_file`) through WSL's own `wslpath`. This is
+> invocation wrapped in `wsl.exe -e` (direct exec, not `--`, which silently
+> drops positional arguments when re-shelled through the default distro
+> shell), converting the local source path through WSL's own `wslpath`. An
+> `ingest` `password_file` is **staged as a fresh, owner-only-permission copy
+> inside WSL's own filesystem** rather than just path-converted: a Windows
+> file reached through DrvFS (the `/mnt/c/...` bridge) is normally exposed as
+> group/world-readable, which rsync refuses for `--password-file`. This is
 > preferred over a native MSYS2/Cygwin `rsync.exe` on `PATH`, which hits
 > cross-runtime bugs (see `targets/base.py`'s `wsl_rsync_available()`
 > docstring) -- that native path remains only as a fallback when no WSL
