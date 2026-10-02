@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
+from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 _PACKAGE = "agent_containers"
+_DIST_NAME = "agent-containers"
 
 
 def runtime_root() -> Path:
@@ -17,8 +22,66 @@ def runtime_root() -> Path:
     return Path.home() / _legacy
 
 
+def _deploy_manifest_source_root() -> Path | None:
+    manifest = runtime_root() / "deploy-manifest.json"
+    if not manifest.is_file():
+        return None
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError, TypeError):
+        return None
+    source_path = str((data or {}).get("source", {}).get("path") or "").strip()
+    if not source_path:
+        return None
+    candidate = Path(source_path).expanduser()
+    if candidate.is_dir() and (candidate / "plugin.json").is_file():
+        return candidate.resolve()
+    return None
+
+
+def _direct_url_source_root() -> Path | None:
+    try:
+        payload_dist = distribution(_DIST_NAME)
+    except PackageNotFoundError:
+        return None
+    try:
+        payload = payload_dist.read_text("direct_url.json")
+    except FileNotFoundError:
+        return None
+    if not payload:
+        return None
+    try:
+        data = json.loads(payload)
+    except (ValueError, TypeError):
+        return None
+    url = str((data or {}).get("url") or "").strip()
+    if not url:
+        return None
+    parsed = urlparse(url)
+    if parsed.scheme != "file":
+        return None
+    candidate = Path(url2pathname(parsed.path))
+    if candidate.is_dir() and (candidate / "plugin.json").is_file():
+        return candidate.resolve()
+    return None
+
+
 def payload_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    env_payload = os.environ.get("COPILOT_PLUGIN_ROOT", "").strip()
+    if env_payload:
+        candidate = Path(env_payload).expanduser()
+        if candidate.is_dir() and (candidate / "plugin.json").is_file():
+            return candidate.resolve()
+    candidate = Path(__file__).resolve().parents[2]
+    if candidate.is_dir() and (candidate / "plugin.json").is_file():
+        return candidate
+    manifest_root = _deploy_manifest_source_root()
+    if manifest_root is not None:
+        return manifest_root
+    direct_url_root = _direct_url_source_root()
+    if direct_url_root is not None:
+        return direct_url_root
+    return candidate
 
 
 def payload_binstub() -> Path | None:

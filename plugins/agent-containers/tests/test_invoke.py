@@ -8,6 +8,7 @@ updating, so preferring it made the daemon spawn the wrapper from stale code.
 
 from __future__ import annotations
 
+import json
 import sys
 
 from agent_containers import _invoke
@@ -49,6 +50,57 @@ def test_payload_binstub_returns_none_when_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(_invoke, "payload_root", lambda: tmp_path / "payload")
 
     assert _invoke.payload_binstub() is None
+
+
+def test_payload_root_prefers_env_payload_root(monkeypatch, tmp_path):
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    (payload / "plugin.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", str(payload))
+
+    assert _invoke.payload_root() == payload.resolve()
+
+
+def test_payload_root_uses_deploy_manifest_source_path(monkeypatch, tmp_path):
+    installed = tmp_path / "site-packages" / "agent_containers" / "__init__.py"
+    installed.parent.mkdir(parents=True)
+    installed.write_text("", encoding="utf-8")
+    source_root = tmp_path / "src" / "agent-containers"
+    source_root.mkdir(parents=True)
+    (source_root / "plugin.json").write_text("{}", encoding="utf-8")
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    (runtime / "deploy-manifest.json").write_text(
+        json.dumps({"source": {"path": str(source_root)}}),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
+    monkeypatch.setenv("AGENT_CONTAINERS_HOME", str(runtime))
+    monkeypatch.setattr(_invoke, "__file__", str(installed))
+
+    assert _invoke.payload_root() == source_root.resolve()
+
+
+def test_payload_root_uses_direct_url_source_path(monkeypatch, tmp_path):
+    installed = tmp_path / "site-packages" / "agent_containers" / "__init__.py"
+    installed.parent.mkdir(parents=True)
+    installed.write_text("", encoding="utf-8")
+    source_root = tmp_path / "src" / "agent-containers"
+    source_root.mkdir(parents=True)
+    (source_root / "plugin.json").write_text("{}", encoding="utf-8")
+    monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
+    monkeypatch.setenv("AGENT_CONTAINERS_HOME", str(tmp_path / "runtime"))
+    monkeypatch.setattr(_invoke, "__file__", str(installed))
+
+    class _FakeDist:
+        @staticmethod
+        def read_text(name):
+            assert name == "direct_url.json"
+            return json.dumps({"url": source_root.resolve().as_uri()})
+
+    monkeypatch.setattr(_invoke, "distribution", lambda name: _FakeDist())
+
+    assert _invoke.payload_root() == source_root.resolve()
 
 
 def test_runtime_root_honors_agent_containers_home(monkeypatch, tmp_path):

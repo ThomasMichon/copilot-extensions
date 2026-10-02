@@ -652,7 +652,7 @@ shape before committing to a design)_
       compares the output against a fresh current-canonical vendored
       reconstruction (copy canonical -> materialize nested refs) rather than a
       stale historical tree. No `SKIP`s, no tree drift.
-- [ ] Confirm every consuming plugin's own test suite
+- [x] Confirm every consuming plugin's own test suite
       (`tools/run-plugin-tests.py <plugin>`) passes with **no local
       `libs/<lib>` directory present at all** in the `dev` checkout —
       proving the canonical reference alone (via `[tool.uv.sources]`
@@ -672,9 +672,30 @@ shape before committing to a design)_
       directly confirmed so far for `agent-worktrees`, `agent-vault`, and
       `agent-ssh` (3 of the 11 real converted plugin consumers above —
       `lazy-cli-dispatch` is a lib `agent-worktrees` consumes, PR #4245,
-      not a distinct plugin, so it does not add a fourth) — the remaining
-      suite matrix still needs to be run and recorded before this
-      criterion can honestly close.
+      not a distinct plugin, so it does not add a fourth). **Done,
+      2026-10-02:** finished the remaining 8-plugin non-editable sweep in
+      scratch venvs installed with `uv pip install <plugin-dir>` (no `-e`)
+      from the live checkout, then ran each plugin's own suite through
+      `test-supervisor`, confirming every escaping `editable = true`
+      `[tool.uv.sources]` dependency still imported from canonical
+      `libs/*/src`. Newly confirmed this session: `agent-bridge`
+      (2969 passed / 25 skipped), `agent-mcp` (625 / 9), `agent-containers`
+      (560 / 4), `agent-codespaces` (1579 / 13), `agent-dispatch`
+      (3756 / 11), `agent-logger` (664 / 37), `agent-index` (714 / 3),
+      and `agent-machines` (690 / 16). Two real non-editable source-root
+      bugs surfaced and were fixed in the same sweep — `agent-containers`
+      and `agent-codespaces` now recover their payload-local shim roots from
+      `COPILOT_PLUGIN_ROOT`, deploy-manifest source metadata, or PEP 610
+      `direct_url.json` when the top-level plugin itself is installed
+      non-editably — and one test-only source-root assumption in
+      `agent-dispatch` was corrected so its build-info stamper test resolves
+      `scripts/stamp_build_info.py` from the live source checkout instead of
+      assuming the installed package sits beside `scripts/`. With those
+      fixes, the full 11-plugin set is now directly confirmed:
+      `agent-worktrees`, `agent-bridge`, `agent-mcp`,
+      `agent-containers`, `agent-codespaces`, `agent-vault`,
+      `agent-dispatch`, `agent-logger`, `agent-ssh`, `agent-index`, and
+      `agent-machines`.
 
 ### Phase 2 — Canonical-reference form for the shared installer engine
 > **Status note (2026-09-30, updated):** libs' mechanism pivoted away to
@@ -783,7 +804,7 @@ shape before committing to a design)_
       `uv`-editable is current again; a `src-passthrough` copy's own
       "local pointer directory present, `src/` replaced by a stub"
       criterion no longer applies once each lib is re-converted.)
-- [ ] **NEW criterion, added by the second course correction**
+- [x] **NEW criterion, added by the second course correction**
       (confirmed for `lazy-cli-dispatch` specifically, PR #4245 -- not
       yet for every lib, since only that one is converted so far): a
       converted plugin's own test suite ALSO passes when the plugin
@@ -822,9 +843,14 @@ shape before committing to a design)_
       bugs fixed, `agent-worktrees` itself is now confirmed non-editably,
       alongside `agent-vault` and `agent-ssh` (3 of 11 real converted
       plugin consumers — `lazy-cli-dispatch` is a lib `agent-worktrees`
-      consumes, PR #4245, not a distinct fourth) — **this criterion stays
-      open** until the remaining suite matrix is run and recorded across
-      the rest.
+      consumes, PR #4245, not a distinct fourth). **Done, 2026-10-02:**
+      closed the remaining 8-plugin gap with the same scratch-venv proof:
+      `agent-bridge`, `agent-mcp`, `agent-containers`, `agent-codespaces`,
+      `agent-dispatch`, `agent-logger`, `agent-index`, and
+      `agent-machines` were each installed non-editably from the live
+      checkout, their full suites passed under `test-supervisor`, and their
+      `editable = true` canonical-reference lib dependencies imported live
+      from canonical `libs/*/src` rather than a copied vendored tree.
 - [x] Editing the canonical `libs/<lib>` source and re-running a
       converted plugin's tests **without reinstalling** picks up the edit
       — the "in-place test scripts in `dev`" / "call across folders"
@@ -3143,3 +3169,59 @@ _Pending._
   the only remaining unchecked work is the separate non-editable top-level
   suite proof already called out above (the Phase 1 twin checklist item plus
   the Validation Plan item), which stays intentionally untouched by this leg.
+
+### 2026-10-02 — Non-editable top-level-suite proof completed across the remaining 8 plugins
+
+- Closed the last open validation gap from the 2026-10-01 review correction:
+  ran the same non-editable scratch-venv proof for the **remaining 8 real
+  converted plugin consumers** — `agent-bridge`, `agent-mcp`,
+  `agent-containers`, `agent-codespaces`, `agent-dispatch`,
+  `agent-logger`, `agent-index`, and `agent-machines`. This deliberately
+  **does not** count `lazy-cli-dispatch` as a twelfth plugin: it remains a
+  shared lib that `agent-worktrees` consumes, not a distinct plugin
+  consumer.
+- Proof shape (same claim as the earlier `agent-worktrees`/`agent-vault`/
+  `agent-ssh` evidence, now applied to the rest): for each plugin, created
+  a fresh scratch venv, ran `uv pip install <plugin-dir>` **without `-e`**
+  from the live `dev` checkout, verified the plugin's escaping
+  `editable = true` `[tool.uv.sources]` dependencies still imported from
+  canonical `libs/*/src`, then ran the plugin's own full suite through
+  `test-supervisor`.
+- Results:
+  - `agent-bridge`: **2969 passed, 25 skipped**; confirmed canonical live
+    imports for `agent-config-migrate`, `agent-credential-relay`,
+    `agent-dropin-registry`, `agent-plugin-activation`,
+    `agent-plugin-resolve`, `agent-procutil`,
+    `agent-single-instance-lease`, `agent-ssh-manager`, and `agent-zdd`.
+  - `agent-mcp`: **625 passed, 9 skipped**; confirmed canonical live
+    imports for `agent-credential-relay`, `agent-procutil`,
+    `agent-single-instance-lease`, and `agent-zdd`.
+  - `agent-containers`: **560 passed, 4 skipped** after fixing a real
+    non-editable source-root gap: the plugin's payload-local shim resolver
+    now recovers the live source payload from `COPILOT_PLUGIN_ROOT`,
+    deploy-manifest source metadata, or PEP 610 `direct_url.json` when the
+    top-level plugin itself is installed non-editably. Added regression
+    coverage for those fallback sources.
+  - `agent-codespaces`: **1579 passed, 13 skipped** after the same class of
+    real non-editable source-root fix for its payload-local shim resolver,
+    again with committed regression coverage.
+  - `agent-dispatch`: **3756 passed, 11 skipped**; the real fix here was
+    narrower and test-local: `test_build_info.py` now resolves
+    `scripts/stamp_build_info.py` from the live source checkout (via the
+    installed package's source metadata) instead of assuming a non-editable
+    installed package still sits beside the repo's `scripts/` tree.
+  - `agent-logger`: **664 passed, 37 skipped**.
+  - `agent-index`: **714 passed, 3 skipped**; the contained proof needed a
+    prepared sandbox temp/runtime tree so LanceDB's own spill/temp paths had
+    somewhere real to write, after which the suite was green and canonical
+    lib imports remained live.
+  - `agent-machines`: **690 passed, 16 skipped**.
+- Net effect: the formerly-open non-editable proof now covers **all 11**
+  real converted plugin consumers: the prior 3
+  (`agent-worktrees`, `agent-vault`, `agent-ssh`) plus the 8 above. Both
+  the Phase 1 twin checklist item and the Validation Plan item are now
+  honestly `[x]`.
+- With those two checkboxes closed, **every currently-listed Plan phase and
+  Validation Plan item in this effort is now checked off**. The effort may
+  be ready for the operator to mark Done, but that status change itself is
+  intentionally left to operator judgment rather than being flipped here.

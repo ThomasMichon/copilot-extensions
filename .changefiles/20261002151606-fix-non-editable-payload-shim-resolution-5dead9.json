@@ -1,0 +1,9 @@
+{
+  "comment": "fix non-editable payload shim resolution",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}
