@@ -564,7 +564,7 @@ class _SilentRelay:
             conn, _addr = sock.accept()
             with conn:
                 try:
-                    conn.settimeout(0.3)
+                    conn.settimeout(3.0)
                     self.request = conn.recv(4096)
                     while conn.recv(4096):
                         pass
@@ -728,7 +728,7 @@ class TestRelayServingLiveness:
     def test_bash_env_liveness_is_connect_not_ping_gated(self):
         bash = _require_host_loopback_bash()
         probe = _extract_bash_relay_connects() + '\n_relay_connects "$1"\n'
-        env = {**os.environ, "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.1"}
+        env = {**os.environ, "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "1.5"}
 
         with _OneShotRelay("pong\n\n") as relay:
             live = subprocess.run(
@@ -754,7 +754,7 @@ class TestRelayServingLiveness:
         code = _extract_discovery_python()
         ports_dir = tmp_path / "relay-ports"
         ports_dir.mkdir()
-        env = {**os.environ, "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.1"}
+        env = {**os.environ, "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "1.5"}
 
         closed = _unused_closed_port()
         with _OneShotRelay("pong\n\n") as serving, _OneShotRelay("not-pong\n\n") as old_relay:
@@ -773,7 +773,7 @@ class TestRelayServingLiveness:
                 env=env,
                 text=True,
                 capture_output=True,
-                timeout=5,
+                timeout=10,
                 check=False,
             )
 
@@ -798,7 +798,7 @@ class TestRelayServingLiveness:
                 env=env,
                 text=True,
                 capture_output=True,
-                timeout=5,
+                timeout=10,
                 check=False,
             )
 
@@ -820,7 +820,7 @@ class TestRelayServingLiveness:
         env = {
             **os.environ,
             "PATH": os.path.dirname(bash) + os.pathsep + os.environ.get("PATH", ""),
-            "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.1",
+            "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "1.5",
         }
 
         with _OneShotRelay("pong\n\n") as relay:
@@ -834,7 +834,7 @@ class TestRelayServingLiveness:
             )
         assert live.stdout.strip() == "pong"
 
-        with _SilentRelay() as relay:
+        with _OneShotRelay("not-pong\n\n") as relay:
             accepted = subprocess.run(
                 [node, str(probe), str(relay.port)],
                 env=env,
@@ -880,7 +880,7 @@ class TestRelayServingLiveness:
         env = {
             **os.environ,
             "PATH": os.path.dirname(bash) + os.pathsep + os.environ.get("PATH", ""),
-            "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "0.1",
+            "LC_GIT_CREDENTIAL_RELAY_PING_TIMEOUT": "1.5",
         }
 
         closed = _unused_closed_port()

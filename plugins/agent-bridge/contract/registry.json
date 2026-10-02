@@ -8,9 +8,9 @@
       "kind": "wire-protocol",
       "normative": true,
       "declared_range": {
-        "current": 19,
+        "current": 20,
         "minimum": 1,
-        "previous_generation": 18,
+        "previous_generation": 19,
         "previous_absent_reason": null
       },
       "evidence_window": {
@@ -25,7 +25,8 @@
           16,
           17,
           18,
-          19
+          19,
+          20
         ],
         "runtimes": [
           "0.4.0-dev423",
@@ -59,13 +60,14 @@
         "dispatch_task_session": 15,
         "bare_session_transcript": 17,
         "remote_session_copilot_args": 18,
-        "live_session_mode": 19
+        "live_session_mode": 19,
+        "cli_mode_unclaimed_release": 20
       },
       "durable_records": [],
       "source_paths": [
         {
           "path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
-          "sha256": "7b6f84cd989d1526ed1d54550e5a7754a473b45ed10c2717650b15632913ee99",
+          "sha256": "80ae2fd5e9c2d7ae739fd123e91812236acdf538814fe76e3c1710072efc232e",
           "semantic": true,
           "non_semantic_reason": null
         },
@@ -103,9 +105,9 @@
       "fixtures": [
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/health.json",
-          "sha256": "4fdaabbdbf7da900e0b9a229dffbea51df89e5abf89fcc9f29dfbab1bec86a95",
+          "sha256": "df80aa9df7d3a14876a4df7dd59b8a675f669f1d3778be1205d34aca1004b03b",
           "role": "current health response",
-          "generation": 19
+          "generation": 20
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/previous-generation-13/health.json",
@@ -133,9 +135,9 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/session-create-response.json",
-          "sha256": "5d7ddb7a7a86858bcafa027b54cee038d6994b38704c8969056e2df17877aeb6",
+          "sha256": "1cf0cc2d4fc2328a450755995c11e55472083d7fba0321a5b06669719329a371",
           "role": "current session-create response",
-          "generation": 19
+          "generation": 20
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/representative-error.json",
@@ -163,9 +165,9 @@
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/protocol-constants.json",
-          "sha256": "b0035034ff19bcb4831e4ce71ff9911ad7fba6de3112a6a6dd6d4bf2a659dc31",
+          "sha256": "f4b207bca02d6f36518a64ef555f59401275367bee0e2d7c803a81067ca28e61",
           "role": "current HTTP range and capability constants",
-          "generation": 19
+          "generation": 20
         },
         {
           "path": "plugins/agent-bridge/contract/fixtures/http/current/remote-command.json",
@@ -199,6 +201,30 @@
         }
       ],
       "provenance": [
+        {
+          "commit": "e4fa49fe5b3fe3f16043ddf8f77d606432a630d6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 20,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
+          "source_git_blob": "87aaa0e16e53d45e0ecad51c1ec73fcd4148744f",
+          "capture_method": "Read production constants from the pushed head revision; HTTP_PROTOCOL_VERSION is 20 and cli_mode_unclaimed_release is introduced at generation 20."
+        },
+        {
+          "commit": "e4fa49fe5b3fe3f16043ddf8f77d606432a630d6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 20,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/models.py",
+          "source_git_blob": "ca098768745ddfebc4e0cf8b5f0161c99091ac58",
+          "capture_method": "Serialize StartSessionResponse from the pushed head revision; its protocol_version default follows HTTP generation 20."
+        },
+        {
+          "commit": "e4fa49fe5b3fe3f16043ddf8f77d606432a630d6",
+          "plugin_version": "0.4.1-dev3",
+          "generation": 20,
+          "source_path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
+          "source_git_blob": "366c8900d9b7823a48c1012ea754deeb2492b51d",
+          "capture_method": "Invoke the health route shape from the pushed head revision with controlled empty runtime state; the response advertises HTTP generation 20."
+        },
         {
           "commit": "851dfca5a0982a97eff672865648f9cbf0318229",
           "plugin_version": "0.4.0-dev500",

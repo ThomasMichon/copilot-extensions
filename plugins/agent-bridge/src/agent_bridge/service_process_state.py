@@ -25,21 +25,57 @@ def _active_endpoint():
         return None
 
 
+def _active_route() -> dict | None:
+    """The raw ``active`` entry of ``active.json``, or ``None``."""
+    core = _core()
+    from .routing_state import active_route
+
+    return active_route(core._INSTALL_DIR)
+
+
 def _active_endpoint_port() -> int | None:
     """The routed daemon port, or ``None`` when no route has been published."""
     endpoint = _active_endpoint()
     if endpoint is not None and endpoint.port:
         return int(endpoint.port)
+    # A venue launcher's forwarded route may predate ``bind`` in its entry.
+    # Classify and read the port from ONE snapshot: a concurrent replacement
+    # between two reads must not yield a missing row or another row's port.
+    from .routing_state import active_route_is_forward
+
+    route = _active_route()
+    if active_route_is_forward(route):
+        try:
+            return int(route["port"])
+        except (KeyError, TypeError, ValueError):
+            return None
     return None
+
+
+def _active_endpoint_is_forward() -> bool:
+    """Whether ``active.json`` routes to a bridge this machine only forwards to.
+
+    A venue launcher (CodeSpace, container, SSH) records the host bridge's
+    forwarded port there, marked ``"forwarded": true`` (older launchers wrote
+    just ``{"port": N}``); a daemon always publishes its own ``pid`` and
+    ``generation``. A local daemon started over that route takes it over: the
+    sessions here then report to it, and the host loses them.
+    """
+    from .routing_state import active_route_is_forward
+
+    return active_route_is_forward(_active_route())
 
 
 def _service_port() -> int:
     """Resolved bridge port: live routing table > config > platform default."""
-    from .models import default_port
-
     live = _active_endpoint_port()
-    if live:
-        return live
+    return live or _configured_port()
+
+
+def _configured_port() -> int:
+    """The port a local daemon is configured to bind: config > platform default
+    (never the live routing table, which may name a forwarded port)."""
+    from .models import default_port
 
     core = _core()
     cfg_path = os.path.join(core._INSTALL_DIR, "config.yaml")
@@ -223,6 +259,10 @@ def _reconcile_live_dynamic_daemon() -> bool:
     with routing._routing_lock(core._INSTALL_DIR):
         table = routing.read_table(core._INSTALL_DIR) or {}
         active_raw = table.get("active")
+        from .routing_state import active_route_is_forward
+
+        if active_route_is_forward(active_raw):
+            return False
         current = (
             routing.Endpoint.from_dict(active_raw)
             if isinstance(active_raw, dict)
@@ -272,9 +312,11 @@ def _service_pid() -> int | None:
     endpoint = core._active_endpoint()
     if endpoint is not None and endpoint.pid:
         return int(endpoint.pid)
-    port_pid = core._pid_on_port(core._service_port())
-    if port_pid:
-        return port_pid
+    if not core._active_endpoint_is_forward():
+        # (A forwarded port's listener is the ssh session, not a bridge.)
+        port_pid = core._pid_on_port(core._service_port())
+        if port_pid:
+            return port_pid
     return core._read_pid_file()
 
 

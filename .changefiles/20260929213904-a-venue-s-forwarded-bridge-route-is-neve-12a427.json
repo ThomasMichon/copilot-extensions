@@ -1,0 +1,21 @@
+{
+  "comment": "A venue's forwarded bridge route is never taken over by a local daemon: venue launchers write it complete (bind + forwarded), the venue's agent-bridge CLI resolves it (even the older bind-less form) and never starts a local daemon over it (it retries with backoff instead), and a daemon whose route a live forward replaced retires. Before this, the first daemon-touching agent-bridge command a CLI-mode worker ran started a local daemon that took the route over, so the host expired the still-running session.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

@@ -116,28 +116,38 @@ point remotely, invoke that repository's published binstub through the same
 profile. Transport setup and repair remain in the dedicated client, host, key,
 and troubleshooting skills shipped by this plugin.
 
-## Detached CLI-mode session on a machine
+## CLI-mode session on a machine
 
-For an observable Copilot CLI session on a POSIX SSH machine without handing
-over the caller terminal:
+For an observable Copilot CLI session on a POSIX SSH machine:
 
 ```bash
-<catalog argv[0]> copilot <ssh-target> --detach \
-  --workspace /path/to/remote/checkout \
-  --seed-file task.md
-<catalog argv[0]> copilot <ssh-target> --stop \
-  --workspace /path/to/remote/checkout
+<catalog argv[0]> copilot-config set <ssh-target> --workspace /path/to/remote/checkout
+<catalog argv[0]> copilot <ssh-target>
+<catalog argv[0]> copilot <ssh-target> --detach --seed-file task.md
+<catalog argv[0]> copilot <ssh-target> --stop
 ```
 
 The target must already have `bash`, `tmux`, `copilot`, `agent-worktrees`, and
-the `agent-bridge` Copilot plugin installed. `--detach` provisions the host
+the `agent-bridge` Copilot plugin installed. With no mode flag, `copilot`
+attaches this terminal to the remote machine's tmux-backed anchor session;
+re-running the command re-attaches. If a detached keeper or another attached
+process already provides the bridge route, the attached command reuses it
+instead of binding the same remote forward again. `--detach` provisions the host
 bridge registration credentials on the remote, starts a small keeper for the
 bridge reverse forward, reserves a venue-qualified CLI-mode identity
 (`anchor-<repo>@<ssh-target>`), runs the target's own worktree `embody` verb
-(anchor, JSON mode) in the workspace, waits for registration, and prints a JSON
-handle with `status`/`observe`/`nudge`/`attach`/`stop` commands. Windows SSH
-targets are not supported yet; run the orchestrator on that machine and embody
-the session there locally.
+(anchor, JSON mode), waits for registration, and prints a JSON handle with
+`status`/`observe`/`nudge`/`attach`/`stop` commands. `--stop` stops that
+detached session and releases its keeper. Windows SSH targets are not supported
+yet; run the orchestrator on that machine and embody the session there locally.
+
+The remote checkout is resolved fail-closed: explicit `--workspace`, then the
+per-host config this plugin owns, written by
+`<catalog argv[0]> copilot-config set <ssh-target> --workspace /path/to/checkout`
+(`~/.agent-ssh/copilot-hosts.json`). It does not scan the remote machine for a
+checkout. If no workspace resolves, pass `--workspace` or set the per-host
+config. `--ttl-seconds` is attached mode only; detached launches use a fixed
+short launch reservation and release it after registration.
 
 `--ref-file PATH` (repeatable; a file or a folder, up to 256 MiB per call)
 copies an operator file (a HAR, a log, a transcript) to

@@ -242,8 +242,48 @@ def test_reconcile_does_not_overwrite_concurrent_publication(monkeypatch):
     assert undrained["called"] is False
 
 
+def test_reconcile_refuses_legacy_forward_written_under_lock(monkeypatch):
+    monkeypatch.setattr(m, "_active_endpoint", lambda: None)
+    monkeypatch.setattr(m, "_pid_from_lock", lambda port: 222 if port == 0 else None)
+    monkeypatch.setattr(m, "_listening_ports_for_pid", lambda _pid: [55231])
+    monkeypatch.setattr(
+        m,
+        "_service_health_on_port",
+        lambda port, **_kwargs: (
+            {
+                "status": "ok",
+                "service": "agent-bridge",
+                "ready": True,
+                "draining": False,
+                "version": "0.4.0-dev417",
+            }
+            if port == 55231
+            else None
+        ),
+    )
+
+    from zdd import routing
+
+    @contextmanager
+    def _lock(_config_dir):
+        yield
+
+    monkeypatch.setattr(routing, "_routing_lock", _lock)
+    monkeypatch.setattr(routing, "read_table", lambda _config_dir: {"active": {"port": 62254}})
+    monkeypatch.setattr(
+        routing,
+        "_publish_active_unlocked",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("a forwarded route must not be replaced")
+        ),
+    )
+
+    assert m._reconcile_live_dynamic_daemon() is False
+
+
 def test_service_start_recovers_before_platform_manager(monkeypatch, capsys):
     monkeypatch.setattr(m, "_service_is_running", lambda: False)
+    monkeypatch.setattr(m, "_active_endpoint_is_forward", lambda: False)
     monkeypatch.setattr(m, "_reconcile_live_dynamic_daemon", lambda: True)
     monkeypatch.setattr(m, "_service_port", lambda: 55231)
     monkeypatch.setattr(
@@ -269,6 +309,7 @@ def test_service_start_recovers_before_platform_manager(monkeypatch, capsys):
 def test_ensure_daemon_recovers_before_wait_or_spawn(monkeypatch):
     monkeypatch.delenv("AGENT_BRIDGE_NO_ENSURE", raising=False)
     monkeypatch.setattr(m, "_service_is_running", lambda: False)
+    monkeypatch.setattr(m, "_active_endpoint_is_forward", lambda: False)
     monkeypatch.setattr(m, "_reconcile_live_dynamic_daemon", lambda: True)
     monkeypatch.setattr(
         m,

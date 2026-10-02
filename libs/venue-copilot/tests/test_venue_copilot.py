@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from venue_copilot import (
     observe_commands,
     release_cli_mode,
     reserve_cli_mode,
+    registration_credentials_script,
     reserve_with_retry,
     resolve_daemon_port,
     run_venue_copilot,
@@ -443,15 +445,22 @@ class TestDetachedSharedHelpers:
 
 
 class _Adapter:
-    def __init__(self, launch_payload: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        launch_payload: dict[str, Any] | None = None,
+        *,
+        hold_added: bool = True,
+    ) -> None:
         self.launch_payload = launch_payload or {
             "ok": True,
             "created": True,
             "seed_submitted": True,
             "session": "wt-anchor-repo",
         }
+        self.hold_added = hold_added
         self.calls: list[tuple[str, str]] = []
         self.keeper_stopped = False
+        self.stop_keeper_error: Exception | None = None
 
     def run(self, command: str, *, timeout: float) -> tuple[int, str, str]:
         self.calls.append(("run", command))
@@ -472,9 +481,11 @@ class _Adapter:
 
     def ensure_keeper(self, *, venue_port: int, mux: str) -> dict[str, Any]:
         self.calls.append(("keeper", f"{venue_port}:{mux}"))
-        return {"started": True, "state": {"pid": 123}}
+        return {"started": True, "hold_added": self.hold_added, "state": {"pid": 123}}
 
     def stop_keeper(self) -> bool:
+        if self.stop_keeper_error is not None:
+            raise self.stop_keeper_error
         self.keeper_stopped = True
         return True
 
@@ -649,6 +660,69 @@ class TestDetachedRunner:
         assert adapter.keeper_stopped is True
         assert any("tmux kill-session" in command for kind, command in adapter.calls if kind == "run")
 
+    def test_launch_failure_does_not_release_preexisting_keeper_hold(self, monkeypatch) -> None:
+        from venue_copilot import detached
+
+        adapter = _Adapter(
+            {"ok": True, "created": False, "session": "wt-anchor-repo"},
+            hold_added=False,
+        )
+        monkeypatch.setattr("venue_copilot.detached.resolve_daemon_port", lambda: 41234)
+        monkeypatch.setattr("venue_copilot.detached.resolve_local_auth_token", lambda: "tok")
+        monkeypatch.setattr(
+            "venue_copilot.detached.reserve_with_retry",
+            lambda scope, venue, **kw: {"reservation_id": "r1"},
+        )
+        monkeypatch.setattr("venue_copilot.detached.await_claim", lambda scope, rid, timeout: None)
+        monkeypatch.setattr("venue_copilot.detached.release_cli_mode", lambda *a, **k: 1)
+
+        rc, payload = detached.launch_detached(
+            adapter,
+            self._plan(),
+            seed="do it",
+            driver="d",
+            copilot_args=[],
+            ensure_mux=True,
+            register_timeout=0.0,
+            progress=lambda *a: None,
+        )
+
+        assert rc == 1
+        assert "never registered" in payload["error"]
+        assert adapter.keeper_stopped is False
+        assert not any("tmux kill-session" in command for kind, command in adapter.calls if kind == "run")
+
+    def test_launch_failure_cleanup_preserves_original_payload_when_keeper_stop_fails(
+        self, monkeypatch, capsys,
+    ) -> None:
+        from venue_copilot import detached
+
+        adapter = _Adapter({"ok": True, "created": True, "seed_submitted": False})
+        adapter.stop_keeper_error = RuntimeError("lock busy")
+        monkeypatch.setattr("venue_copilot.detached.resolve_daemon_port", lambda: 41234)
+        monkeypatch.setattr("venue_copilot.detached.resolve_local_auth_token", lambda: "tok")
+        monkeypatch.setattr(
+            "venue_copilot.detached.reserve_with_retry",
+            lambda scope, venue, **kw: {"reservation_id": "r1"},
+        )
+        monkeypatch.setattr("venue_copilot.detached.release_cli_mode", lambda *a, **k: 1)
+
+        rc, payload = detached.launch_detached(
+            adapter,
+            self._plan(),
+            seed="do it",
+            driver="d",
+            copilot_args=[],
+            ensure_mux=True,
+            register_timeout=0.0,
+            progress=lambda *a: None,
+        )
+
+        assert rc == 1
+        assert "seed was not submitted" in payload["error"]
+        assert "could not update the forward keeper" in capsys.readouterr().err
+        assert any("tmux kill-session" in command for kind, command in adapter.calls if kind == "run")
+
     def test_detached_launch_uses_180_second_seed_ready_timeout_floor(self, monkeypatch) -> None:
         from venue_copilot import detached
 
@@ -735,3 +809,89 @@ class TestDetachedRunner:
         assert rc == 1
         assert "could not verify" in payload["error"]
         assert released == []
+
+
+def _bash() -> str | None:
+    import shutil
+    import sys
+
+    if sys.platform != "win32":
+        return shutil.which("bash")
+    for base in (os.environ.get("ProgramFiles", ""), os.environ.get("ProgramW6432", "")):
+        candidate = Path(base) / "Git" / "bin" / "bash.exe"
+        if base and candidate.is_file():
+            return str(candidate)
+    return None
+
+
+@pytest.mark.skipif(_bash() is None, reason="needs bash")
+def test_registration_credentials_write_a_complete_forwarded_route(tmp_path):
+    env = {**os.environ, "HOME": str(tmp_path)}
+    script = (
+        'flock() { touch "$1"; shift; "$@"; }; '
+        + registration_credentials_script("tok-1", 62254)
+    )
+    subprocess.run([_bash(), "-c", script], env=env, check=True)
+    route = json.loads((tmp_path / ".agent-bridge" / "active.json").read_text())
+    # A "bind" lets the venue's agent-bridge CLI parse the route (without it,
+    # it fell back to its default port and started a local daemon over it).
+    assert route == {"active": {"bind": "127.0.0.1", "port": 62254, "forwarded": True}}
+    assert (tmp_path / ".agent-bridge" / "auth.yaml").read_text() == "token: tok-1\n"
+    assert not list((tmp_path / ".agent-bridge").glob("*.XXXXXX"))
+    assert (tmp_path / ".agent-bridge" / "active.lock").exists()
+
+
+def _bash_supports_python_fcntl() -> bool:
+    bash = _bash()
+    if bash is None:
+        return False
+    return (
+        subprocess.run(
+            [
+                bash,
+                "-c",
+                "py=$(command -v python3 || command -v python || true); "
+                'test -n "$py" && "$py" -c "import fcntl"',
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode
+        == 0
+    )
+
+
+@pytest.mark.skipif(not _bash_supports_python_fcntl(), reason="needs bash + python fcntl")
+def test_registration_credentials_fallback_locks_with_python_fcntl(tmp_path):
+    env = {**os.environ, "HOME": str(tmp_path)}
+    script = (
+        "command() { "
+        "if [ \"$1\" = -v ] && [ \"$2\" = flock ]; then return 1; fi; "
+        "builtin command \"$@\"; "
+        "}; "
+        + registration_credentials_script("tok-2", 62255)
+    )
+    subprocess.run([_bash(), "-c", script], env=env, check=True)
+    bridge = tmp_path / ".agent-bridge"
+    assert json.loads((bridge / "active.json").read_text()) == {
+        "active": {"bind": "127.0.0.1", "port": 62255, "forwarded": True}
+    }
+    assert (bridge / "auth.yaml").read_text() == "token: tok-2\n"
+    assert (bridge / "active.lock").exists()
+
+
+@pytest.mark.skipif(_bash() is None, reason="needs bash")
+def test_registration_credentials_fails_without_locking_tool(tmp_path):
+    env = {**os.environ, "HOME": str(tmp_path)}
+    script = (
+        "command() { "
+        "if [ \"$1\" = -v ] && { [ \"$2\" = flock ] || [ \"$2\" = python3 ] || [ \"$2\" = python ]; }; "
+        "then return 1; fi; "
+        "builtin command \"$@\"; "
+        "}; "
+        + registration_credentials_script("tok-3", 62256)
+    )
+    result = subprocess.run([_bash(), "-c", script], env=env, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "cannot lock active.json" in result.stderr
+    assert not (tmp_path / ".agent-bridge" / "active.json").exists()

@@ -236,16 +236,22 @@ def test_trusted_image_run_wires_host_mounts_and_systemd_capability(monkeypatch)
     run = calls[0]
     assert "-v" in run
     mounts = [run[i + 1] for i, value in enumerate(run) if value == "-v"]
+    member_workspace = fleet_mod._member_host_path(
+        "/mnt/data/workspaces", "example-1", label="host_workspace_path"
+    )
+    member_home = fleet_mod._member_host_path(
+        "/mnt/data/home", "example-1", label="host_home_path"
+    )
     # Each fleet member mounts its OWN subdirectory (keyed by its container
     # name) under the configured parent path -- never the bare parent path
     # directly, which would collide across a size > 1 fleet's members.
-    assert "/mnt/data/workspaces/example-1:/workspace/example" in mounts
-    assert "/mnt/data/home/example-1:/home/node" in mounts
+    assert f"{member_workspace}:/workspace/example" in mounts
+    assert f"{member_home}:/home/node" in mounts
     # Each member directory was created/chowned to the resolved exec_user
     # uid/gid BEFORE the mount arg was added -- a missing bind-mount source
     # would otherwise be auto-created by Docker as root.
-    assert ("/mnt/data/workspaces/example-1", 1000, 1000) in ensure_owned_calls
-    assert ("/mnt/data/home/example-1", 1000, 1000) in ensure_owned_calls
+    assert (member_workspace, 1000, 1000) in ensure_owned_calls
+    assert (member_home, 1000, 1000) in ensure_owned_calls
     assert run[run.index("--cap-add") + 1] == "SYS_ADMIN"
     # PID 1 (systemd) must boot as root regardless of the image's own
     # default USER -- exec_user only governs later `docker exec` calls.
@@ -317,8 +323,14 @@ def test_trusted_image_run_namespaces_host_paths_per_fleet_member(monkeypatch):
 
     mounts_1 = [calls[0][i + 1] for i, v in enumerate(calls[0]) if v == "-v"]
     mounts_2 = [calls[1][i + 1] for i, v in enumerate(calls[1]) if v == "-v"]
-    assert mounts_1 == ["/mnt/data/workspaces/example-1:/workspace/example"]
-    assert mounts_2 == ["/mnt/data/workspaces/example-2:/workspace/example"]
+    member_1 = fleet_mod._member_host_path(
+        "/mnt/data/workspaces", "example-1", label="host_workspace_path"
+    )
+    member_2 = fleet_mod._member_host_path(
+        "/mnt/data/workspaces", "example-2", label="host_workspace_path"
+    )
+    assert mounts_1 == [f"{member_1}:/workspace/example"]
+    assert mounts_2 == [f"{member_2}:/workspace/example"]
 
 
 def test_trusted_image_run_rejects_path_traversal_via_name_prefix(monkeypatch):
@@ -354,7 +366,10 @@ def test_ensure_owned_dir_creates_and_chowns(monkeypatch, tmp_path):
     target = tmp_path / "workspaces" / "example-1"
     chown_calls: list[tuple[str, int, int]] = []
     monkeypatch.setattr(
-        fleet_mod.os, "chown", lambda path, uid, gid: chown_calls.append((path, uid, gid))
+        fleet_mod.os,
+        "chown",
+        lambda path, uid, gid: chown_calls.append((path, uid, gid)),
+        raising=False,
     )
 
     fleet_mod._ensure_owned_dir(str(target), 1000, 1000)

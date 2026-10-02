@@ -1,0 +1,9 @@
+{
+  "comment": "Add attached SSH CLI-mode copilot sessions",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

@@ -17,6 +17,7 @@ from agent_bridge.models import ServiceConfig
 from agent_bridge.protocol import (
     AT_REST_PROJECTION_PROTOCOL_VERSION,
     ATTENTION_WAIT_PROTOCOL_VERSION,
+    CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION,
     CONDITIONAL_IDLE_END_PROTOCOL_VERSION,
     CONTAINER_RECREATE_PROTOCOL_VERSION,
     FAILED_ACP_HANDSHAKE_FAULT,
@@ -83,6 +84,11 @@ def test_live_session_mode_capability_is_advertised() -> None:
 
     assert LIVE_SESSION_MODE_PROTOCOL_VERSION == 19
     assert LIVE_SESSION_MODE_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
+
+
+def test_cli_mode_unclaimed_release_capability_is_advertised() -> None:
+    assert CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION == 20
+    assert CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
 
 
 def _app(tmp_path):

@@ -46,8 +46,9 @@ def add_copilot_subparser(sub) -> None:
         "--seed", help="Forwarded to the remote `agent-worktrees copilot --seed`",
     )
     copilot_p.add_argument(
-        "--ttl-seconds", type=float, default=300.0,
-        help="CLI-mode reservation lifetime before it's reclaimable (default 300)",
+        "--ttl-seconds", type=float, default=None,
+        help="Attached mode only: CLI-mode reservation lifetime before it's "
+             "reclaimable (default 300). Not valid with --detach or --stop.",
     )
     copilot_p.add_argument(
         "--no-ensure-mux", dest="ensure_mux", action="store_false", default=True,
@@ -134,6 +135,11 @@ def cmd_copilot(
     """
     if getattr(args, "ref_files", None) and not getattr(args, "detach", False):
         print("[FAIL] --ref-file requires --detach", file=sys.stderr)
+        return 1
+    if getattr(args, "ttl_seconds", None) is not None and (
+        getattr(args, "stop", False) or getattr(args, "detach", False)
+    ):
+        print("[FAIL] --ttl-seconds applies only to attached mode", file=sys.stderr)
         return 1
     if getattr(args, "stop", False) or getattr(args, "detach", False):
         from . import copilot_detach
@@ -230,7 +236,7 @@ def cmd_copilot(
                 identity,
                 connect=connect,
                 anchor=anchor_mode,
-                ttl_seconds=args.ttl_seconds,
+                ttl_seconds=300.0 if args.ttl_seconds is None else args.ttl_seconds,
                 driver=args.driver,
                 seed=args.seed,
                 ensure_mux=args.ensure_mux,

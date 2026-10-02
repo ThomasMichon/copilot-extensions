@@ -678,6 +678,97 @@ else:
 PYEOF
 }
 
+_active_is_forward() {
+    # Whether the routing table points at a host bridge this machine only
+    # forwards to (a venue launcher wrote it): marked "forwarded", or the older
+    # launcher form with a port but no bind/daemon pid/generation. Never start a
+    # local daemon over it -- it would take the route over from the host.
+    local aj="$INSTALL_DIR/active.json" py=""
+    [[ -f "$aj" ]] || return 1
+    py="$VENV_DIR/bin/python"
+    [[ -x "$py" ]] || py="$(command -v python3 || command -v python || true)"
+    [[ -n "$py" ]] || return 1
+    "$py" - "$aj" <<'PYEOF' 2>/dev/null
+import json, sys
+try:
+    a = json.load(open(sys.argv[1])).get("active") or {}
+    port = int(a.get("port") or 0)
+except Exception:
+    sys.exit(1)
+fwd = (
+    a.get("forwarded") is True
+    or (a.get("pid") is None and "generation" not in a and "bind" not in a)
+)
+sys.exit(0 if port > 0 and fwd else 1)
+PYEOF
+}
+
+_active_signature() {
+    local aj="$INSTALL_DIR/active.json" py=""
+    [[ -f "$aj" ]] || return 1
+    py="$VENV_DIR/bin/python"
+    [[ -x "$py" ]] || py="$(command -v python3 || command -v python || true)"
+    [[ -n "$py" ]] || return 1
+    "$py" - "$aj" <<'PYEOF' 2>/dev/null
+import json, sys
+try:
+    a = json.load(open(sys.argv[1])).get("active") or {}
+    port = int(a.get("port") or 0)
+except Exception:
+    sys.exit(1)
+is_forward = a.get("forwarded") is True or (
+    a.get("pid") is None and "generation" not in a and "bind" not in a
+)
+if port <= 0 or is_forward:
+    sys.exit(1)
+print(json.dumps({
+    "bind": a.get("bind"),
+    "port": port,
+    "pid": a.get("pid"),
+    "generation": a.get("generation"),
+}, sort_keys=True, separators=(",", ":")))
+PYEOF
+}
+
+_update_lifecycle_still_targets_predecessor() {
+    # $2 == allow-absent: after this update stopped the pinned predecessor, its
+    # graceful shutdown clears its own route, so an absent route still means "ours".
+    local pinned="${1:-}" allow_absent="${2:-}" current=""
+    if _active_is_forward; then
+        _step "Forwarded host bridge route appeared during update -- skipping drain/stop/start"
+        return 1
+    fi
+    if [[ -n "$pinned" ]]; then
+        current="$(_active_signature 2>/dev/null || true)"
+        if [[ "$allow_absent" == allow-absent && -z "$current" ]]; then
+            return 0
+        fi
+        if [[ "$current" != "$pinned" ]]; then
+            _step "Active route changed during update -- skipping drain/stop/start"
+            return 1
+        fi
+    fi
+    return 0
+}
+
+_update_lifecycle_drain_stop() {
+    local pinned="${1:-}" timeout="${2:-120}"
+    if ! _update_lifecycle_still_targets_predecessor "$pinned"; then
+        return 1
+    fi
+    _drain_service "$timeout"
+    do_stop
+}
+
+_update_lifecycle_start() {
+    local pinned="${1:-}" message="${2:-Starting service...}"
+    if ! _update_lifecycle_still_targets_predecessor "$pinned" allow-absent; then
+        return 1
+    fi
+    _step "$message"
+    do_start
+}
+
 _active_host() {
     # The daemon's LIVE bind address from the routing table, mirroring
     # install.ps1's endpoint resolution: default loopback, and treat a wildcard
@@ -1561,6 +1652,11 @@ do_start() {
         fi
     fi
 
+    if _active_is_forward; then
+        _skip "this machine reaches a host bridge through a forward (active.json); not starting a local daemon"
+        return 0
+    fi
+
     local rt_py
     if ! rt_py="$(_rt_python)"; then
         _fail "agent-bridge not installed. Run: install.sh install"
@@ -1972,9 +2068,19 @@ do_update() {
         return 0
     fi
 
+    local active_forward=false
+    if _active_is_forward; then
+        active_forward=true
+        _step "Forwarded host bridge route detected -- updating runtime files without draining/stopping/starting a local daemon"
+    fi
+    local predecessor_signature=""
+    if [[ "$active_forward" != true ]]; then
+        predecessor_signature="$(_active_signature 2>/dev/null || true)"
+    fi
+
     # Is the service currently running?
     local was_running=false
-    if pid=$(_get_pid) || (command -v systemctl &>/dev/null && systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null); then
+    if [[ "$active_forward" != true ]] && { pid=$(_get_pid) || (command -v systemctl &>/dev/null && systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null); }; then
         was_running=true
     fi
 
@@ -2015,7 +2121,7 @@ do_update() {
     # longer needs the (new) venv to pre-exist -- gate only on "running".
     local cutover=false
     if [[ "$VERSIONED_RUNTIME" == 1 ]]; then
-        if [[ "$was_running" == true ]]; then
+        if [[ "$was_running" == true && "$active_forward" != true ]]; then
             cutover=true
             # Cutover onto the same slot is impossible; downgrade to stop-and-rebuild.
             if [[ "$SRC_VERSION" == "$prev_version" ]]; then
@@ -2023,7 +2129,7 @@ do_update() {
                 cutover=false
             fi
         fi
-    elif [[ "$was_running" == true && -x "$VENV_DIR/bin/agent-bridge" ]]; then
+    elif [[ "$was_running" == true && "$active_forward" != true && -x "$VENV_DIR/bin/agent-bridge" ]]; then
         cutover=true
     fi
 
@@ -2031,8 +2137,9 @@ do_update() {
     # doing a cutover (which keeps the old daemon up and retires it afterward).
     # Either way, drain first so in-flight turns get a chance to settle.
     if [[ "$was_running" == true && "$cutover" == false ]]; then
-        _drain_service "${AGENT_BRIDGE_DRAIN_TIMEOUT:-120}"
-        do_stop
+        if ! _update_lifecycle_drain_stop "$predecessor_signature" "${AGENT_BRIDGE_DRAIN_TIMEOUT:-120}"; then
+            was_running=false
+        fi
     fi
 
     # Run the protected update; on any failure, roll back to the snapshot.
@@ -2046,9 +2153,8 @@ do_update() {
             if [[ -n "$SRC_VERSION" && "$SRC_VERSION" != "$prev_version" ]]; then
                 rm -rf "$INSTALL_DIR/versions/$SRC_VERSION"
             fi
-            if [[ "$was_running" == true && "$cutover" == false ]]; then
-                _step "Restarting the previous version..."
-                do_start
+            if [[ "$was_running" == true && "$cutover" == false && "$active_forward" != true ]]; then
+                _update_lifecycle_start "$predecessor_signature" "Restarting the previous version..." || was_running=false
             fi
             _warn "Update failed; kept the previous runtime (venv -> versions/${prev_version:-<previous>})."
         elif [[ "$have_backup" == true ]]; then
@@ -2057,9 +2163,8 @@ do_update() {
                 _ok "Previous venv restored"
                 # Only restart in the default path -- in cutover mode the old
                 # daemon was never stopped, so it is still serving.
-                if [[ "$was_running" == true && "$cutover" == false ]]; then
-                    _step "Restarting the previous service..."
-                    do_start
+                if [[ "$was_running" == true && "$cutover" == false && "$active_forward" != true ]]; then
+                    _update_lifecycle_start "$predecessor_signature" "Restarting the previous service..." || was_running=false
                 fi
             else
                 _fail "Rollback failed -- run install.sh install to rebuild the runtime"
@@ -2094,20 +2199,21 @@ do_update() {
     _write_deploy_manifest
 
     # Bring the new version into service, via the resolved slot interpreter.
-    if [[ "$cutover" == true ]]; then
+    if [[ "$active_forward" == true ]]; then
+        _step "Forwarded host bridge route still active -- not starting a local daemon"
+    elif [[ "$cutover" == true ]]; then
         _step "Zero-downtime cutover (agent-bridge deploy)..."
         if _bridge_cli deploy \
                 --drain-timeout "${AGENT_BRIDGE_DRAIN_TIMEOUT:-300}"; then
             _ok "Cutover complete -- new daemon active, old retired"
         else
             _warn "Cutover failed -- falling back to drain/stop/start"
-            _drain_service 30
-            do_stop
-            do_start
+            if _update_lifecycle_drain_stop "$predecessor_signature" 30; then
+                _update_lifecycle_start "$predecessor_signature" "Starting service..." || true
+            fi
         fi
     else
-        _step "Starting service..."
-        do_start
+        _update_lifecycle_start "$predecessor_signature" "Starting service..." || true
     fi
 
     # Versioned layout: prune old version slots now that the new one is healthy

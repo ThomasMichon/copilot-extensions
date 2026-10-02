@@ -101,6 +101,14 @@ class CutoverResult:
         }
 
 
+class _NeverRaised(Exception):
+    """Stands in for a refusal a routing module can't raise."""
+
+
+class _UnguardedRouting(Exception):
+    """A refusal hook was given, but the routing module can't publish guarded."""
+
+
 class CutoverOrchestrator:
     """Drive one active/passive cutover. See module docstring for the sequence."""
 
@@ -114,6 +122,7 @@ class CutoverOrchestrator:
         health_check: Callable[[str, int], bool],
         make_client: Callable[[str], _Client],
         pick_free_port: Callable[[], int],
+        refuse_old: Callable[[dict[str, Any] | None], str | None] | None = None,
         service: str | None = None,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
@@ -126,6 +135,7 @@ class CutoverOrchestrator:
         self.health_check = health_check
         self.make_client = make_client
         self.pick_free_port = pick_free_port
+        self.refuse_old = refuse_old
         self.sleep = sleep
         self.clock = clock
         self.routing = routing_mod
@@ -194,6 +204,36 @@ class CutoverOrchestrator:
         except Exception:
             return False
 
+    def _await_exit(self, handle: _Handle, timeout: float = 10.0, poll: float = 0.2) -> bool:
+        """True once ``handle`` has provably exited; False on timeout or no ``poll()``."""
+        poll_fn = getattr(handle, "poll", None)
+        if not callable(poll_fn):
+            return False
+        deadline = self.clock() + timeout
+        while True:
+            try:
+                if poll_fn() is not None:
+                    return True
+            except Exception:  # noqa: BLE001 -- an unreadable handle is unconfirmed
+                return False
+            if self.clock() >= deadline:
+                return False
+            self.sleep(poll)
+
+    def _refuse_current_old(self, result: CutoverResult) -> bool:
+        if self.refuse_old is None:
+            return False
+        table = self.routing.read_table(self.config_dir)
+        active_raw = table.get("active") if isinstance(table, dict) else None
+        if not isinstance(active_raw, dict):
+            active_raw = None
+        refusal = self.refuse_old(active_raw)
+        if not refusal:
+            return False
+        result.error = refusal
+        result.steps.append(f"refused: {refusal}")
+        return True
+
     # -- main ----------------------------------------------------------------
 
     def run(
@@ -259,6 +299,8 @@ class CutoverOrchestrator:
         from zdd import lifecycle
 
         result = CutoverResult(ok=False)
+        if self._refuse_current_old(result):
+            return result
         # Dead-port watchdog: before standing up the new daemon, retire any
         # advertised-but-dead endpoint a previously-aborted cutover may have left
         # behind (the state that wedged the pipeline). Best-effort -- it only acts
@@ -268,6 +310,11 @@ class CutoverOrchestrator:
             self.routing.reap_stale_active(self.config_dir, service=self.service)
         except Exception:  # noqa: BLE001 -- watchdog is best-effort, never fatal
             pass
+        if self._refuse_current_old(result):
+            return result
+        old_for_cas = self.routing.read_active_endpoint(
+            self.config_dir, verify_listener=False,
+        )
         old = self.routing.read_active_endpoint(self.config_dir)
         result.old_endpoint = old
 
@@ -329,11 +376,70 @@ class CutoverOrchestrator:
             # Flip the route: new active, old demoted to previous. From here a
             # new CLI resolution lands on the new daemon; long-lived sockets stay
             # on the old one until their turn completes (migrate at a breakpoint).
-            self.routing.publish_active(
-                self.config_dir, bind=self.bind, port=new_port,
-                pid=getattr(handle, "pid", None), version=self.version,
-                demote_existing=True,
-            )
+            # Without ``refuse_old`` this is exactly the plain publish it always
+            # was (a caller's routing stand-in may override ``publish_active``,
+            # e.g. to promote its passive first). With it, the publish is
+            # guarded: the current route is re-checked under the routing lock
+            # that writes the new one -- and only a routing object that itself
+            # defines the guarded publish can do that (``getattr_static``, so a
+            # stand-in forwarding unknown names to zdd.routing doesn't count);
+            # otherwise the cutover refuses rather than flip unguarded.
+            refused = _NeverRaised
+            try:
+                if self.refuse_old is None:
+                    self.routing.publish_active(
+                        self.config_dir, bind=self.bind, port=new_port,
+                        pid=getattr(handle, "pid", None), version=self.version,
+                        demote_existing=True,
+                    )
+                else:
+                    import inspect
+
+                    if inspect.getattr_static(
+                        self.routing, "publish_active_with_previous_guarded", None,
+                    ) is None:
+                        raise _UnguardedRouting(
+                            "the routing module can't publish guarded; refusing to flip "
+                            "a route that must be re-checked first"
+                        )
+                    refused = self.routing.ActivePublicationRefused
+                    self.routing.publish_active_with_previous_guarded(
+                        self.config_dir, bind=self.bind, port=new_port,
+                        pid=getattr(handle, "pid", None), version=self.version,
+                        demote_existing=True, expected_active=old_for_cas,
+                        refuse_current=self.refuse_old,
+                    )
+            except (refused, _UnguardedRouting) as exc:
+                result.error = str(exc)
+                result.steps.append(f"refused: {exc}")
+                terminated = False
+                try:
+                    handle.terminate()
+                    result.steps.append("refusal: terminated new daemon")
+                    # terminate() only requests exit; keep the breadcrumb (the
+                    # durable PID reap_abandoned_passive needs) until it's confirmed.
+                    terminated = self._await_exit(handle)
+                    if not terminated:
+                        result.steps.append(
+                            "refusal: new daemon exit unconfirmed; breadcrumb kept"
+                        )
+                except Exception as term_exc:  # noqa: BLE001
+                    result.steps.append(
+                        f"refusal: new daemon termination failed: {term_exc}"
+                    )
+                    log.error(
+                        "Cutover refusal could not terminate passive daemon: %s",
+                        term_exc,
+                    )
+                if terminated:
+                    breadcrumb.clear_breadcrumb(self.config_dir)
+                else:
+                    breadcrumb.write_breadcrumb(
+                        self.config_dir, state="started", old=old_dict,
+                        new_port=new_port, new_pid=new_pid,
+                        error=result.error, started_at=started_at,
+                    )
+                return result
             flipped = True
             result.steps.append("routing table flipped -> new active")
             breadcrumb.write_breadcrumb(

@@ -55,6 +55,7 @@ from dataclasses import asdict, dataclass, field, fields
 from typing import TYPE_CHECKING, Any, Protocol
 
 from .config import RUNTIME_DIR, ensure_runtime_dir
+from .owner_identity import beacon_identity, owner_identity_matches, owner_process_identity
 from .owner_ports import sanitize_port as _sanitize_port
 from .owner_ports import clear_session_forwards, sanitize_hold_forwards, set_hold_forwards
 
@@ -95,8 +96,8 @@ class OwnerHold:
     launcher exits. ``sessions`` records, per such tenant, only transport facts
     the Owner needs to renew it on its own: the remote ``mux_session`` whose
     existence keeps the tenant alive and an absolute ``expires_at`` lease cap.
-    ``reverse_forwards`` ({venue port: fixed host port}) and ``local_forwards``
-    ({host port: venue port}) live as long as ``daemon_port``.
+    ``reverse_forwards`` / ``local_forwards`` live as long as ``daemon_port``;
+    assigned local forwards mark ports allocated from ``0:VENUE_PORT``.
     """
 
     codespace: str
@@ -109,6 +110,7 @@ class OwnerHold:
     sessions: dict[str, dict[str, Any]] = field(default_factory=dict)
     reverse_forwards: dict[str, int] = field(default_factory=dict)
     local_forwards: dict[str, int] = field(default_factory=dict)
+    assigned_local_forwards: dict[str, int] = field(default_factory=dict)
 
     def live_tenants(self, ttl: float = DEFAULT_TTL) -> dict[str, float]:
         """Tenants whose heartbeat is within ``ttl``."""
@@ -318,18 +320,16 @@ def hold(
     sticky and only cleared by :func:`release` with ``unpin=True``.
 
     ``mux_session`` makes this a **session tenant**: the Owner renews it on its
-    own for as long as that mux session still exists on the CodeSpace (see
-    :class:`ConnectionOwner`), up to an absolute ``max_lease`` counted from the
-    tenant's first hold (a re-hold never extends it). A session tenant is
-    *unconfirmed* until its launcher re-holds it with ``confirmed=True`` once
-    the session is up: until then a probe that cannot see the mux session (it
-    is still starting, or the CodeSpace is still booting) never releases it --
-    only the TTL does. ``daemon_port`` asks for the host bridge daemon reverse
-    forward (CodeSpace-side listen port). ``fresh=True`` starts a new launch
+    own while that mux session exists, up to an absolute ``max_lease`` counted
+    from the tenant's first hold (a re-hold never extends it). A session tenant
+    is *unconfirmed* until its launcher re-holds it with ``confirmed=True`` once
+    the session is up: until then a probe that cannot see the mux session never
+    releases it -- only the TTL does. ``daemon_port`` asks for the host bridge
+    daemon reverse forward. ``fresh=True`` starts a new launch
     generation (unconfirmed, new lease), so nothing -- neither an older
     session's confirmation nor an in-flight probe of it -- can release the new
     launch; ``restore`` puts back a session entry exactly as it was before a
-    failed relaunch. ``reverse_forwards`` / ``local_forwards``, when given, replace the
+    failed relaunch (its ``assigned_local_forwards`` key, too). ``reverse_forwards`` / ``local_forwards`` replace the
     hold's extra forwards of that direction.
     """
     if not codespace:
@@ -363,10 +363,11 @@ def hold(
         port = _sanitize_port(daemon_port)
         if port is not None:
             existing.daemon_port = port
-        set_hold_forwards(existing, reverse_forwards, local_forwards)
+        from .owner_local_forwards import reuse_assigned_local_forwards
+        local_forwards = reuse_assigned_local_forwards(existing, local_forwards)
+        set_hold_forwards(existing, reverse_forwards, local_forwards, (restore or {}).get("assigned_local_forwards"))
         _write_holds(holds)
         return existing
-
 
 def heartbeat(
     codespace: str, tenant: str, ttl: float = DEFAULT_TTL,
@@ -453,10 +454,9 @@ LIVE_FILE = RUNTIME_DIR / "connection-owner.live.json"
 # flap on scheduler jitter).
 _LIVE_STALE_INTERVALS = 3
 _LIVE_STALE_FLOOR = 45.0
-# A heartbeat timestamp this far in the future is treated as NOT fresh: a bogus
-# future beacon or a backward clock jump must fail safe (a tenant falls back to
-# owning its own relay), while a sub-second skew is tolerated so liveness does not
-# flap on ordinary clock jitter.
+_PROCESS_STARTED_AT = time.time()
+# A future heartbeat (bogus beacon / backward clock jump) is NOT fresh, beyond a
+# sub-second-ish skew, so a tenant fails safe to owning its own relay.
 _LIVE_FUTURE_TOLERANCE = 5.0
 
 
@@ -468,12 +468,10 @@ class OwnerLiveness:
     host: str
     heartbeat_at: float
     interval: float
-    # CodeSpaces the Owner currently has a *live* relay channel for (published so
-    # a tenant can tell the relay it wants to defer to is actually up before it
-    # skips standing up its own -- the timing seam the ssh/dispatch rewire needs).
-    active: tuple[str, ...] = ()
-    # CodeSpaces the Owner currently has a live host-bridge-daemon forward for.
-    bridge_forwards: tuple[str, ...] = ()
+    process_started_at: float = 0.0
+    process_identity: str | None = None  # OS birth identity of ``pid`` (beacon writer)
+    active: tuple[str, ...] = ()  # CodeSpaces with live relay channels (tenants defer)
+    bridge_forwards: tuple[str, ...] = ()  # CodeSpaces with a live host-bridge forward
 
     def staleness_threshold(self) -> float:
         return max(_LIVE_STALE_FLOOR, _LIVE_STALE_INTERVALS * max(self.interval, 0.0))
@@ -495,16 +493,16 @@ def _write_liveness(
 ) -> None:
     """Refresh the daemon liveness beacon (best-effort; never raises).
 
-    ``active`` is the set of CodeSpaces the Owner currently has a live relay
-    channel for; it is published so a tenant can wait for the relay it wants
-    before deferring. ``bridge_forwards`` likewise names the CodeSpaces with a
-    live host-bridge-daemon forward.
+    ``active`` names CodeSpaces with live relay channels; ``bridge_forwards``
+    names CodeSpaces with live host-bridge-daemon forwards.
     """
     try:
         ensure_runtime_dir()
         payload = {
             "pid": os.getpid(),
             "host": _this_host(),
+            "process_started_at": _PROCESS_STARTED_AT,
+            "process_identity": owner_process_identity(os.getpid()),
             "heartbeat_at": time.time(),
             "interval": float(interval),
             "active": sorted(active or ()),
@@ -549,6 +547,8 @@ def read_liveness() -> OwnerLiveness | None:
             host=str(raw.get("host", "")),
             heartbeat_at=float(raw.get("heartbeat_at", 0.0)),
             interval=float(raw.get("interval", 0.0)),
+            process_started_at=float(raw.get("process_started_at", 0.0)),
+            process_identity=beacon_identity(raw),
             active=tuple(str(cs) for cs in active_raw if isinstance(cs, str)),
             bridge_forwards=tuple(str(cs) for cs in bridge_raw if isinstance(cs, str)),
         )
@@ -559,9 +559,9 @@ def read_liveness() -> OwnerLiveness | None:
 def _pid_alive(pid: int) -> bool | None:
     """Best-effort: is ``pid`` a live process? ``None`` when undeterminable.
 
-    POSIX uses ``os.kill(pid, 0)``. On Windows ``os.kill`` with a non-control
-    signal calls ``TerminateProcess`` (it would KILL the pid), so we never probe
-    there -- return ``None`` and let heartbeat freshness be the sole signal.
+    POSIX uses ``os.kill(pid, 0)``; on Windows that would KILL the pid, so we
+    never probe there (heartbeat freshness plus the beacon's birth identity
+    decide instead).
     """
     if pid <= 0:
         return False
@@ -590,7 +590,7 @@ def _live_snapshot(now: float | None = None) -> OwnerLiveness | None:
         return None
     if not live.is_fresh(now):
         return None
-    if _pid_alive(live.pid) is False:
+    if _pid_alive(live.pid) is False or not owner_identity_matches(live, _this_host()):
         return None
     return live
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 from types import SimpleNamespace
 
@@ -66,6 +67,43 @@ def test_normal_start_publishes_bound_port_before_resolver_init(
     assert table["active"]["pid"] is not None
     assert table["active"]["generation"] == 2
     assert table["previous"]["port"] == 41001
+
+
+def test_normal_start_replaces_bound_pidless_route(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv(
+        "AGENT_WORKTREES_PROJECTS_YAML",
+        str(tmp_path / "nonexistent-projects.yaml"),
+    )
+    (tmp_path / "active.json").write_text(
+        '{"active":{"bind":"127.0.0.1","port":41011}}',
+        encoding="utf-8",
+    )
+
+    original_resolver = app_module.daemon_resolver
+    observed = {}
+
+    def resolver(cfg):
+        observed["table"] = routing.read_table(tmp_path)
+        return original_resolver(cfg)
+
+    monkeypatch.setattr(app_module, "daemon_resolver", resolver)
+
+    app = create_app(config=_config(tmp_path), token="test-token")
+    app.state.bound_port = 41012
+    app.state.publish_on_ready = True
+    app.state.supersession_client_factory = lambda _ep: SimpleNamespace(
+        drain=lambda **_kwargs: {"drained": True},
+        shutdown=lambda: {"shutting_down": True},
+        undrain=lambda: {"draining": False},
+    )
+
+    with TestClient(app) as client:
+        assert client.get("/health").status_code == 200
+
+    table = observed["table"]
+    assert table["active"]["port"] == 41012
+    assert table["previous"]["port"] == 41011
 
 
 def test_passive_start_does_not_publish_before_resolver_init(
@@ -162,6 +200,47 @@ def test_startup_failure_restores_previous_route(tmp_path, monkeypatch):
     table = routing.read_table(tmp_path)
     assert table["active"]["port"] == 43001
     assert table["active"]["pid"] == os.getpid()
+
+
+def test_cmd_start_refuses_forward_published_during_publication(
+    tmp_path, monkeypatch, capsys,
+):
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setenv(
+        "AGENT_WORKTREES_PROJECTS_YAML",
+        str(tmp_path / "nonexistent-projects.yaml"),
+    )
+
+    def publish_forward(_config_dir):
+        (tmp_path / "active.json").write_text(
+            '{"active":{"bind":"127.0.0.1","port":62254,"forwarded":true}}',
+            encoding="utf-8",
+        )
+
+    import agent_bridge.config as bridge_config
+    import agent_bridge.lifecycle_hooks as lifecycle_hooks
+    import agent_bridge.watchdog as watchdog
+    import agent_bridge.winjob as winjob
+    from agent_bridge import service_start_cli
+
+    monkeypatch.setattr(lifecycle_hooks, "startup_sweep", publish_forward)
+    monkeypatch.setattr(bridge_config, "config_dir", lambda: tmp_path)
+    monkeypatch.setattr(bridge_config, "load_config", lambda: _config(tmp_path))
+    monkeypatch.setattr(bridge_config, "migrate_config", lambda cfg: cfg)
+    monkeypatch.setattr(bridge_config, "write_default_config", lambda _cfg: None)
+    monkeypatch.setattr(bridge_config, "load_or_create_auth_token", lambda: "test-token")
+    monkeypatch.setattr(service_start_cli._core(), "_INSTALL_DIR", str(tmp_path))
+    monkeypatch.setattr(winjob, "setup_kill_on_close_job", lambda: None)
+    monkeypatch.setattr(watchdog, "arm_serving_watchdog", lambda *a, **k: None)
+
+    service_start_cli._cmd_start(
+        argparse.Namespace(port=0, bind=None, idle_shutdown=None, passive=False)
+    )
+
+    assert "SKIP:" in capsys.readouterr().out
+    assert routing.read_table(tmp_path) == {
+        "active": {"bind": "127.0.0.1", "port": 62254, "forwarded": True}
+    }
 
 
 def test_startup_failure_does_not_overwrite_newer_successor(

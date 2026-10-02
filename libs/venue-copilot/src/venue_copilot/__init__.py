@@ -146,13 +146,40 @@ def trust_folder_command(folder: str) -> str:
 
 
 def registration_credentials_script(token: str, port: int) -> str:
-    """Shell snippet provisioning agent-bridge registration credentials."""
+    """Shell snippet provisioning agent-bridge registration credentials.
+
+    The route names the host bridge's forwarded port with a ``bind`` (so the
+    venue's agent-bridge CLI parses it, rather than falling back to its default
+    port and starting a local daemon that takes the route over) and
+    ``"forwarded": true`` (so that CLI never starts a daemon over it, and a
+    daemon that did start retires).
+    """
+    active = json.dumps(
+        {"active": {"bind": "127.0.0.1", "port": int(port), "forwarded": True}},
+        separators=(",", ": "),
+    )
     return (
-        "mkdir -p ~/.agent-bridge && "
-        f"printf 'token: %s\\n' {shlex.quote(token)} "
-        "> ~/.agent-bridge/auth.yaml && "  # marketplace-isolation: allow agent-bridge-management
-        f"printf '{{\"active\": {{\"port\": {int(port)}}}}}' "
-        "> ~/.agent-bridge/active.json"  # marketplace-isolation: allow agent-bridge-management
+        "set -e; d=\"$HOME/.agent-bridge\"; mkdir -p \"$d\"; "
+        "umask 077; "
+        f"auth_tmp=$(mktemp \"$d/auth.yaml.XXXXXX\"); printf 'token: %s\\n' {shlex.quote(token)} > \"$auth_tmp\"; "
+        f"active_tmp=$(mktemp \"$d/active.json.XXXXXX\"); printf %s {shlex.quote(active)} > \"$active_tmp\"; "
+        "commit_forward_route() { mv \"$auth_tmp\" \"$d/auth.yaml\" && mv \"$active_tmp\" \"$d/active.json\"; }; "
+        "if command -v flock >/dev/null 2>&1; then "
+        "touch \"$d/active.lock\"; flock \"$d/active.lock\" sh -c 'mv \"$1\" \"$2\" && mv \"$3\" \"$4\"' sh "
+        "\"$auth_tmp\" \"$d/auth.yaml\" \"$active_tmp\" \"$d/active.json\"; "
+        "else "
+        "py=$(command -v python3 || command -v python || true); "
+        "test -n \"$py\" || { echo 'agent-bridge: cannot lock active.json: flock and python are unavailable' >&2; exit 1; }; "
+        "\"$py\" - \"$d/active.lock\" \"$auth_tmp\" \"$d/auth.yaml\" \"$active_tmp\" \"$d/active.json\" <<'PYLOCK'\n"
+        "import fcntl, os, sys\n"
+        "lock, auth_tmp, auth_dst, active_tmp, active_dst = sys.argv[1:]\n"
+        "os.makedirs(os.path.dirname(lock), exist_ok=True)\n"
+        "with open(lock, 'a+b') as handle:\n"
+        "    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)\n"
+        "    os.replace(auth_tmp, auth_dst)\n"
+        "    os.replace(active_tmp, active_dst)\n"
+        "PYLOCK\n"
+        "fi"  # marketplace-isolation: allow agent-bridge-management
     )
 
 

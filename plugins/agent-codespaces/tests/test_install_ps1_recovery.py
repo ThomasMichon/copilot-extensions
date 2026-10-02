@@ -387,6 +387,22 @@ def test_marketplace_staged_uninstall_waits_without_holding_runtime_cwd(
         / "agent-codespaces"
     )
     shutil.copytree(PLUGIN, installed)
+    libs = installed / "libs"
+    libs.mkdir()
+    for lib in (
+        "config-migrate",
+        "credential-relay",
+        "session-liveness-probe",
+        "single-instance-lease",
+        "ssh-manager",
+        "venue-copilot",
+        "zdd",
+    ):
+        shutil.copytree(
+            PLUGIN.parents[1] / "libs" / lib,
+            libs / lib,
+            ignore=shutil.ignore_patterns("__pycache__", ".venv"),
+        )
     env = _environment(home, fake_bin, fake_bin.parent / "fake_uv.py", "sleep-pip")
     install_process = subprocess.Popen(
         [PWSH, "-NoProfile", "-File", str(installed / "scripts" / "install.ps1"), "install"],

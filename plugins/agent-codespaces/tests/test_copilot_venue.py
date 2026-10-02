@@ -274,6 +274,33 @@ class TestCmdCopilotAnchorDefault:
         assert rc == 0
         assert seen == {"identity": "wt-A", "anchor": False}
 
+    def test_attached_mode_uses_default_ttl_when_flag_is_omitted(
+        self, store, monkeypatch,
+    ) -> None:
+        monkeypatch.setattr(owner, "ensure_owner_running", lambda config: True)
+        monkeypatch.setattr(config_mod, "load_merged_config", lambda: object())
+        monkeypatch.setattr("venue_copilot.resolve_daemon_port", lambda: None)
+        monkeypatch.setattr(
+            "agent_codespaces.relay_launch.effective_relay_port", lambda config: 9857,
+        )
+        monkeypatch.setattr(
+            "agent_codespaces.relay_token.token_for", lambda name, **kw: "tok-1",
+        )
+        seen = {}
+
+        def fake_run_venue_copilot(worktree_id, *, connect, ttl_seconds, **kwargs):
+            seen["ttl_seconds"] = ttl_seconds
+            return 0
+
+        monkeypatch.setattr("venue_copilot.run_venue_copilot", fake_run_venue_copilot)
+
+        rc = copilot_venue.cmd_copilot(
+            _ns(ttl_seconds=None), interactive_ssh=lambda *a, **kw: 0,
+        )
+
+        assert rc == 0
+        assert seen == {"ttl_seconds": 300.0}
+
     def test_places_and_releases_owner_hold_around_a_successful_run(
         self, store, monkeypatch,
     ) -> None:
