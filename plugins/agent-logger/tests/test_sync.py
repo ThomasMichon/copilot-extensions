@@ -1444,7 +1444,7 @@ def test_rsync_runtime_source_arg_noop_without_wsl(tmp_path: Path) -> None:
 
 
 def test_ssh_target_push_uses_wsl_wrapped_rsync(monkeypatch, tmp_path: Path) -> None:
-    """When WSL is available, push() must run rsync wrapped in `wsl.exe --`,
+    """When WSL is available, push() must run rsync wrapped in `wsl.exe -e`,
     with a bare "ssh" (WSL's own, no cross-runtime sibling needed) and the
     source path converted via wslpath instead of a raw Windows path."""
     from agent_logger.sync.targets import base as sync_base

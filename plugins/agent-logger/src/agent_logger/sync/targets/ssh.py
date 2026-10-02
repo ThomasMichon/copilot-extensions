@@ -136,8 +136,13 @@ class SshTarget(Target):
                 # The WSL-wrapped process always emits UTF-8; text=True's
                 # locale decoder can raise UnicodeDecodeError on non-ASCII
                 # diagnostics there, so decode explicitly for that case.
+                # rsync/ssh diagnostics can also carry arbitrary (non-UTF-8)
+                # filename bytes, so use replacement rather than strict
+                # decoding -- a malformed byte must never crash the push.
                 decode_kwargs = (
-                    {"encoding": "utf-8"} if runtime.use_wsl else {"text": True}
+                    {"encoding": "utf-8", "errors": "replace"}
+                    if runtime.use_wsl
+                    else {"text": True}
                 )
                 proc = subprocess.run(
                     cmd,
