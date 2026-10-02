@@ -1824,13 +1824,13 @@ def _reconcile_active_pr(
         # -- this IS the "successful provider observation of a non-terminal
         # state" `_ensure_pr_claim` requires, closing the gap an out-of-band
         # `set-pr` (which persists state with no provider read at all)
-        # leaves open. Idempotent + cheap; only actually writes when the
-        # claim doesn't already exist.
+        # leaves open. Idempotent + cheap; only actually writes when
+        # `_ensure_pr_claim` reports a real transition (new OR reactivated
+        # claim) -- never for an already-active no-op.
         if active.state != "open":
             active.state = "open"
-        had_claim = any(c.ref == _pr_claim_ref(active) for c in record.resources)
         claimed_ref = _ensure_pr_claim(record, active)
-        if not had_claim:
+        if claimed_ref:
             persisted = False
             if best_effort:
                 with tracking._RecordLock(record.yaml_path, blocking=False) as lk:
@@ -1840,7 +1840,7 @@ def _reconcile_active_pr(
             else:
                 tracking.save_record(record)
                 persisted = True
-            if persisted and claimed_ref:
+            if persisted:
                 claim_history.record_pr_event(
                     claimed_ref, worktree_id=record.worktree_id,
                     machine=record.machine, event="claimed")

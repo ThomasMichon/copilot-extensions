@@ -102,9 +102,10 @@ def test_history_for_ref_skips_parseable_non_dict_lines(monkeypatch, tmp_path: P
 
 
 def test_record_event_never_raises_on_write_failure(monkeypatch):
-    monkeypatch.setattr(
-        claim_history, "history_path", lambda: Path("/nonexistent-root/x/claim-history.jsonl")
-    )
+    def _boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(claim_history.handoff_trace, "_append_lock", _boom)
     # Must not raise -- best-effort, same contract as activity.log_event.
     claim_history.record_event(
         kind="pr", ref="o/r#1", worktree_id="wt-a", machine="m", event="claimed",

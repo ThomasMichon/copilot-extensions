@@ -9,7 +9,7 @@ from pathlib import Path
 from agent_worktrees import __main__ as m
 from agent_worktrees import claim_history
 from agent_worktrees import config as cfg
-from agent_worktrees import git_ops, pr_ops, tracking
+from agent_worktrees import git_ops, obligations, pr_ops, tracking
 
 # ---------------------------------------------------------------------------
 # Pure helpers
@@ -2529,6 +2529,28 @@ class TestReconcileActivePrSelfHeal:
         self._patch(monkeypatch, fake)
         pr_ops._reconcile_active_pr(rec, self._config())
         assert rec.active_pr().state == "open"
+
+    def test_reactivated_released_claim_is_persisted_and_feeds_history(
+        self, tmp_path, monkeypatch,
+    ):
+        """A PR claim released then re-observed open must be reactivated,
+        SAVED, and feed claim_history -- not silently skipped just because
+        a (now-stale) claim entry already existed for that ref (#review
+        finding: the old `had_claim`-by-ref-presence gate missed exactly
+        this reactivation case)."""
+        rec = self._record(tmp_path, monkeypatch)
+        rec.resources = [
+            tracking.ResourceClaim(kind="pr", ref="o/r#7", state=obligations.RELEASED),
+        ]
+        tracking.save_record(rec)
+        fake = self._fake_provider(merged=False, contained=False)
+        self._patch(monkeypatch, fake)
+        pr_ops._reconcile_active_pr(rec, self._config())
+        assert rec.resources[0].state == obligations.ACTIVE
+        reloaded = tracking.load_record(rec.yaml_path)
+        assert reloaded.resources[0].state == obligations.ACTIVE
+        events = claim_history.history_for_ref("o/r#7")
+        assert [e["event"] for e in events] == ["claimed"]
 
     def test_unknown_containment_leaves_open(self, tmp_path, monkeypatch):
         rec = self._record(tmp_path, monkeypatch)
