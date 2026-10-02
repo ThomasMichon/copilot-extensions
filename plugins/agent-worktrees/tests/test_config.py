@@ -1571,6 +1571,35 @@ class TestInRepoConfigCommittedRefResolution:
                 self._resolve(tmp_path)
         assert sum(timeouts) <= src._RESOLUTION_BUDGET
 
+    def test_load_config_wires_one_budget_across_its_resolutions(self, monkeypatch, tmp_path):
+        """load_config() itself opens the shared budget: a load resolving several
+        repos stays within one budget with no caller-provided scope."""
+        import types
+
+        from agent_worktrees import git_ops, inrepo_config_source as src
+
+        clock = {"t": 1000.0}
+        timeouts: list[float] = []
+
+        def slow_git(*args, timeout, **_kw):
+            timeouts.append(timeout)
+            clock["t"] += timeout
+            if args[0] == "symbolic-ref":
+                return types.SimpleNamespace(returncode=0, stdout="refs/remotes/origin/main\n")
+            return types.SimpleNamespace(returncode=1, stdout="")
+
+        def _load_resolving_five_repos(*_a, **_kw):
+            for _ in range(5):  # e.g. five configured repos
+                self._resolve(tmp_path)
+            return types.SimpleNamespace(repos={})
+
+        monkeypatch.setattr(git_ops, "git", slow_git)
+        monkeypatch.setattr(src.time, "monotonic", lambda: clock["t"])
+        monkeypatch.setattr(cfg, "_load_config_uncached", _load_resolving_five_repos)
+        cfg.load_config(include_control_plane_related_pr=False)
+        assert len(timeouts) >= 2  # probes ran (a later repo may find the budget spent)
+        assert sum(timeouts) <= src._RESOLUTION_BUDGET
+
     @staticmethod
     def _git(*args: str, cwd: Path):
         import subprocess
