@@ -176,7 +176,7 @@ def gh_auth_preflight(status_func, account_login_remedy) -> list[str]:
         login.casefold(): scopes for login, scopes in per_account.items()
         if login.casefold() not in failures
     }
-    accounts, uses_ambient = codespace_scope_accounts()
+    accounts, uses_ambient = codespace_scope_accounts(live_only=True)
     if not accounts:
         msgs.extend(_active_scope_findings(lowered, combined, failures, account_login_remedy))
         return msgs

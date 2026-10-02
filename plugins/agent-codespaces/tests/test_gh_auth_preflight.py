@@ -75,6 +75,19 @@ def test_preflight_flags_missing_mapped_account():
     assert any("ghost" in msg and "not logged in" in msg for msg in msgs)
 
 
+def test_preflight_ignores_accounts_bound_only_to_deleted_codespaces():
+    from agent_codespaces.account_binding import AccountBinding
+
+    bindings = [AccountBinding(codespace="cs-gone", account="stale", bound_at=0.0)]
+    with patch("subprocess.run") as run, \
+         patch("agent_codespaces.account_binding.list_bindings", return_value=bindings), \
+         patch("agent_codespaces.lifecycle.list_codespaces", return_value=[]), \
+         patch("agent_codespaces.config.load_merged_config", return_value=MagicMock(repos={})):
+        run.return_value = MagicMock(returncode=0, stdout=_STATUS, stderr="")
+        msgs = m._gh_auth_preflight()
+    assert not any("stale" in msg for msg in msgs)
+
+
 def test_preflight_clean_when_all_scoped():
     status = _STATUS.replace(
         "  - Token scopes: 'gist', 'read:org', 'repo', 'workflow'\n",
