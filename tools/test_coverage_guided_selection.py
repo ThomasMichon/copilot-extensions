@@ -35,7 +35,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 from tools.coverage_guided_selection import baseline as baseline_mod  # noqa: E402
 from tools.coverage_guided_selection import correlation  # noqa: E402
-from tools.coverage_guided_selection import fallback, select  # noqa: E402
+from tools.coverage_guided_selection import fallback, selection as select  # noqa: E402
 
 
 def _synthetic_baseline() -> dict:
