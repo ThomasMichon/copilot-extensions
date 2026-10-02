@@ -632,7 +632,7 @@ class SendMessageRequest(BaseModel):
     body: str
     reply_to: str | None = None
     kind: str = "prompt"
-    delivery: LiveMessageDelivery = "queue"
+    delivery: LiveMessageDelivery = "steer"  # not "queue": see _live_message_delivery
     wait: bool = False
     wait_timeout: float = 120.0
     #: Optional freshness assertion (#2906): the session id the caller believes
@@ -672,7 +672,7 @@ class LiveMessage(BaseModel):
     body: str
     reply_to: str | None = None
     kind: str = "prompt"
-    delivery: LiveMessageDelivery = "queue"
+    delivery: LiveMessageDelivery = "steer"
     created_at: float
 
 

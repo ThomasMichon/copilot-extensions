@@ -427,14 +427,14 @@ def test_message_carries_delivery_over_route(client: TestClient) -> None:
     assert listed[0]["delivery"] == "interrupt"
 
 
-def test_message_delivery_defaults_to_queue_over_route(client: TestClient) -> None:
+def test_message_delivery_defaults_to_steer_over_route(client: TestClient) -> None:
     _register(client)
     client.post(
         "/api/v1/live-sessions/cli-1/messages",
         json={"sender": "peer", "body": "do the thing"},
     )
     listed = client.get("/api/v1/live-sessions/cli-1/messages").json()["messages"]
-    assert listed[0]["delivery"] == "queue"
+    assert listed[0]["delivery"] == "steer"
 
 
 def test_message_rejects_unknown_delivery_over_route(client: TestClient) -> None:

@@ -10,6 +10,7 @@ import {
   escAttr,
   renderDeliveredPrompt,
   STATUS_CHECK_INLINE_GUIDANCE,
+  PROMPT_REPLY_GUIDANCE,
   controlPlan,
   modeApplied,
 } from "../extensions/agent-bridge/delivery.mjs";
@@ -104,6 +105,17 @@ test("status-check without reply-to asks for an inline answer", () => {
   assert.ok(!inline.includes("send <reply-to>"));
   const routed = renderDeliveredPrompt({ id: 9, sender: "a", body: "status?", kind: "status-check", reply_to: "wt-a" });
   assert.ok(routed.includes("send <reply-to>"));
+});
+
+test("an ordinary prompt with reply-to tells the receiver reply-to is the routable address", () => {
+  const routed = renderDeliveredPrompt({ id: 12, sender: "wt-sender", body: "do the thing", reply_to: "wt-sender" });
+  assert.ok(routed.includes(PROMPT_REPLY_GUIDANCE));
+  assert.ok(routed.includes("send <reply-to>"));
+});
+
+test("an ordinary prompt with no reply-to carries no reply guidance (nothing to route to)", () => {
+  const unrouted = renderDeliveredPrompt({ id: 13, sender: "bridge-ui", body: "do the thing" });
+  assert.ok(!unrouted.includes(PROMPT_REPLY_GUIDANCE));
 });
 
 function recorded(msg) {

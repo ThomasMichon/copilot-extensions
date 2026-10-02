@@ -765,7 +765,7 @@ class BridgeClient(CliModeClientMixin, WorktreeRestartMixin):
     def send_live_message(
         self, session_id: str, *, sender: str, body: str,
         reply_to: str | None = None, kind: str = "prompt",
-        delivery: str = "queue",
+        delivery: str = "steer",
         wait: bool = False, wait_timeout: float | None = None,
         idempotency_key: str | None = None,
         expected_session_id: str | None = None,
@@ -784,7 +784,7 @@ class BridgeClient(CliModeClientMixin, WorktreeRestartMixin):
             payload["reply_to"] = reply_to
         if kind and kind != "prompt":
             payload["kind"] = kind
-        if delivery and delivery != "queue":
+        if delivery and delivery != "steer":
             payload["delivery"] = delivery
         if idempotency_key:
             payload["idempotency_key"] = idempotency_key
@@ -1579,7 +1579,7 @@ class BridgeClient(CliModeClientMixin, WorktreeRestartMixin):
         sender: str,
         message: str,
         kind: str = "prompt",
-        delivery: str = "queue",
+        delivery: str = "steer",
         expected_session_id: str | None = None,
         idempotency_key: str | None = None,
         timeout: float = 20.0,

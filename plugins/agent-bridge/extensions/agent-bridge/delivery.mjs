@@ -37,6 +37,16 @@ export const STATUS_CHECK_INLINE_GUIDANCE = "This is a STATUS-CHECK with no " +
   "reply-to. Answer tersely in your reply right here; do NOT treat it as new " +
   "work or start a task, and carry on with what you were doing.";
 
+// An ordinary ("prompt" kind) message with a reply-to still needs the same
+// explicit routing hint as notify/status-check: `from` is the sender's
+// display label, not guaranteed to be a resolvable send target by itself.
+// Without this, a receiving agent naturally tries `send <from> "..."` first
+// (reply to whoever it looks like the message came from) and only `reply-to`
+// is guaranteed to resolve back through the bridge.
+export const PROMPT_REPLY_GUIDANCE = "To reply, use the exact argv[0] from " +
+  "the agent-bridge session command catalog with `send <reply-to> \"...\"` " +
+  "-- `from` is a display label, not necessarily a valid send target.";
+
 // The runtime's SendRequest.source provenance tag this delivery always uses.
 // Must carry the `agent-` prefix (any non-empty suffix is accepted) so the
 // runtime's own admission logic (apply_public_send_admission) never defaults
@@ -56,7 +66,9 @@ export function renderDeliveredPrompt(msg) {
   const body = String(msg.body ?? "");
   const text = kind === "status-check" && !msg.reply_to
     ? STATUS_CHECK_INLINE_GUIDANCE
-    : kind && KIND_GUIDANCE[kind];
+    : kind
+      ? KIND_GUIDANCE[kind]
+      : msg.reply_to && PROMPT_REPLY_GUIDANCE;
   const guidance = text ? `\n\n(${text})` : "";
   return `<agent-message ${attrs.join(" ")}>\n${body}${guidance}\n</agent-message>`;
 }

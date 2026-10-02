@@ -170,11 +170,26 @@ answer against the actual repository/CI configuration:
   also grant the ability to forge a passing attestation, and vice versa.
   This is the concrete form of "an independently constrained publisher
   credential" named in the original finding.
-- **Build hermeticity:** open-ended build-system requirements (e.g.
-  `setuptools>=83.0.0`) can produce different bytes for a nominally
-  identical artifact identity across promotions; identity needs to account
-  for the resolved build-tool closure too. _(Not yet resolved -- next in
-  queue.)_
+- **Build hermeticity -- resolved (2026-10-02):** confirmed every
+  `pyproject.toml` in `plugins/` and `libs/` (43 files surveyed) uses the
+  same `setuptools.build_meta` backend with an open-floor `requires`
+  (`setuptools>=68.0`, `>=83.0.0`, or `>=84.0.0` depending on the package --
+  never an upper bound or exact pin). A single shared backend simplifies
+  the fix: Phase 2 must not rely on pip/`uv`'s normal PEP 517 **isolated**
+  build environment (which silently resolves "whatever satisfies the floor
+  today," unrecorded and unreproducible run-to-run). Instead, promotion
+  resolves one shared **build-toolchain lock** per promotion run (exact
+  `setuptools`/`wheel` versions, resolved from the governed feed like every
+  other third-party dependency in this effort -- never a public index),
+  installs it into a controlled build venv, and builds every plugin/lib
+  wheel in that run with `--no-build-isolation` against that one locked
+  venv. The resolved toolchain lock's hash becomes a component of each
+  artifact's identity key alongside payload hash + platform + architecture
+  + Python ABI (not a replacement for those fields), and the exact pinned
+  versions are recorded in the artifact manifest -- so two promotions that
+  happen to use different setuptools versions are naturally different,
+  auditable artifact identities instead of a silent same-identity byte
+  mismatch.
 - **Vendored first-party libs -- resolved (2026-10-01):** `tools/materialize_main.py`
   already enumerates exactly the set this effort needs. Its
   `materialize_uv_editable_ref_into()` walks each consumer's
@@ -222,6 +237,23 @@ answer against the actual repository/CI configuration:
 _Pending Phase 1 spike evidence._
 
 ## Journal
+
+### 2026-10-02 - Build hermeticity resolved; all 6 of 7 questions now concrete
+
+- Surveyed every `pyproject.toml` under `plugins/` and `libs/` (43 files):
+  all use `setuptools.build_meta` with an open-floor `requires` (`>=68.0`,
+  `>=83.0.0`, or `>=84.0.0`) -- confirmed single-backend, simplifying the
+  fix to one shared build-toolchain lock rather than a per-backend scheme.
+- Resolved **build hermeticity**: promotion resolves and records one
+  governed-feed-sourced build-toolchain lock per run, builds every wheel
+  `--no-build-isolation` against it, and folds the lock's hash into each
+  artifact's identity alongside the existing payload/platform/arch/ABI
+  fields. See the Open Design Questions entry for the full reasoning.
+- **Remaining:** Phase 1's spike (governed-feed-only install + timing
+  baseline) is the only item not yet started. All 7 Open Design Questions
+  now have a concrete, committed direction; Phase 2 implementation can
+  begin drafting the promotion-side changes once Phase 1 produces its
+  baseline evidence.
 
 ### 2026-10-01 - Four Open Design Questions resolved concretely
 

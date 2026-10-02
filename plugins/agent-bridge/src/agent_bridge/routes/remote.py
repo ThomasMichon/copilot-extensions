@@ -76,7 +76,10 @@ class RemoteLiveMessageRequest(BaseModel):
     sender: str = Field(min_length=1, max_length=128)
     message: str = Field(min_length=1, max_length=1_048_576)
     kind: str = Field(default="prompt")
-    delivery: str = Field(default="queue")
+    # "steer" (not "queue"): a cross-machine relay send is an agent-to-agent
+    # message, where queueing behind the receiver's current turn can stall
+    # for a long time. Pass delivery="queue" explicitly to opt back in.
+    delivery: str = Field(default="steer")
     expected_session_id: str | None = Field(
         default=None, min_length=1, max_length=256
     )
