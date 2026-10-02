@@ -311,15 +311,25 @@ this phase) is considered.)_
         scheduled, a newly arriving event extends/no-ops rather than queuing
         a second one.
   - [ ] **Close the gap between the initial snapshot and the subscription
-        actually being live:** a mutation that lands after the initial
-        `begin`/`row`/`done` fetch but before `stream_events()`'s
+        actually being live — and prove it's actually live, not just that
+        the HTTP response started:** a mutation that lands after the
+        initial `begin`/`row`/`done` fetch but before `stream_events()`'s
         subscription is actually established has no event to consume — the
-        same kind of non-replay gap the reconnect path already has to solve.
-        Treat initial startup the same way: establish the subscription
-        first, then immediately run one full reconcile pass before
-        processing any events it yields, rather than trusting the initial
-        fetch's snapshot to already be current by the time the subscription
-        is live.
+        same kind of non-replay gap the reconnect path already has to
+        solve. Opening the connection is not sufficient proof of this: the
+        `/events` route sends no initial frame today, and
+        `EventBus.subscribe()` only registers its queue once the route's
+        generator begins iterating — a client can receive response headers
+        before that registration actually happens, so starting the
+        reconcile right after `stream_events()` returns can still race the
+        exact gap this bullet means to close. Fixed by having the route
+        emit an explicit **ready frame** immediately after queue
+        registration (before yielding any real event), and having the
+        client: (1) wait for that ready frame, (2) buffer any events
+        received from that point on rather than applying them immediately,
+        (3) run the immediate reconcile pass, then (4) apply the buffered
+        events on top of the reconciled snapshot — so nothing in the
+        handoff window is lost to either side.
   - [ ] **Scope to the direct (local) path only:**
         `_fetch_rows()` already branches to `_fetch_rows_delegated()` for a
         cross-machine `--machine`. The local coordinator's `/events` stream
@@ -373,13 +383,17 @@ this phase) is considered.)_
         pure wake signals even without task identity). The genuine gaps are
         the mutation endpoints that publish **nothing at all** today:
         `POST /tasks/{id}/activity` and `POST /tasks/{id}/heartbeat`
-        (`coordinator_tasks.py`, `_guard()` called with no `event_type`) and
-        the MCP heartbeat path's own `_mutate(..., None)` call
-        (`mcp_http.py`). Add an event — any `event_type`, e.g.
-        `task.activity_updated`/`task.heartbeat` — to each of these specific
-        call sites; no other audit is needed once every mutation path
-        publishes at least one event, since the relay no longer depends on
-        that event's contents.
+        (`coordinator_tasks.py`, `_guard()` called with no `event_type`), the
+        MCP heartbeat path's own `_mutate(..., None)` call (`mcp_http.py`),
+        **and the manual recovery entry points** — `POST /recover`
+        (`coordinator_tasks.py:888-891`) and MCP `dispatch_recover`
+        (`mcp_http.py:801-805`) both call `queue.reconcile_liveness()`
+        directly with no event published at all, even though that call can
+        requeue, suspend, or dead-letter rows. Add an event — any
+        `event_type`, e.g. `task.activity_updated`/`task.heartbeat`/
+        `task.recovered` — to each of these specific call sites; no other
+        audit is needed once every mutation path publishes at least one
+        event, since the relay no longer depends on that event's contents.
   - [ ] **Time-derived fields change with no mutation and no event at all,
         and need their own refresh path, not a daemon round-trip:**
         `_build()` expires `activity` after `ACTIVITY_TTL_SECONDS`, advances
@@ -649,14 +663,26 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
       refresh latency (mirroring the `picker-reconcile-local` before/after
       methodology from 2026-09-30), plus a headless test proving the Picker
       repaints on a `delta`/`removed` envelope line without a poll tick.
-- [ ] **Phase 3 (design review gate):** each plugin's own daemon-relay change
-      must be reviewed before landing — it introduces a new internal failure
-      mode (the CLI's own daemon connection drops or misbehaves) that its
-      existing poll-and-diff path doesn't have. Validate that CLI-internal
-      degradation (daemon unreachable → existing poll-and-diff `--stream`
-      behavior) actually happens — kill the daemon mid-render and confirm the
-      Picker keeps getting data, just via the slower internal path, never a
-      frozen or crashed pivot.
+- [ ] **Phase 3 (design review gate):** 3a's agent-dispatch relay and 3b's
+      agent-bridge daemon-side cache each introduce their own new internal
+      failure modes beyond what the existing poll-and-diff/scan-per-call
+      paths have, and each needs its own acceptance test, not one shared
+      generic check:
+  - **3a:** kill the coordinator mid-render and confirm the relay degrades
+        to its existing poll-and-diff path (never a frozen or crashed
+        pivot), reconnects with bounded backoff once the coordinator comes
+        back (not permanently stuck on polling), and runs a full reconcile
+        on that reconnect.
+  - **3b:** a regression test per new failure mode the cache introduces —
+        recovery from an uninitialized namespace (never silently published
+        as complete), recovery from a hung/crashed background refresh task
+        (the freshness deadline actually marks it incomplete and an
+        opportunistic `GET` actually triggers a real rescan), a provider
+        added/removed at runtime (the cache's namespace set actually tracks
+        `refresh_provider_resolvers()`'s own membership changes), and
+        competing concurrent refreshes of the same namespace (single-flight
+        plus generation-guarded publication actually prevents a
+        stale-overwrite and doesn't duplicate the scan).
 - [ ] **Phase 4:** a regression test asserting only the expected segment(s)
       refresh for a given cause (cosmetic pulse vs. nav vs. reload vs. pivot
       switch), plus confirmation (via the same real-timer profiling method
@@ -1374,3 +1400,30 @@ and surfaced three further gaps in code the design hadn't touched yet:
 
 All six replied-to inline (three new threads; three confirmations/fixes on
 carried-over and previously-missed findings).
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 7: subscription-ack race, two more silent-mutation paths, stale Validation Plan
+Three more findings:
+- **Opening the SSE connection isn't proof the subscription is live.**
+  `/events` sends no initial frame, and `EventBus.subscribe()` only
+  registers its queue once the route's generator starts iterating — a
+  client can observe response headers before that registration happens, so
+  running the startup reconcile right after `stream_events()` returns can
+  still race the exact gap it's meant to close. Fixed by requiring the
+  route to emit an explicit ready frame right after queue registration,
+  and the client to wait for it, buffer events arriving from that point,
+  run the reconcile, then apply the buffered events on top — closing the
+  gap on both sides instead of just moving where it could happen.
+- **Two more mutation paths publish nothing:** `POST /recover` and MCP
+  `dispatch_recover` both call `queue.reconcile_liveness()` directly with
+  no event at all, despite being able to requeue/suspend/dead-letter rows.
+  Folded into the same "every mutation path needs at least one event"
+  requirement as the activity/heartbeat fix.
+- **The Phase 3 Validation Plan still only described the two-daemon-relay
+  shape this design abandoned for agent-bridge.** Killing a daemon mid-render
+  doesn't exercise 3b's actual new failure modes (an uninitialized
+  namespace, a hung refresh task, runtime provider add/remove, competing
+  concurrent refreshes) at all. Rewrote the Phase 3 Validation Plan entry
+  into 3a-specific and 3b-specific acceptance criteria matching what each
+  part of the redesigned plan actually introduces.
+
+All three replied-to inline.
