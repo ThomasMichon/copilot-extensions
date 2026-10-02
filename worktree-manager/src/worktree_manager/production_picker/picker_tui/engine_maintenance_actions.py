@@ -446,15 +446,23 @@ class PickerScreenMaintenanceActionsMixin:
             if not confirmed:
                 return
             on = {o["label"] for o in dlg["opts"] if o["on"]}
-            if not _SEED_PROMPT_ENABLED or "Bare" in on or "No Mux" in on:
+            is_remote = (tm, te) != self.src.LOCAL
+            if (
+                not _SEED_PROMPT_ENABLED or "Bare" in on or "No Mux" in on
+                or "Anchor repo" in on or is_remote
+            ):
                 # A bare worktree gets no Copilot bootstrap at all -- nothing
                 # to seed. A No-Mux worktree launches Copilot directly,
                 # bypassing the mux pane `embody`'s delivery depends on
                 # entirely -- a typed prompt would be persisted as
                 # `pending_seed` and never delivered (or delivered
                 # unexpectedly later if a mux session is created
-                # afterward). Skip the prompt screen for both and behave
-                # exactly as before this screen existed.
+                # afterward). Anchor-repo and remote-machine targets resolve
+                # via `--base`/`--machine`, and the engine's own `resolve`
+                # CLI rejects `--seed` alongside either -- forwarding a typed
+                # prompt there would fail the whole launch request. Skip the
+                # prompt screen for all four and behave exactly as before
+                # this screen existed.
                 self._confirm_new_worktree(dlg)
                 return
 

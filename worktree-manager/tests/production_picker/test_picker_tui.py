@@ -4674,11 +4674,42 @@ def test_new_worktree_anchor_option_shows_selected_state():
             await pilot.press("tab")
             await pilot.press("enter")
             await pilot.pause()
-            await pilot.press("enter")      # SeedPromptScreen: textarea -> buttons
-            await pilot.press("enter")      # activate Launch (blank prompt)
-            await pilot.pause()
+            # Anchor resolves via `--base`, which the engine's own resolve
+            # CLI rejects alongside `--seed` -- the seed-prompt screen is
+            # skipped here too, same as Bare/No Mux.
         assert app.result["action"] == "new"
         assert app.result["options"]["anchor"] is True
+        assert app.result["options"]["seed_prompt"] == ""
+
+    asyncio.run(run())
+
+
+def test_new_worktree_remote_target_skips_seed_prompt(monkeypatch):
+    """A remote-machine target resolves via `--machine`, which the engine's
+    own resolve CLI also rejects alongside `--seed`. Confirming Create for a
+    remote target must go straight to the launch decision, never opening
+    SeedPromptScreen -- same class of gap as Anchor/Bare/No Mux."""
+    from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
+    monkeypatch.setattr(ema, "_SEED_PROMPT_ENABLED", True)
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.create_target = lambda: ("remote-host", "WSL")
+            scr._open_optmenu()
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            assert dlg is not None
+            from worktree_manager.production_picker.picker_tui.engine import FocusGroup
+            assert dlg.query_one("#scope-buttons", FocusGroup).has_focus
+            await pilot.press("enter")          # confirm Create, no options
+            await pilot.pause()
+        assert app.result is not None
+        assert app.result["action"] == "new"
+        assert app.result["machine"] == "remote-host"
+        assert app.result["options"]["seed_prompt"] == ""
 
     asyncio.run(run())
 
