@@ -19,6 +19,20 @@ agent-worktrees -p copilot-extensions worktree create --json
 Running a project binstub bare (e.g. `my-control-harness`) still launches the
 interactive picker.
 
+## State-root and paired-worktree resolution
+
+`agent-worktrees state-root --json` resolves the repository that owns personal
+state for the current project. `state-root --pair` is stricter: it resolves the
+task-specific sibling of the current tracked worktree and exits `3` when no
+pair is available.
+
+When `--pair` runs from a registered repository anchor, JSON output preserves
+the existing `"error": "current directory is not a tracked worktree"` contract
+and also reports the independently resolved state root, checkout classification,
+and recovery guidance. Plain output keeps the same error as its first line and
+adds the safe read-only destination when available. The command never guesses
+among the anchor's worktrees and never creates or selects a writable pair.
+
 ## Knowledge plugin composition
 
 A stateless harness paired with a private knowledge worktree can compose the

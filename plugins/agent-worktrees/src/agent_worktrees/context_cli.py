@@ -534,19 +534,122 @@ def cmd_installer_readiness(args: argparse.Namespace) -> int:
     return emit(evaluate())
 
 
+def _untracked_pair_context(
+    pair: state_root_mod.StatePair,
+    config: cfg.Config | None,
+    cwd: str,
+    *,
+    config_error: str | None = None,
+) -> tuple[dict, str | None]:
+    payload = pair.as_dict()
+    if pair.error != state_root_mod.UNTRACKED_WORKTREE_ERROR:
+        return payload, None
+
+    try:
+        git_root = state_root_mod._git_toplevel(cwd)
+        checkout_path = git_root or str(Path(cwd).resolve(strict=False))
+        anchor = None
+        if config is not None:
+            try:
+                anchor = config.default_repo.anchor
+            except KeyError:
+                pass
+        checkout_kind = (
+            "anchor"
+            if state_root_mod._same_path(checkout_path, anchor)
+            else "untracked"
+        )
+
+        state_root = None
+        state_root_error = config_error
+        if config is not None:
+            state_root = state_root_mod.resolve_state_root(config, cwd=cwd)
+    except Exception as exc:
+        # Optional diagnostics must never replace the strict pair failure.
+        payload["state_root_error"] = (
+            f"additional state-root context unavailable: {exc}"
+        )
+        return payload, None
+
+    if state_root is not None:
+        root_payload = state_root.as_dict()
+        payload.update(
+            {
+                key: value
+                for key, value in root_payload.items()
+                if key != "error"
+            }
+        )
+        state_root_error = root_payload["error"]
+    if state_root_error:
+        payload["state_root_error"] = state_root_error
+
+    is_anchor = checkout_kind == "anchor"
+    payload.update(
+        {
+            "checkout": {"kind": checkout_kind, "path": checkout_path},
+            "error_code": (
+                "CURRENT_CHECKOUT_IS_ANCHOR"
+                if is_anchor
+                else "CURRENT_DIRECTORY_UNTRACKED"
+            ),
+            "message": (
+                "The current directory is the registered repository anchor, "
+                "not a tracked worktree. The state root can still be used for "
+                "read-only access, but no unique writable pair can be selected "
+                "from an anchor."
+                if is_anchor and state_root and state_root.bound
+                else "The current directory is not a tracked worktree, so no "
+                "unique writable pair can be selected."
+            ),
+            "recovery": {
+                "read_only_path": (
+                    state_root.path if state_root and state_root.bound else None
+                ),
+                "read_only": (
+                    "Use the resolved state_root for read-only access."
+                    if state_root and state_root.bound
+                    else "Run `agent-worktrees state-root --json` after "
+                    "repairing the project binding or configuration."
+                ),
+                "writable": (
+                    "Run `agent-worktrees state-root --pair` from a tracked "
+                    "worktree."
+                ),
+            },
+        }
+    )
+    return payload, payload["message"]
+
+
 def _state_root_pair(json_out: bool) -> int:
     """Resolve the paired (harness/knowledge sibling) worktree of the cwd."""
+    config_error = None
     try:
         config = cfg.load_config()
-    except (OSError, RuntimeError, ValueError):
+    except (OSError, RuntimeError, ValueError) as exc:
         config = None
-    pair = state_root_mod.resolve_pair(config, cwd=os.getcwd())
+        config_error = str(exc)
+    cwd = os.getcwd()
+    pair = state_root_mod.resolve_pair(config, cwd=cwd)
+    payload, guidance = _untracked_pair_context(
+        pair, config, cwd, config_error=config_error
+    )
     if json_out:
-        print(json.dumps(pair.as_dict(), indent=2))
+        print(json.dumps(payload, indent=2))
     elif pair.sibling and not pair.error:
         print(pair.sibling.path)
     elif pair.error:
         print(pair.error, file=sys.stderr)
+        if guidance:
+            print(guidance, file=sys.stderr)
+            recovery = payload.get("recovery", {})
+            if recovery.get("read_only_path"):
+                print(
+                    f"Read-only state root: {recovery['read_only_path']}",
+                    file=sys.stderr,
+                )
+            print(recovery["writable"], file=sys.stderr)
     return 0 if pair.paired and pair.sibling and not pair.error else 3
 
 
@@ -579,7 +682,8 @@ def cmd_state_root_dispatch(argv: list[str]) -> int:
         help="Resolve the PAIRED worktree (the citadel -harness/-knowledge "
         "sibling of the current worktree): print the sibling's checkout "
         "path, or JSON (pair_id/role/sibling id/role/path/kind) with "
-        "--json. Exit 3 when the current worktree is unpaired/untracked.",
+        "--json. Exit 3 when the current worktree is unpaired/untracked; "
+        "an untracked anchor still reports its resolved read-only state root.",
     )
     p.add_argument(
         "--conduct",
