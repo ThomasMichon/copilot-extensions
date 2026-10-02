@@ -279,6 +279,117 @@ def test_promote_writes_pipeline_state_into_generated_commit(repo: Path):
     assert state["paused"] is False
 
 
+def test_promote_checks_in_a_matching_coverage_baseline(tmp_path: Path, repo: Path):
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("x\n", encoding="utf-8")
+    dev_head = _commit(repo, "demo-plugin: a change")
+    _git(["checkout", "-q", "main"], repo)
+
+    baselines_dir = tmp_path / "baselines"
+    baselines_dir.mkdir()
+    (baselines_dir / "demo-plugin.json").write_text(
+        json.dumps({
+            "schema_version": 2,
+            "plugin": "demo-plugin",
+            "measured_commit": dev_head,
+            "tests": {"tests/test_foo.py::test_bar": {"duration_s": 0.1}},
+            "coverage": {"demo-plugin/foo.py": {"1": ["tests/test_foo.py::test_bar"]}},
+        }),
+        encoding="utf-8",
+    )
+
+    report = pr.promote(
+        repo=repo, dev_ref="dev", main_ref="main", push=False,
+        coverage_baselines_dir=baselines_dir,
+    )
+    assert report["promoted"] is True
+    assert report["coverage_baselines_written"] == ["demo-plugin"]
+
+    checked_in = _git(
+        ["show", f"{report['commit']}:{pr.COVERAGE_BASELINES_DIR}/demo-plugin.json"], repo
+    )
+    data = json.loads(checked_in)
+    assert data["measured_commit"] == dev_head
+    assert data["plugin"] == "demo-plugin"
+
+
+def test_promote_refuses_a_coverage_baseline_measured_against_a_different_commit(
+    tmp_path: Path, repo: Path,
+):
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("x\n", encoding="utf-8")
+    _commit(repo, "demo-plugin: a change")
+    _git(["checkout", "-q", "main"], repo)
+
+    baselines_dir = tmp_path / "baselines"
+    baselines_dir.mkdir()
+    (baselines_dir / "demo-plugin.json").write_text(
+        json.dumps({
+            "measured_commit": "0" * 40,  # not this promotion's own dev_head
+            "tests": {}, "coverage": {},
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(pr.PromotionError, match="measured against"):
+        pr.promote(
+            repo=repo, dev_ref="dev", main_ref="main", push=False,
+            coverage_baselines_dir=baselines_dir,
+        )
+
+
+def test_promote_without_coverage_baselines_dir_writes_nothing(repo: Path):
+    """Omitting coverage_baselines_dir entirely (the default, and every
+    promotion today before this is wired into validate-and-promote.yml)
+    must remain a fully valid promotion -- coverage-baseline collection is
+    optional, never required."""
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("x\n", encoding="utf-8")
+    _commit(repo, "demo-plugin: a change")
+    _git(["checkout", "-q", "main"], repo)
+
+    report = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+    assert report["promoted"] is True
+    assert report["coverage_baselines_written"] == []
+
+    listing = _git(["ls-tree", "-r", "--name-only", report["commit"]], repo)
+    assert pr.COVERAGE_BASELINES_DIR not in listing
+
+
+def test_promote_a_second_time_with_only_a_coverage_baseline_change_is_a_no_op(
+    tmp_path: Path, repo: Path,
+):
+    """A coverage-baseline update alone (no real dev content change) must
+    never force a vacuous promotion -- baselines are written only after the
+    no-op content check, mirroring the pipeline-state file's own exclusion."""
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("x\n", encoding="utf-8")
+    dev_head = _commit(repo, "demo-plugin: a change")
+    _git(["checkout", "-q", "main"], repo)
+
+    baselines_dir = tmp_path / "baselines"
+    baselines_dir.mkdir()
+    (baselines_dir / "demo-plugin.json").write_text(
+        json.dumps({"measured_commit": dev_head, "tests": {}, "coverage": {}}),
+        encoding="utf-8",
+    )
+
+    first = pr.promote(
+        repo=repo, dev_ref="dev", main_ref="main", push=False,
+        coverage_baselines_dir=baselines_dir,
+    )
+    assert first["promoted"] is True
+    _git(["update-ref", "refs/heads/main", first["commit"]], repo)
+
+    # Same dev content, a "fresh" baseline re-collected against the same
+    # dev_head (as a real re-run would produce) -- still a no-op.
+    second = pr.promote(
+        repo=repo, dev_ref="dev", main_ref="main", push=False,
+        coverage_baselines_dir=baselines_dir,
+    )
+    assert second["promoted"] is False
+
+
 def test_promote_a_second_time_with_only_state_change_is_a_no_op(repo: Path):
     """Re-running promote() against the SAME dev content a second time must
     not treat the previous commit's own state-file update as a real content
