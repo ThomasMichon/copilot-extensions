@@ -1244,3 +1244,155 @@ def test_down_generation_failure_defers_only_affected_stopped_member(monkeypatch
 
     assert "execution generation" in result.deferred["sandbox-1"]
     assert "sandbox-2" in result.unchanged
+
+
+
+
+def test_trusted_reconcile_up_recreates_profile_drifted_member(monkeypatch):
+    """A fleet relaxed from restricted->trusted should recreate an old member
+    still carrying the stale (restricted) discovered profile, not silently
+    leave it untouched (copilot-extensions#4933)."""
+    from agent_containers import replacement
+
+    config = ContainersConfig()
+    config.fleets["worker"] = FleetConfig(
+        image="example/agent",
+        security_profile="trusted",
+    )
+    drifted = DockerContainerInfo(
+        name="worker-1",
+        container_id="old-instance",
+        image="example/agent",
+        state="running",
+        status="Up",
+        fleet="worker",
+        security_profile="restricted",
+    )
+    monkeypatch.setattr(fleet_mod, "_check_docker", lambda: None)
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: [drifted])
+    captured_calls = []
+
+    def fake_destroy_restricted(_config, _fleet, member, **kwargs):
+        captured_calls.append((member.name, kwargs.get("migrating")))
+        return replacement.DestructiveResult(member.name, "removed")
+
+    monkeypatch.setattr(
+        replacement, "destroy_restricted_member", fake_destroy_restricted
+    )
+    provisioned = []
+    monkeypatch.setattr(
+        fleet_mod,
+        "_image_run",
+        lambda _fleet_name, _fleet, name, **_kwargs: (
+            provisioned.append(name) or name
+        ),
+    )
+
+    result = fleet_mod.reconcile_up(config, "worker", recreate=True)
+
+    assert result.removed == ["worker-1"]
+    assert result.recreated == ["worker-1"]
+    assert provisioned == ["worker-1"]
+    # Routed through the full restricted rescue/liveness pipeline, not a
+    # lightweight lease-only path.
+    assert captured_calls == [("worker-1", True)]
+
+
+def test_trusted_reconcile_up_without_recreate_raises_on_drift(monkeypatch):
+    config = ContainersConfig()
+    config.fleets["worker"] = FleetConfig(
+        image="example/agent",
+        security_profile="trusted",
+    )
+    drifted = DockerContainerInfo(
+        name="worker-1",
+        container_id="old-instance",
+        image="example/agent",
+        state="running",
+        status="Up",
+        fleet="worker",
+        security_profile="restricted",
+    )
+    monkeypatch.setattr(fleet_mod, "_check_docker", lambda: None)
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: [drifted])
+
+    with pytest.raises(RuntimeError, match="security profile"):
+        fleet_mod.reconcile_up(config, "worker")
+
+
+def test_trusted_reconcile_up_defers_drifted_member_with_active_lease(monkeypatch):
+    from agent_containers import replacement
+
+    config = ContainersConfig()
+    config.fleets["worker"] = FleetConfig(
+        image="example/agent",
+        security_profile="trusted",
+    )
+    drifted = DockerContainerInfo(
+        name="worker-1",
+        container_id="old-instance",
+        image="example/agent",
+        state="running",
+        status="Up",
+        fleet="worker",
+        security_profile="restricted",
+    )
+    monkeypatch.setattr(fleet_mod, "_check_docker", lambda: None)
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: [drifted])
+    monkeypatch.setattr(
+        replacement,
+        "destroy_restricted_member",
+        lambda *_args, **_kwargs: replacement.DestructiveResult(
+            "worker-1", "deferred", "container has an active effort lease"
+        ),
+    )
+    monkeypatch.setattr(
+        fleet_mod,
+        "_image_run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("deferred member must not be re-provisioned")
+        ),
+    )
+
+    result = fleet_mod.reconcile_up(config, "worker", recreate=True)
+
+    assert result.removed == []
+    assert result.deferred == {"worker-1": "container has an active effort lease"}
+
+
+def test_remove_fleet_recreates_drifted_restricted_member(monkeypatch):
+    """`rm` on a now-trusted fleet should remove (not hard-defer) a member
+    still carrying the stale restricted discovered profile, routed through
+    the full restricted rescue/liveness pipeline (migrating=True)."""
+    from agent_containers import replacement
+
+    config = ContainersConfig()
+    config.fleets["worker"] = FleetConfig(
+        image="example/agent",
+        security_profile="trusted",
+    )
+    drifted = DockerContainerInfo(
+        name="worker-1",
+        container_id="old-instance",
+        image="example/agent",
+        state="running",
+        status="Up",
+        fleet="worker",
+        security_profile="restricted",
+    )
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: [drifted])
+    captured_calls = []
+
+    def fake_destroy_restricted(_config, _fleet, member, **kwargs):
+        captured_calls.append(kwargs.get("migrating"))
+        return replacement.DestructiveResult(member.name, "removed")
+
+    monkeypatch.setattr(
+        replacement, "destroy_restricted_member", fake_destroy_restricted
+    )
+
+    result = fleet_mod.remove_fleet(config, "worker", force=True)
+
+    assert result.removed == ["worker-1"]
+    assert result.deferred == {}
+    assert captured_calls == [True]

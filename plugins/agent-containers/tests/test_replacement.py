@@ -1138,3 +1138,146 @@ def test_unconfirmed_action_marks_hold_uncertain(monkeypatch):
         )
 
     assert marked == [(info.name, "hold-token")]
+
+
+
+
+def _migrated_config() -> tuple[ContainersConfig, FleetConfig]:
+    """A fleet whose containers.yaml entry has relaxed to trusted, while
+    ``_member()``'s discovered container is still restricted-built."""
+    fleet = FleetConfig(
+        image="example/agent",
+        security_profile="trusted",
+        exec_user="agent",
+    )
+    return ContainersConfig(fleets={"sandbox": fleet}), fleet
+
+
+def test_migrating_member_rejected_without_migrating_flag(monkeypatch):
+    """A restricted-built member can't go through this pipeline against a
+    now-trusted fleet config unless the caller explicitly opts in."""
+    config, fleet = _migrated_config()
+    info = _member()
+    _safe_defaults(monkeypatch, info)
+
+    with pytest.raises(RuntimeError, match="migrating=True"):
+        replacement.destroy_restricted_member(
+            config,
+            fleet,
+            info,
+            operation="recreate",
+            force_remove=True,
+            force_abandon=False,
+        )
+
+
+def test_migrating_member_still_blocks_on_active_session(monkeypatch):
+    """copilot-extensions#4933 fix: a restricted->trusted migration must not
+    bypass the session-liveness/rescue safety net -- only the (now
+    inapplicable) CURRENT-policy conformance check is skipped."""
+    config, fleet = _migrated_config()
+    info = _member()
+    _safe_defaults(monkeypatch, info)
+    monkeypatch.setattr(
+        replacement,
+        "probe_session_liveness",
+        lambda *_args, **_kwargs: replacement.SessionLiveness(
+            "active",
+            ["11111111-1111-4111-8111-111111111111"],
+            [],
+        ),
+    )
+    monkeypatch.setattr(
+        replacement,
+        "remove_container",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("active session must not be removed during migration")
+        ),
+    )
+
+    result = replacement.destroy_restricted_member(
+        config,
+        fleet,
+        info,
+        operation="recreate",
+        force_remove=True,
+        force_abandon=False,
+        migrating=True,
+    )
+
+    assert result.status == "deferred"
+    assert "active Copilot session-state lock" in (result.reason or "")
+
+
+def test_migrating_member_skips_current_policy_conformance(monkeypatch):
+    """The member no longer matches the fleet's CURRENT (trusted) policy by
+    definition during a migration -- that mismatch must not block removal,
+    while rescue/liveness still run."""
+    config, fleet = _migrated_config()
+    info = _member()
+    _safe_defaults(monkeypatch, info)
+    monkeypatch.setattr(
+        replacement,
+        "probe_session_liveness",
+        lambda *_args, **_kwargs: replacement.SessionLiveness("idle", [], []),
+    )
+    monkeypatch.setattr(
+        replacement,
+        "restricted_policy_errors",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("current-policy conformance must not be checked "
+                           "during a migration")
+        ),
+    )
+    rescued = []
+    monkeypatch.setattr(
+        replacement,
+        "capture_restricted_sessions",
+        lambda *_args, **kwargs: rescued.append(kwargs.get("migrating"))
+        or {"status": "verified", "capture_id": "cap-1"},
+    )
+    removed = []
+    monkeypatch.setattr(
+        replacement,
+        "remove_container",
+        lambda container_id, **_kwargs: removed.append(container_id),
+    )
+
+    result = replacement.destroy_restricted_member(
+        config,
+        fleet,
+        info,
+        operation="recreate",
+        force_remove=True,
+        force_abandon=False,
+        migrating=True,
+    )
+
+    assert result.status == "removed"
+    assert removed == [info.container_id]
+    assert rescued == [True]
+
+
+def test_destroy_drifted_restricted_members_reports_independent_outcomes(monkeypatch):
+    config, fleet = _migrated_config()
+    idle = _member("sandbox-1")
+    busy = _member("sandbox-2")
+
+    def fake_destroy(_config, _fleet, member, **_kwargs):
+        if member.name == "sandbox-1":
+            return replacement.DestructiveResult("sandbox-1", "removed")
+        return replacement.DestructiveResult(
+            "sandbox-2", "deferred", "active Copilot session-state lock present"
+        )
+
+    monkeypatch.setattr(replacement, "destroy_restricted_member", fake_destroy)
+
+    result = replacement.destroy_drifted_restricted_members(
+        config, fleet, "sandbox", [idle, busy],
+        operation="recreate", force_abandon=False,
+    )
+
+    assert result.removed == ["sandbox-1"]
+    assert result.deferred == {
+        "sandbox-2": "active Copilot session-state lock present"
+    }

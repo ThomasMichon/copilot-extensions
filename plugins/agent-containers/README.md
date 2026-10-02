@@ -412,6 +412,17 @@ member carrying an explicit foreign fleet label is reported as drift and
 deferred; its foreign/trusted configuration can never downgrade a requested
 restricted remove into the trusted direct-removal path.
 
+**Profile migration (`restricted` -> `trusted`):** when a fleet's
+`containers.yaml` entry relaxes its `security_profile` while a member built
+under the old `restricted` profile is still live, `up --recreate` and `rm`
+both detect that drift and recreate/remove the member -- routed through the
+exact same rescue/liveness/lease pipeline above (a restricted-built member
+never gets a lighter-weight path just because the fleet's current config
+moved on), with only the "does it still match the CURRENT fleet's
+conformance policy" check skipped, since that check assumes the container is
+staying restricted. Without `--recreate`, `up` raises instead of silently
+leaving the old member untouched.
+
 `rescue-capture` runs the same admission/lease/liveness gating as `down`/`rm`
 against every running restricted member of the named fleet, but performs no
 stop or remove afterward -- the container keeps running untouched. This is

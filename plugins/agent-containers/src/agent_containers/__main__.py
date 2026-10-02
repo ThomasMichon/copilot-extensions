@@ -85,8 +85,11 @@ def main(argv: list[str] | None = None) -> int:
         "--recreate",
         action="store_true",
         help="Recreate restricted members that drifted from the fleet's current "
-        "image/policy (instead of refusing). Removes and re-provisions them on "
-        "the current image; active/unknown/leased members are deferred.",
+        "image/policy (instead of refusing), AND any member (of either profile) "
+        "whose discovered security_profile no longer matches the fleet's "
+        "current containers.yaml config (e.g. a restricted->trusted "
+        "migration). Removes and re-provisions them on the current image; "
+        "active/unknown/leased members are deferred.",
     )
     up_p.add_argument(
         "--force-abandon",
