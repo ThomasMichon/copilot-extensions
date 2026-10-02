@@ -29,6 +29,13 @@ class PickerScreenModelMixin:
             if self.show_hidden or self._hidden_count() > 0:
                 bset.append("TH")
             return bset
+        if kind == "registered":
+            # A registered pivot's data-driven "New …" affordance (Phase B,
+            # picker-new-session-prompt-and-composer): only present when the
+            # manifest declares a pivot-level `create_action` (most pivots
+            # don't -- their rows are read-only, discovered state).
+            reg = self._reg_pivot()
+            return ["NC"] if reg is not None and reg.create_action is not None else []
         return BUTTON_SETS.get(kind, [])
     def active_button(self):
         bset = self.button_set()
@@ -432,9 +439,13 @@ class PickerScreenModelMixin:
                     out.append(("C", li))
                     li += 1
         elif self._kind() == "registered":
-            # Registered pivot: View nav + machine sub-nav, then one stop per
-            # task row (grouped rows are flattened in first-seen order).
+            # Registered pivot: View nav + machine sub-nav, then (when the
+            # manifest declares one) the data-driven "New …" button, then one
+            # stop per task row (grouped rows are flattened in first-seen
+            # order).
             out = [*self._v_stops(), ("M", 0)]
+            if self.button_set():
+                out.append(("BTN", 0))
             for i in range(len(self._task_rows())):
                 out.append(("T", i))
         else:
@@ -473,6 +484,8 @@ class PickerScreenModelMixin:
                 heads.append(("SA", 0))   # Tab into the selection/list region
         elif self._kind() == "registered":
             heads = [*v, ("M", 0)]
+            if self.button_set():
+                heads.append(("BTN", 0))
             if self._task_rows():
                 heads.append(("T", 0))
         else:

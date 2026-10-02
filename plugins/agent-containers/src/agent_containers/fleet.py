@@ -445,9 +445,11 @@ def reconcile_up(
     fleet image is rebuilt (or the policy changes) a still-running member no
     longer matches and dispatch is refused. Without ``recreate`` such drift
     raises (the historical behavior); with it, the drifted members are removed
-    and re-provisioned fresh on the current image/policy. Active, unknown, or
-    leased members remain running and are reported as deferred. Container names
-    are deterministic, but replacement is admitted only after any lease is
+    and re-provisioned on the current image/policy -- including a fleet's
+    ``security_profile`` itself relaxing (restricted->trusted). Active,
+    unknown, or leased members remain running and are reported as deferred.
+    Container names are
+    deterministic, but replacement is admitted only after any lease is
     released.
     """
     _check_docker()
@@ -548,7 +550,25 @@ def reconcile_up(
         else:
             result = FleetOperationResult()
     else:
-        result = FleetOperationResult()
+        # A fleet's security_profile can relax while a member built under
+        # the old profile is still live (copilot-extensions#4933).
+        drifted = [c for c in existing if c.security_profile != fleet.security_profile]
+        if drifted:
+            if not recreate:
+                raise RuntimeError(
+                    f"Fleet '{fleet_name}' has containers whose discovered security "
+                    f"profile no longer matches its configured profile "
+                    f"({fleet.security_profile!r}): {', '.join(c.name for c in drifted)}. "
+                    "Recreate them before dispatch (pass recreate=True / `up --recreate`)."
+                )
+            from .replacement import destroy_drifted_restricted_members
+            result = destroy_drifted_restricted_members(
+                config, fleet, fleet_name, drifted,
+                operation="recreate", force_abandon=force_abandon,
+            )
+            existing = [c for c in existing if c.name not in result.removed]
+        else:
+            result = FleetOperationResult()
     need = target - len(existing)
     if need <= 0:
         log.info(
@@ -896,8 +916,40 @@ def remove_fleet(
             )
             continue
         fleet = requested_fleet
-        if (fleet and fleet.restricted) or c.security_profile == "restricted":
+        profile_drifted = fleet is not None and c.security_profile != fleet.security_profile
+        if (fleet and fleet.restricted) or c.security_profile == "restricted" or profile_drifted:
             if fleet is None or not fleet.restricted:
+                if profile_drifted and c.security_profile != "restricted":
+                    # No migration path (e.g. unlabeled "unknown") -- defer,
+                    # don't fall to the unguarded removal below (#4933).
+                    result.deferred[c.name] = (
+                        f"discovered security profile {c.security_profile!r} has no "
+                        "supported migration path; recreate it manually"
+                    )
+                    continue
+                if profile_drifted:
+                    # Still restricted-BUILT -- full rescue/liveness,
+                    # migrating=True.
+                    from .replacement import destroy_restricted_member
+                    from .rescue import RescueError
+                    try:
+                        decision = destroy_restricted_member(
+                            config, fleet, c, operation="remove",
+                            force_remove=force, force_abandon=force_abandon,
+                            migrating=True,
+                        )
+                    except (RescueError, RuntimeError) as exc:
+                        result.deferred[c.name] = str(exc)
+                        continue
+                    if decision.status != "removed":
+                        result.deferred[c.name] = decision.reason or "removal deferred"
+                        continue
+                    if decision.rescue:
+                        result.rescues[c.name] = decision.rescue
+                    if decision.telemetry_abandoned:
+                        result.telemetry_abandoned.append(c.name)
+                    result.removed.append(c.name)
+                    continue
                 result.deferred[c.name] = (
                     "restricted container has no matching restricted fleet configuration"
                 )

@@ -90,6 +90,31 @@ class _AutoExpandTextArea(TextArea):
                 adv(self)
 
 
+class _AdvancingInput(Input):
+    """A single-line ``text`` field with the same Enter-to-advance /
+    Ctrl+Left/Right-tab-switch keyboard flow ``_AutoExpandTextArea`` gives
+    multi-line fields. Textual's plain ``Input`` natively binds Ctrl+Left/
+    Right to word-cursor movement and Enter only to its own ``Submitted``
+    message, neither forwarded to the screen -- without this, a ``text``
+    field could not follow a multi-field form's documented keyboard flow."""
+
+    def on_key(self, event) -> None:
+        key = event.key
+        if key in ("ctrl+left", "ctrl+right"):
+            event.prevent_default()
+            event.stop()
+            action = "action_next_tab" if key == "ctrl+right" else "action_prev_tab"
+            fn = getattr(self.screen, action, None)
+            if callable(fn):
+                fn()
+        elif key == "enter":
+            event.prevent_default()
+            event.stop()
+            adv = getattr(self.screen, "_advance_focus", None)
+            if callable(adv):
+                adv(self)
+
+
 class _SteerRadioSet(RadioSet):
     """A single-select that keeps ``Space`` = toggle-and-stay but makes ``Enter``
     = toggle-**and-advance** (the steer form's keyboard flow). Enter that lands on
@@ -186,7 +211,7 @@ def compose_field(f: dict, i: int) -> tuple[list[Widget], dict]:
             widgets.append(other)
     else:  # text -> single-line Input; textarea -> free-form auto-expand box
         if ftype == "text":
-            w: Widget = Input(id=f"q-{i}")
+            w: Widget = _AdvancingInput(id=f"q-{i}")
         else:
             w = _AutoExpandTextArea(id=f"q-{i}")
         rec["primary"] = w

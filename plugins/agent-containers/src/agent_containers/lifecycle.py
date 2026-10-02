@@ -290,14 +290,28 @@ def restricted_policy_errors(
     workspace_folder: str,
     exec_user: str,
     inspected: dict | None = None,
+    migrating: bool = False,
 ) -> list[str]:
-    """Inspect and validate the effective Docker boundary for a restricted fleet."""
+    """Inspect and validate the effective Docker boundary for a restricted fleet.
+
+    ``migrating`` skips only the checks that compare against ``fleet`` (the
+    CURRENT containers.yaml config) and necessarily fail across a deliberate
+    restricted->trusted migration: image, policy fingerprint, explicit
+    environment, and exact network/memory/cpu/pids/tmpfs-size VALUES. Every
+    FIXED security invariant about the observed container's own build still
+    applies unconditionally -- profile label, home/uid/gid, no bind mounts,
+    no privileged/extra capabilities, read-only rootfs, no host device/
+    namespace/port exposure, no credential-shaped env, network isolation
+    (``none`` or exclusively Docker-internal networks), real positive
+    memory/cpu/pids bounds (with memory==swap), and each tmpfs surface's
+    fixed mount flags plus a real positive ``size=`` budget (its exact
+    value excepted).
+    """
     errors: list[str] = []
     try:
         fleet.validate_restricted()
     except RuntimeError as exc:
         errors.append(str(exc))
-    expected_policy = fleet.security_policy_fingerprint(workspace_folder, exec_user)
     doc = inspected or inspect_container(info.name)
     host = doc.get("HostConfig") or {}
     container = doc.get("Config") or {}
@@ -308,19 +322,27 @@ def restricted_policy_errors(
 
     if labels.get(SECURITY_PROFILE_LABEL) != "restricted":
         errors.append("security profile label is not restricted")
-    if labels.get(SECURITY_POLICY_LABEL) != expected_policy:
-        errors.append("security policy fingerprint is stale")
-    if container.get("Image") != fleet.image:
-        errors.append("container image differs from configured image")
+    # FIXED invariant regardless of profile/config: the running image must
+    # still be the one actually provisioned (no silent image swap) --
+    # unlike the CURRENT-config image comparisons below, this binds the
+    # container to its OWN recorded provisioning, never today's fleet.
     if labels.get(SECURITY_IMAGE_ID_LABEL) != doc.get("Image"):
         errors.append("container image ID differs from provisioned image ID")
-    current_image = _docker(
-        ["image", "inspect", "--format", "{{.Id}}", fleet.image],
-        timeout=30,
-    )
-    current_image_id = current_image.stdout.strip() if current_image.returncode == 0 else ""
-    if not current_image_id or current_image_id != doc.get("Image"):
-        errors.append("configured image reference differs from running image ID")
+    if not migrating:
+        expected_policy = fleet.security_policy_fingerprint(workspace_folder, exec_user)
+        if labels.get(SECURITY_POLICY_LABEL) != expected_policy:
+            errors.append("security policy fingerprint is stale")
+        if container.get("Image") != fleet.image:
+            errors.append("container image differs from configured image")
+        current_image = _docker(
+            ["image", "inspect", "--format", "{{.Id}}", fleet.image],
+            timeout=30,
+        )
+        current_image_id = (
+            current_image.stdout.strip() if current_image.returncode == 0 else ""
+        )
+        if not current_image_id or current_image_id != doc.get("Image"):
+            errors.append("configured image reference differs from running image ID")
     if not home or not str(home).startswith("/"):
         errors.append("restricted home label is missing or invalid")
     try:
@@ -339,9 +361,12 @@ def restricted_policy_errors(
     }
     if home and f"HOME={home}" not in env:
         errors.append("HOME does not target the restricted writable home")
-    for name, expected in fleet.environment.items():
-        if env_map.get(name) != expected:
-            errors.append(f"explicit environment '{name}' differs from configuration")
+    if not migrating:
+        for name, expected in fleet.environment.items():
+            if env_map.get(name) != expected:
+                errors.append(
+                    f"explicit environment '{name}' differs from configuration"
+                )
     sensitive = sorted(
         name for name in env_map if is_sensitive_environment_name(name)
     )
@@ -380,67 +405,154 @@ def restricted_policy_errors(
     if host.get("ExtraHosts"):
         errors.append("extra host mappings are present")
 
-    expected_network = fleet.effective_network()
-    if host.get("NetworkMode") != expected_network:
-        errors.append("network mode differs from configured restricted network")
     attached_networks = set(
         ((doc.get("NetworkSettings") or {}).get("Networks") or {}).keys()
     )
-    expected_networks = {expected_network} if expected_network else set()
-    if attached_networks != expected_networks:
-        errors.append("attached networks differ from configured restricted network")
-    if expected_network != "none":
-        network = _docker(["network", "inspect", expected_network], timeout=30)
-        try:
-            network_docs = json.loads(network.stdout) if network.returncode == 0 else []
-        except json.JSONDecodeError:
-            network_docs = []
-        if not network_docs or not network_docs[0].get("Internal"):
-            errors.append("configured restricted network is not Docker-internal")
-        else:
-            attached = (
-                ((doc.get("NetworkSettings") or {}).get("Networks") or {}).get(
-                    expected_network
+    if migrating:
+        # FIXED invariant independent of the current fleet's configured
+        # network name: the container must be network-isolated -- either
+        # no network at all (with nothing attached), or every attached
+        # network verified Docker-internal. An uninspectable non-"none"
+        # mode (e.g. a namespace-sharing "container:<id>" with no own
+        # Networks entries) is rejected rather than treated as safe.
+        network_mode = host.get("NetworkMode")
+        if network_mode == "none":
+            # Docker's real shape for --network none: NetworkSettings
+            # reports exactly one entry keyed "none" -> {} -- not an
+            # absence of entries.
+            if attached_networks != {"none"}:
+                errors.append(
+                    "network mode is 'none' but attached networks are unexpected"
                 )
-                or {}
+        elif not attached_networks:
+            errors.append(
+                f"network mode {network_mode!r} has no inspectable attached networks"
             )
-            if attached.get("NetworkID") != network_docs[0].get("Id"):
-                errors.append("attached network ID differs from configured network")
-    try:
-        memory_bytes = _parse_size(fleet.effective_memory())
-        if int(host.get("Memory") or 0) != memory_bytes:
-            errors.append("memory limit differs from configured limit")
-        if int(host.get("MemorySwap") or 0) != memory_bytes:
-            errors.append("swap limit differs from configured memory limit")
-    except (TypeError, ValueError):
-        errors.append("memory limit is invalid")
-    if int(host.get("NanoCpus") or 0) != int(fleet.effective_cpus() * 1_000_000_000):
-        errors.append("CPU limit differs from configured limit")
-    if int(host.get("PidsLimit") or 0) != fleet.effective_pids_limit():
-        errors.append("PID limit differs from configured limit")
+        else:
+            for net_name in attached_networks:
+                inspected_net = _docker(["network", "inspect", net_name], timeout=30)
+                try:
+                    net_docs = (
+                        json.loads(inspected_net.stdout)
+                        if inspected_net.returncode == 0
+                        else []
+                    )
+                except json.JSONDecodeError:
+                    net_docs = []
+                if not net_docs or not net_docs[0].get("Internal"):
+                    errors.append(
+                        f"attached network {net_name!r} is not Docker-internal"
+                    )
+    else:
+        expected_network = fleet.effective_network()
+        if host.get("NetworkMode") != expected_network:
+            errors.append("network mode differs from configured restricted network")
+        expected_networks = {expected_network} if expected_network else set()
+        if attached_networks != expected_networks:
+            errors.append("attached networks differ from configured restricted network")
+        if expected_network != "none":
+            network = _docker(["network", "inspect", expected_network], timeout=30)
+            try:
+                network_docs = json.loads(network.stdout) if network.returncode == 0 else []
+            except json.JSONDecodeError:
+                network_docs = []
+            if not network_docs or not network_docs[0].get("Internal"):
+                errors.append("configured restricted network is not Docker-internal")
+            else:
+                attached = (
+                    ((doc.get("NetworkSettings") or {}).get("Networks") or {}).get(
+                        expected_network
+                    )
+                    or {}
+                )
+                if attached.get("NetworkID") != network_docs[0].get("Id"):
+                    errors.append("attached network ID differs from configured network")
+
+    if migrating:
+        # FIXED invariants independent of the current fleet's configured
+        # values: real, positive bounds on memory/cpu/pids, and no extra
+        # swap beyond the memory limit -- only the exact configured
+        # values are exempt.
+        observed_memory = int(host.get("Memory") or 0)
+        if observed_memory <= 0:
+            errors.append("memory limit is not a positive bound")
+        elif int(host.get("MemorySwap") or 0) != observed_memory:
+            errors.append("swap limit does not match the restricted no-extra-swap policy")
+        if int(host.get("NanoCpus") or 0) <= 0:
+            errors.append("CPU limit is not a positive bound")
+        if int(host.get("PidsLimit") or 0) <= 0:
+            errors.append("PID limit is not a positive bound")
+    else:
+        try:
+            memory_bytes = _parse_size(fleet.effective_memory())
+            if int(host.get("Memory") or 0) != memory_bytes:
+                errors.append("memory limit differs from configured limit")
+            if int(host.get("MemorySwap") or 0) != memory_bytes:
+                errors.append("swap limit differs from configured memory limit")
+        except (TypeError, ValueError):
+            errors.append("memory limit is invalid")
+        if int(host.get("NanoCpus") or 0) != int(fleet.effective_cpus() * 1_000_000_000):
+            errors.append("CPU limit differs from configured limit")
+        if int(host.get("PidsLimit") or 0) != fleet.effective_pids_limit():
+            errors.append("PID limit differs from configured limit")
 
     tmpfs = host.get("Tmpfs") or {}
-    required_tmpfs = {workspace_folder, home, "/tmp", "/run"}  # noqa: S108
-    if set(tmpfs) != required_tmpfs:
-        errors.append("writable tmpfs surfaces differ from restricted policy")
+    if migrating:
+        # ``workspace_folder`` is part of the OLD restricted policy
+        # fingerprint -- it may have changed together with
+        # security_profile, so requiring an exact match against the
+        # CURRENT config's value would wrongly defer a migration whose
+        # container is otherwise fully compliant. Derive the single
+        # workspace-like surface from what's actually mounted instead.
+        # "/" is never a valid workspace -- restricted creation forbids
+        # mounting writable tmpfs over root (defeats read-only-rootfs) --
+        # so explicitly reject it even if a legitimate workspace mount is
+        # ALSO present (not just when it's the sole candidate).
+        if "/" in tmpfs:
+            errors.append("writable tmpfs surfaces differ from restricted policy")
+        non_workspace = {home, "/tmp", "/run", "/"}  # noqa: S108
+        observed_workspace_candidates = set(tmpfs) - non_workspace
+        if len(observed_workspace_candidates) != 1:
+            errors.append("writable tmpfs surfaces differ from restricted policy")
+            observed_workspace = None
+        else:
+            observed_workspace = next(iter(observed_workspace_candidates))
+    else:
+        required_tmpfs = {workspace_folder, home, "/tmp", "/run"}  # noqa: S108
+        if set(tmpfs) != required_tmpfs:
+            errors.append("writable tmpfs surfaces differ from restricted policy")
+        observed_workspace = workspace_folder
+    # FIXED flags every writable tmpfs surface must carry regardless of
+    # profile/config: no setuid, no device nodes, owned by the restricted
+    # exec user, private mode. Only the exact ``size=`` budget is
+    # current-config-dependent (skipped during migration).
+    base_flags = {"rw", "nosuid", "nodev", "exec", f"uid={uid}", f"gid={gid}", "mode=0700"}
+    tmp_flags = {"rw", "nosuid", "nodev"}
+    fixed_flags = {home: base_flags, "/tmp": tmp_flags, "/run": tmp_flags}  # noqa: S108
+    if observed_workspace is not None:
+        fixed_flags[observed_workspace] = base_flags
     expected_options = {
-        workspace_folder: {
-            "rw", "nosuid", "nodev", "exec",
-            f"size={fleet.effective_workspace_size()}",
-            f"uid={uid}", f"gid={gid}", "mode=0700",
-        },
-        home: {
-            "rw", "nosuid", "nodev", "exec",
-            f"size={fleet.effective_home_size()}",
-            f"uid={uid}", f"gid={gid}", "mode=0700",
-        },
-        "/tmp": {"rw", "nosuid", "nodev", "size=512m"},  # noqa: S108
-        "/run": {"rw", "nosuid", "nodev", "size=64m"},
+        workspace_folder: base_flags | {f"size={fleet.effective_workspace_size()}"},
+        home: base_flags | {f"size={fleet.effective_home_size()}"},
+        "/tmp": tmp_flags | {"size=512m"},  # noqa: S108
+        "/run": tmp_flags | {"size=64m"},
     }
-    for path, expected in expected_options.items():
+    for path, expected in (fixed_flags if migrating else expected_options).items():
         actual = set(str(tmpfs.get(path, "")).split(",")) if path else set()
+        if migrating:
+            size_tokens = [opt for opt in actual if opt.startswith("size=")]
+            size_value = -1
+            if len(size_tokens) == 1:
+                try:
+                    size_value = _parse_size(size_tokens[0].split("=", 1)[1])
+                except (TypeError, ValueError):
+                    size_value = -1
+            if size_value <= 0:
+                errors.append(f"{path} tmpfs size budget is missing or invalid")
+            actual = {opt for opt in actual if not opt.startswith("size=")}
         if actual != expected:
             errors.append(f"{path} tmpfs options differ from restricted policy")
+
 
     return errors
 

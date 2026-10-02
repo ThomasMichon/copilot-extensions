@@ -233,3 +233,38 @@ class TestDemoPivotFixture:
         assert rc == 2
         out = json.loads(capsys.readouterr().out)
         assert "error" in out
+
+    def test_main_create_verb_prints_acknowledgment_and_succeeds(self, capsys):
+        from worktree_manager import demo_pivot
+
+        rc = demo_pivot.main(["create", "Recalibrate the thing", "--prompt", "why"])
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "Recalibrate the thing" in out
+        assert "for science" in out
+
+    def test_main_create_verb_preserves_a_flag_like_or_create_titled_title(self, capsys):
+        """The title is read from its fixed positional slot (right after the
+        verb), not filtered by value -- a title that happens to start with
+        `--` or equal `create` must survive verbatim, not be silently
+        discarded as if it were an option or a repeated verb."""
+        from worktree_manager import demo_pivot
+
+        rc = demo_pivot.main(["create", "--not-a-flag", "--prompt", "why"])
+        assert rc == 0
+        assert "--not-a-flag" in capsys.readouterr().out
+
+        rc = demo_pivot.main(["create", "create", "--prompt", "why"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "filed test request 'create'" in out
+
+    def test_main_create_verb_with_no_title_uses_a_placeholder(self, capsys):
+        from worktree_manager import demo_pivot
+
+        rc = demo_pivot.main(["create"])
+
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "(untitled)" in out

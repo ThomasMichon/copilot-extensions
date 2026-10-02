@@ -1138,3 +1138,373 @@ def test_unconfirmed_action_marks_hold_uncertain(monkeypatch):
         )
 
     assert marked == [(info.name, "hold-token")]
+
+
+
+
+def _migrated_config() -> tuple[ContainersConfig, FleetConfig]:
+    """A fleet whose containers.yaml entry has relaxed to trusted, while
+    ``_member()``'s discovered container is still restricted-built."""
+    fleet = FleetConfig(
+        image="example/agent",
+        security_profile="trusted",
+        exec_user="agent",
+    )
+    return ContainersConfig(fleets={"sandbox": fleet}), fleet
+
+
+def test_migrating_member_rejected_without_migrating_flag(monkeypatch):
+    """A restricted-built member can't go through this pipeline against a
+    now-trusted fleet config unless the caller explicitly opts in."""
+    config, fleet = _migrated_config()
+    info = _member()
+    _safe_defaults(monkeypatch, info)
+
+    with pytest.raises(RuntimeError, match="migrating=True"):
+        replacement.destroy_restricted_member(
+            config,
+            fleet,
+            info,
+            operation="recreate",
+            force_remove=True,
+            force_abandon=False,
+        )
+
+
+def test_migrating_member_still_blocks_on_active_session(monkeypatch):
+    """copilot-extensions#4933 fix: a restricted->trusted migration must not
+    bypass the session-liveness/rescue safety net -- only the (now
+    inapplicable) CURRENT-policy conformance check is skipped."""
+    config, fleet = _migrated_config()
+    info = _member()
+    _safe_defaults(monkeypatch, info)
+    monkeypatch.setattr(
+        replacement,
+        "probe_session_liveness",
+        lambda *_args, **_kwargs: replacement.SessionLiveness(
+            "active",
+            ["11111111-1111-4111-8111-111111111111"],
+            [],
+        ),
+    )
+    monkeypatch.setattr(
+        replacement,
+        "remove_container",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("active session must not be removed during migration")
+        ),
+    )
+
+    result = replacement.destroy_restricted_member(
+        config,
+        fleet,
+        info,
+        operation="recreate",
+        force_remove=True,
+        force_abandon=False,
+        migrating=True,
+    )
+
+    assert result.status == "deferred"
+    assert "active Copilot session-state lock" in (result.reason or "")
+
+
+def test_migrating_member_forwards_migrating_flag_to_policy_check(monkeypatch):
+    """The CURRENT-config conformance checks must be skipped (``migrating``
+    forwarded to ``restricted_policy_errors``), while rescue/liveness still
+    run in full."""
+    config, fleet = _migrated_config()
+    info = _member()
+    _safe_defaults(monkeypatch, info)
+    monkeypatch.setattr(
+        replacement,
+        "probe_session_liveness",
+        lambda *_args, **_kwargs: replacement.SessionLiveness("idle", [], []),
+    )
+    policy_calls = []
+    monkeypatch.setattr(
+        replacement,
+        "restricted_policy_errors",
+        lambda *_args, **kwargs: policy_calls.append(kwargs.get("migrating")) or [],
+    )
+    rescued = []
+    monkeypatch.setattr(
+        replacement,
+        "capture_restricted_sessions",
+        lambda *_args, **kwargs: rescued.append(kwargs.get("migrating"))
+        or {"status": "verified", "capture_id": "cap-1"},
+    )
+    removed = []
+    monkeypatch.setattr(
+        replacement,
+        "remove_container",
+        lambda container_id, **_kwargs: removed.append(container_id),
+    )
+
+    result = replacement.destroy_restricted_member(
+        config,
+        fleet,
+        info,
+        operation="recreate",
+        force_remove=True,
+        force_abandon=False,
+        migrating=True,
+    )
+
+    assert result.status == "removed"
+    assert removed == [info.container_id]
+    assert rescued == [True]
+    assert policy_calls == [True]
+
+
+def test_migrating_member_still_blocks_on_fixed_security_invariant(monkeypatch):
+    """A migration only exempts CURRENT-config comparisons -- a FIXED
+    invariant violation (e.g. a privileged container) must still block
+    destruction even with ``migrating=True``."""
+    config, fleet = _migrated_config()
+    info = _member()
+    _safe_defaults(monkeypatch, info)
+    monkeypatch.setattr(
+        replacement,
+        "probe_session_liveness",
+        lambda *_args, **_kwargs: replacement.SessionLiveness("idle", [], []),
+    )
+    monkeypatch.setattr(
+        replacement,
+        "restricted_policy_errors",
+        lambda *_args, **_kwargs: ["container is privileged"],
+    )
+    monkeypatch.setattr(
+        replacement,
+        "remove_container",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("a fixed-invariant violation must not be removed")
+        ),
+    )
+
+    result = replacement.destroy_restricted_member(
+        config,
+        fleet,
+        info,
+        operation="recreate",
+        force_remove=True,
+        force_abandon=False,
+        migrating=True,
+    )
+
+    assert result.status == "deferred"
+    assert "container is privileged" in (result.reason or "")
+
+
+def test_destroy_drifted_restricted_members_reports_independent_outcomes(monkeypatch):
+    config, fleet = _migrated_config()
+    idle = _member("sandbox-1")
+    busy = _member("sandbox-2")
+
+    def fake_destroy(_config, _fleet, member, **_kwargs):
+        if member.name == "sandbox-1":
+            return replacement.DestructiveResult("sandbox-1", "removed")
+        return replacement.DestructiveResult(
+            "sandbox-2", "deferred", "active Copilot session-state lock present"
+        )
+
+    monkeypatch.setattr(replacement, "destroy_restricted_member", fake_destroy)
+
+    result = replacement.destroy_drifted_restricted_members(
+        config, fleet, "sandbox", [idle, busy],
+        operation="recreate", force_abandon=False,
+    )
+
+    assert result.removed == ["sandbox-1"]
+    assert result.deferred == {
+        "sandbox-2": "active Copilot session-state lock present"
+    }
+
+
+def test_destroy_drifted_restricted_members_defers_unknown_profile(monkeypatch):
+    """An unlabeled legacy member (discovered security_profile == 'unknown')
+    has no supported migration path -- it must be deferred per-member, not
+    crash the whole reconciliation by hitting destroy_restricted_member's
+    restricted-only guard (copilot-extensions#4933 follow-up)."""
+    config, fleet = _migrated_config()
+    unknown = DockerContainerInfo(
+        name="sandbox-1",
+        container_id="sandbox-1-instance",
+        image="example/agent",
+        state="running",
+        status="Up",
+        fleet="sandbox",
+        security_profile="unknown",
+    )
+    monkeypatch.setattr(
+        replacement,
+        "destroy_restricted_member",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("an unknown-profile member must never reach "
+                           "destroy_restricted_member")
+        ),
+    )
+
+    result = replacement.destroy_drifted_restricted_members(
+        config, fleet, "sandbox", [unknown],
+        operation="recreate", force_abandon=False,
+    )
+
+    assert result.removed == []
+    assert "no supported migration path" in result.deferred["sandbox-1"]
+
+
+def test_destroy_drifted_restricted_members_defers_on_runtime_error(monkeypatch):
+    """A Docker inspection/removal failure for one member must defer just
+    that member, not abort the whole per-member reconciliation."""
+    config, fleet = _migrated_config()
+    broken = _member("sandbox-1")
+    fine = _member("sandbox-2")
+
+    def fake_destroy(_config, _fleet, member, **_kwargs):
+        if member.name == "sandbox-1":
+            raise RuntimeError("docker rm sandbox-1 failed: container is running")
+        return replacement.DestructiveResult("sandbox-2", "removed")
+
+    monkeypatch.setattr(replacement, "destroy_restricted_member", fake_destroy)
+
+    result = replacement.destroy_drifted_restricted_members(
+        config, fleet, "sandbox", [broken, fine],
+        operation="recreate", force_abandon=False,
+    )
+
+    assert result.removed == ["sandbox-2"]
+    assert "docker rm sandbox-1 failed" in result.deferred["sandbox-1"]
+
+
+def test_destroy_drifted_restricted_members_defers_on_rescue_error(monkeypatch):
+    config, fleet = _migrated_config()
+    member = _member("sandbox-1")
+    monkeypatch.setattr(
+        replacement,
+        "destroy_restricted_member",
+        lambda *_a, **_k: (_ for _ in ()).throw(RescueError("rescue capture failed")),
+    )
+
+    result = replacement.destroy_drifted_restricted_members(
+        config, fleet, "sandbox", [member],
+        operation="recreate", force_abandon=False,
+    )
+
+    assert result.removed == []
+    assert "rescue capture failed" in result.deferred["sandbox-1"]
+
+
+def test_migrating_member_image_id_tamper_is_not_tolerated(monkeypatch):
+    """Unlike the ordinary restricted-recreate-on-image-rebuild case (where
+    an image ID mismatch is expected drift), the same error during a
+    migration means the container's image was swapped post-creation and
+    must still block destruction (copilot-extensions#4933 follow-up)."""
+    config, fleet = _migrated_config()
+    info = _member()
+    _safe_defaults(monkeypatch, info)
+    monkeypatch.setattr(
+        replacement,
+        "probe_session_liveness",
+        lambda *_args, **_kwargs: replacement.SessionLiveness("idle", [], []),
+    )
+    monkeypatch.setattr(
+        replacement,
+        "restricted_policy_errors",
+        lambda *_args, **_kwargs: [
+            "container image ID differs from provisioned image ID"
+        ],
+    )
+    monkeypatch.setattr(
+        replacement,
+        "remove_container",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("an image-ID-tampered container must not be removed")
+        ),
+    )
+
+    result = replacement.destroy_restricted_member(
+        config,
+        fleet,
+        info,
+        operation="recreate",
+        force_remove=True,
+        force_abandon=False,
+        migrating=True,
+    )
+
+    assert result.status == "deferred"
+    assert "provisioned image ID" in (result.reason or "")
+
+
+def test_migrating_member_uses_inspected_uid_for_docker_exec(monkeypatch):
+    """copilot-extensions#4933 follow-up: probing/rescue run `docker exec`
+    inside the OLD container -- if the CURRENT fleet's exec_user changed
+    with the migration, it may not exist there. Use the container's own
+    recorded UID label instead of today's config."""
+    config, fleet = _migrated_config()
+    info = _member()
+    _safe_defaults(monkeypatch, info)
+    monkeypatch.setattr(
+        replacement,
+        "inspect_container",
+        lambda name: {
+            "Id": name,
+            "State": {"StartedAt": "2026-01-01T00:00:00Z"},
+            "Config": {
+                "Labels": {
+                    "agent-containers.security-home": "/home/agent",
+                    "agent-containers.security-uid": "1234",
+                }
+            },
+            "HostConfig": {
+                "Tmpfs": {
+                    "/home/agent": "",
+                    "/workspace": "",
+                    "/tmp": "",  # noqa: S108
+                    "/run": "",
+                }
+            },
+            "Mounts": [],
+        },
+    )
+    monkeypatch.setattr(
+        replacement,
+        "probe_session_liveness",
+        lambda *_args, **_kwargs: replacement.SessionLiveness("idle", [], []),
+    )
+    monkeypatch.setattr(
+        replacement,
+        "restricted_policy_errors",
+        lambda *_args, **_kwargs: [],
+    )
+    resolve_calls = []
+    monkeypatch.setattr(
+        replacement,
+        "resolve_executable",
+        lambda _container_id, user, _inspected, **_kwargs: (
+            resolve_calls.append(user) or ("/bin/bash", "/home/agent")
+        ),
+    )
+    monkeypatch.setattr(
+        replacement,
+        "capture_restricted_sessions",
+        lambda *_args, **_kwargs: {"status": "verified", "capture_id": "cap-1"},
+    )
+    monkeypatch.setattr(replacement, "remove_container", lambda *_a, **_k: None)
+
+    result = replacement.destroy_restricted_member(
+        config,
+        fleet,
+        info,
+        operation="recreate",
+        force_remove=True,
+        force_abandon=False,
+        migrating=True,
+    )
+
+    assert result.status == "removed"
+    # The CURRENT fleet has no exec_user set -- the inspected container's
+    # own recorded UID ("1234") must be used, not whatever config.exec_user
+    # defaults to.
+    assert resolve_calls == ["1234"]

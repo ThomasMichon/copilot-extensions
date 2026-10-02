@@ -13,7 +13,7 @@ from session_liveness_probe import (
     parse_probe_output,
 )
 
-from .config import ContainersConfig, FleetConfig
+from .config import RESTRICTED_PROFILE, SECURITY_UID_LABEL, ContainersConfig, FleetConfig
 from .lease import (
     ProviderAdmissionError,
     active_session_admissions,
@@ -121,15 +121,29 @@ def destroy_restricted_member(
     operation: str,
     force_remove: bool,
     force_abandon: bool,
+    migrating: bool = False,
     timeout: float = 120.0,
 ) -> DestructiveResult:
-    """Rescue and remove one restricted member only after confirmed idleness."""
+    """Rescue and remove one restricted member only after confirmed idleness.
+
+    ``migrating`` additionally admits a member whose OWN discovered profile
+    is ``restricted`` even though ``fleet`` (the CURRENT containers.yaml
+    config) is no longer restricted -- e.g. a live ``restricted``-built
+    member being recreated under a relaxed-to-``trusted`` fleet entry. The
+    member still carries the restricted-only tmpfs session-liveness markers
+    and evidence this function exists to protect, so the rescue/liveness
+    pipeline below still applies in full; only the "does it still match the
+    CURRENT fleet's restricted policy" conformance check is skipped (that
+    check assumes the container is staying restricted, which during a
+    deliberate migration it is not).
+    """
     return _restricted_member_action(
         config,
         fleet,
         info,
         operation=operation,
         force_abandon=force_abandon,
+        migrating=migrating,
         action=lambda current, action_timeout: remove_container(
             current.container_id,
             force=force_remove,
@@ -195,6 +209,71 @@ def rescue_capture_restricted_member(
     )
 
 
+def destroy_drifted_restricted_members(
+    config: ContainersConfig,
+    fleet: FleetConfig,
+    fleet_name: str,
+    members: list[DockerContainerInfo],
+    *,
+    operation: str,
+    force_abandon: bool,
+):
+    """Recreate each member whose discovered profile has drifted off its (now
+    non-restricted) fleet's current configuration.
+
+    Most members here are restricted-observed (the common migration case),
+    routed through the full restricted rescue/liveness pipeline via
+    ``destroy_restricted_member(..., migrating=True)`` -- never a
+    lightweight lease-only path. An unlabeled legacy member (discovered
+    ``security_profile == "unknown"``) has no supported migration path and
+    is deferred rather than passed to a helper that only accepts restricted
+    members. Independent per member (one bad apple never blocks the rest).
+    Returns a ``fleet.FleetOperationResult`` with
+    ``removed``/``deferred``/``rescues``/``telemetry_abandoned`` populated
+    (other fields left at their defaults).
+    """
+    from .fleet import FleetOperationResult
+
+    result = FleetOperationResult()
+    for member in members:
+        if getattr(member, "fleet", None) and member.fleet != fleet_name:
+            result.deferred[member.name] = (
+                f"container fleet label {member.fleet!r} conflicts with "
+                f"requested fleet {fleet_name!r}"
+            )
+            continue
+        if member.security_profile != RESTRICTED_PROFILE:
+            result.deferred[member.name] = (
+                f"discovered security profile {member.security_profile!r} "
+                "has no supported migration path; recreate it manually"
+            )
+            continue
+        decision = None
+        try:
+            decision = destroy_restricted_member(
+                config,
+                fleet,
+                member,
+                operation=operation,
+                force_remove=True,
+                force_abandon=force_abandon,
+                migrating=True,
+            )
+        except (RescueError, RuntimeError) as exc:
+            result.deferred[member.name] = str(exc)
+            continue
+        if decision.status == "removed":
+            result.removed.append(member.name)
+            if decision.rescue:
+                result.rescues[member.name] = decision.rescue
+            if decision.telemetry_abandoned:
+                result.telemetry_abandoned.append(member.name)
+        else:
+            result.deferred[member.name] = decision.reason or "replacement deferred"
+    return result
+
+
+
 def _restricted_member_action(
     config: ContainersConfig,
     fleet: FleetConfig,
@@ -206,9 +285,13 @@ def _restricted_member_action(
     confirm: Callable[[DockerContainerInfo], bool] | None,
     action_timeout: float,
     success_status: str,
+    migrating: bool = False,
 ) -> DestructiveResult:
-    if not fleet.restricted:
-        raise RuntimeError("restricted destructive lifecycle requires a restricted fleet")
+    if not fleet.restricted and not (migrating and info.security_profile == RESTRICTED_PROFILE):
+        raise RuntimeError(
+            "restricted destructive lifecycle requires a restricted fleet, or "
+            "migrating=True with a restricted-observed member"
+        )
     user = fleet.exec_user or config.exec_user
     rescue_timeout = config.rescue.operation_timeout_seconds
     deadline = time.monotonic() + rescue_timeout
@@ -280,6 +363,17 @@ def _restricted_member_action(
                 )
 
             inspected = inspect_container(current.container_id)
+            if migrating:
+                # Probing/rescue run `docker exec` inside the OLD
+                # container; the CURRENT fleet's exec_user may not exist
+                # there if it changed with the migration. Use the
+                # container's own recorded UID (Docker accepts a numeric
+                # `-u`) instead of today's config.
+                migrated_uid = (
+                    (inspected.get("Config") or {}).get("Labels") or {}
+                ).get(SECURITY_UID_LABEL)
+                if migrated_uid:
+                    user = migrated_uid
             try:
                 generation = container_generation(inspected)
             except RescueError as exc:
@@ -294,11 +388,23 @@ def _restricted_member_action(
                 workspace_folder=fleet.workspace_folder or config.workspace_folder,
                 exec_user=user,
                 inspected=inspected,
+                migrating=migrating,
+            )
+            # The provisioned-image-ID check is a FIXED invariant during a
+            # migration (the container's own image genuinely hasn't
+            # changed), so it must NOT be tolerated there -- only the
+            # ordinary restricted-recreate-on-image-rebuild case (where the
+            # fleet's image was deliberately rebuilt) allows this drift.
+            _image_id_drift = "container image ID differs from provisioned image ID"
+            allowed_drift = (
+                _ALLOWED_REPLACEMENT_DRIFT - {_image_id_drift}
+                if migrating
+                else _ALLOWED_REPLACEMENT_DRIFT
             )
             unsafe_policy_errors = [
                 error
                 for error in policy_errors
-                if error not in _ALLOWED_REPLACEMENT_DRIFT
+                if error not in allowed_drift
             ]
             if unsafe_policy_errors:
                 return DestructiveResult(
@@ -430,6 +536,7 @@ def _restricted_member_action(
                     container_instance=info.container_id,
                     user=user,
                     deadline=deadline,
+                    migrating=migrating,
                 )
             except (RescueError, OSError) as exc:
                 if not force_abandon:

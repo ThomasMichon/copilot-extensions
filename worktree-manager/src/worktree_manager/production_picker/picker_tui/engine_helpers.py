@@ -545,8 +545,10 @@ MAINT_GROUP_ORDER = ["DIRTY", "WIP", "ACTIVE", "ORPHAN", "CONVO", "UNUSED",
 # Worktrees has a single "New worktree…" entry that opens the options dialog
 # directly (test-chamber #1346); the old separate "More options…" is gone.
 # Per-pivot button sets, keyed by pivot *kind* (Tab/Shift+Tab rotate within
-# these when focused). Worktrees and Profiles are handled inline in
-# ``button_set`` (their sets are dynamic); registered pivots have none.
+# these when focused). Worktrees, Profiles, and a registered pivot (whose
+# optional data-driven "New …" button depends on its own manifest's
+# create_action) are all handled inline in ``button_set`` since their sets
+# are dynamic.
 BUTTON_SETS = {"maintenance": ["K", "SY"]}
 
 # ---- Profiles matrix model ----------------------------------------------------

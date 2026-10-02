@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -553,6 +554,753 @@ def test_restricted_policy_inspects_effective_docker_boundary(monkeypatch):
     )
     assert "Linux capabilities are re-added" in errors
     assert "an unconfined security profile is present" in errors
+
+
+def test_restricted_policy_migrating_skips_only_current_config_checks(monkeypatch):
+    """copilot-extensions#4933 follow-up: ``migrating=True`` exempts the
+    CURRENT-config comparisons (image/policy/environment/network/memory/
+    cpu/pids/tmpfs sizing) a deliberate profile migration necessarily no
+    longer matches, while every FIXED security invariant about the
+    container's own build still applies."""
+    old_fleet = FleetConfig(
+        image="example/agent:latest",
+        security_profile="restricted",
+        acp_command="minimal-agent --stdio",
+    )
+    policy = old_fleet.security_policy_fingerprint("/workspace", "agent")
+    info = DockerContainerInfo(
+        name="sandbox-1",
+        container_id="cid",
+        image="example/agent:latest",
+        state="running",
+        status="Up",
+        fleet="sandbox",
+        security_profile="restricted",
+        security_policy=policy,
+    )
+    doc = {
+        "Config": {
+            "Image": "example/agent:latest",
+            "Env": ["HOME=/home/agent"],
+            "Labels": {
+                "agent-containers.security-profile": "restricted",
+                "agent-containers.security-policy": policy,
+                "agent-containers.security-home": "/home/agent",
+                "agent-containers.security-uid": "1000",
+                "agent-containers.security-gid": "1000",
+                "agent-containers.security-image-id": "sha256:image",
+            },
+        },
+        "Image": "sha256:image",
+        "HostConfig": {
+            "ReadonlyRootfs": True,
+            "Privileged": False,
+            "CapDrop": ["ALL"],
+            "CapAdd": None,
+            "SecurityOpt": ["no-new-privileges"],
+            "Binds": None,
+            "Devices": [],
+            "DeviceRequests": None,
+            "PidMode": "",
+            "IpcMode": "private",
+            "UTSMode": "",
+            "UsernsMode": "",
+            "PortBindings": {},
+            "PublishAllPorts": False,
+            "ExtraHosts": None,
+            "NetworkMode": "none",
+            "Memory": 4 * 1024**3,
+            "MemorySwap": 4 * 1024**3,
+            "NanoCpus": 2_000_000_000,
+            "PidsLimit": 256,
+            "Tmpfs": {
+                "/workspace": "rw,nosuid,nodev,exec,size=2g,uid=1000,gid=1000,mode=0700",
+                "/home/agent": "rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000,mode=0700",
+                "/tmp": "rw,nosuid,nodev,size=512m",  # noqa: S108
+                "/run": "rw,nosuid,nodev,size=64m",
+            },
+        },
+        "Mounts": [],
+        "NetworkSettings": {"Networks": {"none": {}}},
+    }
+    monkeypatch.setattr(
+        "agent_containers.lifecycle.inspect_container",
+        lambda name: doc,
+    )
+    monkeypatch.setattr(
+        "agent_containers.lifecycle._docker",
+        lambda args, timeout=30: _ok("sha256:image\n"),
+    )
+
+    # The CURRENT (now-trusted) fleet config: image, environment, and
+    # network/memory/cpu/pids all necessarily differ from the restricted-
+    # built container's own real values -- none of that should block a
+    # migration.
+    new_fleet = FleetConfig(
+        image="example/agent:v2",
+        security_profile="trusted",
+        environment={"SOME_VAR": "changed"},
+    )
+
+    assert restricted_policy_errors(
+        info,
+        new_fleet,
+        workspace_folder="/workspace",
+        exec_user="agent",
+        migrating=True,
+    ) == []
+
+    # A FIXED invariant violation still blocks, even with migrating=True.
+    doc["HostConfig"]["Privileged"] = True
+    errors = restricted_policy_errors(
+        info,
+        new_fleet,
+        workspace_folder="/workspace",
+        exec_user="agent",
+        migrating=True,
+    )
+    assert "container is privileged" in errors
+
+
+def test_restricted_policy_migrating_still_catches_unsafe_network_and_tmpfs(
+    monkeypatch,
+):
+    """copilot-extensions#4933 follow-up: migrating=True must not blanket-skip
+    network isolation or tmpfs mount-flag safety -- only the exact
+    config-dependent name/ID/size comparisons are exempt."""
+    old_fleet = FleetConfig(
+        image="example/agent:latest",
+        security_profile="restricted",
+        acp_command="minimal-agent --stdio",
+    )
+    policy = old_fleet.security_policy_fingerprint("/workspace", "agent")
+    info = DockerContainerInfo(
+        name="sandbox-1",
+        container_id="cid",
+        image="example/agent:latest",
+        state="running",
+        status="Up",
+        fleet="sandbox",
+        security_profile="restricted",
+        security_policy=policy,
+    )
+    doc = {
+        "Config": {
+            "Image": "example/agent:latest",
+            "Env": ["HOME=/home/agent"],
+            "Labels": {
+                "agent-containers.security-profile": "restricted",
+                "agent-containers.security-policy": policy,
+                "agent-containers.security-home": "/home/agent",
+                "agent-containers.security-uid": "1000",
+                "agent-containers.security-gid": "1000",
+                "agent-containers.security-image-id": "sha256:image",
+            },
+        },
+        "Image": "sha256:image",
+        "HostConfig": {
+            "ReadonlyRootfs": True,
+            "Privileged": False,
+            "CapDrop": ["ALL"],
+            "CapAdd": None,
+            "SecurityOpt": ["no-new-privileges"],
+            "Binds": None,
+            "Devices": [],
+            "DeviceRequests": None,
+            "PidMode": "",
+            "IpcMode": "private",
+            "UTSMode": "",
+            "UsernsMode": "",
+            "PortBindings": {},
+            "PublishAllPorts": False,
+            "ExtraHosts": None,
+            # A non-"none" network, unlike the known-good fixture above.
+            "NetworkMode": "a-public-bridge",
+            "Memory": 4 * 1024**3,
+            "MemorySwap": 4 * 1024**3,
+            "NanoCpus": 2_000_000_000,
+            "PidsLimit": 256,
+            "Tmpfs": {
+                # Missing "nosuid" -- a fixed invariant violation that must
+                # still be caught even though the "size=" differs from any
+                # current config (migration-exempt).
+                "/workspace": "rw,nodev,exec,size=99g,uid=1000,gid=1000,mode=0700",
+                "/home/agent": "rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000,mode=0700",
+                "/tmp": "rw,nosuid,nodev,size=512m",  # noqa: S108
+                "/run": "rw,nosuid,nodev,size=64m",
+            },
+        },
+        "Mounts": [],
+        "NetworkSettings": {"Networks": {"a-public-bridge": {}}},
+    }
+
+    def fake_docker(args, timeout=30):
+        if args[:2] == ["network", "inspect"]:
+            return _ok(json.dumps([{"Id": "net-id", "Internal": False}]))
+        return _ok("sha256:image\n")
+
+    monkeypatch.setattr(
+        "agent_containers.lifecycle.inspect_container",
+        lambda name: doc,
+    )
+    monkeypatch.setattr("agent_containers.lifecycle._docker", fake_docker)
+
+    new_fleet = FleetConfig(image="example/agent:v2", security_profile="trusted")
+
+    errors = restricted_policy_errors(
+        info,
+        new_fleet,
+        workspace_folder="/workspace",
+        exec_user="agent",
+        migrating=True,
+    )
+
+    assert any("not Docker-internal" in e for e in errors)
+    assert any("/workspace tmpfs options differ" in e for e in errors)
+    # The /home/agent, /tmp, /run surfaces are still fully compliant, and
+    # their differing "size=" budgets never trigger a false positive.
+    assert not any("/home/agent tmpfs options differ" in e for e in errors)
+    assert not any("/tmp tmpfs options differ" in e for e in errors)  # noqa: S108
+    assert not any("/run tmpfs options differ" in e for e in errors)
+
+
+def test_restricted_policy_migrating_rejects_uninspectable_network_mode(monkeypatch):
+    """A namespace-sharing mode like ``container:<id>`` can report an empty
+    ``NetworkSettings.Networks`` -- that must be rejected, not treated as
+    safely isolated just because there's nothing to inspect."""
+    old_fleet = FleetConfig(
+        image="example/agent:latest",
+        security_profile="restricted",
+        acp_command="minimal-agent --stdio",
+    )
+    policy = old_fleet.security_policy_fingerprint("/workspace", "agent")
+    info = DockerContainerInfo(
+        name="sandbox-1",
+        container_id="cid",
+        image="example/agent:latest",
+        state="running",
+        status="Up",
+        fleet="sandbox",
+        security_profile="restricted",
+        security_policy=policy,
+    )
+    doc = {
+        "Config": {
+            "Image": "example/agent:latest",
+            "Env": ["HOME=/home/agent"],
+            "Labels": {
+                "agent-containers.security-profile": "restricted",
+                "agent-containers.security-policy": policy,
+                "agent-containers.security-home": "/home/agent",
+                "agent-containers.security-uid": "1000",
+                "agent-containers.security-gid": "1000",
+                "agent-containers.security-image-id": "sha256:image",
+            },
+        },
+        "Image": "sha256:image",
+        "HostConfig": {
+            "ReadonlyRootfs": True,
+            "Privileged": False,
+            "CapDrop": ["ALL"],
+            "CapAdd": None,
+            "SecurityOpt": ["no-new-privileges"],
+            "Binds": None,
+            "Devices": [],
+            "DeviceRequests": None,
+            "PidMode": "",
+            "IpcMode": "private",
+            "UTSMode": "",
+            "UsernsMode": "",
+            "PortBindings": {},
+            "PublishAllPorts": False,
+            "ExtraHosts": None,
+            "NetworkMode": "container:other-instance",
+            "Memory": 4 * 1024**3,
+            "MemorySwap": 4 * 1024**3,
+            "NanoCpus": 2_000_000_000,
+            "PidsLimit": 256,
+            "Tmpfs": {
+                "/workspace": "rw,nosuid,nodev,exec,size=2g,uid=1000,gid=1000,mode=0700",
+                "/home/agent": "rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000,mode=0700",
+                "/tmp": "rw,nosuid,nodev,size=512m",  # noqa: S108
+                "/run": "rw,nosuid,nodev,size=64m",
+            },
+        },
+        "Mounts": [],
+        "NetworkSettings": {"Networks": {}},
+    }
+    monkeypatch.setattr(
+        "agent_containers.lifecycle.inspect_container",
+        lambda name: doc,
+    )
+    monkeypatch.setattr(
+        "agent_containers.lifecycle._docker",
+        lambda args, timeout=30: _ok("sha256:image\n"),
+    )
+    new_fleet = FleetConfig(image="example/agent:v2", security_profile="trusted")
+
+    errors = restricted_policy_errors(
+        info,
+        new_fleet,
+        workspace_folder="/workspace",
+        exec_user="agent",
+        migrating=True,
+    )
+
+    assert any("no inspectable attached networks" in e for e in errors)
+
+
+def test_restricted_policy_migrating_tolerates_changed_workspace_folder(monkeypatch):
+    """``workspace_folder`` is part of the OLD restricted policy fingerprint
+    -- it may have changed together with security_profile, so requiring it
+    to match the CURRENT config must not permanently defer an otherwise
+    fully-compliant migration (copilot-extensions#4933 follow-up)."""
+    old_fleet = FleetConfig(
+        image="example/agent:latest",
+        security_profile="restricted",
+        acp_command="minimal-agent --stdio",
+    )
+    policy = old_fleet.security_policy_fingerprint("/old-workspace", "agent")
+    info = DockerContainerInfo(
+        name="sandbox-1",
+        container_id="cid",
+        image="example/agent:latest",
+        state="running",
+        status="Up",
+        fleet="sandbox",
+        security_profile="restricted",
+        security_policy=policy,
+    )
+    doc = {
+        "Config": {
+            "Image": "example/agent:latest",
+            "Env": ["HOME=/home/agent"],
+            "Labels": {
+                "agent-containers.security-profile": "restricted",
+                "agent-containers.security-policy": policy,
+                "agent-containers.security-home": "/home/agent",
+                "agent-containers.security-uid": "1000",
+                "agent-containers.security-gid": "1000",
+                "agent-containers.security-image-id": "sha256:image",
+            },
+        },
+        "Image": "sha256:image",
+        "HostConfig": {
+            "ReadonlyRootfs": True,
+            "Privileged": False,
+            "CapDrop": ["ALL"],
+            "CapAdd": None,
+            "SecurityOpt": ["no-new-privileges"],
+            "Binds": None,
+            "Devices": [],
+            "DeviceRequests": None,
+            "PidMode": "",
+            "IpcMode": "private",
+            "UTSMode": "",
+            "UsernsMode": "",
+            "PortBindings": {},
+            "PublishAllPorts": False,
+            "ExtraHosts": None,
+            "NetworkMode": "none",
+            "Memory": 4 * 1024**3,
+            "MemorySwap": 4 * 1024**3,
+            "NanoCpus": 2_000_000_000,
+            "PidsLimit": 256,
+            # Built under the OLD workspace path, not today's current-config
+            # "/workspace" (passed below as the current fleet's value).
+            "Tmpfs": {
+                "/old-workspace": "rw,nosuid,nodev,exec,size=2g,uid=1000,gid=1000,mode=0700",
+                "/home/agent": "rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000,mode=0700",
+                "/tmp": "rw,nosuid,nodev,size=512m",  # noqa: S108
+                "/run": "rw,nosuid,nodev,size=64m",
+            },
+        },
+        "Mounts": [],
+        "NetworkSettings": {"Networks": {"none": {}}},
+    }
+    monkeypatch.setattr(
+        "agent_containers.lifecycle.inspect_container",
+        lambda name: doc,
+    )
+    monkeypatch.setattr(
+        "agent_containers.lifecycle._docker",
+        lambda args, timeout=30: _ok("sha256:image\n"),
+    )
+    new_fleet = FleetConfig(image="example/agent:v2", security_profile="trusted")
+
+    assert restricted_policy_errors(
+        info,
+        new_fleet,
+        workspace_folder="/workspace",  # today's config -- deliberately differs
+        exec_user="agent",
+        migrating=True,
+    ) == []
+
+
+def test_restricted_policy_migrating_still_requires_positive_resource_bounds(
+    monkeypatch,
+):
+    """copilot-extensions#4933 follow-up: migrating=True exempts matching
+    today's EXACT configured memory/cpu/pids/tmpfs-size values, but must
+    still require real, positive bounds -- not waive them entirely."""
+    old_fleet = FleetConfig(
+        image="example/agent:latest",
+        security_profile="restricted",
+        acp_command="minimal-agent --stdio",
+    )
+    policy = old_fleet.security_policy_fingerprint("/workspace", "agent")
+    info = DockerContainerInfo(
+        name="sandbox-1",
+        container_id="cid",
+        image="example/agent:latest",
+        state="running",
+        status="Up",
+        fleet="sandbox",
+        security_profile="restricted",
+        security_policy=policy,
+    )
+    doc = {
+        "Config": {
+            "Image": "example/agent:latest",
+            "Env": ["HOME=/home/agent"],
+            "Labels": {
+                "agent-containers.security-profile": "restricted",
+                "agent-containers.security-policy": policy,
+                "agent-containers.security-home": "/home/agent",
+                "agent-containers.security-uid": "1000",
+                "agent-containers.security-gid": "1000",
+                "agent-containers.security-image-id": "sha256:image",
+            },
+        },
+        "Image": "sha256:image",
+        "HostConfig": {
+            "ReadonlyRootfs": True,
+            "Privileged": False,
+            "CapDrop": ["ALL"],
+            "CapAdd": None,
+            "SecurityOpt": ["no-new-privileges"],
+            "Binds": None,
+            "Devices": [],
+            "DeviceRequests": None,
+            "PidMode": "",
+            "IpcMode": "private",
+            "UTSMode": "",
+            "UsernsMode": "",
+            "PortBindings": {},
+            "PublishAllPorts": False,
+            "ExtraHosts": None,
+            "NetworkMode": "none",
+            # Unbounded -- no real memory/cpu/pids ceiling at all.
+            "Memory": 0,
+            "MemorySwap": 0,
+            "NanoCpus": 0,
+            "PidsLimit": 0,
+            "Tmpfs": {
+                # Missing "size=" entirely -- an unbounded tmpfs.
+                "/workspace": "rw,nosuid,nodev,exec,uid=1000,gid=1000,mode=0700",
+                "/home/agent": "rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000,mode=0700",
+                "/tmp": "rw,nosuid,nodev,size=512m",  # noqa: S108
+                "/run": "rw,nosuid,nodev,size=64m",
+            },
+        },
+        "Mounts": [],
+        "NetworkSettings": {"Networks": {"none": {}}},
+    }
+    monkeypatch.setattr(
+        "agent_containers.lifecycle.inspect_container",
+        lambda name: doc,
+    )
+    monkeypatch.setattr(
+        "agent_containers.lifecycle._docker",
+        lambda args, timeout=30: _ok("sha256:image\n"),
+    )
+    new_fleet = FleetConfig(image="example/agent:v2", security_profile="trusted")
+
+    errors = restricted_policy_errors(
+        info,
+        new_fleet,
+        workspace_folder="/workspace",
+        exec_user="agent",
+        migrating=True,
+    )
+
+    assert any("memory limit is not a positive bound" in e for e in errors)
+    assert any("CPU limit is not a positive bound" in e for e in errors)
+    assert any("PID limit is not a positive bound" in e for e in errors)
+    assert any("/workspace tmpfs size budget is missing or invalid" in e for e in errors)
+    # The compliant /home/agent, /tmp, /run surfaces still pass.
+    assert not any("/home/agent tmpfs size budget" in e for e in errors)
+
+
+def test_restricted_policy_migrating_still_catches_image_id_tamper(monkeypatch):
+    """copilot-extensions#4933 follow-up: the provisioned-image-ID check
+    binds the running image to what the container was actually created
+    from -- a FIXED fact about the container's own history, independent of
+    today's fleet config -- so it must still block during a migration."""
+    old_fleet = FleetConfig(
+        image="example/agent:latest",
+        security_profile="restricted",
+        acp_command="minimal-agent --stdio",
+    )
+    policy = old_fleet.security_policy_fingerprint("/workspace", "agent")
+    info = DockerContainerInfo(
+        name="sandbox-1",
+        container_id="cid",
+        image="example/agent:latest",
+        state="running",
+        status="Up",
+        fleet="sandbox",
+        security_profile="restricted",
+        security_policy=policy,
+    )
+    doc = {
+        "Config": {
+            "Image": "example/agent:latest",
+            "Env": ["HOME=/home/agent"],
+            "Labels": {
+                "agent-containers.security-profile": "restricted",
+                "agent-containers.security-policy": policy,
+                "agent-containers.security-home": "/home/agent",
+                "agent-containers.security-uid": "1000",
+                "agent-containers.security-gid": "1000",
+                # Recorded at creation time -- doesn't match the running
+                # image below, i.e. the image was swapped post-creation.
+                "agent-containers.security-image-id": "sha256:original-image",
+            },
+        },
+        "Image": "sha256:swapped-image",
+        "HostConfig": {
+            "ReadonlyRootfs": True,
+            "Privileged": False,
+            "CapDrop": ["ALL"],
+            "CapAdd": None,
+            "SecurityOpt": ["no-new-privileges"],
+            "Binds": None,
+            "Devices": [],
+            "DeviceRequests": None,
+            "PidMode": "",
+            "IpcMode": "private",
+            "UTSMode": "",
+            "UsernsMode": "",
+            "PortBindings": {},
+            "PublishAllPorts": False,
+            "ExtraHosts": None,
+            "NetworkMode": "none",
+            "Memory": 4 * 1024**3,
+            "MemorySwap": 4 * 1024**3,
+            "NanoCpus": 2_000_000_000,
+            "PidsLimit": 256,
+            "Tmpfs": {
+                "/workspace": "rw,nosuid,nodev,exec,size=2g,uid=1000,gid=1000,mode=0700",
+                "/home/agent": "rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000,mode=0700",
+                "/tmp": "rw,nosuid,nodev,size=512m",  # noqa: S108
+                "/run": "rw,nosuid,nodev,size=64m",
+            },
+        },
+        "Mounts": [],
+        "NetworkSettings": {"Networks": {"none": {}}},
+    }
+    monkeypatch.setattr(
+        "agent_containers.lifecycle.inspect_container",
+        lambda name: doc,
+    )
+    monkeypatch.setattr(
+        "agent_containers.lifecycle._docker",
+        lambda args, timeout=30: _ok("sha256:image\n"),
+    )
+    new_fleet = FleetConfig(image="example/agent:v2", security_profile="trusted")
+
+    errors = restricted_policy_errors(
+        info,
+        new_fleet,
+        workspace_folder="/workspace",
+        exec_user="agent",
+        migrating=True,
+    )
+
+    assert any(
+        "container image ID differs from provisioned image ID" in e for e in errors
+    )
+
+
+def test_restricted_policy_migrating_rejects_root_as_workspace(monkeypatch):
+    """copilot-extensions#4933 follow-up: '/' must never be accepted as the
+    derived workspace tmpfs surface during migration -- restricted creation
+    forbids mounting writable tmpfs over root in the first place."""
+    old_fleet = FleetConfig(
+        image="example/agent:latest",
+        security_profile="restricted",
+        acp_command="minimal-agent --stdio",
+    )
+    policy = old_fleet.security_policy_fingerprint("/workspace", "agent")
+    info = DockerContainerInfo(
+        name="sandbox-1",
+        container_id="cid",
+        image="example/agent:latest",
+        state="running",
+        status="Up",
+        fleet="sandbox",
+        security_profile="restricted",
+        security_policy=policy,
+    )
+    doc = {
+        "Config": {
+            "Image": "example/agent:latest",
+            "Env": ["HOME=/home/agent"],
+            "Labels": {
+                "agent-containers.security-profile": "restricted",
+                "agent-containers.security-policy": policy,
+                "agent-containers.security-home": "/home/agent",
+                "agent-containers.security-uid": "1000",
+                "agent-containers.security-gid": "1000",
+                "agent-containers.security-image-id": "sha256:image",
+            },
+        },
+        "Image": "sha256:image",
+        "HostConfig": {
+            "ReadonlyRootfs": True,
+            "Privileged": False,
+            "CapDrop": ["ALL"],
+            "CapAdd": None,
+            "SecurityOpt": ["no-new-privileges"],
+            "Binds": None,
+            "Devices": [],
+            "DeviceRequests": None,
+            "PidMode": "",
+            "IpcMode": "private",
+            "UTSMode": "",
+            "UsernsMode": "",
+            "PortBindings": {},
+            "PublishAllPorts": False,
+            "ExtraHosts": None,
+            "NetworkMode": "none",
+            "Memory": 4 * 1024**3,
+            "MemorySwap": 4 * 1024**3,
+            "NanoCpus": 2_000_000_000,
+            "PidsLimit": 256,
+            "Tmpfs": {
+                # "/" instead of a real workspace path -- must never be
+                # accepted as the derived workspace surface.
+                "/": "rw,nosuid,nodev,exec,size=2g,uid=1000,gid=1000,mode=0700",
+                "/home/agent": "rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000,mode=0700",
+                "/tmp": "rw,nosuid,nodev,size=512m",  # noqa: S108
+                "/run": "rw,nosuid,nodev,size=64m",
+            },
+        },
+        "Mounts": [],
+        "NetworkSettings": {"Networks": {"none": {}}},
+    }
+    monkeypatch.setattr(
+        "agent_containers.lifecycle.inspect_container",
+        lambda name: doc,
+    )
+    monkeypatch.setattr(
+        "agent_containers.lifecycle._docker",
+        lambda args, timeout=30: _ok("sha256:image\n"),
+    )
+    new_fleet = FleetConfig(image="example/agent:v2", security_profile="trusted")
+
+    errors = restricted_policy_errors(
+        info,
+        new_fleet,
+        workspace_folder="/workspace",
+        exec_user="agent",
+        migrating=True,
+    )
+
+    assert any("writable tmpfs surfaces differ from restricted policy" in e for e in errors)
+
+
+def test_restricted_policy_migrating_rejects_root_alongside_valid_workspace(
+    monkeypatch,
+):
+    """copilot-extensions#4933 follow-up: a writable root tmpfs must be
+    rejected even when a legitimate workspace mount is ALSO present, not
+    just when '/' is the sole candidate."""
+    old_fleet = FleetConfig(
+        image="example/agent:latest",
+        security_profile="restricted",
+        acp_command="minimal-agent --stdio",
+    )
+    policy = old_fleet.security_policy_fingerprint("/workspace", "agent")
+    info = DockerContainerInfo(
+        name="sandbox-1",
+        container_id="cid",
+        image="example/agent:latest",
+        state="running",
+        status="Up",
+        fleet="sandbox",
+        security_profile="restricted",
+        security_policy=policy,
+    )
+    doc = {
+        "Config": {
+            "Image": "example/agent:latest",
+            "Env": ["HOME=/home/agent"],
+            "Labels": {
+                "agent-containers.security-profile": "restricted",
+                "agent-containers.security-policy": policy,
+                "agent-containers.security-home": "/home/agent",
+                "agent-containers.security-uid": "1000",
+                "agent-containers.security-gid": "1000",
+                "agent-containers.security-image-id": "sha256:image",
+            },
+        },
+        "Image": "sha256:image",
+        "HostConfig": {
+            "ReadonlyRootfs": True,
+            "Privileged": False,
+            "CapDrop": ["ALL"],
+            "CapAdd": None,
+            "SecurityOpt": ["no-new-privileges"],
+            "Binds": None,
+            "Devices": [],
+            "DeviceRequests": None,
+            "PidMode": "",
+            "IpcMode": "private",
+            "UTSMode": "",
+            "UsernsMode": "",
+            "PortBindings": {},
+            "PublishAllPorts": False,
+            "ExtraHosts": None,
+            "NetworkMode": "none",
+            "Memory": 4 * 1024**3,
+            "MemorySwap": 4 * 1024**3,
+            "NanoCpus": 2_000_000_000,
+            "PidsLimit": 256,
+            "Tmpfs": {
+                # A legitimate workspace mount IS present ("/extra-workspace")
+                # -- "/" must still be rejected additively, not ignored
+                # because a valid single candidate also exists.
+                "/": "rw,nosuid,nodev,exec,size=1g,uid=1000,gid=1000,mode=0700",
+                "/extra-workspace": "rw,nosuid,nodev,exec,size=2g,uid=1000,gid=1000,mode=0700",
+                "/home/agent": "rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000,mode=0700",
+                "/tmp": "rw,nosuid,nodev,size=512m",  # noqa: S108
+                "/run": "rw,nosuid,nodev,size=64m",
+            },
+        },
+        "Mounts": [],
+        "NetworkSettings": {"Networks": {"none": {}}},
+    }
+    monkeypatch.setattr(
+        "agent_containers.lifecycle.inspect_container",
+        lambda name: doc,
+    )
+    monkeypatch.setattr(
+        "agent_containers.lifecycle._docker",
+        lambda args, timeout=30: _ok("sha256:image\n"),
+    )
+    new_fleet = FleetConfig(image="example/agent:v2", security_profile="trusted")
+
+    errors = restricted_policy_errors(
+        info,
+        new_fleet,
+        workspace_folder="/workspace",
+        exec_user="agent",
+        migrating=True,
+    )
+
+    assert any("writable tmpfs surfaces differ from restricted policy" in e for e in errors)
 
 
 def test_start_restricted_validates_before_start(monkeypatch):
@@ -1244,3 +1992,192 @@ def test_down_generation_failure_defers_only_affected_stopped_member(monkeypatch
 
     assert "execution generation" in result.deferred["sandbox-1"]
     assert "sandbox-2" in result.unchanged
+
+
+
+
+def test_trusted_reconcile_up_recreates_profile_drifted_member(monkeypatch):
+    """A fleet relaxed from restricted->trusted should recreate an old member
+    still carrying the stale (restricted) discovered profile, not silently
+    leave it untouched (copilot-extensions#4933)."""
+    from agent_containers import replacement
+
+    config = ContainersConfig()
+    config.fleets["worker"] = FleetConfig(
+        image="example/agent",
+        security_profile="trusted",
+    )
+    drifted = DockerContainerInfo(
+        name="worker-1",
+        container_id="old-instance",
+        image="example/agent",
+        state="running",
+        status="Up",
+        fleet="worker",
+        security_profile="restricted",
+    )
+    monkeypatch.setattr(fleet_mod, "_check_docker", lambda: None)
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: [drifted])
+    captured_calls = []
+
+    def fake_destroy_restricted(_config, _fleet, member, **kwargs):
+        captured_calls.append((member.name, kwargs.get("migrating")))
+        return replacement.DestructiveResult(member.name, "removed")
+
+    monkeypatch.setattr(
+        replacement, "destroy_restricted_member", fake_destroy_restricted
+    )
+    provisioned = []
+    monkeypatch.setattr(
+        fleet_mod,
+        "_image_run",
+        lambda _fleet_name, _fleet, name, **_kwargs: (
+            provisioned.append(name) or name
+        ),
+    )
+
+    result = fleet_mod.reconcile_up(config, "worker", recreate=True)
+
+    assert result.removed == ["worker-1"]
+    assert result.recreated == ["worker-1"]
+    assert provisioned == ["worker-1"]
+    # Routed through the full restricted rescue/liveness pipeline, not a
+    # lightweight lease-only path.
+    assert captured_calls == [("worker-1", True)]
+
+
+def test_trusted_reconcile_up_without_recreate_raises_on_drift(monkeypatch):
+    config = ContainersConfig()
+    config.fleets["worker"] = FleetConfig(
+        image="example/agent",
+        security_profile="trusted",
+    )
+    drifted = DockerContainerInfo(
+        name="worker-1",
+        container_id="old-instance",
+        image="example/agent",
+        state="running",
+        status="Up",
+        fleet="worker",
+        security_profile="restricted",
+    )
+    monkeypatch.setattr(fleet_mod, "_check_docker", lambda: None)
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: [drifted])
+
+    with pytest.raises(RuntimeError, match="security profile"):
+        fleet_mod.reconcile_up(config, "worker")
+
+
+def test_trusted_reconcile_up_defers_drifted_member_with_active_lease(monkeypatch):
+    from agent_containers import replacement
+
+    config = ContainersConfig()
+    config.fleets["worker"] = FleetConfig(
+        image="example/agent",
+        security_profile="trusted",
+    )
+    drifted = DockerContainerInfo(
+        name="worker-1",
+        container_id="old-instance",
+        image="example/agent",
+        state="running",
+        status="Up",
+        fleet="worker",
+        security_profile="restricted",
+    )
+    monkeypatch.setattr(fleet_mod, "_check_docker", lambda: None)
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: [drifted])
+    monkeypatch.setattr(
+        replacement,
+        "destroy_restricted_member",
+        lambda *_args, **_kwargs: replacement.DestructiveResult(
+            "worker-1", "deferred", "container has an active effort lease"
+        ),
+    )
+    monkeypatch.setattr(
+        fleet_mod,
+        "_image_run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("deferred member must not be re-provisioned")
+        ),
+    )
+
+    result = fleet_mod.reconcile_up(config, "worker", recreate=True)
+
+    assert result.removed == []
+    assert result.deferred == {"worker-1": "container has an active effort lease"}
+
+
+def test_remove_fleet_recreates_drifted_restricted_member(monkeypatch):
+    """`rm` on a now-trusted fleet should remove (not hard-defer) a member
+    still carrying the stale restricted discovered profile, routed through
+    the full restricted rescue/liveness pipeline (migrating=True)."""
+    from agent_containers import replacement
+
+    config = ContainersConfig()
+    config.fleets["worker"] = FleetConfig(
+        image="example/agent",
+        security_profile="trusted",
+    )
+    drifted = DockerContainerInfo(
+        name="worker-1",
+        container_id="old-instance",
+        image="example/agent",
+        state="running",
+        status="Up",
+        fleet="worker",
+        security_profile="restricted",
+    )
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: [drifted])
+    captured_calls = []
+
+    def fake_destroy_restricted(_config, _fleet, member, **kwargs):
+        captured_calls.append(kwargs.get("migrating"))
+        return replacement.DestructiveResult(member.name, "removed")
+
+    monkeypatch.setattr(
+        replacement, "destroy_restricted_member", fake_destroy_restricted
+    )
+
+    result = fleet_mod.remove_fleet(config, "worker", force=True)
+
+    assert result.removed == ["worker-1"]
+    assert result.deferred == {}
+    assert captured_calls == [True]
+
+
+def test_remove_fleet_defers_unknown_profile_member_not_direct_remove(monkeypatch):
+    """An unlabeled legacy member (discovered security_profile == 'unknown')
+    must be deferred through the guarded path, never fall through to the
+    unguarded direct-removal branch that skips all lease/liveness checks
+    (copilot-extensions#4933 follow-up)."""
+    config = ContainersConfig()
+    config.fleets["worker"] = FleetConfig(
+        image="example/agent",
+        security_profile="trusted",
+    )
+    unknown = DockerContainerInfo(
+        name="worker-1",
+        container_id="old-instance",
+        image="example/agent",
+        state="running",
+        status="Up",
+        fleet="worker",
+        security_profile="unknown",
+    )
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: [unknown])
+    monkeypatch.setattr(
+        fleet_mod,
+        "remove_container",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError(
+                "an unknown-profile drifted member must be deferred, never "
+                "force-removed directly"
+            )
+        ),
+    )
+
+    result = fleet_mod.remove_fleet(config, "worker", force=True)
+
+    assert result.removed == []
+    assert "no supported migration path" in result.deferred["worker-1"]

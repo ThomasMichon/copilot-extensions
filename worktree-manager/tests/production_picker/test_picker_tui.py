@@ -7627,6 +7627,32 @@ def _write_tasks_manifest(directory):
     (directory / "agent-dispatch.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
+def _write_tasks_manifest_with_create(directory, *, confirm=False):
+    """A Tasks manifest with a pivot-level ``create_action`` (Phase B,
+    picker-new-session-prompt-and-composer) -- one text field (``title``) and
+    one textarea field (``prompt``), mirroring the Tasks-pane effort's own
+    planned field shape closely enough to exercise the generic mechanism."""
+    import json
+    manifest = {
+        "label": "Tasks",
+        "after": "Worktrees",
+        "list": [sys.executable],
+        "entry": {"id": "id", "title": "title"},
+        "empty_hint": "No proposed tasks.",
+        "create_action": {
+            "label": "New task",
+            "fields": [
+                {"name": "title", "type": "text"},
+                {"name": "prompt", "type": "textarea"},
+            ],
+            "run": [sys.executable, "create", "{field.title}",
+                    "--prompt", "{field.prompt}"],
+            "confirm": confirm,
+        },
+    }
+    (directory / "agent-dispatch.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
 class _FakeRuntime:
     def __init__(self, rows):
         self.rows = rows
@@ -8857,6 +8883,219 @@ def test_registered_pivot_conditional_actions_filter_by_when(tmp_path, monkeypat
             menu = _task_menu(scr)
             assert menu is not None
             assert [a.label for a in menu._actions] == ["Details", "Recycle"]
+
+    asyncio.run(run())
+
+
+def test_registered_pivot_create_action_button_appears_and_absent(tmp_path, monkeypatch):
+    """Phase B engine wiring: a pivot that declares ``create_action`` gets a
+    data-driven "New …" button (the BTN stop/row); a pivot that doesn't
+    (``_write_tasks_manifest``, no ``create_action`` key) gets none -- the
+    gap the effort doc's Journal flagged (``button_set()`` returned ``[]`` for
+    every registered pivot, unconditionally)."""
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_tasks_manifest_with_create(d)
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.htab = scr.htabs.index("Tasks")
+            await pilot.pause()
+            assert scr.button_set() == ["NC"]
+            assert ("BTN", 0) in scr.stops()
+
+    asyncio.run(run())
+
+    d2 = tmp_path / "pivots-no-create"
+    d2.mkdir()
+    _write_tasks_manifest(d2)
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d2))
+    src2 = _fixture_source()
+
+    async def run_absent():
+        app = PickerApp(src2, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            scr.htab = scr.htabs.index("Tasks")
+            await pilot.pause()
+            assert scr.button_set() == []
+            assert ("BTN", 0) not in scr.stops()
+
+    asyncio.run(run_absent())
+
+
+def test_registered_pivot_create_action_opens_and_submits(tmp_path, monkeypatch):
+    """The data-driven "New …" button opens ``CreateActionScreen`` built from
+    the manifest's static ``create_action.fields``; Confirm substitutes
+    ``{field.<name>}`` tokens into ``run`` and executes it via the pivot
+    runtime -- the exact same single-subprocess ``format_form_template`` +
+    ``run_resolved`` path the row-scoped ``kind:"form"`` action already uses
+    (no new orchestration needed at the picker layer)."""
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui.engine import (
+        CreateActionScreen,
+        _AutoExpandTextArea,
+    )
+    from textual.widgets import Input
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_tasks_manifest_with_create(d)
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    rows = [{"id": "t1", "title": "existing task"}]
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            rt = _seed_fake_tasks(scr, rows)
+            scr.htab = scr.htabs.index("Tasks")
+
+            scr.sel = ("BTN", 0)
+            await pilot.pause()
+            scr._activate()
+            await pilot.pause()
+            assert isinstance(app.screen, CreateActionScreen)
+            screen = app.screen
+            # Two fields -> TabbedContent; q-0 (text) then q-1 (textarea). Both
+            # the real documented keyboard flow (Ctrl+Right to switch tabs,
+            # Enter to accept + advance) work for a text field too.
+            screen.query_one("#q-0", Input).value = "Fix the flaky test"
+            await pilot.press("ctrl+right")      # text tab -> textarea tab
+            await pilot.pause()
+            screen.query_one("#q-1", _AutoExpandTextArea).text = "investigate and fix it"
+            await pilot.press("enter")          # advance textarea -> button row
+            await pilot.pause()
+            await pilot.press("enter")          # activate Create (confirm=False)
+            await pilot.pause()
+
+            assert rt.resolved == [
+                str(Path(sys.executable).resolve()), "create", "Fix the flaky test",
+                "--prompt", "investigate and fix it",
+            ]
+            assert rt.invalidated is True
+
+    asyncio.run(run())
+
+
+def test_registered_pivot_create_action_cancel_does_not_submit(tmp_path, monkeypatch):
+    """Escape (or the Cancel button) dismisses with ``None`` -- the pivot
+    runtime never runs anything, mirroring the Bare/No-Mux/Anchor "nothing to
+    submit" skip paths elsewhere in this effort."""
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui.engine import CreateActionScreen
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_tasks_manifest_with_create(d)
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    rows = [{"id": "t1", "title": "existing task"}]
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            rt = _seed_fake_tasks(scr, rows)
+            scr.htab = scr.htabs.index("Tasks")
+
+            scr.sel = ("BTN", 0)
+            await pilot.pause()
+            scr._activate()
+            await pilot.pause()
+            assert isinstance(app.screen, CreateActionScreen)
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not isinstance(app.screen, CreateActionScreen)
+            assert not hasattr(rt, "resolved")
+
+    asyncio.run(run())
+
+
+def test_registered_pivot_create_action_confirm_gate(tmp_path, monkeypatch):
+    """``create_action.confirm: true`` shows an inline are-you-sure before the
+    collected values are actually dismissed/submitted -- Cancel on that
+    prompt returns to the fields with nothing lost; Create on it submits."""
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui.engine import (
+        CreateActionScreen,
+        FocusGroup,
+    )
+    from textual.widgets import Input
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_tasks_manifest_with_create(d, confirm=True)
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    rows = [{"id": "t1", "title": "existing task"}]
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            rt = _seed_fake_tasks(scr, rows)
+            scr.htab = scr.htabs.index("Tasks")
+
+            scr.sel = ("BTN", 0)
+            await pilot.pause()
+            scr._activate()
+            await pilot.pause()
+            screen = app.screen
+            assert isinstance(screen, CreateActionScreen)
+            screen.query_one("#q-0", Input).value = "A title"
+            await pilot.press("ctrl+right")      # text tab -> textarea tab
+            await pilot.pause()
+            await pilot.press("enter")          # textarea -> button row
+            await pilot.press("enter")          # activate Create -> confirm gate
+            await pilot.pause()
+            # Still the same screen instance (inline prompt, no second push),
+            # and nothing has run yet.
+            assert app.screen is screen
+            assert not hasattr(rt, "resolved")
+            group = screen.query_one("#create-confirm-prompt-buttons", FocusGroup)
+            assert group.value == "no"          # Cancel is the initial choice
+
+            # Exercise the Cancel path FIRST: activating the initial "Cancel"
+            # choice must return to the fields -- the screen stays open, the
+            # confirm prompt is gone, nothing ran, and the title typed
+            # earlier is still there (nothing was lost).
+            await pilot.press("enter")          # activate Cancel ("no")
+            await pilot.pause()
+            assert app.screen is screen
+            assert not screen._confirming
+            assert not hasattr(rt, "resolved")
+            assert screen.query_one("#q-0", Input).value == "A title"
+
+            # Re-trigger Create -> confirm gate, this time actually confirm.
+            await pilot.press("enter")          # activate Create -> confirm gate
+            await pilot.pause()
+            group = screen.query_one("#create-confirm-prompt-buttons", FocusGroup)
+            assert group.value == "no"          # still starts on Cancel
+            await pilot.press("left")           # Cancel -> Create ("yes")
+            assert group.value == "yes"
+            await pilot.press("enter")
+            await pilot.pause()
+            assert not isinstance(app.screen, CreateActionScreen)
+            assert rt.resolved == [
+                str(Path(sys.executable).resolve()), "create", "A title",
+                "--prompt", "",
+            ]
 
     asyncio.run(run())
 

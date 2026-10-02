@@ -443,9 +443,15 @@ def capture_restricted_sessions(
     container_instance: str,
     user: str,
     deadline: float | None = None,
+    migrating: bool = False,
 ) -> dict:
-    """Capture allowlisted evidence with descriptor-bound, atomic publication."""
-    if not fleet.restricted:
+    """Capture allowlisted evidence with descriptor-bound, atomic publication.
+
+    ``migrating`` admits a container whose OWN observed profile is
+    restricted even when ``fleet`` (the current containers.yaml config) has
+    since moved off restricted -- see ``replacement.destroy_restricted_member``.
+    """
+    if not fleet.restricted and not migrating:
         raise RescueError("session evidence rescue is restricted-fleet only")
     config.rescue.validate()
     ensure_state_dir()
