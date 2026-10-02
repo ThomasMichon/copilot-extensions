@@ -7,11 +7,14 @@ rendering (``claims history <ref>``).
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from agent_worktrees import claim_history, claims_history_cli
+from agent_worktrees import config as cfg
+from agent_worktrees import finalize
 from agent_worktrees import obligations, tracking, tracking_claim_write, tracking_write
 
 
@@ -99,6 +102,23 @@ def test_current_session_id_reads_the_env_var(monkeypatch):
     assert claim_history.current_session_id() is None
 
 
+def test_record_claim_released_convenience(monkeypatch):
+    claim = tracking.ResourceClaim(kind="pr", ref="o/r#8", state=obligations.RELEASED)
+    claim_history.record_claim_released(claim, worktree_id="wt-a", machine="m", note="x")
+    events = claim_history.history_for_ref("o/r#8")
+    assert events[0]["event"] == "released"
+    assert events[0]["note"] == "x"
+
+
+def test_record_pr_event_convenience(monkeypatch):
+    claim_history.record_pr_event(
+        "o/r#8", worktree_id="wt-a", machine="m", event="claimed",
+    )
+    events = claim_history.history_for_ref("o/r#8")
+    assert events[0]["kind"] == "pr"
+    assert events[0]["event"] == "claimed"
+
+
 # ── Wiring: tracking_claim_write's three verbs feed claim_history ───────
 
 @pytest.fixture
@@ -157,22 +177,78 @@ def test_claim_settle_feeds_history_with_disposition_as_note(record_path):
     assert events[-1]["note"] == obligations.AT_REST
 
 
-def test_release_all_resources_feeds_history_for_pr_kind_claims(record_path):
-    """`finalize`'s bulk release-on-finalize cascade
-    (`tracking.release_all_resources`) is the other real place a PR claim
-    gets released outside the three single-claim verbs above -- it must
-    feed the same ledger."""
+def test_release_all_resources_does_not_itself_feed_history(record_path):
+    """`release_all_resources(save=False)` must NOT emit a history event on
+    its own -- it is routinely called with ``save=False`` (finalize folds
+    the persist into its own later save), and emitting history before
+    anything is durable would misrecord a transition a later save failure
+    could silently undo. The caller (`finalize.py`) is responsible for
+    recording history only after its own save is confirmed -- see
+    `test_finalize_feeds_claim_history_after_release` below."""
     rec = tracking.load_record(record_path)
     rec.resources = [
         tracking.ResourceClaim(kind="pr", ref="o/r#3", state=obligations.ACTIVE),
-        tracking.ResourceClaim(kind="codespace", ref="cs-1", state=obligations.ACTIVE),
     ]
     tracking.release_all_resources(rec, save=False)
-    pr_events = claim_history.history_for_ref("o/r#3")
-    assert [e["event"] for e in pr_events] == ["released"]
-    assert pr_events[0]["note"] == "finalized"
-    # Non-pr kinds are never fed into this ledger.
-    assert claim_history.history_for_ref("cs-1") == []
+    assert claim_history.history_for_ref("o/r#3") == []
+
+
+def _git(*args: str, cwd: Path) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=str(cwd), check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+
+
+def test_finalize_feeds_claim_history_after_release(tmp_path: Path, monkeypatch):
+    """Real end-to-end proof: `finalize.validate_and_finalize` releasing a
+    worktree's pr-kind claim feeds claim_history ONLY after its own save
+    (`tracking.update_status`) is confirmed -- matching
+    `test_release_all_resources_does_not_itself_feed_history` above, this
+    is the other half of that invariant."""
+    tracking_d = tmp_path / ".proj" / "worktrees"
+    tracking_d.mkdir(parents=True)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tracking_d)
+    monkeypatch.setattr(cfg, "project_dir", lambda name=None: tmp_path / ".proj")
+
+    origin = tmp_path / "origin.git"
+    _git("init", "-q", "--bare", "-b", "base", str(origin), cwd=tmp_path)
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    _git("init", "-q", "-b", "base", cwd=anchor)
+    _git("config", "user.email", "t@x.com", cwd=anchor)
+    _git("config", "user.name", "T", cwd=anchor)
+    (anchor / "base.txt").write_text("base\n")
+    _git("add", "-A", cwd=anchor)
+    _git("commit", "-m", "base", cwd=anchor)
+    _git("remote", "add", "origin", str(origin), cwd=anchor)
+    _git("push", "-q", "origin", "base", cwd=anchor)
+
+    repo_cfg = cfg.RepoConfig(
+        anchor=str(anchor), worktree_root=str(tmp_path),
+        default_branch="base", remote="origin",
+    )
+    config = cfg.Config(
+        srcroot=str(tmp_path), machine="m", platform="linux",
+        repo_name="proj", repos={"proj": repo_cfg},
+    )
+
+    rec = tracking.WorktreeRecord(
+        worktree_id="wt-fin", branch="worktree/wt-fin",
+        worktree_path=str(tmp_path / "gone-wt-fin"),
+        repo="o/r", machine="m", platform="linux",
+        started_at="2026-10-01T00:00:00", last_resumed_at="2026-10-01T00:00:00",
+        resume_count=0, title=None, status="active", completed_at=None,
+        resources=[tracking.ResourceClaim(kind="pr", ref="o/r#7", state=obligations.AT_REST)],
+    )
+    tracking.save_record(rec, tracking_d / "wt-fin.yaml")
+
+    assert finalize.validate_and_finalize("wt-fin", config) is True
+
+    events = claim_history.history_for_ref("o/r#7")
+    assert [e["event"] for e in events] == ["released"]
+    assert events[0]["note"] == "finalized"
+    assert events[0]["worktree_id"] == "wt-fin"
 
 
 # ── CLI rendering ─────────────────────────────────────────────────────

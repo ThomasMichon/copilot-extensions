@@ -55,6 +55,19 @@ def test_apply_releases_at_rest_never_active(tmp_path, monkeypatch, capfd):
         "worktree_id": "wt-owner", "kind": "codespace", "ref": "cs-1"})]
 
 
+def test_apply_feeds_claim_history_for_pr_kind(tmp_path, monkeypatch, capfd):
+    tdir = _seed_project(tmp_path, monkeypatch)
+    _owner(tdir, "wt-owner", [
+        tracking.ResourceClaim(kind="pr", ref="o/r#2", state="at-rest"),
+    ])
+    rc = m.cmd_claims(_args(apply=True))
+    assert rc == 0
+    from agent_worktrees import claim_history
+    events = claim_history.history_for_ref("o/r#2")
+    assert [e["event"] for e in events] == ["released"]
+    assert events[0]["note"] == "at-rest-reconciled"
+
+
 def test_dry_run_reports_but_does_not_write(tmp_path, monkeypatch, capfd):
     tdir = _seed_project(tmp_path, monkeypatch)
     _owner(tdir, "wt-owner", [

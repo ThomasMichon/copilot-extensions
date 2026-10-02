@@ -165,6 +165,32 @@ def test_cli_sweep_dry_run_does_not_log(tmp_path, monkeypatch, capfd):
     assert logged == []
 
 
+def test_cli_sweep_apply_feeds_claim_history_for_pr_kind(tmp_path, monkeypatch, capfd):
+    """The never-wedge sweep is another real place a pr-kind claim gets
+    released (abandoned) outside the three single-claim verbs -- it must
+    feed the same ownership-history ledger."""
+    tdir = _seed_project(tmp_path, monkeypatch)
+    rec = tracking.create_new_record(
+        "wt-owner", "worktree/wt-owner", str(tdir.parent / "wt-owner"), "p",
+        "m", "windows", tdir,
+    )
+    tracking.add_resource_claim(
+        rec, tracking.ResourceClaim(
+            kind="pr", ref="o/r#1", created_at=tracking._now_iso(), state="active"),
+        save=False,
+    )
+    tracking.save_record(rec, tdir / "wt-owner.yaml")
+    import agent_worktrees.sweep as sweep_mod
+    monkeypatch.setattr(
+        sweep_mod, "make_resolvers", lambda config: (lambda c: True, lambda c: True))
+    rc = m.cmd_claims(_sweep_args(apply=True))
+    assert rc == 0
+    from agent_worktrees import claim_history
+    events = claim_history.history_for_ref("o/r#1")
+    assert [e["event"] for e in events] == ["released"]
+    assert events[0]["note"] == "abandoned"
+
+
 def test_cli_sweep_spares_orphaned_and_active_children(tmp_path, monkeypatch, capfd):
     tdir = _seed_project(tmp_path, monkeypatch)
     _child(tdir, "wt-orphan", "orphaned")     # gone but unsafe

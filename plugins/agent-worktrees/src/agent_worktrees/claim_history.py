@@ -8,11 +8,18 @@ that durable, append-only record, scoped today to ``pr``-kind claims and
 fed from every known persisted mutation path for a ``pr``-kind claim:
 ``tracking_claim_write.py``'s three single-worktree claim verbs
 (add/release/settle), ``pr_ops.py``'s own direct create/merge-driven
-claim/release calls, and ``finalize.py``'s bulk release-on-finalize.
+claim/release calls, ``finalize.py``'s bulk release-on-finalize, and
+``claims_cli.py``'s ``sweep --apply``/``reconcile-at-rest --apply`` batch
+release paths. Every call site records history only AFTER its own save is
+durably confirmed -- never before, or a save failure could leave a false
+event for a mutation that never actually persisted.
 
 **Explicitly NOT yet covered by this slice** (tracked as a remaining
 follow-up, not silently dropped):
 
+- ``worktree run``'s own PR-claim persistence path (``worktree_ops_cli.py``)
+  -- a distinct, less-central mutation surface deferred for a follow-up
+  pass rather than wired in without fully tracing its own save semantics.
 - Claim-handoff bundle transitions (``claim_handoffs.py``'s offer/accept/
   decline/cancel) -- an explicit, deliberate hand-off between worktrees is
   real reassignment history this ledger should eventually include, but
@@ -75,6 +82,9 @@ def record_event(
 ) -> None:
     """Append one ownership-history entry for a claimed resource.
 
+    ``session_id`` defaults to :func:`current_session_id` when omitted, so
+    most call sites never pass it explicitly.
+
     Best-effort and silently a no-op for any ``kind`` outside
     :data:`SUPPORTED_KINDS` or on any write failure (disk full,
     permissions, ...) -- a diagnostic/history record must never perturb
@@ -83,6 +93,8 @@ def record_event(
     """
     if kind not in SUPPORTED_KINDS:
         return
+    if session_id is None:
+        session_id = current_session_id()
     try:
         path = history_path()
         lock_path = path.with_suffix(path.suffix + ".lock")
@@ -104,6 +116,25 @@ def record_event(
                 handle.write(line + "\n")
     except Exception:
         pass
+
+
+def record_claim_released(claim, *, worktree_id: str, machine: str, note: str = "") -> None:
+    """Convenience: record_event("released") for a duck-typed claim object
+    (``.kind``/``.ref``) -- shrinks a batch-release call site (e.g.
+    ``finalize.py``'s release-all-resources loop) to one line."""
+    record_event(
+        kind=claim.kind, ref=claim.ref, worktree_id=worktree_id, machine=machine,
+        event="released", note=note,
+    )
+
+
+def record_pr_event(ref: str, *, worktree_id: str, machine: str, event: str, note: str = "") -> None:
+    """Convenience: record_event(kind="pr", ...) for the common ``pr_ops.py``
+    call-site shape, shrinking three call sites to one line each."""
+    record_event(
+        kind="pr", ref=ref, worktree_id=worktree_id, machine=machine,
+        event=event, note=note,
+    )
 
 
 def current_session_id() -> str | None:
@@ -137,6 +168,8 @@ def history_for_ref(ref: str) -> list[dict]:
                 try:
                     entry = json.loads(raw)
                 except Exception:
+                    continue
+                if not isinstance(entry, dict):
                     continue
                 if entry.get("ref") == ref:
                     out.append(entry)

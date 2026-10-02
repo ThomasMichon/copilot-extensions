@@ -2422,27 +2422,44 @@ class TestPrClaimHelpers:
         pr_ops._release_pr_claim(rec, tracking.PRRecord(number=5, repo="o/r"))
         assert rec.resources == []
 
-    def test_ensure_pr_claim_feeds_claim_history(self, tmp_path, monkeypatch):
+    def test_ensure_pr_claim_returns_ref_on_a_real_new_claim(self, tmp_path, monkeypatch):
+        """Save-ordering contract: `_ensure_pr_claim` never feeds
+        claim_history itself (it always runs with `save=False`) -- it
+        returns the ref only for a genuinely NEW claim, so the caller can
+        record history after ITS OWN save is confirmed."""
+        rec = self._rec(tmp_path, monkeypatch)
+        pr = tracking.PRRecord(number=5, repo="o/r", state="open")
+        assert pr_ops._ensure_pr_claim(rec, pr) == "o/r#5"
+        assert claim_history.history_for_ref("o/r#5") == []
+
+    def test_ensure_pr_claim_returns_none_for_an_idempotent_no_op(self, tmp_path, monkeypatch):
+        """A reconciliation re-observing an already-active claim is not a
+        real transition -- must not be reported as a fresh 'claimed' event
+        by the caller."""
         rec = self._rec(tmp_path, monkeypatch)
         pr = tracking.PRRecord(number=5, repo="o/r", state="open")
         pr_ops._ensure_pr_claim(rec, pr)
-        events = claim_history.history_for_ref("o/r#5")
-        assert [e["event"] for e in events] == ["claimed"]
-        assert events[0]["worktree_id"] == "wt-c"
-        assert events[0]["machine"] == "m"
+        assert pr_ops._ensure_pr_claim(rec, pr) is None
 
-    def test_release_pr_claim_feeds_claim_history(self, tmp_path, monkeypatch):
+    def test_release_pr_claim_returns_ref_on_a_real_release(self, tmp_path, monkeypatch):
+        rec = self._rec(tmp_path, monkeypatch)
+        pr = tracking.PRRecord(number=5, repo="o/r", state="open")
+        pr_ops._ensure_pr_claim(rec, pr)
+        assert pr_ops._release_pr_claim(rec, pr) == "o/r#5"
+        assert claim_history.history_for_ref("o/r#5") == []
+
+    def test_release_pr_claim_returns_none_for_an_already_released_claim(
+        self, tmp_path, monkeypatch,
+    ):
         rec = self._rec(tmp_path, monkeypatch)
         pr = tracking.PRRecord(number=5, repo="o/r", state="open")
         pr_ops._ensure_pr_claim(rec, pr)
         pr_ops._release_pr_claim(rec, pr)
-        events = claim_history.history_for_ref("o/r#5")
-        assert [e["event"] for e in events] == ["claimed", "released"]
+        assert pr_ops._release_pr_claim(rec, pr) is None
 
-    def test_release_without_existing_claim_does_not_feed_history(self, tmp_path, monkeypatch):
+    def test_release_without_existing_claim_returns_none(self, tmp_path, monkeypatch):
         rec = self._rec(tmp_path, monkeypatch)
-        pr_ops._release_pr_claim(rec, tracking.PRRecord(number=5, repo="o/r"))
-        assert claim_history.history_for_ref("o/r#5") == []
+        assert pr_ops._release_pr_claim(rec, tracking.PRRecord(number=5, repo="o/r")) is None
 
 
 class TestReconcileActivePrSelfHeal:

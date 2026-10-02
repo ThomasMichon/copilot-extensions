@@ -1158,7 +1158,7 @@ def _pr_claim_ref(pr: PRRecord) -> str:
 
 def _ensure_pr_claim(
     record: tracking.WorktreeRecord | None, pr: PRRecord | None,
-) -> None:
+) -> str | None:
     """Claim the resource ledger's ``pr``-kind entry for a confirmed-open PR.
 
     ``pr-merge-obligation-gate`` defense 2: a worktree that opened a PR must
@@ -1178,12 +1178,23 @@ def _ensure_pr_claim(
     ``_reconcile_active_pr``, which is exactly that confirmation path and
     calls this helper once it has one). Idempotent: `add_resource_claim`
     reuses a matching ``ref`` rather than duplicating it.
+
+    Returns the claimed ``ref`` only when a genuinely NEW/reactivated claim
+    was written in-memory (never for an already-active no-op reconciliation,
+    nor a rejection) -- the caller is responsible for calling
+    :func:`claim_history.record_event` with it, but only AFTER its own save
+    of this record is confirmed to have happened (this function always
+    runs with ``save=False``, so nothing here is durable yet).
     """
     if record is None or pr is None or pr.number is None or pr.state != "open":
-        return
+        return None
     ref = _pr_claim_ref(pr)
     if not ref:
-        return
+        return None
+    already_active = any(
+        c.ref == ref and c.kind == "pr" and c.state == obligations.ACTIVE
+        for c in record.resources
+    )
     try:
         tracking.add_resource_claim(
             record,
@@ -1197,15 +1208,11 @@ def _ensure_pr_claim(
     except ValueError:
         # Owner is finalizing/orphaned/frozen -- nothing sane to claim onto;
         # the caller's own save (if any) still reflects whatever else changed.
-        pass
-    else:
-        claim_history.record_event(
-            kind="pr", ref=ref, worktree_id=record.worktree_id, machine=record.machine,
-            event="claimed", session_id=claim_history.current_session_id(),
-        )
+        return None
+    return None if already_active else ref
 
 
-def _release_pr_claim(record: tracking.WorktreeRecord | None, pr: PRRecord | None) -> None:
+def _release_pr_claim(record: tracking.WorktreeRecord | None, pr: PRRecord | None) -> str | None:
     """Settle a ``pr``-kind claim to ``released`` once its PR is confirmed MERGED.
 
     Only ``merged`` releases the claim -- a PR ``closed`` *without* merging
@@ -1214,19 +1221,23 @@ def _release_pr_claim(record: tracking.WorktreeRecord | None, pr: PRRecord | Non
     contract for an unmerged close); its claim is left ``active`` so
     finalize keeps blocking until an operator explicitly abandons it or the
     PR is reopened and actually merged.
+
+    Returns the released ``ref`` only when a real, live claim was actually
+    settled (never for a missing or already-released claim) -- same
+    save-ordering contract as :func:`_ensure_pr_claim`: the caller must
+    call :func:`claim_history.record_event` only after its own save of
+    this record is confirmed.
     """
     if record is None or pr is None:
-        return
+        return None
     ref = _pr_claim_ref(pr)
     if not ref:
-        return
+        return None
+    match = next((c for c in record.resources if c.ref == ref), None)
+    if match is None or not match.is_live:
+        return None
     settled = tracking.settle_resource_claim(record, ref, obligations.RELEASED, save=False)
-    if settled is not None:
-        claim_history.record_event(
-            kind="pr", ref=ref, worktree_id=record.worktree_id, machine=record.machine,
-            event="released", session_id=claim_history.current_session_id(),
-            note="merged",
-        )
+    return ref if settled is not None else None
 
 
 def _open_via_provider(
@@ -1377,8 +1388,12 @@ def _open_via_provider(
         # this PR is genuinely open -- claim it now, in the SAME record save
         # as everything else above, so a worktree can never finalize past an
         # open PR it just created regardless of pr.strategy.
-        _ensure_pr_claim(record, target_pr)
+        claimed_ref = _ensure_pr_claim(record, target_pr)
         tracking.save_record(record)
+        if claimed_ref:
+            claim_history.record_pr_event(
+                claimed_ref, worktree_id=record.worktree_id,
+                machine=record.machine, event="claimed")
     result["pr_opened"] = True
     result["url"] = pull.url
     result["number"] = pull.number
@@ -1779,6 +1794,7 @@ def _reconcile_active_pr(
         active.state = resolved
         if not active.closed_at:
             active.closed_at = tracking._now_iso()
+        released_ref = None
         if resolved == "merged":
             # pr-merge-obligation-gate defense 2: a confirmed-merged PR is a
             # clean hand-back, not an involuntary reclaim -- release its
@@ -1787,15 +1803,21 @@ def _reconcile_active_pr(
             # pr-ready, pr-status, pr-nudge, the Picker's background sweep,
             # pr-reconcile) next observes the merge, without waiting on the
             # separate sweep/self-heal path.
-            _release_pr_claim(record, active)
+            released_ref = _release_pr_claim(record, active)
         if best_effort:
             # Skip the persist on contention -- the monotonic transition is
             # re-applied next sweep; never block a critical updater.
             with tracking._RecordLock(record.yaml_path, blocking=False) as lk:
                 if lk.acquired:
                     tracking.save_record(record)
+                else:
+                    released_ref = None
         else:
             tracking.save_record(record)
+        if released_ref:
+            claim_history.record_pr_event(
+                released_ref, worktree_id=record.worktree_id,
+                machine=record.machine, event="released", note="merged")
     else:
         # Provider confirms the PR is still genuinely open (a real read
         # succeeded and reported neither merged nor another terminal state)
@@ -1807,14 +1829,21 @@ def _reconcile_active_pr(
         if active.state != "open":
             active.state = "open"
         had_claim = any(c.ref == _pr_claim_ref(active) for c in record.resources)
-        _ensure_pr_claim(record, active)
+        claimed_ref = _ensure_pr_claim(record, active)
         if not had_claim:
+            persisted = False
             if best_effort:
                 with tracking._RecordLock(record.yaml_path, blocking=False) as lk:
                     if lk.acquired:
                         tracking.save_record(record)
+                        persisted = True
             else:
                 tracking.save_record(record)
+                persisted = True
+            if persisted and claimed_ref:
+                claim_history.record_pr_event(
+                    claimed_ref, worktree_id=record.worktree_id,
+                    machine=record.machine, event="claimed")
 
 
 def _live_pr_state(
