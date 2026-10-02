@@ -212,10 +212,12 @@ The per-file "prefer local" preamble (step 2), the repo-wide catch-all
 projection (step 3, opted out of its own local cache per step 1's
 exception), and the `agent-worktrees` create/resume + `sessionStart` wiring
 (step 4, via `agent_worktrees.local_cache_refresh`) have all landed --
-Phase 7's **Plan** is complete. Its Validation Plan is not: a clean-room,
-agent-driven proof that the preamble/catch-all actually drive an agent to
-the fresher content remains open (see the effort README's own Journal and
-Validation Plan).
+Phase 7's **Plan and Validation Plan are both complete -- Phase 7 is Done.**
+A clean-room, agent-driven proof (3 tool-forbidden `explore` sub-agents per
+scenario, given only a frozen snapshot) confirmed the preamble and the
+catch-all each independently drive an agent to the fresher
+`.local.instructions.md` content over a stale or absent checked-in file
+(see the effort README's own Journal for the scenarios and results).
 
 ## See Also
 
