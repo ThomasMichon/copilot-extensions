@@ -396,8 +396,13 @@ def _resolve_live_fork_owner(prcfg, token: str | None) -> str | None:
     :func:`_ensure_fork_and_remote`'s mutating POST/remote-repoint can run.
 
     Returns ``None`` ("couldn't check") for an unsupported provider or a
-    failed resolution; the caller then proceeds to the normal, mutating
-    path, which will surface the same auth/provider failure there instead.
+    failed resolution -- the confirmation gate treats that as inconclusive
+    and fails CLOSED: a prior approval cannot be silently reused without
+    actually having verified the identity it was reused for, so the caller
+    returns ``needs_confirmation: fork_setup`` BEFORE
+    :func:`_ensure_fork_and_remote`'s mutating POST/remote-repoint ever
+    runs, rather than treating an unverifiable lookup as permission to
+    proceed.
     """
     if getattr(prcfg, "provider", "") != "github":
         return None
