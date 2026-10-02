@@ -183,7 +183,7 @@ class SshTarget(Target):
         if use_wsl:
             result.add("rsync present", True, "via WSL")
             ssh_exe = "ssh"
-            ssh_cmd = ["wsl.exe", "--", ssh_exe]
+            ssh_cmd = ["wsl.exe", "-e", ssh_exe]
             ssh_present = True
             result.add("ssh present", True, "via WSL")
         else:

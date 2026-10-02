@@ -1623,14 +1623,24 @@ def test_ssh_target_doctor_reports_wsl_rsync(monkeypatch) -> None:
 
     monkeypatch.setattr(sync_base, "wsl_rsync_available", lambda **_kwargs: True)
 
+    captured_commands: list[list[str]] = []
+
     class _Proc:
         returncode = 0
 
-    monkeypatch.setattr(ssh_mod.subprocess, "run", lambda *a, **k: _Proc())
+    def _fake_run(cmd, **kwargs):
+        captured_commands.append(cmd)
+        return _Proc()
+
+    monkeypatch.setattr(ssh_mod.subprocess, "run", _fake_run)
     result = SshTarget({"host": "user@example", "remote_path": "/srv"}).doctor()
     detail_by_name = {name: detail for name, _ok, detail in result.checks}
     assert detail_by_name["rsync present"] == "via WSL"
     assert detail_by_name["ssh present"] == "via WSL"
+    # Regression guard: the reachability probe must use -e (direct exec),
+    # never -- (which silently drops positional arguments after the
+    # command name when wsl.exe re-shells the joined command line).
+    assert captured_commands[-1][:2] == ["wsl.exe", "-e"]
 
 
 def test_ingest_target_doctor_reports_wsl_rsync(monkeypatch) -> None:
