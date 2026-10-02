@@ -604,7 +604,7 @@ if (Get-Command docker -ErrorAction SilentlyContinue) {
     # venv still install fine on a machine without it (matches init.sh's
     # `command -v docker` guard). Calling `docker` unguarded here throws a
     # CommandNotFoundException under ErrorActionPreference=Stop and aborts the
-    # reconcile with exit 1 on every Docker-less box (e.g. augloop1).
+    # reconcile with exit 1 on every Docker-less box (e.g. box1).
     Write-Step 'docker CLI not found -- agent-containers fleet operations unavailable on this machine (non-fatal)'
 }
 

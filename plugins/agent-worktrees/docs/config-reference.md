@@ -337,6 +337,21 @@ through ACP — a separate, tracked gap outside this mechanism's scope.
 | `env` | map(str→str) | `{}` | Environment variables exported for the session. Keys must be valid env-var identifiers. |
 | `copilot_args` | list[str] | `[]` | Extra arguments passed to `copilot`. |
 
+**Scope (known gap, tracked):** `profiles[0]` is used as a default only inside
+the **interactive Tab-cycle picker** flow (a bare binstub invocation with a
+TTY and no explicit worktree). `resolve --base`, `resolve --json
+--worktree-id <id>` (the path `embody`, `agent-bridge`, `agent-dispatch`, and
+any background/headless launcher goes through), and a plain resume/new call
+all resolve `profile=None` unless the caller passes an explicit `--profile
+<name>`. A declared `copilot_profiles` entry does **not** yet act as a
+universal default the way the persisted-settings mechanism above does — see
+[ThomasMichon/copilot-extensions#4849](https://github.com/ThomasMichon/copilot-extensions/issues/4849).
+Until that lands, prefer the persisted `~/.copilot/settings.json`
+`model`/`effortLevel`/`contextTier` mechanism above for a default that must
+survive every launch path; reach for a named `copilot_profiles` entry plus an
+explicit `--profile` when a specific call site needs it (e.g. a different
+backend/provider per profile, not just a model string).
+
 ### Balanced profile assignment — `profile_assignment`
 
 Profile assignment is an explicit, default-off policy over the existing named

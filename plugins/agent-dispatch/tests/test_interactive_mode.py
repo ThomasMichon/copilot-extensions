@@ -1,6 +1,6 @@
 """Interactive service mode guards for the Windows installer (install.ps1).
 
-On an interactive-required host (dev6/cloud1/augloop1: an RDP/console logon is
+On an interactive-required host (dev6/cloud1/box1: an RDP/console logon is
 required before SSH works, and Task Scheduler registration is admin-gated), the
 non-elevated HKCU logon auto-start is the FIRST-CLASS coordinator service -- no
 elevated S4U boot task. These read install.ps1 as text and assert that shape so

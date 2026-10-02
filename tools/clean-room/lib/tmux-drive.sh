@@ -4,7 +4,7 @@
 # send-keys, for cases where `-p`/`--acp` do not exercise the code path under
 # test.
 #
-# Why this exists: investigating github/copilot-agent-runtime#22266 (the
+# Why this exists: investigating a known Copilot CLI extension-connection-clash issue (private, not publicly linked) (the
 # context-handoff extension-connection clash) established that `copilot -p`
 # (headless mode) never launches extensions at all -- only skills load
 # headlessly. Extensions (the JS runtime-hosted kind that register tools,

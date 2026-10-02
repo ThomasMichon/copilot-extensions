@@ -96,3 +96,56 @@ def test_io_priority_best_effort_no_ionice(monkeypatch) -> None:
 
     monkeypatch.setattr(shutil, "which", lambda _name: None)
     priority._lower_io_priority()  # must not raise
+
+
+@pytest.mark.skipif(not sys.platform.startswith("win"), reason="Windows-only priority-class path")
+def test_windows_lowers_priority_class_in_child() -> None:
+    """In a child process, the Windows priority class must actually change to
+    BELOW_NORMAL, verified out-of-process so the test runner's own priority is
+    unaffected.
+
+    Regression guard: ``GetCurrentProcess()`` returns a pseudo-HANDLE (the
+    64-bit all-ones bit pattern on Win64); calling it and ``SetPriorityClass``
+    through ctypes WITHOUT declared ``argtypes``/``restype`` truncates/
+    mis-sign-extends that value under the untyped ``c_int`` default, so
+    ``SetPriorityClass`` silently fails (returns 0) on every real run --
+    observed directly in production: a live engine process queried via
+    ``GetPriorityClass`` after `agent-index` applied this throttle still
+    reported ``Normal``, not ``BelowNormal``.
+    """
+    import subprocess
+    import sys as _sys
+
+    script = (
+        "import ctypes, json\n"
+        "from agent_index.indexing import priority\n"
+        "k = ctypes.windll.kernel32\n"
+        "k.GetCurrentProcess.restype = ctypes.c_void_p\n"
+        "k.GetPriorityClass.argtypes = [ctypes.c_void_p]\n"
+        "k.GetPriorityClass.restype = ctypes.c_uint32\n"
+        "k.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint32]\n"
+        "k.SetPriorityClass.restype = ctypes.c_int\n"
+        "h = k.GetCurrentProcess()\n"
+        "before = k.GetPriorityClass(h)\n"
+        # Force back to NORMAL first so the throttle's own effect is
+        # unambiguous regardless of whatever class this interpreter
+        # inherited from its parent (observed to already be BelowNormal
+        # in some launch contexts).
+        "reset_ok = k.SetPriorityClass(h, 0x00000020)\n"
+        "priority.lower_current_process_priority(10)\n"
+        "after = k.GetPriorityClass(h)\n"
+        "print(json.dumps({'before': before, 'reset_ok': reset_ok, 'after': after}))\n"
+    )
+    completed = subprocess.run(  # noqa: S603
+        [_sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    )
+    import json
+
+    result = json.loads(completed.stdout.strip().splitlines()[-1])
+    below_normal_priority_class = 0x00004000
+    assert result["reset_ok"], "could not reset to NORMAL_PRIORITY_CLASS before the test"
+    assert result["after"] == below_normal_priority_class

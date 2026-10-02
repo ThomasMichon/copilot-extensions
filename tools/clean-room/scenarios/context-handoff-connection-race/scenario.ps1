@@ -1,7 +1,7 @@
 <#
   context-handoff-connection-race\scenario.ps1 -- WINDOWS arm of the
   same-session double-discovery tool-name-clash repro
-  (copilot-agent-runtime#22266). Windows counterpart of scenario.sh; see that
+  (a known, privately tracked Copilot CLI issue). Windows counterpart of scenario.sh; see that
   file's own header for the full mechanism writeup (same-session
   double-discovery of one plugin from two sources, NOT a manual out-of-band
   join -- that path was tried on Linux first and failed for an unrelated,
@@ -43,7 +43,7 @@ $ExtLogDir = Join-Path $HOME '.copilot\logs\extensions'
 
 cr_init
 cr_meta 'plugin' $Plugin
-cr_meta 'validates' 'same-session double-discovery tool-name clash reproduces on Windows (copilot-agent-runtime#22266)'
+cr_meta 'validates' 'same-session double-discovery tool-name clash reproduces on Windows (a known, privately tracked Copilot CLI issue)'
 
 # =========================================================================
 phase 0 'environment (fresh machine)'

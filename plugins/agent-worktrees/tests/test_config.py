@@ -1969,14 +1969,14 @@ class TestFindMachineEntry:
         # A machine keyed by a friendly name declares its raw COMPUTERNAME via
         # `hostname:`; it must be findable by key, alias, hostname, or display_name.
         e = {
-            "host-augloop1": cfg.MachineEntry(
-                key="host-augloop1", display_name="augloop1",
-                environment="Windows 11", alias="augloop1",
+            "host-box1": cfg.MachineEntry(
+                key="host-box1", display_name="box1",
+                environment="Windows 11", alias="box1",
                 hostname="cpc-tmich-oixui",
             ),
         }
-        assert cfg.find_machine_entry(e, "host-augloop1") is not None   # key
-        assert cfg.find_machine_entry(e, "augloop1") is not None           # alias/display
+        assert cfg.find_machine_entry(e, "host-box1") is not None   # key
+        assert cfg.find_machine_entry(e, "box1") is not None           # alias/display
         assert cfg.find_machine_entry(e, "cpc-tmich-oixui") is not None    # hostname field
         assert cfg.find_machine_entry(e, "CPC-tmich-OIXUI") is not None    # hostname, case-insensitive
 
@@ -1997,14 +1997,14 @@ class TestDetectMachine:
         # Key is the friendly name; COMPUTERNAME is declared via `hostname:`.
         self._write(tmp_path, (
             "machines:\n"
-            "  host-augloop1:\n"
-            "    display_name: augloop1\n"
-            "    alias: augloop1\n"
+            "  host-box1:\n"
+            "    display_name: box1\n"
+            "    alias: box1\n"
             "    hostname: cpc-tmich-oixui\n"
             "    environment: Windows 11\n"
         ))
         monkeypatch.setattr(cfg.socket, "gethostname", lambda: "CPC-tmich-OIXUI")
-        assert cfg.detect_machine(tmp_path) == "augloop1"
+        assert cfg.detect_machine(tmp_path) == "box1"
 
     def test_detect_via_key(self, tmp_path: Path, monkeypatch):
         self._write(tmp_path, (

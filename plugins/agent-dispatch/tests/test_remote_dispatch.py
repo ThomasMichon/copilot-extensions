@@ -492,25 +492,25 @@ def test_diagnose_remote_failure_no_stderr():
 
 
 def test_local_machine_prefers_configured_environment(monkeypatch):
-    monkeypatch.setenv("AGENT_DISPATCH_SUPERVISE_MACHINE", "AugLoop1")
+    monkeypatch.setenv("AGENT_DISPATCH_SUPERVISE_MACHINE", "box1")
     monkeypatch.setattr(
         "agent_dispatch.identity.resolve_identity",
         lambda: pytest.fail("identity subprocess fallback should not run"),
     )
-    assert remote_dispatch.local_machine() == "augloop1"
+    assert remote_dispatch.local_machine() == "box1"
 
 
 def test_local_machine_reads_configured_supervisor_file(monkeypatch, tmp_path):
     monkeypatch.delenv("AGENT_DISPATCH_SUPERVISE_MACHINE", raising=False)
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
     (tmp_path / "supervisor.env").write_text(
-        "AGENT_DISPATCH_SUPERVISE_MACHINE=AugLoop1\n", encoding="utf-8"
+        "AGENT_DISPATCH_SUPERVISE_MACHINE=box1\n", encoding="utf-8"
     )
     monkeypatch.setattr(
         "agent_dispatch.identity.resolve_identity",
         lambda: pytest.fail("identity subprocess fallback should not run"),
     )
-    assert remote_dispatch.local_machine() == "augloop1"
+    assert remote_dispatch.local_machine() == "box1"
 
 
 def test_local_machine_falls_back_to_identity(monkeypatch, tmp_path):

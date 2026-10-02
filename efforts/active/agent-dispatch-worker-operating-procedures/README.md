@@ -426,7 +426,7 @@ per environment are genuinely undecided, not just unwritten._
            record (left as-is, not deleted, matching how every other
            scratch validation task in this effort's history has been
            handled); the detached tmux session and container lease were
-           torn down; `peaceful_wright` (the `odsp-web` fleet's trusted
+           torn down; `peaceful_wright` (a consuming product fleet's trusted
            container) ended healthy, running, and unleased.
 
 ### Phase 4 — agent-bridge companion-agent heads-up ✅ landed
@@ -803,7 +803,7 @@ _Pending._
   correctly up to that point. Left open rather than forced; a future
   session should investigate the Copilot CLI's own behavior under a fresh
   `--session-id` in that container image (compare CLI versions, check for
-  an upstream CAR issue, or try a different mux/detach strategy) before
+  an upstream Copilot CLI runtime issue, or try a different mux/detach strategy) before
   reattempting the hand-run.
 
 ### 2026-09-29 — Phase 3's hand-run genuinely succeeds; effort's Phases 1-4 all complete

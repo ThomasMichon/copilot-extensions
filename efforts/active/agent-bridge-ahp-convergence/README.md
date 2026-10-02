@@ -332,16 +332,16 @@ policy, version decision, and exception ledger live in
 
 ## Journal
 
-### 2026-09-13 — Confirmed no built-in remote-subagent path in CAR; propose decoupling the native-host-proxy leg
+### 2026-09-13 — Confirmed no built-in remote-subagent path in the Copilot CLI runtime; propose decoupling the native-host-proxy leg
 
 - Motivating question, from a separate CPU/process-architecture audit session:
   can a Copilot CLI agent already create-and-pilot *another* Copilot CLI
   session as a sub-agent, over AHP, ACP, or A2A, without agent-bridge?
-- Checked `github/copilot-agent-runtime` source directly. `--fleet`/`/fleet`
+- Checked the Copilot CLI runtime's source directly. `--fleet`/`/fleet`
   (parallel subagent orchestration) is generated straight off the native Rust
   runtime's `SessionFleetApi` -- local, in-process subagent spawning within one
-  CLI session only. Nothing in CAR wires a subagent to a remote AHP host or an
-  ACP peer. Confirms there is no built-in CAR mechanism for this; the control
+  CLI session only. Nothing in the Copilot CLI runtime wires a subagent to a remote AHP host or an
+  ACP peer. Confirms there is no built-in remote-subagent mechanism for this; the control
   layer has to be provided by us, as this effort already assumes.
 - Checked agent-bridge's own provider/target registry
   (`agent_registry.py`/`admin_resolver.py`): today's only target types are
@@ -357,11 +357,11 @@ policy, version decision, and exception ledger live in
 - **Proposal, agreed with the operator:** AHP-host (Phases 1-6, ingress) and
   AHP-client/native-host-proxy (Phase 7, egress) are orthogonal goals, and
   since AHP is an open, versioned protocol, agent-bridge does not need to wait
-  on `copilotd`/CAR changes to be a legitimate AHP *host* itself -- only work
+  on `copilotd`'s own runtime changes to be a legitimate AHP *host* itself -- only work
   that depends on `copilotd`'s own internals (e.g. closing the
   materialization-vs-activation gap recorded in the superseded
   `dotfiles`/`agent-host-protocol-convergence` journal) requires diving into
-  CAR and pushing changes upstream there. See the scoping note added to Phase 7
+  the Copilot CLI runtime and pushing changes upstream there. See the scoping note added to Phase 7
   above proposing the native-host-proxy leg run as an earlier, decoupled slice
   rather than strictly after Phase 6.
 - **Convergence note for a follow-up pass:** `worktree-manager` already carries

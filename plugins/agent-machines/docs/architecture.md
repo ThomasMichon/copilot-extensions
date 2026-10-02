@@ -185,6 +185,24 @@ before mutation. Location classes are resolved by
 `src\agent_machines\locations.py`; `$WORKTREES` applies to worktrees that exist at
 restore time.
 
+**`model`/`effortLevel`/`contextTier` get a second, independent guarantee at
+launch time, not just at restore time.** Copilot CLI has been observed to
+ignore these persisted `copilot.settings` values alone at startup (honoring
+only an explicit CLI flag or a mid-session `/model` change) — this is also
+the behavior a policy that forces the launch default to `Auto` would exploit.
+`agent-worktrees` closes that gap on its side: it unconditionally re-expresses
+whatever is currently persisted in `~/.copilot/settings.json` as explicit
+`--model`/`--reasoning-effort`/`--context` CLI flags on every non-ACP
+worktree create/resume/recovery launch (see
+`plugins/agent-worktrees/docs/config-reference.md` § "Persisted model/effort/
+context preference at launch"). Declaring these three keys in your own
+`copilot.settings` package here is what feeds that downstream mechanism the
+right values — restoring this surface and relying on `agent-worktrees`'
+launch-time reinforcement are two halves of one guarantee, not two
+alternatives. ACP sessions are a tracked exception (Copilot ignores these
+flags in ACP mode); `agent-bridge` carries model/effort through its own ACP
+configuration path there instead.
+
 ## Repo-local modules
 
 `src\agent_machines\modules.py` is a generic runner. Module commands are argv

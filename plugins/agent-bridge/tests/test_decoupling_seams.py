@@ -105,7 +105,7 @@ def test_ai_plugin_dirs_uses_in_bridge_remote_resolve():
         seen["repo_dir"] = repo_dir
         return (
             ["/workspaces/example-web/.ai/atomic", "/workspaces/example-web/.ai/od-web"],
-            ["example-ai-hub-ecs@agency-playground"],
+            ["example-ai-hub-svc@agency-playground"],
         )
 
     with patch(

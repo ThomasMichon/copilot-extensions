@@ -789,7 +789,7 @@ def _create_worktree_core(
 
     # Pre-approve the facility's own extension-permission-access gate so the
     # first launch here never blocks on an interactive prompt no one is
-    # necessarily present to answer (github/copilot-agent-runtime#22266).
+    # necessarily present to answer (a known Copilot CLI extension-load gate).
     if permissions.ensure_extension_permission_approvals(worktree_path):
         print("Pre-approved facility extension permissions for worktree path.", file=sys.stderr)
 

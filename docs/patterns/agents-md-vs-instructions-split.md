@@ -16,7 +16,7 @@ different files, and it is easy to put the wrong content in the wrong one:
 
 Without a stated rule, content drifts into whichever file a contributor
 happens to be editing. This repo hit a real incident from exactly that drift:
-`gim-home/odsp-web-harness`'s `AGENTS.md` hardcoded a PR-review-count claim
+`fabrikam/fabrikam-harness`'s `AGENTS.md` hardcoded a PR-review-count claim
 that silently went stale against the live GitHub branch ruleset, breaking
 self-merge until diagnosed by hand -- a fact that should have been resolved
 live from config, not restated as static prose in the visitor contract.
@@ -44,7 +44,7 @@ guidance is for** and **whether it is resolvable at review time**:
 | Audience | any agent visiting this repo, from any home base | a harness operating with this repo as its own home base |
 | Authored | by hand, reviewed like any other doc | often projected by a plugin's `sessionStart` hook from live config |
 | Content | durable facts a human can state once and keep true: identity, conventions, safety rules, the repo's own contribution flow | facts that are only correct *this session*, resolved from config/state a static file can't safely restate (current branch-protection state, a resolved PR-merge profile, a live topology fact) |
-| Failure mode when misplaced | a live/derivable fact goes stale in prose (the odsp-web-harness review-count incident) | a universally-true rule is hidden from a visiting agent whose home base is elsewhere (it never gets a plugin-computed session file) |
+| Failure mode when misplaced | a live/derivable fact goes stale in prose (the fabrikam-harness review-count incident) | a universally-true rule is hidden from a visiting agent whose home base is elsewhere (it never gets a plugin-computed session file) |
 
 ## Audit heuristic
 
@@ -60,14 +60,14 @@ For any paragraph of agent-facing guidance, ask:
    human decision?** A resolved PR-merge profile, a branch-protection review
    count, a currently-bound knowledge repo -- these drift independently of
    the document describing them. Restating them as static `AGENTS.md` prose
-   creates exactly the odsp-web-harness incident's failure mode. Prefer a
+   creates exactly the fabrikam-harness incident's failure mode. Prefer a
    dynamic, plugin-computed `.github/instructions` projection (or a pointer
    to the live command that resolves it) over a hardcoded restatement.
 3. **Is it a repo-owned policy decision that will not go stale on its own**
    (a review-count *rule*, not the review count itself; a stated safety
    invariant; "never do X in this repo")? That is legitimate `AGENTS.md`
    content and should stay there even if it overlaps in subject with a
-   dynamic surface elsewhere -- e.g. odsp-web-harness's own
+   dynamic surface elsewhere -- e.g. fabrikam-harness's own
    never-pre-patch-another-contributor's-PR rule is a durable policy
    decision, not a derivable fact, and correctly lives in its `AGENTS.md`.
 4. **Is this a known failure symptom an agent can't phrase-match its way
@@ -106,7 +106,7 @@ applies per-paragraph, not per-file.
 `efforts/active/pr-conduct-guidance-consolidation` applied this heuristic to
 PR-conduct content specifically, across three repos:
 
-- **`gim-home/odsp-web-harness`** needed a real trim: its `AGENTS.md` restated
+- **`fabrikam/fabrikam-harness`** needed a real trim: its `AGENTS.md` restated
   generic, derivable PR-conduct mechanics (wait/rebase/merge sequence,
   resolved merge-actor) that now come from `agent-worktrees`' dynamic
   session-scoped `PR:` line and `pr.notes` channel. What remained after the
