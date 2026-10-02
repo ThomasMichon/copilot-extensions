@@ -75,12 +75,12 @@ def payload_root() -> Path:
     candidate = Path(__file__).resolve().parents[2]
     if candidate.is_dir() and (candidate / "plugin.json").is_file():
         return candidate
-    manifest_root = _deploy_manifest_source_root()
-    if manifest_root is not None:
-        return manifest_root
     direct_url_root = _direct_url_source_root()
     if direct_url_root is not None:
         return direct_url_root
+    manifest_root = _deploy_manifest_source_root()
+    if manifest_root is not None:
+        return manifest_root
     return candidate
 
 

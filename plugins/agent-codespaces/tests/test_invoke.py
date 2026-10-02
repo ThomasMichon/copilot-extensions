@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from importlib.metadata import PackageNotFoundError
 
 from agent_codespaces import _invoke
 
@@ -62,6 +63,11 @@ def test_payload_root_uses_deploy_manifest_source_path(monkeypatch, tmp_path):
     monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
     monkeypatch.setenv("AGENT_CODESPACES_HOME", str(runtime))
     monkeypatch.setattr(_invoke, "__file__", str(installed))
+    monkeypatch.setattr(
+        _invoke,
+        "distribution",
+        lambda name: (_ for _ in ()).throw(PackageNotFoundError(name)),
+    )
 
     assert _invoke._payload_root() == source_root.resolve()
 
@@ -70,11 +76,20 @@ def test_payload_root_uses_direct_url_source_path(monkeypatch, tmp_path):
     installed = tmp_path / "site-packages" / "agent_codespaces" / "__init__.py"
     installed.parent.mkdir(parents=True)
     installed.write_text("", encoding="utf-8")
+    stale_root = tmp_path / "src" / "stale-agent-codespaces"
+    stale_root.mkdir(parents=True)
+    (stale_root / "plugin.json").write_text("{}", encoding="utf-8")
     source_root = tmp_path / "src" / "agent-codespaces"
     source_root.mkdir(parents=True)
     (source_root / "plugin.json").write_text("{}", encoding="utf-8")
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    (runtime / "deploy-manifest.json").write_text(
+        json.dumps({"source": {"path": str(stale_root)}}),
+        encoding="utf-8",
+    )
     monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
-    monkeypatch.setenv("AGENT_CODESPACES_HOME", str(tmp_path / "runtime"))
+    monkeypatch.setenv("AGENT_CODESPACES_HOME", str(runtime))
     monkeypatch.setattr(_invoke, "__file__", str(installed))
 
     class _FakeDist:
