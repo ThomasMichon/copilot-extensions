@@ -1,0 +1,9 @@
+{
+  "comment": "Fix the host-politeness CPU-priority throttle actually doing nothing on Windows: GetCurrentProcess()/SetPriorityClass() were called through ctypes without declared argtypes/restype, truncating the 64-bit pseudo-handle and causing SetPriorityClass to silently fail on every real run.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
