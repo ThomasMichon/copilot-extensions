@@ -415,6 +415,28 @@ class TestBaselineCollectionErrorContract:
         )
         assert local_result["measured_commit"] is None
 
+    def test_subprocess_env_scrubs_ambient_containment_variables(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Regression test for a real failure this effort's agent-containers
+        # enrollment surfaced: on a machine with a facility/host env var
+        # like `AGENT_RT_ROOT` set ambiently, `_subprocess_env` used to copy
+        # `os.environ` wholesale into the ephemeral baseline-collection
+        # subprocess, unlike `run-plugin-tests.py`'s own
+        # `isolated_environment`, which always scrubs these -- letting a
+        # plugin under test read the leaked ambient value ahead of a test's
+        # own monkeypatched substitute. Assert every name in
+        # `plugin_test_containment.ALWAYS_SCRUB_NAMES` is absent from the
+        # env `_subprocess_env` actually builds, so this exact class of
+        # containment gap can't regress unseen.
+        from tools.plugin_test_containment import ALWAYS_SCRUB_NAMES
+
+        for name in ALWAYS_SCRUB_NAMES:
+            monkeypatch.setenv(name, "ambient-leak-should-not-survive")
+        env = baseline_mod._subprocess_env(tmp_path / ".coverage")
+        for name in ALWAYS_SCRUB_NAMES:
+            assert name not in env, f"{name} should be scrubbed from the baseline subprocess env"
+
 
 def test_collect_baseline_round_trips_against_a_real_plugin_suite() -> None:
     # Deliberately opt-in: spawns a real "uv run --with coverage ..."
