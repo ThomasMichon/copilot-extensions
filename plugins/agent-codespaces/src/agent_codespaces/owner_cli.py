@@ -37,6 +37,44 @@ def _transcript_mirror():
     return TranscriptMirror()
 
 
+#: The resident daemon's own log: it usually runs headless (a scheduled task
+#: or an on-demand detached start), where stderr goes nowhere, so a relay or
+#: forward re-establish would otherwise leave no trace to correlate a drop with.
+OWNER_LOG_MAX_BYTES = 5 * 1024 * 1024
+OWNER_LOG_BACKUPS = 3
+
+
+def owner_log_path():
+    from .config import _runtime_dir
+
+    return _runtime_dir() / "logs" / "owner.log"
+
+
+def _attach_owner_log() -> str | None:
+    """Also log to a size-rotated ``logs/owner.log``; its path, or ``None``
+    when it can't be opened (the daemon still runs, logging to stderr)."""
+    import logging
+    from logging.handlers import RotatingFileHandler
+
+    path = owner_log_path()
+    root = logging.getLogger()
+    if any(isinstance(h, RotatingFileHandler) and getattr(h, "baseFilename", None) == str(path)
+           for h in root.handlers):
+        return str(path)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(path, maxBytes=OWNER_LOG_MAX_BYTES,
+                                      backupCount=OWNER_LOG_BACKUPS, encoding="utf-8")
+    except OSError as exc:
+        print(f"connection-owner: can't open {path} ({exc}); logging to stderr only", file=sys.stderr)
+        return None
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    root.addHandler(handler)
+    if root.level == logging.NOTSET or root.level > logging.INFO:
+        root.setLevel(logging.INFO)
+    return str(path)
+
+
 def cmd_owner(args: argparse.Namespace) -> int:
     """Run the Connection Owner relay reconcile daemon (config-gated; default on).
 
@@ -144,11 +182,16 @@ def cmd_owner(args: argparse.Namespace) -> int:
         print(f"connection-owner: reconciled once; held={held}; active={active}")
         return 0
 
+    log_path = _attach_owner_log()
     print(
         f"connection-owner: starting reconcile daemon (interval={interval}s; "
-        f"idle_shutdown_after={idle_shutdown_after}; Ctrl-C to stop)...",
+        f"idle_shutdown_after={idle_shutdown_after}; log={log_path or 'stderr'}; Ctrl-C to stop)...",
         file=sys.stderr,
     )
+    import logging
+
+    logging.getLogger("agent-codespaces.owner").info(
+        "connection-owner starting (interval=%ss, idle_shutdown_after=%s)", interval, idle_shutdown_after)
     try:
         asyncio.run(
             run_owner_daemon(
@@ -157,4 +200,5 @@ def cmd_owner(args: argparse.Namespace) -> int:
         )
     except KeyboardInterrupt:
         pass
+    logging.getLogger("agent-codespaces.owner").info("connection-owner stopped")
     return 0

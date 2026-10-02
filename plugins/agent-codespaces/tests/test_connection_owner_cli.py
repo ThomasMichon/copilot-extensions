@@ -192,3 +192,40 @@ def test_connection_owner_empty_block_claims_slot(tmp_path, monkeypatch):
     # repo1's empty block claimed the slot (defaults -> enabled=True) -> repo2's
     # enabled:false is ignored.
     assert merged.connection_owner.enabled is True
+
+
+def test_the_daemon_logs_to_a_rotated_file(monkeypatch, tmp_path):
+    """Headless (a scheduled task), the Owner's stderr goes nowhere: its relay
+    and forward re-establishes must land in a file a drop can be checked against."""
+    import logging
+    from logging.handlers import RotatingFileHandler
+
+    from agent_codespaces import owner_cli
+
+    monkeypatch.setenv("AGENT_CODESPACES_HOME", str(tmp_path))
+    root = logging.getLogger()
+    before = list(root.handlers)
+    try:
+        path = owner_cli._attach_owner_log()
+        assert path == str(tmp_path / "logs" / "owner.log")
+        assert owner_cli._attach_owner_log() == path  # idempotent: one handler
+        added = [h for h in root.handlers if h not in before]
+        assert len(added) == 1 and isinstance(added[0], RotatingFileHandler)
+        assert added[0].maxBytes == owner_cli.OWNER_LOG_MAX_BYTES
+        logging.getLogger("ssh-manager.relay").warning("relay re-establishing")
+        added[0].flush()
+        assert "relay re-establishing" in (tmp_path / "logs" / "owner.log").read_text("utf-8")
+    finally:
+        for h in [h for h in root.handlers if h not in before]:
+            root.removeHandler(h)
+            h.close()
+
+
+def test_an_unopenable_owner_log_falls_back_to_stderr(monkeypatch, tmp_path, capsys):
+    from agent_codespaces import owner_cli
+
+    blocker = tmp_path / "logs"
+    blocker.write_text("a file where the logs dir should be", "utf-8")
+    monkeypatch.setenv("AGENT_CODESPACES_HOME", str(tmp_path))
+    assert owner_cli._attach_owner_log() is None
+    assert "logging to stderr only" in capsys.readouterr().err
