@@ -225,13 +225,34 @@ def _prepare_project_venv(project_dir: Path, tmp_path: Path, *, timeout_s: float
 
 
 def _discover_test_files(cwd: Path, test_path: str) -> list[Path] | None:
-    """Every `test_*.py` file under `test_path` (sorted), or `None` if
-    `test_path` isn't a directory (e.g. it already names a single file) --
-    the caller then treats it as a single, unsplit chunk."""
+    """Every file under `test_path` matching pytest's own default
+    collection patterns (`test_*.py` and `*_test.py` -- confirmed in
+    pytest's documented `python_files` default; a project overriding that
+    default via its own `pyproject.toml`/`pytest.ini` is not accounted for
+    here, same as `run-plugin-tests.py`'s own single-pattern discovery),
+    sorted, deduped (a name like `test_foo_test.py` matches both patterns).
+    Returns `None` if `test_path` isn't a directory (e.g. it already names
+    a single file) -- the caller then treats it as a single, unsplit
+    chunk."""
     target = (cwd / test_path).resolve()
     if not target.is_dir():
         return None
-    return sorted(target.rglob("test_*.py"))
+    return sorted(
+        {*target.rglob("test_*.py"), *target.rglob("*_test.py")}
+    )
+
+
+def _relative_or_absolute(path: Path, cwd: Path) -> str:
+    """`path` relative to `cwd` when possible, or `path` itself (resolved,
+    absolute) when it isn't -- e.g. a test directory given as an absolute
+    path outside `cwd` entirely. Pytest accepts either form as a positional
+    collection argument regardless of its own `cwd`, so an out-of-tree
+    `test_path` keeps working once a suite is large enough to chunk, not
+    just while it stays under the single-chunk threshold."""
+    try:
+        return str(path.relative_to(cwd))
+    except ValueError:
+        return str(path)
 
 
 def _plan_chunks(cwd: Path, test_path: str, max_files_per_chunk: int) -> list[list[str]]:
@@ -249,7 +270,9 @@ def _plan_chunks(cwd: Path, test_path: str, max_files_per_chunk: int) -> list[li
     test_files = _discover_test_files(cwd, test_path)
     if test_files is None or len(test_files) <= max_files_per_chunk:
         return [[test_path]]
-    return partition([str(f.relative_to(cwd)) for f in test_files], max_files_per_chunk)
+    return partition(
+        [_relative_or_absolute(f, cwd) for f in test_files], max_files_per_chunk
+    )
 
 
 def _merge_chunk_results(chunks: list[dict]) -> dict:

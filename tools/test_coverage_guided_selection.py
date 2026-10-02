@@ -362,6 +362,49 @@ class TestPlanChunks:
         flattened = [path for chunk in chunks for path in chunk]
         assert flattened == sorted(f"tests/{name}" for name in names)
 
+    def test_large_suite_includes_both_default_pytest_filename_patterns(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression test: pytest's own default collection matches BOTH
+        # `test_*.py` and `*_test.py` -- a suite large enough to chunk must
+        # not silently drop files matching the second pattern just because
+        # it crossed the threshold (a suite below the threshold passes the
+        # whole directory straight to pytest, which already finds both).
+        tests_dir = tmp_path / "tests"
+        tests_dir.mkdir()
+        names = [f"test_{i:02d}.py" for i in range(6)] + ["extra_test.py"]
+        for name in names:
+            (tests_dir / name).write_text("def test_x(): pass\n")
+
+        chunks = baseline_mod._plan_chunks(tmp_path, "tests", max_files_per_chunk=3)
+
+        flattened = {path for chunk in chunks for path in chunk}
+        assert flattened == {f"tests/{name}" for name in names}
+
+    def test_large_suite_outside_cwd_keeps_absolute_paths(
+        self, tmp_path: Path
+    ) -> None:
+        # Regression test: a test_path outside cwd entirely (e.g. a shared
+        # test directory) must keep working once it's large enough to
+        # chunk, not raise ValueError from an impossible relative_to(cwd)
+        # -- a suite below the threshold passes the whole (possibly
+        # absolute, possibly out-of-tree) test_path straight through
+        # unmodified, so chunking must preserve that same tolerance.
+        cwd = tmp_path / "repo"
+        cwd.mkdir()
+        external_tests = tmp_path / "shared-tests"
+        external_tests.mkdir()
+        names = [f"test_{i:02d}.py" for i in range(5)]
+        for name in names:
+            (external_tests / name).write_text("def test_x(): pass\n")
+
+        chunks = baseline_mod._plan_chunks(
+            cwd, str(external_tests), max_files_per_chunk=2
+        )
+
+        flattened = {path for chunk in chunks for path in chunk}
+        assert flattened == {str(external_tests / name) for name in names}
+
 
 class TestMergeChunkResults:
     """Fast, pure-function tests for `_merge_chunk_results` -- no real
