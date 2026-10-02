@@ -108,16 +108,21 @@ risk profiles:
   shared token), the detached child gets no matching local `_COMMAND` var,
   and if a stale local `AGENT_DISPATCH_TOKEN` happens to already be present
   in the parent's environment (inherited from elsewhere), the child
-  silently uses that stale value instead. Fix: add the matching `_COMMAND`
-  translation alongside each existing raw-value translation —
-  `AGENT_DISPATCH_SHARED_TOKEN_COMMAND` → `AGENT_DISPATCH_TOKEN_COMMAND` and
+  silently uses that stale value instead. **Fix, in this exact order:**
+  (1) when `--shared` is set, unconditionally clear any inherited local
+  `AGENT_DISPATCH_TOKEN`/`AGENT_DISPATCH_CONTROL_TOKEN`/
+  `AGENT_DISPATCH_TOKEN_COMMAND`/`AGENT_DISPATCH_CONTROL_TOKEN_COMMAND` from
+  `env` FIRST, before any mapping is applied — never leave a stale local
+  value sitting there for a mapping to "maybe" overwrite; (2) THEN apply
+  whichever shared mapping actually resolved: the existing raw-value
+  translations, plus the new matching `_COMMAND` translations
+  (`AGENT_DISPATCH_SHARED_TOKEN_COMMAND` → `AGENT_DISPATCH_TOKEN_COMMAND` and
   `AGENT_DISPATCH_SHARED_CONTROL_TOKEN_COMMAND` →
-  `AGENT_DISPATCH_CONTROL_TOKEN_COMMAND` — and, when only the shared
-  `_COMMAND` form is set (no raw shared token), explicitly clear any
-  inherited local `AGENT_DISPATCH_TOKEN`/`AGENT_DISPATCH_CONTROL_TOKEN` from
-  `env` so a stale direct value can never silently win over the intended
-  command-sourced one. Add a dedicated regression test exercising
-  `--shared --detach` with only the `_COMMAND` variants configured.
+  `AGENT_DISPATCH_CONTROL_TOKEN_COMMAND`). Add a dedicated regression test
+  exercising `--shared --detach` with only the `_COMMAND` variants
+  configured, and a second test confirming a stale inherited local value is
+  never observed by the detached child even when neither shared form is
+  set.
 
 ## agent-index: `AGENT_INDEX_ADO_TOKEN` and `AGENT_INDEX_GITHUB_TOKEN`
 

@@ -196,20 +196,38 @@ corrections to the same original ask, not a change in intent.
         command is tried first, falls back to the raw direct env value only
         if the command is unset or fails/returns empty. Mirrors
         `producer_capability()`'s existing precedence.
-- [ ] **Windows-safe command parsing:** the existing agent-dispatch
-      `_run_token_command()` parses with plain `shlex.split()` (POSIX mode),
-      which treats backslash as an escape character and mangles an ordinary
-      Windows path command like `C:\Tools\vault.exe read secret` into
-      `C:Toolsvault.exe read secret`. The shared primitive must parse with
-      `shlex.split(command, posix=(os.name != "nt"))` (or an equivalent
-      platform-aware argv parser) so Windows-style paths/quoting survive —
-      this is a genuine latent bug in the code being extracted, not something
-      to carry forward unfixed. Add explicit Windows-path parsing test cases
-      (not just POSIX ones) to Phase 1's unit tests.
+- [ ] **`token-resolve`'s own `pyproject.toml` must declare its
+      `agent_procutil` dependency as a canonical-reference vendor pointer**,
+      not just rely on a consumer happening to have it installed already:
+      `dependencies = ["agent-procutil"]` plus a `[tool.uv.sources]` entry
+      `agent-procutil = { path = "../agent-procutil", editable = true }`,
+      exactly matching the existing nested-dependency pattern in
+      `libs/ssh-manager/pyproject.toml:15-25` (ssh-manager has the identical
+      shape: it also imports `agent_procutil` and is itself consumed as a
+      vendor pointer by multiple plugins) — required so a consumer that also
+      depends on `agent-procutil` directly doesn't hit a `uv` editable/
+      non-editable resolution conflict on the same path.
+- [ ] **Windows-safe command parsing, including quoting:** the existing
+      agent-dispatch `_run_token_command()` parses with plain `shlex.split()`
+      (POSIX mode), which treats backslash as an escape character and
+      mangles an ordinary Windows path command like
+      `C:\Tools\vault.exe read secret` into `C:Toolsvault.exe read secret`.
+      Switching to `shlex.split(command, posix=False)` alone is **not
+      sufficient**: non-POSIX mode leaves surrounding quote characters
+      literally IN each token (`shlex.split('"C:\Tools\vault.exe" read
+      secret', posix=False)` returns `['"C:\Tools\vault.exe"', 'read',
+      'secret']` — the leading/trailing `"` survives in `argv[0]`, which
+      `subprocess.run` would then try to execute as a literal path
+      containing quote characters and fail). The shared primitive must, on
+      the Windows branch, additionally strip one matching pair of
+      leading/trailing quote characters (`"` or `'`) from each split token
+      before building `argv`. Add explicit test cases for both an
+      unquoted and a quoted Windows path command (not just POSIX ones) to
+      Phase 1's unit tests.
 - [ ] Unit tests for the new lib covering both resolvers (direct value,
       command fetch, neither set, command failure, command producing empty
-      output) plus the low-level primitive directly (POSIX and Windows-style
-      command strings).
+      output) plus the low-level primitive directly (POSIX, Windows-style
+      unquoted, and Windows-style quoted command strings).
 - [ ] **Register the new lib's tests in CI**, not just locally: add
       `python -m pytest -q libs/token-resolve/tests` to the shared-library
       test lane in `.github/workflows/ci.yml` (~lines 345-356, alongside the
@@ -247,6 +265,13 @@ corrections to the same original ask, not a change in intent.
 - [ ] No behavior change for existing agent-dispatch deployments — this is a
       pure refactor; existing tests must continue to pass unmodified in
       intent (updates only for the new call shape).
+- [ ] **Docs, in this phase, not deferred:** since this phase is a pure
+      refactor of already-documented `_COMMAND` vars (no new vars
+      introduced), no env-var table changes are needed here — confirm the
+      existing `agent-dispatch` docs still accurately describe
+      `AGENT_DISPATCH_CONTROL_TOKEN_COMMAND`/`AGENT_DISPATCH_SHARED_TOKEN_COMMAND`/
+      `AGENT_DISPATCH_SHARED_CONTROL_TOKEN_COMMAND` post-migration (same
+      behavior, so they should), and correct them in this same PR if not.
 
 ### Phase 3 — Add `_COMMAND` support to agent-vault
 - [ ] `AGENT_VAULT_CORE_TOKEN_COMMAND` via the shared lib's
@@ -258,6 +283,10 @@ corrections to the same original ask, not a change in intent.
       `agent-mcp/scripts/init.sh`/`init.ps1` pattern cited in Context as the
       model, adapted to agent-vault's own installer layout).
 - [ ] Tests mirroring agent-dispatch's existing coverage shape.
+- [ ] **Docs, in this phase:** add `AGENT_VAULT_CORE_TOKEN_COMMAND` to
+      `agent-vault`'s own documented env-var table in this same PR, not
+      deferred to a later phase — a new var ships documented, not with a
+      pending TODO.
 
 ### Phase 4 — Expand scope to agent-dispatch's remaining token and agent-index
 
@@ -289,11 +318,15 @@ working this phase). Summary:
       separate engine venv (`ENGINE_VENV_PYTHON`) preinstall paths in
       `install.sh`/`install.ps1` — adding the new lib to only one leaves the
       other's install broken.
+- [ ] **Docs, in this phase:** add `AGENT_DISPATCH_TOKEN_COMMAND`,
+      `AGENT_INDEX_ADO_TOKEN_COMMAND`, and `AGENT_INDEX_GITHUB_TOKEN_COMMAND`
+      to their respective plugins' env-var tables in this same PR.
 
-### Phase 5 — Docs
-- [ ] Each touched plugin's own docs/README gains every new `_COMMAND`
-      variable in its documented env-var table, following the existing
-      `AGENT_DISPATCH_*_TOKEN_COMMAND` documentation shape as the model.
+### Phase 5 — Final documentation sweep
+- [ ] Confirm every `_COMMAND` var introduced in Phases 2-4 actually landed
+      in its plugin's docs in the phase that introduced it (per each phase's
+      own Docs sub-task above) — this phase is a verification pass, not
+      where the writing happens.
 - [ ] Note the new shared lib in `CONTRIBUTING.md`'s vendored-libs table if
       that table is exhaustive (confirm during Phase 1).
 
@@ -536,3 +569,24 @@ conventions to mirror) to be elaborated once this plan clears review._
   `no_window_kwargs()` requirement plus a headless-child test case; added
   the `pr-gate` `needs:` wiring requirement; corrected the class name
   throughout.
+
+### 2026-10-02 — Review round 11 (PR #4910)
+- Copilot review: four round-10 findings resolved; one new Medium finding
+  plus three previously-missed items. New: `token-resolve`'s own
+  `pyproject.toml` must declare its `agent_procutil` dependency as a
+  canonical-reference vendor pointer (matching `libs/ssh-manager`'s existing
+  pattern), not just assume a consumer already has it. Previously missed:
+  (1) `shlex.split(command, posix=False)` alone is insufficient for Windows
+  — it leaves literal quote characters in each token, which would make
+  `argv[0]` an unexecutable path-with-quotes; (2) the detached-waiter fix
+  should clear inherited local credentials FIRST, unconditionally, then
+  apply whichever shared mapping resolved — not clear conditionally as an
+  afterthought; (3) new env vars should be documented in the phase that
+  introduces them, not batched into a deferred final Phase 5. All four
+  addressed: added the `pyproject.toml`/`[tool.uv.sources]` requirement to
+  Phase 1; added explicit quote-stripping to the Windows parsing fix with
+  a dedicated quoted-path test case; reordered the detached-waiter fix to
+  clear-then-apply; moved each phase's own Docs sub-task inline (Phase 2
+  confirms no change needed since it's a pure refactor; Phase 3 documents
+  `AGENT_VAULT_CORE_TOKEN_COMMAND`; Phase 4 documents its three new vars),
+  leaving Phase 5 as a verification-only final sweep.
