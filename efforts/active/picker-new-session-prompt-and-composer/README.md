@@ -1164,20 +1164,29 @@ after Phase A item 4's two still-incomplete seams.
 the "zero slack" state the previous session's handoff flagged. Extracted
 the six `execution_leg_*` CLI calls (`get`/`set`/`clear`/`reserve`/`renew`/
 `release`, a cohesive ~180-line concern already used by `ahp_provider.py`)
-into a new sibling module, `engine_execution_leg.py`, re-exported from
-`engine_client` (`# noqa: F401`-annotated, mirroring `steering.py`'s own
-re-export convention) so every existing `engine_client.execution_leg_*`
-caller needed zero changes. One real ordering subtlety: the re-export
-import has to come AFTER `run_json`/`EngineError`/etc. are defined in
-`engine_client.py` (not at the top with the other imports), or the new
-module's own `from .engine_client import run_json` hits a partially
-initialized module -- `# noqa: E402` on that one import, which IS the
-correct annotation here, not a lint problem to silence blindly.
+into a new sibling module, `engine_execution_leg.py`. The first draft
+re-exported these via a top-level import (`# noqa: F401`/`E402`,
+mirroring `steering.py`'s own re-export convention) placed after
+`run_json`/`EngineError`/etc. -- but Copilot review correctly flagged this
+as a reproducible circular-import deadlock: `engine_execution_leg.py`
+itself does `from .engine_client import run_json, ...`, so importing
+`engine_execution_leg` directly (before `engine_client`) hits
+`engine_client`'s own top-level `from .engine_execution_leg import (...)`
+line while `engine_execution_leg` is still mid-init -> `ImportError` on a
+not-yet-defined name. Fixed properly: the re-export is now a **lazy module
+`__getattr__`** (PEP 562) at the bottom of `engine_client.py` -- the import
+of `engine_execution_leg` happens only on first actual attribute access
+(`engine_client.execution_leg_get(...)` etc.), well after either possible
+import order has already finished. Verified directly: imported
+`engine_execution_leg` first, then `engine_client` first, confirmed both
+resolve to the identical function object.
 
-`engine_client.py` dropped to 832 lines with the room freed. Added an
-optional `seed: str | None = None` kwarg to `resolve_launch_plan()`,
-forwarded as `--seed <text>` to `agent-worktrees resolve` (confirmed via
-its own `--help`: `--new`-only, already engine-side-rejected alongside
+`engine_client.py` ends at 861 lines (not 832 -- that was the first
+draft's count before the `__getattr__` fix added a little back) with real
+room left. Added an optional `seed: str | None = None` kwarg to
+`resolve_launch_plan()`, forwarded as `--seed <text>` to `agent-worktrees
+resolve` (confirmed via its own `--help`: `--new`-only, already
+engine-side-rejected alongside
 `--machine`, so deliberately NOT re-validated here -- the engine owns that
 contract). Threaded through the one real call site that needed it:
 `__main__.py`'s `_resolve_for()` now passes

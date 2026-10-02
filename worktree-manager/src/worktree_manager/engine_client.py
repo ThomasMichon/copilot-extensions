@@ -407,8 +407,8 @@ def repository_token(
 # this file -- NOT a top-level import -- so `engine_execution_leg.py`'s own
 # `from .engine_client import run_json, ...` can fully resolve this module
 # first without a circular-import deadlock (reproducible if anything ever
-# imports `engine_execution_leg` directly, before `engine_client`: Copilot
-# review finding on PR #4878). See `__getattr__` below.
+# imports `engine_execution_leg` directly, before `engine_client`). See
+# `__getattr__` below.
 _EXECUTION_LEG_NAMES = frozenset({
     "execution_leg_clear",
     "execution_leg_get",
