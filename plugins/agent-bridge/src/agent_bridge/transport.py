@@ -506,10 +506,11 @@ class RemoteProjectNotProvisioned(RuntimeError):
 
     Distinguishes an **unprovisioned project** (the remote ``<project>``
     worktree binstub does not exist on the target -- so the resolve command is
-    a shell "command not found") from a *generic* resolve failure. The former
-    must fail loud (#757): degrading to a direct ``--new`` launch there only
-    produces a misleading ``LAUNCH_ACP: Connection closed`` downstream, whereas
-    a generic failure can still legitimately fall back.
+    a shell "command not found") from a *generic* resolve failure. Every
+    resolve failure -- unprovisioned project or otherwise -- fails loud:
+    degrading to a direct ``--new`` launch in an unmanaged cwd only produces a
+    misleading ``LAUNCH_ACP: Connection closed`` (or ACP handshake timeout)
+    downstream, whichever kind of resolve failure caused it.
     """
 
 
@@ -572,8 +573,8 @@ async def _resolve_worktree_remote(
     in case a remote shell prepends banner noise.
 
     Returns the parsed plan dict. Raises ``RuntimeError`` on failure; the
-    caller treats failure as non-fatal (falls back to a direct ``--new``
-    launch).
+    caller fails the whole connect attempt rather than falling back to a
+    direct ``--new`` launch in an unmanaged cwd.
     """
     if not target.project:
         raise RuntimeError("remote resolve requires target.project")
@@ -1091,10 +1092,18 @@ async def spawn_ssh(
     # bridge's session<->worktree linkage (managed/live state, duplicate NF
     # cards). ``resolve --new`` creates the worktree; _build_remote_cmd then
     # takes its resume branch (--worktree-id) so the binstub launches into the
-    # just-created worktree (no second worktree). If resolve fails, keep the
-    # legacy direct --new launch path but surface the failure as a connection
-    # checkpoint and probe the target for an existing cwd so ACP validation does
-    # not fail on a templated, non-existent home directory.
+    # just-created worktree (no second worktree).
+    #
+    # A resolve failure, or a resolve that returns an incomplete plan (missing
+    # either ``worktree_id`` or ``work_dir``), fails the whole connect attempt
+    # (see below) instead of degrading to a direct launch in an unmanaged,
+    # non-worktree directory -- a degraded launch there just fails a second
+    # time with an unrelated-looking error (an immediate "Connection closed",
+    # or an ACP handshake timeout), hiding the real stage-6 cause. The plan's
+    # ``worktree_id``/``work_dir`` are authoritative over any pre-populated
+    # ``target.cwd`` (e.g. a static ``cwd:`` carried from agent config): a
+    # stale or unrelated configured cwd must never silently substitute for the
+    # just-resolved worktree checkout.
     if (
         target.project
         and not target.explicit_cwd
@@ -1106,32 +1115,30 @@ async def spawn_ssh(
             launch = plan.get("launch", plan)
             wt_id = launch.get("worktree_id")
             work_dir = launch.get("work_dir")
-            if wt_id:
-                target.worktree_id = wt_id
-            if work_dir and not target.cwd:
-                target.cwd = work_dir
-            if not target.cwd:
-                fallback = await _resolve_remote_existing_cwd(manager, target)
-                if fallback:
-                    target.cwd = fallback
-                    log.warning(
-                        "Remote worktree resolve for %s returned no cwd; "
-                        "using verified fallback cwd=%s",
-                        target.host, fallback,
-                    )
+            if not wt_id or not work_dir:
+                msg = (
+                    f"remote worktree resolve for {target.host} succeeded but "
+                    f"returned an incomplete plan (worktree_id={wt_id!r}, "
+                    f"work_dir={work_dir!r})"
+                )
+                tracker.failed(ConnectStage.WORKTREE, msg, retryable=False)
+                raise ConnectError(ConnectStage.WORKTREE, msg, retryable=False)
+            target.worktree_id = wt_id
+            target.cwd = work_dir
             log.info(
                 "Bound remote worktree for %s: id=%s cwd=%s",
                 target.host, wt_id, target.cwd,
             )
             tracker.reached(
                 ConnectStage.WORKTREE,
-                f"worktree={target.worktree_id or '(unbound)'} cwd={target.cwd or '(none)'}",
+                f"worktree={target.worktree_id} cwd={target.cwd}",
             )
         except RemoteProjectNotProvisioned as exc:
-            # Fail loud, do NOT degrade (#757). Degrading to a direct --new
-            # launch when the project isn't provisioned only surfaces later as a
-            # misleading `LAUNCH_ACP: Connection closed`, hiding the real cause.
-            # Raise a clear, staged error naming the project + host instead.
+            # Fail loud, do NOT degrade. Degrading to a direct --new launch
+            # when the project isn't provisioned only surfaces later as a
+            # misleading `LAUNCH_ACP: Connection closed`, hiding the real
+            # cause. Raise a clear, staged error naming the project + host
+            # instead.
             msg = (
                 f"{exc}. Provision {target.project!r} on {target.host!r}, or "
                 f"dispatch from a context whose project is provisioned there "
@@ -1142,24 +1149,24 @@ async def spawn_ssh(
             raise ConnectError(
                 ConnectStage.WORKTREE, msg, retryable=False, cause=exc,
             ) from exc
-        except Exception as exc:  # noqa: BLE001 -- non-fatal, see above
-            detail = (
-                f"remote worktree resolve failed for {target.host}: {exc}; "
-                "falling back to direct launch"
-            )
-            log.warning("%s", detail)
-            if not target.cwd:
-                fallback = await _resolve_remote_existing_cwd(manager, target)
-                if fallback:
-                    target.cwd = fallback
-                    detail += f" with verified cwd={fallback}"
-                    log.warning(
-                        "Using verified remote fallback cwd for %s: %s",
-                        target.host, fallback,
-                    )
-                else:
-                    detail += "; no verified cwd available"
-            tracker.failed(ConnectStage.WORKTREE, detail, retryable=False)
+        except ConnectError:
+            # Already staged + tagged above (the incomplete-plan case);
+            # propagate as-is instead of letting the generic handler below
+            # re-wrap it.
+            raise
+        except Exception as exc:  # noqa: BLE001 -- staged + re-raised below
+            # Fail loud here too, uniformly, rather than narrowly scoped to
+            # "unprovisioned project" only. A generic resolve failure must not
+            # launch ACP directly in a bare, unmanaged cwd -- that degraded
+            # launch never actually recovers; it just fails a second time
+            # with an unrelated-looking error (an immediate "Connection
+            # closed", or an ACP handshake timeout), hiding the real stage-6
+            # cause.
+            msg = f"remote worktree resolve failed for {target.host}: {exc}"
+            tracker.failed(ConnectStage.WORKTREE, msg, retryable=False)
+            raise ConnectError(
+                ConnectStage.WORKTREE, msg, retryable=False, cause=exc,
+            ) from exc
 
     # Stages 5-7 happen remotely inside the binstub; the device breadcrumb
     # (in the remote command) is the on-device proof of arrival.
