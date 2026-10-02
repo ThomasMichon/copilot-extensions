@@ -528,6 +528,14 @@ def release_all_resources(
     record.last_finalize_released = [replace(claim) for claim in released]
     if save and (released or had_trail):
         tracking.save_record(record)
+    if released:
+        from . import claim_history
+        for claim in released:
+            claim_history.record_event(
+                kind=claim.kind, ref=claim.ref, worktree_id=record.worktree_id,
+                machine=record.machine, event="released",
+                session_id=claim_history.current_session_id(), note="finalized",
+            )
     return released
 
 

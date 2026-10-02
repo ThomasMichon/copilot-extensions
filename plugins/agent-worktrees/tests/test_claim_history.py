@@ -157,6 +157,24 @@ def test_claim_settle_feeds_history_with_disposition_as_note(record_path):
     assert events[-1]["note"] == obligations.AT_REST
 
 
+def test_release_all_resources_feeds_history_for_pr_kind_claims(record_path):
+    """`finalize`'s bulk release-on-finalize cascade
+    (`tracking.release_all_resources`) is the other real place a PR claim
+    gets released outside the three single-claim verbs above -- it must
+    feed the same ledger."""
+    rec = tracking.load_record(record_path)
+    rec.resources = [
+        tracking.ResourceClaim(kind="pr", ref="o/r#3", state=obligations.ACTIVE),
+        tracking.ResourceClaim(kind="codespace", ref="cs-1", state=obligations.ACTIVE),
+    ]
+    tracking.release_all_resources(rec, save=False)
+    pr_events = claim_history.history_for_ref("o/r#3")
+    assert [e["event"] for e in pr_events] == ["released"]
+    assert pr_events[0]["note"] == "finalized"
+    # Non-pr kinds are never fed into this ledger.
+    assert claim_history.history_for_ref("cs-1") == []
+
+
 # ── CLI rendering ─────────────────────────────────────────────────────
 
 def _ns(**kwargs):

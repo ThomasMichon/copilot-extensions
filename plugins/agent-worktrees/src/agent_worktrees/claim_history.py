@@ -1,28 +1,24 @@
 """Append-only, timestamped ownership-history ledger for a claimed resource.
 
-Plan Phase 3b of ``efforts/active/worktree-claims-transitive-finalization``
-(aperture-labs) -- **partial slice**, matching the effort's own precedent
-for splitting an immediately-actionable narrow piece off a larger item (see
-that effort's split-out ``dampener-review-session-audit-trail`` sibling).
-
 Current-owner claim state (``ResourceClaim.state``) only ever answers "who
 holds this NOW" -- a single PR can be picked up by multiple
 worktrees/sessions over its life (errors, redrives, rebinds), and nothing
 preserves *who else ever touched it, in what order, when*. This module is
-that durable, append-only record, scoped today to ``pr``-kind claims (the
-Plan's own "starting with pr-kind" instruction) and fed only from the three
-centralized single-worktree claim-lifecycle write verbs in
-``tracking_claim_write.py`` (add/release/settle).
+that durable, append-only record, scoped today to ``pr``-kind claims and
+fed from every known persisted mutation path for a ``pr``-kind claim:
+``tracking_claim_write.py``'s three single-worktree claim verbs
+(add/release/settle), ``pr_ops.py``'s own direct create/merge-driven
+claim/release calls, and ``finalize.py``'s bulk release-on-finalize.
 
-**Explicitly NOT yet covered by this slice** (tracked as the Plan's
-remaining Phase 3b work, not silently dropped):
+**Explicitly NOT yet covered by this slice** (tracked as a remaining
+follow-up, not silently dropped):
 
 - Claim-handoff bundle transitions (``claim_handoffs.py``'s offer/accept/
   decline/cancel) -- an explicit, deliberate hand-off between worktrees is
   real reassignment history this ledger should eventually include, but
   wiring it in means touching that module's own intricate locked state
-  machine, deferred to keep this slice's blast radius to the three simple,
-  already-centralized write verbs above.
+  machine, deferred to keep this slice's blast radius to the already-
+  identified direct mutation call sites above.
 - **Implicit** reassignment: an agent-dispatch task redrive/reassignment
   after an error, or an agent-bridge session rebind to a worktree, both
   change "who is actually working this PR right now" without ever calling
@@ -31,6 +27,14 @@ remaining Phase 3b work, not silently dropped):
   duplicating them blind, and is unstarted.
 - Remote-mirroring for converged repos (today this is a single machine-
   local file, same posture ``claim_handoffs.py`` itself started from).
+
+**Concurrent writers.** Multiple independent processes can append a claim
+event at once (the CLI, a resident daemon dispatch, ``pr_ops``'s own
+reconcile path). A plain ``O_APPEND`` write is not a documented
+cross-platform atomicity guarantee, so every append here takes the same
+real cross-process advisory lock ``handoff_trace.py`` already established
+for this exact problem (``fcntl``/``msvcrt``), rather than relying on
+filesystem append semantics alone.
 """
 
 from __future__ import annotations
@@ -41,9 +45,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from . import config as cfg
+from . import handoff_trace
 
-#: Claim kinds this ledger records. Scoped to the Plan's own "starting with
-#: pr-kind" instruction -- any other kind is a silent no-op in
+#: Claim kinds this ledger records. Any other kind is a silent no-op in
 #: :func:`record_event`, so callers never need to pre-filter kind
 #: themselves before calling it unconditionally from a claim write path.
 SUPPORTED_KINDS = frozenset({"pr"})
@@ -81,7 +85,7 @@ def record_event(
         return
     try:
         path = history_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = path.with_suffix(path.suffix + ".lock")
         entry: dict[str, object] = {
             "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "kind": kind,
@@ -93,8 +97,11 @@ def record_event(
         }
         if note:
             entry["note"] = note
-        with open(path, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry, ensure_ascii=True) + "\n")
+        line = json.dumps(entry, ensure_ascii=True)
+        with handoff_trace._append_lock(lock_path):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
     except Exception:
         pass
 

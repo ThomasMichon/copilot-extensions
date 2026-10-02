@@ -7,6 +7,7 @@ import types
 from pathlib import Path
 
 from agent_worktrees import __main__ as m
+from agent_worktrees import claim_history
 from agent_worktrees import config as cfg
 from agent_worktrees import git_ops, pr_ops, tracking
 
@@ -2420,6 +2421,28 @@ class TestPrClaimHelpers:
         rec = self._rec(tmp_path, monkeypatch)
         pr_ops._release_pr_claim(rec, tracking.PRRecord(number=5, repo="o/r"))
         assert rec.resources == []
+
+    def test_ensure_pr_claim_feeds_claim_history(self, tmp_path, monkeypatch):
+        rec = self._rec(tmp_path, monkeypatch)
+        pr = tracking.PRRecord(number=5, repo="o/r", state="open")
+        pr_ops._ensure_pr_claim(rec, pr)
+        events = claim_history.history_for_ref("o/r#5")
+        assert [e["event"] for e in events] == ["claimed"]
+        assert events[0]["worktree_id"] == "wt-c"
+        assert events[0]["machine"] == "m"
+
+    def test_release_pr_claim_feeds_claim_history(self, tmp_path, monkeypatch):
+        rec = self._rec(tmp_path, monkeypatch)
+        pr = tracking.PRRecord(number=5, repo="o/r", state="open")
+        pr_ops._ensure_pr_claim(rec, pr)
+        pr_ops._release_pr_claim(rec, pr)
+        events = claim_history.history_for_ref("o/r#5")
+        assert [e["event"] for e in events] == ["claimed", "released"]
+
+    def test_release_without_existing_claim_does_not_feed_history(self, tmp_path, monkeypatch):
+        rec = self._rec(tmp_path, monkeypatch)
+        pr_ops._release_pr_claim(rec, tracking.PRRecord(number=5, repo="o/r"))
+        assert claim_history.history_for_ref("o/r#5") == []
 
 
 class TestReconcileActivePrSelfHeal:

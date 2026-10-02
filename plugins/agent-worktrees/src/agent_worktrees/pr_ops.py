@@ -39,7 +39,7 @@ import re
 import string
 from pathlib import Path
 
-from . import config as cfg
+from . import claim_history, config as cfg
 from . import git_ops, hooks, obligations, tracking
 from .config import Config, SourceAttribution
 from .tracking import PRRecord
@@ -1198,6 +1198,11 @@ def _ensure_pr_claim(
         # Owner is finalizing/orphaned/frozen -- nothing sane to claim onto;
         # the caller's own save (if any) still reflects whatever else changed.
         pass
+    else:
+        claim_history.record_event(
+            kind="pr", ref=ref, worktree_id=record.worktree_id, machine=record.machine,
+            event="claimed", session_id=claim_history.current_session_id(),
+        )
 
 
 def _release_pr_claim(record: tracking.WorktreeRecord | None, pr: PRRecord | None) -> None:
@@ -1215,7 +1220,13 @@ def _release_pr_claim(record: tracking.WorktreeRecord | None, pr: PRRecord | Non
     ref = _pr_claim_ref(pr)
     if not ref:
         return
-    tracking.settle_resource_claim(record, ref, obligations.RELEASED, save=False)
+    settled = tracking.settle_resource_claim(record, ref, obligations.RELEASED, save=False)
+    if settled is not None:
+        claim_history.record_event(
+            kind="pr", ref=ref, worktree_id=record.worktree_id, machine=record.machine,
+            event="released", session_id=claim_history.current_session_id(),
+            note="merged",
+        )
 
 
 def _open_via_provider(
