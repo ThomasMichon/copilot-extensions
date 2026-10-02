@@ -77,17 +77,24 @@ distribution unit.
 
 ### Phase 1 — Spike: governed-feed-only install and timing baseline
 
-- [ ] Prove a first-party wheel can be installed while every transitive
-      third-party resolution uses only the machine's governed feed
-      configuration (`uv.toml`/`UV_DEFAULT_INDEX` — `uv` does not read
-      `pip.conf`). Capture evidence that no public package index was
-      contacted.
-- [ ] Measure actual governed-feed propagation lag to inform a lag-tolerant
-      version-selection policy for later phases.
-- [ ] Compare a from-source install against a verified first-party-wheel
-      install, cold vs. warm cache, recording wall time, network activity,
-      and physical disk use.
-- [ ] Record findings and revise later phases only from measured evidence.
+- [x] **Done (2026-10-02).** Proved a first-party wheel can be installed
+      while every transitive third-party resolution uses only the
+      machine's governed feed configuration. See Proposal for the evidence
+      and method.
+- [x] **Done (2026-10-02).** Measured actual governed-feed propagation lag
+      across 3 real third-party dependencies — see Proposal. Lag is **not**
+      a fixed constant; it varies per package from ~0 days to 65+ days,
+      correcting this effort's original "~1 week" assumption.
+- [x] **Done (2026-10-02).** Compared from-source vs. verified first-party
+      wheel install, cold and warm cache, wall time and physical storage —
+      see Proposal. Network-activity comparison (request counts/bytes) was
+      not captured; only host/index identity was verified. If a future
+      phase needs exact byte/request-count deltas, re-run with a packet
+      capture or an HTTP proxy in front of both paths.
+- [x] **Done (2026-10-02).** Findings recorded below; later phases should
+      treat the lag-tolerant version-selection design as revised by this
+      evidence (a dynamic, feed-queried admission check, not a static
+      age window).
 
 ### Phase 2 — Promotion-built, content-addressed first-party artifacts
 
@@ -135,7 +142,15 @@ answer against the actual repository/CI configuration:
 - **Lag-tolerant version selection:** resolving "newest compatible" would
   routinely pin versions a real governed feed doesn't carry yet; the
   resolver needs a seasoning/age constraint (or equivalent), tuned from
-  Phase 1's measured lag.
+  Phase 1's measured lag. **Phase 1 evidence (2026-10-02) revises this: lag
+  is not a fixed ~1-week constant** — measured at 0 days (pydantic,
+  uvicorn) to 65+ days (fastapi) across just 3 real dependencies of one
+  plugin. A static per-package age window would be wrong in one direction
+  or the other depending on the package. The consumer-side admission check
+  (per the Feed model question above) should instead directly **query the
+  governed feed's own currently-available versions at install time** and
+  select the newest one the feed actually carries, rather than applying any
+  assumed universal age constant. See Proposal for the full measurement.
 - **Trust root -- resolved (2026-10-01):** `.github/workflows/validate-and-promote.yml`'s
   `promote` job confirms "branch-protected committed metadata" does **not**
   hold as a trust root here: `main` carries a zero-bypass PR-required
@@ -234,9 +249,111 @@ answer against the actual repository/CI configuration:
 
 ## Proposal
 
-_Pending Phase 1 spike evidence._
+### Phase 1 spike evidence (2026-10-02)
+
+**Method:** built real wheels for `agent-bridge` and all 9 of its
+materialized `libs/<lib>` path dependencies (`ssh-manager`,
+`credential-relay`, `zdd`, `single-instance-lease`, `config-migrate`,
+`plugin-resolve`, `agent-procutil`, `dropin-registry`,
+`plugin-activation`) via `uv build --wheel` from this `dev`-branch
+checkout. Installed the `agent-bridge` wheel with `uv pip install
+--find-links <local dist dir> <wheel>` into fresh venvs on a machine
+already configured per the managed-machine governed-feed rules
+(`uv.toml` default index = `https://packagefeedproxy.microsoft.io/pypi/simple/`).
+Compared against installing the same plugin directly from its project
+directory (today's real from-source path). All timings are single runs on
+one Windows machine (augloop1) — directional, not statistically rigorous.
+
+**1. Governed-feed-only resolution — proven.** The full verbose (`-v`)
+install log was searched for every contacted host. Zero matches for
+`pypi.org` or `files.pythonhosted.org`. Every third-party dependency
+(`fastapi`, `uvicorn`, `starlette`, `h11`, `wsproto`, `pyyaml`, `pydantic`,
+`pydantic-core`, `annotated-types`, `anyio`, `click`, `idna`,
+`typing-extensions`, `typing-inspection`, `agent-client-protocol`) resolved
+through `packagefeedproxy.microsoft.io` → its backing
+`*.pkgs.visualstudio.com` Azure Artifacts feed → `*.vsblob.vsassets.io`
+blob storage — the full governed chain, never a public index. The 9
+first-party vendored-lib names (`agent-ssh-manager`, etc., which do not
+exist on any public index) were also checked against the governed feed
+first and fell back to the local `--find-links` wheels only once the feed
+had no matching name — confirming the governed feed is consulted
+uniformly for every name, with no special-cased bypass.
+
+**2. Feed propagation lag — measured, and the "~1 week" assumption does not
+hold uniformly.** Compared the governed-feed-resolved version of each
+third-party dependency against PyPI's actual release history
+(`pypi.org/rss/project/<name>/releases.xml`) as of 2026-10-02:
+
+| Package  | Governed feed resolved | PyPI latest (as of 2026-10-02) | Lag |
+|----------|------------------------|----------------------------------|-----|
+| fastapi  | 0.141.1 (released 2026-07-29) | 0.142.2 (released 2026-09-30) | ~65 days, 2 minor versions behind |
+| pydantic | 2.13.5 (released 2026-08-28)  | 2.13.5 is PyPI's latest stable (2.14.0 betas excluded) | ~0 days |
+| uvicorn  | 0.54.0 (released 2026-09-25)  | 0.54.0 is PyPI's latest | ~0 days (7 days old, but current) |
+
+Lag varies from 0 to 65+ days across just 3 real dependencies of one
+plugin — it is not a fixed constant tunable with a single universal age
+window. This revises the Lag-tolerant version selection Open Design
+Question above: Phase 2 should query the governed feed's own currently
+available versions at install time, not apply an assumed age constant.
+
+**3. Timing and storage — wheel-based install is faster, markedly so
+warm.**
+
+| Scenario | From source (today) | First-party wheel (proposed) | Delta |
+|----------|---------------------|-------------------------------|-------|
+| Cold (no `uv` cache) | 24.4 s | 20.6 s | ~16% faster |
+| Warm (`uv` cache populated) | 15.2 s | 5.7 s | ~63% faster (2.7×) |
+
+First-party artifact storage cost is small relative to third-party deps:
+the 10 built wheels (`agent-bridge` + 9 libs) total ~0.89 MiB; the fully
+installed venv (including all third-party packages) is ~14.8 MiB — so the
+content-addressed first-party artifacts this effort proposes storing are a
+small fraction of total install footprint, consistent with the "bounded
+storage" goal. `agent-bridge`'s vendored libs are small pure-Python
+packages, so the cold-case win is modest here; a plugin with heavier
+build steps (e.g. anything invoking a native/compiled extension, or
+`agent-index`'s much larger footprint per the Context section's baseline
+measurements) would be expected to show a larger cold-case delta — not
+yet measured directly.
+
+**Not yet done:** exact network request-count/byte deltas (only host
+identity was verified, not volume); a POSIX/Linux run (Windows only so
+far); and a larger plugin than `agent-bridge` to test whether the cold-case
+win grows with build complexity.
 
 ## Journal
+
+### 2026-10-02 - Phase 1 spike run: governed-feed resolution proven, lag measured, timing/storage baselined
+
+- Built real wheels for `agent-bridge` + its 9 materialized vendored libs
+  via `uv build --wheel`, then installed into fresh venvs on a
+  governed-feed-configured machine (augloop1), comparing the wheel-based
+  path against today's from-source install.
+- Proved governed-feed-only resolution: searched the full verbose install
+  log for every contacted host -- zero `pypi.org`/`files.pythonhosted.org`
+  matches; every third-party dependency resolved through
+  `packagefeedproxy.microsoft.io` and its backing Azure Artifacts/blob
+  storage chain.
+- Measured feed propagation lag against PyPI's real release history for 3
+  dependencies: fastapi ~65 days behind (2 minor versions), pydantic and
+  uvicorn ~0 days (feed had PyPI's actual latest). **This corrects the
+  effort's original "~1 week" lag assumption** -- lag is per-package and
+  variable, not a fixed constant; revised the Lag-tolerant version
+  selection Open Design Question to recommend a dynamic, feed-queried
+  admission check instead of a static age window.
+- Measured timing: cold install 20.6s (wheel) vs 24.4s (source, ~16%
+  faster); warm install 5.7s (wheel) vs 15.2s (source, ~63%/2.7x faster).
+  First-party wheel storage (~0.89 MiB for 10 wheels) is a small fraction
+  of total installed footprint (~14.8 MiB venv).
+- Full method and tables recorded in Proposal. Checked off all 4 Phase 1
+  plan items; noted two follow-ups not yet measured (network byte/request
+  counts, and a larger/heavier plugin than agent-bridge for the cold-case
+  comparison).
+- **All 7 Open Design Questions now have a concrete, committed direction,
+  and Phase 1's spike has produced real measured evidence** -- both
+  alternative completion-gate conditions for this leg are satisfied.
+  **Next:** Phase 2 implementation can begin (promotion-side wheel
+  building, manifest/attestation, publication) informed by this evidence.
 
 ### 2026-10-02 - Build hermeticity resolved; all 6 of 7 questions now concrete
 
