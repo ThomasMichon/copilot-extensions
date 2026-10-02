@@ -10,9 +10,9 @@
   existing vision governs cross-plugin credential-sourcing configuration;
   `visions/installer` covers machine bootstrap, not per-plugin runtime token
   resolution, and neither `agent-vault` nor `agent-index` has its own vision
-  doc under `visions/plugins/`. _(agent-recommended: if a future related
-  change warrants one, author a leaf vision then; this effort doesn't invent
-  one to satisfy the template.)_
+  doc under `visions/plugins/`. A future related change may warrant
+  authoring a leaf vision then; this effort does not invent one to satisfy
+  the template.
 - **Umbrella issue:** _to file once this effort's plan clears review_
 - **Sub-issues:** _TBD, one per Plan phase_
 - **Hybrid split:** this is the canonical, generalized effort. A private
@@ -80,16 +80,18 @@ as a follow-up request, not part of that fix).
 `_COMMAND` alternative:**
 - `agent-vault`: `AGENT_VAULT_CORE_TOKEN`
   (`plugins/agent-vault/src/agent_vault/core_ext.py:47,106`)
-- `agent-dispatch`: `AGENT_DISPATCH_TOKEN`, the plain client bearer resolved by
-  `client_token()` (`agent_dispatch/config.py:533-535`) — distinct from the
-  three pairs below that already have `_COMMAND`; flagged by review as a gap
-  in the original scope statement.
+- `agent-dispatch`: `AGENT_DISPATCH_TOKEN`, the plain client bearer — distinct
+  from the three pairs below that already have `_COMMAND`. Read directly
+  from `os.environ` at **seven call sites total**: `client_token()` itself
+  (`config.py:535`), `config.py:231` (inside `load_config()`'s `Config`
+  construction), `board_cli.py:342,368,549,739` (four separate board
+  requests), and `producers/webhook.py:167` (the webhook producer, including
+  coordinator startup).
 - `agent-index`: `AGENT_INDEX_ADO_TOKEN`, the Azure DevOps source's PAT
-  (`agent_index/sources/azure_devops.py:62-66`) — also flagged by review.
+  (`agent_index/sources/azure_devops.py:62-66`).
 - `agent-index`: `AGENT_INDEX_GITHUB_TOKEN`, the GitHub source's token
-  (`agent_index/sources/github.py:283-287`, ahead of the ambient `GH_TOKEN`/
-  `GITHUB_TOKEN` fallbacks in the same resolution chain) — flagged by review
-  round 3 as a previously-missed gap in the same scope statement.
+  (`agent_index/sources/github.py:283-287`), ahead of the ambient `GH_TOKEN`/
+  `GITHUB_TOKEN` fallbacks in the same resolution chain.
 
 **Already has the `_COMMAND` pattern (the reference implementation to
 extract):**
@@ -163,12 +165,12 @@ ask, not a change in intent.
         command is tried first, falls back to the raw direct env value only
         if the command is unset or fails/returns empty. Mirrors
         `producer_capability()`'s existing precedence.
-- [ ] **Windows-safe command parsing** (flagged by review): the existing
-      agent-dispatch `_run_token_command()` parses with plain `shlex.split()`
-      (POSIX mode), which treats backslash as an escape character and mangles
-      an ordinary Windows path command like `C:\Tools\vault.exe read secret`
-      into `C:Toolsvault.exe read secret`. The shared primitive must parse
-      with `shlex.split(command, posix=(os.name != "nt"))` (or an equivalent
+- [ ] **Windows-safe command parsing:** the existing agent-dispatch
+      `_run_token_command()` parses with plain `shlex.split()` (POSIX mode),
+      which treats backslash as an escape character and mangles an ordinary
+      Windows path command like `C:\Tools\vault.exe read secret` into
+      `C:Toolsvault.exe read secret`. The shared primitive must parse with
+      `shlex.split(command, posix=(os.name != "nt"))` (or an equivalent
       platform-aware argv parser) so Windows-style paths/quoting survive —
       this is a genuine latent bug in the code being extracted, not something
       to carry forward unfixed. Add explicit Windows-path parsing test cases
@@ -185,10 +187,10 @@ ask, not a change in intent.
       `AGENT_DISPATCH_SHARED_TOKEN`, `AGENT_DISPATCH_SHARED_CONTROL_TOKEN`).
 - [ ] Replace `producer_capability()`'s inline logic with a thin wrapper over
       the shared lib's `resolve_command_first()` — **preserve its exact
-      existing precedence**; this is the highest-risk migration step (flagged
-      by review) and must ship with its own explicit before/after test
-      proving identical behavior for: command present+succeeds, command
-      present+fails, command absent+direct value present, both absent.
+      existing precedence**; this is the highest-risk migration step and
+      must ship with its own explicit before/after test proving identical
+      behavior for: command present+succeeds, command present+fails, command
+      absent+direct value present, both absent.
 - [ ] Add `agent-dispatch` as a consumer of the new lib: `pyproject.toml`
       dependency + `[tool.uv.sources]` entry, plus the matching preinstall
       addition in its own `scripts/init.sh`/`init.ps1` if it has an
@@ -208,25 +210,41 @@ ask, not a change in intent.
       model, adapted to agent-vault's own installer layout).
 - [ ] Tests mirroring agent-dispatch's existing coverage shape.
 
-### Phase 4 — Expand scope to the three review-flagged gaps
+### Phase 4 — Expand scope to agent-dispatch's remaining token and agent-index
 - [ ] `agent-dispatch`: `AGENT_DISPATCH_TOKEN` is read directly from
-      `os.environ` in **six separate call sites**, not just `client_token()`
-      (flagged by review) — `config.py:231`, `config.py:535`
-      (`client_token()` itself), `board_cli.py:342,368,549,739` (four
-      separate board requests), and `producers/webhook.py:167` (the webhook
-      producer, including coordinator startup). A `_COMMAND` slot added only
-      to `client_token()` would leave the other five seams silently ignoring
-      it. **First** consolidate every direct
-      `os.environ.get("AGENT_DISPATCH_TOKEN")` read to call `client_token()`
-      instead (a mechanical, behavior-preserving refactor — test each call
-      site still gets the same value it did before), **then** add
-      `AGENT_DISPATCH_TOKEN_COMMAND` support to `client_token()` via
-      `resolve_direct_first()` so every consumer benefits automatically.
-      `no_cli_prompts.py:92` and `execution_cli.py:113,121` only reference or
-      forward the env var name in prompts/subprocess env setup, not an
-      independent read of the token's value — confirm during this phase
-      whether either needs its own update or is already covered once
-      `client_token()` is the single source.
+      `os.environ` at **seven call sites total** (see Context): `client_token()`
+      itself, `config.py:231` (inside `load_config()`), `board_cli.py` x4, and
+      `producers/webhook.py:167`. These sites split into two groups with
+      different risk profiles:
+      - **Actual consumption sites** (`client_token()`, `board_cli.py` x4,
+        `webhook.py:167`): consolidate each direct
+        `os.environ.get("AGENT_DISPATCH_TOKEN")` read to call `client_token()`
+        instead (a mechanical, behavior-preserving refactor — test each call
+        site still gets the same value it did before), **then** add
+        `AGENT_DISPATCH_TOKEN_COMMAND` support to `client_token()` via
+        `resolve_direct_first()` so every one of these consumers benefits
+        automatically.
+      - **`config.py:231`, inside `load_config()`: leave this one as a raw
+        env read, do NOT route it through the command-resolving
+        `client_token()`.** `load_config()` is called for purposes that don't
+        need the token at all (e.g. `client_url()` only needs host/port for
+        addressing); making it execute a token-fetch command as a side
+        effect of unrelated config resolution would violate the same
+        discipline `resolve_control_token()`'s own docstring already states
+        for the existing `_COMMAND` pairs (deliberately *not* called from
+        `load_config()`). `Config.token` stays the raw direct value; only
+        actual use sites resolve the command-backed form.
+      - `no_cli_prompts.py:92` generates a **standalone helper script** that
+        independently resolves `AGENT_DISPATCH_TOKEN` in a separate process —
+        it will NOT inherit `client_token()`'s changes automatically. Update
+        the generated helper's own token-resolution logic to call the shared
+        lib directly (or shell out to the same command), with its own test.
+      - `agent-codespaces`/`agent-containers`' peer env-var allowlists
+        forward today's named dispatch vars to spawned codespace/container
+        peers but do not yet know about `AGENT_DISPATCH_TOKEN_COMMAND` — add
+        the new var name to both allowlists so a command-sourced token
+        actually propagates to a spawned peer instead of silently arriving
+        tokenless.
 - [ ] `agent-index`: add `AGENT_INDEX_ADO_TOKEN_COMMAND` via
       `resolve_direct_first()`, consumed by the Azure DevOps source
       (`azure_devops.py:62-66`). Confirm whether `agent-index`'s other
@@ -236,11 +254,14 @@ ask, not a change in intent.
       the earlier assumption.
 - [ ] `agent-index`: add `AGENT_INDEX_GITHUB_TOKEN_COMMAND` via
       `resolve_direct_first()`, consulted in `_env_token()`'s resolution
-      chain (`sources/github.py:283-287`) **before** the existing
-      `AGENT_INDEX_GITHUB_TOKEN` / ambient `GH_TOKEN` / `GITHUB_TOKEN`
-      fallbacks — i.e. the dedicated `_COMMAND` var takes priority over the
-      direct `AGENT_INDEX_GITHUB_TOKEN` value, which in turn still precedes
-      the ambient CLI fallbacks exactly as today. Do **not** add a
+      chain (`sources/github.py:283-287`). **Precedence, matching
+      `resolve_direct_first()`'s actual (not inverted) semantics:** the
+      direct `AGENT_INDEX_GITHUB_TOKEN` value wins when set; the `_COMMAND`
+      fetch runs only when `AGENT_INDEX_GITHUB_TOKEN` is unset. Both still
+      precede the ambient `GH_TOKEN`/`GITHUB_TOKEN` CLI fallbacks exactly as
+      today — i.e. the resolution order becomes `AGENT_INDEX_GITHUB_TOKEN` →
+      `AGENT_INDEX_GITHUB_TOKEN_COMMAND` → `GH_TOKEN` → `GITHUB_TOKEN`. Do
+      **not** add a
       `_COMMAND` variant for the ambient `GH_TOKEN`/`GITHUB_TOKEN` names
       themselves — those are shared, external-tool-owned conventions outside
       this plugin's own credential surface.
@@ -264,14 +285,19 @@ ask, not a change in intent.
       after the Phase 2 migration — proves the refactor preserves current
       behavior exactly, **including `producer_capability()`'s command-first
       precedence** (the highest-risk migration step).
-- [ ] New agent-vault, agent-dispatch (`AGENT_DISPATCH_TOKEN` — covering all
-      six consolidated call sites, not just `client_token()`), and
-      agent-index (`AGENT_INDEX_ADO_TOKEN` and `AGENT_INDEX_GITHUB_TOKEN`)
-      tests (Phases 3-4) pass, each proving: direct env wins (or loses, per
-      the correct precedence for that call site) when both are set; command
-      fetch works when only `_COMMAND` is set; absence of both resolves to
-      `None`/not-configured, matching each plugin's existing behavior for
-      "no token."
+- [ ] New agent-vault, agent-dispatch (`AGENT_DISPATCH_TOKEN` — covering the
+      five consumption-site consolidations onto `client_token()`, the
+      standalone `no_cli_prompts.py` helper, and the
+      agent-codespaces/agent-containers peer allowlist propagation, but
+      explicitly *not* routing `config.py:231`'s `load_config()` read
+      through command resolution), and agent-index (`AGENT_INDEX_ADO_TOKEN`
+      and `AGENT_INDEX_GITHUB_TOKEN`) tests (Phase 4) pass, each proving:
+      direct env wins (or loses, per the correct precedence for that call
+      site) when both are set; command fetch works when only `_COMMAND` is
+      set; absence of both resolves to `None`/not-configured, matching each
+      plugin's existing behavior for "no token"; and `load_config()` never
+      executes a token-fetch command as a side effect of unrelated config
+      resolution.
 - [ ] Packaging validation: for each touched plugin, a clean non-uv install
       (bare `pip`, simulating `HAVE_UV=0`) succeeds and the plugin can import
       the shared lib — proves the installer preinstall-list additions are
@@ -343,3 +369,28 @@ conventions to mirror) to be elaborated once this plan clears review._
   deliberately NOT given their own `_COMMAND`, being external-tool-owned
   conventions); renumbered remaining phases; will update the PR description
   itself to match this file's generic framing before the next push.
+
+### 2026-10-02 — Review round 4 (PR #4910)
+- Copilot review flagged: (1) a count error — the plan said "six" direct
+  `AGENT_DISPATCH_TOKEN` read sites when the actual inventory is seven
+  (including `client_token()` itself); (2) a side-effect risk — routing
+  `config.py:231` (inside `load_config()`) through `client_token()` would
+  make generic config loading (e.g. `client_url()`, which only needs
+  host/port) execute a token-fetch command as an unwanted side effect,
+  contradicting the existing `resolve_control_token()` discipline this
+  effort is supposed to preserve; (3) an incomplete-propagation gap — the
+  standalone helper `no_cli_prompts.py` generates and resolves tokens
+  independently (won't inherit `client_token()` changes), and
+  agent-codespaces/agent-containers' peer env-var allowlists don't yet know
+  the new `_COMMAND` var name; (4) a precedence contradiction — the
+  agent-index GitHub token sub-task named `resolve_direct_first()` but then
+  described command-first behavior. All four addressed: corrected the count
+  to seven and explicitly listed all seven sites; `config.py:231` now stays
+  a raw read, excluded from the `client_token()` consolidation, with its own
+  Validation Plan line; added explicit sub-tasks for the standalone helper
+  and both peer allowlists; fixed the GitHub-token precedence description to
+  match `resolve_direct_first()`'s actual semantics (direct value wins,
+  command is the fallback, both still precede the ambient CLI fallbacks).
+  Also removed "flagged by review"-style process narration throughout in
+  favor of stating the technical facts/decisions directly (the Journal
+  entries already carry the review history).
