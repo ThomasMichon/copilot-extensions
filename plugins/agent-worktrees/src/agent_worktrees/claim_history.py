@@ -42,6 +42,18 @@ cross-platform atomicity guarantee, so every append here takes the same
 real cross-process advisory lock ``handoff_trace.py`` already established
 for this exact problem (``fcntl``/``msvcrt``), rather than relying on
 filesystem append semantics alone.
+
+**Ordering is best-effort, not a total order.** Every write-path caller
+appends immediately after confirming ITS OWN record save succeeded (never
+batched/deferred across multiple records), and the append lock itself
+guarantees no two appends interleave mid-line. What is NOT guaranteed:
+two genuinely concurrent transitions on the SAME ref, saved under two
+different record locks milliseconds apart, could still append in an order
+that does not exactly match which save committed to disk first -- there is
+no single lock spanning "save a record" and "append its history entry"
+across every caller. Treat this ledger as "every real transition gets
+recorded, each one truthfully after its own save succeeded" rather than
+"a strictly serialized timeline safe to diff for exact interleavings."
 """
 
 from __future__ import annotations

@@ -41,9 +41,11 @@ def cmd_claims_history(
     print(f"Ownership history for {ref}:")
     if not events:
         print(
-            "  (none recorded -- either nothing has happened since this "
-            "ledger started, or this ref's kind is not yet tracked; see "
-            "claim_history.SUPPORTED_KINDS)"
+            "  (no covered transition recorded -- this does NOT prove "
+            "nothing happened: this ref's kind may not be tracked yet "
+            "(see claim_history.SUPPORTED_KINDS), or the actual event may "
+            "have gone through a path this ledger doesn't cover yet -- see "
+            "claim_history.py's own module docstring for the current scope)"
         )
         return 0
     for e in events:

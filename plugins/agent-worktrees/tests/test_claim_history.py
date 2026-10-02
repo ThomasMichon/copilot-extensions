@@ -85,6 +85,22 @@ def test_history_for_ref_skips_unparseable_lines(monkeypatch, tmp_path: Path):
     assert events[0]["event"] == "claimed"
 
 
+def test_history_for_ref_skips_parseable_non_dict_lines(monkeypatch, tmp_path: Path):
+    """A line can be valid JSON ([]/null/a string) without being an object
+    -- `.get()` on any of those must never raise."""
+    path = tmp_path / "claim-history.jsonl"
+    path.write_text(
+        json.dumps([]) + "\n"
+        + json.dumps(None) + "\n"
+        + json.dumps("just a string") + "\n"
+        + json.dumps({"ref": "o/r#1", "event": "claimed"}) + "\n"
+    )
+    monkeypatch.setattr(claim_history, "history_path", lambda: path)
+    events = claim_history.history_for_ref("o/r#1")
+    assert len(events) == 1
+    assert events[0]["event"] == "claimed"
+
+
 def test_record_event_never_raises_on_write_failure(monkeypatch):
     monkeypatch.setattr(
         claim_history, "history_path", lambda: Path("/nonexistent-root/x/claim-history.jsonl")
@@ -272,7 +288,7 @@ def test_cli_renders_empty_history(capsys):
         json_error=lambda *a, **k: 2, json_output=lambda *a: None,
     )
     assert rc == 0
-    assert "none recorded" in capsys.readouterr().out
+    assert "no covered transition recorded" in capsys.readouterr().out
 
 
 def test_cli_renders_populated_history(capsys):

@@ -728,6 +728,17 @@ def _claims_sweep(args: argparse.Namespace) -> int:
                 )
                 if flipped:
                     tracking.save_record(rec, rec_path)
+                    # Append immediately, still inside this record's own
+                    # lock, using THIS record's own machine (never the
+                    # ambient config's -- a renamed/migrated machine can
+                    # differ) -- never deferred to a later batch pass,
+                    # so a later record's failure can't silently drop an
+                    # already-persisted transition's history entry.
+                    for c in flipped:
+                        claim_history.record_event(
+                            kind=c.kind, ref=c.ref, worktree_id=rec.worktree_id,
+                            machine=rec.machine, event="released", note="abandoned",
+                        )
         else:
             before = {c.ref: c.state for c in rec.resources}
             flipped = tracking.sweep_abandoned_obligations(
@@ -750,10 +761,6 @@ def _claims_sweep(args: argparse.Namespace) -> int:
                 worktree_id=r["owner"],
                 kind=r["kind"],
                 ref=r["ref"],
-            )
-            claim_history.record_event(
-                kind=r["kind"], ref=r["ref"], worktree_id=r["owner"],
-                machine=config.machine, event="released", note="abandoned",
             )
     if args.json:
         _json_output({"applied": apply, "reclaimed": reclaimed, "count": len(reclaimed)})
@@ -781,7 +788,6 @@ def _claims_reconcile_at_rest(args: argparse.Namespace) -> int:
     target = list(getattr(args, "target", None) or [])
     selectors = set(target[1:])
     tdir = cfg.tracking_dir()
-    config = cfg.load_config()
     released: list[dict[str, str]] = []
     for rec in tracking.list_records(tdir):
         if selectors and rec.worktree_id not in selectors:
@@ -793,6 +799,14 @@ def _claims_reconcile_at_rest(args: argparse.Namespace) -> int:
                 flipped = tracking.release_at_rest_resources(rec, save=False)
                 if flipped:
                     tracking.save_record(rec, rec_path)
+                    # Same immediate-append, same-record-lock,
+                    # record-owned-machine discipline as `_claims_sweep`.
+                    for c in flipped:
+                        claim_history.record_event(
+                            kind=c.kind, ref=c.ref, worktree_id=rec.worktree_id,
+                            machine=rec.machine, event="released",
+                            note="at-rest-reconciled",
+                        )
         else:
             before = {c.ref: c.state for c in rec.resources}
             flipped = tracking.release_at_rest_resources(rec, save=False)
@@ -809,10 +823,6 @@ def _claims_reconcile_at_rest(args: argparse.Namespace) -> int:
                 worktree_id=r["owner"],
                 kind=r["kind"],
                 ref=r["ref"],
-            )
-            claim_history.record_event(
-                kind=r["kind"], ref=r["ref"], worktree_id=r["owner"],
-                machine=config.machine, event="released", note="at-rest-reconciled",
             )
     if args.json:
         _json_output({"applied": apply, "released": released, "count": len(released)})

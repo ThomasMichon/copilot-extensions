@@ -168,11 +168,13 @@ def test_cli_sweep_dry_run_does_not_log(tmp_path, monkeypatch, capfd):
 def test_cli_sweep_apply_feeds_claim_history_for_pr_kind(tmp_path, monkeypatch, capfd):
     """The never-wedge sweep is another real place a pr-kind claim gets
     released (abandoned) outside the three single-claim verbs -- it must
-    feed the same ownership-history ledger."""
-    tdir = _seed_project(tmp_path, monkeypatch)
+    feed the same ownership-history ledger, attributed to the RECORD's own
+    machine (never the ambient config's -- a renamed/migrated machine can
+    differ)."""
+    tdir = _seed_project(tmp_path, monkeypatch, machine="config-machine")
     rec = tracking.create_new_record(
         "wt-owner", "worktree/wt-owner", str(tdir.parent / "wt-owner"), "p",
-        "m", "windows", tdir,
+        "record-machine", "windows", tdir,
     )
     tracking.add_resource_claim(
         rec, tracking.ResourceClaim(
@@ -189,6 +191,7 @@ def test_cli_sweep_apply_feeds_claim_history_for_pr_kind(tmp_path, monkeypatch, 
     events = claim_history.history_for_ref("o/r#1")
     assert [e["event"] for e in events] == ["released"]
     assert events[0]["note"] == "abandoned"
+    assert events[0]["machine"] == "record-machine"
 
 
 def test_cli_sweep_spares_orphaned_and_active_children(tmp_path, monkeypatch, capfd):

@@ -56,7 +56,10 @@ def test_apply_releases_at_rest_never_active(tmp_path, monkeypatch, capfd):
 
 
 def test_apply_feeds_claim_history_for_pr_kind(tmp_path, monkeypatch, capfd):
-    tdir = _seed_project(tmp_path, monkeypatch)
+    """Attributed to the RECORD's own machine ("m" via `_owner`), never the
+    ambient config's (seeded here as a different value) -- a renamed/
+    migrated machine can differ."""
+    tdir = _seed_project(tmp_path, monkeypatch, machine="config-machine")
     _owner(tdir, "wt-owner", [
         tracking.ResourceClaim(kind="pr", ref="o/r#2", state="at-rest"),
     ])
@@ -66,6 +69,7 @@ def test_apply_feeds_claim_history_for_pr_kind(tmp_path, monkeypatch, capfd):
     events = claim_history.history_for_ref("o/r#2")
     assert [e["event"] for e in events] == ["released"]
     assert events[0]["note"] == "at-rest-reconciled"
+    assert events[0]["machine"] == "m"
 
 
 def test_dry_run_reports_but_does_not_write(tmp_path, monkeypatch, capfd):
