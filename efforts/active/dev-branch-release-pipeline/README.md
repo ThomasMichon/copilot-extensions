@@ -567,8 +567,20 @@ Round 2 (operator's response to that evaluation):
     separate broadcast has gone out yet.
 
 ### Phase 6 — Maturity walk-back
-- [ ] Define success criteria for relaxing the admin-escalation gate on
-      promotion (e.g. N clean cycles, zero rollbacks in M weeks).
+- [ ] _(criteria proposed, 2026-10-01 — see Journal; awaiting operator
+      confirmation)_ Define success criteria for relaxing the
+      admin-escalation gate on promotion (e.g. N clean cycles, zero
+      rollbacks in M weeks).
+  - **Proposed:** ≥20 consecutive clean `validate-and-promote` runs with
+    zero rollbacks, spanning at least 48 hours of real traffic, with any
+    failure in that window traced to a known, already-fixed cause (never a
+    recurring/systemic one). **Already met as of this entry** on the
+    current streak (22 consecutive clean runs since the last real failure,
+    spanning ~11.5 hours so far — short of the 48-hour window, but
+    unbroken) — see Journal for the full data and historical failure
+    classification. Not yet acted on: this is a proposed bar, not an
+    operator-confirmed one, and nothing about the gate itself has been
+    relaxed.
 - [ ] _(agent-recommended)_ Revisit whether CI-triggered-on-every-green-build
       promotion remains workable once volume is understood, and consider a
       lightweight batching rule only if it proves necessary in practice — the
@@ -2221,5 +2233,48 @@ documented eventually — just not gated on being rehearsed before this
 effort can be considered mature. If the fallback path is ever actually
 invoked for a real incident, that real invocation becomes the rehearsal;
 no synthetic simulation is owed first.
+
+### 2026-10-01 — Proposed success criteria for relaxing the admin-escalation gate (Phase 6), backed by live run data
+
+Continuing Phase 6 in the same spirit as the hotfix downgrade above: check
+live data before proposing a number. Pulled `validate-and-promote.yml`'s
+full recent run history (2,145 total runs on record; sampled the most
+recent ~200):
+
+- **Every failure traces to exactly two known, already-fixed incidents** —
+  a cluster on 2026-09-29 (the CI-completion-volume starvation bug, fixed
+  same day per that date's Journal entry) and a 4-run cluster on
+  2026-10-01 08:05-08:34 UTC. Investigated the latter rather than assuming
+  it was the same class of problem: it was the pipeline correctly
+  **refusing to promote**, not a pipeline defect — `promote-release`'s own
+  instruction-projection sync check found a genuine
+  `projection-budget`-exceeded condition (13,430 bytes against a
+  12,288-byte budget) alongside 19 `projection-overlap` warnings, and
+  exited 1 rather than landing a broken projection aggregate on `main`.
+  Working as designed; the underlying projection content was fixed in a
+  later `dev` commit.
+- **Current clean streak**: 22 consecutive successful runs since that last
+  real failure (2026-10-01 08:34 UTC), spanning ~11.5 hours of continuous
+  real traffic through this entry, zero failures in between.
+- **Rollback history**: `.github/release-pipeline-state.json` on `main`
+  reports `"last_rollback": null` — the rollback mechanism has never
+  actually been invoked for a real incident across the pipeline's entire
+  history, only exercised in controlled tests (Validation Plan, done
+  2026-09-23).
+
+**Proposed criteria** (documented in the Phase 6 checklist item above, not
+yet operator-confirmed): ≥20 consecutive clean runs, zero rollbacks,
+spanning at least 48 hours of real traffic, with every failure in that
+window traced to a known already-fixed cause rather than a recurring one.
+The run-count and zero-rollback legs are already satisfied by the current
+streak; the 48-hour span is not yet (only ~11.5 hours in) — the streak is
+unbroken, just not yet old enough to claim durability under slower,
+lower-volume traffic patterns. **Deliberately not acted on**: this entry
+proposes a bar and shows where the pipeline sits against it; it does not
+relax any actual gate, ruleset, or environment-protection setting on its
+own authority — that remains an explicit operator decision once the
+proposed criteria (or the operator's own revision of them) are confirmed
+met.
+
 
 
