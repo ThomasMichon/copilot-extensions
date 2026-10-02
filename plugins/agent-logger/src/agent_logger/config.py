@@ -974,10 +974,10 @@ def load_config(
     repo_root = _find_repo_root(repo_start) if include_repo else None
     repo_config_path = find_repo_config(repo_start) if include_repo else None
     repo_data: dict[str, Any] = {}
+    pre_repo_local_path = data["sync"]["targets"]["local"].get("path")
     if repo_config_path:
         repo_data = _load_repo_config(repo_config_path)
         data = _deep_merge(data, repo_data)
-
     # Environment overrides (flat, opt-in).
     if os.environ.get("AGENT_LOGGER_SYNC_TARGET"):
         data["sync"]["target"] = os.environ["AGENT_LOGGER_SYNC_TARGET"]
@@ -986,8 +986,8 @@ def load_config(
 
     # Deferred host-native check (see _validate_native_absolute_path). Every
     # consumer of Config.sync_path reads it regardless of the active sync
-    # target, so a foreign value must never stay in data for one to misread
-    # it as relative. Raise only when target is "local"; else strip it.
+    # target, so a foreign value must never stay in data. Raise only when
+    # target is "local"; else restore whatever machine-local path preceded it.
     repo_local_path = repo_data.get("sync", {}).get("targets", {}).get("local", {}).get("path")
     if repo_local_path is not None:
         try:
@@ -995,6 +995,6 @@ def load_config(
         except RepositoryConfigError:
             if data["sync"]["target"] == "local":
                 raise
-            data["sync"]["targets"]["local"]["path"] = None
+            data["sync"]["targets"]["local"]["path"] = pre_repo_local_path
 
     return Config(data, resolved_home, repo_config_path, repo_root)

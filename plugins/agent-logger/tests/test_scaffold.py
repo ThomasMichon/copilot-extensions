@@ -276,6 +276,34 @@ def test_repo_config_foreign_local_path_tolerated_when_target_is_not_local(
     assert cfg.sync_path == home / "sessions"
 
 
+def test_repo_config_foreign_local_path_restores_machine_local_path(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A foreign repo override must not discard a machine-local
+    sync.targets.local.path a Windows host configured for its own non-local
+    consumers (e.g. a cold-store corpus root) -- it must fall back to that
+    preceding value, not the global <home>/sessions default."""
+    home = tmp_path / "home"
+    home.mkdir()
+    machine_local_path = tmp_path / "machine-local-corpus"
+    (home / "config.yaml").write_text(
+        f"sync:\n  target: ssh\n  targets:\n    local:\n      path: '{machine_local_path}'\n",
+        encoding="utf-8",
+    )
+
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".agent-logger.yaml").write_text(
+        f"schema_version: 3\nsync:\n  local_path: {_foreign_absolute_path()}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+
+    cfg = load_config(home=home)
+    assert cfg.sync_target == "ssh"
+    assert cfg.sync_path == machine_local_path
+
+
 def test_repo_config_foreign_local_path_raises_when_target_is_local(
     tmp_path: Path, monkeypatch
 ) -> None:
