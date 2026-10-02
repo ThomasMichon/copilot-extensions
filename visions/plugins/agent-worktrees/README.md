@@ -647,12 +647,10 @@ emergency path.
 ### guard-gaps-are-tracked-not-treated-as-breaches
 
 An unmatched invocation syntax in a write guard (an unusual flag, an
-unconventional command shape) is a coverage gap to widen when convenient —
-not an urgent security bypass to patch before anything else lands. The
-design goal is reminding an agent on the paths it actually takes in
-practice, not exhaustively enumerating every way a command could be phrased
-to evade detection. Treat it accordingly in review: real, but not
-inherently blocking.
+unconventional command shape) is a coverage gap to widen opportunistically,
+not an urgent security bypass. The design goal is reminding an agent on the
+paths it actually takes in practice, not exhaustively enumerating every way
+a command could be phrased to evade detection.
 
 ### durable-files-are-persistence-not-a-side-door
 
