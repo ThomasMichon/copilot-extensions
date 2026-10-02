@@ -1548,6 +1548,29 @@ class TestInRepoConfigCommittedRefResolution:
         assert sum(timeouts) <= src._RESOLUTION_BUDGET
         assert all(t <= src._OFFLINE_GIT_TIMEOUT for t in timeouts)
 
+    def test_resolutions_in_one_load_share_the_budget(self, monkeypatch, tmp_path):
+        """Several repos resolved in one load_config() spend one budget, not one each."""
+        import types
+
+        from agent_worktrees import git_ops, inrepo_config_source as src
+
+        clock = {"t": 1000.0}
+        timeouts: list[float] = []
+
+        def slow_git(*args, timeout, **_kw):
+            timeouts.append(timeout)
+            clock["t"] += timeout
+            if args[0] == "symbolic-ref":
+                return types.SimpleNamespace(returncode=0, stdout="refs/remotes/origin/main\n")
+            return types.SimpleNamespace(returncode=1, stdout="")
+
+        monkeypatch.setattr(git_ops, "git", slow_git)
+        monkeypatch.setattr(src.time, "monotonic", lambda: clock["t"])
+        with src.resolution_budget():
+            for _ in range(5):  # e.g. five configured repos
+                self._resolve(tmp_path)
+        assert sum(timeouts) <= src._RESOLUTION_BUDGET
+
     @staticmethod
     def _git(*args: str, cwd: Path):
         import subprocess

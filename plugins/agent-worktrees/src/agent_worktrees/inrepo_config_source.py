@@ -17,6 +17,8 @@ working tree or index.
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import time
 from pathlib import Path
 from typing import Any
@@ -27,9 +29,30 @@ from . import git_ops
 
 #: Per-probe cap: a single git launch can be slow on a loaded host.
 _OFFLINE_GIT_TIMEOUT = 15
-#: Shared budget for one whole resolution (up to ~8 probes), so the sum stays
-#: well inside callers' own timeouts however slow each launch is.
+#: Budget for one ``load_config()`` (all its resolutions, up to ~8 probes each),
+#: so the sum stays well inside callers' own timeouts however slow each launch is.
 _RESOLUTION_BUDGET = 30.0
+
+
+#: The deadline shared by every resolution inside one ``load_config()`` (which
+#: resolves several repos and anchors), so the whole load stays in budget.
+_shared_deadline: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "_agent_worktrees_inrepo_resolution_deadline", default=None
+)
+
+
+@contextlib.contextmanager
+def resolution_budget(seconds: float | None = None):
+    """Share one probe budget across every committed-config resolution in this
+    block. Nested blocks keep the outermost deadline."""
+    if _shared_deadline.get() is not None:
+        yield
+        return
+    token = _shared_deadline.set(time.monotonic() + (_RESOLUTION_BUDGET if seconds is None else seconds))
+    try:
+        yield
+    finally:
+        _shared_deadline.reset(token)
 
 
 def _probe_timeout(deadline: float) -> float | None:
@@ -134,7 +157,7 @@ def load_inrepo_config_from_committed_ref(
     fetched tracking refs, or the anchor isn't a git repo at all); callers
     fall back to the working-tree read in that case.
     """
-    deadline = time.monotonic() + _RESOLUTION_BUDGET
+    deadline = _shared_deadline.get() or time.monotonic() + _RESOLUTION_BUDGET
     head_branch = _offline_remote_head_branch(anchor, remote, deadline)
     if head_branch is None:
         return {}
