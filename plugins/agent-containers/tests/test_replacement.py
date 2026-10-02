@@ -1352,3 +1352,44 @@ def test_destroy_drifted_restricted_members_defers_unknown_profile(monkeypatch):
 
     assert result.removed == []
     assert "no supported migration path" in result.deferred["sandbox-1"]
+
+
+def test_destroy_drifted_restricted_members_defers_on_runtime_error(monkeypatch):
+    """A Docker inspection/removal failure for one member must defer just
+    that member, not abort the whole per-member reconciliation."""
+    config, fleet = _migrated_config()
+    broken = _member("sandbox-1")
+    fine = _member("sandbox-2")
+
+    def fake_destroy(_config, _fleet, member, **_kwargs):
+        if member.name == "sandbox-1":
+            raise RuntimeError("docker rm sandbox-1 failed: container is running")
+        return replacement.DestructiveResult("sandbox-2", "removed")
+
+    monkeypatch.setattr(replacement, "destroy_restricted_member", fake_destroy)
+
+    result = replacement.destroy_drifted_restricted_members(
+        config, fleet, "sandbox", [broken, fine],
+        operation="recreate", force_abandon=False,
+    )
+
+    assert result.removed == ["sandbox-2"]
+    assert "docker rm sandbox-1 failed" in result.deferred["sandbox-1"]
+
+
+def test_destroy_drifted_restricted_members_defers_on_rescue_error(monkeypatch):
+    config, fleet = _migrated_config()
+    member = _member("sandbox-1")
+    monkeypatch.setattr(
+        replacement,
+        "destroy_restricted_member",
+        lambda *_a, **_k: (_ for _ in ()).throw(RescueError("rescue capture failed")),
+    )
+
+    result = replacement.destroy_drifted_restricted_members(
+        config, fleet, "sandbox", [member],
+        operation="recreate", force_abandon=False,
+    )
+
+    assert result.removed == []
+    assert "rescue capture failed" in result.deferred["sandbox-1"]

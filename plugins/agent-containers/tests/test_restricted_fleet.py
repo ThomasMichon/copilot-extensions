@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -659,6 +660,108 @@ def test_restricted_policy_migrating_skips_only_current_config_checks(monkeypatc
         migrating=True,
     )
     assert "container is privileged" in errors
+
+
+def test_restricted_policy_migrating_still_catches_unsafe_network_and_tmpfs(
+    monkeypatch,
+):
+    """copilot-extensions#4933 follow-up: migrating=True must not blanket-skip
+    network isolation or tmpfs mount-flag safety -- only the exact
+    config-dependent name/ID/size comparisons are exempt."""
+    old_fleet = FleetConfig(
+        image="example/agent:latest",
+        security_profile="restricted",
+        acp_command="minimal-agent --stdio",
+    )
+    policy = old_fleet.security_policy_fingerprint("/workspace", "agent")
+    info = DockerContainerInfo(
+        name="sandbox-1",
+        container_id="cid",
+        image="example/agent:latest",
+        state="running",
+        status="Up",
+        fleet="sandbox",
+        security_profile="restricted",
+        security_policy=policy,
+    )
+    doc = {
+        "Config": {
+            "Image": "example/agent:latest",
+            "Env": ["HOME=/home/agent"],
+            "Labels": {
+                "agent-containers.security-profile": "restricted",
+                "agent-containers.security-policy": policy,
+                "agent-containers.security-home": "/home/agent",
+                "agent-containers.security-uid": "1000",
+                "agent-containers.security-gid": "1000",
+                "agent-containers.security-image-id": "sha256:image",
+            },
+        },
+        "Image": "sha256:image",
+        "HostConfig": {
+            "ReadonlyRootfs": True,
+            "Privileged": False,
+            "CapDrop": ["ALL"],
+            "CapAdd": None,
+            "SecurityOpt": ["no-new-privileges"],
+            "Binds": None,
+            "Devices": [],
+            "DeviceRequests": None,
+            "PidMode": "",
+            "IpcMode": "private",
+            "UTSMode": "",
+            "UsernsMode": "",
+            "PortBindings": {},
+            "PublishAllPorts": False,
+            "ExtraHosts": None,
+            # A non-"none" network, unlike the known-good fixture above.
+            "NetworkMode": "a-public-bridge",
+            "Memory": 4 * 1024**3,
+            "MemorySwap": 4 * 1024**3,
+            "NanoCpus": 2_000_000_000,
+            "PidsLimit": 256,
+            "Tmpfs": {
+                # Missing "nosuid" -- a fixed invariant violation that must
+                # still be caught even though the "size=" differs from any
+                # current config (migration-exempt).
+                "/workspace": "rw,nodev,exec,size=99g,uid=1000,gid=1000,mode=0700",
+                "/home/agent": "rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000,mode=0700",
+                "/tmp": "rw,nosuid,nodev,size=512m",  # noqa: S108
+                "/run": "rw,nosuid,nodev,size=64m",
+            },
+        },
+        "Mounts": [],
+        "NetworkSettings": {"Networks": {"a-public-bridge": {}}},
+    }
+
+    def fake_docker(args, timeout=30):
+        if args[:2] == ["network", "inspect"]:
+            return _ok(json.dumps([{"Id": "net-id", "Internal": False}]))
+        return _ok("sha256:image\n")
+
+    monkeypatch.setattr(
+        "agent_containers.lifecycle.inspect_container",
+        lambda name: doc,
+    )
+    monkeypatch.setattr("agent_containers.lifecycle._docker", fake_docker)
+
+    new_fleet = FleetConfig(image="example/agent:v2", security_profile="trusted")
+
+    errors = restricted_policy_errors(
+        info,
+        new_fleet,
+        workspace_folder="/workspace",
+        exec_user="agent",
+        migrating=True,
+    )
+
+    assert any("not Docker-internal" in e for e in errors)
+    assert any("/workspace tmpfs options differ" in e for e in errors)
+    # The /home/agent, /tmp, /run surfaces are still fully compliant, and
+    # their differing "size=" budgets never trigger a false positive.
+    assert not any("/home/agent tmpfs options differ" in e for e in errors)
+    assert not any("/tmp tmpfs options differ" in e for e in errors)  # noqa: S108
+    assert not any("/run tmpfs options differ" in e for e in errors)
 
 
 def test_start_restricted_validates_before_start(monkeypatch):

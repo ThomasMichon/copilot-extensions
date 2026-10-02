@@ -924,24 +924,23 @@ def remove_fleet(
         if (fleet and fleet.restricted) or c.security_profile == "restricted":
             if fleet is None or not fleet.restricted:
                 if fleet is not None and c.security_profile != fleet.security_profile:
-                    # Still restricted-BUILT (tmpfs evidence) despite the
-                    # fleet relaxing to trusted -- full rescue/liveness
-                    # pipeline via migrating=True (copilot-extensions#4933).
+                    # Still restricted-BUILT despite the fleet relaxing to
+                    # trusted -- full rescue/liveness pipeline, migrating=True
+                    # (copilot-extensions#4933).
                     from .replacement import destroy_restricted_member
+                    from .rescue import RescueError
 
-                    decision = destroy_restricted_member(
-                        config,
-                        fleet,
-                        c,
-                        operation="remove",
-                        force_remove=force,
-                        force_abandon=force_abandon,
-                        migrating=True,
-                    )
-                    if decision.status != "removed":
-                        result.deferred[c.name] = (
-                            decision.reason or "removal deferred"
+                    try:
+                        decision = destroy_restricted_member(
+                            config, fleet, c, operation="remove",
+                            force_remove=force, force_abandon=force_abandon,
+                            migrating=True,
                         )
+                    except (RescueError, RuntimeError) as exc:
+                        result.deferred[c.name] = str(exc)
+                        continue
+                    if decision.status != "removed":
+                        result.deferred[c.name] = decision.reason or "removal deferred"
                         continue
                     if decision.rescue:
                         result.rescues[c.name] = decision.rescue

@@ -248,15 +248,20 @@ def destroy_drifted_restricted_members(
                 "has no supported migration path; recreate it manually"
             )
             continue
-        decision = destroy_restricted_member(
-            config,
-            fleet,
-            member,
-            operation=operation,
-            force_remove=True,
-            force_abandon=force_abandon,
-            migrating=True,
-        )
+        decision = None
+        try:
+            decision = destroy_restricted_member(
+                config,
+                fleet,
+                member,
+                operation=operation,
+                force_remove=True,
+                force_abandon=force_abandon,
+                migrating=True,
+            )
+        except (RescueError, RuntimeError) as exc:
+            result.deferred[member.name] = str(exc)
+            continue
         if decision.status == "removed":
             result.removed.append(member.name)
             if decision.rescue:
