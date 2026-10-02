@@ -211,6 +211,38 @@ def test_attached_default_uses_venue_copilot_over_ssh(seams, monkeypatch):
     assert any("auth.yaml" in command for command in seams.remote)
 
 
+@pytest.mark.parametrize("failure", ["reservation", "popen"])
+def test_attached_releases_its_keeper_hold_when_launch_fails(seams, monkeypatch, failure):
+    monkeypatch.setattr(
+        detach, "_ssh_config",
+        lambda target: types.SimpleNamespace(
+            config_file=None, port=None, identity_file=None, extra_options={}, ssh_target=target),
+    )
+    monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: None)
+    monkeypatch.setattr(detach, "_ensure_remote_tooling", lambda _cfg: None)
+    monkeypatch.setattr(detach, "resolve_daemon_port", lambda: 41234)
+    monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
+
+    def fake_run_venue(identity, *, connect, **kwargs):
+        if failure == "reservation":
+            raise detach.VenueCopilotError("reservation refused")
+        return connect("agent-worktrees copilot --anchor")
+
+    def failing_popen(argv, **kwargs):
+        raise OSError("ssh could not start")
+
+    monkeypatch.setattr(detach, "run_venue_copilot", fake_run_venue)
+    monkeypatch.setattr(detach.subprocess, "Popen", failing_popen)
+
+    args = _args(detach=False, workspace="/workspaces/repo", copilot_args=[])
+    if failure == "reservation":
+        assert detach.cmd_attached(args) == 1
+    else:
+        with pytest.raises(OSError):
+            detach.cmd_attached(args)
+    assert seams.stop_keeper == [("devbox", seams.keeper[0][1]["hold_id"])]
+
+
 def test_attached_skips_reverse_forward_when_live_keeper_holds_route(seams, monkeypatch):
     monkeypatch.setattr(
         detach,

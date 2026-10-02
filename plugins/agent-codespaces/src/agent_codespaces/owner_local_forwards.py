@@ -118,24 +118,41 @@ def reassign_dynamic_local_forward(
         return True
 
 
+def _this_process_is_live_owner(owner: Any) -> bool:
+    """Whether the Owner liveness beacon still names this very process."""
+    live = owner.read_liveness()
+    return (
+        live is not None
+        and live.pid == os.getpid()
+        and live.host == owner._this_host()
+        and live.process_started_at == owner._PROCESS_STARTED_AT
+    )
+
+
 def write_active_local_forwards(active: dict[str, dict[int, int]]) -> None:
+    """Publish this Owner's active local forwards -- only while it is still the
+    live Owner. Serialized with the beacon under the Owner lock, so a superseded
+    Owner finishing an in-flight reconcile can't replace its successor's file."""
     try:
         from . import connection_owner as owner
 
         ensure_runtime_dir()
-        payload = {
-            "pid": os.getpid(),
-            "host": owner._this_host(),
-            "process_started_at": owner._PROCESS_STARTED_AT,
-            "heartbeat_at": time.time(),
-            "local_forwards": {
-                cs: {str(int(host)): int(venue) for host, venue in forwards.items()}
-                for cs, forwards in active.items()
-            },
-        }
-        tmp = ACTIVE_LOCAL_FORWARDS_FILE.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(payload), encoding="utf-8")
-        os.replace(tmp, ACTIVE_LOCAL_FORWARDS_FILE)
+        with owner._owner_lock():
+            if not _this_process_is_live_owner(owner):
+                return
+            payload = {
+                "pid": os.getpid(),
+                "host": owner._this_host(),
+                "process_started_at": owner._PROCESS_STARTED_AT,
+                "heartbeat_at": time.time(),
+                "local_forwards": {
+                    cs: {str(int(host)): int(venue) for host, venue in forwards.items()}
+                    for cs, forwards in active.items()
+                },
+            }
+            tmp = ACTIVE_LOCAL_FORWARDS_FILE.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(payload), encoding="utf-8")
+            os.replace(tmp, ACTIVE_LOCAL_FORWARDS_FILE)
     except Exception:
         pass
 
@@ -176,7 +193,22 @@ def read_active_local_forwards(*, now: float | None = None) -> dict[str, dict[in
 
 
 def clear_active_local_forwards() -> None:
+    """Remove the file on shutdown -- only if it is still this Owner's own, so a
+    retiring Owner never deletes its successor's."""
     try:
-        ACTIVE_LOCAL_FORWARDS_FILE.unlink(missing_ok=True)
+        from . import connection_owner as owner
+
+        with owner._owner_lock():
+            try:
+                raw = json.loads(ACTIVE_LOCAL_FORWARDS_FILE.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return
+            ours = (
+                raw.get("pid") == os.getpid()
+                and raw.get("host") == owner._this_host()
+                and raw.get("process_started_at") == owner._PROCESS_STARTED_AT
+            )
+            if ours:
+                ACTIVE_LOCAL_FORWARDS_FILE.unlink(missing_ok=True)
     except Exception:
         pass

@@ -669,16 +669,10 @@ def cmd_attached(args: argparse.Namespace) -> int:
         )
         if attached_hold_id:
             _update_keeper_hold_pid(args.target, attached_hold_id, proc.pid)
-        try:
-            return int(proc.wait())
-        finally:
-            if attached_hold_id:
-                stop_keeper(
-                    args.target,
-                    hold_id=attached_hold_id,
-                    probe=lambda mux: _probe_hold(ssh_config, mux),
-                )
+        return int(proc.wait())
 
+    # The hold is released once, whatever ends the attach: a failed reservation
+    # before ``connect`` runs, a failed ``Popen``, or the session exiting.
     try:
         return run_venue_copilot(
             plan["identity"],
@@ -696,6 +690,13 @@ def cmd_attached(args: argparse.Namespace) -> int:
     except VenueCopilotError as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)
         return 1
+    finally:
+        if attached_hold_id:
+            stop_keeper(
+                args.target,
+                hold_id=attached_hold_id,
+                probe=lambda mux: _probe_hold(ssh_config, mux),
+            )
 
 
 def _mux_exists(ssh_config: Any, mux: str) -> bool | None:

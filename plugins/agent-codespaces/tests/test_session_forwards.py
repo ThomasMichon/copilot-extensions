@@ -454,6 +454,21 @@ def test_active_local_forward_beacon_requires_live_matching_owner(store):
     assert olf.read_active_local_forwards() == {}
 
 
+def test_a_superseded_owner_never_publishes_or_clears_the_live_owners_file(store, monkeypatch):
+    owner._write_liveness(15.0)
+    olf.write_active_local_forwards({"cs-1": {49152: 3000}})
+    successor = json.loads(olf.ACTIVE_LOCAL_FORWARDS_FILE.read_text(encoding="utf-8"))
+    successor["pid"] = successor["pid"] + 1
+    olf.ACTIVE_LOCAL_FORWARDS_FILE.write_text(json.dumps(successor), encoding="utf-8")
+    # The beacon now names another process: this one has been superseded.
+    monkeypatch.setattr(owner, "_PROCESS_STARTED_AT", owner._PROCESS_STARTED_AT - 1.0)
+
+    olf.write_active_local_forwards({"cs-1": {50000: 3000}})
+    olf.clear_active_local_forwards()
+
+    assert json.loads(olf.ACTIVE_LOCAL_FORWARDS_FILE.read_text(encoding="utf-8")) == successor
+
+
 def test_active_local_forward_beacon_uses_owner_liveness_threshold(store):
     owner._write_liveness(300.0)
     olf.write_active_local_forwards({"cs-1": {49152: 3000}})
