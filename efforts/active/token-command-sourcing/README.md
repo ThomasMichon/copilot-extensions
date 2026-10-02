@@ -16,10 +16,10 @@
 - **Umbrella issue:** _to file once this effort's plan clears review_
 - **Sub-issues:** _TBD, one per Plan phase_
 - **Hybrid split:** this is the canonical, generalized effort. A private
-  facility-specific companion (vault wiring, docs, deployment env files) lives
-  in `aperture-labs` as `facility-token-command-adoption` (umbrella
-  [aperture-labs #7863](https://gitea.michon.ski/tmichon/aperture-labs/issues/7863))
-  and links back here; it does not duplicate this plan.
+  downstream adoption effort tracks facility-specific deployment wiring
+  (Vault-sourced commands, docs, deployment env files) once this lands; it is
+  not linked here per this repo's public-artifact conventions, and does not
+  duplicate this plan.
 
 ## Guiding Intent
 
@@ -59,9 +59,9 @@ lib is actually deployable, not just importable in a dev checkout.
 
 ## Context
 
-Surveyed during the `lambda-core-wsl-20260928-122423-8918` aperture-labs
-session (durable fix for the self-reintroducing agent-bridge packaging bug;
-this effort was carved out as a follow-up request, not part of that fix).
+Surveyed during a private downstream adopter's session (a durable fix for a
+self-reintroducing packaging bug in `agent-bridge`; this effort was carved out
+as a follow-up request, not part of that fix).
 
 **Operator-managed credential tokens found reading a plain env var with no
 `_COMMAND` alternative:**
@@ -116,15 +116,16 @@ actually deployable.
 
 ## Request
 
-Operator (verbatim): "For the control token, we need to make sure all
-agent-* services which need tokens support a user- or repo-configurable
-'command' slot, for a shell/pwsh/python command that will pipe it a token.
-For aperture-labs, we'll prefer sourcing from Vault." Follow-up, clarifying
-the underlying goal: "just wanted to avoid putting tokens in ENV. Prefer
-on-demand sourcing from contained locations." Scope decisions confirmed:
-candidate list (agent-dispatch/agent-mcp/agent-vault) accepted as proposed;
-shared-lib extraction preferred over per-plugin duplication; track as a
-formal effort.
+Operator (verbatim, private repo name redacted per this repo's public-artifact
+conventions): "For the control token, we need to make sure all agent-*
+services which need tokens support a user- or repo-configurable 'command'
+slot, for a shell/pwsh/python command that will pipe it a token. For
+[our private deployment], we'll prefer sourcing from Vault." Follow-up,
+clarifying the underlying goal: "just wanted to avoid putting tokens in ENV.
+Prefer on-demand sourcing from contained locations." Scope decisions
+confirmed: candidate list (agent-dispatch/agent-mcp/agent-vault) accepted as
+proposed; shared-lib extraction preferred over per-plugin duplication; track
+as a formal effort.
 
 ## Plan
 
@@ -142,9 +143,20 @@ formal effort.
         command is tried first, falls back to the raw direct env value only
         if the command is unset or fails/returns empty. Mirrors
         `producer_capability()`'s existing precedence.
+- [ ] **Windows-safe command parsing** (flagged by review): the existing
+      agent-dispatch `_run_token_command()` parses with plain `shlex.split()`
+      (POSIX mode), which treats backslash as an escape character and mangles
+      an ordinary Windows path command like `C:\Tools\vault.exe read secret`
+      into `C:Toolsvault.exe read secret`. The shared primitive must parse
+      with `shlex.split(command, posix=(os.name != "nt"))` (or an equivalent
+      platform-aware argv parser) so Windows-style paths/quoting survive —
+      this is a genuine latent bug in the code being extracted, not something
+      to carry forward unfixed. Add explicit Windows-path parsing test cases
+      (not just POSIX ones) to Phase 1's unit tests.
 - [ ] Unit tests for the new lib covering both resolvers (direct value,
       command fetch, neither set, command failure, command producing empty
-      output) plus the low-level primitive directly.
+      output) plus the low-level primitive directly (POSIX and Windows-style
+      command strings).
 
 ### Phase 2 — Migrate agent-dispatch onto the shared lib
 - [ ] Replace `agent-dispatch`'s own `resolve_control_token()` with a thin
@@ -185,9 +197,24 @@ formal effort.
 - [ ] Tests mirroring agent-dispatch's existing coverage shape.
 
 ### Phase 5 — Expand scope to the two review-flagged gaps
-- [ ] `agent-dispatch`: add `AGENT_DISPATCH_TOKEN_COMMAND` via
-      `resolve_direct_first()`, consumed by `client_token()`
-      (`config.py:533-535`).
+- [ ] `agent-dispatch`: `AGENT_DISPATCH_TOKEN` is read directly from
+      `os.environ` in **six separate call sites**, not just `client_token()`
+      (flagged by review) — `config.py:231`, `config.py:535`
+      (`client_token()` itself), `board_cli.py:342,368,549,739` (four
+      separate board requests), and `producers/webhook.py:167` (the webhook
+      producer, including coordinator startup). A `_COMMAND` slot added only
+      to `client_token()` would leave the other five seams silently ignoring
+      it. **First** consolidate every direct
+      `os.environ.get("AGENT_DISPATCH_TOKEN")` read to call `client_token()`
+      instead (a mechanical, behavior-preserving refactor — test each call
+      site still gets the same value it did before), **then** add
+      `AGENT_DISPATCH_TOKEN_COMMAND` support to `client_token()` via
+      `resolve_direct_first()` so every consumer benefits automatically.
+      `no_cli_prompts.py:92` and `execution_cli.py:113,121` only reference or
+      forward the env var name in prompts/subprocess env setup, not an
+      independent read of the token's value — confirm during this phase
+      whether either needs its own update or is already covered once
+      `client_token()` is the single source.
 - [ ] `agent-index`: add `AGENT_INDEX_ADO_TOKEN_COMMAND` via
       `resolve_direct_first()`, consumed by the Azure DevOps source
       (`azure_devops.py:62-66`). Confirm whether `agent-index`'s other
@@ -208,14 +235,17 @@ formal effort.
 ## Validation Plan
 
 - [ ] New shared-lib unit tests (Phase 1) pass via the bounded test runner,
-      covering both `resolve_direct_first()` and `resolve_command_first()`.
+      covering both `resolve_direct_first()` and `resolve_command_first()`
+      **and both POSIX and Windows-style command strings** (the shlex
+      Windows-path fix).
 - [ ] agent-dispatch's full existing test suite passes unmodified in intent
       after the Phase 2 migration — proves the refactor preserves current
       behavior exactly, **including `producer_capability()`'s command-first
       precedence** (the highest-risk migration step).
-- [ ] New agent-mcp, agent-vault, agent-dispatch (`AGENT_DISPATCH_TOKEN`), and
-      agent-index tests (Phases 3-5) pass, each proving: direct env wins (or
-      loses, per the correct precedence for that call site) when both are
+- [ ] New agent-mcp, agent-vault, agent-dispatch (`AGENT_DISPATCH_TOKEN` —
+      covering all six consolidated call sites, not just `client_token()`),
+      and agent-index tests (Phases 3-5) pass, each proving: direct env wins
+      (or loses, per the correct precedence for that call site) when both are
       set; command fetch works when only `_COMMAND` is set; absence of both
       resolves to `None`/not-configured, matching each plugin's existing
       behavior for "no token."
@@ -236,9 +266,10 @@ conventions to mirror) to be elaborated once this plan clears review._
 
 ### 2026-10-02 — Kickoff
 - Effort created from an operator request surfaced immediately after landing
-  the durable agent-bridge packaging fix (PR #4908) in the same aperture-labs
-  session. Candidate token inventory, shared-lib approach, and effort
-  tracking confirmed with the operator before any implementation started.
+  a durable `agent-bridge` packaging fix (PR #4908) in the same private
+  downstream session. Candidate token inventory, shared-lib approach, and
+  effort tracking confirmed with the operator before any implementation
+  started.
 
 ### 2026-10-02 — Review round 1 (PR #4910)
 - Copilot review flagged: (1) a High-severity scope gap —
@@ -253,3 +284,19 @@ conventions to mirror) to be elaborated once this plan clears review._
   `producer_capability()` migration; added explicit packaging/installer
   sub-tasks to Phases 2-5; added `Vision`/`## Coordination`; added Phase 5
   covering both previously-missed tokens.
+
+### 2026-10-02 — Review round 2 (PR #4910)
+- Copilot review flagged: (1) a Medium cross-platform gap — the proposed
+  shared primitive would inherit agent-dispatch's existing `shlex.split()`
+  bug (POSIX mode mangles Windows backslash paths); (2) a Medium scope gap —
+  Phase 5's `AGENT_DISPATCH_TOKEN` migration only named `client_token()`,
+  missing five other direct `os.environ.get("AGENT_DISPATCH_TOKEN")` reads
+  (`config.py:231`, `board_cli.py` x4, `producers/webhook.py:167`); (3) a Low
+  public-artifact violation — this file named a private downstream repo,
+  issue number, and hostname. All three addressed: Phase 1 now specifies
+  `shlex.split(command, posix=(os.name != "nt"))` with explicit
+  Windows-path test coverage; Phase 5 now consolidates all six
+  `AGENT_DISPATCH_TOKEN` read sites onto `client_token()` first, then adds
+  `_COMMAND` support there; every private repo/issue/hostname reference
+  removed or redacted (hybrid-split note, Context survey line, and the
+  Request's verbatim operator quote).
