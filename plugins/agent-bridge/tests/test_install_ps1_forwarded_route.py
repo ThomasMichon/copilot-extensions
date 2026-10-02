@@ -165,12 +165,12 @@ def test_update_start_accepts_the_route_its_own_stop_cleared(
     result = _run_harness(
         tmp_path,
         ["Test-UpdateLifecycleStillTargetsPredecessor", "Invoke-UpdateStart",
-         "Invoke-UpdateDrainStop"],
+         "Get-SignatureBaseUrl", "Invoke-UpdateDrainStop"],
         f"""
 function Test-ActiveIsForward {{ return ${str(forward).lower()} }}
 function Get-ActiveSignature {{ return '{current}' }}
 function Invoke-Start {{ Write-Host 'STARTED' }}
-function Invoke-Drain {{ param($TimeoutSec) }}
+function Invoke-Drain {{ param($TimeoutSec, $BaseUrl) }}
 function Invoke-Stop {{ Write-Host 'STOPPED' }}
 $null = Invoke-UpdateStart -Signature 'sig'
 $null = Invoke-UpdateDrainStop -Signature 'sig'
@@ -179,3 +179,31 @@ $null = Invoke-UpdateDrainStop -Signature 'sig'
     assert ("STARTED" in result.stdout) is starts
     # Drain/stop stays strict: it never stops anything but the pinned route.
     assert ("STOPPED" in result.stdout) is (current == "sig" and not forward)
+
+
+@pytest.mark.parametrize(
+    ("signature", "url"),
+    [
+        ("127.0.0.1|41000|123|7", "http://127.0.0.1:41000"),
+        ("0.0.0.0|41000||", "http://127.0.0.1:41000"),
+        ("::|41000||", "http://[::1]:41000"),
+        ("", "http://127.0.0.1:9280"),  # no route: the fixed-port daemon
+    ],
+)
+def test_update_drain_is_pinned_to_the_validated_predecessor(
+    tmp_path: Path, signature: str, url: str,
+) -> None:
+    """A route rewritten (e.g. to a forward) after validation can't redirect the
+    drain: it targets the predecessor's own endpoint via AGENT_BRIDGE_BASE_URL."""
+    (tmp_path / "agent-bridge").mkdir()
+    result = _run_harness(
+        tmp_path,
+        ["Get-SignatureBaseUrl", "Invoke-UpdateDrainStop"],
+        f"""
+function Test-UpdateLifecycleStillTargetsPredecessor {{ param($Signature) return $true }}
+function Invoke-Drain {{ param($TimeoutSec, $BaseUrl) Write-Host "DRAIN=$BaseUrl" }}
+function Invoke-Stop {{ }}
+$null = Invoke-UpdateDrainStop -Signature '{signature}'
+""",
+    )
+    assert f"DRAIN={url}" in result.stdout

@@ -751,12 +751,38 @@ _update_lifecycle_still_targets_predecessor() {
     return 0
 }
 
+_pinned_base_url() {
+    # The validated predecessor's own endpoint (its _active_signature JSON; empty =
+    # the fixed $PORT daemon), so the drain targets exactly it and never follows a
+    # route rewritten after validation -- e.g. to a venue forward.
+    local pinned="${1:-}" py=""
+    if [[ -z "$pinned" ]]; then
+        [[ -n "${PORT:-}" ]] || return 1
+        echo "http://127.0.0.1:${PORT}"
+        return 0
+    fi
+    py="${VENV_DIR:-}/bin/python"
+    [[ -x "$py" ]] || py="$(command -v python3 || command -v python || true)"
+    [[ -n "$py" ]] || return 1
+    "$py" -c 'import json, sys
+a = json.loads(sys.argv[1])
+port = int(a["port"])
+bind = a.get("bind") or "127.0.0.1"
+bind = {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(bind, bind)
+print(("http://[%s]:%d" if ":" in bind else "http://%s:%d") % (bind, port))' "$pinned" 2>/dev/null
+}
+
 _update_lifecycle_drain_stop() {
-    local pinned="${1:-}" timeout="${2:-120}"
+    local pinned="${1:-}" timeout="${2:-120}" base=""
     if ! _update_lifecycle_still_targets_predecessor "$pinned"; then
         return 1
     fi
-    _drain_service "$timeout"
+    if base="$(_pinned_base_url "$pinned")" && [[ -n "$base" ]]; then
+        # AGENT_BRIDGE_BASE_URL overrides the routing table for the drain client.
+        ( export AGENT_BRIDGE_BASE_URL="$base"; _drain_service "$timeout" )
+    else
+        _warn "Cannot pin the drain to the validated bridge -- skipping drain"
+    fi
     do_stop
 }
 

@@ -1281,12 +1281,30 @@ function Test-UpdateLifecycleStillTargetsPredecessor {
     return $true
 }
 
+function Get-SignatureBaseUrl {
+    # The validated predecessor's own endpoint (signature "bind|port|pid|generation";
+    # empty = the fixed $Port daemon), so the drain targets exactly it and never
+    # follows a route rewritten after validation -- e.g. to a venue forward.
+    param([string]$Signature)
+    $bind = '127.0.0.1'
+    $p = $Port
+    $parts = if ($Signature) { $Signature.Split('|') } else { @() }
+    $parsed = 0
+    if ($parts.Count -ge 2 -and [int]::TryParse($parts[1], [ref]$parsed) -and $parsed -gt 0) {
+        $p = $parsed
+        if ($parts[0] -eq '::') { $bind = '::1' }
+        elseif ($parts[0] -and $parts[0] -ne '0.0.0.0') { $bind = $parts[0] }
+    }
+    if ($bind.Contains(':')) { return "http://[$bind]:$p" }
+    return "http://${bind}:$p"
+}
+
 function Invoke-UpdateDrainStop {
     param([string]$Signature, [int]$TimeoutSec = 120)
     if (-not (Test-UpdateLifecycleStillTargetsPredecessor -Signature $Signature)) {
         return $false
     }
-    Invoke-Drain -TimeoutSec $TimeoutSec
+    Invoke-Drain -TimeoutSec $TimeoutSec -BaseUrl (Get-SignatureBaseUrl -Signature $Signature)
     Invoke-Stop
     return $true
 }
@@ -1381,15 +1399,21 @@ function Invoke-Drain {
     # Windows pre-stop hook -- Phase 1 zero-downtime). Bounded + forced so an
     # update never blocks indefinitely. Non-fatal; the Stop that follows is the
     # backstop against the Job Object force-kill on daemon exit.
-    param([int]$TimeoutSec = 120)
+    # -BaseUrl pins the drain to that endpoint (AGENT_BRIDGE_BASE_URL overrides the
+    # routing table) instead of whatever active.json names by the time it runs.
+    param([int]$TimeoutSec = 120, [string]$BaseUrl = '')
     $bridgeExe = Join-Path $VenvDir 'Scripts\agent-bridge.exe'
     if (-not (Test-Path $bridgeExe)) { return }
     Write-Step "Draining in-flight sessions (up to ${TimeoutSec}s)..."
+    $prevBaseUrl = $env:AGENT_BRIDGE_BASE_URL
     try {
+        if ($BaseUrl) { $env:AGENT_BRIDGE_BASE_URL = $BaseUrl }
         & $bridgeExe drain --timeout $TimeoutSec --force 2>&1 | Out-Null
         Write-Ok 'Drain window complete'
     } catch {
         Write-Warn 'Drain reported busy sessions -- proceeding with swap'
+    } finally {
+        $env:AGENT_BRIDGE_BASE_URL = $prevBaseUrl
     }
 }
 

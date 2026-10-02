@@ -211,6 +211,23 @@ def test_service_stop_over_a_forward_still_stops_a_local_fixed_port_daemon(tmp_p
     assert killed == [7777]
 
 
+def test_service_stop_over_a_same_port_forward_still_stops_the_stray_daemon(tmp_path, monkeypatch):
+    """The forward was published on the local daemon's own configured port;
+    the stray daemon (no pid file) still holds that port's singleton lock."""
+    _forward_down(tmp_path, monkeypatch)
+    killed = []
+    _stop_setup(monkeypatch, killed)
+    same = m._service_port()  # the forwarded port
+    monkeypatch.setattr(m, "_configured_port", lambda: same)
+    alive = {7777}
+    monkeypatch.setattr(m, "_pid_from_lock",
+                        lambda port: 7777 if port == same and 7777 in alive else None)
+    monkeypatch.setattr(m, "_pid_is_agent_bridge", lambda pid, *_a: pid in alive)
+    monkeypatch.setattr(m, "_kill_pid", lambda pid: (killed.append(pid), alive.discard(pid)))
+    m._service_stop()
+    assert killed == [7777]  # never 4242, the ssh session holding the forward
+
+
 def test_service_stop_kills_a_port_listener_only_if_it_is_a_bridge(tmp_path, monkeypatch):
     _route(tmp_path, monkeypatch, {"bind": "127.0.0.1", "port": 39881, "generation": 1})
     killed = []
@@ -466,3 +483,32 @@ def test_install_sh_update_start_accepts_the_route_its_own_stop_cleared(current,
     out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout
     assert ("STARTED" in out) is starts
     assert ("STOPPED" in out) is stops
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a POSIX bash environment is needed")
+@pytest.mark.parametrize(
+    ("signature", "url"),
+    [
+        ('{"bind":"127.0.0.1","generation":7,"pid":123,"port":41000}', "http://127.0.0.1:41000"),
+        ('{"bind":"0.0.0.0","generation":null,"pid":null,"port":41000}', "http://127.0.0.1:41000"),
+        ('{"bind":"::","generation":null,"pid":null,"port":41000}', "http://[::1]:41000"),
+        ("", "http://127.0.0.1:9280"),  # no route: the fixed-port daemon
+    ],
+)
+def test_install_sh_update_drain_is_pinned_to_the_validated_predecessor(signature, url):
+    """A route rewritten (e.g. to a forward) after validation can't redirect the
+    drain: it targets the predecessor's own endpoint via AGENT_BRIDGE_BASE_URL."""
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    helpers = text.split("_pinned_base_url() {", 1)[1].split("\n}\n\n_update_lifecycle_start", 1)[0]
+    script = (
+        "PORT=9280\n"
+        "_update_lifecycle_still_targets_predecessor() { return 0; }\n"
+        '_drain_service() { echo "DRAIN=${AGENT_BRIDGE_BASE_URL:-}"; }\n'
+        "do_stop() { :; }\n_warn() { echo \"WARN $*\"; }\n"
+        "_pinned_base_url() {" + helpers + "\n}\n"
+        f"_update_lifecycle_drain_stop '{signature}'\n"
+        'echo "AFTER=${AGENT_BRIDGE_BASE_URL:-unset}"\n'
+    )
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout
+    assert f"DRAIN={url}" in out
+    assert "AFTER=unset" in out  # pinned only for the drain itself

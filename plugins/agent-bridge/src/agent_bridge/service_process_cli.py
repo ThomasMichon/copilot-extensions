@@ -695,8 +695,11 @@ def _service_stop() -> None:
 
     port = core._service_port()
     # A local daemon on its configured port (no pid file) may outlive a route
-    # rewritten to a forward: its lock holder is still a victim, identity-checked.
-    fixed_ports = {0} | ({core._configured_port()} - {port})
+    # rewritten to a forward -- even onto that same port, where it then blocks
+    # the forward's bind. Its lock holder is still a victim: the ssh process
+    # carrying a forward never holds this lock, and `_pid_from_lock` only
+    # returns a live agent-bridge holder.
+    fixed_ports = {0, core._configured_port()}
     victims = {core._read_pid_file(), *(core._pid_from_lock(p) for p in fixed_ports)}
     if not core._active_endpoint_is_forward():
         # A forwarded port is held by the ssh session carrying the forward.
