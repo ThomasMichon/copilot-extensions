@@ -235,31 +235,38 @@ jobs:
         run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
       - name: Coverage baseline - ${{ matrix.plugin }} (pilot plugins only)
         # Phase 1 pilot (efforts/active/coverage-guided-ci): coverage
-        # collection is wired for one plugin at a time, starting with
-        # agent-ssh (smallest in this matrix, 16 test files, but still a
-        # real dependency-having plugin -- proves the `project_dir`
+        # collection is wired for a growing subset of this matrix, starting
+        # with agent-ssh (smallest, 16 test files, but still a real
+        # dependency-having plugin -- proves the `project_dir`
         # editable-install path, not just a dependency-free script
-        # plugin). Independent of, and in addition to, the trusted
-        # `run-plugin-tests.py` run above -- this step's own failure never
-        # fails this job (see `continue-on-error` below): a baseline is
-        # optional evidence relative to `run-plugin-tests.py`'s own real
-        # test outcome, but the `promote` job's own "Verify enrolled
-        # coverage baselines were actually collected" step makes an
-        # ENROLLED plugin's baseline a hard requirement regardless -- keep
-        # this `if:` condition's plugin list in exact sync with that step's
-        # own list. Expand both lists together as later pilots prove out.
-        if: matrix.plugin == 'agent-ssh'
+        # plugin), then agent-codespaces and agent-containers. Independent
+        # of, and in addition to, the trusted `run-plugin-tests.py` run
+        # above -- this step's own failure never fails this job (see
+        # `continue-on-error` below): a baseline is optional evidence
+        # relative to `run-plugin-tests.py`'s own real test outcome, but
+        # the `promote` job's own "Verify enrolled coverage baselines were
+        # actually collected" step makes an ENROLLED plugin's baseline a
+        # hard requirement regardless -- keep this `if:` condition's
+        # plugin list in exact sync with that step's own list. Expand both
+        # lists together as later pilots prove out. `--cov-source` is
+        # derived from `matrix.plugin` (every plugin's own `src/` package
+        # name is its plugin name with hyphens swapped for underscores --
+        # confirmed for every plugin enrolled so far) rather than
+        # hardcoded per plugin, so enrolling the next one only ever touches
+        # this `if:` list and the `promote` job's matching one below.
+        if: contains(fromJSON('["agent-ssh","agent-codespaces","agent-containers"]'), matrix.plugin)
         continue-on-error: true
         run: |
+          plugin="${{ matrix.plugin }}"
           python tools/coverage_guided_selection/baseline.py \
-            "plugins/${{ matrix.plugin }}/tests" \
-            --cov-source "plugins/${{ matrix.plugin }}/src/agent_ssh" \
-            --plugin "${{ matrix.plugin }}" \
-            --project-dir "plugins/${{ matrix.plugin }}" \
+            "plugins/${plugin}/tests" \
+            --cov-source "plugins/${plugin}/src/${plugin//-/_}" \
+            --plugin "${plugin}" \
+            --project-dir "plugins/${plugin}" \
             --measured-commit "${{ needs.gate.outputs.sha }}" \
-            --out "${{ matrix.plugin }}.json"
+            --out "${plugin}.json"
       - name: Upload coverage baseline - ${{ matrix.plugin }}
-        if: matrix.plugin == 'agent-ssh'
+        if: contains(fromJSON('["agent-ssh","agent-codespaces","agent-containers"]'), matrix.plugin)
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
@@ -641,7 +648,7 @@ jobs:
         # that's the single other place a plugin gets "enrolled".
         run: |
           missing=()
-          for plugin in agent-ssh; do
+          for plugin in agent-ssh agent-codespaces agent-containers; do
             if [ ! -f "coverage-baselines/${plugin}.json" ]; then
               missing+=("$plugin")
             fi

@@ -67,7 +67,14 @@ ALWAYS_SANDBOX_ENV_NAMES = (
     "XDG_RUNTIME_DIR",
 )
 
-_ALWAYS_SCRUB_NAMES = {
+# Public (no leading underscore): also reused by
+# `coverage_guided_selection/baseline.py` so a coverage-baseline collection
+# run scrubs the exact same facility/host env vars `isolated_environment`
+# already scrubs for the trusted `run-plugin-tests.py` path -- without this,
+# a baseline collected on a machine with any of these ambient (e.g.
+# `AGENT_RT_ROOT` on a facility worktree host) can diverge from, and fail
+# tests that, the real validation gate's own containment would pass clean.
+ALWAYS_SCRUB_NAMES = {
     "AGENT_RT_ROOT",
     "AGENT_WORKTREES_CONFIG_ROOT",
     "AGENT_WORKTREES_OWNER_REF",
@@ -76,6 +83,7 @@ _ALWAYS_SCRUB_NAMES = {
     "COPILOT_CUSTOM_INSTRUCTIONS_DIRS",
     "COPILOT_PLUGIN_ROOT",
 }
+_ALWAYS_SCRUB_NAMES = ALWAYS_SCRUB_NAMES
 
 _CREDENTIAL_NAMES = {
     "GH_TOKEN",

@@ -319,6 +319,7 @@ def collect_baseline(
 
 def _subprocess_env(cov_data_file: Path) -> dict:
     import os
+    import sys
 
     env = dict(os.environ)
     # Never let a cached dev-venv's own interpreter/env leak into the
@@ -327,6 +328,19 @@ def _subprocess_env(cov_data_file: Path) -> dict:
     # environment, not the selector's).
     env.pop("UV_PROJECT_ENVIRONMENT", None)
     env.pop("VIRTUAL_ENV", None)
+    # Scrub the same facility/host env vars `run-plugin-tests.py`'s
+    # `isolated_environment` always scrubs -- confirmed live: on a machine
+    # with `AGENT_RT_ROOT` set ambiently (a facility worktree host),
+    # `agent-containers`' own `provider_ssh.py` reads it ahead of any
+    # monkeypatched `RUNTIME_DIR`, producing a baseline-collection-only test
+    # failure the real validation gate's own containment never sees. A
+    # baseline is only ever earned from the same conditions the gate itself
+    # runs under (see `collect_baseline`'s own docstring).
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from plugin_test_containment import ALWAYS_SCRUB_NAMES
+
+    for var in ALWAYS_SCRUB_NAMES:
+        env.pop(var, None)
     # Never let an ambient pytest-selection override make a partial
     # collection look like a complete, authoritative baseline run.
     for var in _AMBIENT_PYTEST_SELECTION_ENV_VARS:
