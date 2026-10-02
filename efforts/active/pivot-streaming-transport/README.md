@@ -298,6 +298,35 @@ this phase) is considered.)_
       unchanged, then open `DispatchClient.stream_events()` (`GET /events`)
       and translate each lifecycle event into `delta`/`removed` frames
       instead of re-polling on a timer.
+  - [ ] **Scope to the direct (local) path only** (round-1 review finding):
+        `_fetch_rows()` already branches to `_fetch_rows_delegated()` for a
+        cross-machine `--machine`. The local coordinator's `/events` stream
+        only describes *this* machine's tasks, so relaying it for a
+        delegated board would silently mix in the wrong machine's events (or
+        none at all for the real target). The relay path applies **only**
+        when `_fetch_rows` resolves to `_fetch_rows_direct()`; a delegated
+        board keeps today's poll-and-diff loop unmodified, full stop — not a
+        gap to close later, a hard scope boundary for this phase. (Relaying
+        a delegated board would require the *remote* host's own coordinator
+        to run the `--subscribe` relay and forward its NDJSON through the
+        inbox — a materially different mechanism, not an extension of this
+        one — and is explicitly out of scope here.)
+  - [ ] **Keep the stream alive through idle quiet periods** (round-1 review
+        finding): `DispatchClient` configures a single 10s timeout across
+        connect/read/write/pool (`client.py:54`), and `/events` emits no
+        periodic keepalive (`coordinator_status.py:83-89`) — a coordinator
+        with no task activity for >10s would make `stream_events()`'s
+        `iter_lines()` raise on read-timeout well before any real event
+        occurs, permanently tripping the relay into its poll fallback on
+        every quiet board. The relay's own stream call must use a read
+        timeout of `None` (unbounded) for this one long-lived GET — httpx
+        supports a per-call timeout override
+        (`client.stream("GET", "/events", timeout=httpx.Timeout(10.0,
+        read=None))`) without changing the 10s default for every other
+        short request this client makes. (A server-side SSE heartbeat is a
+        reasonable complementary hardening but is not required to make this
+        design correct — an unbounded client-side read timeout is sufficient
+        on its own and needs no coordinator change.)
   - [ ] Filter to events carrying a `task` payload (ignore `spawn.*`,
         `routing.*`, and other non-task bus traffic the same `/events` feed
         interleaves); re-derive each row through the **same transform**
@@ -308,6 +337,18 @@ this phase) is considered.)_
   - [ ] A task whose lifecycle event moves it outside the board's current
         filter window (aged out of `--recent-mins`, no longer matching
         `--label`, past `--limit`) emits `removed`, not `delta`.
+  - [ ] **Activity-only mutations need their own event** (round-1 review
+        finding): `POST /tasks/{id}/activity` (`coordinator_tasks.py:781-788`)
+        calls `_guard()` with no `event_type`, so `queue.set_activity()`
+        publishes nothing to the bus today — yet `activity`/
+        `activity_updated_at` drive the board's `wt_live` liveness flag and
+        subtitle, currently refreshed on the existing 2s poll. Relaying only
+        today's lifecycle events would silently regress those fields to the
+        30-60s reconcile cadence. Add a `task.activity_updated` event
+        (`_guard(..., "task.activity_updated")`, same pattern every other
+        mutating endpoint already uses) so activity updates ride the fast
+        relay path too, rather than special-casing a slower cadence for
+        just this one field.
   - [ ] **Reconnect-gap safety net (non-negotiable, not an optimization):**
         `EventBus.subscribe()` (`events.py`) is a live, in-memory, non-replay
         broadcast — an event published during a dropped/reconnecting SSE
@@ -336,6 +377,25 @@ this phase) is considered.)_
       scan instead of paying for N. The CLI's `--subscribe` loop keeps its
       current shape (poll on `--interval`, diff, emit) — only what each tick
       costs changes.
+  - [ ] **Preserve the initial-scan recovery contract** (round-1 review
+        finding): `_fetch_complete_initial_rows()` relies on each retried
+        `GET /api/v1/agents` call actually re-scanning so an incomplete
+        namespace has a real chance to resolve on a later attempt — a pure
+        O(1) cache read would instead return the *same* stale partial
+        snapshot on every retry until the background timer happens to fire,
+        letting a new subscriber publish an incomplete roster as
+        authoritative long before a real rescan ever occurs. The cache
+        therefore retains **last-known-good per namespace** (an entry whose
+        most recent resolve failed keeps serving its last successful
+        result, still correctly flagged in that tick's
+        `incomplete_namespaces`), and the endpoint accepts an explicit
+        force-refresh signal (e.g. a `force_refresh=true` query param) that
+        `_fetch_complete_initial_rows()`'s retry loop sets, triggering an
+        immediate out-of-band re-scan of just the still-incomplete
+        namespace(s) before responding — not a cache read. Every other
+        caller (the CLI's ordinary `--subscribe` poll tick) keeps the cheap
+        unconditional cache read; only the bounded initial-scan retry path
+        pays for a forced rescan, exactly the callers that need one.
 - [ ] **3c — agent-bridge roster-change SSE (deferred; do not start until 3b
       is shipped and measured insufficient):** add a genuine
       `GET /api/v1/agents/stream` daemon route that pushes `delta`/`removed`
@@ -880,3 +940,43 @@ No code changed in this session leg -- this is the design-review artifact
 itself (effort README revision), landed as its own reviewed PR per the gate's
 own wording ("must be reviewed before landing"), before any Phase 3
 implementation PR opens.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 1: four real gaps, all fixed
+Copilot's review on the design PR itself (the mechanism this phase's own gate
+calls for) found four genuine gaps the first draft missed -- all now folded
+into the 3a/3b plan above:
+
+- **High: delegated-machine boards would relay the wrong machine's events.**
+  `_run_stream()` also serves `--machine <peer>` boards via
+  `_fetch_rows_delegated()`; the local coordinator's `/events` only describes
+  *this* machine. Fixed by scoping the relay strictly to the
+  `_fetch_rows_direct()` case -- a delegated board keeps the unmodified
+  poll-and-diff loop, a hard boundary for this phase, not a follow-up gap.
+- **Medium: the relay would trip into its own fallback on every quiet
+  board.** `DispatchClient`'s single 10s timeout covers connect/read/write/
+  pool, and `/events` emits no heartbeat -- past 10s of coordinator quiet,
+  `stream_events()` would read-timeout and permanently downgrade to polling.
+  Fixed by requiring an unbounded read timeout specifically for this one
+  long-lived GET (an httpx per-call override), leaving the 10s default
+  untouched for every other short request the same client makes.
+- **Medium: activity-only updates would regress from a 2s to a 30-60s
+  cadence.** `POST /tasks/{id}/activity` publishes no bus event today
+  (`_guard()` called with no `event_type`), yet drives the board's `wt_live`
+  liveness flag and subtitle. Fixed by requiring a new `task.activity_updated`
+  event on that endpoint, the same `_guard(..., event_type)` pattern every
+  other mutating endpoint already uses -- keeps activity on the fast path
+  instead of carving out a slower-cadence exception for one field.
+- **Medium: an O(1) cache read would break the existing incomplete-roster
+  recovery contract.** `_fetch_complete_initial_rows()`'s bounded retry only
+  works today because each retried `GET /api/v1/agents` call is a real
+  re-scan; a pure cache read would return the same stale partial snapshot on
+  every retry until the background timer happened to fire, letting a new
+  subscriber publish an incomplete roster as authoritative. Fixed by
+  requiring the cache to retain last-known-good *per namespace* plus an
+  explicit `force_refresh` signal the retry loop sets to trigger an
+  immediate out-of-band re-scan of just the still-incomplete namespace(s) --
+  every other caller keeps the cheap unconditional cache read.
+
+All four replied-to inline with the concrete fix and the exact README lines
+revised, per this effort's established review-response convention (state the
+fix, don't just acknowledge).
