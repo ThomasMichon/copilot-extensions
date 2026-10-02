@@ -562,25 +562,34 @@ and the new sibling pattern doc,
       a PR missing the stamp label, touching a path outside the managed
       globs, or containing a non-regular-file diff shape is rejected by the
       bypass; and a routed conflict is proven to update the existing PR
-      without ever self-merging. **Scoped-closed 2026-10-02, not dropped:**
-      the conflict-routing and trusted-source-allowlist conjuncts are
-      proven in `test_projection_reflect.py` since both are implemented
-      directly in this repo's `bypass_decision()`. The remaining
-      stamp-label/diff-shape/disabled-plugin conjuncts are **not**
-      implemented here at all -- they exist only as policy documented in
-      the `setting-up-instruction-sync-worker` skill's own scaffolded
-      templates (`bypass-profile.md`/`scheduler-config.md`), which an
-      adopting repo renders into its *own* GitHub Actions workflow and
-      branch-protection config. Proving them would mean building new test
-      infrastructure this repo doesn't otherwise need: a synthetic
-      adopting-repo fixture plus some way to execute or interpret that
-      scaffolded CI logic (an actionlint-style check or a hand-rolled
-      condition interpreter) -- not a mechanical finish of existing code,
-      and disproportionate to what those templates actually are (reviewed,
-      human-readable scaffolding guidance, not executable code this repo
-      owns). Per the operator's explicit decision (this effort's second
-      scoped-closed item, alongside the Phase 2 recompute-verification one
-      above), this is accepted as a deliberate gap, not pursued further.
+      without ever self-merging. **Landed the disabled-plugin conjunct,
+      scope-closed the remaining two 2026-10-02:** the conflict-routing and
+      trusted-source-allowlist conjuncts were already proven in
+      `test_projection_reflect.py`. The **disabled-plugin conjunct is now
+      also proven**, directly in this repo --
+      `test_disabled_plugin_projection_is_never_touched_even_if_payload_changed`
+      in `tests/test_projection_sync_worker.py` -- since `run_sync_pass`
+      takes an explicit `sources` list (the same shape
+      `discover_enabled_sources`/`assemble_enabled_plugins` already filter
+      disabled entries out of before a caller ever supplies it), this
+      conjunct needed no adopting-repo scaffolding at all; an earlier draft
+      of this scope-close had incorrectly grouped it with the two
+      genuinely un-implemented conjuncts below, caught by PR #4905's own
+      Copilot review. Only the **stamp-label/diff-shape** conjuncts remain
+      scoped-closed: they exist only as policy documented in the
+      `setting-up-instruction-sync-worker` skill's own scaffolded templates
+      (`bypass-profile.md`/`scheduler-config.md`), which an adopting repo
+      renders into its *own* GitHub Actions workflow and branch-protection
+      config. Proving them would mean building new test infrastructure
+      this repo doesn't otherwise need: a synthetic adopting-repo fixture
+      plus some way to execute or interpret that scaffolded CI logic (an
+      actionlint-style check or a hand-rolled condition interpreter) -- not
+      a mechanical finish of existing code, and disproportionate to what
+      those templates actually are (reviewed, human-readable scaffolding
+      guidance, not executable code this repo owns). Per the operator's
+      explicit decision (this effort's second scoped-closed item, alongside
+      the Phase 2 recompute-verification one above), this narrower gap is
+      accepted as a deliberate, not pursued further.
 - [x] The setup skill refuses to scaffold the scheduler/bypass without the
       repo's explicit, committed opt-in signal present (a negative-proof
       test: no opt-in file present -> setup declines), **and** a live
@@ -643,6 +652,29 @@ and the new sibling pattern doc,
 _Pending._
 
 ## Journal
+
+### 2026-10-02 (cont.) -- PR #4905 review caught an over-broad scope-close; narrowed and fixed
+PR #4905's archive diff drew a real Copilot review finding: the scope-close
+rationale for Phase 2's bypass safety boundary had incorrectly grouped the
+**disabled-plugin** conjunct with the genuinely un-implemented stamp-label/
+diff-shape ones. It isn't scaffolding-only -- `run_sync_pass` takes an
+explicit `sources` list, and `scan_plugin_sources.assemble_enabled_plugins`
+already filters disabled entries out before a caller ever supplies it
+(`if not enabled[key]: continue`) -- so the conjunct is fully provable in
+this repo with no adopting-repo fixture. Added
+`test_disabled_plugin_projection_is_never_touched_even_if_payload_changed`
+in `tests/test_projection_sync_worker.py`: syncs a plugin, changes its
+template on disk (simulating a payload update after the plugin is
+disabled), re-runs `run_sync_pass` with that source omitted from `sources`
+entirely, and proves the checked-in destination is byte-identical to its
+last sync -- never regenerated with the changed-but-now-unreferenced
+payload. `tools/run-plugin-tests.py customizing-copilot`: passes. Narrowed
+the Validation Plan item's scope-close rationale to only the two conjuncts
+that are genuinely scaffolding-only (stamp-label, diff-shape); the
+disabled-plugin conjunct is now **landed**, not scope-closed. Also added a
+`dev` changefile for `customizing-copilot` (this is a real test addition,
+not a docs-only change) and corrected the PR description, which had
+inaccurately claimed no plugin payloads changed.
 
 ### 2026-10-02 -- Effort complete: Phase 7 PR merged, Phase 2's last gap scoped-closed, effort Done
 Phase 7 (PR #4898) went through four Copilot review rounds before merging to

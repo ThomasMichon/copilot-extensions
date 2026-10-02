@@ -1,5 +1,5 @@
 {
-  "comment": "Fix stale efforts/active/ambient-guidance-navigability path references after the effort's archive move",
+  "comment": "Fix stale efforts/active/ambient-guidance-navigability path references after the effort's archive move; add a disabled-plugin negative-proof test for Phase 2's bypass safety boundary (customizing-copilot)",
   "changes": [
     {
       "plugin": "customizing-copilot",
