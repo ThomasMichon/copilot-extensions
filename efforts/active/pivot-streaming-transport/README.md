@@ -298,7 +298,7 @@ this phase) is considered.)_
       unchanged, then open `DispatchClient.stream_events()` (`GET /events`)
       and translate each lifecycle event into `delta`/`removed` frames
       instead of re-polling on a timer.
-  - [ ] **Scope to the direct (local) path only** (round-1 review finding):
+  - [ ] **Scope to the direct (local) path only:**
         `_fetch_rows()` already branches to `_fetch_rows_delegated()` for a
         cross-machine `--machine`. The local coordinator's `/events` stream
         only describes *this* machine's tasks, so relaying it for a
@@ -311,8 +311,8 @@ this phase) is considered.)_
         to run the `--subscribe` relay and forward its NDJSON through the
         inbox — a materially different mechanism, not an extension of this
         one — and is explicitly out of scope here.)
-  - [ ] **Keep the stream alive through idle quiet periods** (round-1 review
-        finding): `DispatchClient` configures a single 10s timeout across
+  - [ ] **Keep the stream alive through idle quiet periods:**
+        `DispatchClient` configures a single 10s timeout across
         connect/read/write/pool (`client.py:54`), and `/events` emits no
         periodic keepalive (`coordinator_status.py:83-89`) — a coordinator
         with no task activity for >10s would make `stream_events()`'s
@@ -337,24 +337,30 @@ this phase) is considered.)_
   - [ ] A task whose lifecycle event moves it outside the board's current
         filter window (aged out of `--recent-mins`, no longer matching
         `--label`, past `--limit`) emits `removed`, not `delta`.
-  - [ ] **Every eventless mutation that drives a board-visible field needs an
-        event** (round-1 found `activity`; round-2 found a second one —
-        treat this as a general requirement, not a one-off patch):
-        `POST /tasks/{id}/activity` (`coordinator_tasks.py:781-788`) and
-        `POST /tasks/{id}/heartbeat` both call `_guard()` with no
-        `event_type`, so neither `queue.set_activity()` nor the heartbeat
-        handler publishes anything today — yet `activity`/
-        `activity_updated_at` drive `wt_live` and the subtitle, and the
-        heartbeat's `lease_expires_at`/`updated_at` drive row sort order
-        (`_build()`), all currently refreshed on the existing 2s poll.
-        Relaying only today's named lifecycle events would silently regress
-        every one of these fields to the 30-60s reconcile cadence. Add
-        `task.activity_updated` and `task.heartbeat` events (same
-        `_guard(..., event_type)` pattern every other mutating endpoint
-        already uses) so both ride the fast relay path — audit every other
-        `_guard()` call site in `coordinator_tasks.py` for the same gap
-        before considering 3a's event coverage complete, rather than fixing
-        findings one at a time as review happens to surface them.
+  - [ ] **Every board-visible mutation needs an event, across every mutation
+        entry point, not only `coordinator_tasks.py`'s `_guard()` calls:**
+        `POST /tasks/{id}/activity` and `POST /tasks/{id}/heartbeat` both
+        call `_guard()` with no `event_type`, so neither publishes anything
+        today — yet `activity`/`activity_updated_at` drive `wt_live` and the
+        subtitle, and the heartbeat's `lease_expires_at`/`updated_at` drive
+        row sort order (`_build()`), all currently refreshed on the existing
+        2s poll. The same gap exists outside that one file: the MCP
+        heartbeat path (`mcp_http.py`'s own `_mutate(..., None)` call) and
+        the background reconcilers (`coordinator_loops.py`'s liveness/
+        cooldown/orphan/run-waiter sweeps, `coordinator.py`'s run-waiter
+        recovery) all mutate task state but publish only aggregate `task.*`
+        *count* events with no `task` payload — exactly the traffic the
+        relay's task-payload filter above silently drops. Relaying only
+        today's named lifecycle events would regress every one of these
+        fields/mutations to the 30-60s reconcile cadence. Requirement: audit
+        every queue-mutation entry point (not just one file) and either (a)
+        add a per-task event carrying enough identity for the relay to act
+        on — ideally the same row-shaped payload existing events already
+        use — or (b), only where a reconciler is genuinely batch-oriented
+        and can't reasonably emit per-task events, document that specific
+        mutation class as intentionally covered by the reconcile interval
+        rather than silently relying on the general safety net to paper over
+        an unaudited gap.
   - [ ] **Reconnect-gap safety net (non-negotiable, not an optimization):**
         `EventBus.subscribe()` (`events.py`) is a live, in-memory, non-replay
         broadcast — an event published during a dropped/reconnecting SSE
@@ -366,8 +372,8 @@ this phase) is considered.)_
         not a return to 2s polling) that re-diffs the complete board against
         the tracked snapshot the same way `--subscribe` already does today,
         catching anything the event stream missed.
-  - [ ] **Serialize the reconcile against the live event stream** (round-2
-        review finding): running the background reconcile's fetch/diff/emit
+  - [ ] **Serialize the reconcile against the live event stream:** running
+        the background reconcile's fetch/diff/emit
         concurrently with the SSE consumer risks a race — if the reconcile's
         snapshot is fetched *before* a mutation, but an event for that same
         mutation is applied *after* the fetch and *before* the reconcile's
@@ -395,8 +401,8 @@ this phase) is considered.)_
       scan instead of paying for N. The CLI's `--subscribe` loop keeps its
       current shape (poll on `--interval`, diff, emit) — only what each tick
       costs changes.
-  - [ ] **Preserve the initial-scan recovery contract** (round-1 review
-        finding): `_fetch_complete_initial_rows()` relies on each retried
+  - [ ] **Preserve the initial-scan recovery contract:**
+        `_fetch_complete_initial_rows()` relies on each retried
         `GET /api/v1/agents` call actually re-scanning so an incomplete
         namespace has a real chance to resolve on a later attempt — a pure
         O(1) cache read would instead return the *same* stale partial
@@ -415,7 +421,7 @@ this phase) is considered.)_
         unconditional cache read; only the bounded initial-scan retry path
         pays for a forced rescan, exactly the callers that need one.
   - [ ] **A stalled or crashed refresh task must not serve a stale roster as
-        complete forever** (round-2 review finding): moving the scan to a
+        complete forever:** moving the scan to a
         background task adds a new failure mode the current per-call scan
         doesn't have — if that task exits or hangs after one successful
         scan, every subsequent O(1) read keeps returning an
@@ -438,7 +444,7 @@ this phase) is considered.)_
         response to mark it incomplete even without any client-side
         force-refresh request at all.
   - [ ] **A namespace that has never completed its first scan is not the
-        same as one with a last-known-good value** (round-2 review finding):
+        same as one with a last-known-good value:**
         the last-known-good design above only covers a namespace that has
         *previously* succeeded at least once. While the daemon is still
         warming up, `GET /api/v1/agents` must not answer with an
@@ -452,7 +458,7 @@ this phase) is considered.)_
         first successful scan completes — never silently omitted as if it
         had simply resolved to zero agents.
   - [ ] **`force_refresh` is a protocol-gated capability, not an additive
-        response field** (round-2 review finding): unlike Phase 2's
+        response field:** unlike Phase 2's
         `incomplete_namespaces` (an additive, tolerant-reader *response*
         field correctly exempted from a version bump per `protocol.py`'s
         own documented rule), `force_refresh` is a new **request** parameter
