@@ -242,105 +242,28 @@ corrections to the same original ask, not a change in intent.
 - [ ] Tests mirroring agent-dispatch's existing coverage shape.
 
 ### Phase 4 — Expand scope to agent-dispatch's remaining token and agent-index
+
+Full per-call-site inventory and precedence design extracted to
+[`phase-4-remaining-tokens.md`](phase-4-remaining-tokens.md) (read it when
+working this phase). Summary:
+
 - [ ] `agent-dispatch`: `AGENT_DISPATCH_TOKEN` is read directly from
-      `os.environ` at **seven call sites total** (see Context): `client_token()`
-      itself, `config.py:231` (inside `load_config()`), `board_cli.py` x4, and
-      `producers/webhook.py:167`. These sites split into two groups with
-      different risk profiles:
-      - **Actual consumption sites** (`client_token()`, `board_cli.py` x4,
-        `webhook.py:167`): consolidate each direct
-        `os.environ.get("AGENT_DISPATCH_TOKEN")` read to call `client_token()`
-        instead (a mechanical, behavior-preserving refactor — test each call
-        site still gets the same value it did before), **then** add
-        `AGENT_DISPATCH_TOKEN_COMMAND` support to `client_token()` via
-        `resolve_direct_first()` so every one of these consumers benefits
-        automatically.
-      - **`config.py:231`, inside `load_config()`: leave this one as a raw
-        env read, do NOT route it through the command-resolving
-        `client_token()`.** `load_config()` is called for purposes that don't
-        need the token at all (e.g. `client_url()` only needs host/port for
-        addressing); making it execute a token-fetch command as a side
-        effect of unrelated config resolution would violate the same
-        discipline `resolve_control_token()`'s own docstring already states
-        for the existing `_COMMAND` pairs (deliberately *not* called from
-        `load_config()`). `Config.token` stays the raw direct value; only
-        actual use sites resolve the command-backed form.
-      - **Server-side consumers also need explicit resolution, not just
-        clients:** `coordinator_cli.py:_cmd_serve` builds
-        `effective_token = args.token or base.token` — `base.token` is
-        `load_config().token`, the deliberately-raw value above — and passes
-        it as `cfg.token` into `server.py`'s `build_app()`/`serve()`, where
-        it gates the unsafe-bind guard (`server.py:74-95`) and request
-        authentication (`server.py:308`). If an operator sets only
-        `AGENT_DISPATCH_TOKEN_COMMAND` (no direct value), the coordinator
-        would see no token at all even though `client_token()`-based clients
-        now resolve one — a functional mismatch, not just an inconsistency.
-        Fix: `_cmd_serve` resolves `effective_token` as
-        `args.token or resolve_direct_first("AGENT_DISPATCH_TOKEN",
-        "AGENT_DISPATCH_TOKEN_COMMAND")` — **preserving the existing
-        explicit-CLI-override precedence** (`--token` still wins outright;
-        only the fallback changes from a bare env read to the shared lib's
-        resolver) **at this one specific server-startup call site**, rather
-        than through `load_config()`. This keeps `load_config()` itself
-        side-effect-free while ensuring the actual point where the token
-        gates bind safety and auth resolves the command-backed form too,
-        without ever silently dropping an operator-supplied `--token`.
-      - `no_cli_prompts.py:92` generates a **standalone helper script** that
-        independently resolves `AGENT_DISPATCH_TOKEN` in a separate process —
-        it will NOT inherit `client_token()`'s changes automatically. Update
-        the generated helper's own token-resolution logic to call the shared
-        lib directly (or shell out to the same command), with its own test.
-      - **Peer-launch propagation goes through the canonical source, not the
-        generated copies:** `_peer_launch.py` (and `agent-dispatch`'s own
-        `peer_launch.py`) in every consumer plugin (agent-bridge,
-        agent-dispatch, agent-codespaces, agent-containers, agent-worktrees,
-        agent-logger, agent-index, agent-machines) are byte-identical
-        generated copies of `libs/peer-launch/peer_launch.py`, synced via
-        `tools/sync-peer-launch.py` — editing a generated copy directly
-        breaks that sync guard. Add `AGENT_DISPATCH_TOKEN_COMMAND` to the
-        canonical `libs/peer-launch/peer_launch.py`'s `peer_environment()`
-        allowlist (following its own documented 3-step process: the mapping
-        entry, target-specific environment rebinding, and confirming
-        `tools/sync-installation-context.py` registration is unaffected),
-        then run `tools/sync-peer-launch.py` to regenerate every consumer
-        copy — never hand-edit a `_peer_launch.py`/`peer_launch.py` copy.
-      - **A separate, non-generated allowlist also needs the new var:**
-        `agent-containers`' `copilot_detach.py` has its own independent
-        `_DISPATCH_ENV_KEYS` tuple (lines ~24-35) governing which dispatch
-        vars forward into a detached container session; it already lists
-        `AGENT_DISPATCH_SHARED_TOKEN_COMMAND` but not a plain
-        `AGENT_DISPATCH_TOKEN_COMMAND`. Add it there too (lines ~161-164 is
-        where the tuple is consumed) — this is distinct from the
-        `peer-launch` sync above, not covered by it.
-- [ ] `agent-index`: add `AGENT_INDEX_ADO_TOKEN_COMMAND` via
-      `resolve_direct_first()`, consumed by the Azure DevOps source
-      (`azure_devops.py:62-66`). **Preserve the existing constructor-override
-      precedence:** `AzureDevOpsSource.__init__` already accepts an explicit
-      `token: str | None = None` parameter that wins over the env read
-      (`self._token = token or os.environ.get("AGENT_INDEX_ADO_TOKEN")`,
-      `azure_devops.py:45-66`). The full resolution order must become
-      **explicit constructor `token=` arg → `AGENT_INDEX_ADO_TOKEN` (direct
-      env) → `AGENT_INDEX_ADO_TOKEN_COMMAND`** — never let the new command
-      resolver run ahead of an explicitly-passed `token=`. Confirm whether
-      `agent-index`'s other tokens
-      (`CELL_TRANSACTION_TOKEN`/`CELL_LOCK_TOKEN`/`CELL_START_TOKEN`) are
-      genuinely internally-generated (as currently assumed, hence out of
-      scope above) before closing this phase — re-verify, don't just repeat
-      the earlier assumption.
-- [ ] `agent-index`: add `AGENT_INDEX_GITHUB_TOKEN_COMMAND` via
-      `resolve_direct_first()`, consulted in `_env_token()`'s resolution
-      chain (`sources/github.py:283-287`). The GitHub source's `__init__`
-      also has the identical explicit-constructor-override pattern as Azure
-      DevOps's (`token: str | None = None`, `self._token = token or
-      _env_token()`, `github.py:33-48`) — preserve it the same way. **Full
-      precedence, matching `resolve_direct_first()`'s actual (not inverted)
-      semantics:** explicit constructor `token=` arg → `AGENT_INDEX_GITHUB_TOKEN`
-      (direct env, wins when set) → `AGENT_INDEX_GITHUB_TOKEN_COMMAND` (the
-      `_COMMAND` fetch runs only when the direct env is unset) → ambient
-      `GH_TOKEN` → `GITHUB_TOKEN` (unchanged CLI fallbacks). Do **not** add a
-      `_COMMAND` variant for the ambient `GH_TOKEN`/`GITHUB_TOKEN` names
-      themselves — those are shared, external-tool-owned conventions outside
-      this plugin's own credential surface.
+      `os.environ` at seven call sites with different risk profiles —
+      consolidate the actual consumption sites (`client_token()`,
+      `board_cli.py` x4, `webhook.py:167`) onto `client_token()`, add
+      `_COMMAND` support there; leave `config.py:231`'s `load_config()` read
+      raw (no side-effecting command fetch during generic config load); add
+      explicit resolution at `_cmd_serve` (preserving the `--token` CLI
+      override) and at `build_app()`/`serve()`'s own default-`cfg` path;
+      update the `no_cli_prompts.py` standalone helper; propagate through the
+      canonical `libs/peer-launch/peer_launch.py` source (re-synced to all 8
+      consumer plugins, each needing its own changefile) and
+      `agent-containers`' separate `copilot_detach.py` allowlist.
+- [ ] `agent-index`: add `AGENT_INDEX_ADO_TOKEN_COMMAND` and
+      `AGENT_INDEX_GITHUB_TOKEN_COMMAND`, each preserving its source's
+      existing explicit-constructor-override precedence ahead of both the
+      direct env and the new command resolver; re-verify the
+      internally-generated-token exclusion for agent-index's other tokens.
 - [ ] Packaging for agent-index, following the same per-plugin pattern as
       Phase 3.
 
@@ -534,3 +457,24 @@ conventions to mirror) to be elaborated once this plan clears review._
   Intent/Request/Scope-note prose, keeping only the Journal as the review
   history record. PR description will be refreshed to match before the next
   push.
+
+### 2026-10-02 — Review round 8 (PR #4910)
+- Copilot review: the CLI-override precedence fix resolved; three new/carried
+  findings. (1) Medium — `build_app()`/`serve()` have their own independent
+  default-`cfg` path (`server.py:85,308`) bypassing `_cmd_serve` entirely,
+  so a direct caller (library use, tests, a future entry point) would still
+  get an unresolved token; (2) Medium — regenerating the canonical
+  `libs/peer-launch/peer_launch.py` source changes the materialized payload
+  of all 8 listed consumer plugins at once, each needing its own pending
+  changefile per `CONTRIBUTING.md`'s changefile-presence check, not just
+  `agent-dispatch`'s; (3) Low — the 557-line README violated the "extract
+  substantial inventories to sibling docs" rule. The PR-description
+  staleness finding was carried forward from a stale review cache; the
+  description was already corrected before this round ran. Addressed: added
+  the `build_app()`/`serve()` default-`cfg` fix (extending both
+  `replace(...)` calls to also resolve `token=`, mirroring how
+  `control_token` is already resolved there); added the explicit
+  per-plugin changefile requirement to the peer-launch sync sub-task;
+  extracted Phase 4's full per-call-site inventory and precedence design to
+  `phase-4-remaining-tokens.md`, leaving a short summary + link in the main
+  Plan (557 → 459 lines).
