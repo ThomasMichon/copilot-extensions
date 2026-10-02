@@ -1234,13 +1234,17 @@ function Get-ActiveSignature {
 }
 
 function Test-UpdateLifecycleStillTargetsPredecessor {
-    param([string]$Signature)
+    # -AllowAbsent: after this update stopped the pinned predecessor, its graceful
+    # shutdown clears its own route, so an absent route still means "ours".
+    param([string]$Signature, [switch]$AllowAbsent)
     if (Test-ActiveIsForward) {
         Write-Step 'Forwarded host bridge route appeared during update -- skipping drain/stop/start'
         return $false
     }
     if (-not [string]::IsNullOrWhiteSpace($Signature)) {
-        if ((Get-ActiveSignature) -ne $Signature) {
+        $current = Get-ActiveSignature
+        if ($AllowAbsent -and [string]::IsNullOrWhiteSpace($current)) { return $true }
+        if ($current -ne $Signature) {
             Write-Step 'Active route changed during update -- skipping drain/stop/start'
             return $false
         }
@@ -1260,7 +1264,7 @@ function Invoke-UpdateDrainStop {
 
 function Invoke-UpdateStart {
     param([string]$Signature, [string]$Message = 'Starting service...')
-    if (-not (Test-UpdateLifecycleStillTargetsPredecessor -Signature $Signature)) {
+    if (-not (Test-UpdateLifecycleStillTargetsPredecessor -Signature $Signature -AllowAbsent)) {
         return $false
     }
     Write-Step $Message

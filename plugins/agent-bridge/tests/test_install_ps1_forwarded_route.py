@@ -147,3 +147,35 @@ def test_install_ps1_update_checks_forward_before_lifecycle_actions() -> None:
     assert "Invoke-UpdateStart -Signature $predecessorSignature" in body
     assert "Invoke-UpdateStart -Signature $predecessorSignature -Message 'Restarting the previous version...'" in body
     assert "Invoke-UpdateStart -Signature $predecessorSignature -Message 'Restarting the previous service...'" in body
+
+
+@pytest.mark.parametrize(
+    ("current", "forward", "starts"),
+    [
+        ("", False, True),          # our own drain-stop cleared the route
+        ("sig", False, True),       # still the pinned predecessor
+        ("other", False, False),    # a different successor took over
+        ("", True, False),          # a forwarded route appeared
+    ],
+)
+def test_update_start_accepts_the_route_its_own_stop_cleared(
+    tmp_path: Path, current: str, forward: bool, starts: bool,
+) -> None:
+    (tmp_path / "agent-bridge").mkdir()
+    result = _run_harness(
+        tmp_path,
+        ["Test-UpdateLifecycleStillTargetsPredecessor", "Invoke-UpdateStart",
+         "Invoke-UpdateDrainStop"],
+        f"""
+function Test-ActiveIsForward {{ return ${str(forward).lower()} }}
+function Get-ActiveSignature {{ return '{current}' }}
+function Invoke-Start {{ Write-Host 'STARTED' }}
+function Invoke-Drain {{ param($TimeoutSec) }}
+function Invoke-Stop {{ Write-Host 'STOPPED' }}
+$null = Invoke-UpdateStart -Signature 'sig'
+$null = Invoke-UpdateDrainStop -Signature 'sig'
+""",
+    )
+    assert ("STARTED" in result.stdout) is starts
+    # Drain/stop stays strict: it never stops anything but the pinned route.
+    assert ("STOPPED" in result.stdout) is (current == "sig" and not forward)

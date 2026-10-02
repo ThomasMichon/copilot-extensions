@@ -427,3 +427,25 @@ def test_install_sh_start_does_not_start_a_daemon_over_a_forward(tmp_path):
     assert result.returncode == 0, result.stderr
     assert "not starting a local daemon" in result.stdout
     assert not (home / ".agent-bridge" / "agent-bridge.pid").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a POSIX bash environment is needed")
+@pytest.mark.parametrize(
+    ("current", "starts", "stops"),
+    [("", True, False), ("sig", True, True), ("other", False, False)],
+)
+def test_install_sh_update_start_accepts_the_route_its_own_stop_cleared(current, starts, stops):
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    helpers = text.split("_update_lifecycle_still_targets_predecessor() {", 1)[1].split(
+        "\n}\n\n_active_host", 1)[0]
+    script = (
+        "_active_is_forward() { return 1; }\n"
+        f"_active_signature() {{ printf '%s' '{current}'; }}\n"
+        "_step() { :; }\n_drain_service() { :; }\n"
+        "do_start() { echo STARTED; }\ndo_stop() { echo STOPPED; }\n"
+        "_update_lifecycle_still_targets_predecessor() {" + helpers + "\n}\n"
+        "_update_lifecycle_start sig || true\n_update_lifecycle_drain_stop sig || true\n"
+    )
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True).stdout
+    assert ("STARTED" in out) is starts
+    assert ("STOPPED" in out) is stops

@@ -708,13 +708,18 @@ PYEOF
 }
 
 _update_lifecycle_still_targets_predecessor() {
-    local pinned="${1:-}" current=""
+    # $2 == allow-absent: after this update stopped the pinned predecessor, its
+    # graceful shutdown clears its own route, so an absent route still means "ours".
+    local pinned="${1:-}" allow_absent="${2:-}" current=""
     if _active_is_forward; then
         _step "Forwarded host bridge route appeared during update -- skipping drain/stop/start"
         return 1
     fi
     if [[ -n "$pinned" ]]; then
         current="$(_active_signature 2>/dev/null || true)"
+        if [[ "$allow_absent" == allow-absent && -z "$current" ]]; then
+            return 0
+        fi
         if [[ "$current" != "$pinned" ]]; then
             _step "Active route changed during update -- skipping drain/stop/start"
             return 1
@@ -734,7 +739,7 @@ _update_lifecycle_drain_stop() {
 
 _update_lifecycle_start() {
     local pinned="${1:-}" message="${2:-Starting service...}"
-    if ! _update_lifecycle_still_targets_predecessor "$pinned"; then
+    if ! _update_lifecycle_still_targets_predecessor "$pinned" allow-absent; then
         return 1
     fi
     _step "$message"
