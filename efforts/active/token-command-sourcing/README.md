@@ -41,9 +41,9 @@ parallel ones), and add `_COMMAND` support to the plugins currently missing
 it — including proper packaging (dependency + installer wiring) so the shared
 lib is actually deployable, not just importable in a dev checkout.
 
-**Scope correction (review round 3):** `agent-mcp`'s `AGENT_MCP_CONTROL_TOKEN`
-was initially miscategorized as an operator-managed credential. It is not: a
-fresh token is generated per cutover generation
+**Scope note:** `agent-mcp`'s `AGENT_MCP_CONTROL_TOKEN` is not an
+operator-managed credential. A fresh token is generated per cutover
+generation
 (`secrets.token_hex(16)` in `cutover.py`) and always injected directly into
 the new daemon's environment — the daemon itself then persists it to a
 PID-keyed sidecar file for internal coordination (`serve.py`). This is an
@@ -168,12 +168,11 @@ slot, for a shell/pwsh/python command that will pipe it a token. For
 [our private deployment], we'll prefer sourcing from Vault." Follow-up,
 clarifying the underlying goal: "just wanted to avoid putting tokens in ENV.
 Prefer on-demand sourcing from contained locations." Scope decisions
-confirmed: initial candidate list (agent-dispatch/agent-mcp/agent-vault)
-accepted as proposed; shared-lib extraction preferred over per-plugin
-duplication; track as a formal effort. `agent-mcp` was later dropped and
-`agent-index` added after review (see Context's scope correction and the
-Journal) — both are implementation-detail corrections to the same original
-ask, not a change in intent.
+confirmed: shared-lib extraction preferred over per-plugin duplication; track
+as a formal effort. The concrete per-plugin consumer set is `agent-dispatch`,
+`agent-vault`, and `agent-index` (see Context's scope note on `agent-mcp` and
+the Journal for how that set was determined) — implementation-detail
+corrections to the same original ask, not a change in intent.
 
 ## Plan
 
@@ -205,6 +204,12 @@ ask, not a change in intent.
       command fetch, neither set, command failure, command producing empty
       output) plus the low-level primitive directly (POSIX and Windows-style
       command strings).
+- [ ] **Register the new lib's tests in CI**, not just locally: add
+      `python -m pytest -q libs/token-resolve/tests` to the shared-library
+      test lane in `.github/workflows/ci.yml` (~lines 345-356, alongside the
+      existing `libs/agent-procutil/tests`, `libs/zdd/tests`, etc. entries) —
+      a lib with tests that only ever run locally leaves regressions
+      unchecked in the gate that actually blocks merges.
 
 ### Phase 2 — Migrate agent-dispatch onto the shared lib
 - [ ] Replace `agent-dispatch`'s own `resolve_control_token()` with a thin
@@ -270,13 +275,16 @@ ask, not a change in intent.
         `AGENT_DISPATCH_TOKEN_COMMAND` (no direct value), the coordinator
         would see no token at all even though `client_token()`-based clients
         now resolve one — a functional mismatch, not just an inconsistency.
-        Fix: `_cmd_serve` resolves `effective_token` via the shared lib's
-        `resolve_direct_first()` directly (the same resolution
-        `client_token()` performs) **at this one specific server-startup
-        call site**, rather than through `load_config()`. This keeps
-        `load_config()` itself side-effect-free while ensuring the actual
-        point where the token gates bind safety and auth resolves the
-        command-backed form too.
+        Fix: `_cmd_serve` resolves `effective_token` as
+        `args.token or resolve_direct_first("AGENT_DISPATCH_TOKEN",
+        "AGENT_DISPATCH_TOKEN_COMMAND")` — **preserving the existing
+        explicit-CLI-override precedence** (`--token` still wins outright;
+        only the fallback changes from a bare env read to the shared lib's
+        resolver) **at this one specific server-startup call site**, rather
+        than through `load_config()`. This keeps `load_config()` itself
+        side-effect-free while ensuring the actual point where the token
+        gates bind safety and auth resolves the command-backed form too,
+        without ever silently dropping an operator-supplied `--token`.
       - `no_cli_prompts.py:92` generates a **standalone helper script** that
         independently resolves `AGENT_DISPATCH_TOKEN` in a separate process —
         it will NOT inherit `client_token()`'s changes automatically. Update
@@ -306,21 +314,30 @@ ask, not a change in intent.
         `peer-launch` sync above, not covered by it.
 - [ ] `agent-index`: add `AGENT_INDEX_ADO_TOKEN_COMMAND` via
       `resolve_direct_first()`, consumed by the Azure DevOps source
-      (`azure_devops.py:62-66`). Confirm whether `agent-index`'s other
-      tokens (`CELL_TRANSACTION_TOKEN`/`CELL_LOCK_TOKEN`/`CELL_START_TOKEN`)
-      are genuinely internally-generated (as currently assumed, hence out of
+      (`azure_devops.py:62-66`). **Preserve the existing constructor-override
+      precedence:** `AzureDevOpsSource.__init__` already accepts an explicit
+      `token: str | None = None` parameter that wins over the env read
+      (`self._token = token or os.environ.get("AGENT_INDEX_ADO_TOKEN")`,
+      `azure_devops.py:45-66`). The full resolution order must become
+      **explicit constructor `token=` arg → `AGENT_INDEX_ADO_TOKEN` (direct
+      env) → `AGENT_INDEX_ADO_TOKEN_COMMAND`** — never let the new command
+      resolver run ahead of an explicitly-passed `token=`. Confirm whether
+      `agent-index`'s other tokens
+      (`CELL_TRANSACTION_TOKEN`/`CELL_LOCK_TOKEN`/`CELL_START_TOKEN`) are
+      genuinely internally-generated (as currently assumed, hence out of
       scope above) before closing this phase — re-verify, don't just repeat
       the earlier assumption.
 - [ ] `agent-index`: add `AGENT_INDEX_GITHUB_TOKEN_COMMAND` via
       `resolve_direct_first()`, consulted in `_env_token()`'s resolution
-      chain (`sources/github.py:283-287`). **Precedence, matching
-      `resolve_direct_first()`'s actual (not inverted) semantics:** the
-      direct `AGENT_INDEX_GITHUB_TOKEN` value wins when set; the `_COMMAND`
-      fetch runs only when `AGENT_INDEX_GITHUB_TOKEN` is unset. Both still
-      precede the ambient `GH_TOKEN`/`GITHUB_TOKEN` CLI fallbacks exactly as
-      today — i.e. the resolution order becomes `AGENT_INDEX_GITHUB_TOKEN` →
-      `AGENT_INDEX_GITHUB_TOKEN_COMMAND` → `GH_TOKEN` → `GITHUB_TOKEN`. Do
-      **not** add a
+      chain (`sources/github.py:283-287`). The GitHub source's `__init__`
+      also has the identical explicit-constructor-override pattern as Azure
+      DevOps's (`token: str | None = None`, `self._token = token or
+      _env_token()`, `github.py:33-48`) — preserve it the same way. **Full
+      precedence, matching `resolve_direct_first()`'s actual (not inverted)
+      semantics:** explicit constructor `token=` arg → `AGENT_INDEX_GITHUB_TOKEN`
+      (direct env, wins when set) → `AGENT_INDEX_GITHUB_TOKEN_COMMAND` (the
+      `_COMMAND` fetch runs only when the direct env is unset) → ambient
+      `GH_TOKEN` → `GITHUB_TOKEN` (unchanged CLI fallbacks). Do **not** add a
       `_COMMAND` variant for the ambient `GH_TOKEN`/`GITHUB_TOKEN` names
       themselves — those are shared, external-tool-owned conventions outside
       this plugin's own credential surface.
@@ -494,3 +511,26 @@ conventions to mirror) to be elaborated once this plan clears review._
   propagation sub-task to edit the canonical `peer_environment()` allowlist
   and re-run the sync tool, plus a separate sub-task for
   `copilot_detach.py`'s own tuple.
+
+### 2026-10-02 — Review round 7 (PR #4910)
+- Copilot review: two new findings plus three carried-forward previously-missed
+  findings. New: (1) Medium — the round-6 `_cmd_serve` fix as drafted would
+  have replaced `args.token or base.token` outright, silently dropping the
+  explicit `--token` CLI override's precedence; (2) Low — the PR description
+  had gone stale (wrong round count, wrong site count). Previously missed:
+  (3) Medium — `libs/token-resolve/tests` needs registering in
+  `.github/workflows/ci.yml`'s shared-library test lane, not just runnable
+  locally; (4) Medium — Azure DevOps's `AzureDevOpsSource.__init__` already
+  has an explicit `token=` constructor override that must keep precedence
+  over both the direct env and the new command resolver; (5) Low — a few
+  standing (non-Journal) sections still narrated "review round N" history
+  inline instead of stating the current system plainly. All five addressed:
+  `_cmd_serve`'s fix is now `args.token or resolve_direct_first(...)`,
+  preserving the CLI override; added an explicit CI-registration sub-task to
+  Phase 1; both Azure DevOps and GitHub (which has the identical
+  constructor-override pattern, caught while fixing this) now specify the
+  full `explicit arg → direct env → command → ambient CLI fallback`
+  precedence chain; removed "review round" framing from the Guiding
+  Intent/Request/Scope-note prose, keeping only the Journal as the review
+  history record. PR description will be refreshed to match before the next
+  push.
