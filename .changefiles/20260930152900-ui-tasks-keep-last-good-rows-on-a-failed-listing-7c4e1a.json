@@ -1,9 +1,0 @@
-{
-  "comment": "The /ui task list keeps a project's last good worktree rows (reported under errors) when its agent-worktrees listing fails or times out, instead of blanking that project's tasks and the workers shown on them; a failed repo-registry listing keeps the previous project set.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

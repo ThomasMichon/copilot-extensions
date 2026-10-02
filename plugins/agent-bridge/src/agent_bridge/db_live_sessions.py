@@ -180,27 +180,20 @@ class _LiveSessionsMixin:
         return cur.rowcount == 1
 
     def release_cli_mode_reservation(
-        self,
-        worktree_id: str,
-        *,
-        reservation_id: str | None = None,
-        unclaimed_only: bool = False,
+        self, worktree_id: str, *, reservation_id: str | None = None,
     ) -> int:
         """Delete a CLI-mode reservation -- by worktree, or the exact
         ``reservation_id`` if given (refuses to delete a different, newer
-        reservation created since). With ``unclaimed_only``, also refuses to
-        delete a reservation a session has already claimed. Returns how many
-        rows were removed."""
-        claim_predicate = " AND claimed_by_session_id IS NULL" if unclaimed_only else ""
+        reservation created since). Returns how many rows were removed."""
         if reservation_id is not None:
             cur = self.execute_write(
                 "DELETE FROM cli_mode_reservations "
-                f"WHERE worktree_id=? AND reservation_id=?{claim_predicate}",
+                "WHERE worktree_id=? AND reservation_id=?",
                 (worktree_id, reservation_id),
             )
         else:
             cur = self.execute_write(
-                f"DELETE FROM cli_mode_reservations WHERE worktree_id=?{claim_predicate}",
+                "DELETE FROM cli_mode_reservations WHERE worktree_id=?",
                 (worktree_id,),
             )
         return cur.rowcount

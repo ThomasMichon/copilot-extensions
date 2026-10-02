@@ -662,10 +662,10 @@ def test_inventory_drains_pipe_filling_stderr_without_hanging(monkeypatch):
             "/usr/local/bin/node",
             "/home/agent",
             "script",
-            deadline=time.monotonic() + 30,
+            deadline=time.monotonic() + 2,
         )
 
-    assert time.monotonic() - started < 30
+    assert time.monotonic() - started < 2
 
 
 @pytest.mark.parametrize("reason", ["symlink", "irregular", "oversize"])

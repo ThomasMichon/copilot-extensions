@@ -126,37 +126,6 @@ def test_a_failing_repo_is_reported_without_hiding_the_others(client, cli) -> No
     assert [r["id"] for r in data["workspaces"]] == ["h1"]
 
 
-def test_a_listing_that_fails_later_keeps_that_repos_last_good_rows(client, cli) -> None:
-    assert {r["id"] for r in client.get("/api/v1/ui/workspaces").json()["workspaces"]} == {"h1", "e1", "e2"}
-    original = cli.__call__
-
-    async def slow_ext(cmd, *, timeout=None):
-        if cmd[1:4] == ["-p", "ext", "list"]:
-            return None, "timed out after 90s"
-        return await original(cmd, timeout=timeout)
-
-    ui_tasks._wt._exec_ex = slow_ext
-    data = client.get("/api/v1/ui/workspaces?refresh=true").json()
-    assert data["errors"] == {"ext": "timed out after 90s"}
-    assert {r["id"] for r in data["workspaces"]} == {"h1", "e1", "e2"}  # ext's rows are kept, not blanked
-
-
-def test_a_failing_repo_registry_keeps_the_previous_projects(client, cli) -> None:
-    first = client.get("/api/v1/ui/workspaces").json()
-    original = cli.__call__
-
-    async def no_registry(cmd, *, timeout=None):
-        if cmd[1:3] == ["repos", "list"]:
-            return None, "registry busy"
-        return await original(cmd, timeout=timeout)
-
-    ui_tasks._wt._exec_ex = no_registry
-    data = client.get("/api/v1/ui/workspaces?refresh=true").json()
-    assert data["errors"].get("_repos") == "registry busy"
-    assert data["projects"] == first["projects"] and data["project_info"] == first["project_info"]
-    assert {r["id"] for r in data["workspaces"]} == {"h1", "e1", "e2"}
-
-
 def test_github_pr_urls_are_validated_before_they_reach_a_query(client, cli) -> None:
     cli.lists["harness"][0]["pr"]["url"] = 'https://github.com/o/x"){evil}/pull/7'
     client.get("/api/v1/ui/workspaces")

@@ -35,15 +35,12 @@ class _FakeClient:
         reservation: dict[str, Any] | None = None,
         final_reservation: dict[str, Any] | None = None,
         create_error: BridgeClientError | None = None,
-        get_error: Exception | None = None,
     ) -> None:
         self._reservation = reservation or {}
         self._final_reservation = final_reservation
         self._create_error = create_error
-        self._get_error = get_error
         self.create_calls: list[tuple[str, float]] = []
         self.get_calls: list[str] = []
-        self.release_calls: list[tuple[str, str | None, bool]] = []
 
     def create_cli_mode_reservation(
         self, worktree_id: str, *, ttl_seconds: float = 300.0,
@@ -55,21 +52,9 @@ class _FakeClient:
 
     def get_cli_mode_reservation(self, worktree_id: str) -> dict[str, Any]:
         self.get_calls.append(worktree_id)
-        if self._get_error is not None:
-            raise self._get_error
         if self._final_reservation is not None:
             return self._final_reservation
         return self._reservation
-
-    def release_cli_mode_reservation(
-        self,
-        worktree_id: str,
-        *,
-        reservation_id: str | None = None,
-        unclaimed_only: bool = False,
-    ) -> int:
-        self.release_calls.append((worktree_id, reservation_id, unclaimed_only))
-        return 1
 
 
 def _embody_stdout(**fields: Any) -> str:
@@ -106,7 +91,6 @@ def test_launch_reserves_then_embodies_the_worktree() -> None:
     # proving the daemon's ordinary registration/claim path (Phase 2) is what
     # binds the resulting session rather than this surface duplicating it.
     assert outcome["reservation"]["claimed_by_session_id"] == "sid-1"
-    assert client.release_calls == []
 
 
 def test_launch_forwards_seed_and_driver_and_verify_timeout() -> None:
@@ -148,81 +132,14 @@ def test_launch_surfaces_nonzero_embody_exit_code() -> None:
     outcome = _launch_cli_mode_session(client, "wt-A", run=fake_run)
     assert outcome["exit_code"] == 3
     assert outcome["session"] is None
-    assert client.release_calls == [("wt-A", "r1", True)]
 
 
-def test_launch_releases_reservation_when_embody_raises() -> None:
+def test_launch_tolerates_non_json_embody_stdout() -> None:
     client = _FakeClient(reservation={"reservation_id": "r1"})
 
     def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
-        raise RuntimeError("boom")
-
-    with pytest.raises(RuntimeError, match="boom"):
-        _launch_cli_mode_session(client, "wt-A", run=fake_run)
-    assert client.release_calls == [("wt-A", "r1", True)]
-
-
-def test_launch_tolerates_non_json_embody_stdout_and_releases_reservation() -> None:
-    client = _FakeClient(reservation={"reservation_id": "r1"})
-
-    def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
-        return _FakeCompletedProcess(0, stdout="not json")
+        return _FakeCompletedProcess(1, stdout="not json")
 
     outcome = _launch_cli_mode_session(client, "wt-A", run=fake_run)
     assert outcome["embody"] == {}
     assert outcome["session"] is None
-    assert client.release_calls == [("wt-A", "r1", True)]
-
-
-def test_launch_releases_reservation_when_embody_produces_no_session() -> None:
-    client = _FakeClient(reservation={"reservation_id": "r1"})
-
-    def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
-        return _FakeCompletedProcess(0, stdout=_embody_stdout(session=None))
-
-    outcome = _launch_cli_mode_session(client, "wt-A", run=fake_run)
-    assert outcome["exit_code"] == 0
-    assert outcome["session"] is None
-    assert client.release_calls == [("wt-A", "r1", True)]
-
-
-def test_launch_failure_does_not_release_a_claimed_reservation() -> None:
-    client = _FakeClient(
-        reservation={"reservation_id": "r1"},
-        final_reservation={"reservation_id": "r1", "claimed_by_session_id": "sid-1"},
-    )
-
-    def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
-        return _FakeCompletedProcess(0, stdout="not json")
-
-    outcome = _launch_cli_mode_session(client, "wt-A", run=fake_run)
-    assert outcome["session"] is None
-    assert client.release_calls == []
-
-
-def test_launch_failure_releases_only_the_original_reservation_id() -> None:
-    client = _FakeClient(
-        reservation={"reservation_id": "r1"},
-        final_reservation={"reservation_id": "r2", "claimed_by_session_id": None},
-    )
-
-    def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
-        return _FakeCompletedProcess(3, stdout="")
-
-    _launch_cli_mode_session(client, "wt-A", run=fake_run)
-    assert client.release_calls == [("wt-A", "r1", True)]
-
-
-def test_launch_releases_reservation_when_final_reservation_read_raises() -> None:
-    client = _FakeClient(
-        reservation={"reservation_id": "r1"},
-        get_error=RuntimeError("bridge unavailable"),
-    )
-
-    def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompletedProcess:
-        return _FakeCompletedProcess(0, stdout=_embody_stdout())
-
-    with pytest.raises(RuntimeError, match="bridge unavailable"):
-        _launch_cli_mode_session(client, "wt-A", run=fake_run)
-
-    assert client.release_calls == [("wt-A", "r1", True)]

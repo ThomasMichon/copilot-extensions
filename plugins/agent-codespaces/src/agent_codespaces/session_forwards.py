@@ -75,7 +75,6 @@ TranscriptMirrorFn = Callable[[str], Awaitable[Any]]
 DEFAULT_SESSION_PROBE_INTERVAL = 120.0
 # An otherwise idle Owner stays up this long to retry an owed transcript push.
 OWED_PUSH_GRACE_SECONDS = 3600.0
-LOCAL_REBIND_FAILURES_BEFORE_REASSIGN = 2
 
 
 class SessionForwards:
@@ -109,7 +108,6 @@ class SessionForwards:
         self._channels: dict[str, tuple[int, RelayChannel]] = {}
         self._extra: dict[tuple[str, int], tuple[int, RelayChannel]] = {}
         self._local: dict[tuple[str, int], tuple[int, RelayChannel]] = {}
-        self._local_failures: dict[tuple[str, int], int] = {}
         self._last_probe: dict[str, float] = {}
 
     def active(self) -> dict[str, int]:
@@ -173,27 +171,11 @@ class SessionForwards:
             for cs, hold in holds.items()
             for host, venue in (getattr(hold, "local_forwards", None) or {}).items()
         }
-        dynamic = {
-            (cs, int(host))
-            for cs, hold in holds.items()
-            for host, venue in (getattr(hold, "assigned_local_forwards", None) or {}).items()
-            if wanted.get((cs, int(host))) == venue
-        }
-        fixed_hosts = {
-            int(host)
-            for cs, hold in holds.items()
-            for host in (getattr(hold, "local_forwards", None) or {})
-            if (cs, int(host)) not in dynamic and int(host) != 0
-        }
         for key, (venue, channel) in list(self._local.items()):
             if wanted.get(key) != venue or self._local_factory is None:
                 self._local.pop(key, None)
-                self._local_failures.pop(key, None)
                 await channel.stop()
         if self._local_factory is None:
-            from .owner_local_forwards import write_active_local_forwards
-
-            write_active_local_forwards({})
             return
         for key, venue in wanted.items():
             entry = self._local.get(key)
@@ -202,86 +184,6 @@ class SessionForwards:
                 self._local[key] = entry
             if not await self._ensure(f"local forward {key[1]}->{venue} for {key[0]}", entry[1]):
                 self._local.pop(key, None)
-                if key in dynamic:
-                    if not _local_port_in_use(key[1]):
-                        # A transport outage, not a bind conflict: keep retrying
-                        # the assigned port so its URL stays stable.
-                        self._local_failures.pop(key, None)
-                    elif self._note_local_failure(key):
-                        await self._reassign_dynamic_local_forward(key, venue, entry[1], fixed_hosts)
-                continue
-            self._local_failures.pop(key, None)
-            if not self._record_assigned_local_port(key, venue, entry[1], fixed_hosts):
-                self._local.pop(key, None)
-                await self._stop_untracked_local_forward(entry[1])
-        from .owner_local_forwards import write_active_local_forwards
-
-        write_active_local_forwards(self.active_local_forwards())
-
-    def _note_local_failure(self, key: tuple[str, int]) -> bool:
-        count = self._local_failures.get(key, 0) + 1
-        self._local_failures[key] = count
-        return count >= LOCAL_REBIND_FAILURES_BEFORE_REASSIGN
-
-    async def _reassign_dynamic_local_forward(
-        self, key: tuple[str, int], venue: int, old_channel: RelayChannel, fixed_hosts: set[int],
-    ) -> None:
-        if self._local_factory is None:
-            return
-        try:
-            await old_channel.stop()
-        except Exception:
-            log.debug("old dynamic local forward stop failed for %s:%s", key[0], key[1])
-        entry = (venue, self._local_factory(key[0], 0, venue))
-        if not await self._ensure(f"replacement local forward 0->{venue} for {key[0]}", entry[1]):
-            await self._stop_untracked_local_forward(entry[1])
-            return
-        assigned = _bound_local_port(entry[1])
-        if assigned is None:
-            await self._stop_untracked_local_forward(entry[1])
-            return
-        if assigned in fixed_hosts:
-            await self._stop_untracked_local_forward(entry[1])
-            return
-        from .owner_local_forwards import reassign_dynamic_local_forward
-
-        if reassign_dynamic_local_forward(
-            key[0], old_host_port=key[1], assigned_host_port=assigned, venue_port=venue,
-        ):
-            log.warning(
-                "Connection Owner: dynamic local forward %s:%s was unavailable; reassigned to %s",
-                key[0], key[1], assigned,
-            )
-            self._local_failures.pop(key, None)
-            self._local[(key[0], assigned)] = entry
-        else:
-            await self._stop_untracked_local_forward(entry[1])
-
-    async def _stop_untracked_local_forward(self, channel: RelayChannel) -> None:
-        try:
-            await channel.stop()
-        except Exception:
-            log.debug("untracked local forward stop failed")
-
-    def _record_assigned_local_port(
-        self, key: tuple[str, int], venue: int, channel: RelayChannel, fixed_hosts: set[int],
-    ) -> bool:
-        if key[1] != 0:
-            return True
-        assigned = _bound_local_port(channel)
-        if assigned is None:
-            return False
-        if assigned in fixed_hosts:
-            return False
-        from .owner_local_forwards import record_assigned_local_forward
-
-        if record_assigned_local_forward(
-            key[0], requested_host_port=0, assigned_host_port=assigned, venue_port=venue,
-        ):
-            self._local.pop(key, None)
-            self._local[(key[0], assigned)] = (venue, channel)
-            return True
-        return False
 
     async def _reconcile_extra(self, holds: dict[str, OwnerHold]) -> None:
         wanted = {
@@ -448,9 +350,6 @@ class SessionForwards:
         for key, (_venue, channel) in list(self._local.items()):
             self._local.pop(key, None)
             await channel.stop()
-        from .owner_local_forwards import clear_active_local_forwards
-
-        clear_active_local_forwards()
 
 
 def owner_serves_bridge(codespace: str, now: float | None = None) -> bool:
@@ -523,20 +422,8 @@ class _LocalForwardChannel:
     def is_alive(self) -> bool:
         return bool(self._forward.is_alive)
 
-    @property
-    def bound_port(self) -> int | None:
-        value = getattr(self._forward, "local_port", None)
-        try:
-            port = int(value)
-        except (TypeError, ValueError):
-            return None
-        return port if 0 < port < 65536 else None
-
     async def start(self) -> None:
-        if self.bound_port is not None:
-            await self._forward.refresh()
-        else:
-            await self._forward.establish()
+        await self._forward.establish()
 
     async def stop(self) -> None:
         await self._forward.cancel()
@@ -569,36 +456,6 @@ def make_local_forward_factory(
         return _LocalForwardChannel(forward_cls(ssh_config, venue_port, local_port=host_port))
 
     return factory
-
-
-def _local_port_in_use(port: int) -> bool:
-    """Whether another process holds host loopback ``port`` (a proven local bind
-    conflict), probed by binding it; any other outcome is not a conflict."""
-    import errno
-    import socket
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        try:
-            probe.bind(("127.0.0.1", int(port)))
-        except OSError as exc:
-            # 10013 (WSAEACCES): Windows' answer for a port another process holds exclusively.
-            return exc.errno in {errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", -1), 10013}
-    return False
-
-
-def _bound_local_port(channel: RelayChannel) -> int | None:
-    for source in (channel, getattr(channel, "_forward", None)):
-        if source is None:
-            continue
-        for attr in ("bound_port", "local_port"):
-            value = getattr(source, attr, None)
-            try:
-                port = int(value)
-            except (TypeError, ValueError):
-                continue
-            if 0 < port < 65536:
-                return port
-    return None
 
 
 async def _open_codespace(codespace: str) -> Any:

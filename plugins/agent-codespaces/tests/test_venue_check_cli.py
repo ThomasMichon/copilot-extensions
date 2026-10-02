@@ -117,12 +117,8 @@ class TestCmdDoctorVenue:
         class _Providers:
             active_plugins = _EmptyReport()
             config_d = _EmptyReport()
-            findings: list = []
 
         monkeypatch.setattr(config_mod, "scan_config_providers", lambda: _Providers())
-        monkeypatch.setattr(
-            "agent_codespaces.__main__.scan_config_providers", lambda: _Providers(),
-        )
 
         rc = main(["doctor"])
 

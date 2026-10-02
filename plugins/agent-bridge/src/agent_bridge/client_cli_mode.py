@@ -47,38 +47,9 @@ class CliModeClientMixin(_Base):
                 return {}
             raise
 
-    def release_cli_mode_reservation(
-        self,
-        worktree_id: str,
-        *,
-        reservation_id: str | None = None,
-        unclaimed_only: bool = False,
-    ) -> int:
-        """DELETE .../cli-mode-reservations/{worktree_id}.
-
-        ``reservation_id`` compare-deletes one exact reservation; ``unclaimed_only``
-        additionally refuses to delete a reservation a session already claimed.
-        """
-        if unclaimed_only:
-            from .client import BridgeClientError
-            from .protocol import CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION
-
-            if not self.daemon_supports(CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION):
-                version, _minimum = self.daemon_protocol()
-                raise BridgeClientError(
-                    426,
-                    "Unclaimed-only CLI-mode reservation release requires "
-                    "agent-bridge HTTP protocol "
-                    f"v{CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION}; the daemon "
-                    f"advertises v{version}. Skipping DELETE so the reservation "
-                    "can expire instead of risking removal of a claimed session.",
-                )
-        params = {}
-        if reservation_id:
-            params["reservation_id"] = reservation_id
-        if unclaimed_only:
-            params["unclaimed_only"] = "true"
-        query = "?" + urllib.parse.urlencode(params) if params else ""
+    def release_cli_mode_reservation(self, worktree_id: str, *, reservation_id: str | None = None) -> int:
+        """DELETE .../cli-mode-reservations/{worktree_id} (only ``reservation_id`` if given)."""
+        query = "?" + urllib.parse.urlencode({"reservation_id": reservation_id}) if reservation_id else ""
         resp = self._request("DELETE", f"/api/v1/live-sessions/cli-mode-reservations/{worktree_id}{query}")
         return (resp or {}).get("removed", 0)
 

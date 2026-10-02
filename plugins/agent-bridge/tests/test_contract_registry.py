@@ -103,9 +103,6 @@ def test_http_protocol_constant_fixture_matches_production() -> None:
             bridge_protocol.REMOTE_SESSION_COPILOT_ARGS_PROTOCOL_VERSION
         ),
         "live_session_mode": bridge_protocol.LIVE_SESSION_MODE_PROTOCOL_VERSION,
-        "cli_mode_unclaimed_release": (
-            bridge_protocol.CLI_MODE_UNCLAIMED_RELEASE_PROTOCOL_VERSION
-        ),
     }
 
 

@@ -1106,26 +1106,19 @@ $OwnerTaskName = 'agent-codespaces-owner'
 
 function Get-ConnectionOwnerConfig {
     <# Ask the freshly-built runtime whether the Connection Owner is enabled.
-       Returns @{ Known = <bool>; Enabled = <bool>; Interval = <double> }. A
-       query failure is UNKNOWN: do not create a new login service, but also do
-       not delete an existing one unless the runtime explicitly says disabled. #>
-    $result = @{ Known = $false; Enabled = $false; Interval = 15.0 }
+       Returns @{ Enabled = <bool>; Interval = <double> }; a query failure
+       fails CLOSED (Enabled=$false) regardless of the config's own default,
+       since we cannot safely provision a login service without confirming
+       what the resolved config actually says. #>
+    $result = @{ Enabled = $false; Interval = 15.0 }
     $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
     try {
         $env:PYTHONUTF8 = '1'
         $json = & $LinkPython -m agent_codespaces owner --status 2>$null
         if ($LASTEXITCODE -eq 0 -and $json) {
             $obj = (($json | Out-String).Trim() | ConvertFrom-Json)
-            # Known only for an object with a real boolean ``enabled`` (and a
-            # convertible interval): ``{}``, ``null`` or a truncated payload stays
-            # unknown, so it can never unregister an existing Owner task.
-            if ($obj -is [psobject] -and $obj.PSObject.Properties['enabled'] -and $obj.enabled -is [bool]) {
-                $interval = $result.Interval
-                if ($obj.reconcile_interval) { $interval = [double]$obj.reconcile_interval }
-                $result.Enabled = $obj.enabled
-                $result.Interval = $interval
-                $result.Known = $true
-            }
+            $result.Enabled = [bool]$obj.enabled
+            if ($obj.reconcile_interval) { $result.Interval = [double]$obj.reconcile_interval }
         }
     } catch { }
     $ErrorActionPreference = $prevEAP
@@ -1152,10 +1145,6 @@ function Sync-ConnectionOwnerService {
        register + start the per-user scheduled task; disabled (default) -> ensure
        it is absent. Idempotent + additive; failures are non-fatal to install. #>
     $co = Get-ConnectionOwnerConfig
-    if (-not $co.Known) {
-        Write-ServiceWarn "Connection Owner config query failed; leaving any existing scheduled task unchanged"
-        return
-    }
     if (-not $co.Enabled) {
         Unregister-ConnectionOwnerService
         return

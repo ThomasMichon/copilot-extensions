@@ -172,68 +172,21 @@ def _launch_cli_mode_session(
     if seed:
         argv += ["--seed", seed]
     runner = run or subprocess.run
-    try:
-        result = runner(argv, capture_output=True, text=True)
-    except Exception:
-        _release_unclaimed_cli_mode_reservation(client, worktree_id, reservation)
-        raise
+    result = runner(argv, capture_output=True, text=True)
     embody_out: dict[str, Any] = {}
-    malformed_output = False
     stdout = getattr(result, "stdout", None)
     if stdout:
         try:
-            parsed = json.loads(stdout)
-            if isinstance(parsed, dict):
-                embody_out = parsed
-            else:
-                malformed_output = True
+            embody_out = json.loads(stdout)
         except (json.JSONDecodeError, TypeError):
             embody_out = {}
-            malformed_output = True
-    try:
-        final = client.get_cli_mode_reservation(worktree_id) or reservation
-    except Exception:
-        _release_unclaimed_cli_mode_reservation(client, worktree_id, reservation)
-        raise
-    session = embody_out.get("session")
-    exit_code = getattr(result, "returncode", None)
-    if exit_code != 0 or malformed_output or not session:
-        _release_unclaimed_cli_mode_reservation(
-            client, worktree_id, reservation, current=final,
-        )
+    final = client.get_cli_mode_reservation(worktree_id) or reservation
     return {
         "reservation": final,
         "embody": embody_out,
-        "session": session,
-        "exit_code": exit_code,
+        "session": embody_out.get("session"),
+        "exit_code": getattr(result, "returncode", None),
     }
-
-
-def _release_unclaimed_cli_mode_reservation(
-    client: Any,
-    worktree_id: str,
-    reservation: dict[str, Any],
-    *,
-    current: dict[str, Any] | None = None,
-) -> None:
-    reservation_id = reservation.get("reservation_id")
-    if not reservation_id:
-        return
-    observed = current or reservation
-    if (
-        observed.get("reservation_id") == reservation_id
-        and observed.get("claimed_by_session_id")
-    ):
-        return
-    try:
-        client.release_cli_mode_reservation(
-            worktree_id, reservation_id=reservation_id, unclaimed_only=True,
-        )
-    except Exception as exc:  # best effort: preserve the original launch failure/result
-        print(
-            f"[WARN] failed to release CLI-mode reservation {reservation_id}: {exc}",
-            file=sys.stderr,
-        )
 
 
 def _cmd_live_sessions(args: argparse.Namespace) -> None:

@@ -445,22 +445,15 @@ class TestDetachedSharedHelpers:
 
 
 class _Adapter:
-    def __init__(
-        self,
-        launch_payload: dict[str, Any] | None = None,
-        *,
-        hold_added: bool = True,
-    ) -> None:
+    def __init__(self, launch_payload: dict[str, Any] | None = None) -> None:
         self.launch_payload = launch_payload or {
             "ok": True,
             "created": True,
             "seed_submitted": True,
             "session": "wt-anchor-repo",
         }
-        self.hold_added = hold_added
         self.calls: list[tuple[str, str]] = []
         self.keeper_stopped = False
-        self.stop_keeper_error: Exception | None = None
 
     def run(self, command: str, *, timeout: float) -> tuple[int, str, str]:
         self.calls.append(("run", command))
@@ -481,11 +474,9 @@ class _Adapter:
 
     def ensure_keeper(self, *, venue_port: int, mux: str) -> dict[str, Any]:
         self.calls.append(("keeper", f"{venue_port}:{mux}"))
-        return {"started": True, "hold_added": self.hold_added, "state": {"pid": 123}}
+        return {"started": True, "state": {"pid": 123}}
 
     def stop_keeper(self) -> bool:
-        if self.stop_keeper_error is not None:
-            raise self.stop_keeper_error
         self.keeper_stopped = True
         return True
 
@@ -658,69 +649,6 @@ class TestDetachedRunner:
         assert rc == 1
         assert "seed was not submitted" in payload["error"]
         assert adapter.keeper_stopped is True
-        assert any("tmux kill-session" in command for kind, command in adapter.calls if kind == "run")
-
-    def test_launch_failure_does_not_release_preexisting_keeper_hold(self, monkeypatch) -> None:
-        from venue_copilot import detached
-
-        adapter = _Adapter(
-            {"ok": True, "created": False, "session": "wt-anchor-repo"},
-            hold_added=False,
-        )
-        monkeypatch.setattr("venue_copilot.detached.resolve_daemon_port", lambda: 41234)
-        monkeypatch.setattr("venue_copilot.detached.resolve_local_auth_token", lambda: "tok")
-        monkeypatch.setattr(
-            "venue_copilot.detached.reserve_with_retry",
-            lambda scope, venue, **kw: {"reservation_id": "r1"},
-        )
-        monkeypatch.setattr("venue_copilot.detached.await_claim", lambda scope, rid, timeout: None)
-        monkeypatch.setattr("venue_copilot.detached.release_cli_mode", lambda *a, **k: 1)
-
-        rc, payload = detached.launch_detached(
-            adapter,
-            self._plan(),
-            seed="do it",
-            driver="d",
-            copilot_args=[],
-            ensure_mux=True,
-            register_timeout=0.0,
-            progress=lambda *a: None,
-        )
-
-        assert rc == 1
-        assert "never registered" in payload["error"]
-        assert adapter.keeper_stopped is False
-        assert not any("tmux kill-session" in command for kind, command in adapter.calls if kind == "run")
-
-    def test_launch_failure_cleanup_preserves_original_payload_when_keeper_stop_fails(
-        self, monkeypatch, capsys,
-    ) -> None:
-        from venue_copilot import detached
-
-        adapter = _Adapter({"ok": True, "created": True, "seed_submitted": False})
-        adapter.stop_keeper_error = RuntimeError("lock busy")
-        monkeypatch.setattr("venue_copilot.detached.resolve_daemon_port", lambda: 41234)
-        monkeypatch.setattr("venue_copilot.detached.resolve_local_auth_token", lambda: "tok")
-        monkeypatch.setattr(
-            "venue_copilot.detached.reserve_with_retry",
-            lambda scope, venue, **kw: {"reservation_id": "r1"},
-        )
-        monkeypatch.setattr("venue_copilot.detached.release_cli_mode", lambda *a, **k: 1)
-
-        rc, payload = detached.launch_detached(
-            adapter,
-            self._plan(),
-            seed="do it",
-            driver="d",
-            copilot_args=[],
-            ensure_mux=True,
-            register_timeout=0.0,
-            progress=lambda *a: None,
-        )
-
-        assert rc == 1
-        assert "seed was not submitted" in payload["error"]
-        assert "could not update the forward keeper" in capsys.readouterr().err
         assert any("tmux kill-session" in command for kind, command in adapter.calls if kind == "run")
 
     def test_detached_launch_uses_180_second_seed_ready_timeout_floor(self, monkeypatch) -> None:

@@ -80,29 +80,6 @@ class TestCmdCreateCliDispatch:
         assert exc.value.code == 3
         assert seen["argv"] == ["/bin/agent-containers", "copilot", "repo-1"]
 
-    def test_ssh_target_execs_agent_ssh_copilot(self, monkeypatch) -> None:
-        monkeypatch.setattr(targeting.shutil, "which", lambda name: f"/bin/{name}")
-        seen = {}
-
-        class _Result:
-            returncode = 0
-
-        def fake_run(argv, **kwargs):
-            seen["argv"] = argv
-            return _Result()
-
-        monkeypatch.setattr(targeting.subprocess, "run", fake_run)
-
-        with pytest.raises(SystemExit) as exc:
-            m._cmd_create(_ns(target="ssh:devbox-wsl", prompt="do the thing"))
-
-        assert exc.value.code == 0
-        assert seen["argv"] == [
-            "/bin/agent-ssh", "copilot", "devbox-wsl",
-            "--seed",
-            f"{targeting._COMPANION_SEED_HEADS_UP}\n\ndo the thing",
-        ]
-
     def test_driver_is_forwarded(self, monkeypatch) -> None:
         monkeypatch.setattr(targeting.shutil, "which", lambda name: f"/bin/{name}")
         seen = {}
@@ -279,22 +256,6 @@ class TestCmdCreateCliDetach:
             f"{targeting._COMPANION_SEED_HEADS_UP}\n\n{prompt}"
         )
 
-    def test_detach_forwards_to_ssh_targets(self, monkeypatch) -> None:
-        seen = self._capture(monkeypatch)
-        prompt = "do the ssh work"
-
-        with pytest.raises(SystemExit) as exc:
-            m._cmd_create(_ns(target="ssh:devbox-wsl", prompt=prompt, detach=True))
-
-        assert exc.value.code == 0
-        assert seen["argv"] == [
-            "/bin/agent-ssh", "copilot", "devbox-wsl",
-            "--detach", "--seed-file", "-",
-        ]
-        assert seen["kwargs"]["input"] == (
-            f"{targeting._COMPANION_SEED_HEADS_UP}\n\n{prompt}"
-        )
-
     def test_detach_requires_cli(self, monkeypatch, capsys) -> None:
         with pytest.raises(SystemExit) as exc:
             m._cmd_create(_ns(cli=False, detach=True))
@@ -303,6 +264,6 @@ class TestCmdCreateCliDetach:
 
     def test_parser_exposes_detach(self) -> None:
         args = m.build_parser().parse_args(
-            ["create", "ssh:devbox-wsl", "do it", "--cli", "--detach"]
+            ["create", "codespace:cs-1", "do it", "--cli", "--detach"]
         )
         assert args.detach is True and args.cli is True

@@ -72,16 +72,3 @@ def _isolate_launch_memory(monkeypatch, tmp_path):
     from agent_codespaces import launch_memory
 
     monkeypatch.setattr(launch_memory, "LAUNCHES_DIR", tmp_path / "launches")
-
-
-@pytest.fixture(autouse=True)
-def _isolate_owner_local_forward_beacon(monkeypatch, tmp_path):
-    """Keep Connection Owner local-forward readiness beacons out of the host."""
-    from agent_codespaces import owner_local_forwards
-
-    monkeypatch.setattr(
-        owner_local_forwards,
-        "ACTIVE_LOCAL_FORWARDS_FILE",
-        tmp_path / "connection-owner.local-forwards.json",
-    )
-    monkeypatch.setattr(owner_local_forwards, "ensure_runtime_dir", lambda: None)

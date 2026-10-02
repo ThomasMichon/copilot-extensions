@@ -228,32 +228,21 @@ async def _subjects(st: dict[str, Any], rows: list[dict[str, Any]]) -> None:
 
 
 async def _collect(st: dict[str, Any]) -> dict[str, Any]:
-    # A listing that fails or times out (a slow ``list --all`` on a busy host)
-    # keeps that project's last good rows, reported under ``errors``: one slow
-    # pass must not blank a project's tasks and the workers shown on them.
-    prev = st.get("cache") or {}
-    kept: dict[str, list[dict[str, Any]]] = {}
-    for r in prev.get("workspaces") or []:
-        kept.setdefault(str(r.get("project")), []).append(r)
     repo_rows, err = await _repo_rows()
     projects = sorted({str(r["name"]) for r in repo_rows})
-    if err and not projects:
-        projects = list(prev.get("projects") or [])
     errors: dict[str, str] = {"_repos": err} if err else {}
 
     async def one(project: str) -> list[dict[str, Any]]:
         data, e = await _aw(["-p", project, "list", "--json", "--all"], timeout=LIST_TIMEOUT)
         if data is None:
             errors[project] = e
-            return kept.get(project, [])
+            return []
         rows = data.get("worktrees", data) if isinstance(data, dict) else data
         return [
             _project_row(r, project) for r in rows or [] if isinstance(r, dict) and r.get("id")
         ]
 
     lists, info = await asyncio.gather(asyncio.gather(*(one(p) for p in projects)), _project_info(repo_rows))
-    if err and not repo_rows:
-        info = dict(prev.get("project_info") or {})
     rows = [r for group in lists for r in group]
     await asyncio.gather(_pr_details(st, rows), _subjects(st, rows))
     return {"workspaces": rows, "projects": projects, "project_info": info, "errors": errors,
