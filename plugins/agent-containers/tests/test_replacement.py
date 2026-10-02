@@ -1393,3 +1393,45 @@ def test_destroy_drifted_restricted_members_defers_on_rescue_error(monkeypatch):
 
     assert result.removed == []
     assert "rescue capture failed" in result.deferred["sandbox-1"]
+
+
+def test_migrating_member_image_id_tamper_is_not_tolerated(monkeypatch):
+    """Unlike the ordinary restricted-recreate-on-image-rebuild case (where
+    an image ID mismatch is expected drift), the same error during a
+    migration means the container's image was swapped post-creation and
+    must still block destruction (copilot-extensions#4933 follow-up)."""
+    config, fleet = _migrated_config()
+    info = _member()
+    _safe_defaults(monkeypatch, info)
+    monkeypatch.setattr(
+        replacement,
+        "probe_session_liveness",
+        lambda *_args, **_kwargs: replacement.SessionLiveness("idle", [], []),
+    )
+    monkeypatch.setattr(
+        replacement,
+        "restricted_policy_errors",
+        lambda *_args, **_kwargs: [
+            "container image ID differs from provisioned image ID"
+        ],
+    )
+    monkeypatch.setattr(
+        replacement,
+        "remove_container",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("an image-ID-tampered container must not be removed")
+        ),
+    )
+
+    result = replacement.destroy_restricted_member(
+        config,
+        fleet,
+        info,
+        operation="recreate",
+        force_remove=True,
+        force_abandon=False,
+        migrating=True,
+    )
+
+    assert result.status == "deferred"
+    assert "provisioned image ID" in (result.reason or "")

@@ -322,14 +322,18 @@ def restricted_policy_errors(
 
     if labels.get(SECURITY_PROFILE_LABEL) != "restricted":
         errors.append("security profile label is not restricted")
+    # FIXED invariant regardless of profile/config: the running image must
+    # still be the one actually provisioned (no silent image swap) --
+    # unlike the CURRENT-config image comparisons below, this binds the
+    # container to its OWN recorded provisioning, never today's fleet.
+    if labels.get(SECURITY_IMAGE_ID_LABEL) != doc.get("Image"):
+        errors.append("container image ID differs from provisioned image ID")
     if not migrating:
         expected_policy = fleet.security_policy_fingerprint(workspace_folder, exec_user)
         if labels.get(SECURITY_POLICY_LABEL) != expected_policy:
             errors.append("security policy fingerprint is stale")
         if container.get("Image") != fleet.image:
             errors.append("container image differs from configured image")
-        if labels.get(SECURITY_IMAGE_ID_LABEL) != doc.get("Image"):
-            errors.append("container image ID differs from provisioned image ID")
         current_image = _docker(
             ["image", "inspect", "--format", "{{.Id}}", fleet.image],
             timeout=30,
@@ -500,7 +504,9 @@ def restricted_policy_errors(
         # CURRENT config's value would wrongly defer a migration whose
         # container is otherwise fully compliant. Derive the single
         # workspace-like surface from what's actually mounted instead.
-        non_workspace = {home, "/tmp", "/run"}  # noqa: S108
+        # "/" is never a valid workspace -- restricted creation forbids
+        # mounting writable tmpfs over root (defeats read-only-rootfs).
+        non_workspace = {home, "/tmp", "/run", "/"}  # noqa: S108
         observed_workspace_candidates = set(tmpfs) - non_workspace
         if len(observed_workspace_candidates) != 1:
             errors.append("writable tmpfs surfaces differ from restricted policy")

@@ -379,10 +379,21 @@ def _restricted_member_action(
                 inspected=inspected,
                 migrating=migrating,
             )
+            # The provisioned-image-ID check is a FIXED invariant during a
+            # migration (the container's own image genuinely hasn't
+            # changed), so it must NOT be tolerated there -- only the
+            # ordinary restricted-recreate-on-image-rebuild case (where the
+            # fleet's image was deliberately rebuilt) allows this drift.
+            _image_id_drift = "container image ID differs from provisioned image ID"
+            allowed_drift = (
+                _ALLOWED_REPLACEMENT_DRIFT - {_image_id_drift}
+                if migrating
+                else _ALLOWED_REPLACEMENT_DRIFT
+            )
             unsafe_policy_errors = [
                 error
                 for error in policy_errors
-                if error not in _ALLOWED_REPLACEMENT_DRIFT
+                if error not in allowed_drift
             ]
             if unsafe_policy_errors:
                 return DestructiveResult(
