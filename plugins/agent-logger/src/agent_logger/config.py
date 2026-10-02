@@ -310,35 +310,39 @@ def _validate_relative_path(value: Any, location: str) -> str:
     return text
 
 
-def _validate_absolute_path(value: Any, location: str) -> str:
-    """Validate a facility-wide absolute path (e.g. a shared NAS mount) --
-    the counterpart to :func:`_validate_relative_path` for a sync
-    destination, which is inherently machine-independent and absolute rather
-    than repo-relative. Rejects ``~`` (a per-user expansion defeats the
-    "same value for every machine" property this field exists for), a bare
-    root (``/`` or a drive root), and any ``..`` segment.
-
-    Validated with **host-native** path semantics (:class:`pathlib.Path`,
-    not both ``PurePosixPath``/``PureWindowsPath``): :attr:`Config.sync_path`
-    later does ``Path(configured)`` on whichever machine reads this value, so
-    a foreign-platform absolute path (a Windows drive path committed while
-    read on POSIX, or vice versa) must not pass validation here only to be
-    silently reinterpreted as a *relative* path -- and therefore resolve
-    under the current working directory -- when actually consumed.
+def _validate_portable_absolute_path(value: Any, location: str) -> str:
+    """Platform-neutral syntax checks for a facility-wide absolute path (e.g.
+    a shared NAS mount): non-empty, no ``~`` (defeats the "same value for
+    every machine" property), absolute on *some* platform's syntax, no ``..``.
+    Does **not** check absoluteness on *this* platform -- see
+    :func:`_validate_native_absolute_path`, deferred until the final
+    resolved sync target is known to actually consume the value.
     """
     if not isinstance(value, str) or not value.strip():
         raise RepositoryConfigError(f"{location} must be a non-empty absolute path")
     text = value.strip()
     if text.startswith("~"):
         raise RepositoryConfigError(f"{location} must not use '~' (not machine-portable)")
-    native = Path(text)
+    if not (PurePosixPath(text).is_absolute() or PureWindowsPath(text).is_absolute()):
+        raise RepositoryConfigError(f"{location} must be an absolute path")
+    if ".." in PurePosixPath(text.replace("\\", "/")).parts:
+        raise RepositoryConfigError(f"{location} must not contain '..'")
+    return text
+
+
+def _validate_native_absolute_path(value: str, location: str) -> str:
+    """Host-native final check after :func:`_validate_portable_absolute_path`:
+    must be absolute, and not a bare root, **on this platform specifically**.
+    :attr:`Config.sync_path` later does ``Path(configured)``, so a
+    foreign-platform path must never pass here only to be silently
+    reinterpreted as *relative* (resolving under the cwd) when consumed.
+    """
+    native = Path(value)
     if not native.is_absolute():
         raise RepositoryConfigError(f"{location} must be an absolute path")
     if len(native.parts) <= 1:
         raise RepositoryConfigError(f"{location} must not be a bare filesystem root")
-    if ".." in PurePosixPath(text.replace("\\", "/")).parts:
-        raise RepositoryConfigError(f"{location} must not contain '..'")
-    return text
+    return value
 
 
 
@@ -629,7 +633,9 @@ def _load_repo_config(path: Path) -> dict[str, Any]:
         else:
             _reject_unknown_fields(sync, REPO_SYNC_FIELDS, f"{path}: sync")
         if "local_path" in sync:
-            local_path = _validate_absolute_path(sync["local_path"], "sync.local_path")
+            # Native-absoluteness check deferred to load_config() once the
+            # final target is known (see _validate_native_absolute_path).
+            local_path = _validate_portable_absolute_path(sync["local_path"], "sync.local_path")
             result["sync"] = {"targets": {"local": {"path": local_path}}}
 
     return result
@@ -973,13 +979,21 @@ def load_config(
     data = _deep_merge(DEFAULTS, _load_user_config(resolved_home / "config.yaml"))
     repo_root = _find_repo_root(repo_start) if include_repo else None
     repo_config_path = find_repo_config(repo_start) if include_repo else None
+    repo_data: dict[str, Any] = {}
     if repo_config_path:
-        data = _deep_merge(data, _load_repo_config(repo_config_path))
+        repo_data = _load_repo_config(repo_config_path)
+        data = _deep_merge(data, repo_data)
 
     # Environment overrides (flat, opt-in).
     if os.environ.get("AGENT_LOGGER_SYNC_TARGET"):
         data["sync"]["target"] = os.environ["AGENT_LOGGER_SYNC_TARGET"]
     if os.environ.get("AGENT_LOGGER_VOICE_PACK"):
         data["log"]["voice_pack"] = os.environ["AGENT_LOGGER_VOICE_PACK"]
+
+    # Deferred host-native check (see _validate_native_absolute_path): only
+    # once the final target is known, and only when it's "local".
+    repo_local_path = repo_data.get("sync", {}).get("targets", {}).get("local", {}).get("path")
+    if repo_local_path is not None and data["sync"]["target"] == "local":
+        _validate_native_absolute_path(repo_local_path, "sync.local_path")
 
     return Config(data, resolved_home, repo_config_path, repo_root)

@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from platform import system as _platform_system
 
 import pytest
 import yaml
@@ -235,6 +236,64 @@ def test_repo_config_sync_local_path_does_not_affect_other_sync_fields(
 
     assert cfg.sync_target == "onedrive"  # untouched by the repo config
     assert cfg.sync_path == Path("/mnt/nas/Lake/Copilot/sessions")
+
+
+def _foreign_absolute_path() -> str:
+    """An absolute path in the OTHER platform's syntax, foreign to this one."""
+    if _platform_system() == "Windows":
+        return "/mnt/nas/Lake/Copilot/sessions"  # POSIX: no Windows drive letter
+    return r"C:\nas\sessions"  # Windows: no POSIX leading "/"
+
+
+def test_repo_config_foreign_local_path_tolerated_when_target_is_not_local(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A facility-shared sync.local_path written for the rest of a
+    mixed-platform fleet -- "the same absolute value for every machine" --
+    has no single string that's a native absolute path on every platform. A
+    machine whose own resolved target isn't "local" never consumes this
+    value at all, so a foreign-platform value here must not crash the whole
+    config load."""
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "config.yaml").write_text("sync:\n  target: ssh\n", encoding="utf-8")
+
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".agent-logger.yaml").write_text(
+        f"schema_version: 3\nsync:\n  local_path: {_foreign_absolute_path()}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+
+    cfg = load_config(home=home)
+    assert cfg.sync_target == "ssh"
+
+
+def test_repo_config_foreign_local_path_raises_when_target_is_local(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The same foreign-platform value must still raise when this machine's
+    own resolved target genuinely is "local" -- the hazard
+    (Config.sync_path later doing Path(configured), silently resolving a
+    foreign value as relative to the current working directory) is real in
+    that case, so the deferred native check must still fire."""
+    home = tmp_path / "home"
+    home.mkdir()
+    # No home config.yaml override here -> the default target is "local".
+
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".agent-logger.yaml").write_text(
+        f"schema_version: 3\nsync:\n  local_path: {_foreign_absolute_path()}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+
+    with pytest.raises(
+        RepositoryConfigError, match=r"sync\.local_path must be an absolute path"
+    ):
+        load_config(home=home)
 
 
 @pytest.mark.parametrize(
