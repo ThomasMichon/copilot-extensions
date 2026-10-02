@@ -59,7 +59,9 @@ function Get-LiveReconcilingPlugins {
   # exact lock convention and aren't detected here -- see README.md's Known
   # limitations.
   $found = @()
-  $pattern = Join-Path (Join-Path $HOME ".*") "reconcile.lock"
+  $scanRoot = $env:BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT
+  if (-not $scanRoot) { $scanRoot = $HOME }
+  $pattern = Join-Path (Join-Path $scanRoot ".*") "reconcile.lock"
   foreach ($lock in (Get-ChildItem -Path $pattern -Force -ErrorAction SilentlyContinue)) {
     try {
       $pidText = (Get-Content -LiteralPath $lock.FullName -Raw).Trim()

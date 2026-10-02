@@ -82,8 +82,9 @@ _live_reconciling_plugins() {
   # adopters (agent-bridge, agent-machines, agent-worktrees) don't use this
   # exact lock convention and aren't detected here -- see README.md's Known
   # limitations.
-  local lock pid name
-  for lock in "$HOME"/.*/reconcile.lock; do
+  local scan_root lock pid name
+  scan_root="${BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT:-$HOME}"
+  for lock in "$scan_root"/.*/reconcile.lock; do
     [ -f "$lock" ] || continue
     pid="$(tr -d '[:space:]' < "$lock" 2>/dev/null)"
     [ -n "$pid" ] || continue

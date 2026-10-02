@@ -94,7 +94,8 @@ def test_on_detects_live_in_flight_reconcile(tmp_path) -> None:
     proc = subprocess.Popen(["sleep", "30"])
     try:
         (lock_dir / "reconcile.lock").write_text(str(proc.pid), encoding="utf-8")
-        env = {"PATH": "/usr/bin:/bin", "HOME": str(fake_home)}
+        env = {"PATH": "/usr/bin:/bin"}
+        env["BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT"] = str(fake_home)
         env["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(fake_home / "ks.json")
         result = subprocess.run(
             ["bash", str(GUARD), "on", "test"],
@@ -113,7 +114,8 @@ def test_on_detects_live_in_flight_reconcile(tmp_path) -> None:
 def test_on_reports_no_warning_when_no_lock_present(tmp_path) -> None:
     fake_home = tmp_path / "home"
     fake_home.mkdir()
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(fake_home)}
+    env = {"PATH": "/usr/bin:/bin"}
+    env["BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT"] = str(fake_home)
     env["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(fake_home / "ks.json")
     result = subprocess.run(
         ["bash", str(GUARD), "on", "test"],
@@ -131,7 +133,8 @@ def test_on_ignores_stale_lock_with_dead_pid(tmp_path) -> None:
     lock_dir.mkdir(parents=True)
     # A PID astronomically unlikely to be alive right now.
     (lock_dir / "reconcile.lock").write_text("999999999", encoding="utf-8")
-    env = {"PATH": "/usr/bin:/bin", "HOME": str(fake_home)}
+    env = {"PATH": "/usr/bin:/bin"}
+    env["BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT"] = str(fake_home)
     env["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(fake_home / "ks.json")
     result = subprocess.run(
         ["bash", str(GUARD), "on", "test"],

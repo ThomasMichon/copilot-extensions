@@ -136,7 +136,7 @@ def test_on_detects_live_in_flight_reconcile(tmp_path, monkeypatch, capsys) -> N
     fake_home = tmp_path / "home"
     lock_dir = fake_home / ".fake-plugin"
     lock_dir.mkdir(parents=True)
-    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT", str(fake_home))
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(fake_home / "ks.json"))
 
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
@@ -155,7 +155,7 @@ def test_on_detects_live_in_flight_reconcile(tmp_path, monkeypatch, capsys) -> N
 def test_on_reports_no_warning_when_no_lock_present(tmp_path, monkeypatch, capsys) -> None:
     fake_home = tmp_path / "home"
     fake_home.mkdir()
-    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT", str(fake_home))
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(fake_home / "ks.json"))
 
     rc = _run(["bootstrap-killswitch", "on", "test"])
@@ -170,7 +170,7 @@ def test_on_ignores_stale_lock_with_dead_pid(tmp_path, monkeypatch, capsys) -> N
     lock_dir.mkdir(parents=True)
     # A PID astronomically unlikely to be alive right now.
     (lock_dir / "reconcile.lock").write_text("999999999", encoding="utf-8")
-    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT", str(fake_home))
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(fake_home / "ks.json"))
 
     rc = _run(["bootstrap-killswitch", "on", "test"])
@@ -183,7 +183,7 @@ def test_on_json_mode_includes_in_flight_reconciles(tmp_path, monkeypatch, capsy
     fake_home = tmp_path / "home"
     lock_dir = fake_home / ".fake-plugin"
     lock_dir.mkdir(parents=True)
-    monkeypatch.setenv("HOME", str(fake_home))
+    monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT", str(fake_home))
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(fake_home / "ks.json"))
 
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])

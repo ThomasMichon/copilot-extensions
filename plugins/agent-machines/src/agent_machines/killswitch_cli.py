@@ -54,7 +54,9 @@ def _live_reconciling_plugins() -> list[str]:
     limitations.
     """
     live: list[str] = []
-    for lock_path in sorted(glob.glob(str(Path.home() / ".*" / "reconcile.lock"))):
+    scan_root = os.environ.get("BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT")
+    root = Path(scan_root).expanduser() if scan_root else Path.home()
+    for lock_path in sorted(glob.glob(str(root / ".*" / "reconcile.lock"))):
         lock = Path(lock_path)
         try:
             pid = int(lock.read_text(encoding="utf-8").strip())

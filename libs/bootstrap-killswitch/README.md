@@ -90,11 +90,14 @@ it, when, and why, so a forgotten switch is discoverable rather than silent.
   that process is detached and outlives the session-start hook that spawned
   it. `on` best-effort detects this: most adopters guard their own
   background reconcile with a `~/.<plugin>/reconcile.lock` single-flight
-  file naming the live PID, and `on` scans every such lock on the host,
-  warning by name if any are still alive. This is **not exhaustive** --
-  `agent-bridge`, `agent-machines`, and `agent-worktrees` don't use this
-  exact lock convention and are never detected this way. If `on` reports no
-  warning, a diagnosis can still theoretically race one of those three
-  plugins' own in-flight reconcile; when in doubt, wait a few seconds after
-  activating the switch (most reconciles are brief) before treating any
-  plugin's venv as settled.
+  file naming the live PID, and `on` scans every such lock under
+  `$BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT` (defaults to the home
+  directory; this override exists mainly for tests, since Windows
+  PowerShell 5.1's `$HOME` automatic variable does not honor a reassigned
+  `HOME` env var the way pwsh/bash do), warning by name if any are still
+  alive. This is **not exhaustive** -- `agent-bridge`, `agent-machines`,
+  and `agent-worktrees` don't use this exact lock convention and are never
+  detected this way. If `on` reports no warning, a diagnosis can still
+  theoretically race one of those three plugins' own in-flight reconcile;
+  when in doubt, wait a few seconds after activating the switch (most
+  reconciles are brief) before treating any plugin's venv as settled.

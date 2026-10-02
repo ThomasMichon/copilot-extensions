@@ -134,7 +134,12 @@ def test_on_detects_live_in_flight_reconcile(tmp_path) -> None:
     try:
         (lock_dir / "reconcile.lock").write_text(str(proc.pid), encoding="utf-8")
         env = dict(os.environ)
-        env["HOME"] = str(fake_home)
+        # Not $HOME: Windows PowerShell 5.1's $HOME automatic variable does
+        # not honor a reassigned HOME env var the way pwsh/bash do, so
+        # redirecting via HOME alone is not reliably testable across both
+        # interpreters. The guard supports an explicit scan-root override
+        # for exactly this reason.
+        env["BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT"] = str(fake_home)
         env["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(fake_home / "ks.json")
         result = subprocess.run(
             [PWSH, "-NoProfile", "-File", str(GUARD), "on", "test"],
@@ -154,7 +159,7 @@ def test_on_reports_no_warning_when_no_lock_present(tmp_path) -> None:
     fake_home = tmp_path / "home"
     fake_home.mkdir()
     env = dict(os.environ)
-    env["HOME"] = str(fake_home)
+    env["BOOTSTRAP_KILLSWITCH_RECONCILE_SCAN_ROOT"] = str(fake_home)
     env["BOOTSTRAP_KILLSWITCH_STATE_FILE"] = str(fake_home / "ks.json")
     result = subprocess.run(
         [PWSH, "-NoProfile", "-File", str(GUARD), "on", "test"],
