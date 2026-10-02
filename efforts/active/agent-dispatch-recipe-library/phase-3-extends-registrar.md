@@ -115,7 +115,7 @@ risk, and already delivers the effort's motivating operational finding
    `global:conflict-resolution`/`global:goal-driven` template ahead of that
    refactor would mean inventing a throwaway emitter/evaluator shape for
    them, then redoing it once the unification lands -- so their global
-   recipes now depend on item 4 below (reordered ahead of items 3), not the
+   recipes now depend on item 4 below (reordered ahead of item 5), not the
    other way around. `reviewer`/`repository-issue-loop` needed no such wait:
    both already expand to a concrete emitter/evaluator/pool triple via their
    existing `kind:` sugar (`reviewer_loops.py`/`repository_issue_loops.py`),

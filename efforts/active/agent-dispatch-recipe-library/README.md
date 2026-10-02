@@ -289,12 +289,12 @@ below — read it before starting any Phase 3 work).
       cadence/output) and leaves the irreducibly domain-specific fields
       (name/repo/task_label, the emitter's discovery command, forge
       producer login, worker identity) for the declaration to supply.
-      `global:conflict-resolution`/`global:goal-driven` remain **not yet
-      started** -- re-sequenced (not dropped) behind the single-emitter-
-      primitive refactor above, since those two archetypes have no
-      emitter/evaluator pair to template until that refactor lands
+- [ ] Ship `global:conflict-resolution` and `global:goal-driven` the same
+      way. **Not yet started** -- re-sequenced (not dropped) behind the
+      single-emitter-primitive refactor above, since those two archetypes
+      have no emitter/evaluator pair to template until that refactor lands
       (sub-plan §*Sub-PRs* item 5).
-- [x] Tests: an `extends:`-based declaration referencing each existing
+- [ ] Tests: an `extends:`-based declaration referencing each existing
       archetype behaves identically to today's direct `kind:` declaration
       with the same effective params; a repo-local and a cross-repo recipe
       reference both resolve correctly. **Repo-local/cross-repo path-ref

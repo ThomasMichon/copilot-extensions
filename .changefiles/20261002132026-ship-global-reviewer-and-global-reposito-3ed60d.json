@@ -1,0 +1,9 @@
+{
+  "comment": "Ship global:reviewer and global:repository-issue-loop registrar extends: recipes",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

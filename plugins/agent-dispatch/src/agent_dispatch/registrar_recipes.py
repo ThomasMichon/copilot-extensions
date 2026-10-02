@@ -32,22 +32,11 @@ from .registrar import RegistrarError
 #: ``command``, ``forge.producer_login``, ``pool.body.agent``) -- there is no
 #: sensible generic default for those.
 #:
-#: ``conflict-resolution`` and ``goal-driven`` (the other two archetypes
-#: documented in ``recipes/registry.py`` and
-#: ``visions/plugins/agent-dispatch/README.md``'s *The recipe*) are **not**
-#: shipped yet: per the vision's own updated framing, a recipe there is "a
-#: template for an emitter/evaluator pair", and today those two archetypes
-#: have no emitter/evaluator pair at all -- only the ad-hoc
-#: ``agent_dispatch.recipes`` CLI-kick path (``recipes/registry.py`` +
-#: ``recipes_cli.py``), which is itself slated for retirement in favor of
-#: emitter-native task authoring (*side-load-through-an-emitter*) once the
-#: single-``emitter``-primitive taxonomy refactor (Phase 3's own first
-#: bullet, tracked as sub-plan item 4) lands. Shipping a
-#: ``global:conflict-resolution``/``global:goal-driven`` template ahead of
-#: that refactor would mean inventing a throwaway emitter/evaluator shape for
-#: them, then redoing it once the unification lands -- see
+#: ``conflict-resolution`` and ``goal-driven`` are not shipped here: neither
+#: has a registrar ``kind:`` to expand to today, so there is no
+#: emitter/evaluator pair yet for a template to describe. See
 #: ``efforts/active/agent-dispatch-recipe-library/phase-3-extends-registrar.md``
-#: for the full re-sequencing rationale.
+#: for the sequencing.
 GLOBAL_RECIPES: dict[str, Mapping[str, Any]] = {
     "reviewer": {
         "kind": "reviewer-loop",
