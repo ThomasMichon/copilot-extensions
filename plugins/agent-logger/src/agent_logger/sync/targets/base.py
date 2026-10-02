@@ -126,18 +126,25 @@ def stage_wsl_secret_file(path: str) -> str | None:
     filesystem with ``chmod 600`` sidesteps that regardless of the distro's
     mount configuration.
 
+    *path* is expanded through :meth:`Path.expanduser` first -- configured
+    password-file paths commonly use ``~/...`` and a raw ``Path`` never
+    resolves that.
+
+    ``mktemp`` and the write are two separate calls precisely so a write
+    failure can still clean up the file ``mktemp`` already created --
+    returning ``None`` without a path would otherwise leak it in WSL's
+    filesystem indefinitely.
+
     Returns the staged WSL-native path (the caller must remove it via
     :func:`cleanup_wsl_staged_file` once done), or ``None`` on any failure.
     """
     try:
-        content = Path(path).read_bytes()
+        content = Path(path).expanduser().read_bytes()
     except OSError:
         return None
-    stage_script = 'f=$(mktemp) && cat > "$f" && chmod 600 "$f" && printf %s "$f"'
     try:
-        proc = subprocess.run(
-            ["wsl.exe", "-e", "sh", "-c", stage_script],
-            input=content,
+        mk = subprocess.run(
+            ["wsl.exe", "-e", "mktemp"],
             capture_output=True,
             timeout=_WSL_PROBE_TIMEOUT,
             check=False,
@@ -145,10 +152,27 @@ def stage_wsl_secret_file(path: str) -> str | None:
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
-    if proc.returncode != 0:
+    if mk.returncode != 0:
         return None
-    staged = proc.stdout.decode("utf-8", errors="replace").strip()
-    return staged or None
+    staged = mk.stdout.decode("utf-8", errors="replace").strip()
+    if not staged:
+        return None
+    try:
+        write = subprocess.run(
+            ["wsl.exe", "-e", "sh", "-c", 'cat > "$1" && chmod 600 "$1"', "sh", staged],
+            input=content,
+            capture_output=True,
+            timeout=_WSL_PROBE_TIMEOUT,
+            check=False,
+            **NO_WINDOW_KWARGS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        cleanup_wsl_staged_file(staged)
+        return None
+    if write.returncode != 0:
+        cleanup_wsl_staged_file(staged)
+        return None
+    return staged
 
 
 def cleanup_wsl_staged_file(staged_path: str) -> None:

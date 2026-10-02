@@ -1372,28 +1372,57 @@ def test_stage_wsl_secret_file_passes_content_as_stdin_and_sets_perms(
     monkeypatch, tmp_path: Path
 ) -> None:
     """Content must flow to the WSL-native staged file via stdin (never a
-    converted DrvFS path), with 0600 permissions set inside the same call."""
+    converted DrvFS path), with 0600 permissions set in a separate call so a
+    write failure can still clean up the file mktemp already created."""
     from agent_logger.sync.targets import base
 
     secret = tmp_path / "secret.txt"
     secret.write_bytes(b"hunter2")
 
-    captured_kwargs: dict = {}
-
-    class _Proc:
-        returncode = 0
-        stdout = b"/tmp/tmp.abc123\n"
+    captured_calls: list[tuple[list[str], dict]] = []
 
     def _fake_run(cmd, **kwargs):
-        captured_kwargs.update(kwargs)
-        return _Proc()
+        captured_calls.append((cmd, kwargs))
+        if cmd[2:3] == ["mktemp"]:
+            return type("P", (), {"returncode": 0, "stdout": b"/tmp/tmp.abc123\n"})()
+        return type("P", (), {"returncode": 0, "stdout": b""})()
 
     monkeypatch.setattr(base.subprocess, "run", _fake_run)
     assert base.stage_wsl_secret_file(str(secret)) == "/tmp/tmp.abc123"
-    assert captured_kwargs.get("input") == b"hunter2"
+    write_kwargs = next(
+        k for c, k in captured_calls if c[2:3] != ["mktemp"]
+    )
+    assert write_kwargs.get("input") == b"hunter2"
 
 
-def test_stage_wsl_secret_file_none_when_staging_fails(monkeypatch, tmp_path: Path) -> None:
+def test_stage_wsl_secret_file_expands_tilde_prefixed_paths(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The shipped config example uses password_file: ~/.agent-logger/...;
+    a bare Path never expands that, so every configured ~-path must resolve
+    through the real home directory before reading."""
+    from agent_logger.sync.targets import base
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    secret = tmp_path / "secret.txt"
+    secret.write_bytes(b"hunter2")
+
+    captured_calls: list[tuple[list[str], dict]] = []
+
+    def _fake_run(cmd, **kwargs):
+        captured_calls.append((cmd, kwargs))
+        if cmd[2:3] == ["mktemp"]:
+            return type("P", (), {"returncode": 0, "stdout": b"/tmp/tmp.abc123\n"})()
+        return type("P", (), {"returncode": 0, "stdout": b""})()
+
+    monkeypatch.setattr(base.subprocess, "run", _fake_run)
+    assert base.stage_wsl_secret_file("~/secret.txt") == "/tmp/tmp.abc123"
+    write_kwargs = next(k for c, k in captured_calls if c[2:3] != ["mktemp"])
+    assert write_kwargs.get("input") == b"hunter2"
+
+
+def test_stage_wsl_secret_file_none_when_mktemp_fails(monkeypatch, tmp_path: Path) -> None:
     from agent_logger.sync.targets import base
 
     secret = tmp_path / "secret.txt"
@@ -1405,6 +1434,29 @@ def test_stage_wsl_secret_file_none_when_staging_fails(monkeypatch, tmp_path: Pa
 
     monkeypatch.setattr(base.subprocess, "run", lambda *a, **k: _Proc())
     assert base.stage_wsl_secret_file(str(secret)) is None
+
+
+def test_stage_wsl_secret_file_cleans_up_when_write_fails(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """If mktemp succeeds but the write/chmod step fails, the already-created
+    temp file must not be leaked in WSL's filesystem indefinitely."""
+    from agent_logger.sync.targets import base
+
+    secret = tmp_path / "secret.txt"
+    secret.write_bytes(b"hunter2")
+
+    def _fake_run(cmd, **kwargs):
+        if cmd[2:3] == ["mktemp"]:
+            return type("P", (), {"returncode": 0, "stdout": b"/tmp/tmp.abc123\n"})()
+        return type("P", (), {"returncode": 1, "stdout": b""})()
+
+    monkeypatch.setattr(base.subprocess, "run", _fake_run)
+    cleanup_calls: list[str] = []
+    monkeypatch.setattr(base, "cleanup_wsl_staged_file", cleanup_calls.append)
+
+    assert base.stage_wsl_secret_file(str(secret)) is None
+    assert cleanup_calls == ["/tmp/tmp.abc123"]
 
 
 def test_cleanup_wsl_staged_file_invokes_rm(monkeypatch) -> None:
