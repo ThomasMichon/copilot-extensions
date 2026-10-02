@@ -569,7 +569,7 @@ async def test_no_fallback_resolve_still_raises_when_cli_absent():
 
 # --- list(): genuine provider failure (vs. legitimate absence) -----------
 #
-# round-6 review finding: a found binstub whose namespace-list genuinely
+# A found binstub whose namespace-list genuinely
 # fails (timeout, non-zero exit, unparseable output) with no in-process
 # fallback must NOT degrade to [] like the "not installed" case above --
 # that would let AgentResolver.list_agents_async() treat a partial/failed
