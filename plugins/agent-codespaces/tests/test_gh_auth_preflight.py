@@ -6,6 +6,8 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from dropin_registry import ScanAuthority, ScanSnapshot
 
 from agent_codespaces import __main__ as m
@@ -364,15 +366,58 @@ def test_fast_credential_account_bounds_the_binding_lock_wait(monkeypatch, tmp_p
 
 
 def test_fast_credential_account_falls_back_to_active(monkeypatch):
+    from types import SimpleNamespace
+
     from agent_codespaces import gh_account
 
     monkeypatch.setattr(
         "agent_codespaces.account_binding.bound_account_or_raise",
         lambda name, **_kw: None,
     )
+    monkeypatch.setattr("agent_codespaces.lifecycle.list_codespaces",
+                        lambda: [SimpleNamespace(name="cs-1", account="", repository="o/r")])
     monkeypatch.setattr(gh_account, "active_account", lambda **_kw: "active-user")
 
     assert gh_account.fast_credential_account_for_codespace("cs-1") == "active-user"
+
+
+def test_fast_credential_account_binds_an_unbound_mapped_owner(monkeypatch):
+    """Recovery reaches relay-launch-env without the readiness step that writes
+    the binding: a missing binding must not be read as ambient ownership."""
+    from types import SimpleNamespace
+
+    from agent_codespaces import account_binding, gh_account
+
+    bound = []
+    monkeypatch.setattr(account_binding, "bound_account_or_raise", lambda name, **_kw: None)
+    monkeypatch.setattr(account_binding, "bind", lambda *a: bound.append(a))
+    monkeypatch.setattr("agent_codespaces.lifecycle.list_codespaces",
+                        lambda: [SimpleNamespace(name="cs-1", account="carol", repository="o/r")])
+    monkeypatch.setattr(gh_account, "active_account",
+                        lambda **_kw: (_ for _ in ()).throw(AssertionError("must not guess ambient")))
+    assert gh_account.fast_credential_account_for_codespace("cs-1") == "carol"
+    assert bound == [("cs-1", "carol", "o/r")]
+
+
+@pytest.mark.parametrize("listing", ["missing", "error", "slow"])
+def test_fast_credential_account_never_guesses_an_unresolved_owner(monkeypatch, listing):
+    import time as _time
+    from types import SimpleNamespace
+
+    from agent_codespaces import account_binding, gh_account
+
+    def list_codespaces():
+        if listing == "error":
+            raise RuntimeError("gh unavailable")
+        if listing == "slow":
+            _time.sleep(2)
+        return [SimpleNamespace(name="other", account="", repository="o/r")]
+
+    monkeypatch.setattr(account_binding, "bound_account_or_raise", lambda name, **_kw: None)
+    monkeypatch.setattr("agent_codespaces.lifecycle.list_codespaces", list_codespaces)
+    monkeypatch.setattr(gh_account, "active_account",
+                        lambda **_kw: (_ for _ in ()).throw(AssertionError("must not guess ambient")))
+    assert gh_account.fast_credential_account_for_codespace("cs-1", resolve_timeout=0.3) is None
 
 
 # --- _ambient_codespace_scope (focused ambient gate check, #980) ---------

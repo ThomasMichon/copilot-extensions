@@ -192,12 +192,17 @@ def credential_account_for_codespace(name: str) -> str | None:
 
 
 def fast_credential_account_for_codespace(
-    name: str, *, timeout: float = 3.0
+    name: str, *, timeout: float = 3.0, resolve_timeout: float = 8.0,
 ) -> str | None:
-    """Fast account for launch env: the binding, else (no binding) the bounded
-    active gh account. An unreadable binding (lock contention) is unknown, not
-    absent: it returns None rather than guess the ambient account, so the relay
-    never asks GCM for the wrong account."""
+    """Account for launch env (incl. daemon-restart recovery, which reaches here
+    without the namespace readiness step that normally writes the binding).
+
+    The binding is authoritative. A missing binding is not proof of ambient
+    ownership (it may predate bindings), so a bounded live listing resolves it:
+    a mapped owner is bound and returned; the active account is used only when
+    the listing shows the CodeSpace under ambient auth. An unreadable binding,
+    a failed or slow listing, or a CodeSpace the listing doesn't show returns
+    None -- no account named, never a guess."""
     deadline = time.monotonic() + max(0.1, timeout)
     from . import account_binding
 
@@ -209,8 +214,40 @@ def fast_credential_account_for_codespace(
         return None
     if account:
         return account
-    remaining = max(0.1, deadline - time.monotonic())
-    return active_account(timeout=remaining)
+    owner = _discover_owner(name, resolve_timeout)
+    if owner is None:
+        log.warning("CodeSpace %s owner is unresolved; not naming a GitHub account", name)
+        return None
+    if owner:
+        return owner
+    return active_account(timeout=max(0.1, min(timeout, resolve_timeout)))
+
+
+def _discover_owner(name: str, timeout: float) -> str | None:
+    """The listed owner of ``name`` (bound on discovery), ``""`` when it is
+    listed under ambient auth, or None when unknown within ``timeout``."""
+    import threading
+
+    result: list[str | None] = [None]
+
+    def run() -> None:
+        try:
+            from . import account_binding
+            from .lifecycle import list_codespaces
+
+            for cs in list_codespaces():
+                if cs.name == name:
+                    if cs.account:
+                        account_binding.bind(name, cs.account, cs.repository)
+                    result[0] = cs.account or ""
+                    return
+        except Exception:
+            log.debug("CodeSpace %s owner discovery failed", name, exc_info=True)
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(max(0.1, timeout))
+    return None if worker.is_alive() else result[0]
 
 
 def mapped_accounts() -> tuple[str, ...]:
