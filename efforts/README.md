@@ -11,6 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Retire Dead-Letter Status](active/retire-dead-letter-status/README.md) | Draft | #4744 |
+| [Local-Cache Delivery Primacy](active/local-cache-delivery-primacy/README.md) | Active | #4925 |
 | [Pivot Streaming Transport & Render Performance](active/pivot-streaming-transport/README.md) | Active | #4762 |
 | [agent-dispatch Recipe Library](active/agent-dispatch-recipe-library/README.md) | Draft | #4691 |
 | [Configurable token-command sourcing](active/token-command-sourcing/README.md) | Draft | _pending_ |
