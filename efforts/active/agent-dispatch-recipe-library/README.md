@@ -23,6 +23,11 @@
   [`efforts/active/task-verification-gate/inception-transcript.md`](../task-verification-gate/inception-transcript.md)
   — read it before starting design work here (per #4691's own instruction);
   this effort does not re-quote it in full.
+- **Related:** [`agent-dispatch-recipe-composability`](../agent-dispatch-recipe-composability/README.md)
+  (#4959) builds on this effort's `extends:` resolution mechanism to
+  generalize it (any already-resolved declaration as a base, chaining,
+  script-path-hook override values) — a distinct, later-starting effort,
+  not a duplicate of this one's scope.
 
 ## Guiding Intent
 
