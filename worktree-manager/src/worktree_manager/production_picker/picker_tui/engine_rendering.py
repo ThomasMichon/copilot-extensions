@@ -761,6 +761,10 @@ class PickerScreenRenderingMixin:
             if btn == "PReset":
                 return ("Enter: reset grid to applied · ◀▶ Apply/Reset"
                         " · ↑ grid · Tab region")
+            if btn == "NC":
+                reg = self._reg_pivot()
+                label = reg.create_action.label if reg and reg.create_action else "entry"
+                return (f"Enter: {label} · Tab region · ^◀▶ machine")
             return ""
         if zone == "L":
             rec = self._selected_record()

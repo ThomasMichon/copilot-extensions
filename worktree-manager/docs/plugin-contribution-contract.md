@@ -73,9 +73,14 @@ Version-1 compatibility also covers the existing declarative fields:
   via the same `{field.<name>}` token machinery a row-scoped form action
   uses (no row/entry tokens are available since there is no selected row)
   and is command-resolved/validated identically to every other `run` argv.
-  **Schema and command resolution only as of this contract revision** — no
-  live Picker UI yet opens this affordance; a producer may declare it today
-  so the field spec is ready once that UI wiring lands;
+  **Live in the Picker UI**: a pivot declaring `create_action` gets a
+  data-driven "New …" button (its label taken verbatim from the manifest)
+  when its row list has focus but no row is meaningfully selected; Enter
+  opens a modal built from `fields` (tabs when there is more than one,
+  Enter/Ctrl+Left/Right to navigate, `show_when` hides/reveals dependent
+  fields live) and Confirm substitutes/runs `run` via the same pivot
+  runtime a row-scoped form action uses. `confirm: true` adds an inline
+  are-you-sure before the command actually runs;
 - optional top-level `worker` — `{"worktree": <field>, "label"?: <field>,
   "live"?: <field>, "activity"?: <field>}` — marking the pivot's rows as remote
   workers a worktree supervises. The Manager joins cached rows to Worktrees rows
