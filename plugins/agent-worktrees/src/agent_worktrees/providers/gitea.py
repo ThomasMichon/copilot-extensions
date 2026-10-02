@@ -544,10 +544,14 @@ class GiteaProvider:
         return None
 
     def ensure_fork(
-        self, repo: str, *, token: str | None = None,
+        self, repo: str, *, api_base: str = "", token: str | None = None,
     ) -> tuple[str, str] | None:
         """Not implemented: fork-mode publishing is GitHub-only today."""
-        _ = (repo, token)
+        _ = (repo, api_base, token)
+        return None
+
+    def resolve_fork_owner(self, *, api_base: str = "", token: str | None = None) -> str | None:
+        """Not implemented: fork-mode publishing is GitHub-only today."""
         return None
 
     def get_snapshot(
@@ -986,13 +990,8 @@ class GiteaProvider:
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
         thread_ids: tuple[int, ...] = (),
     ) -> str:
-        """Gitea exposes no programmatic conversation-resolve on its PR API.
-
-        The irritating gap: resolving a review conversation on Gitea is a UI-only
-        action (no stable REST endpoint), so this reports that rather than
-        pretending to resolve. Reading threads (:meth:`get_comment_threads`)
-        works; resolution is manual on Gitea.
-        """
+        """Gitea has no programmatic conversation-resolve API (UI-only);
+        reports that. Reading threads (:meth:`get_comment_threads`) works."""
         _ = (repo, number, api_base, token, thread_ids)
         return (
             "gitea: resolving review conversations is not exposed by the Gitea "

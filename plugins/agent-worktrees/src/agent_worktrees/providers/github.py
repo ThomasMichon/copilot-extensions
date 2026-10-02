@@ -286,19 +286,15 @@ class GitHubProvider:
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> PRSnapshot:
         """Fetch the full review/mergeability/lifecycle snapshot for pr-watch.
-
-        Mirrors the gitea provider over GitHub's REST API (whose ``pulls`` shape
-        is near-identical): one read of the PR object (state, merged, mergeable,
-        head sha, base ref, author, title, draft, labels) plus the paginated
-        reviews list -- the REST ``/pulls/{n}/reviews`` endpoint, so each review
-        carries the **numeric** ``id`` the watch cursor keys off (``gh pr view``
-        only exposes GraphQL node ids). ``checks_state`` folds together GitHub's
-        two independent signals -- legacy commit *statuses* and Actions
-        *check-runs* -- into the provider-neutral vocabulary.
-
-        ``api_base`` may identify a GitHub Enterprise host; otherwise the
-        ambient ``GH_HOST`` or ``github.com`` is resolved once and passed
-        explicitly to every snapshot read.
+        Mirrors the gitea provider over GitHub's REST API (near-identical
+        ``pulls`` shape): one read of the PR object plus the paginated
+        reviews list -- REST ``/pulls/{n}/reviews``, so each review carries
+        the **numeric** ``id`` the watch cursor keys off (``gh pr view`` only
+        exposes GraphQL node ids). ``checks_state`` folds GitHub's two
+        independent signals (legacy commit statuses + Actions check-runs)
+        into the provider-neutral vocabulary. ``api_base`` may identify a
+        GitHub Enterprise host; otherwise ambient ``GH_HOST``/``github.com``
+        is resolved once and passed explicitly to every read.
         """
         host = self.authority_endpoint(api_base)
         proc = run_cli(
@@ -688,23 +684,15 @@ class GitHubProvider:
 
         Native ``enable_auto_merge`` arms successfully even when a required
         review is what's actually blocking the merge -- GitHub queues it
-        indefinitely rather than refusing, so a self-merge repo whose sole
-        maintainer will never supply that second review would otherwise sit
-        armed forever (#3296 follow-up). This distinguishes that specific
-        case from every other reason ``enable_auto_merge`` might be
-        preferred (pending checks, a genuinely multi-reviewer repo, etc.).
+        indefinitely rather than refusing (#3296 follow-up).
 
-        Reads ``gh pr view --json mergeStateStatus,reviewDecision,baseRefName``
-        for the live gate, then -- only when ``reviewDecision`` is
-        ``REVIEW_REQUIRED`` -- the newer branch **rulesets** API
-        (``repos/{repo}/rules/branches/{base}``, then
-        ``repos/{repo}/rulesets/{id}`` for each matching ``pull_request`` rule)
-        for whether the acting identity can bypass it
-        (``current_user_can_bypass`` in ``"always"``/``"pull_requests_only"``).
-        Classic (non-ruleset) branch protection has no per-actor bypass
-        signal at all, so ``bypassable`` is ``None`` (unknown, not "no") when
-        rulesets don't apply or can't be read -- callers must treat ``None``
-        as "do not attempt a bypass", never as an affirmative yes.
+        Reads ``gh pr view --json mergeStateStatus,reviewDecision,baseRefName``,
+        then -- only when ``reviewDecision`` is ``REVIEW_REQUIRED`` -- the
+        branch **rulesets** API for whether the acting identity can bypass
+        it (``current_user_can_bypass``). Classic branch protection has no
+        per-actor bypass signal, so ``bypassable`` is ``None`` (unknown, not
+        "no") when rulesets don't apply -- callers must treat ``None`` as
+        "do not attempt a bypass", never as an affirmative yes.
 
         Returns ``(False, None)`` when no review is required (or the read
         itself fails) -- the ordinary auto-merge path is correct there.
@@ -776,14 +764,13 @@ class GitHubProvider:
         """Read GitHub repo settings + branch protection into a ``RepoPolicy``.
 
         Two reads: ``gh api repos/<repo>`` (merge methods, native auto-merge,
-        delete-branch-on-merge) and, best-effort, the default branch's protection
-        (required approving reviews, required status checks). Both explicitly
-        target ``authority_endpoint(api_base)`` (GitHub Enterprise host, ambient
-        ``GH_HOST``, or ``github.com``) rather than gh's ambient default host --
-        required for ``viewer_permission`` to actually describe the acting
-        identity's access on *this* repo's real host, not whichever host `gh`
-        would otherwise fall back to. Never raises: a failed settings read
-        yields ``RepoPolicy(supported=False, error=...)``; an unreadable/absent
+        delete-branch-on-merge) and, best-effort, the default branch's
+        protection (required approving reviews, required status checks).
+        Both explicitly target ``authority_endpoint(api_base)`` rather than
+        gh's ambient default host -- required for ``viewer_permission`` to
+        describe the acting identity's access on *this* repo's real host.
+        Never raises: a failed settings read yields
+        ``RepoPolicy(supported=False, error=...)``; an unreadable/absent
         protection leaves those fields ``None``.
         """
         from ..pr_contract import RepoPolicy
@@ -854,25 +841,32 @@ class GitHubProvider:
         _ = (repo, base, head_sha, api_base, token)
         return None
 
-    def ensure_fork(
-        self, repo: str, *, token: str | None = None,
-    ) -> tuple[str, str] | None:
-        """Create (or read, if it already exists) the caller's fork via
-        ``POST /repos/<repo>/forks`` -- idempotent on GitHub's own API.
-
-        Resolves the caller's login first (``gh api user``) purely for the
-        returned ``owner`` -- the actual fork-owner is whoever the token
-        belongs to regardless. Returns ``None`` on any failure: no ``gh``
-        auth, a non-2xx API response, or a payload missing ``clone_url``.
-        """
-        who = run_cli(["gh", "api", "user", "--jq", ".login"], env=self._env(token))
+    def resolve_fork_owner(
+        self, *, api_base: str = "", token: str | None = None,
+    ) -> str | None:
+        """Read-only ``gh api user`` half of :meth:`ensure_fork`; ``api_base``
+        pins the host like every other call (:meth:`authority_endpoint`)."""
+        host = self.authority_endpoint(api_base)
+        who = run_cli(
+            ["gh", "api", "--hostname", host, "user", "--jq", ".login"],
+            env=self._env(token),
+        )
         if who.returncode != 0:
             return None
-        owner = who.stdout.strip()
+        return who.stdout.strip() or None
+
+    def ensure_fork(
+        self, repo: str, *, api_base: str = "", token: str | None = None,
+    ) -> tuple[str, str] | None:
+        """Create (or read, if it already exists) the caller's fork via
+        ``POST /repos/<repo>/forks``. Owner from :meth:`resolve_fork_owner`;
+        ``api_base`` resolved once so both calls hit the SAME host."""
+        owner = self.resolve_fork_owner(api_base=api_base, token=token)
         if not owner:
             return None
+        host = self.authority_endpoint(api_base)
         proc = run_cli(
-            ["gh", "api", "-X", "POST", f"repos/{repo}/forks"],
+            ["gh", "api", "--hostname", host, "-X", "POST", f"repos/{repo}/forks"],
             env=self._env(token),
         )
         if proc.returncode != 0:
@@ -886,7 +880,17 @@ class GitHubProvider:
         clone_url = data.get("clone_url") or data.get("ssh_url") or ""
         if not isinstance(clone_url, str) or not clone_url:
             return None
-        return (owner, clone_url)
+        # The GET and this POST are separate calls; a concurrent ambient
+        # account switch between them can create the fork under a
+        # DIFFERENT login. Trust the POST response's own owner.login and
+        # fail closed on any mismatch/missing value.
+        resp_owner = data.get("owner")
+        resp_login = resp_owner.get("login") if isinstance(resp_owner, dict) else None
+        if not isinstance(resp_login, str) or not resp_login:
+            return None
+        if resp_login.casefold() != owner.casefold():
+            return None
+        return (resp_login, clone_url)
 
     _THREADS_QUERY = (
         "query($owner:String!,$name:String!,$number:Int!){"
@@ -972,12 +976,9 @@ class GitHubProvider:
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
         thread_ids: tuple[int, ...] = (),
     ) -> str:
-        """Resolve all active review threads via GraphQL.
-
-        GitHub thread ids are opaque node ids, so ``thread_ids`` (display
-        indices) cannot target individually; this resolves every currently
-        unresolved thread (the "addressed all feedback" case).
-        """
+        """Resolve all active review threads via GraphQL. GitHub thread ids
+        are opaque node ids, so ``thread_ids`` can't target individually;
+        this resolves every currently unresolved thread instead."""
         _ = (api_base, thread_ids)
         owner, name = self._split_owner_name(repo)
         data, err = self._graphql(

@@ -314,6 +314,11 @@ def read_declaration_file_set(
             f"{p}: declaration could not be read: {exc}"
         ) from exc
     data = dict(_decode(text, p.suffix, where=str(p)))
+    if "extends" in data:
+        from .registrar_recipes import resolve_extends
+
+        base_dir = Path(repo_root).expanduser() if repo_root is not None else p.parent
+        data = resolve_extends(data, base_dir=base_dir)
     if data.get("kind") == "reviewer-loop":
         from .reviewer_loops import expand_reviewer_loop
 

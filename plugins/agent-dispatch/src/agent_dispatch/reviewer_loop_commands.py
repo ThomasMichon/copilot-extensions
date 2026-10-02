@@ -45,7 +45,15 @@ def _reviewer_loop_declarations(
     )
 
     path = Path(args.declaration).expanduser().resolve()
-    declarations = read_declaration_file_set(path)
+    repo_root = dispatch_repo_config.repo_root_from_surface_path(path, "registrar")
+    if repo_root is not None:
+        # Guard unconditionally, even when `owner` is already explicit: the
+        # pointer this flow persists (see _reviewer_loop_setup) records
+        # repo_root itself as its `location`, and a worktree checkout path is
+        # never a valid thing to persist there regardless of what owner
+        # string ends up attached to it.
+        _reject_worktree_checkout_as_repo_root(repo_root)
+    declarations = read_declaration_file_set(path, repo_root=repo_root)
     expected = {"emitter", "evaluator", "supervised-lane"}
     if len(declarations) != 3 or {declaration.kind for declaration in declarations} != expected:
         raise ValueError(
@@ -56,14 +64,6 @@ def _reviewer_loop_declarations(
     declared_owners = {declaration.owner for declaration in declarations}
     if owner is None and len(declared_owners) == 1:
         owner = next(iter(declared_owners))
-    repo_root = dispatch_repo_config.repo_root_from_surface_path(path, "registrar")
-    if repo_root is not None:
-        # Guard unconditionally, even when `owner` is already explicit: the
-        # pointer this flow persists (see _reviewer_loop_setup) records
-        # repo_root itself as its `location`, and a worktree checkout path is
-        # never a valid thing to persist there regardless of what owner
-        # string ends up attached to it.
-        _reject_worktree_checkout_as_repo_root(repo_root)
     selected_dir = (
         dispatch_repo_config.selected_repo_surface_dir(repo_root, "registrar").resolve()
         if repo_root is not None

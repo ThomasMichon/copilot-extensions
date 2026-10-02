@@ -673,6 +673,66 @@ def test_reviewer_loop_inspect_expands_declared_units(
     assert not any(unit["overridden_off"] for unit in output["units"])
 
 
+def test_reviewer_loop_inspect_resolves_a_repo_root_relative_extends_ref(
+    tmp_path, monkeypatch, capsys
+):
+    """Regression guard: `_reviewer_loop_declarations` must derive
+    `repo_root` and pass it to `read_declaration_file_set`, since a
+    repo-local `extends:` ref is defined relative to the repo root -- not
+    the registrar directory a missing/implicit `repo_root` would fall back
+    to, where the referenced recipe file would not be found."""
+    from agent_dispatch import __main__ as m
+
+    repo_root = tmp_path / "repo"
+    (repo_root / "recipes").mkdir(parents=True)
+    (repo_root / "recipes" / "review.json").write_text(
+        json.dumps(
+            {
+                "kind": "reviewer-loop",
+                "task_label": "external-review",
+                "emitter": {
+                    "command": ["reviews", "discover"],
+                    "interval_seconds": 60,
+                    "task_output": "json",
+                    "side_load": {
+                        "command": ["reviews", "side-load", "{change_ref}"]
+                    },
+                },
+                "evaluator": {"evaluator_spec": {"rules": []}},
+                "pool": {
+                    "max_active_processes": 2,
+                    "body": {"type": "headless", "agent": "reviewer"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    declaration = repo_root / ".agent-dispatch" / "registrar" / "review.json"
+    declaration.parent.mkdir(parents=True)
+    declaration.write_text(
+        json.dumps(
+            {
+                "extends": "./recipes/review.json",
+                "name": "example-review",
+                "repo": "github.com/example/project",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(m, "_client", lambda _args: _LoopClient())
+
+    assert main(
+        ["reviewer-loop", "inspect", str(declaration), "--owner", "repo:repo"]
+    ) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert [unit["logical_id"] for unit in output["units"]] == [
+        "example-review-source",
+        "example-review-evaluator",
+        "example-review-workers",
+    ]
+
+
 def test_reviewer_loop_status_reports_joined_healthy_state(
     tmp_path, monkeypatch, capsys
 ):

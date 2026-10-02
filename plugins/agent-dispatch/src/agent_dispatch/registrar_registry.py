@@ -338,7 +338,7 @@ def _classify_declaration(
 ) -> EntryDecision[PluginDeclaration]:
     try:
         declaration = read_declaration_file(
-            path, allow_plugin_companion=True
+            path, allow_plugin_companion=True, repo_root=plugin_root
         )
     except RegistrarIndeterminateError as exc:
         return EntryDecision.indeterminate(

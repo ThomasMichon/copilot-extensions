@@ -5802,7 +5802,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
 # would silently break that fold-back (found the hard way, via
 # test_router_worktree_singular_folds_back).
 _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | frozenset({
-    "services", "repos", "accounts", "copilot-identity", "related", "state-root",
+    "services", "repos", "accounts", "forks", "copilot-identity", "related", "state-root",
     "coordination-readiness", "config-root", "knowledge", "git",
     "pr-watch", "pr-merge", "pr-research", "pr",
     "activity", "activity-log", "register-launch", "stage-update", "reconcile-marketplaces",
@@ -6817,6 +6817,18 @@ def main(argv: list[str] | None = None) -> int:
 
         try:
             return repos_cli.cmd_accounts_dispatch(args_list[1:])
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
+    # Forks (durable confirmed fork-publish registry) -- manual dispatch,
+    # mirroring 'accounts'. Own module (not repos_cli) to stay under the
+    # per-module line-count cap.
+    if args_list[0] == "forks":
+        from . import forks_cli
+
+        try:
+            return forks_cli.cmd_forks_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130

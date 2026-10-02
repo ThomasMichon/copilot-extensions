@@ -533,6 +533,80 @@ def test_indeterminate_declaration_retains_only_that_document(
     assert fresh.findings[0].reason == "entry-indeterminate"
 
 
+def test_indeterminate_extends_recipe_read_retains_only_that_document(
+    monkeypatch,
+    tmp_path,
+):
+    """An `extends:`-bearing declaration's recipe-file I/O failure must
+    classify the same way a direct declaration's own read failure does
+    (`entry-indeterminate`, retaining its prior entry) -- not as a
+    permanently invalid entry that withdraws an active unit on a transient
+    filesystem race."""
+    root = _plugin_root(tmp_path)
+    declaration_dir = root / "references/agent-dispatch/registrar"
+    declaration_dir.mkdir(parents=True, exist_ok=True)
+    recipe = declaration_dir / "recipe.json"
+    recipe.write_text(json.dumps({"name": "general"}), encoding="utf-8")
+    declaration = declaration_dir / "general.json"
+    declaration.write_text(
+        json.dumps({"extends": "./recipe.json"}), encoding="utf-8"
+    )
+    registry = tmp_path / "registrar.d"
+    _write_manifest(registry, root)
+    active = _activation({SOURCE: root})
+    first = scan_registrar_registry(registry, activation_report=active)
+    original_read_text = Path.read_text
+
+    def deny_recipe(path, *args, **kwargs):
+        if path == recipe:
+            raise PermissionError("temporarily denied")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", deny_recipe)
+    retained = scan_registrar_registry(
+        registry,
+        previous=first.entries,
+        activation_report=active,
+    )
+    fresh = scan_registrar_registry(registry, activation_report=active)
+
+    assert retained.declarations == first.declarations
+    assert fresh.declarations == ()
+    assert fresh.findings[0].reason == "entry-indeterminate"
+
+
+def test_extends_resolves_relative_to_the_plugin_root_not_the_registrar_dir(
+    tmp_path,
+):
+    """A plugin-contributed declaration's `extends:` ref must resolve
+    relative to the plugin root (what `_classify_declaration` threads as
+    `repo_root`), not the registrar subdirectory the declaration itself
+    happens to live under -- otherwise a recipe placed at the plugin root
+    (rather than beside the declaration) would never be found."""
+    root = _plugin_root(tmp_path)
+    (root / "recipe.json").write_text(
+        json.dumps({"name": "from-recipe", "labels": ["plugin-root-recipe"]}),
+        encoding="utf-8",
+    )
+    declaration_dir = root / "references/agent-dispatch/registrar"
+    declaration_dir.mkdir(parents=True, exist_ok=True)
+    (declaration_dir / "general.json").write_text(
+        json.dumps({"extends": "./recipe.json"}), encoding="utf-8"
+    )
+    registry = tmp_path / "registrar.d"
+    _write_manifest(registry, root)
+
+    result = scan_registrar_registry(
+        registry, activation_report=_activation({SOURCE: root})
+    )
+
+    assert not result.findings, result.findings
+    assert [item.declaration.name for item in result.declarations] == [
+        "from-recipe"
+    ]
+    assert result.declarations[0].declaration.labels == ("plugin-root-recipe",)
+
+
 def test_indeterminate_activation_retains_prior_but_never_activates_fresh(tmp_path):
     root = _plugin_root(tmp_path)
     _write_declaration(root, "general")
