@@ -59,8 +59,9 @@ the same layout. Configuration lives at `~/.agent-logger/config.yaml` <!-- marke
 > separate from Windows' own OpenSSH** -- an `ssh`/`ssh-tunnel` host alias
 > and key must be set up *inside* WSL (`wsl -- ssh <host>` should succeed
 > non-interactively) for this to work, not just in the Windows OpenSSH
-> config. Run `session-sync doctor` to see which runtime (WSL or native) was
-> selected and whether rsync/ssh were actually found there.
+> config. Run `<agent-logger catalog "session-sync" argv[0]> doctor` to see
+> which runtime (WSL or native) was selected and whether rsync/ssh were
+> actually found there.
 
 ## Configure
 
