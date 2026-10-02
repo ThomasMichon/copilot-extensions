@@ -35,9 +35,13 @@ The operator's stated intent is a **reprioritization**, not just a gap
 patch: the lifecycle-hook-rendered local cache should now be understood
 and documented as the **primary** way per-plugin instruction content
 reaches a session. The checked-in, scheduled-sync-worker-maintained copy
-is downgraded (in framing, not in mechanism -- nothing about the actual
-render/precedence code changes) to being purely the fallback that exists
-to handle two cases:
+is downgraded in framing to being purely the fallback that exists to
+handle two cases -- which, in turn, means the precedence *mechanism*
+itself needs one real fix (not just reframing) to actually deserve that
+trust: a fallback that a stale leftover local file can silently outrank
+is not a safe fallback (see Phase 1's stale-sibling item below, caught by
+this effort's own plan-review PR). With that fix landed, the mechanism
+serves:
 
 1. A launch path where no lifecycle hook runs at all before the session
    starts (a fully headless/hookless/sandboxed invocation).
@@ -146,6 +150,29 @@ explicitly named follow-on slices; no other pre-session boundary besides
       any framing that would now read inconsistently with this
       reprioritization (it covers a different, per-session-computed-facts
       case, so likely needs no change -- confirm rather than assume).
+- [ ] **Design and land a stale-sibling invalidation check** (caught by
+      PR #4926's own review, a real gap in the *existing* precedence
+      mechanism that this reframing makes load-bearing rather than
+      cosmetic): today a local sibling is preferred purely by existence
+      (`instruction_projections.py`'s `render_projection` preamble), and
+      is only ever reconciled when `render_local_cache()` itself runs
+      (`_render_local_cache_locked`'s stale-removal pass, which only
+      fires for a *disabled* source, not a merely-outdated one). A sibling
+      left by an earlier *successful* render can therefore silently
+      outrank a *newer* checked-in projection on a later boot where no
+      pre-session render succeeds (hookless boot, a bounded-timeout miss,
+      or any other render failure) -- precisely the boot this effort's
+      reframing says must fall back safely to the checked-in copy. Design
+      direction: embed a render timestamp in **both** the checked-in
+      projection's marker and the local cache's own marker (neither
+      carries one today), and rewrite the preamble/catch-all directive
+      text so the reading agent compares the two markers' timestamps and
+      prefers whichever is actually newer -- never "prefer local merely
+      because it exists." This is a real code change to
+      `instruction_projections.py` (the marker schema and the preamble/
+      catch-all template text), not pure prose -- land it as part of this
+      phase's own PR, with full regression coverage against every
+      existing preamble/marker test.
 
 ### Phase 2 -- `agent-bridge` local spawn-path wiring
 - [ ] Add an `agent_bridge`-side equivalent of
@@ -198,6 +225,14 @@ explicitly named follow-on slices; no other pre-session boundary besides
       checked-in copy is stale -- not just that the unit-level render call
       fires -- and that the render's latency stays within Phase 2's
       defined budget.
+- [ ] **Stale-sibling-boot negative-proof** (the gap PR #4926's review
+      caught): a `.local.instructions.md` sibling rendered from an older
+      installed payload, left in place while the *checked-in* projection
+      is subsequently updated to a genuinely newer version (the scheduled
+      sync worker advanced it independently of this worktree's own local
+      render), must be superseded by the checked-in copy on a boot where
+      no render runs at all -- proven against the real marker-comparison
+      logic Phase 1 lands, not asserted by inspection.
 
 ## Proposal
 
@@ -235,3 +270,15 @@ _Pending._
     spawn" claim (internally contradictory for a synchronous pre-spawn
     render) with a defined short latency budget modeled on this plugin's
     own `SESSIONSTART_MAX_TIMEOUT_S` precedent.
+- **PR #4926 review round 2 caught a genuine architectural gap:** the
+  existing precedence mechanism prefers a local sibling purely by
+  existence, with no freshness check -- so a sibling left by an earlier
+  *successful* render can outrank a *newer* checked-in projection on a
+  later boot where no pre-session render succeeds. This was always true
+  under Phase 7's original framing too, but this effort's reframing
+  (declaring local-render primary) makes it load-bearing rather than a
+  cosmetic edge case: a "fallback" a stale leftover can silently shadow
+  is not actually safe. Added an explicit Phase 1 Plan item (a marker-
+  timestamp comparison the preamble/catch-all directive text must apply,
+  not "prefer local merely because it exists") and a matching Validation
+  Plan item -- this is now real code work for Phase 1, not pure prose.
