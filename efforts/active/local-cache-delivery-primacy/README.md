@@ -143,9 +143,9 @@ explicitly named follow-on slices; no other pre-session boundary besides
 - [ ] Revise `docs/patterns/worktree-scoped-dynamic-guidance.md`'s framing
       (Problem/Standard approach/Rationale sections) to match: the
       checked-in copy is introduced as the fallback tier, the local cache
-      as the primary tier, not the reverse. No change to the actual
-      precedence mechanism (the preamble, the catch-all, the render
-      functions) -- this phase is reframing, not re-implementation.
+      as the primary tier, not the reverse. Note the stale-sibling fix
+      below *does* change the actual precedence mechanism -- this phase
+      is reframing *plus* that one correctness fix, not reframing alone.
 - [ ] Cross-check `docs/patterns/session-scoped-dynamic-guidance.md` for
       any framing that would now read inconsistently with this
       reprioritization (it covers a different, per-session-computed-facts
@@ -162,17 +162,25 @@ explicitly named follow-on slices; no other pre-session boundary besides
       outrank a *newer* checked-in projection on a later boot where no
       pre-session render succeeds (hookless boot, a bounded-timeout miss,
       or any other render failure) -- precisely the boot this effort's
-      reframing says must fall back safely to the checked-in copy. Design
-      direction: embed a render timestamp in **both** the checked-in
-      projection's marker and the local cache's own marker (neither
-      carries one today), and rewrite the preamble/catch-all directive
-      text so the reading agent compares the two markers' timestamps and
-      prefers whichever is actually newer -- never "prefer local merely
-      because it exists." This is a real code change to
-      `instruction_projections.py` (the marker schema and the preamble/
-      catch-all template text), not pure prose -- land it as part of this
-      phase's own PR, with full regression coverage against every
-      existing preamble/marker test.
+      reframing says must fall back safely to the checked-in copy.
+      **Design direction (corrected after review round 3 caught a flawed
+      first draft):** a render *timestamp* cannot establish freshness --
+      an older/regressed installed payload rendered *after* the sync
+      worker commits a newer checked-in projection would still carry the
+      later timestamp and win, recreating the exact bug this item fixes;
+      a changing timestamp field would also break `render_projection()`'s
+      deterministic output and the local cache's own byte-idempotence
+      check (`current == rendered.content`). Use the **stable provenance
+      the markers already carry** instead -- `pluginVersion` and
+      `templateSha256`, no new field needed -- comparing the checked-in
+      projection's marker against the local cache's own marker for the
+      same source, with the numerically newer `pluginVersion` winning.
+      This is a real code change to `instruction_projections.py` (the
+      preamble/catch-all directive text the reading agent follows), not
+      pure prose -- land it as part of this phase's own PR, with full
+      regression coverage against every existing preamble/marker test,
+      *and* a dedicated case for a stale/regressed payload rendered
+      *after* the checked-in update (not only one rendered before it).
 
 ### Phase 2 -- `agent-bridge` local spawn-path wiring
 - [ ] Add an `agent_bridge`-side equivalent of
