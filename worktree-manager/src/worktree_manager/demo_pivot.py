@@ -68,9 +68,15 @@ def main(argv: list[str] | None = None) -> int:
         # and-composer): a harmless, side-effect-free acknowledgment so a
         # --demo render can exercise the full Confirm -> run_resolved round
         # trip without ever touching anything real. Matches demo_engine's
-        # own "obviously synthetic, prints and exits" contract.
-        rest = [a for a in args if a != "create" and not a.startswith("--")]
-        title = rest[0] if rest else "(untitled)"
+        # own "obviously synthetic, prints and exits" contract. The title is
+        # a FIXED positional argument right after the verb (this module's
+        # own create_action.run template in preview.py never reorders it),
+        # so read that slot directly -- filtering by value would corrupt a
+        # legitimate free-text title that happens to equal "create" or start
+        # with "--".
+        verb_index = args.index("create")
+        title_index = verb_index + 1
+        title = args[title_index] if title_index < len(args) else "(untitled)"
         print(f"Example Labs: filed test request {title!r} -- for science.")
         return 0
     json.dump({"error": f"demo pivot has no verb {verb!r}"}, sys.stdout)

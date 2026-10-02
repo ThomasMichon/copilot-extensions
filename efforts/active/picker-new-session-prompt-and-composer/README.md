@@ -31,12 +31,10 @@ render often" section already documents the `--demo`/preview render
 workflow this change's own validation followed -- no update needed there.
 Extended `demo_pivot.py`/`preview.py` (the preview fixture itself, not a
 doc) so that workflow now exercises the new `create_action` affordance for
-any future pivot change. **Correction (same session, caught by review):**
-`worktree-manager/docs/plugin-contribution-contract.md`'s own
-`create_action` entry explicitly said "Schema and command resolution only
-... no live Picker UI yet opens this affordance" -- this PR makes that
-false, so it is updated in this PR too to describe the now-live button/
-modal/submit flow instead of recording "no update needed."
+any future pivot change. `worktree-manager/docs/plugin-contribution-
+contract.md`'s own `create_action` entry is updated in this PR too, to
+describe the now-live button/modal/submit flow a producer's manifest
+triggers.
 
 ## Guiding Intent
 
