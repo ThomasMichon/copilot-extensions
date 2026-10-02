@@ -1,0 +1,9 @@
+{
+  "comment": "Fix deploy-manifest source.path to persist the stable installed-plugins payload path (never an ephemeral self-stage copy), so version-drift reconcile does not silently stop detecting updates forever.",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

@@ -16,6 +16,7 @@ from agent_dispatch.registrar_discovery import read_declaration_file_set
 from agent_dispatch.queue import TaskError
 from agent_dispatch.repository_issue_loops import (
     AzureDevOpsProvider,
+    GiteaProvider,
     GitHubProvider,
     Issue,
     _forge_provider_for,
@@ -1830,6 +1831,73 @@ def test_forge_provider_for_threads_discovery_scope_to_azure_devops():
         "area_path": "example-project\\Team",
         "max_age_days": None,
     }
+
+
+def test_validate_config_rejects_gitea_provider_until_implemented():
+    """GiteaProvider is a structural stub (every op raises NotImplementedError);
+    accepting it here would let a declaration validate cleanly and then fail
+    forever on its first tick, so it must stay rejected until a real adapter
+    lands (ThomasMichon/copilot-extensions#4825)."""
+    with pytest.raises(RegistrarError, match="only \\['azure-devops', 'github'\\]"):
+        validate_config(
+            _config(
+                repo="example-org/example-project",
+                forge={"provider": "gitea", "producer_login": "issue-bot"},
+            )
+        )
+
+
+def test_forge_provider_for_selects_gitea_stub():
+    """_forge_provider_for itself can already route to the stub (useful once
+    validate_config is widened to accept it) -- constructed directly here,
+    bypassing validate_config's deliberate rejection above."""
+    config = {
+        "repo": "example-org/example-project",
+        "forge": {"provider": "gitea", "producer_login": "issue-bot"},
+    }
+    provider = _forge_provider_for(config)
+    assert isinstance(provider, GiteaProvider)
+    assert provider.expected_login == "issue-bot"
+
+
+@pytest.mark.parametrize(
+    ("operation", "args"),
+    [
+        ("list_open_issues", ("example-org/example-project",)),
+        (
+            "reserve",
+            (
+                "example-org/example-project",
+                Issue(1, "t", "url", (), 0.0, 0.0),
+                {},
+            ),
+        ),
+        (
+            "claim",
+            (
+                "example-org/example-project",
+                Issue(1, "t", "url", (), 0.0, 0.0),
+                {},
+                "task-1",
+            ),
+        ),
+        (
+            "release",
+            (
+                "example-org/example-project",
+                Issue(1, "t", "url", (), 0.0, 0.0),
+                {},
+                "reason",
+            ),
+        ),
+    ],
+)
+def test_gitea_provider_is_an_explicit_stub(operation, args):
+    """Every operation fails loud with a pointer to the tracking issue --
+    never a silent no-op a declaration could mistake for working support."""
+    provider = GiteaProvider("issue-bot")
+    with pytest.raises(NotImplementedError, match="copilot-extensions#4825"):
+        getattr(provider, operation)(*args)
 
 
 def _ado_work_item(

@@ -149,12 +149,13 @@ unmanaged state.
   synthetic guidance.
 - Completed focused runtime, helper, shared-library, lint, version, and
   install-contract validation. Repository-only runtime behavior depends on the
-  public trust fix in github/copilot-agent-runtime#18252; ACP plugin-directory
-  parity remains tracked by github/copilot-agent-runtime#18250.
+  public trust fix in a private Copilot CLI runtime issue (#18252); ACP
+  plugin-directory parity remains tracked by a private Copilot CLI runtime
+  issue (#18250).
 
 ### 2026-09-01 - Published and complete
 
 - Squash-merged PR #1563 as `a5bf2314dcf72e960e46e2e7077995e264db847f`,
   closing #1507 after all checks passed and Copilot reported no findings.
 - Archived the completed effort. Remaining runtime dependencies continue under
-  github/copilot-agent-runtime#18252 and github/copilot-agent-runtime#18250.
+  private Copilot CLI runtime issues (#18252 and #18250).

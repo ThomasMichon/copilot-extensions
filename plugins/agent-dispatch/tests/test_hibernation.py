@@ -87,7 +87,8 @@ def test_run_and_resume_reattempts_on_timeout_without_waking(monkeypatch):
     it means the wait command itself already polled the full window and found
     nothing. Re-invoke the same wait in place instead (ThomasMichon/
     copilot-extensions#2576's remaining scope; the observed false-wake/
-    duplicate-comment symptom in gim-home/odsp-web-harness#458)."""
+    duplicate-comment symptom was also seen independently in a consuming
+    harness repo's own issue tracker)."""
     calls = []
 
     def runner(cmd):

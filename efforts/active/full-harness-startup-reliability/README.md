@@ -16,7 +16,7 @@
   documents already require plugins to avoid, and this effort's fixes must
   stay reconciled with that existing contract rather than introduce a new
   one. Also directly informs the still-open half of
-  `github/copilot-agent-runtime#22266` (the "ready-then-exit(1)" mystery) by
+  `a private Copilot CLI runtime issue #22266` (the "ready-then-exit(1)" mystery) by
   reproducing, with reliable timing, the delay and timeout symptom a real
   session shows before its first response — not yet the confirmed root
   cause; see Context below (the watchdog-timeout theory remains unproven).
@@ -28,7 +28,7 @@
   take, does it call expensive interpreters/tools unnecessarily). Distinct,
   complementary concerns over the same `sessionStart` roster —
   cross-link, don't duplicate.
-  `github/copilot-agent-runtime#22266` — the upstream issue whose second,
+  `a private Copilot CLI runtime issue #22266` — the upstream issue whose second,
   unconfirmed half ("ready-then-exit(1)") this effort's test bench targets.
 
 ## Guiding Intent
@@ -105,7 +105,7 @@ proven, so a fresh participant doesn't have to re-derive it:
     all 3 real extensions (`context-handoff`, `agent-worktrees`,
     `agent-bridge`) reaching `=== ready ===` then `=== exit code=1
     disposition=stopped-normally ===` — the exact signature from
-    `github/copilot-agent-runtime#22266`'s still-unconfirmed second mystery. This
+    `a private Copilot CLI runtime issue #22266`'s still-unconfirmed second mystery. This
     reproduced spontaneously (unprompted) in an early full-harness run,
     though not yet on every run — reliability rate not yet measured
     rigorously (see Plan Phase 1).
@@ -484,7 +484,7 @@ correction inline, per the effort's own journal discipline)._
 - Separately addressed this effort README's OWN review findings on PR #3305
   (Vision unlinked from `visions/harness-guidance`/
   `docs/patterns/session-scoped-dynamic-guidance.md`; unqualified
-  `github/copilot-agent-runtime#22266` references; private participant/topology
+  `a private Copilot CLI runtime issue #22266` references; private participant/topology
   details; a Round/Phase numbering collision; a stray private machine
   alias; the premature "landed" ledger language) — all revised in this same
   pass, see the current README content rather than restating each fix here.

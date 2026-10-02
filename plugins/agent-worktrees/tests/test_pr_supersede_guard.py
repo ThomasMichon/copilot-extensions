@@ -36,7 +36,7 @@ def _whoami(login: str):
 
 def test_close_other_authors_open_pr_denies():
     d = guard.decide(
-        _shell("gh pr close 203 --repo gim-home/odsp-web-harness"),
+        _shell("gh pr close 203 --repo example-org/example-repo"),
         env={}, pr_lookup=_lookup("alice", "OPEN"), current_login=_whoami("bot"),
     )
     assert d and d["permissionDecision"] == "deny"
@@ -46,7 +46,7 @@ def test_close_other_authors_open_pr_denies():
 
 def test_close_own_pr_allows():
     d = guard.decide(
-        _shell("gh pr close 203 --repo gim-home/odsp-web-harness"),
+        _shell("gh pr close 203 --repo example-org/example-repo"),
         env={}, pr_lookup=_lookup("bot", "OPEN"), current_login=_whoami("bot"),
     )
     assert d is None
@@ -54,7 +54,7 @@ def test_close_own_pr_allows():
 
 def test_close_own_pr_case_insensitive_allows():
     d = guard.decide(
-        _shell("gh pr close 203 --repo gim-home/odsp-web-harness"),
+        _shell("gh pr close 203 --repo example-org/example-repo"),
         env={}, pr_lookup=_lookup("Bot", "OPEN"), current_login=_whoami("bot"),
     )
     assert d is None
@@ -63,7 +63,7 @@ def test_close_own_pr_case_insensitive_allows():
 def test_close_already_closed_pr_allows():
     # Nothing left to protect -- the PR is already settled.
     d = guard.decide(
-        _shell("gh pr close 203 --repo gim-home/odsp-web-harness"),
+        _shell("gh pr close 203 --repo example-org/example-repo"),
         env={}, pr_lookup=_lookup("alice", "CLOSED"), current_login=_whoami("bot"),
     )
     assert d is None
@@ -71,7 +71,7 @@ def test_close_already_closed_pr_allows():
 
 def test_close_merged_pr_allows():
     d = guard.decide(
-        _shell("gh pr close 203 --repo gim-home/odsp-web-harness"),
+        _shell("gh pr close 203 --repo example-org/example-repo"),
         env={}, pr_lookup=_lookup("alice", "MERGED"), current_login=_whoami("bot"),
     )
     assert d is None
@@ -80,7 +80,7 @@ def test_close_merged_pr_allows():
 def test_api_patch_state_closed_denies():
     d = guard.decide(
         _shell(
-            "gh api repos/gim-home/odsp-web-harness/pulls/203 -X PATCH "
+            "gh api repos/example-org/example-repo/pulls/203 -X PATCH "
             "-f state=closed"
         ),
         env={}, pr_lookup=_lookup("alice", "OPEN"), current_login=_whoami("bot"),
@@ -92,7 +92,7 @@ def test_api_patch_without_state_closed_allows():
     # A PATCH that doesn't touch state (e.g. editing the title) is unrelated.
     d = guard.decide(
         _shell(
-            "gh api repos/gim-home/odsp-web-harness/pulls/203 -X PATCH "
+            "gh api repos/example-org/example-repo/pulls/203 -X PATCH "
             "-f title='new title'"
         ),
         env={}, pr_lookup=_lookup("alice", "OPEN"), current_login=_whoami("bot"),
@@ -104,7 +104,7 @@ def test_api_patch_without_state_closed_allows():
 
 def test_merge_other_authors_pr_allows():
     d = guard.decide(
-        _shell("gh pr merge 203 --repo gim-home/odsp-web-harness --squash"),
+        _shell("gh pr merge 203 --repo example-org/example-repo --squash"),
         env={}, pr_lookup=_lookup("alice", "OPEN"), current_login=_whoami("bot"),
     )
     assert d is None
@@ -114,7 +114,7 @@ def test_merge_other_authors_pr_allows():
 
 def test_unresolvable_pr_lookup_allows():
     d = guard.decide(
-        _shell("gh pr close 203 --repo gim-home/odsp-web-harness"),
+        _shell("gh pr close 203 --repo example-org/example-repo"),
         env={}, pr_lookup=lambda *a: None, current_login=_whoami("bot"),
     )
     assert d is None
@@ -122,14 +122,14 @@ def test_unresolvable_pr_lookup_allows():
 
 def test_unresolvable_whoami_allows():
     d = guard.decide(
-        _shell("gh pr close 203 --repo gim-home/odsp-web-harness"),
+        _shell("gh pr close 203 --repo example-org/example-repo"),
         env={}, pr_lookup=_lookup("alice", "OPEN"), current_login=lambda *a: None,
     )
     assert d is None
 
 
 def test_unrelated_command_allows():
-    d = guard.decide(_shell("gh pr list --repo gim-home/odsp-web-harness"), env={})
+    d = guard.decide(_shell("gh pr list --repo example-org/example-repo"), env={})
     assert d is None
 
 
@@ -143,7 +143,7 @@ def test_non_shell_tool_allows():
 
 def test_env_off_disables_guard():
     d = guard.decide(
-        _shell("gh pr close 203 --repo gim-home/odsp-web-harness"),
+        _shell("gh pr close 203 --repo example-org/example-repo"),
         env={"PR_SUPERSEDE_GUARD": "off"},
         pr_lookup=_lookup("alice", "OPEN"), current_login=_whoami("bot"),
     )
@@ -152,7 +152,7 @@ def test_env_off_disables_guard():
 
 def test_mode_warn_returns_additional_context_not_deny():
     d = guard.decide(
-        _shell("gh pr close 203 --repo gim-home/odsp-web-harness"),
+        _shell("gh pr close 203 --repo example-org/example-repo"),
         env={"PR_SUPERSEDE_GUARD_MODE": "warn"},
         pr_lookup=_lookup("alice", "OPEN"), current_login=_whoami("bot"),
     )
@@ -162,7 +162,7 @@ def test_mode_warn_returns_additional_context_not_deny():
 
 def test_mode_ask_returns_ask_decision():
     d = guard.decide(
-        _shell("gh pr close 203 --repo gim-home/odsp-web-harness"),
+        _shell("gh pr close 203 --repo example-org/example-repo"),
         env={"PR_SUPERSEDE_GUARD_MODE": "ask"},
         pr_lookup=_lookup("alice", "OPEN"), current_login=_whoami("bot"),
     )

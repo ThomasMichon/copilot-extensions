@@ -166,6 +166,93 @@ def test_source_name_is_stable_across_worktrees(tmp_path: Path) -> None:
     assert GitRepoConnector(repo_path=worktree).source_name == "git:canonical"
 
 
+def test_git_repo_connector_indexes_explicit_ref_override(tmp_path: Path) -> None:
+    """``ref=`` lets a repo be indexed from a branch OTHER than the remote's
+    default branch (e.g. ``origin/dev`` for a repo whose integration branch
+    isn't ``main``), without that override leaking into other sources."""
+    origin = tmp_path / "origin.git"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(origin))
+
+    seed = tmp_path / "seed"
+    _git(tmp_path, "clone", str(origin), str(seed))
+    _git(seed, "config", "user.email", "dev@example.test")
+    _git(seed, "config", "user.name", "Dev User")
+    (seed / "README.md").write_text("# main\n", encoding="utf-8")
+    _git(seed, "add", "README.md")
+    _git(seed, "commit", "-m", "seed main")
+    _git(seed, "push", "-u", "origin", "main")
+
+    _git(seed, "checkout", "-b", "dev")
+    (seed / "dev-only.py").write_text("print('dev branch')\n", encoding="utf-8")
+    _git(seed, "add", "dev-only.py")
+    _git(seed, "commit", "-m", "dev-only commit")
+    _git(seed, "push", "-u", "origin", "dev")
+
+    work = tmp_path / "work"
+    _git(tmp_path, "clone", str(origin), str(work))
+
+    default_paths = {entry.path for entry in GitRepoConnector(repo_path=work).discover()}
+    assert "dev-only.py" not in default_paths  # default branch is still main
+
+    dev_connector = GitRepoConnector(repo_path=work, ref="origin/dev")
+    dev_paths = {entry.path for entry in dev_connector.discover()}
+    assert "dev-only.py" in dev_paths
+    assert dev_connector.current_commit() == _git(work, "rev-parse", "origin/dev").strip()
+
+
+def test_git_repo_connector_fetch_passes_token_as_transient_extraheader(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A ``token`` is passed to `git fetch` via a one-off ``-c
+    http.extraheader=`` override -- scoped to that single subprocess call --
+    never written to the repo's persistent git config and never used for any
+    OTHER git invocation (e.g. ``rev-parse``)."""
+    from agent_index.sources import git_repo as git_repo_module
+
+    origin = tmp_path / "origin.git"
+    _git(tmp_path, "init", "--bare", "-b", "main", str(origin))
+    seed = tmp_path / "seed"
+    _git(tmp_path, "clone", str(origin), str(seed))
+    _git(seed, "config", "user.email", "dev@example.test")
+    _git(seed, "config", "user.name", "Dev User")
+    (seed / "README.md").write_text("# Hello\n", encoding="utf-8")
+    _git(seed, "add", "README.md")
+    _git(seed, "commit", "-m", "seed")
+    _git(seed, "push", "-u", "origin", "main")
+
+    work = tmp_path / "work"
+    _git(tmp_path, "clone", str(origin), str(work))
+
+    observed_commands: list[list[str]] = []
+    real_run = subprocess.run
+
+    def _spying_run(command, *args, **kwargs):
+        observed_commands.append(list(command))
+        return real_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(git_repo_module.subprocess, "run", _spying_run)
+
+    connector = GitRepoConnector(repo_path=work, token="s3cr3t-token")
+    connector.discover()
+
+    header_commands = [
+        c for c in observed_commands if any("s3cr3t-token" in part for part in c)
+    ]
+    assert header_commands, "expected at least one command carrying the token header"
+    for command in header_commands:
+        assert "fetch" in command, f"token leaked onto a non-fetch command: {command}"
+
+    # Never persisted to the repo's own git config.
+    persisted = subprocess.run(  # noqa: S603
+        [_GIT, "config", "--get", "http.extraheader"],
+        cwd=work,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert persisted.returncode != 0 or "s3cr3t-token" not in (persisted.stdout or "")
+
+
 def test_git_invocations_suppress_console_window(tmp_path: Path, monkeypatch) -> None:
     """Every ``git`` subprocess the connector spawns must pass
     ``no_window_kwargs()`` (``creationflags=CREATE_NO_WINDOW`` on Windows, ``{}``

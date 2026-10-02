@@ -2,7 +2,7 @@
 
 - **Slug:** `pr-conduct-guidance-consolidation`
 - **Repo:** copilot-extensions (primary; touches dotfiles and
-  gim-home/odsp-web-harness as dependent phases)
+  fabrikam/fabrikam-harness as dependent phases)
 - **Branch(es):** independent per-phase worktrees
 - **Created:** 2026-09-16
 - **Status:** Near-complete -- one explicitly deferred item (see Phase 5)
@@ -15,7 +15,7 @@
 
 The same PR-conduct facts (self-merge authority, wait/rebase/merge sequence,
 which role does what) are independently restated in 8+ places across
-dotfiles, odsp-web-harness, and copilot-extensions (`AGENTS.md`,
+dotfiles, fabrikam-harness, and copilot-extensions (`AGENTS.md`,
 `CONTRIBUTING.md`, `REVIEW.md`, and `.agent-worktrees/config.yaml` comments in
 each), on top of `agent-worktrees`'s own canonical `pr-workflow.md`/`SKILL.md`.
 This is genuine drift risk -- it already caused a real incident: harness
@@ -30,7 +30,7 @@ single dynamically-assembled, session-scoped guidance blob that
 `agent-worktrees` computes and injects (same mechanism as
 `dotfiles-harness`/`ai-attribution`'s sessionStart hooks), and trim each
 repo's own docs down to only what is genuinely repo-unique policy (e.g.
-odsp-web-harness's never-pre-patch-another's-PR rule, its live-validation
+fabrikam-harness's never-pre-patch-another's-PR rule, its live-validation
 exception).
 
 ## Participants
@@ -56,7 +56,7 @@ Primary implementation surface: `plugins/agent-worktrees/` in
 (`hooks.json`, `session-context.json`, `instruction-projections.json`,
 mirroring `dotfiles-harness`'s `write_session_guidance.py` pattern) and its
 config resolution (`src/agent_worktrees/config.py`, `pr_config.py`).
-Consumers to trim: `gim-home/odsp-web-harness` (`AGENTS.md`,
+Consumers to trim: `fabrikam/fabrikam-harness` (`AGENTS.md`,
 `CONTRIBUTING.md`, `REVIEW.md`, `.agent-worktrees/config.yaml`), the
 operator's dotfiles knowledge repo (`AGENTS.md`,
 `.agent-worktrees/config.yaml`), and copilot-extensions' own `AGENTS.md`
@@ -68,7 +68,7 @@ Full audit (repo/file/what's restated) recorded in this session's transcript
 ## Request
 
 > Do some auditing of where PR guidance exists, across dotfiles,
-> odsp-web-harness, and copilot-extensions. Most guidance should live in
+> fabrikam-harness, and copilot-extensions. Most guidance should live in
 > agent-worktrees, and leverage dynamic assembly based on config (via
 > session-state injected instructions), with support for per-repo guidance
 > derived from the aggregated related-repo config.
@@ -129,7 +129,7 @@ Full audit (repo/file/what's restated) recorded in this session's transcript
 - [x] Bump versions; `tools/check-version-bump.py` +
       `tools/run-plugin-tests.py agent-worktrees` (targeted).
 
-### Phase 2 -- odsp-web-harness: trim redundant restatement
+### Phase 2 -- fabrikam-harness: trim redundant restatement
 - [x] `AGENTS.md` §"Drive every PR you open through to merge": keep only
       genuinely unique policy (never-pre-patch-another's-PR,
       live-validation-exception, source-attribution-marker-reading); replace
@@ -149,7 +149,7 @@ Full audit (repo/file/what's restated) recorded in this session's transcript
 ### Phase 3 -- dotfiles: re-scoped after operator correction
 - [x] Operator clarified the underlying model: `CONTRIBUTING.md`/`REVIEW.md`
       -style content describing a repo's **own** contribution process is
-      legitimate and stays (odsp-web-harness's `CONTRIBUTING.md` is exactly
+      legitimate and stays (fabrikam-harness's `CONTRIBUTING.md` is exactly
       that, correctly left alone in Phase 2). The dynamic PR-conduct
       guidance (session `PR:` line, `pr.notes`, `pr-workflow.md`'s
       default-conduct rule) exists for **contributing outward** to *other*
@@ -158,7 +158,7 @@ Full audit (repo/file/what's restated) recorded in this session's transcript
       PR stuck open -- not repos over-documenting their own process.
 - [x] Re-read dotfiles' `AGENTS.md` §571-584 with that lens: it is two
       paragraphs, not one -- "dotfiles' own flow is PR-primary" (legitimate
-      self-description, keep, same as odsp-web-harness's `CONTRIBUTING.md`)
+      self-description, keep, same as fabrikam-harness's `CONTRIBUTING.md`)
       and "Honor every other repo's PR gates" (already correctly points
       outward at the `working-cross-repo` skill and each
       `.agent-worktrees/related/<name>.md`). **No trim needed** -- the
@@ -184,7 +184,7 @@ Full audit (repo/file/what's restated) recorded in this session's transcript
 ### Phase 4 -- copilot-extensions: dogfood the same corrected lens
 - [x] Operator supplied the key distinction that resolves this phase:
       copilot-extensions is **not itself a harness** (nothing treats it as
-      a home-base control-plane the way odsp-web-harness/dotfiles are) --
+      a home-base control-plane the way fabrikam-harness/dotfiles are) --
       its `AGENTS.md` only ever controls how a *visiting* agent should
       operate on/in it, for any caller regardless of home repo. Broader
       principle the operator stated for future work (recorded, **not**
@@ -204,7 +204,7 @@ Full audit (repo/file/what's restated) recorded in this session's transcript
 
 ### Phase 5 -- Validate end-to-end
 - [x] Sanity-checked all three repos' real `pr:` config blocks (raw YAML,
-      not synthetic fixtures) resolve as expected: odsp-web-harness
+      not synthetic fixtures) resolve as expected: fabrikam-harness
       (`enabled: true`, `merge_actor: submitter-direct`, `notes:` set --
       Phase 2), dotfiles (`enabled: true`, `merge_actor: submitter-direct`,
       no `notes` -- correctly none needed), copilot-extensions
@@ -259,13 +259,13 @@ pursued as a first-class initiative.
 - [x] Each of the three repos' curated docs no longer restates a
       generic/derivable PR-conduct fact; only genuinely repo-unique policy
       remains -- confirmed narrower in practice than originally scoped:
-      odsp-web-harness needed a real trim (Phase 2), dotfiles and
+      fabrikam-harness needed a real trim (Phase 2), dotfiles and
       copilot-extensions did not (Phases 3/4 both confirmed legitimate
       visitor-contract content already in place).
 - [x] No existing `pr-*` consumer, test, or session-guidance projection
       regresses in any of the four touched repos -- targeted
       `tools/run-plugin-tests.py agent-worktrees` runs green after every
-      commit; `tools/validate_harness.py` green for odsp-web-harness;
+      commit; `tools/validate_harness.py` green for fabrikam-harness;
       `tools/check-version-bump.py` green for every copilot-extensions
       commit.
 
@@ -277,7 +277,7 @@ _Pending._
 
 ### 2026-09-16 -- Kickoff
 - Effort created after auditing PR-conduct guidance duplication across
-  dotfiles, odsp-web-harness, and copilot-extensions (prompted by today's
+  dotfiles, fabrikam-harness, and copilot-extensions (prompted by today's
   earlier self-merge/ruleset incident and the just-landed
   `pr-workflow.md`/`SKILL.md` default-conduct update, PR #2796).
 - Not started: no implementation yet. Next session should begin Phase 1
@@ -300,7 +300,7 @@ _Pending._
   assertion) -- not caused by this change.
 - Landed via PR #2811 (`pr-self-merge`), version bumped
   1.5.5-dev129 -> dev130 / marketplace 1.7.7-dev114 -> dev115.
-- Next: Phase 2 (trim odsp-web-harness's `AGENTS.md`/`CONTRIBUTING.md`
+- Next: Phase 2 (trim fabrikam-harness's `AGENTS.md`/`CONTRIBUTING.md`
   /`REVIEW.md`/`.agent-worktrees/config.yaml` restatement down to genuinely
   unique policy, pointing at the now-dynamic PR-conduct line instead).
 
@@ -330,19 +330,19 @@ _Pending._
 - Next: Phase 2, now using `pr.notes` for the carried-forward rationale.
 
 ### 2026-09-16 -- Phase 2 landed
-- Trimmed odsp-web-harness `AGENTS.md`'s self-merge section: replaced the
+- Trimmed fabrikam-harness `AGENTS.md`'s self-merge section: replaced the
   numbered wait/rebase/merge/finalize sequence with a pointer to
   agent-worktrees' own Default-conduct guidance, and fixed the actual stale
   claim that caused the original incident ("GitHub branch protection here
   requires zero approving reviews") with an explicit caution against
   hardcoding a review count at all.
-- Added `pr.notes` to odsp-web-harness's `.agent-worktrees/config.yaml`
+- Added `pr.notes` to fabrikam-harness's `.agent-worktrees/config.yaml`
   carrying that same caution.
 - On closer read, `CONTRIBUTING.md`/`REVIEW.md` turned out to be
   predominantly repo-specific (ACL tiers, fork-flow mechanics, review
   rationale) rather than restated generic PR mechanics -- left unchanged;
   narrower actual redundancy than the original audit estimated.
-- Landed via PR gim-home/odsp-web-harness#436 (`pr-self-merge`).
+- Landed via PR fabrikam/fabrikam-harness#436 (`pr-self-merge`).
 - Remaining: Phase 3 (dotfiles trim), Phase 4 (copilot-extensions dogfood
   trim), Phase 5 (end-to-end validation). Paused here for operator check-in
   after landing three PRs across two repos.
@@ -350,7 +350,7 @@ _Pending._
 ### 2026-09-16 -- Operator correction: Phase 3 re-scoped, real gap found
 - Operator corrected the model before Phase 3 started: `CONTRIBUTING.md`/
   `REVIEW.md`-style content describing a repo's **own** process is
-  legitimate (odsp-web-harness's, correctly left alone in Phase 2); the
+  legitimate (fabrikam-harness's, correctly left alone in Phase 2); the
   dynamic PR-conduct guidance exists for **contributing outward**. The
   actual recurring failure is agents getting confused about which target
   repo's protocol applies and leaving a PR stuck open mid-cross-repo-work.
@@ -367,12 +367,12 @@ _Pending._
 - Landed via its own PR (Phase 3b), version bumped again.
 - Next: Phase 4 -- re-check copilot-extensions' own `AGENTS.md` with the
   same corrected lens before touching it (likely legitimate
-  self-description, same as odsp-web-harness/dotfiles).
+  self-description, same as fabrikam-harness/dotfiles).
 
 ### 2026-09-17 -- Phase 4/5: confirmed no-op, principle captured, near-done
 - Operator supplied the resolving distinction for Phase 4: copilot-extensions
   is not itself a harness (nothing treats it as home base the way
-  odsp-web-harness/dotfiles are), so its `AGENTS.md` only ever needs to be a
+  fabrikam-harness/dotfiles are), so its `AGENTS.md` only ever needs to be a
   **visitor contract** -- correct for any agent working on it, home-repo or
   not. Re-read its "Branch and Publication" section with that lens: a
   textbook visitor contract already including its own stuck-PR rule
@@ -394,5 +394,5 @@ _Pending._
   coordinated repo needs the same review. Not silently dropped -- recorded
   as the effort's one remaining open item for whoever picks it back up.
 - Six PRs landed total across two repos this effort: copilot-extensions
-  #2811, #2812, #2814, #2817, #2821 (+this journal update); odsp-web-harness
+  #2811, #2812, #2814, #2817, #2821 (+this journal update); fabrikam-harness
   #436.

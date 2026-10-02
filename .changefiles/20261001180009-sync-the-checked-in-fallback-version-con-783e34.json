@@ -1,0 +1,9 @@
+{
+  "comment": "Sync the checked-in _FALLBACK_VERSION constant with the plugin's actual version (0.1.1-dev3) -- it was blocking every push to this repo's version-consistency gate.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

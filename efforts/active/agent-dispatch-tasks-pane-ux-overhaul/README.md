@@ -1867,12 +1867,13 @@ existing `activity`/`activity_updated_at` for `wt_live`; land
 ### 2026-09-18 — Phase 3's deferred item lands: the "+N more" column-drop indicator (Phase 3 COMPLETE)
 Picked up via a task-backed handoff (`consume_handoff`/`generate_handoff_
 prompt` extension tools both failed with "Extension disconnected before
-responding to tool call" again -- the same known CAR bug; fell back to the
+responding to tool call" again -- the same known Copilot CLI runtime bug; fell back to the
 `agent-dispatch consume <id> --defer-complete` CLI directly, which
 succeeded in ~30s, longer than `handoff-core.mjs`'s own 20s
 `runAgentDispatchConsume` timeout -- worth a heads-up to whoever owns that
 extension, since it means the in-session `consume_handoff` tool can fail
-on a legitimately-slow-but-successful consume, not just on the CAR
+on a legitimately-slow-but-successful consume, not just on the Copilot CLI
+runtime
 extension-disconnect bug). Operator chose to finish Phase 3's deferred item
 before starting Phase 4.
 

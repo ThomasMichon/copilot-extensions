@@ -754,10 +754,18 @@ worktree-manager.
       trigger; a stale/incompatible `worktree-manager` stub can never capture the
       seam. Realizes installer §`bare-invocation-launches-configurator`,
       §`control-plane-is-optional-plugins-are-self-sufficient`.
-- [ ] Onboarding polish for the **absent-Manager** path: the install trigger reads
+- [x] Onboarding polish for the **absent-Manager** path: the install trigger reads
       as a **guided first-run onboarding**, not an error, and points at the
-      trustworthy bootstrap. Closes picker §`first-run-onboarding-entry`, installer
-      §`onboards-from-empty-gracefully`.
+      trustworthy bootstrap. Landed via [#4838](https://github.com/ThomasMichon/copilot-extensions/pull/4838):
+      the scope stayed intentionally **narrow** to the plugin-side
+      `cmd_manager_install_trigger` copy/tests. The richer in-Picker
+      setup-first onboarding home remains the separately tracked
+      Worktree-Manager-side work in #542, with #540/#541 as install-side
+      prerequisites and #357 as the broader configurator track. This lands the
+      **absent-Manager seam's slice** of picker
+      §`first-run-onboarding-entry` and installer
+      §`onboards-from-empty-gracefully`; it does **not** claim the broader
+      Manager-side setup-first/home experience is done here.
 - [ ] **Open question, not yet designed:** the bare-invocation seam currently
       health-probes specifically for a `worktree-manager` binstub on `PATH` --
       it is not yet a generic, pluggable **registration** a third-party
@@ -886,6 +894,40 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-10-01** — Closed the Phase 4 **absent-Manager onboarding polish**
+  item via [#4838](https://github.com/ThomasMichon/copilot-extensions/pull/4838),
+  after first resolving the scope ambiguity explicitly. Re-read this effort's
+  Guiding Intent + Phase 4 wording, the full picker
+  §`first-run-onboarding-entry` vision text/journal, the installer
+  §`onboards-from-empty-gracefully` behavior, and issues #540/#541/#542/#357.
+  Result: this checkbox is the **narrow plugin-side seam copy** only, not the
+  broader Worktree-Manager-side setup-first home. The evidence lined up in one
+  direction: the Guiding Intent distinguishes "Manager absent → trustworthy
+  install/onboarding trigger" from "Manager present → control-plane/front
+  door"; #542 already owns the richer first-run Picker/home behavior in the
+  standalone Manager, with #540/#541 already closed as its install-side
+  prerequisites, while #357 remains the broader configurator track. Implemented
+  only the concrete plugin-side gap that remained: `cmd_manager_install_trigger`
+  now frames the missing Manager as an **expected first-run state**, names the
+  bootstrap as the way to get the interactive front door, keeps the repository
+  verification link + exact bootstrap command, and preserves the explicit
+  headless-commands-still-work reassurance. Tightened the routing test to lock
+  that calmer onboarding framing in place. While validating, current `dev`
+  surfaced two unrelated-but-real agent-worktrees suite blockers on this
+  machine: the POSIX direct-install bootstrap test assumed `sh` existed on
+  Windows, and two mux-status-link tests leaked host Worktree-Manager routing
+  state. Fixed both in the same PR so the required full suite could run green,
+  without broadening the feature scope.
+
+- **2026-09-29** — Claiming Phase 4's "onboarding polish for the
+  absent-Manager path" item: making the install-trigger path (what fires
+  when a bare invocation resolves to no usable Worktree Manager) read as a
+  guided first-run onboarding experience rather than an error, per the
+  Guiding Intent's picker §`first-run-onboarding-entry` and installer
+  §`onboards-from-empty-gracefully` closures this item targets. Working
+  solo per standing operator directive; recorded here per this effort's own
+  Coordination-section claiming discipline since #352 is closed.
 
 - **2026-09-29** — Resumed this exact worktree after an interrupted landing
   pass rather than restarting from scratch. Found one good committed slice

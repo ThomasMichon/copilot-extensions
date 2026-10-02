@@ -22,6 +22,7 @@ from .pivot_actions import (
     parse_config_sections,
     parse_worktree_actions,
 )
+from .pivot_create_action import CreateAction, parse_create_action
 
 #: Environment override for the manifest directory (used by tests for hermetic
 #: isolation, and available as an operator escape hatch).
@@ -236,6 +237,10 @@ class RegisteredPivot:
     #: Optional remote-worker join (see :class:`WorkerSpec`). ``None`` => the
     #: pivot's rows are not shown on Worktrees rows.
     worker: WorkerSpec | None = None
+    #: Phase B -- optional pivot-level "New …" affordance (no row selected).
+    #: ``None`` => this pivot offers no create action (today's default for
+    #: every existing manifest).
+    create_action: CreateAction | None = None
 
     @property
     def account_scoped(self) -> bool:
@@ -613,6 +618,9 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
         subscribe=subscribe,
         visible_when_state_root_file=state_root_file,
         worker=_parse_worker(data.get("worker"), id_field=id_field),
+        create_action=parse_create_action(
+            data.get("create_action"), where="`create_action`"
+        ),
     )
 
 

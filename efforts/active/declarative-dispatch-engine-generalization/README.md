@@ -25,7 +25,7 @@ embody per event instead of paying full instructional cost on every task.
 
 ## Context
 
-Live use of the `odsp-web-harness-backlog` repository-issue-loop (validating
+Live use of the `fabrikam-harness-backlog` repository-issue-loop (validating
 the #2056 terminal-reservation fix, see `review-automation-reliability`) and a
 same-day conversation about extending the engine surfaced four related,
 forward-looking gaps against the newly-extracted repository-issue-loop vision
@@ -37,7 +37,7 @@ and the parent agent-dispatch vision:
    engine at an Azure DevOps backlog is not yet possible.
 2. Adopting a new loop today means authoring a private declaration whose
    `worker_guidance` is a long, hand-written prose blob (see
-   `odsp-web-harness-issue-loop.json`, dotfiles) -- there is no library of
+   `fabrikam-harness-issue-loop.json`, dotfiles) -- there is no library of
    reusable, named worker identities a new adopter can just select.
 3. `embody.autopilot_worker_prompt` inlines a large, generic "how to behave as
    an agent-dispatch worker" instructional essay into **every** embodied
@@ -93,19 +93,20 @@ workers without restating the same policy prose in every declaration.
   `worker_identity` field is mutually exclusive with inline
   `worker_guidance`; `validate_config` resolves it at validation time.
 - [x] Extract at least one existing declaration's inline prose (the
-  `odsp-web-harness-backlog` loop is the live candidate) into such an
+  `fabrikam-harness-backlog` loop is the live candidate) into such an
   identity, proving the declaration shrinks to policy/eligibility only.
   Extracted verbatim into the packaged built-in identity, now shipped from
-  `plugins/agent-dispatch/src/agent_dispatch/identities/odsp-web-harness-backlog.identity.md`
+  `plugins/agent-dispatch/src/agent_dispatch/identities/fabrikam-harness-backlog.identity.md`
   (see 2026-09-07 journal entry below for why it moved there).
   The packaging fix landed on `main` via PR #2204. **Now applied to the live
-  `dotfiles` declaration** -- switched via `owner_user_microsoft/dotfiles#2080`
-  (merged 2026-09-08), gated on confirming the installed agent-dispatch slot
-  (`0.1.2-dev49`) resolves `worker_identity: odsp-web-harness-backlog` first.
+  `dotfiles` declaration** -- switched via a PR in the private operator
+  dotfiles repo (not publicly linked here; merged 2026-09-08), gated on
+  confirming the installed agent-dispatch slot
+  (`0.1.2-dev49`) resolves `worker_identity: fabrikam-harness-backlog` first.
   Verified end-to-end post-merge: `repository_issue_loops.validate_config`
   against the merged `origin/main` declaration resolves `worker_guidance`
   from the packaged identity, byte-for-byte identical to
-  `worker_identities.load_worker_identity("odsp-web-harness-backlog").rules`.
+  `worker_identities.load_worker_identity("fabrikam-harness-backlog").rules`.
   > **2026-09-17 correction:** the packaged path this bullet describes no
   > longer exists -- see the dated journal entry below. The live declaration
   > now resolves the same identity from a repo-local override instead.
@@ -197,8 +198,8 @@ workers without restating the same policy prose in every declaration.
 - [x] A declaration authored against a named worker identity contains no
   inlined behavioral policy prose, only eligibility/cadence/identity
   selection. Proven live 2026-09-08: the `dotfiles`
-  `odsp-web-harness-issue-loop` declaration was switched from inlined
-  `worker_guidance` prose to `worker_identity: odsp-web-harness-backlog`,
+  `fabrikam-harness-issue-loop` declaration was switched from inlined
+  `worker_guidance` prose to `worker_identity: fabrikam-harness-backlog`,
   verified byte-for-byte identical resolved guidance post-merge (see the
   dated journal entry above). This Validation Plan item was left unchecked
   by oversight in earlier legs despite already being satisfied; corrected
@@ -242,14 +243,14 @@ other phases actually land in.
   `agent_dispatch.worker_identities` module (`WorkerIdentity`,
   `load_worker_identity`), a new `worker_identity` declaration field on
   `repository-issue-loop` (validated, mutually exclusive with
-  `worker_guidance`), and the `odsp-web-harness-backlog` identity extracted
+  `worker_guidance`), and the `fabrikam-harness-backlog` identity extracted
   verbatim from the live dotfiles declaration into
-  `plugins/agent-dispatch/identities/odsp-web-harness-backlog.identity.md`.
+  `plugins/agent-dispatch/identities/fabrikam-harness-backlog.identity.md`.
   10 new tests (`test_worker_identities.py` + 4 cases in
   `test_repository_issue_loops.py`); full existing suite (55 tests) passes
   unchanged.
 - Did **not** switch the live `dotfiles` declaration to
-  `worker_identity: odsp-web-harness-backlog` yet -- the running
+  `worker_identity: fabrikam-harness-backlog` yet -- the running
   agent-dispatch daemon must have this PR's code deployed first, or it will
   reject the new field as an unknown key and break the live backlog loop.
   That switch is the very next slice once this PR lands and deploys.
@@ -338,27 +339,27 @@ other phases actually land in.
   bundled with this one.
 - Confirmed again this leg (unchanged from prior handoffs): the live
   `dotfiles` declaration is still NOT switched to
-  `worker_identity: odsp-web-harness-backlog`. Unlike prior legs, this time
+  `worker_identity: fabrikam-harness-backlog`. Unlike prior legs, this time
   the check found the running daemon HAS auto-updated: `agent-dispatch
   --version` -> `0.1.2-dev34` (was `0.1.2-dev29`), and its own venv
   (`%USERPROFILE%\.agent-dispatch\versions\0.1.2-dev34\Scripts\python.exe`)
   successfully imports `agent_dispatch.worker_identities`. The daemon-version
   gate for the dotfiles switch is now clear -- this is the next slice, not a
-  re-check. A paired `odsp-web-harness` + `dotfiles` knowledge worktree
+  re-check. A paired `fabrikam-harness` + `dotfiles` knowledge worktree
   (`owner_user-cloud1-win-20260907-033821-8451` /
   `owner_user-cloud1-win-20260907-033821-8451-k`) already exists, empty and
   unused, ready for whoever picks up the switch (edit
-  `dotfiles/.agent-dispatch/registrar/odsp-web-harness-issue-loop.json` from
+  `dotfiles/.agent-dispatch/registrar/fabrikam-harness-issue-loop.json` from
   its `-k` worktree, never the dotfiles anchor).
 
 ### 2026-09-07 (cont.) - Found and fixed a packaging bug blocking the dotfiles switch
 
 - Edited the `-k` dotfiles worktree's live declaration to
-  `worker_identity: odsp-web-harness-backlog` and validated it against the
+  `worker_identity: fabrikam-harness-backlog` and validated it against the
   running daemon's own installed code (the local per-user
   `.agent-dispatch\versions\0.1.2-dev34\...\repository_issue_loops.validate_config`
   runtime slot) before actually deploying the change. It failed:
-  `RegistrarError: worker_identity 'odsp-web-harness-backlog': no identity
+  `RegistrarError: worker_identity 'fabrikam-harness-backlog': no identity
   file found`. Root cause: `worker_identities._BUILTIN_DIR` was computed as
   `Path(__file__).resolve().parents[2] / "identities"`, which only resolves
   correctly in the **editable/dev src layout**
@@ -394,7 +395,7 @@ other phases actually land in.
   will still fail to resolve the identity file. Re-verify the daemon version
   next leg the same way as this leg did (`agent-dispatch --version` plus
   confirming `agent_dispatch.worker_identities.load_worker_identity(
-  "odsp-web-harness-backlog")` actually resolves, not just imports) before
+  "fabrikam-harness-backlog")` actually resolves, not just imports) before
   retrying the switch. Left the edited-but-not-yet-live declaration change
   in the `-k` worktree (`dotfiles.worktrees\...-8451-k`) uncommitted for
   whoever verifies the new gate is clear; do not copy it into the live
@@ -424,7 +425,7 @@ other phases actually land in.
   up the same way in a future cycle, not that it needs to be forced.
   **Roster item #1 (the actual dotfiles switch) remains not-yet-done** --
   next leg should re-check `agent-dispatch --version` / try resolving
-  `odsp-web-harness-backlog` from the daemon's own installed code before
+  `fabrikam-harness-backlog` from the daemon's own installed code before
   copying the already-edited `-k` worktree declaration onto the live
   `dotfiles` anchor.
 
@@ -661,25 +662,26 @@ other phases actually land in.
 - Re-verified the daemon-version gate before touching the live declaration:
   the currently installed/running agent-dispatch slot is `0.1.2-dev49`
   (confirmed via `agent-dispatch health`), and
-  `worker_identities.load_worker_identity("odsp-web-harness-backlog")`
+  `worker_identities.load_worker_identity("fabrikam-harness-backlog")`
   resolves cleanly against that slot's installed package (packaged identity
   path under `...\0.1.2-dev49\Lib\site-packages\agent_dispatch\identities\`)
   -- the packaging fix from PR #2204 is present, so this switch is safe.
 - Applied the previously-staged edit (from the prior handoff leg) to
-  `dotfiles`'s `.agent-dispatch/registrar/odsp-web-harness-issue-loop.json`:
+  `dotfiles`'s `.agent-dispatch/registrar/fabrikam-harness-issue-loop.json`:
   replaced the inlined `worker_guidance` prose with
-  `"worker_identity": "odsp-web-harness-backlog"`. Landed via
-  `owner_user_microsoft/dotfiles#2080` (self-merged, squash), worktree
+  `"worker_identity": "fabrikam-harness-backlog"`. Landed via a PR in the
+  private operator dotfiles repo (self-merged, squash), worktree
   finalized.
 - Verified end-to-end post-merge (not just pre-merge): fetched
   `origin/main`'s merged declaration content and ran
   `repository_issue_loops.validate_config` against it directly -- it
   resolves `worker_identity` into `worker_guidance`, and the resolved value
   is byte-for-byte identical to
-  `worker_identities.load_worker_identity("odsp-web-harness-backlog").rules`.
+  `worker_identities.load_worker_identity("fabrikam-harness-backlog").rules`.
   `registrar discover`/`registrar doctor` against the merged content also
   show no errors. Phase 2's second bullet is now fully closed.
-- Also filed `gim-home/odsp-web-harness#238` (unrelated, harness-side): the
+- Also filed an issue in a private consuming-harness repo (unrelated, not
+  named here): the
   mux window that resumed this handoff spawned multiple Copilot sessions
   racing to claim the same `context-handoff` task; only one won via the
   exactly-once claim. No data corruption, but the duplicate spawn itself is
@@ -688,7 +690,7 @@ other phases actually land in.
 ### 2026-09-17 - Correction: the packaged identity referenced by earlier legs is gone
 
 The prior entries above (2026-09-08 legs) recorded the identity this effort
-wired up (`worker_identity: odsp-web-harness-backlog`) as **packaged** --
+wired up (`worker_identity: fabrikam-harness-backlog`) as **packaged** --
 resolved from this repo's own built-in identities tier. That is no longer
 accurate: `ThomasMichon/copilot-extensions#2851` (fixed in
 `ThomasMichon/copilot-extensions#2854`) found that identity should never have
@@ -941,7 +943,7 @@ state instead.
   section: "a declaration authored against a named worker identity contains
   no inlined behavioral policy prose" was left unchecked in earlier legs
   despite already being proven live on 2026-09-08 (the `dotfiles` switch to
-  `worker_identity: odsp-web-harness-backlog`, verified byte-for-byte
+  `worker_identity: fabrikam-harness-backlog`, verified byte-for-byte
   identical resolved guidance post-merge). Checked it off with a pointer to
   that existing evidence rather than re-proving it.
 

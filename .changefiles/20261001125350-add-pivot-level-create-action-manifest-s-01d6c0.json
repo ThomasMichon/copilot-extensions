@@ -1,0 +1,9 @@
+{
+  "comment": "Add pivot-level create_action manifest schema (Phase B item 1 of picker-new-session-prompt-and-composer): a new CreateAction dataclass + validators for a 'create new entry' pivot action with no row selected.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

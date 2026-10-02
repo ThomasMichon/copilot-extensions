@@ -1,0 +1,9 @@
+{
+  "comment": "Retire the task-level dead_letter terminal: liveness-cap exhaustion now abandons and clears ownership, with an idempotent database migration and generic reservation reconciliation.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

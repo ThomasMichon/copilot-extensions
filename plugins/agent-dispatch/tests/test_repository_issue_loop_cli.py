@@ -9,7 +9,7 @@ from agent_dispatch.__main__ import main
 from agent_dispatch.repository_issue_loops import Issue
 
 
-def _write_loop(path):
+def _write_loop(path, *, forge=None):
     path.parent.mkdir(parents=True)
     path.write_text(
         json.dumps(
@@ -26,7 +26,8 @@ def _write_loop(path):
                 "priority_labels": ["priority:high"],
                 "batch_size": 1,
                 "task_label": "repository-issue-work",
-                "forge": {
+                "forge": forge
+                or {
                     "provider": "github",
                     "producer_login": "issue-bot",
                 },
@@ -183,6 +184,102 @@ def test_discover_is_dry_run_and_reports_deterministic_issue(
     assert output["eligible"] == [42]
     assert output["created"] == []
     assert output["reserved"] == []
+
+
+def test_discover_routes_through_the_configured_azure_devops_provider(
+    tmp_path, monkeypatch, capsys
+):
+    """Regression guard: `discover` must honor the declaration's configured
+    `forge.provider` rather than always instantiating `GitHubProvider` --
+    monkeypatching only `AzureDevOpsProvider` here means an unfixed hardcoded
+    call would miss this stub entirely and attempt (and fail) a real `gh`
+    call instead."""
+    from agent_dispatch import __main__ as cli
+    from agent_dispatch import repository_issue_loops as loops
+
+    declaration = (
+        tmp_path / "repo" / ".agent-dispatch" / "registrar" / "issues.json"
+    )
+    _write_loop(
+        declaration,
+        forge={"provider": "azure-devops", "producer_login": "issue-bot"},
+    )
+    monkeypatch.setattr(cli, "_client", lambda _args: FakeClient())
+    monkeypatch.setattr(
+        loops.AzureDevOpsProvider,
+        "list_open_issues",
+        lambda _self, _repo: [
+            Issue(
+                42,
+                "Fix race",
+                "https://example.com/issues/42",
+                ("ready", "priority:high"),
+                1,
+                1,
+            )
+        ],
+    )
+
+    assert main(["repository-issue-loop", "discover", str(declaration)]) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["eligible"] == [42]
+
+
+def test_status_routes_forge_reservations_through_the_configured_azure_devops_provider(
+    tmp_path, monkeypatch, capsys
+):
+    """Regression guard for the `status`/`doctor` forge-reservation read
+    (loop_commands.py's `_repository_issue_loop_status`): it must honor the
+    declaration's configured provider too, not just `discover`'s path."""
+    from agent_dispatch import __main__ as cli
+    from agent_dispatch import repository_issue_loops as loops
+
+    declaration = (
+        tmp_path / "repo" / ".agent-dispatch" / "registrar" / "issues.json"
+    )
+    _write_loop(
+        declaration,
+        forge={"provider": "azure-devops", "producer_login": "issue-bot"},
+    )
+    monkeypatch.setattr(cli, "_client", lambda _args, **_kwargs: FakeClient())
+    monkeypatch.setattr(
+        loops.AzureDevOpsProvider,
+        "list_open_issues",
+        lambda _self, _repo: [
+            Issue(
+                42,
+                "Fix race",
+                "https://example.com/issues/42",
+                ("ready", "priority:high"),
+                1,
+                1,
+                reservations=(
+                    {
+                        "loop": "backlog",
+                        "state": "reserved",
+                        "occurrence": 1,
+                        "label": "agent-reserved",
+                    },
+                ),
+            )
+        ],
+    )
+
+    assert main(["repository-issue-loop", "status", str(declaration)]) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["forge_error"] is None
+    assert output["reservations"] == [
+        {
+            "issue": 42,
+            "url": "https://example.com/issues/42",
+            "loop": "backlog",
+            "state": "reserved",
+            "occurrence": 1,
+            "label": "agent-reserved",
+        }
+    ]
 
 
 def test_doctor_exposes_forge_failure_and_emitter_failure(

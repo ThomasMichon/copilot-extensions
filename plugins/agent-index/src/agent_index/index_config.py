@@ -156,6 +156,31 @@ def _default_indexer_nice() -> int:
         return 10
 
 
+def _default_engine_nice() -> int:
+    """POSIX nice increment for the embedding engine daemon (host good citizen).
+
+    The index-worker's own ``indexer_nice`` throttle (above) does not touch the
+    separate, durable embedding-engine process: on a CPU-only host, that engine
+    is the actual CPU-bound consumer during a large reindex (continuous model
+    inference), and an un-niced engine can starve unrelated lightweight host
+    activity even though the worker that triggered the work is already niced
+    down (observed in production: a plain CLI status check took 50+ seconds,
+    and once, 30+ minutes, under a concurrent full reindex on a CPU device).
+
+    ``AGENT_INDEX_ENGINE_NICE`` (default 5 -- gentler than the worker's 10,
+    since this process ALSO serves live interactive search embeddings, not
+    only background reindexing) is the POSIX nice increment the engine applies
+    to itself at startup, before loading any model. 0 (or a negative value)
+    disables the throttle. Like ``indexer_nice``, this only bites under actual
+    CPU contention -- an idle box runs the engine at full speed regardless.
+    """
+    try:
+        return int(os.environ.get("AGENT_INDEX_ENGINE_NICE", "5"))
+    except ValueError:
+        return 5
+
+
+
 def _default_stream_batch_size() -> int:
     """Chunks per embed+store batch, capability-aware (#115).
 
@@ -279,6 +304,11 @@ class IndexConfig:
     # fresh worker subprocess), not bound once at import.
     indexer_nice: int = field(default_factory=_default_indexer_nice)
 
+    # Same host politeness, for the separate embedding-ENGINE daemon (see
+    # _default_engine_nice docstring) -- the actual CPU-bound consumer on a
+    # CPU-only device during a large reindex, not covered by indexer_nice.
+    engine_nice: int = field(default_factory=_default_engine_nice)
+
     # Engine subprocess defaults.
     host: str = os.environ.get("AGENT_INDEX_HOST", "127.0.0.1")
     port: int = int(os.environ.get("AGENT_INDEX_PORT", "8420"))
@@ -287,6 +317,7 @@ class IndexConfig:
     backup_dir: Path = field(
         default_factory=_default_backup_dir
     )
+
 
     @property
     def lance_dir(self) -> Path:

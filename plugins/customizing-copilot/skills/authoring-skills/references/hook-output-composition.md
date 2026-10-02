@@ -31,7 +31,8 @@ stable.
 For `sessionStart` and `subagentStart`, the loss of independently correct
 `additionalContext` values is tracked in
 [github/copilot-cli#3589](https://github.com/github/copilot-cli/issues/3589).
-[github/copilot-agent-runtime#17878](https://github.com/github/copilot-agent-runtime/pull/17878)
+A tracked fix in the private Copilot CLI runtime repo (not publicly linked
+here)
 is implementation work toward preserving every start-hook value. Do not treat a
 merged change, one development build, or one successful launch as the supported
 contract.

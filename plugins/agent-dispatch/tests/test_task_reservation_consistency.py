@@ -49,7 +49,6 @@ def test_all_task_statuses_is_exhaustive():
         Status.SUBMITTED,
         Status.COMPLETED,
         Status.ABANDONED,
-        Status.DEAD_LETTER,
     }
 
 
@@ -98,7 +97,7 @@ def test_cold_suspended_is_the_steady_state_and_is_consistent():
 
 
 def test_cold_is_consistent_only_for_statuses_with_a_known_covering_sweep():
-    """QUEUED (#4512), DEAD_LETTER (#4542), and the three _TERMINAL
+    """QUEUED (#4512) and the three _TERMINAL
     statuses (reconcile()'s own RESERVING/SPAWNED/COLD pool) each have a
     real covering sweep for a COLD reservation."""
     covered = {
@@ -107,7 +106,6 @@ def test_cold_is_consistent_only_for_statuses_with_a_known_covering_sweep():
         Status.SUBMITTED,
         Status.COMPLETED,
         Status.ABANDONED,
-        Status.DEAD_LETTER,
     }
     for status in covered:
         assert (

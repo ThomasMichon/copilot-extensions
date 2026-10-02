@@ -337,8 +337,13 @@ class TestSpawnSsh:
         assert "&& exec " not in remote_cmd
 
     @pytest.mark.asyncio
-    async def test_ssh_project_resolve_failure_falls_back_to_new(self, mock_manager):
-        """If remote resolve fails, launch falls back with a verified cwd."""
+    async def test_ssh_project_resolve_failure_fails_closed(self, mock_manager):
+        """If remote resolve fails, the whole connect attempt fails closed.
+
+        A direct launch in an unmanaged, bare-home cwd is never an acceptable
+        substitute: it just fails a second time with an unrelated-looking
+        error, hiding the real stage-6 cause.
+        """
         target = SpawnTarget(
             type="ssh", host="server-a", user="deploy", project="my-project",
         )
@@ -347,23 +352,18 @@ class TestSpawnSsh:
         failed.exit_code = 1
         failed.stdout = ""
         failed.stderr = "resolve blew up"
-        home = MagicMock()
-        home.timed_out = False
-        home.exit_code = 0
-        home.stdout = "/home/deploy\n"
-        home.stderr = ""
-        mock_manager.exec_command = AsyncMock(side_effect=[failed, home])
+        mock_manager.exec_command = AsyncMock(return_value=failed)
 
         with patch("agent_bridge.transport.get_default_manager", return_value=mock_manager):
-            await spawn_ssh(target)
+            with pytest.raises(ConnectError) as ei:
+                await spawn_ssh(target)
 
-        # No id bound; launch uses the legacy direct --new path.
+        assert ei.value.stage == ConnectStage.WORKTREE
+        assert ei.value.retryable is False
+        assert "resolve blew up" in str(ei.value)
+        # No id bound; the direct launch was never attempted.
         assert target.worktree_id is None
-        assert target.cwd == "/home/deploy"
-        assert mock_manager.exec_command.call_count == 2
-        remote_cmd = mock_manager.open_stdio_channel.call_args[0][1]
-        assert "--new" in remote_cmd
-        assert "--worktree-id" not in remote_cmd
+        mock_manager.open_stdio_channel.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_ssh_unprovisioned_project_fails_loud(self, mock_manager):
@@ -423,11 +423,14 @@ class TestSpawnSsh:
         mock_manager.open_stdio_channel.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_ssh_generic_resolve_failure_still_degrades(self, mock_manager):
-        """A *generic* resolve failure (not command-not-found) still degrades.
+    async def test_ssh_generic_resolve_failure_fails_closed(self, mock_manager):
+        """A *generic* resolve failure (not command-not-found) also fails closed.
 
-        Guards that the #757 fail-loud path is narrow: only an unprovisioned
-        project short-circuits; other resolve failures keep the legacy fallback.
+        Every resolve failure fails the connect attempt -- not only an
+        unprovisioned project. A direct launch in an unmanaged (bare-home) cwd
+        is never an acceptable substitute: it just fails a second time with an
+        unrelated-looking error (an immediate "Connection closed", or an ACP
+        handshake timeout), hiding the real stage-6 cause.
         """
         target = SpawnTarget(
             type="ssh", host="server-a", user="deploy", project="my-project",
@@ -438,19 +441,103 @@ class TestSpawnSsh:
         failed.exit_code = 1
         failed.stdout = ""
         failed.stderr = "fatal: some internal resolve error"
-        home = MagicMock()
-        home.timed_out = False
-        home.exit_code = 0
-        home.stdout = "/home/deploy\n"
-        home.stderr = ""
-        mock_manager.exec_command = AsyncMock(side_effect=[failed, home])
+        mock_manager.exec_command = AsyncMock(return_value=failed)
 
         with patch("agent_bridge.transport.get_default_manager", return_value=mock_manager):
-            await spawn_ssh(target)
+            with pytest.raises(ConnectError) as ei:
+                await spawn_ssh(target)
 
-        # Degraded as before: launched with the verified fallback cwd.
-        assert target.cwd == "/home/deploy"
-        mock_manager.open_stdio_channel.assert_called_once()
+        assert ei.value.stage == ConnectStage.WORKTREE
+        assert ei.value.retryable is False
+        assert "some internal resolve error" in str(ei.value)
+        # Crucially: NO degrade -- the direct launch was never attempted.
+        mock_manager.open_stdio_channel.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ssh_resolve_success_without_work_dir_fails_closed(self, mock_manager):
+        """A resolve that succeeds but omits work_dir also fails closed.
+
+        Even when the remote resolve command itself reports success, an
+        incomplete plan (missing ``work_dir``) must not silently proceed to a
+        bare, unmanaged launch.
+        """
+        target = SpawnTarget(
+            type="ssh", host="server-a", user="deploy", project="my-project",
+            ssh_shell="bash",
+        )
+        ok = MagicMock()
+        ok.timed_out = False
+        ok.exit_code = 0
+        ok.stdout = '{"launch": {"worktree_id": "server-a-new-1"}}'
+        ok.stderr = ""
+        mock_manager.exec_command = AsyncMock(return_value=ok)
+
+        with patch("agent_bridge.transport.get_default_manager", return_value=mock_manager):
+            with pytest.raises(ConnectError) as ei:
+                await spawn_ssh(target)
+
+        assert ei.value.stage == ConnectStage.WORKTREE
+        assert "incomplete plan" in str(ei.value)
+        mock_manager.open_stdio_channel.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ssh_resolve_success_without_worktree_id_fails_closed(self, mock_manager):
+        """A resolve that succeeds but omits worktree_id also fails closed.
+
+        An incomplete plan missing ``worktree_id`` must not silently launch
+        with ``--new`` (creating a second worktree) using whatever ``cwd`` the
+        target happened to already carry.
+        """
+        target = SpawnTarget(
+            type="ssh", host="server-a", user="deploy", project="my-project",
+            ssh_shell="bash",
+        )
+        ok = MagicMock()
+        ok.timed_out = False
+        ok.exit_code = 0
+        ok.stdout = '{"launch": {"work_dir": "/home/deploy/src.worktrees/wt-1"}}'
+        ok.stderr = ""
+        mock_manager.exec_command = AsyncMock(return_value=ok)
+
+        with patch("agent_bridge.transport.get_default_manager", return_value=mock_manager):
+            with pytest.raises(ConnectError) as ei:
+                await spawn_ssh(target)
+
+        assert ei.value.stage == ConnectStage.WORKTREE
+        assert "incomplete plan" in str(ei.value)
+        mock_manager.open_stdio_channel.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ssh_incomplete_plan_fails_closed_despite_preexisting_cwd(
+        self, mock_manager,
+    ):
+        """A pre-populated ``cwd`` (e.g. a static agent-config ``cwd:``) must
+        never substitute for an incomplete resolve plan.
+
+        ``SpawnTarget.cwd`` can be pre-populated from agent config
+        (``explicit_cwd`` stays false in that case) -- an incomplete plan
+        missing ``worktree_id`` must still fail closed instead of silently
+        launching from that unrelated, possibly stale cwd with ``--new``
+        (which would also create a second, orphaned worktree).
+        """
+        target = SpawnTarget(
+            type="ssh", host="server-a", user="deploy", project="my-project",
+            cwd="/home/deploy/some/other/preconfigured/path", ssh_shell="bash",
+        )
+        ok = MagicMock()
+        ok.timed_out = False
+        ok.exit_code = 0
+        ok.stdout = "{}"
+        ok.stderr = ""
+        mock_manager.exec_command = AsyncMock(return_value=ok)
+
+        with patch("agent_bridge.transport.get_default_manager", return_value=mock_manager):
+            with pytest.raises(ConnectError) as ei:
+                await spawn_ssh(target)
+
+        assert ei.value.stage == ConnectStage.WORKTREE
+        assert "incomplete plan" in str(ei.value)
+        mock_manager.open_stdio_channel.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_ssh_project_with_existing_worktree_id_skips_resolve(self, mock_manager):

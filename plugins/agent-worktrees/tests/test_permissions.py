@@ -175,7 +175,7 @@ def test_jsonc_slashes_in_values_not_stripped(copilot_home: Path) -> None:
     assert body["trustedFolders"] == [r"D:\wt\a"]
 
 
-# ── extension-permission-access pre-seed (github/copilot-agent-runtime#22266) ──
+# ── extension-permission-access pre-seed (a known Copilot CLI extension-load gate) ──
 
 def _write_permissions(cop: Path, data: dict) -> Path:
     p = cop / "permissions-config.json"

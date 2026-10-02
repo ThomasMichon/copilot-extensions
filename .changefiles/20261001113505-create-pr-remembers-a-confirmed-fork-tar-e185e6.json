@@ -1,0 +1,9 @@
+{
+  "comment": "create-pr remembers a confirmed fork target per (operator, repo) and stops re-asking --confirm-fork on later calls (#4756)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

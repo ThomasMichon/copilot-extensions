@@ -65,6 +65,7 @@ class SourceSpec:
     auth_account: str | None = None
     trust_domain: str | None = None
     repo_path: str | None = None
+    ref: str | None = None
 
 
 def _type_from_name(name: str) -> str:
@@ -103,6 +104,7 @@ def configured_source_specs() -> list[SourceSpec]:
                 auth_account=(auth or {}).get("account") if isinstance(auth, dict) else None,
                 trust_domain=entry.get("trust_domain"),
                 repo_path=entry.get("_repo_path"),
+                ref=entry.get("ref"),
             )
         )
     if specs:
@@ -160,15 +162,33 @@ def _connector_kwargs(spec: SourceSpec) -> dict[str, object]:
     #1350). The bare default ``git`` source (no repo/repo_path) resolves to no
     kwargs, letting ``GitRepoConnector`` fall back to its cwd/env default."""
     if spec.type == "git":
+        kwargs: dict[str, object] = {}
         path = _resolve_repo_path(spec)
         if path:
-            return {"repo_path": path}
-        if spec.repo or spec.repo_path:
+            kwargs["repo_path"] = path
+        elif spec.repo or spec.repo_path:
             raise RuntimeError(
                 f"git source {spec.name!r}: could not resolve a checkout path "
                 f"(repo={spec.repo!r}) via the agent-worktrees registry"
             )
-        return {}  # bare default 'git' — connector uses cwd / AGENT_INDEX_GIT_REPO
+        if spec.ref:
+            kwargs["ref"] = spec.ref
+        if spec.auth_account:
+            # Authenticate the fetch step so the checkout is actively pulled
+            # forward as the remote's tracked branch moves, rather than
+            # depending on whichever account happens to be ambient-active in
+            # the system's `gh`-backed git credential helper (which may not be
+            # the account THIS repo needs -- e.g. an EMU org repo vs. a
+            # personal one). Unlike the github: (issues/PRs) connector, a
+            # resolution failure here is non-fatal: GitRepoConnector's own
+            # fetch already falls back gracefully to stale-but-canonical
+            # remote-tracking state or the local HEAD (see its module
+            # docstring), so proceed unauthenticated rather than failing the
+            # whole source.
+            token = _resolve_gh_token(spec.auth_account)
+            if token:
+                kwargs["token"] = token
+        return kwargs
     if spec.type == "github":
         if not spec.auth_account:
             return {}  # anonymous (low rate limit) — the connector warns
