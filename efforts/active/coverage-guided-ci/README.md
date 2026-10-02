@@ -296,6 +296,56 @@ _Pending review of this plan._
 
 ## Journal
 
+### 2026-10-02 — Incident: `select.py` shadowed the stdlib, blocking every real promotion for ~3h
+Operator asked me to check whether this effort's own coverage-artifact work
+might have blocked the real `dev`→`main` promotion pipeline. It had.
+
+**What happened:** PR #4902's own "Coverage baseline - agent-ssh" step in
+`validate-and-promote.yml`'s `full` matrix job invokes
+`python tools/coverage_guided_selection/baseline.py ...` as a plain script.
+Running a script that way prepends *its own directory*
+(`tools/coverage_guided_selection/`) to `sys.path` -- and that directory
+contained a module literally named `select.py` (the diff-scoped-selection
+module from the Phase 0 pilot). That shadowed the **stdlib** `select`
+module for every later import in the same process, including
+`subprocess`'s own transitive `import selectors -> import select` --
+`baseline.py`'s own first line, `import subprocess`, crashed outright with
+`AttributeError: module 'select' has no attribute 'select'`, before any of
+this package's own logic ever ran.
+
+Because PR #4902 also added a **hard** "Verify enrolled coverage baselines
+were actually collected" gate in the `promote` job (by design, so a missing
+baseline is never silently swallowed), every single promotion attempt from
+2026-10-02 ~09:27 UTC onward failed at that gate -- correctly refusing to
+promote without `agent-ssh`'s evidence, but for the wrong underlying reason
+(a crash, not a transient collection hiccup). Confirmed via
+`gh run list --workflow validate-and-promote.yml`: 14 consecutive failed
+runs before a fix landed, the last success at 08:06:54 UTC.
+
+**Fix:** landed as #4916 (authored directly by the repo owner, in parallel
+with an equivalent fix prepared here) -- renamed `select.py` ->
+`selection.py` (no stdlib collision) and updated the one import site.
+Verified directly afterward: ran the exact failing CLI invocation and
+confirmed it now produces a real baseline (214 tests, 10 covered files)
+instead of crashing.
+
+**Follow-up (#4918):** #4916's own fix didn't add a test that would catch a
+*future* stdlib-name collision under a different module name -- the rest of
+the suite imports the package normally, which never prepends this directory
+to `sys.path` the way the real script-style invocation does. Added
+`TestNoStdlibModuleNameCollisions`: a fast static check (no `.py` file here
+may collide with `sys.stdlib_module_names`) plus a direct subprocess smoke
+test running `baseline.py --help` as a plain script. Verified the static
+check actually catches the original bug by temporarily reintroducing a
+colliding module name and confirming it fails with the exact collision
+named.
+
+**Lesson for this effort going forward:** a script invoked directly (not via
+`python -m`) always has its own directory prepended to `sys.path` -- any
+future module added to this package needs a quick stdlib-name collision
+check before landing, not just a local test pass (the fast test suite *did*
+pass before this incident, since it only ever imports the package normally).
+
 ### 2026-10-02 — Phase 1 pilot: real promotion-gate wiring for `agent-ssh`
 Operator asked to actually get a baseline committed to `main`, "so we can
 incrementally work towards full coverage across all plugins" -- driving

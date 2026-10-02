@@ -25,6 +25,7 @@ workflow_dispatch-only `coverage-guided-selection-integration` job.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -245,6 +246,56 @@ class TestComputeFallbackSet:
         first = fallback.compute_fallback_set(baseline, runtime_budget_s=0.35)
         second = fallback.compute_fallback_set(baseline, runtime_budget_s=0.35)
         assert first.selected_tests == second.selected_tests
+
+
+class TestNoStdlibModuleNameCollisions:
+    """Incident regression (the `select.py` shadowing-stdlib outage): this
+    package's `baseline.py` is invoked directly as a script by
+    `validate-and-promote.yml`, which prepends this package's own directory
+    to `sys.path` -- so a sibling module here that collides with any
+    top-level stdlib module name silently shadows it for every later import
+    in that same process (confirmed live: `select.py` broke `subprocess`'s
+    own transitive `import selectors -> import select`). A package-import
+    test alone (the rest of this file) never catches this class of bug,
+    since importing the package normally never prepends this directory to
+    `sys.path` the way the real script-style invocation does."""
+
+    def test_no_sibling_module_name_collides_with_a_stdlib_module(self) -> None:
+        package_dir = _REPO_ROOT / "tools" / "coverage_guided_selection"
+        local_names = {
+            p.stem for p in package_dir.glob("*.py") if p.name != "__init__.py"
+        }
+        # A sibling PACKAGE directory (one with its own __init__.py) is just
+        # as importable -- and just as capable of shadowing a stdlib
+        # top-level package (e.g. a future `email/` here would shadow
+        # stdlib `email`) -- as a sibling module file, so it must be
+        # collected the same way, not just *.py files.
+        local_names |= {
+            d.name
+            for d in package_dir.iterdir()
+            if d.is_dir() and (d / "__init__.py").is_file()
+        }
+        collisions = local_names & set(sys.stdlib_module_names)
+        assert not collisions, (
+            f"{collisions!r} collide with stdlib top-level module names -- "
+            "a module here would shadow the real stdlib module for any "
+            "script-style invocation of baseline.py (see this test class's "
+            "own docstring for the exact outage this already caused)"
+        )
+
+    def test_baseline_cli_runs_as_a_plain_script_without_crashing(self) -> None:
+        # Directly reproduces the real invocation that broke: running
+        # baseline.py as a script (not importing the package) prepends its
+        # own directory to sys.path. --help exits 0 after argparse runs,
+        # without needing a real pytest/coverage subprocess -- enough to
+        # prove every top-level import in baseline.py (including the
+        # `import subprocess` that crashed) still succeeds in script mode.
+        baseline_script = _REPO_ROOT / "tools" / "coverage_guided_selection" / "baseline.py"
+        proc = subprocess.run(
+            [sys.executable, str(baseline_script), "--help"],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
 class TestCorrelation:
