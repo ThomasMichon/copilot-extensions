@@ -26,7 +26,12 @@ def _port_map(value: Any) -> dict[str, int]:
 
 
 def reuse_assigned_local_forwards(hold: Any, requested: dict[int, int] | None) -> dict[int, int] | None:
-    """Under the Owner lock, turn repeated ``0:venue`` requests into live assigned ports."""
+    """Under the Owner lock, turn repeated ``0:venue`` requests into live assigned ports.
+
+    An explicit fixed ``HOST:venue`` request keeps the stable-port contract: it
+    drops any dynamic provenance an earlier ``0:venue`` assignment left on that
+    host port, so reconciliation never treats (and reassigns) it as dynamic.
+    """
     requested_clean: dict[int, int] = {}
     for host, venue in (requested or {}).items():
         try:
@@ -35,6 +40,11 @@ def reuse_assigned_local_forwards(hold: Any, requested: dict[int, int] | None) -
             continue
         if 0 <= h < 65536 and 0 < v < 65536:
             requested_clean[h] = v
+    provenance = getattr(hold, "assigned_local_forwards", None)
+    if isinstance(provenance, dict):
+        for host in requested_clean:
+            if host != 0:
+                provenance.pop(str(host), None)
     if not requested_clean or 0 not in requested_clean:
         return requested
     requested_hosts = {host for host in requested_clean if host != 0}

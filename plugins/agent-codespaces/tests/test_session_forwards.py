@@ -454,6 +454,22 @@ def test_repeated_dynamic_request_reuses_active_assignment_inside_owner_lock(sto
     assert kept.assigned_local_forwards == {"49152": 3000}
 
 
+def test_an_explicit_fixed_rejoin_clears_dynamic_provenance(store):
+    """A port first assigned for 0:3000 and then requested explicitly as
+    49152:3000 is fixed from then on: reconciliation must never reassign it."""
+    owner.hold("cs-1", "cli:t", daemon_port=41234, mux_session="wt-x",
+               local_forwards={49152: 3000})
+    h = owner.get_hold("cs-1")
+    h.assigned_local_forwards = {"49152": 3000}
+    owner._write_holds({"cs-1": h})
+
+    kept = owner.hold("cs-1", "cli:t", mux_session="wt-x", local_forwards={49152: 3000})
+
+    assert kept.local_forwards == {"49152": 3000}
+    assert kept.assigned_local_forwards == {}
+    assert owner.get_hold("cs-1").assigned_local_forwards == {}
+
+
 def test_repeated_dynamic_request_reuses_assignment_with_missing_or_stale_beacon(store, monkeypatch):
     owner.hold("cs-1", "cli:t", daemon_port=41234, mux_session="wt-x",
                local_forwards={49152: 3000})
