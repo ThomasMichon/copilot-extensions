@@ -102,7 +102,11 @@ def test_reconcile_refuses_to_publish_daemon_that_stays_drained(monkeypatch):
     monkeypatch.setattr(
         m,
         "_service_health_on_port",
-        lambda _port: {
+        # **_kwargs: the real call site passes a keyword `timeout=` on its
+        # second, current-endpoint-health re-check (service_process_state.py)
+        # -- a positional-only mock signature raises TypeError there instead
+        # of returning the drained health payload this test means to exercise.
+        lambda _port, **_kwargs: {
             "status": "ok",
             "service": "agent-bridge",
             "ready": True,

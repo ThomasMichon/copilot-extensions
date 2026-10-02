@@ -364,3 +364,51 @@ fi
     assert "EXIT:0" in result.stdout
     assert not (vendored_dir / "build").exists()
     assert unrelated.exists()
+
+
+def test_transitively_resolved_lib_under_payload_libs_dir_is_also_scrubbed(
+    tmp_path: Path,
+) -> None:
+    """Regression: the self-reintroducing JobHandle ImportError incident.
+
+    agent-procutil, dropin-registry, plugin-activation, and plugin-resolve
+    are never given a dedicated install call (and therefore never passed as
+    the explicit ``scrub_dir`` argument) -- they are resolved TRANSITIVELY
+    while installing agent-bridge itself, via agent-bridge's own
+    ``[tool.uv.sources]`` workspace path deps. Each still lives under
+    ``$PLUGIN_DIR/libs/<name>/`` as its own independent setuptools build
+    root, and accumulates the identical stale build/egg-info residue. An
+    explicit-scrub_dir-only implementation never reaches these four libs,
+    so a stale ``libs/agent-procutil/build/lib`` silently re-shadows a
+    fresh ``src/`` on every later install -- the exact failure that broke
+    `agent-bridge create` (``ImportError: cannot import name 'JobHandle'``)
+    repeatedly, self-reintroducing after every manual hot-patch. The scrub
+    must reach every immediate child of ``libs/`` unconditionally, not only
+    the libs an explicit scrub_dir call site happens to name."""
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    procutil_dir = plugin_dir / "libs" / "agent-procutil"
+    procutil_dir.mkdir(parents=True)
+    _seed_build_residue(procutil_dir)
+    _seed_src_layout_egg_info(procutil_dir)
+    dropin_dir = plugin_dir / "libs" / "dropin-registry"
+    dropin_dir.mkdir(parents=True)
+    _seed_build_residue(dropin_dir)
+    uv_stub = """
+uv() { echo 'Installed 1 package'; return 0; }
+"""
+    extra = """
+if _uv_pip_install_resilient "" --python fake-python --reinstall-package agent-bridge \
+        --reinstall-package agent-procutil --reinstall-package agent-dropin-registry \
+        "$PLUGIN_DIR" --quiet; then
+    echo "EXIT:0"
+else
+    echo "EXIT:1"
+fi
+"""
+    result = _run_harness(plugin_dir, uv_stub, extra)
+    assert "EXIT:0" in result.stdout
+    assert not (procutil_dir / "build").exists()
+    assert not (procutil_dir / "some_pkg.egg-info").exists()
+    assert not (procutil_dir / "src" / "some_pkg.egg-info").exists()
+    assert not (dropin_dir / "build").exists()
