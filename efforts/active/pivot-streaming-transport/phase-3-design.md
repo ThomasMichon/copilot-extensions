@@ -420,15 +420,25 @@ phase) is considered.
         standard this codebase already holds every other long-lived loop
         to; (b) every cache entry carries a **freshness deadline** (its own
         namespace's `last_refreshed_at` plus a bound meaningfully larger
-        than the normal refresh period, e.g. 3× the refresh interval) — a
-        namespace whose deadline has passed is reported as incomplete in
-        that response's `incomplete_namespaces`; and (c) **marking incomplete
-        is not enough on its own — any `GET` that observes a namespace as
-        incomplete, uninitialized, or past its freshness deadline must
-        itself opportunistically join that namespace's single-flight refresh
-        (the same mechanism `force_refresh` triggers explicitly), not merely
-        report the state and wait for the background timer.** Without (c),
-        an **old CLI** that never sends `force_refresh` and only performs a
+        than the normal refresh period, e.g. 3× the refresh interval) —
+        past that deadline, the entry is internally treated as stale
+        (no longer eligible to be served as-is); and (c) **a stale entry is
+        never served silently and never merely annotated — any `GET` that
+        observes a namespace as incomplete, uninitialized, or past its
+        freshness deadline must itself opportunistically join that
+        namespace's single-flight refresh** (the same mechanism
+        `force_refresh` triggers explicitly) **and the outcome of that
+        refresh decides the response, not a plain `incomplete_namespaces`
+        annotation on an otherwise-normal `200`:** if the joined refresh
+        succeeds, serve the now-current value (and drop that namespace from
+        `incomplete_namespaces` entirely); if it fails, that namespace falls
+        under the same fail-closed `503` contract as any other "nothing
+        authoritative to serve" case defined above — a `200` response
+        never lists a namespace as merely "incomplete" while silently still
+        handing back its stale rows underneath that annotation, since an
+        old client's bounded retry loop would exhaust its attempts and
+        accept that stale/partial data as if `incomplete_namespaces` were
+        just informational.** Without (c), an **old CLI** that never sends `force_refresh` and only performs a
         few plain `GET`s 0.5s apart (`_fetch_complete_initial_rows()`'s
         existing retry shape) would keep reading the same stale snapshot
         across all of them and publish it before the background timer ever
@@ -514,10 +524,14 @@ phase) is considered.
         would have nothing to detect and would publish that gap as
         authoritative immediately. The cache therefore has an explicit
         **uninitialized** state per namespace (distinct from
-        last-known-good-but-currently-failing), and any namespace still in
-        that state is *always* reported in `incomplete_namespaces` until its
-        first successful scan completes — never silently omitted as if it
-        had simply resolved to zero agents.
+        last-known-good-but-currently-failing). Consistent with the
+        fail-closed contract above: a `GET` observing an uninitialized
+        namespace opportunistically joins its single-flight scan; if that
+        scan succeeds, serve the now-current value; if it's still
+        uninitialized afterward (namespace-level `503`, per "any known
+        namespace lacks an authoritative value" above), not a `200` that
+        merely lists it in `incomplete_namespaces` while silently handing
+        back nothing for it.
   - [ ] **The namespace set itself is dynamic, not fixed at startup — and a
         same-namespace provider *replacement* is its own case, not covered
         by add/remove alone:** `refresh_provider_resolvers()`

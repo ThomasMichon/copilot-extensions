@@ -420,8 +420,13 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
         actually tracks `refresh_provider_resolvers()`'s own membership
         changes, and a same-namespace replacement actually invalidates the
         prior generation's cache entry rather than serving the old
-        provider's stale agents as authoritative), competing concurrent
-        refreshes of the same namespace (single-flight plus
+        provider's stale agents as authoritative) — **plus a dedicated
+        deterministic test for the replacement-constructor-failure path
+        specifically** (the new resolver's construction fails: the old
+        resolver and its last-known-good cache entry must remain
+        authoritative, never a brief false-success gap, which the general
+        add/remove/replace test above doesn't exercise on its own) —
+        competing concurrent refreshes of the same namespace (single-flight plus
         generation-guarded publication actually prevents a stale-overwrite
         and doesn't duplicate the scan), **daemon startup before any
         namespace has ever been discovered** (the route responds `503`,
@@ -1524,3 +1529,26 @@ because its own fix introduced the same class of problem:
   "per Copilot review"/"design review" phrase.
 
 Both replied-to inline; the resurfaced thread addressed by the same fix.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 18: transactional replacement needed its own test, and the freshness-deadline wording still contradicted the fail-closed contract in two places
+Two findings:
+- **Medium: the replacement-transactionality fix from round 17 had no
+  dedicated test.** The general add/remove/replace acceptance criterion
+  doesn't exercise the constructor-failure path specifically — an
+  implementation could still unregister the old resolver first and pass
+  that general test while briefly returning a false-success roster missing
+  the namespace. Added a dedicated deterministic test requirement for
+  exactly this path.
+- **Medium: two bullets in `phase-3-design.md` still described a
+  freshness-deadline-expired namespace as merely annotated in
+  `incomplete_namespaces` on an otherwise-normal `200`, contradicting the
+  fail-closed `503` contract settled two rounds ago.** An old client's
+  bounded retry loop would exhaust its attempts and accept that stale data
+  as if the annotation were just informational. Fixed both occurrences (the
+  background-refresh-task bullet and the uninitialized-namespace bullet) to
+  describe the same join-the-refresh-then-503-on-failure behavior
+  consistently, rather than promising a response shape the rest of the
+  design had already superseded.
+
+Both replied-to inline; the resurfaced Guiding Intent thread needed no
+further action (already addressed last round).
