@@ -47,7 +47,8 @@ agents`. The manifest declares `"stream": true, "subscribe": true`
 (pivot-streaming-transport Phase 2): the Picker runs `agents --stream`
 instead of a plain one-shot call, consuming a line-delimited NDJSON envelope
 (`begin`/`row`/`done`) so the roster paints progressively, then holds that
-channel open -- every two seconds (`--interval`) the roster is re-fetched
+channel open -- every 45 seconds (`--interval`, matching the Picker's prior
+one-shot repoll cadence) the roster is re-fetched
 in-process and diffed against the last snapshot, emitting `delta`/`removed`
 frames keyed by agent `name` so an open pivot updates live without
 re-invoking the CLI per refresh. Falls back automatically to the plain

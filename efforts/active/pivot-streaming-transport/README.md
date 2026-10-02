@@ -573,7 +573,8 @@ invariants Phase 1's review corrected in `worktree-manager`'s `tasks.py`
   `_fetch_agent_rows()` that duplicates only the fetch+project-filter
   selection logic, not the printing).
 - `_run_agents_stream()` emits `begin`/`row`/`done`, then with `--subscribe`
-  holds the channel open on a 2s-default periodic re-scan, diffing
+  holds the channel open on a periodic re-scan (default 45s — see the
+  corrected cadence below), diffing
   (`_diff_agent_rows()`, keyed by agent `name` — the manifest's `entry.id`)
   into `delta`/`removed` frames. A topology-profile error on the initial
   fetch raises `RuntimeError` from `_fetch_agent_rows()` and is framed as a
@@ -698,3 +699,37 @@ more often than the Picker's prior one-shot repoll cadence (45s,
 `engine_runtime.py`'s `POLL_SECS`) ever did. Changed `DEFAULT_SUBSCRIBE_
 INTERVAL` to 45.0 -- matching the existing cadence it replaces, rather than
 copying a sibling plugin's cadence for a cheaper call shape.
+
+**Review round 5 -- revisited (and declined) the protocol-version bump,
+fixed stale "2 seconds" docs.** Most of round 5's 14 findings were stale
+re-listings of round-2/3 findings already resolved in the diff (e.g. the
+fixture-provenance concerns no longer apply once the whole protocol-bump
+attempt was reverted). Two genuinely new items:
+
+- `routes/agents.py:25` asked to bump `HTTP_PROTOCOL_VERSION` for the new
+  `incomplete_namespaces` response field, per `protocol.py`'s own
+  documented convention. Declined, with a reply comment on the review
+  thread giving the concrete justification: `protocol.py`'s own rule
+  explicitly carves out "additive, tolerant-reader changes (a new optional
+  field an old client simply ignores)" as **not** requiring a bump --
+  `BridgeClient.list_agents_with_incomplete()` already detects support via
+  response dict **key presence**, not protocol negotiation, which is
+  exactly that carved-out case and needs no version number to be correct
+  against an old daemon. Separately (and this would block the bump even if
+  it were wanted): re-verified empirically that `tools/check-agent-bridge-
+  contracts.py` requires every fixture's `captured_from.commit` to resolve
+  to a real, already-existing git commit whose historical source blob
+  matches the claimed generation -- no such commit can exist for a
+  generation this PR itself introduces, since its own commits get
+  squash-merged into an unpredictable hash. Confirmed locally that bumping
+  the constant alone (fixtures left at generation 19) fails 4
+  `test_contract_registry.py` tests, and that the `agent-bridge` CI job
+  (full `pytest -q`, not `-m guard`-filtered) is a real, currently-passing
+  required check on this PR -- this is not merely a local pre-push nicety.
+  This reconfirms round 3's own "keep semantic, attest in follow-up"
+  finding rather than contradicting it: no protocol.py change at all is
+  needed in this PR, so there is nothing left to attest in a follow-up.
+- Fixed the two remaining stale "2 seconds" references round 5 flagged:
+  `plugins/agent-bridge/README.md:50` ("every two seconds" -> "every 45
+  seconds") and this file's own streaming-architecture note above (now
+  describes the 45s default instead of the superseded 2s one).
