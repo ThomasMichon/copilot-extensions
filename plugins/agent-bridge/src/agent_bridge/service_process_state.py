@@ -68,11 +68,14 @@ def _active_endpoint_is_forward() -> bool:
 
 def _service_port() -> int:
     """Resolved bridge port: live routing table > config > platform default."""
-    from .models import default_port
-
     live = _active_endpoint_port()
-    if live:
-        return live
+    return live or _configured_port()
+
+
+def _configured_port() -> int:
+    """The port a local daemon is configured to bind: config > platform default
+    (never the live routing table, which may name a forwarded port)."""
+    from .models import default_port
 
     core = _core()
     cfg_path = os.path.join(core._INSTALL_DIR, "config.yaml")

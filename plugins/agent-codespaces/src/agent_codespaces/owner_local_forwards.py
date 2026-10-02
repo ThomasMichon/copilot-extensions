@@ -49,6 +49,16 @@ def reuse_assigned_local_forwards(hold: Any, requested: dict[int, int] | None) -
     return reused
 
 
+def _claimed_by_another_hold(holds: dict[str, Any], codespace: str, host_port: int) -> bool:
+    """Whether another hold already forwards ``host_port`` (fixed or dynamic) --
+    re-checked under the Owner lock, since a fixed request can land after the
+    caller's snapshot and before a kernel-chosen port is persisted."""
+    return any(
+        str(host_port) in (getattr(hold, "local_forwards", None) or {})
+        for cs, hold in holds.items() if cs != codespace
+    )
+
+
 def record_assigned_local_forward(
     codespace: str,
     *,
@@ -82,6 +92,8 @@ def record_assigned_local_forward(
         current = forwards.get(str(assigned))
         if current is not None and current != venue:
             return False
+        if _claimed_by_another_hold(holds, codespace, assigned):
+            return False
         forwards.pop("0", None)
         forwards[str(assigned)] = venue
         hold.local_forwards = forwards
@@ -109,6 +121,10 @@ def reassign_dynamic_local_forward(
         holds = owner._prune(owner._read_holds(), owner.DEFAULT_TTL if ttl is None else ttl)
         hold = holds.get(codespace)
         if hold is None or hold.assigned_local_forwards.get(str(old_host)) != venue:
+            return False
+        if _claimed_by_another_hold(holds, codespace, assigned) or (
+            hold.local_forwards.get(str(assigned)) not in (None, venue)
+        ):
             return False
         hold.local_forwards.pop(str(old_host), None)
         hold.assigned_local_forwards.pop(str(old_host), None)

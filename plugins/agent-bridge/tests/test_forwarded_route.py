@@ -194,6 +194,23 @@ def test_service_stop_treats_forwarded_route_as_local_service_down(
     assert "still responding" not in output.err
 
 
+def test_service_stop_over_a_forward_still_stops_a_local_fixed_port_daemon(tmp_path, monkeypatch):
+    """A local daemon on its configured port (no pid file) outlives a rejoin
+    that rewrote the route to a forward; stop still finds it by its lock."""
+    _forward_down(tmp_path, monkeypatch)
+    killed = []
+    _stop_setup(monkeypatch, killed)  # 4242 on the forwarded port is the ssh session
+    fixed = m._configured_port()
+    assert fixed != m._service_port()
+    alive = {7777}
+    monkeypatch.setattr(m, "_pid_from_lock",
+                        lambda port: 7777 if port == fixed and 7777 in alive else None)
+    monkeypatch.setattr(m, "_pid_is_agent_bridge", lambda pid, *_a: pid in alive)
+    monkeypatch.setattr(m, "_kill_pid", lambda pid: (killed.append(pid), alive.discard(pid)))
+    m._service_stop()
+    assert killed == [7777]
+
+
 def test_service_stop_kills_a_port_listener_only_if_it_is_a_bridge(tmp_path, monkeypatch):
     _route(tmp_path, monkeypatch, {"bind": "127.0.0.1", "port": 39881, "generation": 1})
     killed = []
