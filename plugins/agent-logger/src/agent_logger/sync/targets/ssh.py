@@ -55,6 +55,17 @@ def _ssh_executable() -> str:
     return "ssh"
 
 
+def _quote_executable(path: str) -> str:
+    """Quote *path* for embedding in rsync's ``-e`` command string.
+
+    rsync re-splits ``-e``'s argument on whitespace (respecting simple
+    quoting) to build the command it execs, so an unquoted executable path
+    containing a space -- e.g. an MSYS2 install under ``C:\\Program
+    Files\\...`` -- would otherwise be split into multiple bogus words.
+    """
+    return f'"{path}"' if " " in path else path
+
+
 class SshTarget(Target):
     """rsync-over-ssh to an arbitrary ``user@host:path``."""
 
@@ -92,7 +103,7 @@ class SshTarget(Target):
         except OSError as exc:
             return PushResult(ok=False, detail=f"detritus discovery failed: {exc}")
         remote = f"{host}:{self._remote_path()}/{machine}/"
-        ssh_cmd = _ssh_executable() + " " + " ".join(self._ssh_opts())
+        ssh_cmd = _quote_executable(_ssh_executable()) + " " + " ".join(self._ssh_opts())
         for _ in range(2):
             cmd = [
                 "rsync",
