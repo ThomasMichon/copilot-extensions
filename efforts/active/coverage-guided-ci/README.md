@@ -346,6 +346,48 @@ future module added to this package needs a quick stdlib-name collision
 check before landing, not just a local test pass (the fast test suite *did*
 pass before this incident, since it only ever imports the package normally).
 
+### 2026-10-02 (later still) — Phase 1: enroll `agent-vault` and `agent-logger`; `agent-mcp` deferred
+Operator chose the next three Phase 1 plugins out of the 6 remaining:
+`agent-mcp`, `agent-vault`, `agent-logger`.
+
+**`agent-vault` and `agent-logger` enrolled cleanly** -- same generalized
+wiring pattern as the previous round, just appended to the shared
+pilot-plugin list and the `promote` job's matching enrolled-baseline gate.
+`baseline.py` run directly against both real suites produces a clean
+baseline end to end.
+
+**`agent-mcp` deliberately NOT enrolled this round -- a real, reproducible
+scaling limitation, not a transient flake.** Running `baseline.py` against
+its full 54-file suite fails consistently with a bare `exit 1` and almost
+no captured output (one stray `agent_mcp.watchdog` log line, no pytest
+summary at all) -- while `python tools/run-plugin-tests.py agent-mcp`
+(the trusted runner) passes cleanly, 625 tests across 3 sub-suites.
+Isolated `plugins/agent-mcp/tests/test_watchdog.py` alone through
+`baseline.py` and confirmed it passes fine by itself, and reproduced the
+full-suite failure twice more to rule out a one-off. Root cause (reasoned
+from the evidence, not confirmed via a crash dump): `baseline.py` collects
+an entire plugin's suite as **one** pytest process, while
+`run-plugin-tests.py` always chunks a suite into sequential 25-file
+sub-suites specifically to bound per-process resource usage (see its own
+`Limits.max_processes` containment). `agent-mcp` ships real
+process/watchdog-management tests that likely spawn more live
+subprocesses/threads than most other plugins; running its entire suite
+unchunked in one process plausibly exceeds a process-count ceiling the
+trusted runner's own chunking exists to avoid, abruptly killing the
+process before it can flush its own summary. Fixing this properly means
+teaching `baseline.py` to chunk a large suite the same way (and merge
+coverage data across chunks) -- a real design change, not a one-line fix
+like the `agent-containers` environment gap two entries up, so it's
+tracked as a follow-up rather than rushed into this enrollment PR.
+
+**Not yet done:** the `baseline.py` chunking fix for large suites (tracked
+via a Gitea issue in the `aperture-labs` repo, cited from the enrollment
+PR, since this effort's own issue tracking lives there); watching a real
+promotion land both new baselines on `main`; and the operator's next
+choice of which plugin(s) to enroll from the 4 still remaining
+(`agent-bridge`, `agent-dispatch`, `agent-mcp` itself once the chunking
+fix lands, `agent-worktrees`).
+
 ### 2026-10-02 (later) — Phase 1: enroll `agent-codespaces` and `agent-containers`
 Operator chose the next two Phase 1 plugins to wire ("incrementally work
 towards full coverage across all plugins"), out of the 8 remaining in
