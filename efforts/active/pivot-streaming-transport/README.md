@@ -310,6 +310,16 @@ this phase) is considered.)_
         one re-fetch per event — if a fetch is already in flight or already
         scheduled, a newly arriving event extends/no-ops rather than queuing
         a second one.
+  - [ ] **Close the gap between the initial snapshot and the subscription
+        actually being live:** a mutation that lands after the initial
+        `begin`/`row`/`done` fetch but before `stream_events()`'s
+        subscription is actually established has no event to consume — the
+        same kind of non-replay gap the reconnect path already has to solve.
+        Treat initial startup the same way: establish the subscription
+        first, then immediately run one full reconcile pass before
+        processing any events it yields, rather than trusting the initial
+        fetch's snapshot to already be current by the time the subscription
+        is live.
   - [ ] **Scope to the direct (local) path only:**
         `_fetch_rows()` already branches to `_fetch_rows_delegated()` for a
         cross-machine `--machine`. The local coordinator's `/events` stream
@@ -372,17 +382,21 @@ this phase) is considered.)_
         that event's contents.
   - [ ] **Time-derived fields change with no mutation and no event at all,
         and need their own refresh path, not a daemon round-trip:**
-        `_build()` expires `activity` after `ACTIVITY_TTL_SECONDS` and
-        advances the "stalled Nm" text purely from `time.time()` — neither
-        is triggered by any task mutation, so neither the event relay above
-        nor a 30-60s reconcile is a sufficient refresh cadence (the current
-        2s poll happens to mask this today only because it's frequent enough
-        to feel live). Fixed by a **separate, local, no-network recompute
-        tick** on a short cadence (comparable to today's 2s, e.g. 1-2s):
-        recalculates only these time-derived display fields from the
-        already-cached rows' own stored timestamps, emitting a `delta` for
-        any row whose *displayed* text changed purely from clock
-        advancement — zero daemon load, since it never re-fetches.
+        `_build()` expires `activity` after `ACTIVITY_TTL_SECONDS`, advances
+        the "stalled Nm" text purely from `time.time()`, **and** removes a
+        terminal row entirely once `completed_at`/`updated_at` crosses the
+        `--recent-mins` cutoff (`board_cli.py:388-407`) — none of these three
+        transitions is triggered by any task mutation, so neither the event
+        relay above nor a 30-60s reconcile is a sufficient refresh cadence
+        for any of them (the current 2s poll happens to mask this today
+        only because it's frequent enough to feel live). Fixed by a
+        **separate, local, no-network recompute tick** on a short cadence
+        (comparable to today's 2s, e.g. 1-2s) that recalculates all three
+        clock-only transitions — not just the two display-text fields —
+        from the already-cached rows' own stored timestamps: emitting a
+        `delta` for a row whose displayed text changed purely from clock
+        advancement, and a `removed` for a row that has now aged out of
+        `--recent-mins`, purely locally, zero daemon load either way.
   - [ ] **Reconnect-gap safety net (non-negotiable, not an optimization):**
         `EventBus.subscribe()` (`events.py`) is a live, in-memory, non-replay
         broadcast — an event published during a dropped/reconnecting SSE
@@ -411,8 +425,9 @@ this phase) is considered.)_
         (coalescing with any already-pending debounced wake) rather than
         running concurrently.
   - [ ] **A transient SSE failure degrades to polling temporarily, not
-        permanently:** falling back to poll-and-diff forever on the very
-        first `stream_events()` failure contradicts this design's own
+        permanently, and reconnecting means a genuinely fresh client, not a
+        retried stale one:** falling back to poll-and-diff forever on the
+        very first `stream_events()` failure contradicts this design's own
         stated goal (the CLI, not the Picker, owns reconnecting to its
         daemon) and means one transient blip or a routine daemon-generation
         cutover disables the Phase 3 speedup for the rest of a long-lived
@@ -423,7 +438,16 @@ this phase) is considered.)_
         while on the poll fallback) and resume the event-woken relay. Only
         settle into *permanent* polling once reconnect retries are
         genuinely exhausted (a bounded cap, not indefinite retry either) —
-        not on the first failure.
+        not on the first failure. Critically, each reconnect attempt must
+        **re-resolve the endpoint and construct a fresh `DispatchClient`**
+        (re-reading `active.json` via the same `_endpoint()` logic the
+        initial client already uses) rather than retrying the same client
+        instance — a routine zero-downtime coordinator-generation cutover
+        flips `active.json` to a new bind/port, and a client built against
+        the old endpoint can never recover by retrying itself, the same
+        problem `ResolvingDispatchClient` (`client.py:1112`) already exists
+        to solve for long-running supervisors; this reconnect reuses that
+        exact pattern rather than inventing a second one.
 - [ ] **3b — agent-bridge daemon-side cache (land first; smaller, no new
       failure mode):** `AgentResolver`'s per-call resolver scan is the actual
       cost (Phase 2's `incomplete_namespaces` work was about tolerating its
@@ -455,28 +479,37 @@ this phase) is considered.)_
         unconditional cache read; only the bounded initial-scan retry path
         pays for a forced rescan, exactly the callers that need one.
   - [ ] **A stalled or crashed refresh task must not serve a stale roster as
-        complete forever:** moving the scan to a
+        complete forever, and the recovery can't be merely passive:**
+        moving the scan to a
         background task adds a new failure mode the current per-call scan
         doesn't have — if that task exits or hangs after one successful
         scan, every subsequent O(1) read keeps returning an
         apparently-complete old snapshot, and neither `incomplete_namespaces`
         nor the CLI's retry logic has any way to detect it (nothing failed;
-        nothing is marked incomplete). Fixed by two requirements together:
+        nothing is marked incomplete). Fixed by three requirements together:
         (a) the background task is **supervised** — a process-level
         watchdog restarts it if it exits or stops making progress, the same
         standard this codebase already holds every other long-lived loop
-        to; and (b) every cache entry carries a **freshness deadline**
-        (its own namespace's `last_refreshed_at` plus a bound meaningfully
-        larger than the normal refresh period, e.g. 3× the refresh
-        interval) — a namespace whose deadline has passed is reported as
-        incomplete in that response's `incomplete_namespaces`, the same
-        signal a genuinely-failing resolver already produces, rather than
-        silently served as current. This deadline mechanism is also what
-        makes an **old CLI** (one that never sends `force_refresh`, see the
-        protocol-gating bullet below) still eventually recover from a
-        genuinely stuck namespace: the deadline expiring forces the
-        response to mark it incomplete even without any client-side
-        force-refresh request at all.
+        to; (b) every cache entry carries a **freshness deadline** (its own
+        namespace's `last_refreshed_at` plus a bound meaningfully larger
+        than the normal refresh period, e.g. 3× the refresh interval) — a
+        namespace whose deadline has passed is reported as incomplete in
+        that response's `incomplete_namespaces`; and (c) **marking incomplete
+        is not enough on its own — any `GET` that observes a namespace as
+        incomplete, uninitialized, or past its freshness deadline must
+        itself opportunistically join that namespace's single-flight refresh
+        (the same mechanism `force_refresh` triggers explicitly), not merely
+        report the state and wait for the background timer.** Without (c),
+        an **old CLI** that never sends `force_refresh` and only performs a
+        few plain `GET`s 0.5s apart (`_fetch_complete_initial_rows()`'s
+        existing retry shape) would keep reading the same stale snapshot
+        across all of them and publish it before the background timer ever
+        fires — the deadline alone only changes what the response *reports*,
+        not whether a real rescan is actually in flight. (c) makes
+        `force_refresh` a pure optimization (skip straight to refreshing
+        instead of waiting to notice staleness) rather than the only path
+        that can ever trigger a rescan, which is what actually preserves
+        reverse skew.
   - [ ] **A namespace that has never completed its first scan is not the
         same as one with a last-known-good value:**
         the last-known-good design above only covers a namespace that has
@@ -491,6 +524,19 @@ this phase) is considered.)_
         that state is *always* reported in `incomplete_namespaces` until its
         first successful scan completes — never silently omitted as if it
         had simply resolved to zero agents.
+  - [ ] **The namespace set itself is dynamic, not fixed at startup:**
+        `refresh_provider_resolvers()` (`agent_registry_resolver.py:159`)
+        already adds, replaces, and unregisters `providers.d`-declared
+        resolvers at runtime on its own TTL — the cache's namespace set must
+        track this, not assume the set discovered at daemon startup is
+        permanent. The background refresh cycle re-runs this same provider
+        scan on its own cadence and reconciles cache membership against it:
+        a newly-registered namespace enters the cache in the
+        **uninitialized** state above (not silently absent until some
+        unrelated trigger populates it), and a namespace whose provider was
+        unregistered is retired from the cache outright — never left
+        serving its last-known-good agents indefinitely as if that provider
+        still existed.
   - [ ] **`force_refresh` is a protocol-gated capability, not an additive
         response field:** unlike Phase 2's
         `incomplete_namespaces` (an additive, tolerant-reader *response*
@@ -504,12 +550,14 @@ this phase) is considered.)_
         query param through `BridgeClient.daemon_supports()` so an old
         daemon that doesn't understand the param is never sent it.
         **Reverse skew** (an old CLI, with no knowledge of `force_refresh`
-        at all, talking to a new cached daemon) is covered by the freshness
-        deadline above, not by the protocol gate: an old CLI's retry loop
-        just repeats plain `GET`s, but once a stuck namespace's deadline
-        expires the daemon reports it incomplete on its own, giving the old
-        CLI's existing retry-on-incomplete logic something real to react to
-        without needing the new parameter at all.
+        at all, talking to a new cached daemon) is covered by the
+        "incomplete GETs opportunistically join the refresh" requirement
+        above, not by the protocol gate: an old CLI's retry loop just
+        repeats plain `GET`s, but any one of those `GET`s against an
+        incomplete/uninitialized/stale namespace is now itself what
+        triggers the real rescan — the daemon doesn't need the caller to
+        know about `force_refresh` at all for the rescan to actually happen,
+        only to request it eagerly instead of opportunistically.
   - [ ] **Concurrent refreshes of the same namespace must not race each
         other, and must not recreate the N-scan cost this cache exists to
         remove:** the periodic timer, a forced refresh, and concurrent
@@ -1274,3 +1322,55 @@ mechanisms it introduced:
   budget settles into permanent polling.
 
 Both replied-to inline with the concrete fix.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 6: reconnect identity, reverse-skew enforcement, and three carried-over gaps in unchanged code
+Round 6 found one more new gap in the round-5 reconnect fix, confirmed two
+findings from round 5 were still genuinely open (not yet fixed despite being
+replied-to — caught here because they'd stopped showing as newly-surfaced),
+and surfaced three further gaps in code the design hadn't touched yet:
+
+- **New: reconnecting must build a fresh client, not retry the stale one.**
+  A routine zero-downtime coordinator-generation cutover flips `active.json`
+  to a new bind/port; retrying the *same* `DispatchClient` instance can
+  never recover from that, since its base URL is fixed at construction.
+  Fixed by requiring each reconnect attempt to re-resolve the endpoint
+  (`_endpoint()`, the same logic the initial client already uses) and
+  construct a fresh client — reusing the exact pattern
+  `ResolvingDispatchClient` already exists for supervisors, rather than
+  inventing a second one.
+- **Confirmed still open from round 5: reverse skew needs an active
+  trigger, not just a passive report.** The freshness-deadline mechanism
+  only changes what a `GET` *reports*; an old CLI that never sends
+  `force_refresh` and only retries a few plain `GET`s 0.5s apart would keep
+  reading the same stale snapshot across all of them and publish it before
+  the background timer ever fires. Fixed by making any `GET` against an
+  incomplete/uninitialized/deadline-expired namespace opportunistically
+  join that namespace's single-flight refresh itself — `force_refresh`
+  becomes a pure "skip straight to it" optimization, not the only path that
+  can trigger a real rescan, which is what actually preserves reverse skew.
+- **Confirmed still open from round 5: the PR description's own 3a summary
+  was stale.** It still described the per-event-transform model round 4
+  replaced. Updated to describe the final wake-only-trigger design, per the
+  required Documentation-impact-matches-the-diff convention.
+- **Previously missed, in code untouched by this design so far — the
+  initial-subscription gap:** a mutation landing after the initial fetch
+  but before `stream_events()`'s subscription is actually live has no event
+  to consume — the same non-replay gap the reconnect path already handles.
+  Fixed by treating startup the same way: establish the subscription, then
+  immediately run one full reconcile before processing any of its events.
+- **Previously missed: the recent-mins cutoff is also a clock-only
+  transition.** `_build()` removes a terminal row once it ages past
+  `--recent-mins`, with no mutation or event involved — exactly the same
+  class of gap the activity-TTL/stalled-text fix already identified, just
+  a third instance of it. Folded into the same local recompute tick rather
+  than a separate mechanism.
+- **Previously missed: the agent-bridge namespace set is dynamic, not fixed
+  at daemon startup.** `refresh_provider_resolvers()` already adds,
+  replaces, and unregisters providers at runtime; the cache's namespace set
+  must track this on its own refresh cycle — a newly-registered namespace
+  enters as uninitialized, and an unregistered one is retired from the
+  cache outright, never left serving stale agents for a provider that no
+  longer exists.
+
+All six replied-to inline (three new threads; three confirmations/fixes on
+carried-over and previously-missed findings).
