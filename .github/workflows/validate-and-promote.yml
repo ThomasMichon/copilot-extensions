@@ -270,8 +270,7 @@ jobs:
           # own uploaded file name verbatim, and `promote_release.py`'s own
           # `_write_coverage_baselines_into_scratch` keys each plugin by
           # that file's name (`<plugin>.json`), so the two must match
-          # exactly (review finding: they didn't, and every promotion would
-          # have silently failed verification as a result).
+          # exactly, or verification below silently fails every run.
           name: coverage-baseline-${{ matrix.plugin }}
           path: ${{ matrix.plugin }}.json
           if-no-files-found: ignore
@@ -626,16 +625,16 @@ jobs:
           merge-multiple: true
       - name: Verify enrolled coverage baselines were actually collected
         if: steps.decide.outputs.proceed == 'true'
-        # Review finding (PR #4902): `continue-on-error: true` on both the
-        # `full` job's own collection step and this job's download step
-        # above means every failure point along the way is individually
-        # soft -- without this check, collection failing, the artifact
-        # never existing, or the download failing would all silently
-        # result in promotion succeeding with no baseline recorded at all,
-        # defeating the "correlation loop never silently breaks" Behavior
-        # for a plugin that IS supposed to have one. This is the one hard
-        # gate: an ENROLLED plugin's baseline is REQUIRED, never optional --
-        # only a plugin not yet in this list is allowed to have none.
+        # `continue-on-error: true` on both the `full` job's own collection
+        # step and this job's download step above means every failure
+        # point along the way is individually soft -- collection failing,
+        # the artifact never existing, or the download failing would all
+        # otherwise let promotion succeed with no baseline recorded at
+        # all, defeating the "correlation loop never silently breaks"
+        # Behavior for a plugin that IS supposed to have one. This step is
+        # the one hard gate: an ENROLLED plugin's baseline is REQUIRED,
+        # never optional -- only a plugin not yet in this list is allowed
+        # to have none.
         #
         # Keep this list in exact sync with `full` job's own
         # `if: matrix.plugin == '...'` collection-step condition above --
