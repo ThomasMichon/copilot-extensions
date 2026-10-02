@@ -21,7 +21,30 @@ def fake_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(check_vendored_libs_sync, "REPO", tmp_path)
     monkeypatch.setattr(check_vendored_libs_sync, "PLUGINS_DIR", tmp_path / "plugins")
     monkeypatch.setattr(check_vendored_libs_sync, "LIBS_DIR", tmp_path / "libs")
+    # The module's `uer` (uv_editable_ref) import is a separate module object
+    # with its OWN `REPO`/`PLUGINS_DIR` constants computed from its own file
+    # location -- redirect those too, or `_editable_pointer_consumers()`
+    # would scan the real repo on disk instead of this fake one.
+    uer = check_vendored_libs_sync.uer
+    monkeypatch.setattr(uer, "REPO", tmp_path)
+    monkeypatch.setattr(uer, "PLUGINS_DIR", tmp_path / "plugins")
+    monkeypatch.setattr(uer, "LIBS_DIR", tmp_path / "libs")
     return tmp_path
+
+
+def _seed_editable_pointer_consumer(root: Path, consumer_rel: str, lib: str) -> None:
+    """A consumer with NO local ``libs/<lib>`` copy at all -- just a
+    `uv`-editable canonical-reference entry in its own ``pyproject.toml``
+    pointing at the top-level ``libs/<lib>``."""
+    consumer_dir = root / consumer_rel
+    consumer_dir.mkdir(parents=True, exist_ok=True)
+    depth = len(Path(consumer_rel).parts)
+    up = "/".join([".."] * depth)
+    (consumer_dir / "pyproject.toml").write_text(
+        f'[project]\nname = "{Path(consumer_rel).name}"\nversion = "0.1.0"\n\n'
+        f'[tool.uv.sources]\n{lib} = {{ path = "{up}/libs/{lib}", editable = true }}\n',
+        encoding="utf-8",
+    )
 
 
 def _seed_real_lib(root: Path, rel: str, *, content: str, version: str = "0.1.0-dev1") -> None:
@@ -116,3 +139,58 @@ def test_verify_still_flags_pointer_version_skew_in_a_mixed_set(fake_repo: Path)
     problems = check_vendored_libs_sync.verify()
 
     assert any("version skew across copies" in p for p in problems)
+
+
+def test_verify_flags_canonical_drift_against_real_copy_with_only_editable_pointer_consumers(
+    fake_repo: Path,
+):
+    """The actual bug (PR #4942 review): `plugin-activation` has real copies
+    in `agent-worktrees`/`customizing-copilot` AND several `uv`-editable-
+    pointer-only consumers, no `VENDOR_POINTER.json` copy at all. Before this
+    fix, canonical was only ever pulled into the comparison when a
+    `VENDOR_POINTER.json` copy existed -- an editable-pointer-only mix (like
+    this one) let a canonical-only edit through as "OK" even though the real
+    copies were now stale."""
+    _seed_real_lib(fake_repo, "libs/shared-lib", content="fixed\n")
+    _seed_real_lib(
+        fake_repo, "plugins/agent-worktrees/libs/shared-lib", content="still-old\n",
+    )
+    _seed_editable_pointer_consumer(fake_repo, "plugins/agent-bridge", "shared-lib")
+
+    problems = check_vendored_libs_sync.verify()
+
+    assert any(
+        "shared-lib: src/shared_lib/__init__.py DIFFERS between libs/shared-lib "
+        "and plugins/agent-worktrees/libs/shared-lib" in p
+        for p in problems
+    ), problems
+
+
+def test_verify_accepts_real_copy_matching_canonical_with_editable_pointer_consumer(
+    fake_repo: Path,
+):
+    _seed_real_lib(fake_repo, "libs/shared-lib", content="value = 1\n")
+    _seed_real_lib(
+        fake_repo, "plugins/agent-worktrees/libs/shared-lib", content="value = 1\n",
+    )
+    _seed_editable_pointer_consumer(fake_repo, "plugins/agent-bridge", "shared-lib")
+
+    assert check_vendored_libs_sync.verify() == []
+
+
+def test_verify_ignores_editable_pointer_only_libs_with_a_single_real_copy(
+    fake_repo: Path,
+):
+    # Only ONE real copy plus editable-pointer consumers -- nothing to
+    # cross-check canonical against except that single copy, which is
+    # already covered the moment a second real/pointer copy appears; a lone
+    # real copy is not itself drift.
+    _seed_real_lib(fake_repo, "libs/shared-lib", content="value = 1\n")
+    _seed_real_lib(
+        fake_repo, "plugins/agent-worktrees/libs/shared-lib", content="value = 1\n",
+    )
+    _seed_editable_pointer_consumer(fake_repo, "plugins/agent-bridge", "shared-lib")
+    _seed_editable_pointer_consumer(fake_repo, "worktree-manager", "shared-lib")
+
+    assert check_vendored_libs_sync.verify() == []
+

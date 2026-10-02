@@ -10,12 +10,9 @@ diff touches, including the shared-``libs/<lib>``-fans-out-to-every-consumer
 rule) via a direct file load -- its filename has a hyphen, so it can't be a
 normal ``import`` -- rather than duplicating that logic.
 
-**Not yet wired into CI.** This tool exists ahead of the actual `dev` cutover
-so it's built, tested, and ready; nothing currently requires a changefile
-for any PR. See the dev-branch-release-pipeline effort's Plan for the
-remaining cutover steps (CI wiring, CONTRIBUTING.md/AGENTS.md going live,
-branch protection -- all deliberately gated on Phase 3's promotion pipeline
-existing, not shipped here).
+**Wired into CI** (`ci.yml`'s `guards + lint` job, `PR-into-dev only`) since
+the dev-branch-release-pipeline cutover; the paragraph below describing it
+as not-yet-wired is historical and predates that cutover.
 
 Usage::
 
@@ -62,9 +59,43 @@ def touched_plugins(base_ref: str, head_ref: str = "HEAD") -> set[str]:
     return set(cvb._plugins_needing_bump(changed, consumers))
 
 
-def plugins_with_pending_changefiles() -> set[str]:
+def added_changefile_names(base_ref: str, head_ref: str = "HEAD") -> set[str]:
+    """Basenames of ``.changefiles/*.json`` files THIS diff (``base_ref..
+    head_ref``) itself adds.
+
+    Deliberately narrower than "every changefile currently sitting in the
+    repo": `dev` is a rolling pre-release branch, so unrelated already-merged
+    PRs routinely leave their own still-pending changefiles in place while
+    they wait for the next promotion. A PR whose own changefile omits a
+    plugin it touches can still pass if that plugin happens to already have
+    an unrelated pending changefile from a DIFFERENT PR -- coincidental
+    coverage, not this PR's own. If that unrelated changefile is consumed by
+    a promotion before this PR merges, the plugin ships this PR's content
+    with no bump at all: exactly the silent stale-deploy failure this whole
+    guard exists to prevent (dotfiles #1025), just one level removed
+    (PR #4942 review)."""
+    cvb = _load_check_version_bump()
+    head = cvb._rev_parse(head_ref)
+    if head is None:
+        return set()
+    base = cvb._rev_parse(base_ref)
+    if base is None:
+        return set()
+    mbase = cvb._merge_base(base, head) or base
+    r = cvb._git("diff", "--name-only", "--diff-filter=A", f"{mbase}..{head}",
+                 "--", ".changefiles")
+    return {Path(ln.strip()).name for ln in r.stdout.splitlines() if ln.strip()}
+
+
+def plugins_with_pending_changefiles(base_ref: str, head_ref: str = "HEAD") -> set[str]:
+    """Plugins named by a changefile THIS PR's own diff adds -- see
+    :func:`added_changefile_names` for why this is scoped to the diff rather
+    than every changefile currently pending in the repo."""
+    added = added_changefile_names(base_ref, head_ref)
     plugins: set[str] = set()
-    for _path, data in read_changefiles():
+    for path, data in read_changefiles():
+        if path.name not in added:
+            continue
         for change in data.get("changes", []):
             plugins.add(change["plugin"])
     return plugins
@@ -74,7 +105,7 @@ def check(base_ref: str, head_ref: str = "HEAD") -> tuple[int, list[str]]:
     plugins = touched_plugins(base_ref, head_ref)
     if not plugins:
         return 0, []
-    pending = plugins_with_pending_changefiles()
+    pending = plugins_with_pending_changefiles(base_ref, head_ref)
     missing = sorted(plugins - pending)
     return (1 if missing else 0), missing
 

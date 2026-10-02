@@ -22,9 +22,17 @@ This check freezes the only invariant that keeps that safe:
 * every lib with multiple *real* vendored copies must have a **byte-identical
   ``src/`` tree** across those copies (the importable surface -- the thing that
   actually gets installed and imported),
-* any real vendored copy that coexists with a DRY ``VENDOR_POINTER.json`` copy
-  must also stay byte-identical to the top-level canonical ``libs/<lib>``
-  source, because the pointer copy itself is not a shipped source tree, and
+* any real vendored copy that coexists with a DRY ``VENDOR_POINTER.json`` copy,
+  OR with a `uv`-editable canonical-reference pointer in some other consumer's
+  own ``pyproject.toml`` (vendor-pointer-generalization effort -- no local
+  copy directory at all; see ``uv_editable_ref.find_uv_editable_refs``), must
+  also stay byte-identical to the top-level canonical ``libs/<lib>`` source,
+  because neither pointer form is itself a shipped source tree. (Before this
+  fix, ONLY the ``VENDOR_POINTER.json`` form pulled canonical into the
+  comparison -- a lib with only real copies plus `uv`-editable pointers, like
+  ``plugin-activation``, could have its canonical source edited without ever
+  being re-synced into its real copies, and this check still reported OK
+  because it never looked at canonical at all. PR #4942 review.) and
 * all compared trees must declare the **same version** (same name + same
   version + same source => pip/uv can dedupe them and no "last writer wins on
   identical version" skew is possible).
@@ -46,6 +54,9 @@ import hashlib
 import re
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import uv_editable_ref as uer  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
@@ -88,6 +99,34 @@ def _is_pointer_copy(lib_dir: Path) -> bool:
     return (lib_dir / POINTER_NAME).is_file()
 
 
+def _editable_pointer_consumers() -> dict[str, list[str]]:
+    """Map ``lib name -> [consumer names]`` for every consumer that references
+    ``lib`` via a `uv`-editable canonical-reference pointer in its own
+    ``pyproject.toml`` (vendor-pointer-generalization effort) -- no local
+    ``libs/<lib>`` copy directory at all, so ``_lib_copies()`` never sees
+    these consumers. Mirrors ``check-version-bump.py``'s own identical scan
+    (``_vendored_consumers``'s editable-ref half) rather than duplicating its
+    fail-closed behavior on an unreadable manifest."""
+    consumers: dict[str, list[str]] = {}
+    for name, consumer_dir in uer.iter_consumer_dirs():
+        try:
+            refs = uer.find_uv_editable_refs(consumer_dir)
+        except uer.ManifestUnreadable as exc:
+            # Fail closed, same rationale as check-version-bump.py's
+            # identical call site: an unreadable manifest could genuinely
+            # reference a lib this check must not silently treat as having
+            # no editable-pointer consumers.
+            raise SystemExit(
+                f"check-vendored-libs-sync: {exc} -- cannot safely determine "
+                f"{name}'s uv-editable consumers; fix its pyproject.toml "
+                "[tool.uv.sources] table."
+            ) from exc
+        for _source_name, _raw_path, lib, editable in refs:
+            if editable:
+                consumers.setdefault(lib, []).append(name)
+    return consumers
+
+
 def _src_files(lib_dir: Path) -> dict[str, str]:
     """Relative-path -> sha256 for every file under ``<lib>/src`` (artifacts skipped)."""
     src = lib_dir / "src"
@@ -118,15 +157,19 @@ def verify() -> list[str]:
     """Return human-readable problems; empty means the check passes."""
     problems: list[str] = []
     base = PLUGINS_DIR.parent  # REPO in production; the tmp root under test
+    editable_consumers_by_lib = _editable_pointer_consumers()
     for lib, paths in _lib_copies().items():
         pointer_paths = [p for p in paths if _is_pointer_copy(p)]
         real_paths = [p for p in paths if not _is_pointer_copy(p)]
+        editable_consumers = editable_consumers_by_lib.get(lib, [])
         compare_paths = list(real_paths)
         canonical = LIBS_DIR / lib
-        # Pointer copies never carry the real importable source tree; once a
-        # lib is mixed real+pointer, canonical becomes the only meaningful
-        # byte-identical reference for the real copies.
-        if pointer_paths and real_paths:
+        # Pointer copies (VENDOR_POINTER.json OR a `uv`-editable canonical
+        # reference with no local copy at all) never carry the real
+        # importable source tree; once a lib is mixed real+pointer in either
+        # form, canonical becomes the only meaningful byte-identical
+        # reference for the real copies.
+        if (pointer_paths or editable_consumers) and real_paths:
             if canonical.is_dir():
                 compare_paths.insert(0, canonical)
             else:
@@ -138,7 +181,7 @@ def verify() -> list[str]:
         if len(compare_paths) < 2:
             continue
         rel_names = [
-            f"libs/{lib}" if p == canonical else str(p.relative_to(base))
+            f"libs/{lib}" if p == canonical else p.relative_to(base).as_posix()
             for p in compare_paths
         ]
 
@@ -174,7 +217,7 @@ def verify() -> list[str]:
             version_paths.extend(pointer_paths)
         versions = {
             (
-                f"libs/{lib}" if p == canonical else str(p.relative_to(base))
+                f"libs/{lib}" if p == canonical else p.relative_to(base).as_posix()
             ): _declared_version(p)
             for p in version_paths
         }
