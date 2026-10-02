@@ -23,6 +23,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -129,7 +130,7 @@ def test_on_detects_live_in_flight_reconcile(tmp_path) -> None:
     fake_home = tmp_path / "home"
     lock_dir = fake_home / ".fake-plugin"
     lock_dir.mkdir(parents=True)
-    proc = subprocess.Popen(["sleep", "30"])
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     try:
         (lock_dir / "reconcile.lock").write_text(str(proc.pid), encoding="utf-8")
         env = dict(os.environ)

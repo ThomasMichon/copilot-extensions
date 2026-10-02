@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 
 from agent_machines import __main__ as cli
 
@@ -138,7 +139,7 @@ def test_on_detects_live_in_flight_reconcile(tmp_path, monkeypatch, capsys) -> N
     monkeypatch.setenv("HOME", str(fake_home))
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(fake_home / "ks.json"))
 
-    proc = subprocess.Popen(["sleep", "30"])
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     try:
         (lock_dir / "reconcile.lock").write_text(str(proc.pid), encoding="utf-8")
         rc = _run(["bootstrap-killswitch", "on", "test"])
@@ -185,7 +186,7 @@ def test_on_json_mode_includes_in_flight_reconciles(tmp_path, monkeypatch, capsy
     monkeypatch.setenv("HOME", str(fake_home))
     monkeypatch.setenv("BOOTSTRAP_KILLSWITCH_STATE_FILE", str(fake_home / "ks.json"))
 
-    proc = subprocess.Popen(["sleep", "30"])
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     try:
         (lock_dir / "reconcile.lock").write_text(str(proc.pid), encoding="utf-8")
         rc = _run(["bootstrap-killswitch", "on", "test", "--json"])
