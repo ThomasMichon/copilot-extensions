@@ -346,10 +346,18 @@ this phase) is considered.)_
         Against a daemon that doesn't advertise it, skip the wait entirely
         and start the reconcile immediately after `stream_events()`
         returns — the pre-fix behavior and its narrower race, not an
-        indefinite hang. The ready frame itself is a control frame the
-        relay's own consumer filters out before it ever reaches row/diff
-        logic — it must never be exposed as a task event to an unrelated
-        `watch`-style consumer of the same stream. Once past that gate, the
+        indefinite hang. **The filtering must live in `stream_events()`
+        itself, not only in the relay's own consumer:** `task_query_cli.
+        _cmd_watch()` already iterates the same `DispatchClient.
+        stream_events()` API, which today yields every SSE `data:` frame —
+        a relay-side-only filter would still leak the ready frame to
+        `agent-dispatch watch` and any other existing consumer of that
+        method. `stream_events()` therefore filters the ready (and any
+        other future control) frame out by default for every caller;
+        readiness is exposed to the relay through a distinct, explicit
+        signal (e.g. a dedicated parameter/mode on `stream_events()`, or a
+        thin wrapper around it) rather than every caller independently
+        having to know to filter it. Once past that gate, the
         client: (1) waits for the ready frame (when the daemon supports
         it), (2) buffers any events
         received from that point on (count only — these are wake signals,
@@ -726,17 +734,24 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
         to its existing poll-and-diff path (never a frozen or crashed
         pivot), reconnects with bounded backoff once the coordinator comes
         back (not permanently stuck on polling), and runs a full reconcile
-        on that reconnect.
+        on that reconnect; plus a test proving the ready frame (and any
+        other control frame `stream_events()` may gain) never reaches an
+        unrelated existing consumer of that same method, e.g.
+        `agent-dispatch watch`/`task_query_cli._cmd_watch()`, not just the
+        relay's own consumer.
   - **3b:** a regression test per new failure mode the cache introduces —
         recovery from an uninitialized namespace (never silently published
         as complete), recovery from a hung/crashed background refresh task
         (the freshness deadline actually marks it incomplete and an
         opportunistic `GET` actually triggers a real rescan), a provider
-        added/removed at runtime (the cache's namespace set actually tracks
-        `refresh_provider_resolvers()`'s own membership changes), and
-        competing concurrent refreshes of the same namespace (single-flight
-        plus generation-guarded publication actually prevents a
-        stale-overwrite and doesn't duplicate the scan).
+        added/removed **or replaced** at runtime (the cache's namespace set
+        actually tracks `refresh_provider_resolvers()`'s own membership
+        changes, and a same-namespace replacement actually invalidates the
+        prior generation's cache entry rather than serving the old
+        provider's stale agents as authoritative), and competing concurrent
+        refreshes of the same namespace (single-flight plus
+        generation-guarded publication actually prevents a stale-overwrite
+        and doesn't duplicate the scan).
 - [ ] **Phase 4:** a regression test asserting only the expected segment(s)
       refresh for a given cause (cosmetic pulse vs. nav vs. reload vs. pivot
       switch), plus confirmation (via the same real-timer profiling method
@@ -1544,3 +1559,24 @@ One new finding plus three previously-missed ones surfaced together:
 
 All four replied-to inline (one new thread; three on previously-missed
 findings in code this design had already touched by this round).
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 10: the ready-frame filter was scoped to the wrong layer, and a validation gap it itself created
+Two findings:
+- **Filtering the ready frame only in the relay's own consumer doesn't
+  protect every other caller of the same client method.**
+  `task_query_cli._cmd_watch()` already iterates `DispatchClient.
+  stream_events()` directly and would print the control frame as a task
+  event. Fixed by moving the filter into `stream_events()` itself — it
+  never yields a control frame to any caller by default — and exposing
+  readiness to the relay through a distinct, explicit signal rather than
+  relying on each caller to filter independently.
+- **The Validation Plan's 3b criterion didn't name the replacement case
+  round 9 just added to the Plan.** The design now explicitly treats
+  same-namespace provider replacement as distinct from add/remove (stale
+  serving risk), but the acceptance test list still only said
+  "added/removed." Fixed by naming replacement and its cache-invalidation
+  requirement explicitly in that same bullet, alongside a new 3a criterion
+  proving the ready frame never leaks to an unrelated existing consumer
+  like `agent-dispatch watch`.
+
+Both replied-to inline.
