@@ -196,32 +196,47 @@ corrections to the same original ask, not a change in intent.
         a visible console window on Windows. Add a headless-child test case
         alongside the POSIX/Windows parsing cases.
         **The timeout must own the complete process tree, not just the
-        direct child:** `no_window_kwargs()` only hides the console — it
-        does not contain descendants, and a plain
-        `subprocess.run(..., timeout=30)` only kills the direct child on
-        timeout, leaking any descendant a misbehaving/hanging credential
-        command spawned. Per
+        direct child — on BOTH platforms, not just Windows:**
+        `no_window_kwargs()` only hides the console — it does not contain
+        descendants, and a plain `subprocess.run(..., timeout=30)` only
+        kills the direct child on timeout, leaking any descendant a
+        misbehaving/hanging credential command spawned. Per
         `docs/patterns/windows-background-process-launch.md`'s launch-kind
         matrix ("timeout owns the complete tree"), this is a "short-lived
-        child with captured/redirected stdio" launch kind: use
-        `agent_procutil`'s job-object-based containment
-        (`spawn_in_kill_on_close_job`, which returns a `JobHandle` bound to
-        a kill-on-close Windows Job Object) rather than a bare
-        `subprocess.run`, so a timeout/cancellation terminates the whole
-        tree, not just the root PID. Note during implementation that
-        `spawn_in_kill_on_close_job` is `async`
-        (`asyncio.subprocess.Process`-based) while `run_token_command()`'s
-        existing call sites are synchronous — resolve this bridging
-        (e.g. a small sync wrapper running its own short-lived event loop,
-        or an equivalent sync containment primitive if one already exists)
-        as part of Phase 1, rather than silently reverting to a
-        non-tree-owning `subprocess.run`. Validation per the pattern doc's
-        own "Review and validation" section: a mocked-flags/ordinary
-        subprocess test proves wiring, not behavior — add a focused live
-        regression (real console-child + any descendant, timeout forced,
-        full tree exit observed over ≥2 cycles with Win32 window
-        enumeration) kept out of the fast required CI lane (a Windows host
-        is needed), per the doc's own guidance.
+        child with captured/redirected stdio" launch kind, and containment
+        needs an explicit strategy per platform — **`agent_procutil`'s
+        `spawn_in_kill_on_close_job` does NOT solve this on its own**: off
+        Windows it is a bare `asyncio.create_subprocess_exec(...)` returning
+        `(process, None)` with zero containment (`agent_procutil/__init__.py:326-332`),
+        and even on Windows, job assignment can itself silently fail (the
+        function already tolerates and logs that case, per its own
+        docstring). Required for genuine cross-platform containment:
+        - **POSIX:** launch with `start_new_session=True` (a new process
+          group via `setsid`), and on timeout/cancellation kill the whole
+          group with `os.killpg(os.getpgid(pid), signal.SIGKILL)` instead of
+          a bare `process.kill()`/`.terminate()` on the root PID alone.
+        - **Windows:** use the job-object containment
+          (`spawn_in_kill_on_close_job`, bound to a kill-on-close Job
+          Object) as already planned, but treat a `None` `JobHandle` return
+          (job creation/assignment failed) as "containment not guaranteed"
+          rather than silently treating it as equivalent success — surface
+          or log this degraded case rather than claiming full containment
+          happened.
+        - Note during implementation that `spawn_in_kill_on_close_job` is
+          `async` (`asyncio.subprocess.Process`-based) while
+          `run_token_command()`'s existing call sites are synchronous —
+          resolve this bridging (e.g. a small sync wrapper running its own
+          short-lived event loop) as part of Phase 1, rather than silently
+          reverting to a non-tree-owning `subprocess.run`.
+        - Validation: a mocked-flags/ordinary subprocess test proves wiring,
+          not behavior. Add a focused live regression on **both** platforms
+          proving the full tree exits on a forced timeout (a child that
+          spawns its own descendant, timeout forced, zero surviving
+          processes observed) — the Windows leg additionally follows the
+          pattern doc's "Review and validation" section (≥2 cycles, Win32
+          window enumeration), kept out of the fast required CI lane (needs
+          a Windows host) per the doc's own guidance; the POSIX leg can run
+          in the ordinary Linux test lane since it needs no special host.
       - `resolve_direct_first(direct_var, command_var) -> str | None` —
         direct env wins, else fetch via command. Mirrors
         `resolve_control_token()`'s existing precedence.
@@ -340,7 +355,14 @@ corrections to the same original ask, not a change in intent.
 - [ ] **Docs, in this phase:** add `AGENT_VAULT_CORE_TOKEN_COMMAND` to
       `agent-vault`'s own documented env-var table in this same PR, not
       deferred to a later phase — a new var ships documented, not with a
-      pending TODO.
+      pending TODO. Drafted entry (adapt to the table's exact existing
+      column shape):
+      > `AGENT_VAULT_CORE_TOKEN_COMMAND` — command whose stdout (stripped)
+      > is the core bearer token, fetched on demand and never persisted.
+      > Only consulted when `AGENT_VAULT_CORE_TOKEN` is unset (direct value
+      > wins when both are present, matching `resolve_direct_first()`'s
+      > precedence). Absent both, the core attaches no bearer token at all
+      > (the pre-existing no-token behavior is unchanged).
 
 ### Phase 4 — Expand scope to agent-dispatch's remaining token and agent-index
 
@@ -374,7 +396,29 @@ working this phase). Summary:
       other's install broken.
 - [ ] **Docs, in this phase:** add `AGENT_DISPATCH_TOKEN_COMMAND`,
       `AGENT_INDEX_ADO_TOKEN_COMMAND`, and `AGENT_INDEX_GITHUB_TOKEN_COMMAND`
-      to their respective plugins' env-var tables in this same PR.
+      to their respective plugins' env-var tables in this same PR. Drafted
+      entries (adapt to each table's exact existing column shape):
+      > `AGENT_DISPATCH_TOKEN_COMMAND` — command whose stdout (stripped) is
+      > the plain client/server bearer, fetched on demand and never
+      > persisted. Consulted at every consumption site this phase
+      > consolidated (`client_token()` and its callers, `_cmd_serve`,
+      > `build_app()`/`serve()`'s default-`cfg` path) and propagated to the
+      > detached waiter and spawned peers; only `config.py:231`'s
+      > `load_config()` read stays raw/unresolved, by design. Only
+      > consulted when `AGENT_DISPATCH_TOKEN` is unset (direct env wins).
+      >
+      > `AGENT_INDEX_ADO_TOKEN_COMMAND` — command whose stdout (stripped) is
+      > the Azure DevOps source's PAT, fetched on demand and never
+      > persisted. Full precedence: an explicit `token=` constructor
+      > argument wins outright, then `AGENT_INDEX_ADO_TOKEN` (direct env),
+      > then this command — unchanged from today otherwise.
+      >
+      > `AGENT_INDEX_GITHUB_TOKEN_COMMAND` — command whose stdout (stripped)
+      > is the GitHub source's token, fetched on demand and never
+      > persisted. Full precedence: an explicit `token=` constructor
+      > argument wins outright, then `AGENT_INDEX_GITHUB_TOKEN` (direct
+      > env), then this command, then the ambient `GH_TOKEN`/`GITHUB_TOKEN`
+      > CLI fallbacks (unchanged).
 
 ### Phase 5 — Final documentation sweep
 - [ ] Confirm every `_COMMAND` var introduced in Phases 2-4 actually landed
@@ -681,3 +725,22 @@ conventions to mirror) to be elaborated once this plan clears review._
   agent-dispatch installer filename and added the stale-cache array
   requirement; added the error-message update to the Azure DevOps
   sub-task.
+
+### 2026-10-02 — Review round 14 (PR #4910)
+- Copilot review: the process-tree-containment fix resolved for the Windows
+  leg but review correctly caught that `spawn_in_kill_on_close_job` provides
+  ZERO containment on POSIX (a bare `asyncio.create_subprocess_exec` with no
+  process-group isolation) — a High-severity gap, since most agent-* hosts
+  in practice run POSIX. Also three carried-forward Low findings: drafted
+  doc content was missing for the agent-vault and agent-index `_COMMAND`
+  vars (the plan only said "document this," without the actual content),
+  and the unsafe-bind error message needed updating to mention the new
+  `_COMMAND` path. All four addressed: added an explicit POSIX containment
+  strategy (`start_new_session=True` + `os.killpg` on timeout) alongside the
+  Windows job-object path, plus treating a `None` `JobHandle` as a degraded
+  case to surface rather than silently accept; added a cross-platform live
+  regression requirement; added fully-drafted documentation entries for
+  `AGENT_VAULT_CORE_TOKEN_COMMAND`, `AGENT_DISPATCH_TOKEN_COMMAND`,
+  `AGENT_INDEX_ADO_TOKEN_COMMAND`, and `AGENT_INDEX_GITHUB_TOKEN_COMMAND`
+  directly in their introducing phases; added the unsafe-bind error-message
+  update to the `_cmd_serve` sub-task.

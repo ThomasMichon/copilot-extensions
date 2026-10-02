@@ -50,7 +50,15 @@ risk profiles:
   `load_config()`. This keeps `load_config()` itself side-effect-free while
   ensuring the actual point where the token gates bind safety and auth
   resolves the command-backed form too, without ever silently dropping an
-  operator-supplied `--token`.
+  operator-supplied `--token`. **Update the unsafe-bind error message
+  too:** `requires_token_bind()`'s raised message (`server.py:~78-83`)
+  currently reads "Set `AGENT_DISPATCH_TOKEN` (and firewall the port off the
+  LAN), or bind a specific host-local interface instead." — after this fix,
+  a token can also come from `AGENT_DISPATCH_TOKEN_COMMAND`; update the
+  message to mention both, or an operator who configured only the
+  `_COMMAND` form (and is seeing this error for an unrelated reason, e.g. a
+  failing command) gets remediation advice that looks wrong for their
+  actual configuration.
 - **`build_app()`/`serve()` have their OWN independent default-`cfg` path,
   bypassing `_cmd_serve` entirely:** both functions default a `None` `cfg`
   argument via
