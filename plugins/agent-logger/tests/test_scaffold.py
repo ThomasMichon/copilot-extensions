@@ -224,10 +224,11 @@ def test_repo_config_sync_local_path_does_not_affect_other_sync_fields(
         encoding="utf-8",
     )
 
+    native_path = str(tmp_path / "nas" / "Lake" / "Copilot" / "sessions")
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
     (repo / ".agent-logger.yaml").write_text(
-        "schema_version: 3\nsync:\n  local_path: /mnt/nas/Lake/Copilot/sessions\n",
+        f"schema_version: 3\nsync:\n  local_path: {native_path}\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(repo)
@@ -235,7 +236,7 @@ def test_repo_config_sync_local_path_does_not_affect_other_sync_fields(
     cfg = load_config(home=home)
 
     assert cfg.sync_target == "onedrive"  # untouched by the repo config
-    assert cfg.sync_path == Path("/mnt/nas/Lake/Copilot/sessions")
+    assert cfg.sync_path == Path(native_path)
 
 
 def _foreign_absolute_path() -> str:
@@ -253,7 +254,9 @@ def test_repo_config_foreign_local_path_tolerated_when_target_is_not_local(
     has no single string that's a native absolute path on every platform. A
     machine whose own resolved target isn't "local" never consumes this
     value at all, so a foreign-platform value here must not crash the whole
-    config load."""
+    config load -- and must not leak into Config.sync_path either, since
+    other consumers (chronicle corpus root, cold-store resolution, origin
+    backfill) read that property regardless of the active sync target."""
     home = tmp_path / "home"
     home.mkdir()
     (home / "config.yaml").write_text("sync:\n  target: ssh\n", encoding="utf-8")
@@ -268,6 +271,9 @@ def test_repo_config_foreign_local_path_tolerated_when_target_is_not_local(
 
     cfg = load_config(home=home)
     assert cfg.sync_target == "ssh"
+    # Stripped, not leaked: falls back to the default <home>/sessions, never
+    # the raw foreign-platform string a consumer could misread as relative.
+    assert cfg.sync_path == home / "sessions"
 
 
 def test_repo_config_foreign_local_path_raises_when_target_is_local(

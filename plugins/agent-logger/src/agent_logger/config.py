@@ -311,12 +311,9 @@ def _validate_relative_path(value: Any, location: str) -> str:
 
 
 def _validate_portable_absolute_path(value: Any, location: str) -> str:
-    """Platform-neutral syntax checks for a facility-wide absolute path (e.g.
-    a shared NAS mount): non-empty, no ``~`` (defeats the "same value for
-    every machine" property), absolute on *some* platform's syntax, no ``..``.
-    Does **not** check absoluteness on *this* platform -- see
-    :func:`_validate_native_absolute_path`, deferred until the final
-    resolved sync target is known to actually consume the value.
+    """Platform-neutral checks for a facility-wide absolute path: non-empty,
+    no ``~``, absolute on *some* platform's syntax, no ``..``. Does not check
+    absoluteness on *this* platform -- see :func:`_validate_native_absolute_path`.
     """
     if not isinstance(value, str) or not value.strip():
         raise RepositoryConfigError(f"{location} must be a non-empty absolute path")
@@ -331,11 +328,8 @@ def _validate_portable_absolute_path(value: Any, location: str) -> str:
 
 
 def _validate_native_absolute_path(value: str, location: str) -> str:
-    """Host-native final check after :func:`_validate_portable_absolute_path`:
-    must be absolute, and not a bare root, **on this platform specifically**.
-    :attr:`Config.sync_path` later does ``Path(configured)``, so a
-    foreign-platform path must never pass here only to be silently
-    reinterpreted as *relative* (resolving under the cwd) when consumed.
+    """Host-native final check: must be absolute (not a bare root) on *this*
+    platform -- a foreign-platform path must never silently resolve relative.
     """
     native = Path(value)
     if not native.is_absolute():
@@ -990,10 +984,17 @@ def load_config(
     if os.environ.get("AGENT_LOGGER_VOICE_PACK"):
         data["log"]["voice_pack"] = os.environ["AGENT_LOGGER_VOICE_PACK"]
 
-    # Deferred host-native check (see _validate_native_absolute_path): only
-    # once the final target is known, and only when it's "local".
+    # Deferred host-native check (see _validate_native_absolute_path). Every
+    # consumer of Config.sync_path reads it regardless of the active sync
+    # target, so a foreign value must never stay in data for one to misread
+    # it as relative. Raise only when target is "local"; else strip it.
     repo_local_path = repo_data.get("sync", {}).get("targets", {}).get("local", {}).get("path")
-    if repo_local_path is not None and data["sync"]["target"] == "local":
-        _validate_native_absolute_path(repo_local_path, "sync.local_path")
+    if repo_local_path is not None:
+        try:
+            _validate_native_absolute_path(repo_local_path, "sync.local_path")
+        except RepositoryConfigError:
+            if data["sync"]["target"] == "local":
+                raise
+            data["sync"]["targets"]["local"]["path"] = None
 
     return Config(data, resolved_home, repo_config_path, repo_root)
