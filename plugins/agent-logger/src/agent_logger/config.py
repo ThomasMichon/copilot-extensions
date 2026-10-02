@@ -974,7 +974,7 @@ def load_config(
     repo_root = _find_repo_root(repo_start) if include_repo else None
     repo_config_path = find_repo_config(repo_start) if include_repo else None
     repo_data: dict[str, Any] = {}
-    pre_repo_local_path = data["sync"]["targets"]["local"].get("path")
+    pre_repo_local_path = (data["sync"]["targets"].get("local") or {}).get("path")
     if repo_config_path:
         repo_data = _load_repo_config(repo_config_path)
         data = _deep_merge(data, repo_data)

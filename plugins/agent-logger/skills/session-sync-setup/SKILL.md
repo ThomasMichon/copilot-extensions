@@ -205,16 +205,19 @@ mount) rather than a per-machine choice. Under `log:`, only `root`,
 fields/placeholders, unsupported schema versions, and invalid timezones fail
 explicitly.
 
-**Unsafe paths fail explicitly only on a machine whose own resolved
-`sync.target` is `local`.** A mixed Windows/POSIX fleet has no single
-`local_path` string that's a native absolute path on every platform, so the
-host-native absoluteness check is deferred until the final target is known:
-on a machine targeting `local`, a bad/foreign-platform value still fails the
-config load exactly as before; on any other target (`ssh`, `onedrive`,
-`ingest`, ...) it's inapplicable there and is silently dropped back to
-whatever `sync.targets.local.path` that machine's own `~/.agent-logger/config.yaml`
-set (or the default), rather than failing the whole load over a value it
-never consumes.
+**Platform-neutral syntax (non-empty, no `~`, absolute on *some* platform's
+syntax, no `..`) still fails explicitly for `sync.local_path` on every
+target.** Only the final *host-native* absoluteness check -- whether the
+value is absolute on *this specific* platform -- is deferred until a
+machine's own resolved `sync.target` is known: a mixed Windows/POSIX fleet
+has no single `local_path` string that's a native absolute path on every
+platform. On a machine targeting `local`, a value that's foreign to this
+platform (valid syntax elsewhere, but not here) still fails the config load
+exactly as before; on any other target (`ssh`, `onedrive`, `ingest`, ...) a
+foreign-but-otherwise-valid value is inapplicable there and is silently
+dropped back to whatever `sync.targets.local.path` that machine's own
+`~/.agent-logger/config.yaml` set (or the default), rather than failing the
+whole load over a value it never consumes.
 
 Repo-local config of any kind is honored only for a checkout that is both a
 project registered with `agent-worktrees` and currently on that project's
