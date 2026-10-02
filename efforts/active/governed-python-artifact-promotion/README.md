@@ -73,6 +73,36 @@ gate that keeps a promoted release installable under real-world feed lag.
   gate that accounts for feed propagation lag instead of locking to
   not-yet-available versions; and verified artifact consumption with a
   correct source-build fallback when no matching artifact exists.
+- **Feed model constraint (review finding, 2026-10-01):** promotion runs on
+  GitHub-hosted `ubuntu-latest` runners
+  (`.github/workflows/validate-and-promote.yml:445-446`), which can reach
+  only a public reference index, not any particular consumer's private
+  governed-feed mirror or its propagation state. A promotion-side check
+  therefore **cannot** certify "this closure is installable from *your*
+  governed feed right now" for every consumer. Promotion's own gate is
+  reframed accordingly: it resolves and pins an exact, reproducible
+  dependency closure against a public reference index and records it in the
+  manifest; it does **not** claim governed-feed installability for any
+  specific consumer. The actual governed-feed-lag-aware admission check is a
+  **consumer-side, install-time** responsibility (Phase 3) run against that
+  machine's own governed feed, with a safe from-source fallback when that
+  specific machine's feed doesn't yet carry the pinned closure.
+- **Trust/authentication gap (review finding, 2026-10-01):** a digest and
+  provenance record are not self-authenticating if both the wheel and the
+  manifest live in the same, equally-mutable artifact store — replacing both
+  together defeats the check. The manifest's expected digest must be rooted
+  in something an attacker can't co-replace with the artifact, e.g.
+  committed into promoted, branch-protected repository metadata (so forging
+  it requires forging a reviewed commit, not just an artifact-store write),
+  or a signed attestation verified against a pinned, out-of-band verifier
+  key. Phase 2 must pick one and specify it concretely, not defer it.
+- **Fail-closed-on-tamper gap (review finding, 2026-10-01):** "no verified
+  match" must not conflate two different states: an artifact that was never
+  published for this tuple (safe to fall back to from-source) versus a
+  published artifact whose digest/provenance verification **failed** (must
+  fail closed with diagnostics — falling back there would silently mask
+  corruption or tampering and defeat the whole admission signal). Phase 3's
+  consumption logic and Validation Plan must treat these as distinct cases.
 - Baseline measurements (directional, to be re-validated with this effort's
   own spike rather than assumed): representative Windows ZIP sizes around
   12–25 MiB for most plugins and roughly 320 MiB for agent-index's full
@@ -104,10 +134,12 @@ gate that keeps a promoted release installable under real-world feed lag.
       pip `index-url` rather than pinning a separate one — `uv` does not
       read `pip.conf`). Capture evidence that no public package index was
       contacted.
-- [ ] Measure a deterministic governed-feed availability probe: does the
-      resolved dependency closure exist on the governed feed right now?
-      Distinguish temporary feed propagation lag from a genuinely absent
-      package or version.
+- [ ] Define the authoritative feed model given the CI-reachability
+      constraint above: promotion resolves/pins against a public reference
+      index only; design the consumer-side admission probe (Phase 3) that
+      actually answers "is this pinned closure available from *this*
+      machine's governed feed right now," distinguishing transient
+      propagation lag from a genuinely absent package/version.
 - [ ] Compare a from-source install against a verified first-party-wheel
       install, cold governed cache vs. warm shared cache, recording wall
       time, network activity, and physical disk use (careful not to
@@ -121,17 +153,31 @@ gate that keeps a promoted release installable under real-world feed lag.
       plugin payload hash, platform, architecture, and Python ABI, with
       artifact digests and build provenance. Keep first-party payload
       identity separate from third-party dependency-closure identity.
-- [ ] Add the governed-feed dependency-closure admission gate: promotion
-      fails before publishing artifacts whose tested closure is not
-      resolvable from the governed feed, distinguishing transient lag from
-      a truly unavailable package/version.
+- [ ] Resolve and pin an exact, reproducible third-party dependency closure
+      against a public reference index at promotion time (see the feed
+      model constraint above); record it in the manifest as the closure a
+      consumer must later validate against their own governed feed.
+- [ ] Specify and implement the manifest's trust root concretely (see the
+      trust/authentication gap above): either a digest committed into
+      branch-protected repository metadata, or a signed attestation
+      verified against a pinned verifier key. Define how installers obtain
+      and pin that verifier/trust anchor.
 
 ### Phase 3 — Verified consumption with correct fallback
 
+- [ ] Implement the consumer-side governed-feed admission probe designed in
+      Phase 1: before consuming a promoted artifact, confirm its pinned
+      third-party closure is resolvable from *this* machine's own governed
+      feed; treat feed propagation lag as distinct from a genuinely
+      unavailable package/version.
 - [ ] Teach installers (via the shared installer engine, not a parallel
-      mechanism) to locate, verify, and consume a matching artifact,
-      falling back safely to the existing from-source path when no
-      verified match exists. Preserve existing immutable-slot assembly,
+      mechanism) to locate, verify, and consume a matching artifact.
+      Distinguish, and handle separately: (a) **no artifact published** for
+      this payload/platform/arch/ABI tuple — fall back safely to the
+      existing from-source path; (b) **a published artifact whose
+      digest/provenance verification fails** — fail closed with
+      diagnostics; never silently fall back, since that would mask
+      corruption or tampering. Preserve existing immutable-slot assembly,
       health gates, activation, and rollback.
 - [ ] Validate across supported platform/architecture/Python-ABI
       combinations, including a clean-room first install (never having
@@ -150,12 +196,22 @@ gate that keeps a promoted release installable under real-world feed lag.
 - [ ] A clean-cache test proves third-party resolution uses only the
       governed feed; verify the effective `uv`/`pip` configuration
       independently and never log credentials.
-- [ ] Feed-lag tests show promotion fails before publishing an unavailable
-      closure, succeeds for a governed-available version, and never
-      silently substitutes a public-index candidate.
-- [ ] Manifest tests reject a wrong payload/ABI/platform, altered artifact
-      bytes, missing provenance, or a mismatched dependency closure before
-      activation.
+- [ ] Feed-lag tests exercise the **consumer-side** admission probe (not a
+      promotion-side check — see the feed model constraint in Context):
+      show it blocks consumption of a pinned closure not yet available on
+      *this machine's* governed feed, succeeds once the feed carries it,
+      and never silently substitutes a public-index candidate.
+- [ ] Manifest/trust-root tests reject a wrong payload/ABI/platform, an
+      altered artifact digest, a missing or unverifiable provenance
+      attestation, or a mismatched dependency closure before activation —
+      and specifically prove that replacing *both* the artifact and its
+      manifest at the artifact store (without forging the committed/signed
+      trust root) is still rejected.
+- [ ] A dedicated test distinguishes the two "no usable artifact" cases:
+      **absence** (no artifact published for this tuple) results in a safe
+      from-source fallback; **verification failure** (published artifact,
+      failed digest/provenance check) results in a fail-closed error with
+      diagnostics and never falls back silently.
 - [ ] Cold/warm source-build and artifact paths report comparable wall
       time, network, and physical storage, measured against this effort's
       own Phase 1 baseline (not an assumed target).
@@ -178,3 +234,25 @@ _Pending Phase 1 spike evidence._
   effort scopes itself to the genuinely missing supply-chain layer:
   promotion-built content-addressed artifacts, governed-feed admission, and
   verified consumption.
+
+### 2026-10-01 — Review findings incorporated before merge
+
+- PR #4877's automated review (non-blocking `COMMENTED`) raised three
+  design-level gaps in this planning-only effort, addressed directly in the
+  Context/Plan/Validation Plan above rather than deferred:
+  1. **Feed model mismatch** — promotion runs on public GitHub-hosted
+     runners and cannot certify installability from any one consumer's
+     private governed feed. Reframed: promotion pins an exact closure
+     against a public reference index; the actual governed-feed-lag-aware
+     admission check moved to a new **consumer-side, install-time** probe
+     (Phase 1 design → Phase 3 implementation).
+  2. **Trust-root gap** — a digest/provenance record in the same mutable
+     artifact store as the wheel doesn't prevent co-replacement of both.
+     Phase 2 now requires a concrete trust root (branch-protected committed
+     digest, or a signed attestation against a pinned verifier key).
+  3. **Fail-closed-on-tamper gap** — "no verified match" must distinguish
+     genuine absence (safe from-source fallback) from a published artifact
+     that fails verification (must fail closed with diagnostics, never
+     fall back). Phase 3 and the Validation Plan now treat these as
+     distinct, separately tested cases.
+
