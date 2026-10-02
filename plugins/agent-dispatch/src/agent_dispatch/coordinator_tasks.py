@@ -249,6 +249,12 @@ class UnholdBody(BaseModel):
     expected_status: str | None = None
 
 
+class UnexcludeBody(BaseModel):
+    exclude: str | None = None
+    actor: str | None = None
+    expected_status: str | None = None
+
+
 def _task_dict(task: Task) -> dict:
     return asdict(task)
 
@@ -734,6 +740,18 @@ def register_task_routes(
                 expected_status=body.expected_status,
             ),
             "task.unheld",
+        )
+
+    @app.post("/tasks/{task_id}/unexclude")
+    def unexclude(task_id: str, body: UnexcludeBody) -> dict:
+        return _guard(
+            lambda: queue.clear_exclude(
+                task_id,
+                exclude=body.exclude,
+                actor=body.actor,
+                expected_status=body.expected_status,
+            ),
+            "task.unexcluded",
         )
 
     @app.post("/tasks/{task_id}/reset")

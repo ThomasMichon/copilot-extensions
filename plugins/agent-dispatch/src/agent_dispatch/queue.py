@@ -76,6 +76,7 @@ from .queue_common import (  # noqa: F401 -- re-exported for existing call sites
     _TASK_DB_COLUMNS,
 )
 from .queue_completion_review import QueueCompletionReviewMixin
+from .queue_excludes import QueueExcludeMixin
 from .queue_handoff_fallback import HandoffFallbackMixin
 from .queue_lifecycle import QueueLifecycleMixin
 from .queue_liveness import LivenessMixin
@@ -140,6 +141,7 @@ class TaskQueue(
     AgentBackedRepoMixin,
     QueueClaimQueriesMixin,
     QueueLifecycleMixin,
+    QueueExcludeMixin,
     QueueSuspendMixin,
     QueueVerificationRequestsMixin,
     QueueCompletionReviewMixin,

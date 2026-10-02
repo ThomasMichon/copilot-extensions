@@ -665,6 +665,80 @@ def test_clear_hold_rejects_stale_expected_status_only_when_actually_held(q):
     assert noop.hold_reason is None
 
 
+# -- clear_exclude: the symmetric undo `yield --exclude`/`--exclude-self`
+# never got, so a self-exclusion permanently starves a task once set --------
+
+
+def test_clear_exclude_removes_one_token_and_leaves_others(q):
+    t = q.create("task")
+    q.claim_one("w1", task_id=t.id)
+    q.yield_task(t.id, "w1", note="blocked here", exclude="machine:m1")
+    q.claim_one("w2", task_id=t.id)
+    q.yield_task(t.id, "w2", note="blocked here too", exclude="machine:m2")
+    assert set(q.get(t.id).excludes) == {"machine:m1", "machine:m2"}
+
+    cleared = q.clear_exclude(t.id, exclude="machine:m1", actor="op")
+    assert cleared.excludes == ["machine:m2"]
+
+
+def test_clear_exclude_without_a_token_clears_everything(q):
+    t = q.create("task")
+    q.claim_one("w1", task_id=t.id)
+    q.yield_task(t.id, "w1", note="blocked", exclude="machine:m1")
+    q.claim_one("w2", task_id=t.id)
+    q.yield_task(t.id, "w2", note="blocked", exclude="machine:m2")
+
+    cleared = q.clear_exclude(t.id, actor="op")
+    assert cleared.excludes == []
+
+
+def test_clear_exclude_is_a_noop_when_nothing_is_excluded(q):
+    t = q.create("task")
+    # No excludes were ever set -- clearing must not error.
+    noop = q.clear_exclude(t.id, actor="op")
+    assert noop.excludes == []
+
+
+def test_clear_exclude_is_a_noop_for_an_unmatched_token(q):
+    t = q.create("task")
+    q.claim_one("w1", task_id=t.id)
+    q.yield_task(t.id, "w1", note="blocked", exclude="machine:m1")
+
+    noop = q.clear_exclude(t.id, exclude="machine:does-not-exist", actor="op")
+    assert noop.excludes == ["machine:m1"]
+
+
+def test_clear_exclude_rejects_stale_expected_status_only_when_actually_excluded(q):
+    t = q.create("task")
+    q.claim_one("w1", task_id=t.id)
+    q.yield_task(t.id, "w1", note="blocked", exclude="machine:m1")
+    with pytest.raises(TaskError, match="changed; refresh and retry"):
+        q.clear_exclude(t.id, actor="op", expected_status=Status.STARTED)
+    assert q.get(t.id).excludes == ["machine:m1"]
+    cleared = q.clear_exclude(t.id, actor="op", expected_status=Status.QUEUED)
+    assert cleared.excludes == []
+
+    # already-clear is a no-op regardless of a stale expected_status.
+    noop = q.clear_exclude(t.id, actor="op", expected_status=Status.STARTED)
+    assert noop.excludes == []
+
+
+def test_clear_exclude_unstrands_a_single_machine_lane(q):
+    """The motivating scenario: a task self-excluded the only machine its
+    lane permits, permanently starving it with no error, card, or
+    dead-letter signal. clear_exclude is the only way out."""
+    t = q.create("task")
+    q.claim_one("w1", task_id=t.id)
+    q.yield_task(t.id, "w1", note="blocked on this machine", exclude="machine:only-box")
+    # still excluded -- the lane's only permitted machine can't claim it
+    assert q.claim_one("w2", task_id=t.id, machine="only-box") is None
+
+    q.clear_exclude(t.id, exclude="machine:only-box", actor="op")
+    claimed = q.claim_one("w2", task_id=t.id, machine="only-box")
+    assert claimed is not None
+    assert claimed.id == t.id
+
+
 def test_abandon_rejects_stale_expected_status(q):
     t = q.create("task")
     q.claim_one("w1", task_id=t.id)

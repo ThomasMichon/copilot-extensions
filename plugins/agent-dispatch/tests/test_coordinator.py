@@ -1583,6 +1583,36 @@ def test_hold_rejects_stale_expected_status_over_http(api):
     assert ok.status_code == 200
 
 
+def test_unexclude_over_http(api):
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+    api.post(
+        f"/tasks/{tid}/yield",
+        json={"worker_id": "w1", "note": "blocked here", "exclude": "machine:only-box"},
+    )
+    assert api.post(f"/tasks/{tid}/unexclude", json={}).json()["excludes"] == []
+
+
+def test_unexclude_removes_only_the_named_token_over_http(api):
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+    api.post(
+        f"/tasks/{tid}/yield",
+        json={"worker_id": "w1", "note": "blocked", "exclude": "machine:m1"},
+    )
+    api.post("/claim", json={"worker_id": "w2", "repo": TEST_REPO, "task_id": tid})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w2"})
+    api.post(
+        f"/tasks/{tid}/yield",
+        json={"worker_id": "w2", "note": "blocked too", "exclude": "machine:m2"},
+    )
+    cleared = api.post(f"/tasks/{tid}/unexclude", json={"exclude": "machine:m1"})
+    assert cleared.status_code == 200
+    assert cleared.json()["excludes"] == ["machine:m2"]
+
+
 def test_reset_over_http(api):
     tid = api.post("/tasks", json={"title": "x"}).json()["id"]
     api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})

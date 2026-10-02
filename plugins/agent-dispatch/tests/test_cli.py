@@ -2728,6 +2728,44 @@ def test_pause_and_unpause_cli(monkeypatch):
     }
 
 
+def test_unexclude_cli(monkeypatch):
+    from agent_dispatch import __main__
+
+    seen = {}
+
+    class _C:
+        def clear_exclude(self, task_id, *, exclude=None, actor=None, expected_status=None):
+            seen["clear_exclude"] = dict(
+                task_id=task_id, exclude=exclude, actor=actor, expected_status=expected_status
+            )
+            return {"id": task_id, "excludes": []}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+    monkeypatch.setattr(__main__, "_owner_from_identity", lambda args: None)
+
+    args = build_parser().parse_args(
+        ["unexclude", "t1", "--exclude", "machine:tmichon-cloud2", "--actor", "alice"]
+    )
+    assert args.func(args) == 0
+    assert seen["clear_exclude"] == {
+        "task_id": "t1",
+        "exclude": "machine:tmichon-cloud2",
+        "actor": "alice",
+        "expected_status": None,
+    }
+
+    # Omitting --exclude clears every exclusion on the task.
+    args = build_parser().parse_args(["unexclude", "t1", "--actor", "alice"])
+    assert args.func(args) == 0
+    assert seen["clear_exclude"]["exclude"] is None
+
+
 def test_pause_defaults_actor_to_resolved_identity(monkeypatch):
     from agent_dispatch import __main__
 

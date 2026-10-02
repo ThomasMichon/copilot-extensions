@@ -1,0 +1,9 @@
+{
+  "comment": "Add 'unexclude' (clear_exclude): the missing symmetric undo for yield --exclude/--exclude-self. A worker's own self-exclusion (e.g. machine:only-box when that machine is the lane's only permitted one) previously had no way to be undone -- it permanently starved the task with no error, card, or dead-letter signal, just silent, invisible starvation. New CLI: 'agent-dispatch unexclude <task> [--exclude TOKEN]' (omit --exclude to clear all).",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "minor"
+    }
+  ]
+}
