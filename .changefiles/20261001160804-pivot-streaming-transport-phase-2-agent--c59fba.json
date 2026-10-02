@@ -1,0 +1,9 @@
+{
+  "comment": "pivot-streaming-transport Phase 2: agent-bridge's Bridges pivot adopts stream/subscribe. 'agents' gains --stream/--subscribe/--interval, emitting the registered-pivot NDJSON envelope and live delta/removed frames on a held channel.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

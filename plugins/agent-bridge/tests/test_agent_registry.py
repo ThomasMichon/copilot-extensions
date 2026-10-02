@@ -940,6 +940,39 @@ class TestNamespaceResolvers:
         assert "ok:test-agent" in names
         assert not any(n.startswith("broken:") for n in names)
 
+    @pytest.mark.asyncio
+    async def test_list_agents_async_reports_incomplete_namespaces(self):
+        """A namespace resolver that fails/times out must be surfaced via
+        `incomplete_namespaces` -- not just silently dropped -- so a
+        `--stream`/`--subscribe` consumer (`agent-bridge agents --stream`)
+        can tell "transiently unavailable" apart from "genuinely gone" and
+        never report a false removal for it."""
+        class _FailingResolver:
+            @property
+            def prefix(self) -> str:
+                return "broken"
+
+            async def list(self):
+                raise RuntimeError("boom")
+
+            async def resolve(self, name):  # pragma: no cover - unused here
+                raise NotImplementedError
+
+            async def ensure_ready(self, name):  # pragma: no cover - unused
+                raise NotImplementedError
+
+        resolver = AgentResolver({}, {})
+        resolver.register_namespace_resolver(_FailingResolver())
+        resolver.register_namespace_resolver(_MockResolver("ok"))
+        assert resolver.incomplete_namespaces == []
+        await resolver.list_agents_async()
+        assert resolver.incomplete_namespaces == ["broken"]
+        # A SUBSEQUENT fully-successful call resets it -- it reflects only
+        # the most recent scan, never a sticky/latched failure.
+        resolver._namespace_resolvers.pop("broken")
+        await resolver.list_agents_async()
+        assert resolver.incomplete_namespaces == []
+
 
 # -- AdminResolver tests ------------------------------------------------------
 

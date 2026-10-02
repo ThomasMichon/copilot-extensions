@@ -3,6 +3,8 @@
   "label": "Bridges",
   "after": "Worktrees",
   "list": ["agent-bridge", "--json", "agents"],
+  "stream": true,
+  "subscribe": true,
   "entry": {
     "id": "name",
     "title": "name",

@@ -46,6 +46,7 @@ class AgentResolver:
         self._topology_errors = list(topology_errors or [])
         self._topology_warnings = list(topology_warnings or [])
         self._namespace_resolvers: dict[str, NamespaceResolver] = {}
+        self._last_incomplete_namespaces: list[str] = []
         self._provider_scan_ts: float = 0.0
         self._provider_scan_ttl: float = 10.0
         self._provider_entries: dict[str, ProviderManifest] = {}
@@ -103,6 +104,15 @@ class AgentResolver:
     @property
     def topology_warnings(self) -> list[str]:
         return list(self._topology_warnings)
+
+    @property
+    def incomplete_namespaces(self) -> list[str]:
+        """Namespace prefixes (e.g. ``codespace``) whose resolver timed out
+        or raised on the MOST RECENT :meth:`list_agents_async` call -- those
+        namespaces' agents are silently absent from that listing, not
+        confirmed gone. A ``--stream``/``--subscribe`` consumer must not
+        treat their absence as a real removal."""
+        return list(self._last_incomplete_namespaces)
 
     def canonical_agent_name(self, name: str) -> str | None:
         """Resolve an exact, case-insensitive, or declared static alias."""
@@ -774,6 +784,7 @@ class AgentResolver:
             *(_bounded_list(prefix) for prefix in prefixes),
             return_exceptions=True,
         )
+        incomplete_namespaces: list[str] = []
         for prefix, outcome in zip(prefixes, listings):
             if isinstance(outcome, asyncio.TimeoutError):
                 log.warning(
@@ -783,6 +794,7 @@ class AgentResolver:
                     prefix,
                     resolver_timeout,
                 )
+                incomplete_namespaces.append(prefix)
                 continue
             if isinstance(outcome, BaseException):
                 log.warning(
@@ -790,6 +802,7 @@ class AgentResolver:
                     prefix,
                     exc_info=outcome,
                 )
+                incomplete_namespaces.append(prefix)
                 continue
             resolver = self._namespace_resolvers[prefix]
             for agent in outcome:
@@ -817,4 +830,5 @@ class AgentResolver:
                     "bare_addressable": getattr(resolver, "bare_addressable", True),
                     "state": agent.state,
                 })
+        self._last_incomplete_namespaces = incomplete_namespaces
         return result
