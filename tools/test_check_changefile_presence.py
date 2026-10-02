@@ -147,13 +147,18 @@ def test_nested_added_changefile_does_not_satisfy_via_basename_collision(repo: P
     """The regression this test exists for (PR #4954 review): a changefile
     added at a NESTED path (e.g. ``.changefiles/archive/pending.json``) must
     not satisfy the requirement by basename alone just because an existing,
-    unrelated TOP-LEVEL file (``.changefiles/pending.json``) happens to share
-    that name -- ``changefile.read_changefiles()`` only ever globs
-    ``.changefiles/*.json`` non-recursively, so the nested file this PR adds
-    is never actually consumed at all."""
+    unrelated TOP-LEVEL file of the same name (``.changefiles/pending.json``)
+    already happens to name the SAME plugin this diff touches --
+    ``changefile.read_changefiles()`` only ever globs ``.changefiles/*.json``
+    non-recursively, so the nested file this PR adds is never actually
+    consumed at all. The existing top-level file must name `alpha` (not an
+    unrelated plugin) for this to actually exercise the basename collision:
+    naming a different plugin would make `alpha` still get flagged missing
+    for an unrelated reason, passing even without the top-level-path
+    restriction this test exists to prove (PR #4954 review)."""
     _write(repo, ".changefiles/pending.json",
-           json.dumps({"comment": "unrelated, top-level",
-                       "changes": [{"plugin": "beta", "type": "patch"}]}))
+           json.dumps({"comment": "unrelated top-level file, same basename as the nested one below",
+                       "changes": [{"plugin": "alpha", "type": "patch"}]}))
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "unrelated top-level pending.json, already merged")
     base_sha = subprocess.run(
