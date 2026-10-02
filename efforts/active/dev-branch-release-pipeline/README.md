@@ -471,9 +471,13 @@ Round 2 (operator's response to that evaluation):
   - **Done, 2026-09-23 (cutover session).** `tools/rollback_release.py
     pause --reason "..." --push` lands first; `promote_release.py` refuses
     to run while paused (`PromotionPaused`, exit 0 -- not a CI failure).
-- [ ] Document and rehearse the hotfix flow: fork last-known-good `dev`, run
-      the snapshot tool, hot-patch `main` directly, cherry-pick the fix back
-      to `dev`.
+- [ ] _(downgraded, 2026-10-01 — see Journal)_ Document and rehearse the
+      hotfix flow: fork last-known-good `dev`, run the snapshot tool,
+      hot-patch `main` directly, cherry-pick the fix back to `dev`. No
+      longer a blocking obligation — retained only as a rare fallback for a
+      scenario where the ordinary `dev`→`main` path is itself unavailable
+      (e.g. a broken promotion pipeline); forward-fix-and-promote is the
+      default incident response now that live latency is empirically fast.
 - [x] Document the rollback flow: pause CI, `git revert` the generated commit
       + re-tag, never force-push, then resume CI.
   - **Done, 2026-09-23 (cutover session), implemented differently than
@@ -603,8 +607,11 @@ Round 2 (operator's response to that evaluation):
 - [ ] Empirically confirm Copilot CLI's update-detection mechanism (version
       string diff vs. semver-aware) before relying on assumptions about
       staged rollout.
-- [ ] Simulate one full hotfix cycle end-to-end (fork LKG → patch → cherry-pick
-      back) before depending on it during a real incident.
+- [ ] _(downgraded, 2026-10-01 — see Journal)_ Simulate one full hotfix
+      cycle end-to-end (fork LKG → patch → cherry-pick back) — no longer
+      gating reliance on the mechanism, since forward-fix-and-promote is
+      now the default incident response; rehearse only if the fallback
+      path is ever actually invoked for real.
 - [ ] Simulate one rollback (revert generated commit, re-tag) and confirm CI's
       non-incremental-update guard actually blocks a bad subsequent promotion.
 - [ ] Confirm the auto-updater coverage fix: every harness worktree that
@@ -2181,4 +2188,38 @@ known failure modes can surface at all -- and when one does, it
 self-repairs on the very next scheduled run rather than needing manual
 intervention, since the purge set is always recomputed fresh against
 whatever `main` currently records, never a stale run-scoped list.
+
+### 2026-10-01 — Downgraded the hotfix-rehearsal obligation: forward-fix-and-promote is fast enough to be the default
+
+Operator observation, checked empirically before acting on it rather than
+taken on faith: is a distinct "hotfix `main` directly, bypass `dev`" path
+still load-bearing now that the ordinary pipeline is mature? Pulled live
+run data rather than guessing — `validate-and-promote.yml`'s own job
+duration across the 10 most recent successful runs (2026-10-01) is
+consistently **6-8 minutes**, and 88 of the last 100 recorded runs
+succeeded, with several landing within the same hour of each other all
+day. Combined with `dev`'s own CI time, this matches (doesn't exceed)
+CONTRIBUTING.md's documented ~10-20 minute `dev`-merge-to-`main`-release
+estimate — a real incident fix merged to `dev` reaches `main` in well
+under 20 minutes with no manual intervention required.
+
+That removes the actual justification for a separate hotfix path: the
+scenario it exists for — "an incident needs a fix on `main` faster than
+the normal pipeline can deliver one" — doesn't arise when the normal
+pipeline is this fast. **Decision:** forward-fix-and-promote (land the fix
+on `dev` like any other change, let the pipeline carry it to `main`) is now
+the default and expected incident-response path, full stop. The hotfix
+tooling/flow is **not removed** — it is genuinely useful for the narrower
+case where the ordinary pipeline itself is unavailable (e.g. `main-gate` or
+`validate-and-promote.yml` broken, or `main` unreachable from `dev`'s own
+history) — but it is **no longer a blocking validation/documentation
+obligation** for this effort to close out. Downgraded both affected
+checklist items (Phase 4's "document and rehearse" item, and the
+Validation Plan's "simulate one full hotfix cycle" item) in place rather
+than striking them, since the mechanism should still exist and be
+documented eventually — just not gated on being rehearsed before this
+effort can be considered mature. If the fallback path is ever actually
+invoked for a real incident, that real invocation becomes the rehearsal;
+no synthetic simulation is owed first.
+
 

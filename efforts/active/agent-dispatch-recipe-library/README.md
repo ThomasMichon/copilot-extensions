@@ -246,9 +246,17 @@ not new engines either. The `extends:` model (Phase 3) and provider adapters
       own test shape, for both backlog and reviewer surfaces.
 
 ### Phase 3 — Registrar `extends:` unification
+
+**Sub-plan:** [`phase-3-extends-registrar.md`](phase-3-extends-registrar.md)
+(where `extends:` plugs into the existing declaration pipeline, the
+recipe-reference syntax and merge semantics, and why the `extends:` work is
+sequenced independently of the single-emitter-primitive taxonomy refactor
+below — read it before starting any Phase 3 work).
+
 - [ ] Introduce the single `emitter` producer primitive, with schedule/
       webhook/websocket as emitter *triggers* rather than separate `kind`
-      values.
+      values. **Tracked as its own follow-on slice** (sub-plan §*Sub-PRs*,
+      item 4) — not a blocking dependency for `extends:` itself.
 - [ ] Introduce `extends:` in a registrar declaration: a reference to a
       global (plugin-shipped), repo-local, or cross-repo recipe, plus a
       `emitter:`/`evaluator:` block of template-injected or direct param
@@ -526,3 +534,31 @@ _Pending review._
   reviewer-recipe delta (Phase 4) depends on it and the named recipes
   (Phases 5-8) build on both; Phase 2's remaining item stays tracked here
   and gets picked up alongside Phase 4.
+
+### 2026-10-01 — Phase 3 kickoff: concurrent-work check, sub-plan extracted
+- Before starting Phase 3, checked for concurrent work in this space per
+  operator direction (another harness agent is active here): no open PR or
+  active effort targets the `extends:`/single-emitter-primitive unification
+  itself. Found and ruled out two adjacent-but-distinct items: the
+  `agent-dispatch-emitter-receipts` effort (same account) is a different,
+  already-merged-and-archived feature (durable receipts for `kind: emitter`
+  command-authored tasks, #4774/#4775/#4790) with no scope overlap; open PR
+  #4791 ("opt-in enforcement for registered agent-backed repo lanes")
+  touches adjacent registrar files (`registrar_discovery.py`,
+  `registrar_lane_aliases.py`, ...) but a different concern (lane
+  enforcement, not `extends:`/kind unification) — noted as a rebase-watch
+  item, not a blocker.
+- Phase 3 is substantially larger than a typical phase (a core-pipeline
+  architecture change touching `registrar_discovery.py`'s one dispatch
+  chokepoint, plus new recipe-template/merge machinery). Per the `efforts`
+  skill's *decompose large phases into linked sub-docs* guidance, extracted
+  [`phase-3-extends-registrar.md`](phase-3-extends-registrar.md): identifies
+  `read_declaration_file_set`'s `kind`-dispatch as the exact integration
+  point, the `extends:` ref syntax (`global:`/repo-local/cross-repo) and
+  deep-merge semantics, and sequences the work into 4 independently
+  reviewable sub-PRs — explicitly decoupling `extends:` itself from the
+  single-`emitter`-primitive taxonomy refactor (Phase 3's own first
+  bullet), since the latter is not a hard prerequisite for the former to
+  deliver value.
+- Next: sub-PR 1 (the `extends:` resolution mechanism + repo-local/
+  cross-repo refs, no global recipes yet).
