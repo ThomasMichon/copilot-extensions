@@ -143,8 +143,11 @@ class CreateActionScreen(FieldQuestionsMixin, ModalScreen[dict | None]):
         frame = self.query_one("#create-frame", Vertical)
         for child in list(frame.children):
             child.display = False
-        prompt = Static(
-            f"Create this {self._label.lower()}?", id="create-confirm-prompt")
+        # Neutral wording: ``label`` is an arbitrary manifest-authored button
+        # label (often already a full, punctuated phrase like "New task…"),
+        # not necessarily a bare noun -- "Create this <label>?" reads wrong
+        # for most real labels ("Create this New task…?").
+        prompt = Static(f"Proceed with {self._label!r}?", id="create-confirm-prompt")
         buttons = FocusGroup(
             [("yes", "Create"), ("no", "Cancel")], initial=1,
             id="create-confirm-prompt-buttons")

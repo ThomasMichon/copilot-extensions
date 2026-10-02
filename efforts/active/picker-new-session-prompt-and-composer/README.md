@@ -361,13 +361,16 @@ real code, not assumption:
       (`test_registered_pivot_create_action_button_appears_and_absent`,
       `_opens_and_submits`, `_cancel_does_not_submit`, `_confirm_gate`) plus
       a new manifest-writer test helper
-      (`_write_tasks_manifest_with_create`). A genuine (pre-existing, not
-      new) gap surfaced while writing these: a plain `text`-type field has
-      no Enter/Ctrl+Right-to-advance mechanic of its own (only
-      textarea/choice/multichoice do, via `field_widgets`' custom widgets --
-      `Input`'s native word-cursor binding claims Ctrl+Right first), so those
-      two tests switch tabs via `screen._activate_tab()` directly for that
-      one field, the same way a mouse click on the tab header would.
+      (`_write_tasks_manifest_with_create`). A genuine gap surfaced while
+      writing these: a plain `text`-type field had no Enter/Ctrl+Right-to-
+      advance mechanic of its own (only textarea/choice/multichoice did, via
+      `field_widgets`' custom widgets -- `Input`'s native word-cursor binding
+      claimed Ctrl+Right first). **Fixed, see the next Journal entry:** a
+      new `_AdvancingInput` (`field_widgets.py`) forwards Enter/Ctrl+Left/
+      Right the same way `_AutoExpandTextArea` already does; `compose_field`
+      now uses it for `text` fields, and the tests exercise the real
+      `pilot.press("ctrl+right")` keyboard sequence instead of calling
+      `_activate_tab()` directly.
 
       **Render-verified, not just unit-tested** (per this project's own
       "render early, render often" README mandate): extended the official
@@ -1528,16 +1531,17 @@ describes, caught only because the render step wasn't skipped.
 **Tests:** 4 new (`test_registered_pivot_create_action_button_appears_and_
 absent`, `_opens_and_submits`, `_cancel_does_not_submit`,
 `_confirm_gate`) plus a new `_write_tasks_manifest_with_create` manifest
-helper. Surfaced one genuine (pre-existing, not new) UI gap while writing
-them: a plain `text` field has no Enter/Ctrl+Right advance mechanic of its
-own (`Input`'s native word-cursor binding claims Ctrl+Right before the
-screen's own tab-cycle action ever sees it; only the custom
-`_AutoExpandTextArea`/`_SteerRadioSet`/`_SteerSelectionList` widgets wire
-that). Worked around it in the two affected tests via
-`screen._activate_tab()` (the same effect a mouse click on the tab header
-would have) rather than pretending a keyboard-only flow already works for
-every field type -- left as a known, pre-existing limitation, not
-something this Phase B item needs to fix.
+helper. Surfaced one genuine UI gap while writing them: a plain `text`
+field had no Enter/Ctrl+Right advance mechanic of its own (`Input`'s native
+word-cursor binding claimed Ctrl+Right before the screen's own tab-cycle
+action ever saw it; only the custom `_AutoExpandTextArea`/
+`_SteerRadioSet`/`_SteerSelectionList` widgets wired that). **Fixed in a
+follow-up round on this PR** (Copilot review caught it): a new
+`_AdvancingInput` (`field_widgets.py`) forwards Enter/Ctrl+Left/Right the
+same way `_AutoExpandTextArea` does; `compose_field` now uses it for
+`text` fields, and both affected tests exercise the real
+`pilot.press("ctrl+right")` sequence instead of the `_activate_tab()`
+workaround.
 
 **Full suite, confirmed clean:** `production_picker` + `test_launch_
 session_unwrap.py` + `test_picker_preview_mode.py`, 913 passed, 1 skipped,

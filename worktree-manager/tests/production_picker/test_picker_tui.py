@@ -9070,6 +9070,23 @@ def test_registered_pivot_create_action_confirm_gate(tmp_path, monkeypatch):
             assert not hasattr(rt, "resolved")
             group = screen.query_one("#create-confirm-prompt-buttons", FocusGroup)
             assert group.value == "no"          # Cancel is the initial choice
+
+            # Exercise the Cancel path FIRST: activating the initial "Cancel"
+            # choice must return to the fields -- the screen stays open, the
+            # confirm prompt is gone, nothing ran, and the title typed
+            # earlier is still there (nothing was lost).
+            await pilot.press("enter")          # activate Cancel ("no")
+            await pilot.pause()
+            assert app.screen is screen
+            assert not screen._confirming
+            assert not hasattr(rt, "resolved")
+            assert screen.query_one("#q-0", Input).value == "A title"
+
+            # Re-trigger Create -> confirm gate, this time actually confirm.
+            await pilot.press("enter")          # activate Create -> confirm gate
+            await pilot.pause()
+            group = screen.query_one("#create-confirm-prompt-buttons", FocusGroup)
+            assert group.value == "no"          # still starts on Cancel
             await pilot.press("left")           # Cancel -> Create ("yes")
             assert group.value == "yes"
             await pilot.press("enter")
