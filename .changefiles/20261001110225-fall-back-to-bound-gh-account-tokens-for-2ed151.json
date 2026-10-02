@@ -1,0 +1,9 @@
+{
+  "comment": "Pass the per-connection GitHub account into github.com relay requests and warn on launch preflight failures.",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

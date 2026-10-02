@@ -30,6 +30,7 @@ import logging
 import os
 import shutil
 import subprocess
+import time
 
 from agent_procutil import no_window_flags
 
@@ -125,6 +126,128 @@ def env_for_account(login: str | None, base: dict | None = None) -> dict:
 def env_for_repo(slug: str | None, base: dict | None = None) -> dict:
     """Return an env dict authenticating ``gh`` as the account for ``slug``."""
     return env_for_account(account_for_repo(slug), base)
+
+
+def active_account(host: str = "github.com", *, timeout: float = 10.0) -> str | None:
+    """Return gh's active account for ``host`` without changing global auth."""
+    try:
+        result = subprocess.run(
+            [
+                "gh", "auth", "status", "--active",
+                "--hostname", host, "--json", "hosts",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            creationflags=_creation_flags(),
+        )
+    except Exception:
+        return None
+    # A failed API check can make gh exit nonzero while its JSON still names
+    # the active login, so parse whatever it printed.
+    try:
+        data = json.loads(result.stdout or "{}")
+    except Exception:
+        return None
+    entries = ((data.get("hosts") or {}).get(host) or []) if isinstance(data, dict) else []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        # The configured active login, even if gh's API check timed out or
+        # errored: account selection must not depend on that probe (the
+        # credential preflight reports whether the account is usable).
+        if entry.get("active") is True:
+            login = str(entry.get("login") or "").strip()
+            return login or None
+    return None
+
+
+def credential_account_for_codespace(name: str) -> str | None:
+    """Account to pass as github.com credential username for this connection.
+
+    The persisted binding is authoritative: an unreadable binding (lock
+    contention) is unknown, not absent, so this returns None rather than guess
+    the ambient account (matching :func:`fast_credential_account_for_codespace`).
+    With no binding, the existing CodeSpace resolver runs; ``None`` there means
+    this CodeSpace is operated through ambient gh auth, so use gh's active account.
+    """
+    from . import account_binding
+
+    try:
+        bound = account_binding.bound_account_or_raise(name)
+    except Exception:
+        log.warning("CodeSpace %s account binding is unavailable; not guessing an account", name)
+        return None
+    if bound:
+        return bound
+    try:
+        from .lifecycle import account_for_codespace
+
+        account = account_for_codespace(name)
+    except worktrees.ContextRefused:
+        raise
+    except Exception:
+        account = None
+    return account or active_account()
+
+
+def fast_credential_account_for_codespace(
+    name: str, *, timeout: float = 3.0, resolve_timeout: float = 8.0,
+) -> str | None:
+    """Account for launch env (incl. daemon-restart recovery, which reaches here
+    without the namespace readiness step that normally writes the binding).
+
+    The binding is authoritative. A missing binding is not proof of ambient
+    ownership (it may predate bindings), so a bounded live listing resolves it:
+    a mapped owner is bound and returned; the active account is used only when
+    the listing shows the CodeSpace under ambient auth. An unreadable binding,
+    a failed or slow listing, or a CodeSpace the listing doesn't show returns
+    None -- no account named, never a guess."""
+    deadline = time.monotonic() + max(0.1, timeout)
+    from . import account_binding
+
+    try:
+        account = account_binding.bound_account_or_raise(
+            name, timeout=max(0.1, deadline - time.monotonic()))
+    except Exception:
+        log.warning("CodeSpace %s account binding is unavailable; not guessing an account", name)
+        return None
+    if account:
+        return account
+    owner = _discover_owner(name, resolve_timeout)
+    if owner is None:
+        log.warning("CodeSpace %s owner is unresolved; not naming a GitHub account", name)
+        return None
+    if owner:
+        return owner
+    return active_account(timeout=max(0.1, min(timeout, resolve_timeout)))
+
+
+def _discover_owner(name: str, timeout: float) -> str | None:
+    """The listed owner of ``name`` (bound on discovery), ``""`` when it is
+    listed under ambient auth, or None when unknown within ``timeout``."""
+    import threading
+
+    result: list[str | None] = [None]
+
+    def run() -> None:
+        try:
+            from . import account_binding
+            from .lifecycle import list_codespaces
+
+            for cs in list_codespaces():
+                if cs.name == name:
+                    if cs.account:
+                        account_binding.bind(name, cs.account, cs.repository)
+                    result[0] = cs.account or ""
+                    return
+        except Exception:
+            log.debug("CodeSpace %s owner discovery failed", name, exc_info=True)
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(max(0.1, timeout))
+    return None if worker.is_alive() else result[0]
 
 
 def mapped_accounts() -> tuple[str, ...]:

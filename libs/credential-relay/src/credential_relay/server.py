@@ -128,7 +128,15 @@ _KNOWN_ACTIONS = frozenset({
     "get-azure-token",
     "get-access-token",
     "ping",
+    "capabilities",
 })
+
+# Advertised by the ``capabilities`` action so a client can tell this relay
+# from an older one (which answers that unknown action with nothing).
+# ``git-credential-username-cache``: git credentials are cached per
+# (protocol, host, username), so a request naming a GitHub account never
+# receives another account's cached credential.
+RELAY_CAPABILITIES = ("git-credential-username-cache",)
 
 # git-credential "get" semantics -- a request asking for a username/password.
 # When one of these cannot be resolved we must FAIL FAST (see below) rather
@@ -375,6 +383,11 @@ class CredentialRelayServer:
 
             if action == "ping":
                 writer.write(b"pong\n\n")
+                await writer.drain()
+                return
+            if action == "capabilities":
+                caps = ",".join(RELAY_CAPABILITIES)
+                writer.write(f"capabilities={caps}\n\n".encode())
                 await writer.drain()
                 return
 

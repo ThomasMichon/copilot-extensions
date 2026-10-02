@@ -344,6 +344,17 @@ def claim_or_exit_code(args: argparse.Namespace) -> int | None:
     return None
 
 
+def github_credential_preflight(name: str):
+    """Run the host github.com credential relay preflight for ``name``."""
+    import asyncio
+
+    from . import auth_preflight
+    from .gh_account import credential_account_for_codespace
+
+    account = credential_account_for_codespace(name)
+    return asyncio.run(auth_preflight.github_credential_preflight(account))
+
+
 def cmd_copilot(
     args: argparse.Namespace,
     *,
@@ -466,6 +477,12 @@ def _cmd_copilot_connect(
     except (OSError, ValueError) as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)
         return 2
+
+    if not args.no_relay:
+        github_auth = github_credential_preflight(args.name)
+        if not github_auth.ok:
+            print(f"[WARN] {github_auth.reason_code}: {github_auth.detail}\n"
+                  f"       Remedy: {github_auth.remedy}", file=sys.stderr)
 
     _ensure_agent_bridge_plugin(args.name)
 

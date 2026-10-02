@@ -180,6 +180,34 @@ def test_apply_relay_profile_container_two_sources(tmp_path):
     assert b.port is None and b.azure == ["*"]
 
 
+def test_apply_relay_profile_passes_github_profile_to_gh_auth():
+    b = _FakeBuilder()
+    with patch("credential_relay.sources.gh_auth.GhAuthSource") as gh_source:
+        gh_source.return_value.name = "gh-auth"
+        _apply_relay_profile(b, {
+            "sources": ["gh-auth"],
+            "github_hosts": ["github.com"],
+            "azure_resources": [],
+        })
+
+    assert b.sources == ["gh-auth"]
+    gh_source.assert_called_once_with(github_hosts=["github.com"])
+
+
+def test_apply_relay_profile_passes_github_profile_to_git_credential():
+    b = _FakeBuilder()
+    with patch("credential_relay.sources.git_credential.GitCredentialSource") as git_source:
+        git_source.return_value.name = "git-credential"
+        _apply_relay_profile(b, {
+            "sources": ["git-credential"],
+            "github_hosts": ["github.com"],
+            "azure_resources": [],
+        })
+
+    assert b.sources == ["git-credential"]
+    git_source.assert_called_once_with(github_hosts=["github.com"])
+
+
 def test_apply_relay_profile_skips_unknown_source():
     b = _FakeBuilder()
     _apply_relay_profile(b, {"sources": ["bogus"], "azure_resources": []})

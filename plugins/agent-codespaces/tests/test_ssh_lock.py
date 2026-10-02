@@ -193,11 +193,11 @@ class TestDiagnosticRemoteCmd:
             calls.append(name)
 
         monkeypatch.setattr(cli, "_provision_relay_helpers", lambda *_a: record("relay"))
-        monkeypatch.setattr(cli, "_verify_remote_auth", lambda *_a: record("auth"))
+        monkeypatch.setattr(cli, "_verify_remote_auth", lambda *_a, **_kw: record("auth"))
         monkeypatch.setattr(
-            cli, "_provision_dotfiles", lambda *_a: record("dotfiles")
+            cli, "_provision_dotfiles", lambda *_a, **_kw: record("dotfiles")
         )
-        monkeypatch.setattr(cli, "_provision_harness", lambda *_a: record("harness"))
+        monkeypatch.setattr(cli, "_provision_harness", lambda *_a, **_kw: record("harness"))
         monkeypatch.setattr(
             cli, "_register_codespace_plugins", lambda *_a: record("register")
         )
@@ -237,9 +237,9 @@ class TestDiagnosticRemoteCmd:
             return []
 
         monkeypatch.setattr(cli, "_provision_relay_helpers", lambda *_a: record("relay"))
-        monkeypatch.setattr(cli, "_verify_remote_auth", lambda *_a: record("auth"))
-        monkeypatch.setattr(cli, "_provision_dotfiles", lambda *_a: record("dotfiles"))
-        monkeypatch.setattr(cli, "_provision_harness", lambda *_a: record("harness"))
+        monkeypatch.setattr(cli, "_verify_remote_auth", lambda *_a, **_kw: record("auth"))
+        monkeypatch.setattr(cli, "_provision_dotfiles", lambda *_a, **_kw: record("dotfiles"))
+        monkeypatch.setattr(cli, "_provision_harness", lambda *_a, **_kw: record("harness"))
         monkeypatch.setattr(cli, "_register_codespace_plugins", empty_list)
         monkeypatch.setattr(cli, "_provision_repo_hooks", lambda *_a: record("hooks"))
         monkeypatch.setattr(cli, "_stage_plugins", empty_list)
@@ -304,7 +304,7 @@ class TestAuthCacheWarmup:
             calls.append(name)
 
         monkeypatch.setattr(cli, "_provision_relay_helpers", lambda *_a: record("relay"))
-        monkeypatch.setattr(cli, "_verify_remote_auth", lambda *_a: record("auth"))
+        monkeypatch.setattr(cli, "_verify_remote_auth", lambda *_a, **_kw: record("auth"))
         monkeypatch.setattr(cli, "_warm_remote_auth_cache", lambda *_a, **_kw: record("warm"))
 
         rc = main([
@@ -469,9 +469,9 @@ class TestSshSessionHooks:
             return value
 
         monkeypatch.setattr(cli, "_provision_relay_helpers", lambda *_a: record("relay"))
-        monkeypatch.setattr(cli, "_verify_remote_auth", lambda *_a: record("auth"))
-        monkeypatch.setattr(cli, "_provision_dotfiles", lambda *_a: record("dotfiles"))
-        monkeypatch.setattr(cli, "_provision_harness", lambda *_a: record("harness"))
+        monkeypatch.setattr(cli, "_verify_remote_auth", lambda *_a, **_kw: record("auth"))
+        monkeypatch.setattr(cli, "_provision_dotfiles", lambda *_a, **_kw: record("dotfiles"))
+        monkeypatch.setattr(cli, "_provision_harness", lambda *_a, **_kw: record("harness"))
         monkeypatch.setattr(
             cli, "_register_codespace_plugins",
             lambda *_a: record("register", ["/stage/example-agent"]),

@@ -94,7 +94,8 @@ is about that supplementary config.
   Without the `codespace` scope, CodeSpace operations fail with
   `HTTP 403 ... needs the "codespace" scope`.
   `<agent-codespaces catalog argv[0]> doctor` checks
-  the ambient account and any mapped accounts and prints the exact remedy.
+  the accounts that serve a CodeSpace (plus the active account when a CodeSpace
+  uses ambient ownership) and prints the exact remedy.
 - **agent-bridge** (optional sibling) -- needed for `codespace:<name>`
   dispatch and for the managed host credential relay. The agent-codespaces
   CLI/binstub itself remains standalone; lifecycle commands and relay-free

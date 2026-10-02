@@ -25,7 +25,7 @@ def _args(**kw):
         name="cs-1", worktree_id=None, driver="orchestrator", seed="do the task",
         seed_file=None, copilot_args=["--no-ask-user"], register_timeout=0.0,
         ensure_mux=True, dry_run=False, effort=None, force=False, force_claim=False,
-        detach=True, stop=False,
+        detach=True, stop=False, no_relay=False,
     )
     base.update(kw)
     return argparse.Namespace(**base)
@@ -50,6 +50,11 @@ def seams(monkeypatch):
         lambda: [types.SimpleNamespace(name="cs-1", repository="example/example-web-vessel")],
     )
     monkeypatch.setattr(copilot_venue, "claim_or_exit_code", lambda a: None)
+    monkeypatch.setattr(
+        copilot_venue,
+        "github_credential_preflight",
+        lambda n: types.SimpleNamespace(ok=True, to_dict=lambda: {"ok": True}),
+    )
     # Hermetic: never read the developer's own ~/.copilot/settings.json model.
     monkeypatch.setattr(detach, "with_supervisor", lambda venue, ref=None: dict(venue))
     monkeypatch.setattr(detach, "model_copilot_args", lambda existing: [])
@@ -215,6 +220,66 @@ def test_busy_claim_touches_nothing(seams, monkeypatch):
     rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams))
     assert rc == 75
     assert seams.holds == [] and seams.ssh == [] and seams.reserve == []
+
+
+def test_github_credential_unavailable_warns_and_continues(seams, monkeypatch, capsys):
+    monkeypatch.setattr(
+        copilot_venue,
+        "github_credential_preflight",
+        lambda n: types.SimpleNamespace(
+            ok=False,
+            detail="no github credential",
+            reason_code="github-credential-unavailable",
+            remedy="sign in",
+            to_dict=lambda: {
+                "ok": False,
+                "reason_code": "github-credential-unavailable",
+                "remedy": "sign in",
+            },
+        ),
+    )
+
+    rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout=_CREATED))
+
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "github-credential-unavailable" in err
+    assert seams.holds and seams.ssh
+
+
+def test_github_credential_ambiguity_warns_and_continues(seams, monkeypatch, capsys):
+    monkeypatch.setattr(
+        copilot_venue,
+        "github_credential_preflight",
+        lambda n: types.SimpleNamespace(
+            ok=False,
+            detail="ambiguous github credential",
+            reason_code="github-credential-ambiguous",
+            remedy="bind account",
+            to_dict=lambda: {"ok": False},
+        ),
+    )
+
+    rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout=_CREATED))
+
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "github-credential-ambiguous" in err
+    assert seams.holds and seams.ssh
+
+
+def test_no_relay_skips_github_credential_preflight(seams, monkeypatch):
+    monkeypatch.setattr(
+        copilot_venue,
+        "github_credential_preflight",
+        lambda n: (_ for _ in ()).throw(AssertionError("must not preflight")),
+    )
+
+    rc = detach.cmd_detach(
+        _args(no_relay=True), ssh_session=_ssh(seams, stdout=_CREATED),
+    )
+
+    assert rc == 0
 
 
 def test_no_host_bridge_fails_before_any_hold(seams, monkeypatch, capsys):

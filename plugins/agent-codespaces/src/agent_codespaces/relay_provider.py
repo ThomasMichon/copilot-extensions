@@ -57,9 +57,10 @@ def relay_profile() -> dict:
         log.debug("codespaces relay config unavailable; using relay defaults")
 
     return {
-        "sources": ["git-credential"],
+        "sources": ["git-credential", "gh-auth"],
         "port": port,
         "ado_host": ado_host,
+        "github_hosts": ["github.com"],
         "azure_resources": sorted(azure_resources),
         "gated_actions": ["get-azure-token"],
         "token_store": str(_TOKENS_FILE),
@@ -82,12 +83,14 @@ def register_relay(builder) -> None:
     unavailable (#892 Inc 2). ``set_port(None)`` / ``set_ado_host(None)`` are
     internally no-ops, so a config-unavailable profile behaves exactly as before.
     """
+    from credential_relay.sources.gh_auth import GhAuthSource
     from credential_relay.sources.git_credential import GitCredentialSource
 
     from .relay_token import authorize_azure
 
     prof = relay_profile()
-    builder.add_source(GitCredentialSource())
+    builder.add_source(GitCredentialSource(github_hosts=prof["github_hosts"]))
+    builder.add_source(GhAuthSource(github_hosts=prof["github_hosts"]))
     builder.set_port(prof["port"])
     builder.set_ado_host(prof["ado_host"])
     # Raw Azure/Entra bearer minting stays policy-gated: a CodeSpace token may

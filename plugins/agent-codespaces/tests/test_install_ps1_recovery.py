@@ -21,10 +21,13 @@ VERSION = tomllib.loads((PLUGIN / "pyproject.toml").read_text(encoding="utf-8"))
     "project"
 ]["version"]
 
-pytestmark = pytest.mark.skipif(
-    os.name != "nt" or PWSH is None,
-    reason="Windows PowerShell lifecycle coverage",
-)
+pytestmark = [
+    pytest.mark.skipif(
+        os.name != "nt" or PWSH is None,
+        reason="Windows PowerShell lifecycle coverage",
+    ),
+    pytest.mark.timeout(180),
+]
 
 
 def _write_fake_uv(tmp_path: Path) -> Path:
@@ -154,6 +157,27 @@ def _run(
 
 def _slot(home: Path) -> Path:
     return home / ".agent-codespaces" / "versions" / VERSION
+
+
+def _copy_plugin_tree(dst: Path) -> None:
+    ignored = shutil.ignore_patterns(
+        "__pycache__", ".pytest_cache", ".ruff_cache", "*.egg-info",
+    )
+    shutil.copytree(
+        PLUGIN,
+        dst,
+        ignore=ignored,
+    )
+    sources = tomllib.loads((PLUGIN / "pyproject.toml").read_text(encoding="utf-8"))
+    for _name, spec in sources.get("tool", {}).get("uv", {}).get("sources", {}).items():
+        rel = spec.get("path") if isinstance(spec, dict) else None
+        if not isinstance(rel, str) or not rel.startswith("../../libs/"):
+            continue
+        lib_name = Path(rel).name
+        target = dst / "libs" / lib_name
+        if target.exists():
+            continue
+        shutil.copytree((PLUGIN / rel).resolve(), target, ignore=ignored)
 
 
 def test_uv_only_clean_host_installs_without_precreating_slot(tmp_path: Path) -> None:
@@ -355,7 +379,7 @@ def test_marketplace_staged_uninstall_removes_runtime_and_binstubs(
         / "example-marketplace"
         / "agent-codespaces"
     )
-    shutil.copytree(PLUGIN, installed)
+    _copy_plugin_tree(installed)
     stamped = _run(installed / "scripts" / "install.ps1", "stamp", home=home, fake_bin=fake_bin, mode="success")
     assert stamped.returncode == 0, stamped.stdout
 
@@ -386,23 +410,7 @@ def test_marketplace_staged_uninstall_waits_without_holding_runtime_cwd(
         / "example-marketplace"
         / "agent-codespaces"
     )
-    shutil.copytree(PLUGIN, installed)
-    libs = installed / "libs"
-    libs.mkdir()
-    for lib in (
-        "config-migrate",
-        "credential-relay",
-        "session-liveness-probe",
-        "single-instance-lease",
-        "ssh-manager",
-        "venue-copilot",
-        "zdd",
-    ):
-        shutil.copytree(
-            PLUGIN.parents[1] / "libs" / lib,
-            libs / lib,
-            ignore=shutil.ignore_patterns("__pycache__", ".venv"),
-        )
+    _copy_plugin_tree(installed)
     env = _environment(home, fake_bin, fake_bin.parent / "fake_uv.py", "sleep-pip")
     install_process = subprocess.Popen(
         [PWSH, "-NoProfile", "-File", str(installed / "scripts" / "install.ps1"), "install"],

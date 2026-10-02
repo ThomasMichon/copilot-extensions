@@ -35,14 +35,19 @@ class AccountBinding:
 
 
 @contextmanager
-def _binding_lock(timeout: float = 10.0, poll: float = 0.05) -> Iterator[None]:
+def _binding_lock(
+    timeout: float = 10.0, poll: float = 0.05, *, stale_after: float | None = None,
+) -> Iterator[None]:
     """Cross-platform exclusive lock via O_CREAT|O_EXCL lock file.
 
     Mirrors ``status._status_lock`` (including stale-lock recovery) so the
-    non-TTL stores behave identically under contention.
+    non-TTL stores behave identically under contention. ``stale_after``
+    (default ``3 * timeout``) is how old a lock must be to be recovered, so a
+    caller with a short deadline never steals a live holder's lock.
     """
     ensure_runtime_dir()
     deadline = time.monotonic() + timeout
+    stale = stale_after if stale_after is not None else timeout * 3
     fd = None
     while True:
         try:
@@ -52,7 +57,7 @@ def _binding_lock(timeout: float = 10.0, poll: float = 0.05) -> Iterator[None]:
             if time.monotonic() >= deadline:
                 try:
                     age = time.time() - _LOCK_FILE.stat().st_mtime
-                    if age > timeout * 3:
+                    if age > stale:
                         _LOCK_FILE.unlink(missing_ok=True)
                         continue
                 except OSError:
@@ -133,7 +138,7 @@ def bound_account(codespace: str) -> str | None:
         return None
 
 
-def bound_account_or_raise(codespace: str) -> str | None:
+def bound_account_or_raise(codespace: str, *, timeout: float = 10.0) -> str | None:
     """Like :func:`bound_account`, but propagates a lock-acquisition
     failure instead of silently degrading to "no binding" -- for a
     caller (e.g. a destructive CodeSpace reclaim) that must not treat an
@@ -143,8 +148,8 @@ def bound_account_or_raise(codespace: str) -> str | None:
     still degrades to "no binding" here too -- that is this store's own
     intentional, documented contract (see :func:`_read`'s own docstring)
     -- only lock CONTENTION (a transient, ambiguous unavailability, not a
-    confirmed empty store) propagates."""
-    with _binding_lock():
+    confirmed empty store) propagates. ``timeout`` bounds the lock wait."""
+    with _binding_lock(timeout=timeout, stale_after=30.0):
         rec = _read().get(codespace)
     return (rec.account or None) if rec else None
 

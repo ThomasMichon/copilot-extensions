@@ -10,6 +10,12 @@ import pytest
 from ssh_manager import SSHConfig, SupervisedRelayForward
 
 
+@pytest.fixture(autouse=True)
+def _plain_subprocess_spawn(monkeypatch) -> None:
+    """These relay-channel tests fake asyncio subprocesses directly."""
+    monkeypatch.setattr("agent_procutil._is_windows", lambda: False)
+
+
 class _FakeStderr:
     def __init__(self, data: bytes = b"") -> None:
         self._chunks = [data] if data else []

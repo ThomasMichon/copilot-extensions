@@ -7,6 +7,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agent_codespaces.auth_preflight import (
+    GITHUB_CREDENTIAL_AMBIGUOUS,
+    GITHUB_CREDENTIAL_UNAVAILABLE,
+    github_credential_preflight,
     host_from_url,
     host_has_auth,
     parse_remote_hosts,
@@ -88,6 +91,70 @@ class TestHostHasAuth:
         source = AsyncMock()
         source.resolve = AsyncMock(side_effect=RuntimeError("boom"))
         assert await host_has_auth("github.com", source=source) is False
+
+
+class TestGithubCredentialPreflight:
+
+    @pytest.mark.asyncio
+    async def test_uses_git_credential_first(self):
+        git_source = AsyncMock()
+        git_source.name = "git-credential"
+        git_source.resolve = AsyncMock(
+            return_value="protocol=https\nhost=github.com\npassword=tok\n\n",
+        )
+
+        result = await github_credential_preflight(
+            "bound-user", git_source=git_source,
+        )
+
+        assert result.ok is True
+        assert result.source == "git-credential"
+        assert result.account == "bound-user"
+        fields = git_source.resolve.call_args.args[1]
+        assert fields["username"] == "bound-user"
+
+    @pytest.mark.asyncio
+    async def test_no_gh_fallback_for_bound_account(self):
+        git_source = AsyncMock()
+        git_source.name = "git-credential"
+        git_source.resolve = AsyncMock(return_value=None)
+
+        result = await github_credential_preflight(
+            "bound-user", git_source=git_source,
+        )
+
+        assert result.ok is False
+        assert result.reason_code == GITHUB_CREDENTIAL_UNAVAILABLE
+
+    @pytest.mark.asyncio
+    async def test_reports_structured_failure(self):
+        git_source = AsyncMock()
+        git_source.name = "git-credential"
+        git_source.resolve = AsyncMock(return_value=None)
+
+        result = await github_credential_preflight(
+            "bound-user", git_source=git_source,
+        )
+
+        assert result.ok is False
+        assert result.reason_code == GITHUB_CREDENTIAL_UNAVAILABLE
+        assert "git credential-manager github login --username bound-user" in result.remedy
+
+    @pytest.mark.asyncio
+    async def test_reports_ambiguous_when_no_bound_account_and_multiple_gcm_accounts(self):
+        git_source = AsyncMock()
+        git_source.name = "git-credential"
+        git_source.resolve = AsyncMock(return_value=None)
+
+        result = await github_credential_preflight(
+            None,
+            git_source=git_source,
+            gcm_accounts=["work-account", "personal-account"],
+        )
+
+        assert result.ok is False
+        assert result.reason_code == GITHUB_CREDENTIAL_AMBIGUOUS
+        assert "no bound account" in result.detail
 
 
 class TestVerifyRemoteAuth:
@@ -206,6 +273,40 @@ class TestVerifyRemoteAuthExtraHosts:
 
         assert DOTFILES_DIR in REMOTE_LIST_COMMAND
         assert "${VM_REPO_PATH:-$PWD}" in REMOTE_LIST_COMMAND
+
+    @pytest.mark.asyncio
+    async def test_connect_verifier_uses_selected_github_account(self, monkeypatch):
+        from agent_codespaces import __main__ as cli
+
+        seen = {}
+
+        class _Source:
+            def __init__(self, *, github_username=None, **_kw):
+                seen["github_username"] = github_username
+
+        async def _verify(_run_remote, *, source=None, extra_hosts=None, **_kw):
+            seen["source"] = source
+            return ["github.com"], []
+
+        monkeypatch.setattr(cli, "exec_with_retry", AsyncMock(return_value=type(
+            "R", (), {"stdout": "", "exit_code": 0, "stderr": ""}
+        )()))
+        monkeypatch.setattr(
+            "agent_codespaces.auth_preflight.verify_remote_auth", _verify,
+        )
+        monkeypatch.setattr(
+            "credential_relay.sources.git_credential.GitCredentialSource", _Source,
+        )
+
+        await cli._verify_remote_auth(
+            object(),
+            "cs-1",
+            type("Cfg", (), {"dotfiles_repo": "example-org/dotfiles"})(),
+            github_account="alice",
+        )
+
+        assert seen["github_username"] == "alice"
+        assert isinstance(seen["source"], _Source)
 
 
 class TestAdoRestPreflight:
