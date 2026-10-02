@@ -389,7 +389,7 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
         other control frame `stream_events()` may gain) never reaches an
         unrelated existing consumer of that same method, e.g.
         `agent-dispatch watch`/`task_query_cli._cmd_watch()`, not just the
-        relay's own consumer; and **deterministic concurrency regression
+        relay's own consumer; **deterministic concurrency regression
         tests** for each race this design introduces — the ready-frame
         handshake actually closing the startup subscription gap (not just
         narrowing it), an event arriving during an in-flight fetch actually
@@ -397,7 +397,12 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
         the event-woken fetch / long reconcile / local recompute tick
         writers actually serializing against each other without a
         stale-overwrite — none of which a coordinator-kill test alone
-        exercises.
+        exercises; **and the fallback-poller/reconnect handoff
+        specifically**: a deterministic test proving the current poll tick
+        finishes (with no next tick scheduled) and cannot publish after the
+        reconnect's promotion reconcile has already run — sharing the
+        snapshot-owner lock alone doesn't prove the quiescence ordering is
+        actually enforced.
   - **3b:** a regression test per new failure mode the cache introduces —
         recovery from an uninitialized namespace (never silently published
         as complete), recovery from a hung/crashed background refresh task
@@ -417,11 +422,15 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
         serve** (the same `503` contract, verified against both an old and
         a new client — the fix is server-side and version-independent, not
         a client-side blocking change only a new client would observe), and
-        **`refresh_provider_resolvers()` itself failing repeatedly after a
-        prior successful discovery** (the discovery-generation freshness
-        deadline actually drives the same `503` response once no
-        last-known-good survives, not just an individual namespace's agent
-        scan).
+        **`refresh_provider_resolvers()`'s own discovery-generation
+        expiring** (the `503` fires even while every existing namespace
+        still has last-known-good data — never conditioned on namespace-
+        level staleness also being absent — and a discovery result that
+        reports a per-manifest construction failure, not only a raised
+        scan exception, must count as a failed attempt that does not
+        advance the generation).
+- [ ] **Phase 4:** a regression test asserting only the expected segment(s)
+      refresh for a given cause (cosmetic pulse vs. nav vs. reload vs. pivot
 - [ ] **Phase 4:** a regression test asserting only the expected segment(s)
       refresh for a given cause (cosmetic pulse vs. nav vs. reload vs. pivot
       switch), plus confirmation (via the same real-timer profiling method
@@ -1423,3 +1432,28 @@ Five findings, all in `phase-3-design.md` now that the design lives there:
   finding named.
 
 All five replied-to inline.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 15: validation-plan drift from the design doc, and a discovery-success signal that doesn't exist yet
+Three low-severity findings, all about keeping the Validation Plan and the
+design doc's own internals honest with each other:
+
+- **The Validation Plan didn't name the fallback-poller/reconnect handoff
+  test** round 14's fix actually requires — sharing a lock doesn't prove a
+  quiescence *ordering* is enforced without a dedicated deterministic test.
+  Added explicitly.
+- **The Validation Plan's 3b wording still conditioned the
+  discovery-generation `503` on "no last-known-good survives,"
+  contradicting round 14's own fix** in `phase-3-design.md`, which made
+  discovery-generation expiry an *independent* trigger. Reworded to match.
+- **`refresh_provider_resolvers()` has no observable success/failure signal
+  for "failed discovery must not advance the generation" to hook into at
+  all** — it returns `-> None` unconditionally on both its success path and
+  its `except Exception: return` failure path, and a per-manifest
+  resolver-construction exception inside the reconciliation loop is caught
+  and continued past silently, so even a "successful" scan can have quietly
+  dropped a namespace. Fixed by requiring the method itself to return an
+  explicit discovery-result distinguishing a raised scan, a completed scan
+  with one or more per-manifest construction failures, and a genuinely
+  clean pass — only the clean-pass case advances the generation.
+
+All three replied-to inline.

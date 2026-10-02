@@ -421,17 +421,28 @@ phase) is considered.
         that can ever trigger a rescan, which is what actually preserves
         reverse skew. **This same supervised-plus-freshness-deadline
         treatment applies to `refresh_provider_resolvers()` itself, not
-        just to a namespace's agent scan:** that call already swallows
-        registry-scan and resolver-construction failures internally,
-        returning `None` on failure (`agent_registry_resolver.py:159-170,
-        245-252`) — after one successful discovery, a *provider-discovery*
-        failure (as opposed to an individual namespace's agent-scan
-        failure) could silently leave the cache refreshing the same old
-        resolver set forever, reporting it complete even while
-        provider-registry removal/replacement discovery is failing. Fixed
-        by tracking discovery itself as its own generation/freshness state,
-        separate from any individual namespace's: a failed discovery
-        attempt must not advance that generation, and that generation going
+        just to a namespace's agent scan — but the method as it stands
+        today gives nothing to hook that treatment into:** it returns
+        `-> None` unconditionally, on both its success path *and* its
+        `except Exception: return` failure path
+        (`agent_registry_resolver.py:159-170`) — there is no observable
+        signal distinguishing them today. It also tolerates **partial**
+        failure silently: a specific manifest's own resolver-construction
+        exception is caught and the reconciliation loop continues past it
+        (`agent_registry_resolver.py:245-252`), so even a successful-looking
+        overall scan can still have silently dropped one namespace's
+        resolver. "A failed discovery attempt must not advance the
+        generation" therefore first requires the method to **report** a
+        real result: change it to return an explicit discovery-result
+        object (or equivalent) that distinguishes (a) the scan itself
+        raising, (b) completing with one or more per-manifest construction
+        failures, and (c) a genuinely clean pass with every manifest
+        resolved — the discovery-generation only advances on (c); both
+        (a) and (b) count as a failed discovery attempt for freshness
+        purposes, since a namespace whose manifest silently failed to
+        construct is exactly the kind of gap this tracking exists to catch.
+        With that signal in place: a failed discovery attempt does not
+        advance the generation, and that generation going
         stale past its own deadline forces `503` **independently of
         whether existing namespaces still retain a last-known-good
         value** — a stale discovery generation means additions, removals,
