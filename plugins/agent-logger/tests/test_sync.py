@@ -1135,7 +1135,15 @@ def test_ssh_target_push_uses_sibling_ssh_in_command(monkeypatch, tmp_path: Path
     SshTarget({"host": "user@example", "remote_path": "/srv"}).push(source, "m1")
 
     ssh_arg_index = captured_commands[-1].index("-e") + 1
-    assert captured_commands[-1][ssh_arg_index].startswith(str(ssh_exe))
+    # Compare against the quoted form, not the bare path: push() quotes
+    # whenever the (test-generated, potentially space-containing) tmp_path
+    # happens to contain a space or apostrophe -- independent of the
+    # temporary directory's own name.
+    from agent_logger.sync.targets.ssh import _quote_executable
+
+    assert captured_commands[-1][ssh_arg_index].startswith(
+        _quote_executable(str(ssh_exe))
+    )
 
 
 def test_ssh_executable_quoting_handles_spaces_in_path():
@@ -1145,6 +1153,17 @@ def test_ssh_executable_quoting_handles_spaces_in_path():
     assert _quote_executable(r"C:\no-spaces\ssh.exe") == r"C:\no-spaces\ssh.exe"
     quoted = _quote_executable(r"C:\Program Files\msys64\usr\bin\ssh.exe")
     assert quoted == r'"C:\Program Files\msys64\usr\bin\ssh.exe"'
+
+
+def test_ssh_executable_quoting_handles_apostrophe_in_path():
+    """An apostrophe needs quoting even with no space: rsync's `-e` parser
+    treats it as an opening quote and rejects the command for having no
+    closing one."""
+    from agent_logger.sync.targets.ssh import _quote_executable
+
+    path = r"C:\Users\O'Brien\msys64\usr\bin\ssh.exe"
+    assert _quote_executable(path) == f'"{path}"'
+
 
 
 def test_ssh_target_push_quotes_sibling_path_with_spaces(monkeypatch, tmp_path: Path):

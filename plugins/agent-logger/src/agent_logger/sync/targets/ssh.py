@@ -61,9 +61,12 @@ def _quote_executable(path: str) -> str:
     rsync re-splits ``-e``'s argument on whitespace (respecting simple
     quoting) to build the command it execs, so an unquoted executable path
     containing a space -- e.g. an MSYS2 install under ``C:\\Program
-    Files\\...`` -- would otherwise be split into multiple bogus words.
+    Files\\...`` -- would otherwise be split into multiple bogus words. An
+    apostrophe needs the same treatment: even with no space, rsync's parser
+    treats it as an opening quote and rejects the command for having no
+    closing one (e.g. ``C:\\Users\\O'Brien\\...``).
     """
-    return f'"{path}"' if " " in path else path
+    return f'"{path}"' if (" " in path or "'" in path) else path
 
 
 class SshTarget(Target):
