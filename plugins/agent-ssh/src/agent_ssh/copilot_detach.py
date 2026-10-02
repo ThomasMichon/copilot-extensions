@@ -385,14 +385,17 @@ def _update_keeper_hold_pid(target: str, hold_id: str, pid: int) -> None:
         _STORE.write(_state_key(target), holds_store.state_with_holds(state, holds))
 
 
+def _keeper_token_matches(current: dict[str, Any] | None, token: str | None) -> bool:
+    """False when the stored state belongs to a different keeper instance."""
+    stored = (current or {}).get("instance_token")
+    return not stored or stored == token
+
+
 def _write_keeper_state(target: str, payload: dict[str, Any]) -> None:
+    """Caller must hold ``_holds().lock(_state_key(target))``."""
     current = read_keeper_state(target)
     token = payload.get("instance_token")
-    if (
-        current
-        and current.get("instance_token")
-        and current.get("instance_token") != token
-    ):
+    if not _keeper_token_matches(current, token):
         return
     if (
         current
@@ -668,7 +671,13 @@ def cmd_attached(args: argparse.Namespace) -> int:
             creationflags=no_window_flags(),
         )
         if attached_hold_id:
-            _update_keeper_hold_pid(args.target, attached_hold_id, proc.pid)
+            try:
+                _update_keeper_hold_pid(args.target, attached_hold_id, proc.pid)
+            except BaseException:
+                # Never leave the spawned SSH/Copilot child orphaned once its
+                # hold is released by the caller's cleanup.
+                _reap_child(proc)
+                raise
         return int(proc.wait())
 
     # The hold is released once, whatever ends the attach: a failed reservation
@@ -699,6 +708,17 @@ def cmd_attached(args: argparse.Namespace) -> int:
             )
 
 
+def _reap_child(proc: Any, timeout: float = 10.0) -> None:
+    try:
+        proc.terminate()
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+    except OSError:
+        pass
+
+
 def _mux_exists(ssh_config: Any, mux: str) -> bool | None:
     try:
         rc, _out, _err = _remote(
@@ -725,6 +745,8 @@ def _any_hold_alive(target: str, ssh_config: Any) -> bool:
 async def _run_forward_keeper(args: argparse.Namespace) -> int:
     ssh_config = _ssh_config(args.target)
 
+    instance_token = os.environ.get(_KEEPER_TOKEN_ENV, "")
+
     def write_state() -> None:
         _holds().write_self_state(
             _state_key(args.target),
@@ -736,6 +758,7 @@ async def _run_forward_keeper(args: argparse.Namespace) -> int:
             ),
             fallback_hold_id=getattr(args, "hold_id", None),
             fallback_mux=args.mux,
+            only_if=lambda current: _keeper_token_matches(current, instance_token),
         )
 
     def remove_state() -> None:

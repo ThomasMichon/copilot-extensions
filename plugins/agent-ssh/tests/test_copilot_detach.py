@@ -888,6 +888,77 @@ def test_keeper_hold_store_reads_legacy_single_mux_state(tmp_path, monkeypatch):
     }
 
 
+def test_superseded_forward_keeper_never_overwrites_the_new_instance(tmp_path, monkeypatch):
+    store = detach.KeeperStore(tmp_path)
+    monkeypatch.setattr(detach, "_STORE", store)
+    monkeypatch.setattr(detach, "_ssh_config", lambda target: object())
+    monkeypatch.setenv(detach._KEEPER_TOKEN_ENV, "old")
+    current = {
+        "target": "devbox", "venue_port": 41234, "instance_token": "new",
+        "holds": {"attached:2": {"mux": "wt-b", "updated_at": 1.0, "confirmed_at": 1.0}},
+    }
+    store.write("devbox", current)
+
+    class Forward:
+        process_pid = None
+        process_birth_identity = None
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+    async def fake_loop(forwards, **kwargs):
+        kwargs["write_state"]()
+        return 0
+
+    monkeypatch.setattr(detach, "SupervisedRelayForward", Forward)
+    monkeypatch.setattr(detach, "run_supervised_loop", fake_loop)
+    args = argparse.Namespace(
+        target="devbox", venue_port=41234, mux="wt-a", probe_interval=15.0, startup_grace=300.0,
+    )
+
+    assert asyncio.run(detach._run_forward_keeper(args)) == 0
+    assert store.read("devbox") == current
+
+
+def test_attached_reaps_ssh_child_when_hold_bookkeeping_fails(seams, monkeypatch):
+    monkeypatch.setattr(
+        detach, "_ssh_config",
+        lambda target: types.SimpleNamespace(
+            config_file=None, port=None, identity_file=None, extra_options={}, ssh_target=target),
+    )
+    monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: None)
+    monkeypatch.setattr(detach, "_ensure_remote_tooling", lambda _cfg: None)
+    monkeypatch.setattr(detach, "resolve_daemon_port", lambda: 41234)
+    monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
+    monkeypatch.setattr(
+        detach, "run_venue_copilot",
+        lambda _identity, *, connect, **_kwargs: connect("agent-worktrees copilot --anchor"),
+    )
+    events = []
+
+    class FakeProcess:
+        pid = 999
+
+        def terminate(self):
+            events.append("terminate")
+
+        def wait(self, timeout=None):
+            events.append("wait")
+            return 0
+
+    monkeypatch.setattr(detach.subprocess, "Popen", lambda argv, **kw: FakeProcess())
+
+    def failing_update(*_a, **_k):
+        raise RuntimeError("Could not acquire forward-keeper state lock")
+
+    monkeypatch.setattr(detach, "_update_keeper_hold_pid", failing_update)
+
+    with pytest.raises(RuntimeError):
+        detach.cmd_attached(_args(detach=False, workspace="/workspaces/repo", copilot_args=[]))
+    assert events == ["terminate", "wait"]
+    assert seams.stop_keeper == [("devbox", seams.keeper[0][1]["hold_id"])]
+
+
 def test_keeper_hold_store_uses_sanitized_keeper_state_path(tmp_path, monkeypatch):
     store = detach.KeeperStore(tmp_path)
     monkeypatch.setattr(detach, "_STORE", store)

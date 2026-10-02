@@ -415,10 +415,18 @@ class KeeperHoldStore:
         fallback_hold_id: str | None = None,
         fallback_mux: str | None = None,
         pid: int | None = None,
-    ) -> None:
+        only_if: Callable[[dict[str, Any]], bool] | None = None,
+    ) -> bool:
+        """Merge ``state`` over the stored one under the lock.
+
+        ``only_if`` sees the stored state inside the same lock; when it returns
+        False nothing is written (e.g. a superseded keeper instance).
+        """
         writer_pid = os.getpid() if pid is None else int(pid)
         with self.lock(key):
             existing = self.read_state(key) or {}
+            if only_if is not None and not only_if(existing):
+                return False
             holds = self.read_holds(existing)
             now = time.time()
             if not holds and fallback_hold_id and fallback_mux:
@@ -441,6 +449,7 @@ class KeeperHoldStore:
                     holds,
                 ),
             )
+        return True
 
     def remove_self_state(self, key: str, *, pid: int | None = None) -> None:
         owner_pid = os.getpid() if pid is None else int(pid)

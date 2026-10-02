@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from zdd import routing
 from zdd.cutover import CutoverOrchestrator
 
@@ -273,3 +275,48 @@ def test_refuse_old_with_a_routing_module_that_cant_guard_refuses(tmp_path: Path
     assert not res.ok and "can't publish guarded" in res.error
     assert handle.terminated is True
     assert routing.read_table(tmp_path)["active"]["port"] == 61001
+
+
+@pytest.mark.parametrize("exits", [True, False])
+def test_cutover_refusal_clears_breadcrumb_only_after_confirmed_exit(
+    tmp_path: Path, monkeypatch, exits: bool,
+) -> None:
+    from zdd import breadcrumb
+
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=61001, pid=101, version="old")
+
+    class Handle:
+        pid = 202
+        terminated = False
+
+        def terminate(self):
+            self.terminated = True
+
+        def poll(self):
+            return 0 if exits and self.terminated else None
+
+    def health_check(_host, port):
+        if port == 61002:
+            (tmp_path / "active.json").write_text(json.dumps(
+                {"active": {"bind": "127.0.0.1", "port": 62254, "forwarded": True}}),
+                encoding="utf-8")
+        return True
+
+    ticks = iter(range(10_000))
+    orch = CutoverOrchestrator(
+        tmp_path, bind="127.0.0.1", version="new", spawn_passive=lambda _p: Handle(),
+        health_check=health_check, make_client=lambda _b: None,
+        pick_free_port=lambda: 61002, sleep=lambda _s: None, clock=lambda: float(next(ticks)),
+        refuse_old=lambda a: "refused" if isinstance(a, dict) and a.get("forwarded") else None,
+    )
+    res = orch.run(health_timeout=100, drain_timeout=1)
+
+    assert not res.ok
+    assert "refusal: terminated new daemon" in res.steps
+    crumb = breadcrumb.read_breadcrumb(tmp_path)
+    if exits:
+        assert crumb is None
+    else:
+        assert "refusal: new daemon exit unconfirmed; breadcrumb kept" in res.steps
+        assert crumb["new_pid"] == 202

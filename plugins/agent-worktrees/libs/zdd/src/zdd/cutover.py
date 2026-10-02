@@ -204,6 +204,22 @@ class CutoverOrchestrator:
         except Exception:
             return False
 
+    def _await_exit(self, handle: _Handle, timeout: float = 10.0, poll: float = 0.2) -> bool:
+        """True once ``handle`` has provably exited; False on timeout or no ``poll()``."""
+        poll_fn = getattr(handle, "poll", None)
+        if not callable(poll_fn):
+            return False
+        deadline = self.clock() + timeout
+        while True:
+            try:
+                if poll_fn() is not None:
+                    return True
+            except Exception:  # noqa: BLE001 -- an unreadable handle is unconfirmed
+                return False
+            if self.clock() >= deadline:
+                return False
+            self.sleep(poll)
+
     def _refuse_current_old(self, result: CutoverResult) -> bool:
         if self.refuse_old is None:
             return False
@@ -399,8 +415,14 @@ class CutoverOrchestrator:
                 terminated = False
                 try:
                     handle.terminate()
-                    terminated = True
                     result.steps.append("refusal: terminated new daemon")
+                    # terminate() only requests exit; keep the breadcrumb (the
+                    # durable PID reap_abandoned_passive needs) until it's confirmed.
+                    terminated = self._await_exit(handle)
+                    if not terminated:
+                        result.steps.append(
+                            "refusal: new daemon exit unconfirmed; breadcrumb kept"
+                        )
                 except Exception as term_exc:  # noqa: BLE001
                     result.steps.append(
                         f"refusal: new daemon termination failed: {term_exc}"
