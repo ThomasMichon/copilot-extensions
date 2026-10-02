@@ -25,7 +25,10 @@ def test_endpoint_from_rendezvous_rejects_missing_or_malformed_fields():
     )
 
 
-def test_push_status_via_daemon_forwards_exact_rendered_values_and_releases_client():
+def test_push_status_via_daemon_forwards_exact_rendered_values_and_releases_client(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
     observed = []
 
     def _compute(kind, payload):
@@ -69,7 +72,10 @@ def test_push_status_via_daemon_forwards_exact_rendered_values_and_releases_clie
     assert server.subscriber_count() == 0
 
 
-def test_push_status_via_daemon_reports_daemon_unavailable_when_missing():
+def test_push_status_via_daemon_reports_daemon_unavailable_when_missing(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))
     result = mux_status_link.push_status_via_daemon(
         {
             "project": "proj",

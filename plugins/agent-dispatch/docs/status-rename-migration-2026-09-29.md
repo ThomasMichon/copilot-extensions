@@ -13,6 +13,9 @@ The follow-on verification-gate effort that builds on these restored names is
 tracked separately at
 [`efforts/active/task-verification-gate/README.md`](../../../efforts/active/task-verification-gate/README.md).
 
+For the later retirement of the task-level `DEAD_LETTER` status, see
+[`retire-dead-letter-status-2026-09-30.md`](retire-dead-letter-status-2026-09-30.md).
+
 ## Background
 
 - **2026-09-25 (PR #3715):** `CONFIRMED` was introduced as a new terminal

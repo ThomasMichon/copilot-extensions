@@ -2,7 +2,8 @@
 # Side-effect-only sessionStart wrapper: invokes write_session_guidance.py,
 # UNLESS a warm per-repository guidance cache lets this wrapper serve the
 # session-scoped file directly without spawning python at all (process-count
-# reduction; see copilot-agent-runtime#22031's sibling investigation).
+# reduction; see a sibling investigation tracked in the private Copilot CLI
+# runtime repo, not publicly linked here).
 # write_session_guidance.py remains the sole authority for the cache's format
 # and every safety invariant (session-id shape, symlink/reparse defense,
 # atomic replace, byte budget); this fast path mirrors those checks narrowly

@@ -198,6 +198,14 @@ reads as authoritative.
   (e.g. "Full inception exchange: `inception-transcript.md`"). This keeps the
   README a navigable map — its own stated purpose — without losing the
   authoritative record of what was actually said.
+- **Redaction is the one safety exception to verbatim capture** when the
+  repo is public/externally-shareable and the operator's own words name a
+  real private/internal identifier — never drop or soften the surrounding
+  *intent* to work around it, only the private specifics it doesn't depend
+  on. See *Keep internal specifics out of a public-facing effort*
+  (`references/efforts.md`) for the full technique, including why a name
+  swap alone is sometimes not enough and why the public README never links
+  to a private sidecar.
 
 ## Plan an effort
 
@@ -279,6 +287,22 @@ The README is the shared contract — keep it **ahead of the conversation**. But
 - **Record merged PRs, not in-flight ones.** Listing a PR that the *current*
   commit is itself opening is a catch-22; record a PR only once it has merged.
   Remark open issues the effort spawned or still blocks on.
+
+## Keep internal specifics out of a public-facing effort
+
+When the effort's own repo is public/externally-shareable, its Journal,
+Context, Request, and any linked sub-doc can't carry the same concrete detail
+a private knowledge repo's effort would — a real private/internal repo or
+system name, a private cross-organization issue reference, or a blow-by-blow
+internal-investigation narrative is exactly the kind of content that leaks,
+even inside an effort folder that otherwise looks like ordinary engineering
+notes. This is not a rule against cross-repo references in general — a
+fully-qualified reference to a genuinely *public* repo remains expected
+traceability. See *Keep internal specifics out of a public-facing effort* in
+`references/efforts.md` for the full technique (abstract the specifics
+rather than omitting the lesson, route the un-abstracted record to a private
+knowledge repo without linking to it from the public side, and apply the
+same bar everywhere, not just Journal entries).
 
 ## Drive to completion, relentlessly
 
@@ -428,6 +452,11 @@ change that realizes it.
   summarizing the gist and moving the full exchange to
   `inception-transcript.md`.
 - ❌ Letting the conversation, not the README, hold effort state.
+- ❌ Journaling a real **private/internal** repo or system name, a private
+  cross-org reference, or unabstracted incident narrative into a
+  public-facing effort — abstract the specifics or route the precise record
+  to a private knowledge repo instead. (A fully-qualified reference to a
+  genuinely *public* repo remains expected traceability, not a leak.)
 - ❌ Clearing `follow_up` manually while an open effort remains bound, or
   dropping the binding without verified completion or a named transfer.
 - ❌ Cross-repo issues linking this repo's effort paths.

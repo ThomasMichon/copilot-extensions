@@ -19,7 +19,17 @@ paired `session-guidance.instructions.md` pointer). This guide explains it.
   topology: the primary project plus repos with a non-local locus or an active
   delegate. For the full picture run these live instead:
   `agent-worktrees state-root --pair --json`, `agent-worktrees related list`,
-  `agent-worktrees related resolve <name>`.
+  `agent-worktrees related resolve <name>`. For a hand-authored narrative on
+  one related repo (why it matters, build/test/branch conventions, gotchas),
+  run `agent-worktrees related doc <name>` -- it scaffolds the doc on first
+  use and prints its path either way.
+- A separate `Generated related-repo briefings available this session --
+  read 'files/related-briefings/<name>.md' for one of: ...` line, when
+  present, names which related repos got a generated operating-guide
+  skeleton written into this session's own state folder (computed fresh from
+  the same resolved config as the facts above). Read the one file relevant to
+  your current task -- these are not preloaded, and they compose with
+  (never replace) a hand-authored `related doc` narrative when one exists.
 
 ## A worktree's title is a theme, not an instruction
 

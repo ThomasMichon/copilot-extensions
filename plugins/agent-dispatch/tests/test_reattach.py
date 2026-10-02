@@ -477,7 +477,7 @@ def test_recovered_context_swallows_dispatch_error(monkeypatch):
 def test_reattach_fleet_host_worker_id_and_resume():
     worker_id = "fleet-body:pool-a:sess-1"
     client = _FakeClient(
-        get_task=_task(status="dead_letter"),
+        get_task=_task(status="abandoned"),
         create_task={"id": "t-2", "status": "queued", "owner": None},
     )
     resumed = {}

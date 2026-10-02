@@ -488,13 +488,216 @@ def _build(
     return rows
 
 
+def _fetch_rows_delegated(args: argparse.Namespace) -> list[dict]:
+    """Cross-machine path (this host supervises ``args.machine`` as a peer):
+    run ``agent_dispatch inbox --board`` as a child process, capturing and
+    parsing its JSON-array stdout instead of inheriting the pipe -- so a
+    ``--stream``/``--subscribe`` caller can frame the result as NDJSON (and,
+    with ``--subscribe``, re-run it on a timer) rather than just forwarding
+    the child's one-shot output verbatim. Raises on a non-zero exit or
+    malformed output; the caller decides how to surface that."""
+    python = sys.executable
+    command = [
+        windowless_python(python),
+        "-m",
+        "agent_dispatch",
+        "inbox",
+        "--machine",
+        args.machine,
+        "--board",
+        "--recent-mins",
+        str(args.recent_mins),
+        "--limit",
+        str(args.limit),
+    ]
+    if args.label:
+        command.extend(["--label", args.label])
+    env = dict(os.environ)
+    env.update(windowless_python_env(python))
+    result = subprocess.run(
+        command, check=False, env=env, capture_output=True, text=True,
+        **_no_window_kwargs(),
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            (result.stderr or "").strip()
+            or f"delegated inbox query exited {result.returncode}"
+        )
+    return json.loads(result.stdout or "[]")
+
+
+def _fetch_rows_direct(args: argparse.Namespace) -> list[dict]:
+    """Direct path (this host IS ``args.machine``, the common case): query this
+    machine's own coordinator ``/tasks`` endpoint and run the board through
+    :func:`_build`. A standalone fetch (rather than reusing ``main``'s inline
+    one-shot query) because ``--subscribe`` needs to call it repeatedly from
+    inside one long-lived process, never re-exec'ing the CLI per re-scan.
+    Raises on any fetch/parse failure -- same contract as
+    :func:`_fetch_rows_delegated`."""
+    query = {
+        "status": (
+            "proposed,queued,claimed,started,suspended,"
+            "submitted,completed,abandoned,dead_letter"
+        ),
+        "limit": str(args.limit),
+    }
+    if args.label:
+        query["label"] = args.label
+    endpoint = _endpoint()
+    url = f"{endpoint}/tasks?{urllib.parse.urlencode(query)}"
+    request = urllib.request.Request(url)
+    token = os.environ.get("AGENT_DISPATCH_TOKEN")
+    if token:
+        request.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(request, timeout=3) as response:
+        tasks = json.loads(response.read().decode("utf-8"))
+    global _RELAY_ENDPOINT
+    _RELAY_ENDPOINT = endpoint
+    return _build(
+        tasks,
+        machine=args.machine,
+        recent_mins=args.recent_mins,
+        relay_fetch_many=_relay_fetch_many,
+    )
+
+
+def _fetch_rows(args: argparse.Namespace) -> list[dict]:
+    """Resolve the board rows the right way for this invocation: delegate to
+    the supervisor's cross-machine inbox when ``--machine`` names a peer this
+    host supervises, otherwise query this machine's own coordinator
+    directly. Used only by the ``--stream``/``--subscribe`` path (D2); the
+    plain one-shot path below has its own long-standing inline fetch."""
+    local = _local_machine()
+    if local and local != args.machine.casefold():
+        return _fetch_rows_delegated(args)
+    return _fetch_rows_direct(args)
+
+
+def _emit_frame(obj: dict, out) -> bool:
+    """Write one NDJSON frame, flushing immediately so the Picker paints
+    progressively. Returns False (never raises) once the reader has closed
+    the pipe, so the caller can stop cleanly instead of crashing on a broken
+    pipe."""
+    try:
+        out.write(json.dumps(obj, default=str) + "\n")
+        out.flush()
+        return True
+    except (BrokenPipeError, OSError):
+        return False
+
+
+def _diff_rows(
+    prev: list[dict], curr: list[dict], *, id_key: str = "id"
+) -> tuple[list[dict], list[str]]:
+    """Diff two board snapshots by ``id_key`` for a ``--subscribe`` re-scan.
+
+    Returns ``(deltas, removed_ids)`` -- whole-row ``delta`` entries for ids
+    that are new or whose content changed, and ids present before but gone
+    now. Whole-row granularity matches the Picker's own ``delta``/``removed``
+    envelope contract (``tasks.py``): the consumer replaces/removes by id."""
+    prev_by = {str(r.get(id_key)): r for r in prev if r.get(id_key) is not None}
+    curr_by = {str(r.get(id_key)): r for r in curr if r.get(id_key) is not None}
+    deltas = [
+        r for r in curr
+        if r.get(id_key) is not None and prev_by.get(str(r.get(id_key))) != r
+    ]
+    removed = [rid for rid in prev_by if rid not in curr_by]
+    return deltas, removed
+
+
+#: Default seconds between ``--subscribe`` re-scans. Tighter than
+#: agent-codespaces' pool (5s): task state (steer requests, progress,
+#: completion) changes on a human-interaction cadence, and each re-scan here
+#: is a single lightweight coordinator HTTP call (or, cross-machine, one
+#: child-process inbox query) -- not a `gh` roster call.
+DEFAULT_SUBSCRIBE_INTERVAL = 2.0
+
+
+def _run_stream(args: argparse.Namespace) -> int:
+    """Emit the Tasks board as the registered-pivot NDJSON envelope (D2):
+    ``begin`` -> a ``row`` per task -> ``done``. With ``--subscribe`` the
+    channel is then held open: every ``--interval`` seconds the board is
+    re-fetched and the diff vs. the last snapshot is emitted as
+    ``delta``/``removed`` frames, so an open pivot live-updates without a
+    poll-interval-driven CLI re-exec. A transient re-fetch failure during
+    ``--subscribe`` skips that tick rather than killing the channel -- only
+    the initial fetch failing is fatal (emits ``error``, matching the
+    one-shot path's exit-1 contract)."""
+    out = sys.__stdout__
+    try:
+        rows = _fetch_rows(args)
+    except Exception as exc:
+        _emit_frame({"type": "error", "message": str(exc)[:200]}, out)
+        return 1
+    if not _emit_frame({"type": "begin", "count": len(rows)}, out):
+        return 0
+    for row in rows:
+        if not _emit_frame({"type": "row", "entry": row}, out):
+            return 0
+    if not _emit_frame({"type": "done", "count": len(rows)}, out):
+        return 0
+
+    if not getattr(args, "subscribe", False):
+        return 0
+
+    interval = max(
+        0.5,
+        float(
+            getattr(args, "interval", DEFAULT_SUBSCRIBE_INTERVAL)
+            or DEFAULT_SUBSCRIBE_INTERVAL
+        ),
+    )
+    prev = rows
+    try:
+        while True:
+            time.sleep(interval)
+            try:
+                curr = _fetch_rows(args)
+            except Exception:
+                # A transient re-fetch failure (coordinator hiccup, delegated
+                # subprocess blip) must not kill the live channel -- skip
+                # this tick and try again next time.
+                continue
+            deltas, removed = _diff_rows(prev, curr)
+            for entry in deltas:
+                if not _emit_frame({"type": "delta", "entry": entry}, out):
+                    return 0
+            for rid in removed:
+                if not _emit_frame({"type": "removed", "id": rid}, out):
+                    return 0
+            prev = curr
+    except KeyboardInterrupt:
+        return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agent-dispatch-board")
     parser.add_argument("--machine", required=True)
     parser.add_argument("--recent-mins", type=int, default=120)
     parser.add_argument("--label")
     parser.add_argument("--limit", type=int, default=200)
+    parser.add_argument(
+        "--stream", dest="stream", action="store_true",
+        help="Emit the registered-pivot NDJSON envelope (begin -> row per "
+             "task -> done) so the Picker's Tasks pivot paints progressively "
+             "(D2).",
+    )
+    parser.add_argument(
+        "--subscribe", dest="subscribe", action="store_true",
+        help="With --stream, hold the channel open and emit live "
+             "delta/removed frames from a periodic re-scan so an open pivot "
+             "updates in place (D2).",
+    )
+    parser.add_argument(
+        "--interval", dest="interval", type=float,
+        default=DEFAULT_SUBSCRIBE_INTERVAL,
+        help="Seconds between --subscribe re-scans "
+             f"(default: {DEFAULT_SUBSCRIBE_INTERVAL}).",
+    )
     args = parser.parse_args(argv)
+
+    if args.stream:
+        return _run_stream(args)
 
     local = _local_machine()
     if local and local != args.machine.casefold():

@@ -815,22 +815,30 @@ def cmd_manager_install_trigger(project: str | None) -> int:
     is_windows = platform.system() == "Windows"
     install_cmd = _WORKTREE_MANAGER_INSTALL_PS1 if is_windows else _WORKTREE_MANAGER_INSTALL_SH
 
-    output.header(f"{name} -- the interactive front-end has moved")
+    with output.stdout_to_stderr():
+        output.header(f"{name} -- interactive mode needs Worktree Manager")
+    print(
+        "No usable Worktree Manager is available right now. On a first run "
+        "that's expected; if this machine already had one, update or repair "
+        "it with the bootstrap below.",
+        file=out,
+    )
     print(
         "The Picker / session launcher now ships as the standalone Worktree "
-        "Manager, installed and updated out-of-band from the plugin. Install "
-        "it to launch and manage worktrees interactively again.",
+        "Manager, installed and updated out-of-band from the plugin. "
+        "Bootstrap it from this repo to get the interactive front door.",
         file=out,
     )
     print(file=out)
     print(f"  Source (verify this is ours): {_WORKTREE_MANAGER_REPO_URL}", file=out)
     print(file=out)
-    print("  Install / update:", file=out)
+    print("  Bootstrap / update Worktree Manager:", file=out)
     print(f"    {install_cmd}", file=out)
     print(file=out)
     print(
         f"Once installed, run this binstub again -- bare `{name}` will open the "
-        f"Manager. Agents are unaffected: `{name} <verb>` (e.g. list, create, "
+        f"Manager. Headless agent commands are unaffected: `{name} <verb>` "
+        f"(e.g. list, create, "
         "finalize) works headless without the Manager.",
         file=out,
     )

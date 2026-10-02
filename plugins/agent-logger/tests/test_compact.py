@@ -125,9 +125,9 @@ def test_respects_repo_allowlist(tmp_path: Path, monkeypatch) -> None:
     # pushes the archive store wholesale, so this is a hard leak guard.
     src = tmp_path / "copilot"
     _session(src, "in", updated=NOW - timedelta(days=40), cwd="C:/repo/gone",
-             repository="owner_user_microsoft/dotfiles")
+             repository="owner_user_example/dotfiles")
     _session(src, "out", updated=NOW - timedelta(days=40), cwd="C:/repo/gone",
-             repository="github/copilot-agent-runtime")
+             repository="example-org/example-private-runtime")
     monkeypatch.setattr(compact_mod, "tracked_worktree_paths", lambda: None)
 
     home = tmp_path / "home"

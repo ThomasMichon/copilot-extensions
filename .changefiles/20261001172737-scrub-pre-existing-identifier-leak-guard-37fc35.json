@@ -1,0 +1,21 @@
+{
+  "comment": "Scrub pre-existing identifier-leak-guard matches cataloged in ThomasMichon/copilot-extensions#4834 (private repo/org names and derived machine-name placeholders generalized in test fixtures, docstrings, and docs; no functional change).",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

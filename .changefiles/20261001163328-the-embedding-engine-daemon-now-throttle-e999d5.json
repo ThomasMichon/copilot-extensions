@@ -1,0 +1,9 @@
+{
+  "comment": "The embedding engine daemon now throttles its own CPU priority (AGENT_INDEX_ENGINE_NICE, default 5) the same way the index-worker already does, so a long CPU-only reindex no longer starves unrelated host activity.",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "minor"
+    }
+  ]
+}

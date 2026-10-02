@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # context-handoff-connection-race/scenario.sh -- Tier-P F1 repro rig for
-# github/copilot-agent-runtime#22266: a single session that discovers
+# a known, privately tracked Copilot CLI issue: a single session that discovers
 # `context-handoff` from TWO sources at once -- the marketplace-installed
 # plugin copy AND a second copy present as a project-level extension in the
 # working repo -- launches BOTH as real connections, and the second one hits
@@ -61,7 +61,7 @@ EXT_LOG_DIR="$HOME/.copilot/logs/extensions"
 export CR_SCENARIO_NAME
 cr_init
 cr_meta "plugin" "$PLUGIN"
-cr_meta "validates" "same-session double-discovery tool-name clash reproduces (copilot-agent-runtime#22266)"
+cr_meta "validates" "same-session double-discovery tool-name clash reproduces (a known, privately tracked Copilot CLI issue)"
 
 # =========================================================================
 phase 0 "environment (fresh machine)"

@@ -1,5 +1,5 @@
 """Recover a ``COLD`` spawn reservation whose task ended up queued/unowned,
-or reached ``DEAD_LETTER``, without going through the sanctioned resume or
+without going through the sanctioned resume or
 settlement path.
 
 Extracted out of :mod:`agent_dispatch.supervisor` (module-size discipline --
@@ -22,12 +22,9 @@ from .spawn_factories import _parse_fleet_body_handle, _parse_local_body_handle
 
 log = logging.getLogger("agent-dispatch.supervisor")
 
-#: Settled by reconcile()/dead-lettering elsewhere -- never this sweep's job.
+#: Settled by reconcile() elsewhere -- never this sweep's job.
 #: Kept identical to :data:`agent_dispatch.supervisor._TERMINAL` (includes
-#: COMPLETED as of 2026-09-28, rubber-duck review -- see that constant's own
-#: comment for why DEAD_LETTER is deliberately excluded from this set even
-#: though it's also settled elsewhere, by recover_dead_lettered_cold_reservations
-#: below).
+#: COMPLETED as of 2026-09-28, rubber-duck review.
 _TERMINAL = frozenset({Status.SUBMITTED, Status.COMPLETED, Status.ABANDONED})
 
 
@@ -95,7 +92,7 @@ def recover_stranded_cold_reservations(supervisor: Any) -> int:
         if not supervisor._matches_pool(task):
             continue
         status = task.get("status")
-        if status in _TERMINAL or status == Status.DEAD_LETTER:
+        if status in _TERMINAL:
             continue  # settled by reconcile()/dead-lettering, not here
         if status != Status.QUEUED or task.get("owner"):
             continue  # still genuinely dormant or owned -- not this gap
@@ -154,63 +151,3 @@ def recover_stranded_cold_reservations(supervisor: Any) -> int:
             task.get("id"),
         )
     return recovered
-
-
-def recover_dead_lettered_cold_reservations(supervisor: Any) -> int:
-    """Settle a ``COLD`` reservation whose task reached ``DEAD_LETTER``.
-
-    :meth:`Supervisor.recover_gone` already settles this exact combination
-    (task ``DEAD_LETTER``, "held, not re-spawned") -- but only for a
-    ``SPAWNED`` reservation, since it iterates
-    ``self._pool_reservations(state=SpawnState.SPAWNED)`` (rubber-duck
-    review, 2026-09-28). A reservation that was ``COLD`` (its body
-    intentionally stopped while the task was dormant) when its task's owner
-    later went gone and exhausted ``max_attempts`` into ``DEAD_LETTER``
-    never enters that loop at all, so its reservation is never settled --
-    fencing its ``exclusive_key`` forever, the same permanent-orphan shape
-    :func:`recover_stranded_cold_reservations` above closes for the
-    ``QUEUED``/unowned case.
-
-    Deliberately its own narrow sweep rather than widening
-    :meth:`Supervisor.recover_gone`'s own ``SPAWNED``-scoped loop to also
-    accept ``COLD``: that loop's body assumes an actively-embodied session
-    (fleet/local liveness probing, on-behalf ``yield_task``) that isn't the
-    right shape for an intentionally-stopped ``COLD`` body, and widening it
-    would have this sweep and :func:`recover_stranded_cold_reservations`
-    both racing to act on the same ``COLD`` reservation for a task that
-    isn't ``DEAD_LETTER`` (e.g. ``QUEUED``/unowned) -- disjoint scopes (this
-    function only ever matches ``DEAD_LETTER``) avoid that entirely. Uses
-    :meth:`~agent_dispatch.client.Client.settle_spawn`, matching
-    :meth:`Supervisor.recover_gone`'s own ``DEAD_LETTER`` handling exactly
-    (a held, terminal-failure task is settled outright, never re-spawned --
-    unlike the ``QUEUED`` case above, there is no "fresh attempt" to defer
-    into).
-    """
-    settled = 0
-    for res in supervisor._pool_reservations(state=SpawnState.COLD):
-        key = str(res.get("key") or "")
-        if not key:
-            continue
-        try:
-            task = supervisor.client.get(res["task_id"])
-        except DispatchError:
-            continue  # task vanished; leave the reservation for a human
-        if not supervisor._matches_pool(task):
-            continue
-        if task.get("status") != Status.DEAD_LETTER:
-            continue  # not this gap -- every other status has its own sweep
-        try:
-            supervisor.client.settle_spawn(key, detail="task dead_lettered")
-        except DispatchError:
-            log.exception(
-                "failed to settle dead-lettered cold reservation %s", key
-            )
-            continue
-        settled += 1
-        log.warning(
-            "settled cold reservation %s for dead-lettered task %s "
-            "(recover_gone() only covers this for a spawned reservation)",
-            key,
-            task.get("id"),
-        )
-    return settled

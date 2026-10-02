@@ -184,7 +184,7 @@ _FACILITY_EXTENSION_NAMES: tuple[str, ...] = (
 
 def ensure_extension_permission_approvals(worktree_path: str) -> bool:
     """Pre-approve the facility's own extensions for ``worktree_path`` BEFORE
-    Copilot ever spawns there (github/copilot-agent-runtime#22266).
+    Copilot ever spawns there (a known Copilot CLI extension-load gate).
 
     Without this, a fresh location's first extension load blocks on an
     interactive "extension-permission-access" prompt -- and any tool call

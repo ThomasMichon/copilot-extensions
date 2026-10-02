@@ -605,7 +605,7 @@ def test_repo_local_machine_overlay_wins_over_in_repo_for_duplicate_names(
     config.write_text(
         "corpus:\n"
         "  sources:\n"
-        "    - name: github:gim-home/odsp-web-harness\n"
+        "    - name: github:example-org/example-repo\n"
         "      trust_domain: harness\n",
         encoding="utf-8",
     )
@@ -617,7 +617,7 @@ def test_repo_local_machine_overlay_wins_over_in_repo_for_duplicate_names(
         "  ssh: overlay-box\n"
         "corpus:\n"
         "  sources:\n"
-        "    - name: github:gim-home/odsp-web-harness\n"
+        "    - name: github:example-org/example-repo\n"
         "      trust_domain: machine-local\n"
         "    - name: github:ThomasMichon/copilot-extensions\n"
         "      trust_domain: machine-local\n",
@@ -631,7 +631,7 @@ def test_repo_local_machine_overlay_wins_over_in_repo_for_duplicate_names(
     assert result["indexers"] == [{"machine": "overlay-box", "ssh": "overlay-box"}]
     assert result["sources"] == [
         {
-            "name": "github:gim-home/odsp-web-harness",
+            "name": "github:example-org/example-repo",
             "trust_domain": "machine-local",
         },
         {
@@ -685,7 +685,7 @@ def test_knowledge_overlay_beats_in_repo_base_for_duplicate_names(
     config.write_text(
         "corpus:\n"
         "  sources:\n"
-        "    - name: github:gim-home/odsp-web-harness\n",
+        "    - name: github:example-org/example-repo\n",
         encoding="utf-8",
     )
     knowledge = tmp_path / "knowledge"
@@ -695,7 +695,7 @@ def test_knowledge_overlay_beats_in_repo_base_for_duplicate_names(
     knowledge_config.write_text(
         "corpus:\n"
         "  sources:\n"
-        "    - name: github:gim-home/odsp-web-harness\n"
+        "    - name: github:example-org/example-repo\n"
         "      repo: knowledge-copy\n"
         "    - name: git:dotfiles\n"
         "      repo: dotfiles\n",
@@ -710,7 +710,7 @@ def test_knowledge_overlay_beats_in_repo_base_for_duplicate_names(
     assert result["opted_in"] is True
     assert Path(result["config"]) == config.resolve()
     assert result["sources"] == [
-        {"name": "github:gim-home/odsp-web-harness", "repo": "knowledge-copy"},
+        {"name": "github:example-org/example-repo", "repo": "knowledge-copy"},
         {"name": "git:dotfiles", "repo": "dotfiles"},
     ]
 

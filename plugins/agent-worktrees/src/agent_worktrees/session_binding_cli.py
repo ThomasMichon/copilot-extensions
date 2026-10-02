@@ -8,7 +8,7 @@ import sys
 
 import yaml
 
-from . import activity, output, profile_assignment, sessions, tracking
+from . import activity, output, profile_assignment, related_briefing, sessions, tracking
 from . import config as cfg, session_context as session_context_mod
 from . import session_tracking_cli, status_monitor_runtime, status_updater_cli
 
@@ -544,6 +544,8 @@ def cmd_register_session(args: argparse.Namespace) -> int:
                     plugin_related_anchors=getattr(args, "plugin_related_anchors", None),
                 )
                 message = f"[agent-worktrees] This Copilot session is bound.\n{registry_context}"
+                message = related_briefing.augment_session_message(
+                    message, context_config, record, cwd=target_cwd, session_id=session_id)
             except Exception:
                 message = ""
         if not message and recovered_mux:

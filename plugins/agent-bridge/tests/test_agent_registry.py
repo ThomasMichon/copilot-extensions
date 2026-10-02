@@ -2263,8 +2263,8 @@ def test_detect_local_machine_via_hostname_field(monkeypatch):
     from agent_bridge.agent_registry import _detect_local_machine
     machines = parse_machines_yaml({
         "machines": {
-            "host-augloop1": {
-                "display_name": "augloop1",
+            "host-box1": {
+                "display_name": "box1",
                 "hostname": "cpc-tmich-oixui",
                 "environment": "Windows 11",
             },
@@ -2273,7 +2273,7 @@ def test_detect_local_machine_via_hostname_field(monkeypatch):
     monkeypatch.setattr("socket.gethostname", lambda: "CPC-tmich-OIXUI")
     machine, _platform = _detect_local_machine(machines)
     assert machine is not None
-    assert machine.key == "host-augloop1"
+    assert machine.key == "host-box1"
 
 
 class TestWorktreeDiscoveryEligibility:

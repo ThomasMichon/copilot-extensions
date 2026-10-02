@@ -48,6 +48,7 @@ from .pivot_actions import (
     parse_worktree_actions,
     worktree_action_matches,
 )
+from .pivot_create_action import CreateAction
 from .pivot_manifest import (
     Column,
     PIVOTS_DIR_ENV,
@@ -161,6 +162,7 @@ def find_supervised_workers(pivots, pivot_runtimes, machine, wid):
 __all__ = [
     "Column",
     "ConfigSection",
+    "CreateAction",
     "ManifestError",
     "PIVOTS_DIR_ENV",
     "PLUGINS_ROOT_ENV",

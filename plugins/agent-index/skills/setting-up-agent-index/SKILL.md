@@ -81,8 +81,8 @@ list. Example:
 ```yaml
 corpus:
   sources:
-    - name: github:gim-home/odsp-web-harness
-      trust_domain: odsp-web-harness
+    - name: github:example-org/example-knowledge-repo
+      trust_domain: example-knowledge-repo
     - name: github:ThomasMichon/copilot-extensions
       trust_domain: copilot-extensions
 ```

@@ -66,6 +66,28 @@ elif mode == "subscribe_empty_done":
     # before ending (an early/bare ``done``) -- every reconnect behaves
     # identically, so this exercises the reconnect budget actually exhausting.
     emit({"type": "done"})
+elif mode == "subscribe_empty_held":
+    # Simulates a genuinely-held --subscribe channel (never EOFs) whose
+    # initial board is empty: emits `done` with zero rows, then stays open
+    # for a later delta (bounded so a failed teardown still dies). Without
+    # publishing on an empty `done`, this would stay stuck `loading` forever
+    # waiting for a row that may never come (#4840 review).
+    emit({"type": "done"})
+    time.sleep(0.3)
+    emit({"type": "delta", "entry": {"id": "a", "title": "A"}})
+    for _ in range(300):
+        time.sleep(0.1)
+elif mode == "echo_argv":
+    # Reflects whether --subscribe was actually passed through, so the
+    # runtime's argv construction (not just the manifest flag) is proven.
+    emit({
+        "type": "row",
+        "entry": {
+            "id": "a",
+            "title": "subscribed" if "--subscribe" in sys.argv else "plain",
+        },
+    })
+    emit({"type": "done"})
 '''
 
 
@@ -193,6 +215,51 @@ def test_one_shot_invalidate_midflight_drops_stale_result(tmp_path):
     state, rows, _err = _wait_ready(rt, None)
     assert state == "ready"
     assert [r["id"] for r in rows] == ["a"]
+
+
+def test_subscribe_pivot_passes_subscribe_flag_to_provider(tmp_path):
+    """#4840 review: declaring ``subscribe: true`` in the manifest is only
+    metadata unless the runtime actually appends ``--subscribe`` to argv --
+    without it, the provider runs its one-shot envelope and exits
+    immediately, and every "termination" gets funneled through the
+    subscribe-reconnect path instead of ever holding one process open."""
+    rt = tasks.RegisteredPivotRuntime(
+        _make_pivot(tmp_path, "echo_argv", subscribe=True))
+    rt.ensure(None)
+    state, rows, _err = _wait_ready(rt, None)
+    assert state == "ready"
+    assert rows[0]["title"] == "subscribed"
+    rt.close()
+
+
+def test_stream_only_pivot_does_not_pass_subscribe_flag(tmp_path):
+    """The converse: a ``stream``-only (non-``subscribe``) pivot must NOT
+    get ``--subscribe`` -- it stays a plain one-shot envelope."""
+    rt = tasks.RegisteredPivotRuntime(
+        _make_pivot(tmp_path, "echo_argv", subscribe=False))
+    rt.ensure(None)
+    state, rows, _err = _wait_ready(rt, None)
+    assert state == "ready"
+    assert rows[0]["title"] == "plain"
+
+
+def test_subscribe_empty_board_still_becomes_ready(tmp_path):
+    """#4840 review: a held ``subscribe`` channel whose initial board is
+    empty must still publish a ready, empty snapshot on ``done`` -- not stay
+    stuck ``loading`` forever waiting for a ``row`` that may never come. A
+    later delta on the same still-open channel must then paint normally."""
+    rt = tasks.RegisteredPivotRuntime(
+        _make_pivot(tmp_path, "subscribe_empty_held", subscribe=True))
+    rt.ensure(None)
+    state, rows, _err = _wait_ready(rt, None)
+    assert state == "ready"
+    assert rows == []
+    # The channel is still open (not dropped/reconnected) -- a later delta
+    # paints in place, same held process.
+    _state, rows, _err = _wait(
+        rt, None, lambda s, r, e: bool(r), timeout=4.0)
+    assert [r["id"] for r in rows] == ["a"]
+    rt.close()
 
 
 def test_subscribe_live_delta_then_close_tears_down(tmp_path):

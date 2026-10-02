@@ -60,8 +60,20 @@ def _lower_cpu_priority(nice: int) -> None:
             below_normal = 0x00004000  # BELOW_NORMAL_PRIORITY_CLASS
             idle = 0x00000040  # IDLE_PRIORITY_CLASS
             cls = idle if nice >= 15 else below_normal
-            handle = ctypes.windll.kernel32.GetCurrentProcess()  # type: ignore[attr-defined]
-            if ctypes.windll.kernel32.SetPriorityClass(handle, cls):  # type: ignore[attr-defined]
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            # GetCurrentProcess() returns a pseudo-HANDLE (-1, i.e. the
+            # 64-bit all-ones bit pattern on Win64) -- ctypes' untyped
+            # default (c_int, 32-bit signed) truncates/mis-sign-extends
+            # that value, so SetPriorityClass is then called with a
+            # corrupted handle and fails silently (returns 0 / BOOL
+            # False) on every run, never actually lowering priority.
+            # Declaring the real Win32 signatures (HANDLE -> void*,
+            # DWORD -> uint32) is required for this to work at all.
+            kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+            kernel32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+            kernel32.SetPriorityClass.restype = ctypes.c_int
+            handle = kernel32.GetCurrentProcess()
+            if kernel32.SetPriorityClass(handle, cls):
                 log.debug("indexer CPU priority lowered (win class 0x%x)", cls)
             else:
                 log.debug("SetPriorityClass returned 0; priority unchanged")
