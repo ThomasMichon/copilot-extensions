@@ -505,7 +505,11 @@ def restricted_policy_errors(
         # container is otherwise fully compliant. Derive the single
         # workspace-like surface from what's actually mounted instead.
         # "/" is never a valid workspace -- restricted creation forbids
-        # mounting writable tmpfs over root (defeats read-only-rootfs).
+        # mounting writable tmpfs over root (defeats read-only-rootfs) --
+        # so explicitly reject it even if a legitimate workspace mount is
+        # ALSO present (not just when it's the sole candidate).
+        if "/" in tmpfs:
+            errors.append("writable tmpfs surfaces differ from restricted policy")
         non_workspace = {home, "/tmp", "/run", "/"}  # noqa: S108
         observed_workspace_candidates = set(tmpfs) - non_workspace
         if len(observed_workspace_candidates) != 1:

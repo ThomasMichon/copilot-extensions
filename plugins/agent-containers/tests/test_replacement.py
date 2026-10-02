@@ -1435,3 +1435,76 @@ def test_migrating_member_image_id_tamper_is_not_tolerated(monkeypatch):
 
     assert result.status == "deferred"
     assert "provisioned image ID" in (result.reason or "")
+
+
+def test_migrating_member_uses_inspected_uid_for_docker_exec(monkeypatch):
+    """copilot-extensions#4933 follow-up: probing/rescue run `docker exec`
+    inside the OLD container -- if the CURRENT fleet's exec_user changed
+    with the migration, it may not exist there. Use the container's own
+    recorded UID label instead of today's config."""
+    config, fleet = _migrated_config()
+    info = _member()
+    _safe_defaults(monkeypatch, info)
+    monkeypatch.setattr(
+        replacement,
+        "inspect_container",
+        lambda name: {
+            "Id": name,
+            "State": {"StartedAt": "2026-01-01T00:00:00Z"},
+            "Config": {
+                "Labels": {
+                    "agent-containers.security-home": "/home/agent",
+                    "agent-containers.security-uid": "1234",
+                }
+            },
+            "HostConfig": {
+                "Tmpfs": {
+                    "/home/agent": "",
+                    "/workspace": "",
+                    "/tmp": "",  # noqa: S108
+                    "/run": "",
+                }
+            },
+            "Mounts": [],
+        },
+    )
+    monkeypatch.setattr(
+        replacement,
+        "probe_session_liveness",
+        lambda *_args, **_kwargs: replacement.SessionLiveness("idle", [], []),
+    )
+    monkeypatch.setattr(
+        replacement,
+        "restricted_policy_errors",
+        lambda *_args, **_kwargs: [],
+    )
+    resolve_calls = []
+    monkeypatch.setattr(
+        replacement,
+        "resolve_executable",
+        lambda _container_id, user, _inspected, **_kwargs: (
+            resolve_calls.append(user) or ("/bin/bash", "/home/agent")
+        ),
+    )
+    monkeypatch.setattr(
+        replacement,
+        "capture_restricted_sessions",
+        lambda *_args, **_kwargs: {"status": "verified", "capture_id": "cap-1"},
+    )
+    monkeypatch.setattr(replacement, "remove_container", lambda *_a, **_k: None)
+
+    result = replacement.destroy_restricted_member(
+        config,
+        fleet,
+        info,
+        operation="recreate",
+        force_remove=True,
+        force_abandon=False,
+        migrating=True,
+    )
+
+    assert result.status == "removed"
+    # The CURRENT fleet has no exec_user set -- the inspected container's
+    # own recorded UID ("1234") must be used, not whatever config.exec_user
+    # defaults to.
+    assert resolve_calls == ["1234"]

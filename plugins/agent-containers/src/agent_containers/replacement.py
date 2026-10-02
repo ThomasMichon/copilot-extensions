@@ -13,7 +13,7 @@ from session_liveness_probe import (
     parse_probe_output,
 )
 
-from .config import RESTRICTED_PROFILE, ContainersConfig, FleetConfig
+from .config import RESTRICTED_PROFILE, SECURITY_UID_LABEL, ContainersConfig, FleetConfig
 from .lease import (
     ProviderAdmissionError,
     active_session_admissions,
@@ -363,6 +363,17 @@ def _restricted_member_action(
                 )
 
             inspected = inspect_container(current.container_id)
+            if migrating:
+                # Probing/rescue run `docker exec` inside the OLD
+                # container; the CURRENT fleet's exec_user may not exist
+                # there if it changed with the migration. Use the
+                # container's own recorded UID (Docker accepts a numeric
+                # `-u`) instead of today's config.
+                migrated_uid = (
+                    (inspected.get("Config") or {}).get("Labels") or {}
+                ).get(SECURITY_UID_LABEL)
+                if migrated_uid:
+                    user = migrated_uid
             try:
                 generation = container_generation(inspected)
             except RescueError as exc:
