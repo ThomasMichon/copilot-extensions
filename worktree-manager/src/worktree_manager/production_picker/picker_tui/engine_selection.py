@@ -425,11 +425,12 @@ class PickerScreenSelectionMixin:
     def registered_create_row(self, reg, width, focus):
         """A registered pivot's data-driven "New …" button row (Phase B,
         picker-new-session-prompt-and-composer) -- mirrors ``new_worktree_row``'s
-        single-chip shape, but the label comes from the manifest's own
-        ``create_action.label`` (no hardcoded per-pivot text table) since any
-        pivot can declare one."""
+        single-chip shape, but the label comes verbatim from the manifest's own
+        ``create_action.label`` (no hardcoded per-pivot text table, and no
+        appended ellipsis of our own -- the manifest already carries one when
+        it wants one, e.g. ``"New task…"``) since any pivot can declare one."""
         t = Text("  ")
-        t.append(f" + {reg.create_action.label}… ", style=self._btn_style(focus, True))
+        t.append(f" + {reg.create_action.label} ", style=self._btn_style(focus, True))
         t.append(" " * max(0, width - t.cell_len))
         return t
     def button_row(self, label, suffix, selected, width):

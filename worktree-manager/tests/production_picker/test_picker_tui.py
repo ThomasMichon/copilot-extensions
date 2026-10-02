@@ -8968,15 +8968,11 @@ def test_registered_pivot_create_action_opens_and_submits(tmp_path, monkeypatch)
             await pilot.pause()
             assert isinstance(app.screen, CreateActionScreen)
             screen = app.screen
-            # Two fields -> TabbedContent; q-0 (text) then q-1 (textarea). A
-            # plain text Input has no Enter/Ctrl+Right-to-advance mechanic of
-            # its own (only textarea/choice/multichoice do, via field_widgets'
-            # custom widgets -- Input's native word-cursor binding claims
-            # Ctrl+Right first), so move to the next tab directly, the same
-            # way a mouse click on the tab header would.
+            # Two fields -> TabbedContent; q-0 (text) then q-1 (textarea). Both
+            # the real documented keyboard flow (Ctrl+Right to switch tabs,
+            # Enter to accept + advance) work for a text field too.
             screen.query_one("#q-0", Input).value = "Fix the flaky test"
-            screen._activate_tab(1)
-            screen._q[1]["primary"].focus()
+            await pilot.press("ctrl+right")      # text tab -> textarea tab
             await pilot.pause()
             screen.query_one("#q-1", _AutoExpandTextArea).text = "investigate and fix it"
             await pilot.press("enter")          # advance textarea -> button row
@@ -9063,8 +9059,7 @@ def test_registered_pivot_create_action_confirm_gate(tmp_path, monkeypatch):
             screen = app.screen
             assert isinstance(screen, CreateActionScreen)
             screen.query_one("#q-0", Input).value = "A title"
-            screen._activate_tab(1)
-            screen._q[1]["primary"].focus()
+            await pilot.press("ctrl+right")      # text tab -> textarea tab
             await pilot.pause()
             await pilot.press("enter")          # textarea -> button row
             await pilot.press("enter")          # activate Create -> confirm gate

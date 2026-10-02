@@ -509,8 +509,10 @@ class PickerScreenPivotActionsMixin:
         ``{field.<name>}``/``{fields}`` tokens (no entry tokens -- there is no
         row) and run the command via the pivot runtime, off the render flow
         (:meth:`_run_bg`) exactly like the row-scoped form action. Invalidates
-        the cached list on success so the new entry shows up without waiting
-        on the idle poll tick."""
+        the cached list after every completed attempt (success OR failure,
+        mirroring `_run_pivot_form_submit`) -- a failing command may still
+        have mutated state before returning nonzero, and the old rows would
+        otherwise stay cached indefinitely."""
         from . import pivots as _pivots
 
         rt = self._pivot_runtime(reg)
@@ -522,11 +524,10 @@ class PickerScreenPivotActionsMixin:
             except Exception as exc:  # never let a delivery attempt vanish silently
                 ok, msg = False, f"{type(exc).__name__}: {exc}"
             else:
-                if ok:
-                    try:
-                        rt.invalidate()
-                    except Exception:
-                        pass
+                try:
+                    rt.invalidate()
+                except Exception:
+                    pass
             return ok, msg
 
         def _done(result):

@@ -73,7 +73,7 @@ _DEMO_PIVOT_MANIFEST: dict[str, object] = {
     # data, per this project's "render early, render often" convention --
     # a preview that never populates a new field verifies nothing.
     "create_action": {
-        "label": "New test request",
+        "label": "New test request\u2026",
         "fields": [
             {"name": "title", "type": "text"},
             {"name": "prompt", "type": "textarea"},
