@@ -240,8 +240,10 @@ restarts while the Owner can still bind it. If something else grabs that
 kernel-assigned port while the forward is down, the Owner records a replacement
 assigned port rather than reporting another process's listener as ready; the URL
 changes only because the old assigned port is unusable. Re-running the same
-`--forward 0:VENUE_PORT` for a running session reuses the already assigned host
-port only while the Owner currently owns that forward. The forward can exist
+`--forward 0:VENUE_PORT` for a running session reuses the assigned host port the
+hold recorded, even after an Owner restart (the active-forward beacon may be
+missing or stale then): the restarted Owner rebinds that port and assigns a new
+one only on a proven conflict. The forward can exist
 before the server starts. A rejoin without the flag keeps the
 session's existing assigned or fixed port; `--stop` removes it. If the launch
 times out before the Owner reports the assigned port, the session still returns
