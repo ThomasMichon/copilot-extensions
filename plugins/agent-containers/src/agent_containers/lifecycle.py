@@ -406,9 +406,24 @@ def restricted_policy_errors(
     if migrating:
         # FIXED invariant independent of the current fleet's configured
         # network name: the container must be network-isolated -- either
-        # no network at all, or every attached network is Docker-internal.
+        # no network at all (with nothing attached), or every attached
+        # network verified Docker-internal. An uninspectable non-"none"
+        # mode (e.g. a namespace-sharing "container:<id>" with no own
+        # Networks entries) is rejected rather than treated as safe.
         network_mode = host.get("NetworkMode")
-        if network_mode != "none" and attached_networks:
+        if network_mode == "none":
+            # Docker's real shape for --network none: NetworkSettings
+            # reports exactly one entry keyed "none" -> {} -- not an
+            # absence of entries.
+            if attached_networks != {"none"}:
+                errors.append(
+                    "network mode is 'none' but attached networks are unexpected"
+                )
+        elif not attached_networks:
+            errors.append(
+                f"network mode {network_mode!r} has no inspectable attached networks"
+            )
+        else:
             for net_name in attached_networks:
                 inspected_net = _docker(["network", "inspect", net_name], timeout=30)
                 try:
@@ -463,25 +478,39 @@ def restricted_policy_errors(
             errors.append("PID limit differs from configured limit")
 
     tmpfs = host.get("Tmpfs") or {}
-    required_tmpfs = {workspace_folder, home, "/tmp", "/run"}  # noqa: S108
-    if set(tmpfs) != required_tmpfs:
-        errors.append("writable tmpfs surfaces differ from restricted policy")
+    if migrating:
+        # ``workspace_folder`` is part of the OLD restricted policy
+        # fingerprint -- it may have changed together with
+        # security_profile, so requiring an exact match against the
+        # CURRENT config's value would wrongly defer a migration whose
+        # container is otherwise fully compliant. Derive the single
+        # workspace-like surface from what's actually mounted instead.
+        non_workspace = {home, "/tmp", "/run"}  # noqa: S108
+        observed_workspace_candidates = set(tmpfs) - non_workspace
+        if len(observed_workspace_candidates) != 1:
+            errors.append("writable tmpfs surfaces differ from restricted policy")
+            observed_workspace = None
+        else:
+            observed_workspace = next(iter(observed_workspace_candidates))
+    else:
+        required_tmpfs = {workspace_folder, home, "/tmp", "/run"}  # noqa: S108
+        if set(tmpfs) != required_tmpfs:
+            errors.append("writable tmpfs surfaces differ from restricted policy")
+        observed_workspace = workspace_folder
     # FIXED flags every writable tmpfs surface must carry regardless of
     # profile/config: no setuid, no device nodes, owned by the restricted
     # exec user, private mode. Only the exact ``size=`` budget is
     # current-config-dependent (skipped during migration).
     base_flags = {"rw", "nosuid", "nodev", "exec", f"uid={uid}", f"gid={gid}", "mode=0700"}
-    fixed_flags = {
-        workspace_folder: base_flags,
-        home: base_flags,
-        "/tmp": {"rw", "nosuid", "nodev"},  # noqa: S108
-        "/run": {"rw", "nosuid", "nodev"},
-    }
+    tmp_flags = {"rw", "nosuid", "nodev"}
+    fixed_flags = {home: base_flags, "/tmp": tmp_flags, "/run": tmp_flags}  # noqa: S108
+    if observed_workspace is not None:
+        fixed_flags[observed_workspace] = base_flags
     expected_options = {
         workspace_folder: base_flags | {f"size={fleet.effective_workspace_size()}"},
         home: base_flags | {f"size={fleet.effective_home_size()}"},
-        "/tmp": fixed_flags["/tmp"] | {"size=512m"},  # noqa: S108
-        "/run": fixed_flags["/run"] | {"size=64m"},
+        "/tmp": tmp_flags | {"size=512m"},  # noqa: S108
+        "/run": tmp_flags | {"size=64m"},
     }
     for path, expected in (fixed_flags if migrating else expected_options).items():
         actual = set(str(tmpfs.get(path, "")).split(",")) if path else set()
@@ -489,6 +518,7 @@ def restricted_policy_errors(
             actual = {opt for opt in actual if not opt.startswith("size=")}
         if actual != expected:
             errors.append(f"{path} tmpfs options differ from restricted policy")
+
 
     return errors
 
