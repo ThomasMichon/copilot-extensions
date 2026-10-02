@@ -64,7 +64,7 @@ from typing import Any
 
 import yaml
 from dropin_registry import ScanAuthority
-from plugin_activation import resolve_active_plugins
+from plugin_activation import ActivationReport, resolve_active_plugins
 
 # Repo-owned related-repo config moves toward the shared plugin namespace;
 # payload contributions retain the legacy in-payload ``.agent-worktrees/`` location.
@@ -828,18 +828,19 @@ def installed_plugin_related_anchors(
     root: Path | None = None,
     *,
     home: str | Path | None = None,
+    report: ActivationReport | None = None,
 ) -> list[str]:
     """Discover active plugins that ship a ``.agent-worktrees/related.yaml``.
 
     Returns each contributing plugin's directory (a valid :func:`read_related`
-    anchor), de-duplicated and sorted deterministically. Production discovery
-    uses the effective global-plus-adopted-project activation graph, so copied
-    payloads and live directory-marketplace plugins follow the same enabled and
-    identity-verified contract.
+    anchor), de-duplicated and sorted. Production discovery uses the effective
+    global-plus-adopted-project activation graph (enabled + identity-verified).
 
     ``root`` and :data:`INSTALLED_PLUGINS_ENV` retain the legacy explicit
     filesystem scan for contained tests and diagnostics. That scan tolerates
     marketplace-nested and flat layouts and requires a plugin manifest.
+    ``report`` reuses an already-resolved scan to avoid repeating this
+    not-cheap resolution (see ``related_briefing.write_related_briefings``).
 
     These anchors are the lowest-precedence config-graft layer (see the module
     note above); callers prepend them ahead of the base/knowledge anchors.
@@ -851,7 +852,7 @@ def installed_plugin_related_anchors(
         )
 
     try:
-        report = resolve_active_plugins(home=home)
+        report = report or resolve_active_plugins(home=home)
     except (OSError, ValueError):
         return []
     if report.authority is ScanAuthority.INDETERMINATE:

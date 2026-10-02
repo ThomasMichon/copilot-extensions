@@ -55,12 +55,155 @@ def _safe_filename(name: str) -> str | None:
     return name
 
 
+def _editing_model_label(
+    resolution: related.Resolution, *, available_here: bool, registered: bool,
+) -> str:
+    """Render ``resolution.editing_model`` disambiguating the distinct causes
+    of a raw ``"unknown"``/empty value. The bare label used to conflate these
+    (and could flatly contradict the entry's own free-text ``summary`` in the
+    same rendered file, or flatly misreport an actually-registered repo):
+
+    * a genuine **local-checkout** case -- a ``"local"`` or same-machine
+      ``"machine"`` locus that is actually *available here* (``local``'s own
+      ``locus.machines`` can name only other hosts, in which case
+      ``build_resolution`` itself sets ``available_here=False`` -- that's a
+      remote checkout, not a local gap; ``available_here`` already folds in
+      the caller's ``current_checkout_path`` override) -- is checked FIRST,
+      before ``registered``: a registered repo (e.g. a ``knowledge`` class
+      this planner has no editing prose for) whose *preferred locus* is a
+      remote venue (codespace/container/another machine) is still a remote
+      case, never "registered (...)";
+    * within that local case, ``registered`` (the caller's own registry
+      lookup actually found an entry, any class) disambiguates a real gap
+      from a registered-but-unmapped class -- reported honestly, never as an
+      unregistered gap;
+    * any other case (not available here, or a codespace/container venue
+      regardless of reachability -- editing still happens inside that venue,
+      never via this machine's own checkout) is never edited from a local
+      checkout at all -- an unregistered-locally repo there is expected, not
+      a gap.
+    """
+    model = resolution.editing_model or "unknown"
+    if model != "unknown":
+        return model
+    is_local_checkout = available_here and resolution.locus_kind in ("local", "machine")
+    if not is_local_checkout:
+        return "n/a (remote venue -- edited there, not from a local checkout)"
+    if registered:
+        return "registered (no generated editing-model guidance for this repo class)"
+    return (
+        "unknown (not registered locally -- see "
+        f"`agent-worktrees repos find {resolution.name}`)"
+    )
+
+
+_NOT_GIVEN = object()
+
+
+def _find_using_skills(
+    repo_name: str,
+    *,
+    root: Path | None = None,
+    home: str | Path | None = None,
+    active_report: Any = _NOT_GIVEN,
+    project_name: str = "",
+) -> list[str]:
+    """Discover installed ``using-<repo_name>-<venue>``-style skills.
+
+    A match means a richer, hand-authored venue guide for ``repo_name``
+    already exists (full setup/file-handoff/verification mechanics) -- this
+    generated skeleton should point to it rather than leaving an agent to
+    improvise the venue flow from the thinner mechanical facts alone.
+
+    Mirrors :func:`related.installed_plugin_related_anchors`'s own
+    production-vs-test split: production discovery (``root`` unset, no
+    :data:`related.INSTALLED_PLUGINS_ENV` override) walks the
+    identity-verified *active* plugin graph (never a disabled, stale, or
+    wrong-marketplace plugin's leftover payload); ``home`` lets a test
+    redirect that scan the same way :func:`related.installed_plugin_related_anchors`
+    does. ``root`` or the env override retain a tolerant flat/nested
+    filesystem scan for contained tests and diagnostics. Best effort and
+    never raises: a missing/unreadable tree, or an indeterminate activation
+    scan, is simply "no richer skill found," never a hard failure.
+
+    ``active_report`` lets a caller resolving many repos in one pass (see
+    :func:`write_related_briefings`) share a single, already-resolved
+    activation scan instead of repeating the full verified-project/Git-probe
+    resolution once per related repo -- that resolution is not cheap, and a
+    topology with N related repos must not re-pay its cost N times over.
+    Left unset (the default), this resolves its own scan, same as before.
+
+    ``resolve_active_plugins()`` returns the full machine-wide graph across
+    *every* registered project, not just the one this session is actually
+    running in -- ``project_name`` (mirroring ``config_dropins.py``'s own
+    ``{"global", f"project:{name}"}`` scope-intersection pattern) restricts
+    matches to roots actually reachable from the current session, so a skill
+    enabled only under an unrelated ``project:other-repo`` is never
+    advertised here.
+    """
+    if not repo_name:
+        return []
+    prefix = f"using-{repo_name}-"
+    override = os.environ.get(related.INSTALLED_PLUGINS_ENV)
+    if root is None and not override:
+        if active_report is _NOT_GIVEN:
+            try:
+                report = related.resolve_active_plugins(home=home)
+            except (OSError, ValueError):
+                return []
+        else:
+            report = active_report
+        if report is None:
+            return []
+        if report.authority is related.ScanAuthority.INDETERMINATE:
+            return []
+        allowed_scopes = {"global"}
+        if project_name:
+            allowed_scopes.add(f"project:{project_name}")
+        found_active: set[str] = set()
+        for plugin in report.active.values():
+            for selected in plugin.live_roots:
+                if not allowed_scopes.intersection(selected.scopes):
+                    continue
+                try:
+                    skills_dir = Path(selected.root) / "skills"
+                    if not skills_dir.is_dir():
+                        continue
+                    for skill_dir in skills_dir.glob(f"{prefix}*"):
+                        if skill_dir.is_dir() and (skill_dir / "SKILL.md").is_file():
+                            found_active.add(skill_dir.name)
+                except OSError:
+                    continue
+        return sorted(found_active)
+
+    base = root or Path(override).expanduser()
+    try:
+        if not base.is_dir():
+            return []
+    except OSError:
+        return []
+    found: set[str] = set()
+    for pattern in (f"*/skills/{prefix}*", f"*/*/skills/{prefix}*"):
+        try:
+            for skill_dir in base.glob(pattern):
+                try:
+                    if skill_dir.is_dir() and (skill_dir / "SKILL.md").is_file():
+                        found.add(skill_dir.name)
+                except OSError:
+                    continue
+        except OSError:
+            continue
+    return sorted(found)
+
+
 def render_briefing(
     entry: related.RelatedEntry,
     resolution: related.Resolution,
     *,
     doc_relpath: str | None,
     current_checkout_path: str | None = None,
+    using_skills: list[str] | None = None,
+    registered: bool = False,
 ) -> str:
     """Render the deterministic markdown skeleton for one related repo.
 
@@ -68,6 +211,11 @@ def render_briefing(
     ``explore`` prose (the same sentences ``related resolve`` prints) rather
     than inventing new wording -- this generator's job is composition and
     delivery, not a new source of truth for what those sentences say.
+
+    ``registered`` is the caller's own ``repos.yaml`` lookup result (``reg is
+    not None``) -- it disambiguates an editing model left ``"unknown"`` for a
+    registered-but-unmapped repo class (e.g. ``knowledge``) from a genuinely
+    unregistered repo; see :func:`_editing_model_label`.
 
     ``current_checkout_path``, when set, means this entry describes the
     **same repo this session is already checked out in** (cwd-derived, not a
@@ -104,8 +252,11 @@ def render_briefing(
         locus_desc += f" (machine: {resolution.target_machine})"
     lines.append(f"- **Locus:** {locus_desc}")
     lines.append(f"- **Delegate:** {resolution.delegate_via or 'none'}")
-    lines.append(f"- **Editing model:** {resolution.editing_model or 'unknown'}")
     available_here = resolution.available_here or bool(current_checkout_path)
+    lines.append(
+        f"- **Editing model:** "
+        f"{_editing_model_label(resolution, available_here=available_here, registered=registered)}"
+    )
     if not available_here:
         lines.append("- **Not available on this machine.**")
     if entry.summary:
@@ -161,6 +312,17 @@ def render_briefing(
             f"Scaffold one with `agent-worktrees related doc {name}` if this "
             "repo's operating guidance needs detail beyond this generated "
             "skeleton."
+        )
+    if using_skills:
+        lines.append("")
+        lines.append("## Richer venue skill")
+        lines.append("")
+        listing = ", ".join(f"`{s}`" for s in using_skills)
+        lines.append(
+            f"A dedicated skill covers this repo's full venue mechanics "
+            f"(setup, file hand-off, verification): {listing}. Prefer it "
+            "over improvising the venue flow from this generated skeleton "
+            "alone."
         )
     text = "\n".join(lines) + "\n"
     encoded = text.encode("utf-8")
@@ -224,15 +386,40 @@ def write_related_briefings(
         return []
     try:
         anchors = state_root.config_source_anchors(config, cwd=cwd)
-        plugin_anchors = (
-            related.installed_plugin_related_anchors()
-            if plugin_related_anchors is None
-            else plugin_related_anchors
-        )
+        # Resolve the active-plugin graph (if needed at all) exactly once for
+        # this whole write, and share it between anchor discovery and
+        # per-repo using-skill discovery below -- each is a separate
+        # *consumer* of the same scan, not a reason to repeat a resolution
+        # that re-verifies every adopted project with Git subprocesses.
+        using_skills_report: Any = None
+        using_override = bool(os.environ.get(related.INSTALLED_PLUGINS_ENV))
+        if plugin_related_anchors is None:
+            scan_failed = False
+            if not using_override:
+                try:
+                    using_skills_report = related.resolve_active_plugins()
+                except (OSError, ValueError):
+                    scan_failed = True
+            # A failed scan must not be retried via installed_plugin_related
+            # _anchors' own "resolve if report is None" fallback -- that
+            # would repeat the same expensive, just-failed resolution. Under
+            # the filesystem-override env var, both this function and
+            # _find_using_skills ignore any report anyway -- skip resolving
+            # one at all rather than computing a value neither consumes.
+            plugin_anchors = (
+                []
+                if scan_failed
+                else related.installed_plugin_related_anchors(
+                    report=using_skills_report,
+                )
+            )
+        else:
+            plugin_anchors = plugin_related_anchors
         topology = related.read_related_grafted(
             [*plugin_anchors, *[item.anchor for item in anchors]]
         )
         current_machine = getattr(config, "machine", "") or ""
+        current_project = getattr(config, "repo_name", "") or ""
         try:
             projects = doctor._read_projects()
         except Exception:
@@ -278,6 +465,11 @@ def write_related_briefings(
             content = render_briefing(
                 entry, resolution, doc_relpath=doc_relpath,
                 current_checkout_path=(current_checkout_path if is_current else None),
+                using_skills=_find_using_skills(
+                    entry.name, active_report=using_skills_report,
+                    project_name=current_project,
+                ),
+                registered=reg is not None,
             )
             target = files_dir / f"{safe}.md"
             if _atomic_write(files_dir, target, content):

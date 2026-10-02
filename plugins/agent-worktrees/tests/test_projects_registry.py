@@ -245,6 +245,52 @@ def test_subcommand_preserves_hidden_repo_with_repo_dir(monkeypatch, tmp_path: P
     assert seen == {"repo_agent": False, "project_exposure": False}
 
 
+def test_subcommand_records_local_presence_when_repo_dir_given(
+    monkeypatch, tmp_path: Path
+):
+    """register-project-entry is the installer's own adoption write (used by
+    e.g. a harness's own first-time bootstrap) -- it must offer the same
+    best-effort related.yaml presence recording as `register`."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr("agent_worktrees.repos.find_repo", lambda _name: None)
+    monkeypatch.setattr("agent_worktrees.repos.add_repo", lambda *a, **k: None)
+    monkeypatch.setattr(
+        m.subprocess,
+        "run",
+        lambda *args, **kwargs: argparse.Namespace(returncode=1, stdout=""),
+    )
+    monkeypatch.setattr(installer, "register_project", lambda *a, **k: None)
+
+    recorded: dict[str, object] = {}
+    monkeypatch.setattr(
+        "agent_worktrees.related_machine_presence.record_on_adoption",
+        lambda project, repo_dir: recorded.update(project=project, repo_dir=repo_dir),
+    )
+
+    rc = m.cmd_register_project_entry(_entry_args(repo_dir=str(repo)))
+
+    assert rc == 0
+    assert recorded == {"project": "myproj", "repo_dir": str(repo)}
+
+
+def test_subcommand_skips_local_presence_without_repo_dir(monkeypatch, tmp_path: Path):
+    """No repo_dir (a context-less re-registration) -- there's no cwd to
+    resolve a knowledge-repo-relative state root from, so this is a no-op
+    rather than guessing a machine/cwd."""
+    monkeypatch.setattr(installer, "register_project", lambda *a, **k: None)
+    called = []
+    monkeypatch.setattr(
+        "agent_worktrees.related_machine_presence.record_on_adoption",
+        lambda *a, **k: called.append(True),
+    )
+
+    rc = m.cmd_register_project_entry(_entry_args())
+
+    assert rc == 0
+    assert called == []
+
+
 # ---------------------------------------------------------------------------
 # Reserved-name guard -- the runtime is not a project
 # ---------------------------------------------------------------------------

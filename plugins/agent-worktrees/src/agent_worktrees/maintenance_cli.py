@@ -936,6 +936,19 @@ def cmd_register_project_entry(args) -> int:
             wsl_path=getattr(args, "wsl_path", None),
         )
         binstub_registration.commit()
+
+    # Best-effort, mirroring cmd_register: this entry point is the installer's
+    # own adoption write (both platform installers call it), so it is exactly
+    # the "this repo is now present on this machine" moment a related.yaml
+    # entry's locus.machines list should reflect -- see related_machine_presence.
+    if repo_dir:
+        try:
+            from . import related_machine_presence
+
+            related_machine_presence.record_on_adoption(project, repo_dir)
+        except Exception:
+            pass
+
     return 0
 
 

@@ -116,3 +116,105 @@ class TestRecordLocalPresence:
         )
 
         assert changed is False
+
+
+class TestRecordOnAdoption:
+    """Regression coverage for the ``record_on_adoption`` adoption-site
+    helper: it must load *that project's own* config, not whatever project
+    happens to be active (or none) -- a bare ``load_config(project=project)``
+    resolves its config *path* independently of the ``project`` kwarg and
+    raises when no project is active, which register-project-entry's
+    adoption flow never sets."""
+
+    def test_uses_project_specific_config_without_an_active_project(
+        self, monkeypatch, tmp_path: Path
+    ):
+        from agent_worktrees import config as cfg
+
+        # No active project is set anywhere in this test -- exactly
+        # register-project-entry's own calling context. A regression to
+        # `load_config(project=project)` (no explicit path) would resolve
+        # `default_config_path()`'s *currently active* project instead of
+        # "myproj" (or raise outright with none active), get swallowed by
+        # record_on_adoption's try/except, and silently record nothing.
+        assert cfg.active_project() is None
+
+        seen: dict[str, object] = {}
+        sentinel_config = SimpleNamespace()
+
+        def _fake_load_project_config(name):
+            seen["project_config_loaded_for"] = name
+            return sentinel_config
+
+        monkeypatch.setattr(cfg, "load_project_config", _fake_load_project_config)
+        monkeypatch.setattr(cfg, "detect_machine", lambda *_a, **_k: "book2")
+
+        recorded: dict[str, object] = {}
+        monkeypatch.setattr(
+            related_machine_presence,
+            "record_local_presence",
+            lambda config, repo_name, machine, *, cwd=None: recorded.update(
+                config=config, repo_name=repo_name, machine=machine, cwd=cwd,
+            )
+            or True,
+        )
+
+        changed = related_machine_presence.record_on_adoption(
+            "myproj", str(tmp_path),
+        )
+
+        assert changed is True
+        assert seen == {"project_config_loaded_for": "myproj"}
+        assert recorded == {
+            "config": sentinel_config, "repo_name": "myproj",
+            "machine": "book2", "cwd": str(tmp_path),
+        }
+
+    def test_prefers_loaded_config_machine_over_redetection(
+        self, monkeypatch, tmp_path: Path
+    ):
+        """The loaded project config's own resolved ``machine`` (its tiered
+        machine-local > global > detected lookup) must win over a fresh
+        ``detect_machine(repo_dir)`` -- redetecting can disagree with it
+        (e.g. a configured canonical alias, or no machines.yaml at all), and
+        a later session's presence check compares against ``config.machine``."""
+        from agent_worktrees import config as cfg
+
+        configured_config = SimpleNamespace(machine="configured-alias")
+        monkeypatch.setattr(cfg, "load_project_config", lambda _name: configured_config)
+        monkeypatch.setattr(
+            cfg, "detect_machine",
+            lambda *_a, **_k: (_ for _ in ()).throw(
+                AssertionError("detect_machine must not be called when config.machine is set")
+            ),
+        )
+
+        recorded: dict[str, object] = {}
+        monkeypatch.setattr(
+            related_machine_presence,
+            "record_local_presence",
+            lambda config, repo_name, machine, *, cwd=None: recorded.update(
+                machine=machine,
+            )
+            or True,
+        )
+
+        changed = related_machine_presence.record_on_adoption(
+            "myproj", str(tmp_path),
+        )
+
+        assert changed is True
+        assert recorded == {"machine": "configured-alias"}
+
+    def test_never_raises_on_internal_failure(self, monkeypatch, tmp_path: Path):
+        monkeypatch.setattr(
+            related_machine_presence,
+            "record_local_presence",
+            lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+
+        changed = related_machine_presence.record_on_adoption(
+            "myproj", str(tmp_path),
+        )
+
+        assert changed is False

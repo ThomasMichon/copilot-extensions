@@ -69,3 +69,39 @@ def record_local_presence(
         return True
     except Exception:
         return False
+
+
+def record_on_adoption(project: str, repo_dir: str) -> bool:
+    """Best-effort :func:`record_local_presence` for a repo-adoption CLI path.
+
+    Resolves ``config``/``machine`` from ``repo_dir`` itself so a caller
+    (``cmd_register``, ``cmd_register_project_entry``) needs only this one
+    call rather than repeating the config-load/machine-detect/try-except
+    boilerplate at every adoption call site. Never raises.
+
+    Uses :func:`config.load_project_config`, not a bare
+    ``load_config(project=project)``: the latter's ``project`` kwarg only
+    overrides the *resolved repo name* used while parsing, not which config
+    path gets read -- with no explicit ``path`` it still falls back to
+    ``default_config_path()``, which resolves the *currently active*
+    project, not ``project`` itself. ``register-project-entry`` (unlike
+    ``register``) is intentionally called without an active-project context,
+    so that mismatch would raise here and be silently swallowed, and this
+    presence update would never happen. ``load_project_config`` sets the
+    active project and loads that project's own config path explicitly.
+
+    Prefers the loaded config's own resolved ``machine`` (its tiered
+    machine-local > global > detected lookup) over a fresh
+    :func:`config.detect_machine` -- redetecting from ``repo_dir`` alone can
+    disagree with it (e.g. a canonical machine alias configured for this
+    project, or no ``machines.yaml`` at all), and a later session's own
+    presence check compares against ``config.machine``, not a raw hostname.
+    """
+    try:
+        from . import config as cfg
+
+        loaded = cfg.load_project_config(project)
+        machine = getattr(loaded, "machine", "") or cfg.detect_machine(repo_dir)
+        return record_local_presence(loaded, project, machine, cwd=repo_dir)
+    except Exception:
+        return False
