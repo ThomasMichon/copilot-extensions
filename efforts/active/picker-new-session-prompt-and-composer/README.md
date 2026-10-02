@@ -209,11 +209,12 @@ real code, not assumption:
       New-worktree confirm tests updated for the extra screen hop (each now
       needs 2 Enter presses: textarea->buttons, then activate Launch); 2 new
       tests cover the Bare-skips-the-screen path and a typed prompt carrying
-      through to the decision. Full suite: 847 passed, 1 skipped. **The
-      screen is currently gated OFF the live flow**
-      (`_SEED_PROMPT_ENABLED = False` in `engine_maintenance_actions.py`)
-      until the two seams in the next item are complete -- see there and
-      the Journal for why.
+      through to the decision. Full suite: 847 passed, 1 skipped. The
+      screen's live gate (`_SEED_PROMPT_ENABLED`) stayed off until the
+      remaining delivery seams closed -- see the next item and the Journal;
+      it is now `True` (2026-10-02), and the skip condition has since grown
+      to also cover Anchor-repo and remote-machine targets (see the
+      Journal's 2026-10-02 entries).
 - [x] **Persist the prompt at creation time; deliver it on first attach**
       (current design, replacing the Picker-specific launch-script argument
       chain originally planned here -- see the Journal for the full
@@ -358,7 +359,7 @@ real code, not assumption:
 
 ## Validation Plan
 
-- [ ] Phase A: create a real worktree from the Picker with a typed prompt;
+- [~] Phase A: create a real worktree from the Picker with a typed prompt;
       confirm the new session's first interactive turn is that prompt, with
       no race against the auto-update/bootstrap sequence. Also confirm the
       SKIP path (no prompt entered) launches exactly as before this effort
@@ -367,19 +368,21 @@ real code, not assumption:
       through still outstanding:** the UI chain itself (options dialog ->
       `SeedPromptScreen` -> typed text captured correctly) was confirmed in
       a REAL terminal via `tmux`, not just Pilot (2026-10-01, `--demo`
-      mode). Both delivery seams are now closed and unit/ordering-pinned for
-      both platforms (`test_launch_session_unwrap.py`). The NEW contract
+      mode). Both delivery seams are closed and unit/ordering-pinned for
+      both platforms (`test_launch_session_unwrap.py`), live in the Picker's
+      flow by default (`_SEED_PROMPT_ENABLED = True`). The NEW contract
       seam 2 depends on (`launch-session.{ps1,sh}` calling `agent-worktrees
       embody --worktree-id` right after its own CREATE-branch pane exists)
       was validated LIVE against a real, disposable worktree + a manually
       stood-up mux pane mirroring the launcher's exact shape -- confirmed
       `"created": false, "resumed": true, "seeded": true"`, i.e. the claim+
-      deliver path genuinely fires. **Still outstanding:** a literal, single
-      end-to-end run of the real Picker binary (not a hand-assembled
-      equivalent) creating a brand-new worktree with a typed prompt and
-      watching a freshly-spawned real Copilot session receive it as its
-      first turn -- the two halves have each been proven genuinely, but not
-      yet chained together in one live observed run.
+      deliver path genuinely fires. **Still outstanding (keeps this item
+      unchecked):** a literal, single end-to-end run of the real Picker
+      binary (not a hand-assembled equivalent) creating a brand-new
+      worktree with a typed prompt and watching a freshly-spawned real
+      Copilot session receive it as its first turn -- the two halves have
+      each been proven genuinely, but not yet chained together in one live
+      observed run.
   - [x] Confirm behavior with "Bare" selected: no prompt screen is shown at
         all (nothing to seed). (`test_new_worktree_bare_skips_seed_prompt`,
         passing against the now-default-on `_SEED_PROMPT_ENABLED`.)
