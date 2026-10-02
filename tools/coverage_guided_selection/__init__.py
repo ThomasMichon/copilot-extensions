@@ -7,7 +7,7 @@ fallback curation) works end-to-end against one small plugin before wiring
 anything into the real promotion gate (Phase 1) or the `agent-worktrees`
 rollout (Phase 4).
 
-Three pieces, each independently testable:
+Four pieces, each independently testable:
 
 - `baseline`: collects a portable JSON baseline (test -> covered lines,
   test -> wall-clock cost) from a real pytest + `coverage.py` dynamic-context
@@ -21,4 +21,8 @@ Three pieces, each independently testable:
   budget-bounded weighted-set-cover selection over the baseline's own
   per-test coverage and cost data (see the vision's "coverage-efficient
   fallback curation" Concept).
+- `correlation`: where a baseline generation lives on `main` and how it is
+  correlated back to the `dev` commit it was measured against (this
+  effort's own 2026-10-01 storage/correlation decision) -- not yet wired
+  into a real promotion run.
 """
