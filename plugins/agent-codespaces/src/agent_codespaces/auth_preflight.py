@@ -123,7 +123,7 @@ def codespace_scope_accounts(*, live_only: bool = False) -> tuple[tuple[str, ...
                 uses_ambient = True
     except Exception:
         log.debug("could not resolve configured CodeSpace repo accounts", exc_info=True)
-    live = _live_codespaces() if live_only and (bindings or accounts) else None
+    live = _live_codespaces() if live_only else None
     if live is not None:
         names = {cs.name for cs in live}
         bindings = [b for b in bindings if b.codespace in names]

@@ -560,3 +560,14 @@ def test_serving_accounts_include_ambient_and_mapped_owners_of_live_codespaces()
                return_value=MagicMock(repos={})):
         assert ap.codespace_scope_accounts(live_only=True) == (("alice", "carol"), True)
 
+
+def test_serving_accounts_include_mapped_owners_with_nothing_bound_or_configured():
+    from agent_codespaces import auth_preflight as ap
+
+    live = [SimpleNamespace(name="cs-mapped", account="carol")]
+    with patch("agent_codespaces.account_binding.list_bindings", return_value=[]), \
+         patch("agent_codespaces.lifecycle.list_codespaces", return_value=live), \
+         patch("agent_codespaces.config.load_merged_config",
+               return_value=MagicMock(repos={})):
+        assert ap.codespace_scope_accounts(live_only=True) == (("carol",), False)
+
