@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "provider": "worktree-manager",
+  "description": "copilot-extensions Worktree Manager",
+  "minimum_version": "0.1.0-dev21",
+  "command": [],
+  "provider_root": ""
+}

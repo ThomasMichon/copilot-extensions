@@ -9,7 +9,10 @@ and a synthetic HOME/root.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+import pytest
 
 import worktree_manager.self_install as si
 from worktree_manager.self_install import (
@@ -38,6 +41,12 @@ def _patch_local_bin(monkeypatch, tmp: Path) -> Path:
     return lb
 
 
+def _patch_provider_registry(monkeypatch, tmp: Path) -> Path:
+    registry = tmp / ".agent-worktrees" / "control-plane-providers.d"
+    monkeypatch.setattr(si, "control_plane_providers_dir", lambda: registry)
+    return registry
+
+
 def test_payload_version_reads_init(tmp_path):
     pd = _fake_payload(tmp_path, "9.9.9-dev1")
     assert payload_version(pd) == "9.9.9-dev1"
@@ -58,6 +67,7 @@ def test_apply_installs_marker_slot_and_binstub(tmp_path, monkeypatch):
     pd = _fake_payload(tmp_path, "1.2.3")
     root = tmp_path / "root"
     lb = _patch_local_bin(monkeypatch, tmp_path)
+    registry = _patch_provider_registry(monkeypatch, tmp_path)
     res = self_install(pd, root=root, dry_run=False)
     assert res.action == "installed"
     # marker file (plain text, names the active version)
@@ -72,12 +82,18 @@ def test_apply_installs_marker_slot_and_binstub(tmp_path, monkeypatch):
     assert stub.exists()
     body = stub.read_text()
     assert "current-version" in body and "worktree-manager" in body
+    manifest = registry / "worktree-manager.json"
+    payload = __import__("json").loads(manifest.read_text(encoding="utf-8"))
+    assert payload["provider"] == "worktree-manager"
+    assert payload["command"] == [str((lb / si._primary_binstub_name()).resolve())]
+    assert payload["provider_root"] == str(root.resolve())
 
 
 def test_apply_is_idempotent_and_version_gated(tmp_path, monkeypatch):
     pd = _fake_payload(tmp_path, "1.2.3")
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
     self_install(pd, root=root, dry_run=False)
     assert needs_install("1.2.3", root) is False
     again = self_install(pd, root=root, dry_run=False)
@@ -95,6 +111,7 @@ def test_stale_legacy_binstub_content_forces_redeploy(tmp_path, monkeypatch):
     pd = _fake_payload(tmp_path, "1.2.3")
     root = tmp_path / "root"
     lb = _patch_local_bin(monkeypatch, tmp_path)
+    registry = _patch_provider_registry(monkeypatch, tmp_path)
     self_install(pd, root=root, dry_run=False)
 
     # Simulate a legacy/incompatible binstub clobbering the deployed one --
@@ -109,7 +126,30 @@ def test_stale_legacy_binstub_content_forces_redeploy(tmp_path, monkeypatch):
     res = self_install(pd, root=root, dry_run=False)
     assert res.action == "installed"
     assert "legacy stub" not in stub.read_text()
+    assert (registry / "worktree-manager.json").is_file()
     assert needs_install("1.2.3", root) is False
+
+
+def test_stale_provider_manifest_forces_repair(tmp_path, monkeypatch):
+    pd = _fake_payload(tmp_path, "1.2.3")
+    root = tmp_path / "root"
+    lb = _patch_local_bin(monkeypatch, tmp_path)
+    registry = _patch_provider_registry(monkeypatch, tmp_path)
+    self_install(pd, root=root, dry_run=False)
+
+    manifest = registry / "worktree-manager.json"
+    manifest.write_text(
+        '{"schema_version":1,"provider":"worktree-manager","command":["C:/stale.cmd"],'
+        '"minimum_version":"0.1.0-dev21","provider_root":"C:/stale"}\n',
+        encoding="utf-8",
+    )
+
+    assert needs_install("1.2.3", root) is True
+    repaired = self_install(pd, root=root, dry_run=False)
+    assert repaired.action == "installed"
+    payload = __import__("json").loads(manifest.read_text(encoding="utf-8"))
+    assert payload["command"] == [str((lb / si._primary_binstub_name()).resolve())]
+    assert payload["provider_root"] == str(root.resolve())
 
 
 def test_known_legacy_prerename_binstub_is_recognized_and_cleaned(tmp_path, monkeypatch):
@@ -125,6 +165,7 @@ def test_known_legacy_prerename_binstub_is_recognized_and_cleaned(tmp_path, monk
     pd = _fake_payload(tmp_path, "1.2.3")
     root = tmp_path / "root"
     lb = _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
 
     lb.mkdir(parents=True)
     (lb / "worktree-manager").write_text(si._LEGACY_PRERENAME_SH, encoding="utf-8", newline="")
@@ -161,6 +202,7 @@ def test_unrecognized_binstub_content_is_never_attributed_as_legacy(tmp_path, mo
     pd = _fake_payload(tmp_path, "1.2.3")
     root = tmp_path / "root"
     lb = _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
     lb.mkdir(parents=True)
     (lb / "worktree-manager").write_text("#!/usr/bin/env bash\necho mine\n")
 
@@ -173,6 +215,7 @@ def test_unrecognized_binstub_content_is_never_attributed_as_legacy(tmp_path, mo
 def test_new_version_publishes_new_slot(tmp_path, monkeypatch):
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
     self_install(_fake_payload(tmp_path, "1.0.0"), root=root, dry_run=False)
     # bump the payload version and re-install
     pd2 = _fake_payload(tmp_path / "b", "2.0.0")
@@ -187,6 +230,7 @@ def test_status_reports_marker_and_binstub(tmp_path, monkeypatch):
     pd = _fake_payload(tmp_path, "3.3.3")
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
     assert status(root).installed is False
     self_install(pd, root=root, dry_run=False)
     st = status(root)
@@ -236,6 +280,7 @@ def test_self_install_materializes_a_vendor_pointer_from_a_live_monorepo(tmp_pat
     pd = _fake_monorepo_with_pointer(tmp_path, "5.5.5")
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
 
     res = self_install(pd, root=root, dry_run=False)
     assert res.action == "installed"
@@ -264,6 +309,7 @@ def test_self_install_never_requires_a_monorepo_ancestor_when_there_are_no_point
     # a monorepo-ancestor-required error would fire; it must not be.
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
 
     res = self_install(pd, root=root, dry_run=False)
     assert res.action == "installed"
@@ -292,6 +338,7 @@ def test_self_install_raises_when_pointer_present_without_monorepo_ancestor(tmp_
     )
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
 
     res = self_install(pd, root=root, dry_run=False)
     assert res.action == "error"
@@ -348,6 +395,7 @@ def test_self_install_materializes_a_uv_editable_ref_from_a_live_monorepo(tmp_pa
     pd = _fake_monorepo_with_uv_editable_ref(tmp_path, "5.5.6")
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
 
     res = self_install(pd, root=root, dry_run=False)
     assert res.action == "installed"
@@ -377,6 +425,7 @@ def test_self_install_raises_when_uv_editable_ref_present_without_monorepo_ances
     )
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
 
     res = self_install(pd, root=root, dry_run=False)
     assert res.action == "error"
@@ -385,6 +434,7 @@ def test_self_install_raises_when_uv_editable_ref_present_without_monorepo_ances
     assert not version_slot("6.6.8", root).exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs elevation on Windows")
 def test_self_install_refuses_a_symlink_anywhere_in_the_payload(tmp_path, monkeypatch):
     """Round-9 review finding: symlinks=True on the copytree PRESERVES a
     symlink instead of dereferencing it, but preservation alone doesn't
@@ -399,6 +449,7 @@ def test_self_install_refuses_a_symlink_anywhere_in_the_payload(tmp_path, monkey
     (pd / "sneaky-link").symlink_to(outside)
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
 
     res = self_install(pd, root=root, dry_run=False)
     assert res.action == "error"
@@ -407,6 +458,7 @@ def test_self_install_refuses_a_symlink_anywhere_in_the_payload(tmp_path, monkey
     assert not version_slot("7.7.7", root).exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="symlink creation needs elevation on Windows")
 def test_self_install_refuses_a_symlinked_payload_root(tmp_path, monkeypatch):
     """Round-16 review finding: symlinks=True on the copytree only
     protects symlinks encountered DURING the walk of payload_dir's own
@@ -423,6 +475,7 @@ def test_self_install_refuses_a_symlinked_payload_root(tmp_path, monkeypatch):
     linked_payload.symlink_to(real_payload, target_is_directory=True)
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
 
     res = self_install(linked_payload, root=root, dry_run=False)
     assert res.action == "error"
@@ -444,6 +497,7 @@ def test_bin_directory_is_deployed_into_the_slot(tmp_path, monkeypatch):
     (pd / "bin" / "launch-session.sh").write_text("#!/usr/bin/env bash\necho hi\n")
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
     self_install(pd, root=root, dry_run=False)
     slot = version_slot("4.4.4", root)
     deployed = slot / "bin" / "launch-session.sh"
@@ -533,7 +587,10 @@ def test_self_install_command_dry_run(capsys):
     assert rc in (0, 1)
 
 
-def test_doctor_shows_self_section(capsys):
+def test_doctor_shows_self_section(monkeypatch, capsys):
+    from worktree_manager import doctor_cli
+
+    monkeypatch.setattr(doctor_cli.daemon_health, "doctor_report", lambda apply=False: {"findings": []})
     main(["doctor"])
     assert "worktree-manager (self)" in capsys.readouterr().out
 
@@ -552,6 +609,7 @@ def test_self_install_normalizes_a_malformed_pointer_failure_to_runtimeerror(tmp
     )
     root = tmp_path / "root"
     _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
 
     res = self_install(pd, root=root, dry_run=False)
     assert res.action == "error"
