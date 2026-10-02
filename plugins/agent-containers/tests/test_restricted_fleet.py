@@ -937,6 +937,101 @@ def test_restricted_policy_migrating_tolerates_changed_workspace_folder(monkeypa
     ) == []
 
 
+def test_restricted_policy_migrating_still_requires_positive_resource_bounds(
+    monkeypatch,
+):
+    """copilot-extensions#4933 follow-up: migrating=True exempts matching
+    today's EXACT configured memory/cpu/pids/tmpfs-size values, but must
+    still require real, positive bounds -- not waive them entirely."""
+    old_fleet = FleetConfig(
+        image="example/agent:latest",
+        security_profile="restricted",
+        acp_command="minimal-agent --stdio",
+    )
+    policy = old_fleet.security_policy_fingerprint("/workspace", "agent")
+    info = DockerContainerInfo(
+        name="sandbox-1",
+        container_id="cid",
+        image="example/agent:latest",
+        state="running",
+        status="Up",
+        fleet="sandbox",
+        security_profile="restricted",
+        security_policy=policy,
+    )
+    doc = {
+        "Config": {
+            "Image": "example/agent:latest",
+            "Env": ["HOME=/home/agent"],
+            "Labels": {
+                "agent-containers.security-profile": "restricted",
+                "agent-containers.security-policy": policy,
+                "agent-containers.security-home": "/home/agent",
+                "agent-containers.security-uid": "1000",
+                "agent-containers.security-gid": "1000",
+                "agent-containers.security-image-id": "sha256:image",
+            },
+        },
+        "Image": "sha256:image",
+        "HostConfig": {
+            "ReadonlyRootfs": True,
+            "Privileged": False,
+            "CapDrop": ["ALL"],
+            "CapAdd": None,
+            "SecurityOpt": ["no-new-privileges"],
+            "Binds": None,
+            "Devices": [],
+            "DeviceRequests": None,
+            "PidMode": "",
+            "IpcMode": "private",
+            "UTSMode": "",
+            "UsernsMode": "",
+            "PortBindings": {},
+            "PublishAllPorts": False,
+            "ExtraHosts": None,
+            "NetworkMode": "none",
+            # Unbounded -- no real memory/cpu/pids ceiling at all.
+            "Memory": 0,
+            "MemorySwap": 0,
+            "NanoCpus": 0,
+            "PidsLimit": 0,
+            "Tmpfs": {
+                # Missing "size=" entirely -- an unbounded tmpfs.
+                "/workspace": "rw,nosuid,nodev,exec,uid=1000,gid=1000,mode=0700",
+                "/home/agent": "rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000,mode=0700",
+                "/tmp": "rw,nosuid,nodev,size=512m",  # noqa: S108
+                "/run": "rw,nosuid,nodev,size=64m",
+            },
+        },
+        "Mounts": [],
+        "NetworkSettings": {"Networks": {"none": {}}},
+    }
+    monkeypatch.setattr(
+        "agent_containers.lifecycle.inspect_container",
+        lambda name: doc,
+    )
+    monkeypatch.setattr(
+        "agent_containers.lifecycle._docker",
+        lambda args, timeout=30: _ok("sha256:image\n"),
+    )
+    new_fleet = FleetConfig(image="example/agent:v2", security_profile="trusted")
+
+    errors = restricted_policy_errors(
+        info,
+        new_fleet,
+        workspace_folder="/workspace",
+        exec_user="agent",
+        migrating=True,
+    )
+
+    assert any("memory limit is not a positive bound" in e for e in errors)
+    assert any("CPU limit is not a positive bound" in e for e in errors)
+    assert any("PID limit is not a positive bound" in e for e in errors)
+    assert any("/workspace tmpfs size budget is missing or invalid" in e for e in errors)
+    # The compliant /home/agent, /tmp, /run surfaces still pass.
+    assert not any("/home/agent tmpfs size budget" in e for e in errors)
+
+
 def test_start_restricted_validates_before_start(monkeypatch):
     config = ContainersConfig()
     config.fleets["sandbox"] = FleetConfig(

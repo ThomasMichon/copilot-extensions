@@ -297,14 +297,15 @@ def restricted_policy_errors(
     ``migrating`` skips only the checks that compare against ``fleet`` (the
     CURRENT containers.yaml config) and necessarily fail across a deliberate
     restricted->trusted migration: image, policy fingerprint, explicit
-    environment, exact network name/ID, memory/cpu/pids limits, and the
-    exact tmpfs ``size=`` budget. Every FIXED security invariant about the
-    observed container's own build still applies unconditionally -- profile
-    label, home/uid/gid, no bind mounts, no privileged/extra capabilities,
-    read-only rootfs, no host device/namespace/port exposure, no
-    credential-shaped env, network isolation (``none`` or exclusively
-    Docker-internal networks), and the tmpfs surfaces' fixed mount flags
-    (``nosuid``/``nodev``/owner/mode, size budget excepted).
+    environment, and exact network/memory/cpu/pids/tmpfs-size VALUES. Every
+    FIXED security invariant about the observed container's own build still
+    applies unconditionally -- profile label, home/uid/gid, no bind mounts,
+    no privileged/extra capabilities, read-only rootfs, no host device/
+    namespace/port exposure, no credential-shaped env, network isolation
+    (``none`` or exclusively Docker-internal networks), real positive
+    memory/cpu/pids bounds (with memory==swap), and each tmpfs surface's
+    fixed mount flags plus a real positive ``size=`` budget (its exact
+    value excepted).
     """
     errors: list[str] = []
     try:
@@ -463,7 +464,21 @@ def restricted_policy_errors(
                 if attached.get("NetworkID") != network_docs[0].get("Id"):
                     errors.append("attached network ID differs from configured network")
 
-    if not migrating:
+    if migrating:
+        # FIXED invariants independent of the current fleet's configured
+        # values: real, positive bounds on memory/cpu/pids, and no extra
+        # swap beyond the memory limit -- only the exact configured
+        # values are exempt.
+        observed_memory = int(host.get("Memory") or 0)
+        if observed_memory <= 0:
+            errors.append("memory limit is not a positive bound")
+        elif int(host.get("MemorySwap") or 0) != observed_memory:
+            errors.append("swap limit does not match the restricted no-extra-swap policy")
+        if int(host.get("NanoCpus") or 0) <= 0:
+            errors.append("CPU limit is not a positive bound")
+        if int(host.get("PidsLimit") or 0) <= 0:
+            errors.append("PID limit is not a positive bound")
+    else:
         try:
             memory_bytes = _parse_size(fleet.effective_memory())
             if int(host.get("Memory") or 0) != memory_bytes:
@@ -515,6 +530,15 @@ def restricted_policy_errors(
     for path, expected in (fixed_flags if migrating else expected_options).items():
         actual = set(str(tmpfs.get(path, "")).split(",")) if path else set()
         if migrating:
+            size_tokens = [opt for opt in actual if opt.startswith("size=")]
+            size_value = -1
+            if len(size_tokens) == 1:
+                try:
+                    size_value = _parse_size(size_tokens[0].split("=", 1)[1])
+                except (TypeError, ValueError):
+                    size_value = -1
+            if size_value <= 0:
+                errors.append(f"{path} tmpfs size budget is missing or invalid")
             actual = {opt for opt in actual if not opt.startswith("size=")}
         if actual != expected:
             errors.append(f"{path} tmpfs options differ from restricted policy")
