@@ -424,12 +424,31 @@ function Invoke-UvPipInstallResilient {
        be -- mirrors the POSIX installer's `_scrub_payload_build_artifacts`.
 
        ``SourceDir`` (optional): an additional local source directory to
-       scrub, for a vendored dependency (ssh-manager, credential-relay,
-       zdd, ...) installed from its OWN source tree rather than
-       ``$PluginDir`` -- that tree uses the same setuptools src-layout and
-       accumulates the identical stale build/egg-info residue, which
-       ``$PluginDir``-only scrubbing never reaches
-       (copilot-extensions#3456 review). #>
+       scrub, for a vendored dependency installed from its OWN source tree
+       OUTSIDE $PluginDir/libs/ (e.g. a marketplace layout resolving a lib
+       from a sibling checkout) -- the libs/*/ enumeration below only
+       reaches vendored libs that actually live under this payload's own
+       libs/ directory. Harmless to pass a dir the enumeration already
+       covered: Remove-Item on an already-scrubbed path is a no-op.
+
+       An explicit-SourceDir scrub only reaches the ONE vendored lib the
+       caller happens to name -- it silently misses any lib resolved
+       TRANSITIVELY while installing agent-bridge itself (agent-procutil,
+       dropin-registry, plugin-activation, plugin-resolve: pulled in via
+       agent-bridge's own `[tool.uv.sources]` workspace path deps, never
+       given their own dedicated install call here) even though each is its
+       own independent setuptools build root under
+       `$PluginDir/libs/<name>/` and accumulates the identical stale
+       build/egg-info residue. That gap self-reinvited the exact #3444/
+       #3456 bug class on POSIX: a stale libs/agent-procutil/build/lib
+       shadowing a fresh src/agent_procutil and crashing every
+       headless-spawn session host with `ImportError: cannot import name
+       'JobHandle'`. Mirrors the POSIX installer's own fix and
+       agent-dispatch's `Remove-PluginBuildArtifacts` (copilot-extensions
+       #2863) -- enumerate every immediate child of libs/ unconditionally,
+       since directory names under libs/ don't map 1:1 to package names
+       (e.g. agent-zdd -> libs/zdd) and an enumerated allowlist drifts out
+       of sync with new/renamed vendored libs. #>
     param(
         [Parameter(Mandatory)][string[]]$Arguments,
         [string]$SourceDir = ''
@@ -439,6 +458,16 @@ function Invoke-UvPipInstallResilient {
             (Join-Path $PluginDir 'build'), `
             (Join-Path $PluginDir '*.egg-info'), `
             (Join-Path (Join-Path $PluginDir 'src') '*.egg-info')
+        $libsDir = Join-Path $PluginDir 'libs'
+        if (Test-Path -LiteralPath $libsDir) {
+            Get-ChildItem -LiteralPath $libsDir -Directory -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
+                        (Join-Path $_.FullName 'build'), `
+                        (Join-Path $_.FullName '*.egg-info'), `
+                        (Join-Path (Join-Path $_.FullName 'src') '*.egg-info')
+                }
+        }
         if ($SourceDir -and $SourceDir -ne $PluginDir) {
             Remove-Item -Recurse -Force -ErrorAction SilentlyContinue `
                 (Join-Path $SourceDir 'build'), `

@@ -394,8 +394,20 @@ def test_transitively_resolved_lib_under_payload_libs_dir_is_also_scrubbed(
     dropin_dir = plugin_dir / "libs" / "dropin-registry"
     dropin_dir.mkdir(parents=True)
     _seed_build_residue(dropin_dir)
-    uv_stub = """
-uv() { echo 'Installed 1 package'; return 0; }
+    # The stub `uv` asserts the residue is already gone by the time it's
+    # invoked (not merely by the time the wrapper returns) -- proving the
+    # scrub actually prevents the stale build/lib from shadowing THIS
+    # install, the real incident, not just that cleanup happens afterwards.
+    uv_stub = f"""
+uv() {{
+    if [ -e "{procutil_dir}/build" ] || [ -e "{procutil_dir}/some_pkg.egg-info" ] \\
+        || [ -e "{procutil_dir}/src/some_pkg.egg-info" ] || [ -e "{dropin_dir}/build" ]; then
+        echo 'residue still present at install time' >&2
+        return 1
+    fi
+    echo 'Installed 1 package'
+    return 0
+}}
 """
     extra = """
 if _uv_pip_install_resilient "" --python fake-python --reinstall-package agent-bridge \
@@ -408,6 +420,7 @@ fi
 """
     result = _run_harness(plugin_dir, uv_stub, extra)
     assert "EXIT:0" in result.stdout
+    assert "residue still present" not in result.stderr
     assert not (procutil_dir / "build").exists()
     assert not (procutil_dir / "some_pkg.egg-info").exists()
     assert not (procutil_dir / "src" / "some_pkg.egg-info").exists()
