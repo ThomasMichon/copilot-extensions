@@ -34,7 +34,11 @@ import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 
-BASELINE_SCHEMA_VERSION = 1
+BASELINE_SCHEMA_VERSION = 2
+# v1: {schema_version, plugin, cov_source, generated_at, tests, coverage}
+# v2: adds `measured_commit` (the `dev` SHA this run was measured against,
+#     see `correlation.py`) -- nullable, so a v1 consumer that only reads
+#     the fields it already knows about is unaffected.
 
 # Environment variables that can silently narrow which tests pytest
 # actually collects/runs (e.g. `PYTEST_ADDOPTS=-k smoke` or `-m guard`)
@@ -160,11 +164,22 @@ def collect_baseline(
     cov_source: str,
     plugin: str,
     timeout_s: float = 300.0,
+    measured_commit: str | None = None,
 ) -> dict:
     """Run `test_path` under coverage and return a portable baseline dict.
 
     `cov_source` is the `--cov` target (an import path or directory,
     relative to `cwd`) whose lines are attributed to tests.
+
+    `measured_commit` is the `dev` commit SHA this run's coverage was
+    actually measured against -- e.g. the promotion gate's own `dev_head`
+    (see `correlation.py` and this effort's own 2026-10-01 storage/
+    correlation Journal entry). Embedding it directly in the baseline makes
+    a single baseline file self-correlating, without requiring a reader to
+    cross-reference a second file (`.github/release-pipeline-state.json`)
+    to know what it was measured against. Optional here (a local/manual run
+    has no promotion commit to record), but required by `correlation.py`'s
+    own writer before a baseline is checked into `main`.
 
     Raises `BaselineCollectionError` for any outcome other than a clean,
     fully-passing run (exit code 0) -- a baseline is only ever earned from
@@ -233,6 +248,7 @@ def collect_baseline(
         "plugin": plugin,
         "cov_source": cov_source,
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "measured_commit": measured_commit,
         "tests": {nodeid: {"duration_s": d} for nodeid, d in merged["durations"].items()},
         "coverage": merged["coverage"],
     }
@@ -269,6 +285,11 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
     parser.add_argument("--plugin", required=True)
     parser.add_argument("--cwd", default=".")
     parser.add_argument("--out", required=True)
+    parser.add_argument(
+        "--measured-commit",
+        default=None,
+        help="the dev commit SHA this run is measured against (see correlation.py)",
+    )
     args = parser.parse_args(argv)
 
     baseline = collect_baseline(
@@ -276,6 +297,7 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
         test_path=args.test_path,
         cov_source=args.cov_source,
         plugin=args.plugin,
+        measured_commit=args.measured_commit,
     )
     Path(args.out).write_text(json.dumps(baseline, indent=2, sort_keys=True))
     print(f"wrote baseline for {args.plugin} to {args.out}")

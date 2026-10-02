@@ -20,6 +20,19 @@ def register_registrar_commands(sub) -> None:
     rp.add_argument("location", help="directory of declaration docs, or (with --kind repo) a repo root whose .copilot-extensions/agent-dispatch/registrar/ (legacy .agent-dispatch/registrar/) is read")
     rp.add_argument("--kind", choices=["dir", "repo"], default="dir")
     rp.add_argument("--owner", help="provenance stamped on declarations read here")
+    rp.add_argument(
+        "--alias",
+        dest="aliases",
+        action="append",
+        help="canonical lane this 'repo'-kind pointer backs (repeatable; a task's "
+        "repo lane must match one of these exactly to be agent-backed -- see "
+        "agent_backed_enforcement_enabled). Omitted on a brand-new pointer (or one "
+        "being retargeted to a different location/--kind): auto-derived from the "
+        "repo root's own 'origin' remote when --kind repo, else empty. Omitted on "
+        "an existing pointer re-registered at the SAME location/--kind: its "
+        "current aliases are preserved unchanged -- pass --alias explicitly to "
+        "add one to a pre-existing alias-less pointer, or to replace its aliases.",
+    )
     rp.set_defaults(func=_core()._cmd_registrar)
     rp = reg_sub.add_parser("list", help="list the recorded discovery pointers")
     rp.set_defaults(func=_core()._cmd_registrar)

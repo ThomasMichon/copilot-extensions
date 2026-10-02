@@ -1696,8 +1696,19 @@ in seconds; `0` disables), `AGENT_DISPATCH_RUN_DIR` /
 `AGENT_DISPATCH_ENDPOINT` (local endpoint discovery), `AGENT_DISPATCH_URL`
 (client override), `AGENT_DISPATCH_SHARED_URL` /
 `AGENT_DISPATCH_SHARED_TOKEN` / `AGENT_DISPATCH_SHARED_CONTROL_TOKEN` (opt-in
-shared coordinator), and `AGENT_DISPATCH_NO_AUTOSTART` (disable lazy local
-coordinator start).
+shared coordinator), `AGENT_DISPATCH_NO_AUTOSTART` (disable lazy local
+coordinator start), and `AGENT_DISPATCH_ENFORCE_REGISTERED_REPOS` (opt-in,
+default off: refuse task creation against a repo lane with no registered
+`repo`-kind registrar pointer alias -- a repo with no pointer has no
+coordinator/supervisor of its own watching it, so a task queued against it
+can sit unclaimed indefinitely. Register one with `agent-dispatch registrar
+add-pointer <name> <repo-root> --kind repo [--alias <canonical-lane> ...]`
+before enabling this on a coordinator that serves more than one lane.
+**Migration note:** a pointer registered *before* this flag existed has no
+alias at all (`aliases` defaults to empty for a legacy record), and
+re-registering it with no `--alias` **preserves that empty set** rather than
+auto-deriving one -- enabling enforcement without first adding an explicit
+`--alias` to every pre-existing pointer will reject their lanes' tasks).
 
 ### Federation (`agent-dispatch federation run|status`)
 

@@ -34,6 +34,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from tools.coverage_guided_selection import baseline as baseline_mod  # noqa: E402
+from tools.coverage_guided_selection import correlation  # noqa: E402
 from tools.coverage_guided_selection import fallback, select  # noqa: E402
 
 
@@ -246,6 +247,32 @@ class TestComputeFallbackSet:
         assert first.selected_tests == second.selected_tests
 
 
+class TestCorrelation:
+    def test_baseline_path_on_main_is_one_file_per_plugin(self) -> None:
+        assert (
+            correlation.baseline_path_on_main("ai-attribution")
+            == ".github/coverage-baselines/ai-attribution.json"
+        )
+        assert (
+            correlation.baseline_path_on_main("agent-worktrees")
+            == ".github/coverage-baselines/agent-worktrees.json"
+        )
+
+    def test_require_measured_commit_returns_the_sha_when_present(self) -> None:
+        baseline = {**_synthetic_baseline(), "measured_commit": "abc123"}
+        assert correlation.require_measured_commit(baseline) == "abc123"
+
+    def test_require_measured_commit_rejects_a_missing_sha(self) -> None:
+        baseline = {**_synthetic_baseline(), "measured_commit": None}
+        with pytest.raises(correlation.BaselineCorrelationError):
+            correlation.require_measured_commit(baseline)
+
+    def test_require_measured_commit_rejects_an_absent_key(self) -> None:
+        baseline = _synthetic_baseline()  # no "measured_commit" key at all
+        with pytest.raises(correlation.BaselineCorrelationError):
+            correlation.require_measured_commit(baseline)
+
+
 class TestBaselineCollectionErrorContract:
     """Fast, mocked tests for the two non-clean collection outcomes --
     neither spawns a real subprocess, so both run in the always-on
@@ -294,6 +321,48 @@ class TestBaselineCollectionErrorContract:
         # need to catch `BaselineCollectionError`; confirm the raw
         # `TimeoutExpired` never escapes as the exception type itself.
         assert not isinstance(exc_info.value, subprocess_module.TimeoutExpired)
+
+    def test_measured_commit_round_trips_into_the_baseline_dict(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Mocked, no real subprocess: the driver's own out-file argument is
+        # the 6th positional arg after the driver script path (see
+        # _DRIVER_SCRIPT's own argv unpacking), so a fake "subprocess" just
+        # has to write valid merged JSON there and report success.
+        import json as json_module
+
+        def _fake_run(args, **kwargs):
+            out_file = Path(args[-1])
+            out_file.write_text(
+                json_module.dumps({"durations": {}, "coverage": {}})
+            )
+            return type(
+                "FakeCompletedProcess",
+                (),
+                {"returncode": 0, "stdout": "", "stderr": ""},
+            )()
+
+        monkeypatch.setattr(baseline_mod.subprocess, "run", _fake_run)
+        result = baseline_mod.collect_baseline(
+            cwd=tmp_path,
+            test_path="tests",
+            cov_source="src",
+            plugin="mocked",
+            measured_commit="deadbeef",
+        )
+        assert result["measured_commit"] == "deadbeef"
+        assert result["schema_version"] == baseline_mod.BASELINE_SCHEMA_VERSION
+
+        # Omitting it entirely must still produce a valid (locally-usable)
+        # baseline -- only `correlation.require_measured_commit` enforces
+        # its presence, not `collect_baseline` itself.
+        local_result = baseline_mod.collect_baseline(
+            cwd=tmp_path,
+            test_path="tests",
+            cov_source="src",
+            plugin="mocked",
+        )
+        assert local_result["measured_commit"] is None
 
 
 def test_collect_baseline_round_trips_against_a_real_plugin_suite() -> None:

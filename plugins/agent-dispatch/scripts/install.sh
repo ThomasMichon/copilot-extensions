@@ -1033,6 +1033,8 @@ AGENT_DISPATCH_HOST=127.0.0.1
 # AGENT_DISPATCH_TOKEN=                            # set to require bearer auth
 # AGENT_DISPATCH_CONTROL_TOKEN=                    # required to manage producer scopes (and to register evaluators)
 # AGENT_DISPATCH_CONTROL_TOKEN_COMMAND=            # or fetch it on demand (e.g. a vault CLI) instead of a raw value above
+# refuse task creation against an unregistered repo lane; register every real lane first with 'agent-dispatch registrar add-pointer'
+# AGENT_DISPATCH_ENFORCE_REGISTERED_REPOS=1
 ENVEOF
         _ok "Service env: $ENV_FILE (defaults; edit to expose on the network / add a token)"
     else

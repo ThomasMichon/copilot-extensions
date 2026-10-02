@@ -109,14 +109,31 @@ order.
 ## Plan
 
 ### Phase 0 — Design spike: coverage mechanism + storage format
-- [ ] Pick the concrete coverage-collection mechanism (`coverage.py` dynamic
+- [x] Pick the concrete coverage-collection mechanism (`coverage.py` dynamic
       contexts is the leading candidate named during inception; confirm it
       scales to this repo's per-plugin `.test-venvs` isolation model).
-- [ ] Decide the baseline artifact's storage location and correlation
+      **Decided 2026-10-01** (Phase 0 pilot, PR #4807): `coverage.py`
+      dynamic contexts, via an ephemeral `uv run --with coverage --with
+      pytest-cov --with pytest-json-report` ephemeral ancillary venv (not
+      `.test-venvs` directly — that cache has no coverage-context
+      pass-through yet; wiring it into the cache is Phase 1 scope).
+- [x] Decide the baseline artifact's storage location and correlation
       mechanism — `dev`-resident vs. `main`-published-and-pointer-linked
       (the vision deliberately left this open; this effort makes the call).
       Must satisfy the vision's attribution-correctness Behavior: measured
       against `dev`'s own pre-vendor-materialization source form.
+      **Decided 2026-10-01:** the baseline is checked into `main`,
+      piggybacking on the promotion pipeline's own existing
+      commit-per-promotion + `promote-<timestamp>-<sha>` tag — this repo
+      already has a trusted, audited correlation mechanism
+      (`.github/release-pipeline-state.json`'s `last_promotion.dev_head`,
+      recording the exact `dev` commit each `main` promotion was measured
+      against) rather than needing to invent a GitHub-Release-asset path
+      with no existing analog in this pipeline. Attribution correctness is
+      unaffected either way: measurement happens against `dev`'s own source
+      form regardless of which branch later stores the resulting JSON. See
+      this entry's own Journal note for the fuller rationale and the
+      rejected alternative (a GitHub Release asset tied to the same tag).
 - [ ] Spike coverage collection inside `validate-and-promote.yml`'s existing
       `full`/`worktree-manager` jobs (no new job; instrument the existing
       one) and confirm the artifact it produces round-trips through the
@@ -260,6 +277,48 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-01 — Phase 0 storage/correlation decision: check into `main`
+Resolving this Phase 0 Plan item's own open question, per the operator's
+proposal (either check the baseline into `main` as part of the promotion
+push, tied to the `dev` commit it was measured against, or attach it as a
+release artifact associated with that commit).
+
+Investigated this repo's actual promotion mechanics
+(`.github/workflows/validate-and-promote.yml`, `tools/promote_release.py`)
+before deciding, rather than picking abstractly:
+- Every `dev`→`main` promotion already creates a new `main` commit, pushes
+  an annotated tag (`promote-<timestamp>-<main-sha-prefix>`) on it, **and**
+  writes `.github/release-pipeline-state.json` on `main` recording
+  `last_promotion.dev_head` -- the exact `dev` commit that promotion was
+  measured/built against. This correlation mechanism already exists,
+  already ships, and is already trusted by the rest of the pipeline (it's
+  what `promote_release.py`'s own monotonic-promotion guard reads).
+- There is **no existing GitHub Release object** anywhere in this
+  pipeline -- only git tags. A release-artifact path would mean building
+  an entirely new correlation mechanism (tag -> release -> asset, a new
+  `gh release create` call, new token scope, a new fetch path for the
+  selector) that duplicates what the commit + tag + state file already do,
+  for no correctness benefit: attribution correctness is unaffected either
+  way, since the coverage *measurement* happens against `dev`'s own source
+  form in the `full`/`worktree-manager` jobs regardless of which branch
+  later stores the resulting JSON.
+
+**Decision:** check each baseline generation into `main`'s own tree (e.g.
+`.github/coverage-baselines/<plugin>.json`, alongside the existing
+`release-pipeline-state.json`), piggybacking on the commit + tag the
+promotion pipeline already creates per run. Embed the measured `dev_head`
+directly in the baseline JSON itself (redundant with, but independently
+self-describing from, the pipeline state file's own `last_promotion.dev_head`)
+so a baseline file is correlatable on its own without cross-referencing a
+second file. This is "durably published elsewhere" per the vision's own
+`baseline correlation` Concept (relative to `dev`, the contribution
+branch), not "resident on the contribution branch" -- a vision-compliant
+choice the vision itself deliberately left open for this effort to make.
+
+Not yet done (left for the next increment, per Phase 0's own remaining
+checklist item): actually wiring this into `validate-and-promote.yml`'s
+real jobs and confirming the round-trip against a real promotion run.
 
 ### 2026-10-01 — Phase 0 kickoff: pilot-first sequencing + fallback-curation refinement
 - Operator (via a downstream consumer repository's session that had just
