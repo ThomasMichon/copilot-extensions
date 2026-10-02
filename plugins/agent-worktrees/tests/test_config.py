@@ -1521,6 +1521,33 @@ class TestInRepoConfigCommittedRefResolution:
             ),
         )
 
+    def test_whole_resolution_shares_one_time_budget(self, monkeypatch, tmp_path):
+        """Every probe taking its full timeout still can't push one resolution
+        past the shared budget (the per-probe cap alone allowed ~8 x 15 s)."""
+        import types
+
+        from agent_worktrees import git_ops, inrepo_config_source as src
+
+        clock = {"t": 1000.0}
+        timeouts: list[float] = []
+
+        def slow_git(*args, timeout, **_kw):
+            timeouts.append(timeout)
+            clock["t"] += timeout  # worst case: each launch uses all it's given
+            if args[0] == "symbolic-ref":
+                return types.SimpleNamespace(returncode=0, stdout="refs/remotes/origin/main\n")
+            if args[0] == "show-ref":
+                return types.SimpleNamespace(returncode=0, stdout="")
+            if args[1].startswith("origin/main:") and len(timeouts) == 2:
+                return types.SimpleNamespace(returncode=0, stdout="default_branch: dev\n")
+            return types.SimpleNamespace(returncode=1, stdout="")
+
+        monkeypatch.setattr(git_ops, "git", slow_git)
+        monkeypatch.setattr(src.time, "monotonic", lambda: clock["t"])
+        self._resolve(tmp_path)
+        assert sum(timeouts) <= src._RESOLUTION_BUDGET
+        assert all(t <= src._OFFLINE_GIT_TIMEOUT for t in timeouts)
+
     @staticmethod
     def _git(*args: str, cwd: Path):
         import subprocess

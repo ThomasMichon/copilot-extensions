@@ -17,6 +17,7 @@ working tree or index.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,18 @@ import yaml
 
 from . import git_ops
 
+#: Per-probe cap: a single git launch can be slow on a loaded host.
 _OFFLINE_GIT_TIMEOUT = 15
+#: Shared budget for one whole resolution (up to ~8 probes), so the sum stays
+#: well inside callers' own timeouts however slow each launch is.
+_RESOLUTION_BUDGET = 30.0
+
+
+def _probe_timeout(deadline: float) -> float | None:
+    """This probe's timeout: the remaining budget, capped per probe; ``None``
+    once the budget is spent (the probe is then skipped as unavailable)."""
+    remaining = deadline - time.monotonic()
+    return min(_OFFLINE_GIT_TIMEOUT, remaining) if remaining > 0 else None
 
 
 def parse_yaml_text_safe(text: str) -> dict[str, Any]:
@@ -40,13 +52,18 @@ def parse_yaml_text_safe(text: str) -> dict[str, Any]:
         return {}
 
 
-def _offline_remote_head_branch(anchor: Path, remote: str) -> str | None:
+def _offline_remote_head_branch(
+    anchor: Path, remote: str, deadline: float
+) -> str | None:
     """The branch ``<remote>/HEAD`` currently points at, read offline from the
     local ref store (never a network call) -- or ``None`` if unset/unknown."""
+    timeout = _probe_timeout(deadline)
+    if timeout is None:
+        return None
     try:
         proc = git_ops.git(
             "symbolic-ref", "-q", f"refs/remotes/{remote}/HEAD",
-            cwd=anchor, check=False, capture=True, timeout=_OFFLINE_GIT_TIMEOUT,
+            cwd=anchor, check=False, capture=True, timeout=timeout,
         )
     except Exception:
         return None
@@ -57,13 +74,18 @@ def _offline_remote_head_branch(anchor: Path, remote: str) -> str | None:
     return ref[len(prefix):] if ref.startswith(prefix) else None
 
 
-def _offline_remote_branch_exists(anchor: Path, remote: str, branch: str) -> bool:
+def _offline_remote_branch_exists(
+    anchor: Path, remote: str, branch: str, deadline: float
+) -> bool:
     """Cheap, offline existence check for ``<remote>/<branch>`` in the local
     ref store (no network)."""
+    timeout = _probe_timeout(deadline)
+    if timeout is None:
+        return False
     try:
         proc = git_ops.git(
             "show-ref", "--verify", "--quiet", f"refs/remotes/{remote}/{branch}",
-            cwd=anchor, check=False, capture=True, timeout=_OFFLINE_GIT_TIMEOUT,
+            cwd=anchor, check=False, capture=True, timeout=timeout,
         )
     except Exception:
         return False
@@ -71,15 +93,18 @@ def _offline_remote_branch_exists(anchor: Path, remote: str, branch: str) -> boo
 
 
 def _read_committed_blob(
-    anchor: Path, remote: str, branch: str, rel_path: Path
+    anchor: Path, remote: str, branch: str, rel_path: Path, deadline: float
 ) -> str | None:
     """Text content of ``rel_path`` as committed on ``<remote>/<branch>`` --
     read via ``git show``, so it never depends on (or touches) the anchor's
     working tree or index. ``None`` if the ref or path doesn't exist."""
+    timeout = _probe_timeout(deadline)
+    if timeout is None:
+        return None
     spec = f"{remote}/{branch}:{rel_path.as_posix()}"
     try:
         proc = git_ops.git(
-            "show", spec, cwd=anchor, check=False, capture=True, timeout=_OFFLINE_GIT_TIMEOUT
+            "show", spec, cwd=anchor, check=False, capture=True, timeout=timeout
         )
     except Exception:
         return None
@@ -109,13 +134,14 @@ def load_inrepo_config_from_committed_ref(
     fetched tracking refs, or the anchor isn't a git repo at all); callers
     fall back to the working-tree read in that case.
     """
-    head_branch = _offline_remote_head_branch(anchor, remote)
+    deadline = time.monotonic() + _RESOLUTION_BUDGET
+    head_branch = _offline_remote_head_branch(anchor, remote, deadline)
     if head_branch is None:
         return {}
 
     def _read_config_on(branch: str) -> dict[str, Any] | None:
         for rel_path in rel_path_candidates:
-            text = _read_committed_blob(anchor, remote, branch, rel_path)
+            text = _read_committed_blob(anchor, remote, branch, rel_path, deadline)
             if text is not None:
                 return parse_yaml_text_safe(text)
         return None
@@ -129,7 +155,7 @@ def load_inrepo_config_from_committed_ref(
         isinstance(declared, str)
         and declared
         and declared != head_branch
-        and _offline_remote_branch_exists(anchor, remote, declared)
+        and _offline_remote_branch_exists(anchor, remote, declared, deadline)
     ):
         hopped = _read_config_on(declared)
         if hopped is not None:
