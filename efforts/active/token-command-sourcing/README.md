@@ -2,14 +2,14 @@
 
 - **Slug:** `token-command-sourcing`
 - **Repo:** copilot-extensions (generalizes a pattern already proven in
-  `plugins/agent-dispatch`; consumers: `plugins/agent-mcp`, `plugins/agent-vault`)
+  `plugins/agent-dispatch`; consumers: `plugins/agent-vault`, `plugins/agent-index`)
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-10-02
 - **Status:** Draft
 - **Vision:** None — below-altitude operational/config capability. No
   existing vision governs cross-plugin credential-sourcing configuration;
   `visions/installer` covers machine bootstrap, not per-plugin runtime token
-  resolution, and neither `agent-mcp` nor `agent-vault` has its own vision
+  resolution, and neither `agent-vault` nor `agent-index` has its own vision
   doc under `visions/plugins/`. _(agent-recommended: if a future related
   change warrants one, author a leaf vision then; this effort doesn't invent
   one to satisfy the template.)_
@@ -41,17 +41,30 @@ parallel ones), and add `_COMMAND` support to the plugins currently missing
 it — including proper packaging (dependency + installer wiring) so the shared
 lib is actually deployable, not just importable in a dev checkout.
 
+**Scope correction (review round 3):** `agent-mcp`'s `AGENT_MCP_CONTROL_TOKEN`
+was initially miscategorized as an operator-managed credential. It is not: a
+fresh token is generated per cutover generation
+(`secrets.token_hex(16)` in `cutover.py`) and always injected directly into
+the new daemon's environment — the daemon itself then persists it to a
+PID-keyed sidecar file for internal coordination (`serve.py`). This is an
+internally-generated, ephemeral coordination secret exactly like
+`agent-index`'s cell tokens, not a Vault-sourceable credential, and a
+`_COMMAND` slot would never actually be consulted (cutover always wins).
+**`agent-mcp` is dropped from this effort's scope entirely** rather than
+redesigning its cutover/sidecar lifecycle, which is unrelated, out of scope,
+and risky.
+
 ## Participants
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Lambda-Core (host) | Designs the shared lib, migrates agent-dispatch, adds support to agent-mcp/agent-vault, drives PRs | local `copilot-extensions` worktree |
+| Lambda-Core (host) | Designs the shared lib, migrates agent-dispatch, adds support to agent-vault/agent-index, drives PRs | local `copilot-extensions` worktree |
 
 ## Coordination
 
 - **Topology:** independent per-phase PRs — each phase lands and deploys
   cleanly on its own (Phase 1 is a pure addition; Phase 2 is a same-behavior
-  refactor; Phases 3-5 are additive per-plugin features), so no shared feature
+  refactor; Phases 3-4 are additive per-plugin features), so no shared feature
   branch is needed.
 - **Host (owns PRs):** Lambda-Core (solo effort; no delegates yet).
 - **Delegates:** none currently.
@@ -65,8 +78,6 @@ as a follow-up request, not part of that fix).
 
 **Operator-managed credential tokens found reading a plain env var with no
 `_COMMAND` alternative:**
-- `agent-mcp`: `AGENT_MCP_CONTROL_TOKEN`
-  (`plugins/agent-mcp/src/agent_mcp/__main__.py:620`)
 - `agent-vault`: `AGENT_VAULT_CORE_TOKEN`
   (`plugins/agent-vault/src/agent_vault/core_ext.py:47,106`)
 - `agent-dispatch`: `AGENT_DISPATCH_TOKEN`, the plain client bearer resolved by
@@ -75,6 +86,10 @@ as a follow-up request, not part of that fix).
   in the original scope statement.
 - `agent-index`: `AGENT_INDEX_ADO_TOKEN`, the Azure DevOps source's PAT
   (`agent_index/sources/azure_devops.py:62-66`) — also flagged by review.
+- `agent-index`: `AGENT_INDEX_GITHUB_TOKEN`, the GitHub source's token
+  (`agent_index/sources/github.py:283-287`, ahead of the ambient `GH_TOKEN`/
+  `GITHUB_TOKEN` fallbacks in the same resolution chain) — flagged by review
+  round 3 as a previously-missed gap in the same scope statement.
 
 **Already has the `_COMMAND` pattern (the reference implementation to
 extract):**
@@ -98,9 +113,11 @@ extract):**
 
 **Explicitly out of scope** — internally-generated coordination secrets, not
 operator-sourced credentials, so a `_COMMAND` slot doesn't apply:
-`agent-index`'s `CELL_TRANSACTION_TOKEN`/`CELL_LOCK_TOKEN`/`CELL_START_TOKEN`,
-`agent-ssh`'s `AGENT_SSH_KEEPER_TOKEN`, `agent-worktrees`' handoff/assignment
-tokens.
+`agent-mcp`'s `AGENT_MCP_CONTROL_TOKEN` (see the scope correction above —
+cutover always injects a fresh generated token directly, bypassing any
+`_COMMAND` path), `agent-index`'s
+`CELL_TRANSACTION_TOKEN`/`CELL_LOCK_TOKEN`/`CELL_START_TOKEN`, `agent-ssh`'s
+`AGENT_SSH_KEEPER_TOKEN`, `agent-worktrees`' handoff/assignment tokens.
 
 **Packaging precedent (the pattern every consumer's installer change
 follows):** `agent-mcp/scripts/init.sh`'s "Preinstall workspace path deps
@@ -108,11 +125,11 @@ follows):** `agent-mcp/scripts/init.sh`'s "Preinstall workspace path deps
 `[tool.uv.sources]` workspace path dep as a `'<libs-dir-name>:<pypi-pkg-name>'`
 string and explicitly `pip install`s it when `uv` is unavailable (bare `pip`
 doesn't honor `[tool.uv.sources]` at all) — `init.ps1` (~line 664) does the
-same for Windows. **Every plugin this effort touches has its own equivalent
-preinstall list and needs the new shared lib added to it**, in addition to a
-normal `pyproject.toml` dependency + `[tool.uv.sources]` entry. A shared
-package that exists only as source with no installer/dependency wiring is not
-actually deployable.
+same for Windows. Every plugin this effort actually touches has its own
+equivalent preinstall list (confirm the exact location per plugin) and needs
+the new shared lib added to it, in addition to a normal `pyproject.toml`
+dependency + `[tool.uv.sources]` entry. A shared package that exists only as
+source with no installer/dependency wiring is not actually deployable.
 
 ## Request
 
@@ -123,9 +140,12 @@ slot, for a shell/pwsh/python command that will pipe it a token. For
 [our private deployment], we'll prefer sourcing from Vault." Follow-up,
 clarifying the underlying goal: "just wanted to avoid putting tokens in ENV.
 Prefer on-demand sourcing from contained locations." Scope decisions
-confirmed: candidate list (agent-dispatch/agent-mcp/agent-vault) accepted as
-proposed; shared-lib extraction preferred over per-plugin duplication; track
-as a formal effort.
+confirmed: initial candidate list (agent-dispatch/agent-mcp/agent-vault)
+accepted as proposed; shared-lib extraction preferred over per-plugin
+duplication; track as a formal effort. `agent-mcp` was later dropped and
+`agent-index` added after review (see Context's scope correction and the
+Journal) — both are implementation-detail corrections to the same original
+ask, not a change in intent.
 
 ## Plan
 
@@ -177,26 +197,18 @@ as a formal effort.
       pure refactor; existing tests must continue to pass unmodified in
       intent (updates only for the new call shape).
 
-### Phase 3 — Add `_COMMAND` support to agent-mcp
-- [ ] `AGENT_MCP_CONTROL_TOKEN_COMMAND` via the shared lib's
-      `resolve_direct_first()`, consumed wherever `AGENT_MCP_CONTROL_TOKEN`
-      is read today (`plugins/agent-mcp/src/agent_mcp/__main__.py:620`).
-- [ ] Packaging: `pyproject.toml` dependency + `[tool.uv.sources]` entry, plus
-      add the new lib to `agent-mcp/scripts/init.sh`'s (~line 440) and
-      `init.ps1`'s (~line 664) preinstall workspace-path-dep lists.
-- [ ] Tests mirroring agent-dispatch's existing coverage shape.
-
-### Phase 4 — Add `_COMMAND` support to agent-vault
+### Phase 3 — Add `_COMMAND` support to agent-vault
 - [ ] `AGENT_VAULT_CORE_TOKEN_COMMAND` via the shared lib's
       `resolve_direct_first()`, consumed wherever `AGENT_VAULT_CORE_TOKEN` is
       read today (`plugins/agent-vault/src/agent_vault/core_ext.py:47,106`).
-- [ ] Packaging: same pattern as Phase 3 — `pyproject.toml` +
-      `[tool.uv.sources]` + the plugin's own preinstall list, confirming its
-      exact location during this phase (agent-vault's installer layout may
-      differ from agent-mcp's).
+- [ ] Packaging: `pyproject.toml` dependency + `[tool.uv.sources]` entry, plus
+      add the new lib to agent-vault's own preinstall workspace-path-dep list
+      (confirm its exact location/shape during this phase — follow the
+      `agent-mcp/scripts/init.sh`/`init.ps1` pattern cited in Context as the
+      model, adapted to agent-vault's own installer layout).
 - [ ] Tests mirroring agent-dispatch's existing coverage shape.
 
-### Phase 5 — Expand scope to the two review-flagged gaps
+### Phase 4 — Expand scope to the three review-flagged gaps
 - [ ] `agent-dispatch`: `AGENT_DISPATCH_TOKEN` is read directly from
       `os.environ` in **six separate call sites**, not just `client_token()`
       (flagged by review) — `config.py:231`, `config.py:535`
@@ -222,10 +234,20 @@ as a formal effort.
       are genuinely internally-generated (as currently assumed, hence out of
       scope above) before closing this phase — re-verify, don't just repeat
       the earlier assumption.
-- [ ] Packaging for both, following the same per-plugin pattern as Phases
-      3-4.
+- [ ] `agent-index`: add `AGENT_INDEX_GITHUB_TOKEN_COMMAND` via
+      `resolve_direct_first()`, consulted in `_env_token()`'s resolution
+      chain (`sources/github.py:283-287`) **before** the existing
+      `AGENT_INDEX_GITHUB_TOKEN` / ambient `GH_TOKEN` / `GITHUB_TOKEN`
+      fallbacks — i.e. the dedicated `_COMMAND` var takes priority over the
+      direct `AGENT_INDEX_GITHUB_TOKEN` value, which in turn still precedes
+      the ambient CLI fallbacks exactly as today. Do **not** add a
+      `_COMMAND` variant for the ambient `GH_TOKEN`/`GITHUB_TOKEN` names
+      themselves — those are shared, external-tool-owned conventions outside
+      this plugin's own credential surface.
+- [ ] Packaging for agent-index, following the same per-plugin pattern as
+      Phase 3.
 
-### Phase 6 — Docs
+### Phase 5 — Docs
 - [ ] Each touched plugin's own docs/README gains every new `_COMMAND`
       variable in its documented env-var table, following the existing
       `AGENT_DISPATCH_*_TOKEN_COMMAND` documentation shape as the model.
@@ -242,20 +264,21 @@ as a formal effort.
       after the Phase 2 migration — proves the refactor preserves current
       behavior exactly, **including `producer_capability()`'s command-first
       precedence** (the highest-risk migration step).
-- [ ] New agent-mcp, agent-vault, agent-dispatch (`AGENT_DISPATCH_TOKEN` —
-      covering all six consolidated call sites, not just `client_token()`),
-      and agent-index tests (Phases 3-5) pass, each proving: direct env wins
-      (or loses, per the correct precedence for that call site) when both are
-      set; command fetch works when only `_COMMAND` is set; absence of both
-      resolves to `None`/not-configured, matching each plugin's existing
-      behavior for "no token."
+- [ ] New agent-vault, agent-dispatch (`AGENT_DISPATCH_TOKEN` — covering all
+      six consolidated call sites, not just `client_token()`), and
+      agent-index (`AGENT_INDEX_ADO_TOKEN` and `AGENT_INDEX_GITHUB_TOKEN`)
+      tests (Phases 3-4) pass, each proving: direct env wins (or loses, per
+      the correct precedence for that call site) when both are set; command
+      fetch works when only `_COMMAND` is set; absence of both resolves to
+      `None`/not-configured, matching each plugin's existing behavior for
+      "no token."
 - [ ] Packaging validation: for each touched plugin, a clean non-uv install
       (bare `pip`, simulating `HAVE_UV=0`) succeeds and the plugin can import
       the shared lib — proves the installer preinstall-list additions are
       correct, not just the `pyproject.toml`/`[tool.uv.sources]` entries.
-- [ ] Manual smoke: for at least one of agent-mcp/agent-vault, set only the
-      `_COMMAND` var to a trivial `echo <value>` and confirm the service
-      actually authenticates using the fetched value.
+- [ ] Manual smoke: for agent-vault, set only the `_COMMAND` var to a trivial
+      `echo <value>` and confirm the service actually authenticates using the
+      fetched value.
 
 ## Proposal
 
@@ -300,3 +323,23 @@ conventions to mirror) to be elaborated once this plan clears review._
   `_COMMAND` support there; every private repo/issue/hostname reference
   removed or redacted (hybrid-split note, Context survey line, and the
   Request's verbatim operator quote).
+
+### 2026-10-02 — Review round 3 (PR #4910)
+- Copilot review flagged: (1) a High-severity scope error — `agent-mcp`'s
+  `AGENT_MCP_CONTROL_TOKEN` is actually an internally-generated,
+  per-cutover-generation coordination secret (always injected directly by
+  `cutover.py`, persisted to a PID sidecar by `serve.py`), not an
+  operator-managed credential; a `_COMMAND` slot there would never be
+  consulted; (2) a Medium previously-missed gap — `agent-index`'s
+  `AGENT_INDEX_GITHUB_TOKEN` (`sources/github.py:283-287`) still wasn't
+  covered by the "every operator-managed token" claim; (3) a Low
+  public-artifact miss — the **PR description** (not just the file) still
+  named the private downstream repo/effort. Addressed: dropped `agent-mcp`
+  from scope entirely (Phase 3 removed, moved to "explicitly out of scope"
+  alongside the other internally-generated tokens) rather than redesigning
+  its unrelated cutover/sidecar lifecycle; added `AGENT_INDEX_GITHUB_TOKEN`
+  coverage to the agent-index phase, with explicit precedence over the
+  existing ambient `GH_TOKEN`/`GITHUB_TOKEN` fallbacks (which are
+  deliberately NOT given their own `_COMMAND`, being external-tool-owned
+  conventions); renumbered remaining phases; will update the PR description
+  itself to match this file's generic framing before the next push.
