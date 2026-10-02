@@ -211,7 +211,7 @@ class TestTransitions:
     def test_link_succession_concluded_predecessor_activates_successor(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):
-        """aperture-labs#7824 regression: the ``predecessor_state="concluded"``
+        """Downstream regression (a private repository's report): the ``predecessor_state="concluded"``
         branch (a predecessor with no real history, e.g. a manual repair) must
         activate the successor exactly like the default ``"handed-off"``
         branch does -- otherwise the freshly-written head transition is
@@ -232,7 +232,7 @@ class TestTransitions:
     def test_link_succession_concluded_cancels_yielded_successors_own_handoff(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):
-        """aperture-labs#7824 regression: a successor that is itself
+        """Downstream regression (a private repository's report): a successor that is itself
         ``"yielded"`` (it opened its own handoff intent, never linked) is not
         terminal, so it still passes the terminal-successor guard above and
         gets activated -- but the pending handoff that made it yielded must
@@ -252,7 +252,7 @@ class TestTransitions:
     def test_link_succession_concluded_rejects_terminal_successor(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):
-        """aperture-labs#7824 regression: the ``else`` branch must mirror
+        """Downstream regression (a private repository's report): the ``else`` branch must mirror
         ``link_handoff``'s terminal-successor guard -- never resurrect an
         explicitly ``"handed-off"``/``"concluded"`` successor and hand it
         head just because a manual-repair caller named it."""
@@ -454,7 +454,7 @@ class TestExactHandoffLedger:
     def test_yielded_session_can_reclaim_its_own_head_via_bind(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):
-        """aperture-labs#7824 regression: a session whose own handoff intent
+        """Downstream regression (a private repository's report): a session whose own handoff intent
         was never formally linked to a successor ("yielded" -- itself a
         normal, expected state) must be able to reclaim its own head by
         rebinding itself, with no supported CLI path required beforehand."""
@@ -489,7 +489,7 @@ class TestExactHandoffLedger:
     def test_older_yielded_session_cannot_steal_head_from_newer_yielded_lineage(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):
-        """aperture-labs#7824 regression: mirrors `cancel_handoff`'s
+        """Downstream regression (a private repository's report): mirrors `cancel_handoff`'s
         `predecessor_is_latest_head` guard. `resolved_head_session` hides
         EVERY yielded session, so without checking the raw latest head
         transition, an older yielded session could rebind and silently steal
