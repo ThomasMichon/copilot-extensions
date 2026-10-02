@@ -306,18 +306,26 @@ this phase) is considered.)_
       sidesteps that class of bug entirely by construction, at the cost of
       one full fetch per wake instead of a cheaper partial update.)
   - [ ] **Debounce the wake, but never drop an event that arrives mid-fetch
-        as a no-op:** a burst of events (several task mutations in quick
-        succession) must coalesce into a single pending re-fetch, not one
-        re-fetch per event — if a fetch hasn't started yet and is merely
-        scheduled, a newly arriving event coalesces into that same pending
-        fetch. But an event arriving **while a fetch is already in
-        flight** cannot be a plain no-op: that fetch may already have read
-        the pre-mutation snapshot, so silently dropping the new event would
-        leave the mutation invisible until the 30-60s safety reconcile.
-        Fixed by a trailing-dirty flag: any event arriving during an
-        in-flight fetch sets a flag that triggers exactly one more
-        re-fetch immediately after the current one completes, rather than
-        being coalesced away.
+        as a no-op — and keep the trailing fetch itself rate-limited:**
+        a burst of events (several task mutations in quick succession) must
+        coalesce into a single pending re-fetch, not one re-fetch per event
+        — if a fetch hasn't started yet and is merely scheduled, a newly
+        arriving event coalesces into that same pending fetch. But an event
+        arriving **while a fetch is already in flight** cannot be a plain
+        no-op: that fetch may already have read the pre-mutation snapshot,
+        so silently dropping the new event would leave the mutation
+        invisible until the 30-60s safety reconcile. Fixed by a
+        trailing-dirty flag: any event arriving during an in-flight fetch
+        sets a flag that triggers one more re-fetch after the current one
+        completes. **That trailing fetch is itself subject to the same
+        minimum-interval floor as the debounce window** (not "immediately,
+        unconditionally") — sustained per-task traffic (e.g. activity or
+        heartbeat events firing for every live task in quick succession)
+        would otherwise keep the dirty flag continuously set and turn the
+        relay into back-to-back full-board fetches, a worse load than the
+        fixed 2s poll this phase exists to reduce. The dirty bit persists
+        across a throttled wait; it never causes an update to be dropped,
+        only delayed to the next allowed tick.
   - [ ] **Close the gap between the initial snapshot and the subscription
         actually being live — and prove it's actually live, not just that
         the HTTP response started:** a mutation that lands after the
@@ -552,21 +560,31 @@ this phase) is considered.)_
         caller (the CLI's ordinary `--subscribe` poll tick) keeps the cheap
         unconditional cache read; only the bounded initial-scan retry path
         pays for a forced rescan, exactly the callers that need one.
-        **Retry exhaustion itself must not silently become success:**
-        `_fetch_complete_initial_rows()` today returns whatever `rows` it
-        has after its bounded retries regardless of outcome, and the
-        `begin`/`row`/`done` envelope it emits carries no incomplete
-        marker at all — if every forced rescan still fails and no
-        last-known-good exists for a namespace, this design would still
+        **Retry exhaustion resolves to one explicit contract, chosen now,
+        not left open:** `_fetch_complete_initial_rows()` today returns
+        whatever `rows` it has after its bounded retries regardless of
+        outcome, and the `begin`/`row`/`done` envelope it emits carries no
+        incomplete marker at all — if every forced rescan still fails and
+        no last-known-good exists for a namespace, this design would still
         publish that partial roster as the initial snapshot, exactly what
-        the uninitialized-state bullet below exists to prevent. The
-        exhausted-retry path must therefore either keep retrying under a
-        different, non-silent contract (e.g. block/poll further rather than
-        giving up and publishing) or the envelope itself must carry an
-        explicit partial-snapshot marker the Picker can show as "still
-        discovering" rather than a clean, falsely-complete roster.
+        the uninitialized-state bullet below exists to prevent. Of the two
+        materially different ways to close this, this design picks
+        **blocking, not a new partial-snapshot envelope**: a Picker-visible
+        partial-snapshot marker would require Picker-side changes, which
+        contradicts this effort's own vision boundary (the Picker only
+        ever consumes the existing `stream`/`subscribe` envelope — see this
+        phase's own opening note). Instead, the initial fetch simply does
+        not emit `begin` until discovery succeeds at least once **or** a
+        generous, bounded ceiling elapses (materially longer than the
+        per-namespace retry bound, e.g. an order of magnitude past it) — at
+        which point it falls back to the existing topology-error `error`
+        frame convention (`board_cli.py`'s existing exit-1 stream-error
+        path), never a silent, falsely-complete publish and never an
+        unbounded hang either.
   - [ ] **A stalled or crashed refresh task must not serve a stale roster as
-        complete forever, and the recovery can't be merely passive:**
+        complete forever, and the recovery can't be merely passive — and
+        this applies to the provider-discovery scan itself, not only to an
+        individual namespace's agent scan:**
         moving the scan to a
         background task adds a new failure mode the current per-call scan
         doesn't have — if that task exits or hangs after one successful
@@ -596,7 +614,23 @@ this phase) is considered.)_
         `force_refresh` a pure optimization (skip straight to refreshing
         instead of waiting to notice staleness) rather than the only path
         that can ever trigger a rescan, which is what actually preserves
-        reverse skew.
+        reverse skew. **This same supervised-plus-freshness-deadline
+        treatment applies to `refresh_provider_resolvers()` itself, not
+        just to a namespace's agent scan:** that call already swallows
+        registry-scan and resolver-construction failures internally,
+        returning `None` on failure (`agent_registry_resolver.py:159-170,
+        245-252`) — after one successful discovery, a *provider-discovery*
+        failure (as opposed to an individual namespace's agent-scan
+        failure) could silently leave the cache refreshing the same old
+        resolver set forever, reporting it complete even while
+        provider-registry removal/replacement discovery is failing. Fixed
+        by tracking discovery itself as its own generation/freshness state,
+        separate from any individual namespace's: a failed discovery
+        attempt must not advance that generation, and that generation
+        going stale past its own deadline marks the *whole* cache
+        incomplete, the same global treatment the pre-first-discovery case
+        above gets — ongoing discovery failure is not meaningfully
+        different from never having discovered at all.
   - [ ] **The uninitialized state must exist before daemon startup even
         discovers which namespaces exist at all, not only per already-known
         namespace:** production startup serves a placeholder `AgentResolver`
@@ -774,11 +808,19 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
         to its existing poll-and-diff path (never a frozen or crashed
         pivot), reconnects with bounded backoff once the coordinator comes
         back (not permanently stuck on polling), and runs a full reconcile
-        on that reconnect; plus a test proving the ready frame (and any
+        on that reconnect; a test proving the ready frame (and any
         other control frame `stream_events()` may gain) never reaches an
         unrelated existing consumer of that same method, e.g.
         `agent-dispatch watch`/`task_query_cli._cmd_watch()`, not just the
-        relay's own consumer.
+        relay's own consumer; and **deterministic concurrency regression
+        tests** for each race this design introduces — the ready-frame
+        handshake actually closing the startup subscription gap (not just
+        narrowing it), an event arriving during an in-flight fetch actually
+        producing exactly one trailing fetch (not zero, not a pile-up), and
+        the event-woken fetch / long reconcile / local recompute tick
+        writers actually serializing against each other without a
+        stale-overwrite — none of which a coordinator-kill test alone
+        exercises.
   - **3b:** a regression test per new failure mode the cache introduces —
         recovery from an uninitialized namespace (never silently published
         as complete), recovery from a hung/crashed background refresh task
@@ -788,10 +830,19 @@ This phase adopts that exact asymmetry, not a new, weaker rule.)_
         actually tracks `refresh_provider_resolvers()`'s own membership
         changes, and a same-namespace replacement actually invalidates the
         prior generation's cache entry rather than serving the old
-        provider's stale agents as authoritative), and competing concurrent
+        provider's stale agents as authoritative), competing concurrent
         refreshes of the same namespace (single-flight plus
         generation-guarded publication actually prevents a stale-overwrite
-        and doesn't duplicate the scan).
+        and doesn't duplicate the scan), **daemon startup before any
+        namespace has ever been discovered** (the global discovery-readiness
+        gate, not the per-namespace one, actually marks the whole response
+        incomplete), **the initial-scan retry-exhaustion contract actually
+        chosen above** (blocking past the bound and falling back to the
+        existing topology-error frame, never a silent falsely-complete
+        publish), and **`refresh_provider_resolvers()` itself failing
+        repeatedly after a prior successful discovery** (the
+        discovery-generation freshness deadline actually marks the whole
+        cache incomplete, not just an individual namespace's agent scan).
 - [ ] **Phase 4:** a regression test asserting only the expected segment(s)
       refresh for a given cause (cosmetic pulse vs. nav vs. reload vs. pivot
       switch), plus confirmation (via the same real-timer profiling method
@@ -1655,3 +1706,47 @@ One new high-severity finding plus two previously-missed:
 
 All three replied-to inline (one new thread; two on previously-missed
 findings).
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 12: discovery failure itself needs the same treatment as never-discovered, retry exhaustion gets a committed contract, and two carried-over gaps
+One new high finding, a resolved-then-reopened one, a medium, a low, plus two previously-missed:
+
+- **New, high: `refresh_provider_resolvers()` swallowing its own failures
+  means ongoing discovery failure looks identical to success.** It already
+  swallows registry-scan and resolver-construction failures and returns
+  `None` on failure. After one successful discovery, a *provider-discovery*
+  failure (not an individual namespace's agent-scan failure) could leave
+  the cache refreshing the same old resolver set forever, reporting
+  complete even while removal/replacement discovery keeps failing. Fixed
+  by tracking discovery itself as its own generation/freshness state: a
+  failed discovery attempt never advances it, and that generation going
+  stale marks the *whole* cache incomplete — the same global treatment the
+  round-11 pre-first-discovery fix already uses, since ongoing failure
+  isn't meaningfully different from never having discovered at all.
+- **Resurfaced: the global discovery-readiness gate from round 11, now
+  folded into the discovery-generation fix above** rather than treated as
+  two separate mechanisms — a single generation/freshness concept covers
+  both "never discovered yet" and "discovery is failing now."
+- **Medium: the retry-exhaustion contract was left as an open either/or.**
+  Committed to one: **blocking, not a new partial-snapshot envelope** — a
+  Picker-visible partial marker would need Picker-side changes, which
+  contradicts this effort's own CLI-only vision boundary. The initial
+  fetch now withholds `begin` until discovery succeeds or a bounded,
+  generous ceiling elapses, then falls back to the existing topology-error
+  `error` frame convention — never silent success, never an unbounded
+  hang.
+- **Low: the 3b Validation Plan gate didn't name the newest failure modes.**
+  Added explicit acceptance criteria for pre-discovery startup, retry
+  exhaustion, and discovery-failure-after-success, alongside a parallel
+  addition of missing 3a concurrency regression tests (the ready-frame
+  handshake actually closing the gap, an in-flight-fetch event actually
+  producing one trailing fetch, and writer serialization actually
+  preventing a stale overwrite) that a coordinator-kill test alone never
+  exercised.
+- **Previously missed: the trailing-dirty fetch had no rate limit of its
+  own.** Sustained per-task event traffic could keep the dirty flag
+  continuously set, turning the relay into back-to-back full fetches worse
+  than the 2s poll this phase replaces. Fixed by subjecting the trailing
+  fetch to the same minimum-interval floor as the debounce window.
+
+All four discussion threads replied-to inline; the two carried-over
+findings addressed via the same content fixes described above.
