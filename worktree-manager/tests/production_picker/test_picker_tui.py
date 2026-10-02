@@ -4451,6 +4451,45 @@ def test_new_worktree_bare_skips_seed_prompt(monkeypatch):
     asyncio.run(run())
 
 
+def test_new_worktree_no_mux_skips_seed_prompt(monkeypatch):
+    """A No-Mux worktree launches Copilot directly, bypassing the mux pane
+    that `agent-worktrees embody`'s pending_seed delivery depends on
+    entirely -- a typed prompt would be persisted but never delivered (or
+    delivered unexpectedly later, if a mux session is created afterward).
+    Confirming Create with No Mux selected must go straight to the launch
+    decision, never opening SeedPromptScreen, mirroring the Bare path
+    (found by Copilot review on PR #4893)."""
+    from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
+    monkeypatch.setattr(ema, "_SEED_PROMPT_ENABLED", True)
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.htab = 0
+            scr.btn_idx = 0
+            scr.sel = ("BTN", 0)
+            scr._activate()
+            await pilot.pause()
+            dlg = _scope_dlg(scr)
+            labels = [o["label"] for o in dlg._dlg["opts"]]
+            no_mux = labels.index("No Mux")
+            await pilot.press("tab")
+            for _ in range(no_mux):
+                await pilot.press("down")
+            await pilot.press("space")          # toggle No Mux on
+            await pilot.press("tab")
+            await pilot.press("enter")          # confirm Create
+            await pilot.pause()
+        assert app.result is not None
+        assert app.result["action"] == "new"
+        assert app.result["options"]["no_mux"] is True
+        assert app.result["options"]["seed_prompt"] == ""
+
+    asyncio.run(run())
+
+
 def test_new_worktree_seed_prompt_carries_through(monkeypatch):
     """A typed prompt in the SeedPromptScreen that follows Create reaches the
     launch decision's ``options["seed_prompt"]`` (``_SEED_PROMPT_ENABLED``
@@ -4514,9 +4553,9 @@ def test_new_worktree_no_mux_option():
             await pilot.press("tab")            # options -> button group
             await pilot.press("enter")          # confirm Create
             await pilot.pause()
-            await pilot.press("enter")      # SeedPromptScreen: textarea -> buttons
-            await pilot.press("enter")      # activate Launch (blank prompt)
-            await pilot.pause()
+            # No Mux bypasses the mux pane `embody`'s delivery depends on
+            # entirely, so the seed-prompt screen is skipped -- this must
+            # go straight to the launch decision, same as Bare.
         assert app.result["action"] == "new"
         assert app.result["options"]["no_mux"] is True
 
@@ -4583,9 +4622,8 @@ def test_new_worktree_modifiers_can_be_combined():
             await pilot.press("tab")
             await pilot.press("enter")
             await pilot.pause()
-            await pilot.press("enter")      # SeedPromptScreen: textarea -> buttons
-            await pilot.press("enter")      # activate Launch (blank prompt)
-            await pilot.pause()
+            # No Mux bypasses the mux pane `embody`'s delivery depends on
+            # entirely, so the seed-prompt screen is skipped here too.
         assert app.result["options"]["no_mux"] is True
         assert app.result["options"]["ahp"] is True
 

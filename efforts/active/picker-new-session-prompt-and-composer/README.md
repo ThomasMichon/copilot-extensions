@@ -14,13 +14,18 @@ New CLI help text (`agent-worktrees create --seed`/`resolve --new --seed`)
 is self-documenting at the flag level; no separate CLI reference doc exists
 for these commands to update. No vision, architecture, or operating
 procedure doc describes the New-worktree creation flow at a level this
-change affects -- behavior is additive and, for the Picker's own live flow,
-currently gated off (`_SEED_PROMPT_ENABLED = False`) pending the remaining
-`launch-session.{ps1,sh}`/`engine_client.py` seams, so no user-facing
-documentation yet describes a capability that doesn't yet work end-to-end.
-This effort's own README (here) is the authoritative in-progress record of
-what's implemented vs. outstanding, kept current in its Plan/Journal each
-session.
+change affects -- behavior is additive. As of 2026-10-02, Phase A's seed
+prompt is live in the Picker's own flow (`_SEED_PROMPT_ENABLED = True`):
+both delivery seams (`engine_client.py`'s `--seed` forwarding,
+`launch-session.{ps1,sh}`'s post-create `agent-worktrees embody` call) are
+closed and validated (see the Journal). Still no separate user-facing doc
+to update -- `agent-worktrees embody --help`'s existing `--seed` text
+already documents the delivery contract this reuses verbatim, and the
+Picker has no separate end-user reference doc of its own beyond its
+in-app hints (the options dialog's own hint strings, unchanged by this
+PR). This effort's own README (here) remains the authoritative
+in-progress record of what's implemented vs. outstanding, kept current in
+its Plan/Journal each session.
 
 ## Guiding Intent
 

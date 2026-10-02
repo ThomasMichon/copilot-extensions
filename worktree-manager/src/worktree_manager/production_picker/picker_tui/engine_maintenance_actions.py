@@ -448,9 +448,14 @@ class PickerScreenMaintenanceActionsMixin:
             if not confirmed:
                 return
             on = {o["label"] for o in dlg["opts"] if o["on"]}
-            if not _SEED_PROMPT_ENABLED or "Bare" in on:
+            if not _SEED_PROMPT_ENABLED or "Bare" in on or "No Mux" in on:
                 # A bare worktree gets no Copilot bootstrap at all -- nothing
-                # to seed, so skip the prompt screen entirely and behave
+                # to seed. A No-Mux worktree launches Copilot directly,
+                # bypassing the mux pane `embody`'s delivery depends on
+                # entirely -- a typed prompt would be persisted as
+                # `pending_seed` and never delivered (or delivered
+                # unexpectedly later if a mux session is created
+                # afterward). Skip the prompt screen for both and behave
                 # exactly as before this screen existed.
                 self._confirm_new_worktree(dlg)
                 return

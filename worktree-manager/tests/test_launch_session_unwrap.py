@@ -24,6 +24,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 # The exact transformation launch-session.sh applies to resolve's stdout.
 # Kept in lockstep with bin/launch-session.sh; the marker assertion below
 # fails loudly if the script's snippet is removed or renamed.
@@ -168,6 +170,7 @@ def test_launchers_publish_managed_mux_observation_from_worktree_path():
     assert '--worktree-path="$spath"' in sh
 
 
+@pytest.mark.guard
 def test_launchers_deliver_pending_seed_only_on_fresh_mux_create():
     """picker-new-session-prompt-and-composer Phase A seam 2: the launcher
     itself hands the pane command straight to `new-session`/`tmux new-session`
