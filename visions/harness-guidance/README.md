@@ -52,19 +52,19 @@ portable, attributable, and intentionally budgeted.
 - **Aggregate document structure** gives independently owned contributions a
   coherent, navigable shape without transferring their authorship to the
   composition authority.
-- **A harness's private state/knowledge home** is a generic concept this
-  vision owns as policy: a stateless control harness binds a separate private
-  repo for personal state (efforts, logs, credentials-adjacent config) as a
-  normal onboarding phase. `harness-knowledge` owns the setup/configurator
-  front door for that binding; `agent-worktrees` owns the live
-  binding/pairing/routing and state-root resolution underneath it — the two
-  together implement this policy, with no third owner. It is not GitHub
-  Codespaces' `dotfiles` mechanism — a narrower, specific auto-clone-and-
-  run-on-container-create convention with its own semantics. A consuming
-  harness may happen to name its own bound repo `dotfiles`; shared guidance,
-  skills, and PR/issue titles should name the generic concept ("private state
-  home", "knowledge repo") instead of borrowing that narrower term, so the
-  next harness author isn't misled into
+- **A harness's private state/knowledge home** is a term this guidance keeps
+  consistent, naming the concept [agent-fabric](../agent-fabric/README.md)
+  already owns as the durable coordination identity a stateless harness must
+  bind before it creates or adopts claims (see also
+  `docs/patterns/state-root-coordination.md`). `harness-knowledge` owns the
+  setup/configurator front door for that binding; `agent-worktrees` owns the
+  live binding/pairing/routing and state-root resolution underneath it. None
+  of that concept is GitHub Codespaces' `dotfiles` mechanism — a narrower,
+  specific auto-clone-and-run-on-container-create convention with its own
+  semantics. A consuming harness may happen to name its own bound repo
+  `dotfiles`; shared guidance, skills, and PR/issue titles should name the
+  generic concept ("private state home", "knowledge repo") instead of
+  borrowing that narrower term, so the next harness author isn't misled into
   assuming Codespaces dotfiles
   semantics apply here.
 
