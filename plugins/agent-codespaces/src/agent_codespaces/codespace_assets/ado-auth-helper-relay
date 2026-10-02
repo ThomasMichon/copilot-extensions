@@ -247,23 +247,26 @@ def _relay_caches_by_username():
 
 
 github_account = os.environ.get("LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT", "").strip()
-if (
+names_account = bool(
     github_account
     and fields.get("protocol", "https").lower() == "https"
     and fields.get("host", "").lower() == "github.com"
     and not fields.get("username")
-    and _relay_caches_by_username()
-):
+)
+# The cache entry a relay outage falls back to: the one for the selected
+# account, written only after a username-caching relay served that account.
+offline_fields = dict(fields, username=github_account) if names_account else fields
+if names_account and _relay_caches_by_username():
     stdin_data = stdin_data.rstrip("\n")
     stdin_data += "\nusername=" + github_account + "\n\n"
     fields = _request_fields(stdin_data)
 
 
-def _cache_file():
+def _cache_file(key_fields):
     keymat = "%s|%s|%s" % (
-        fields.get("protocol", ""),
-        fields.get("host", ""),
-        fields.get("username", ""),
+        key_fields.get("protocol", ""),
+        key_fields.get("host", ""),
+        key_fields.get("username", ""),
     )
     key = hashlib.sha256(("git|" + keymat).encode()).hexdigest()[:32]
     return os.path.join(cache_dir, key + ".gitcred")
@@ -271,7 +274,7 @@ def _cache_file():
 
 def _read_cache():
     try:
-        with open(_cache_file()) as fh:
+        with open(_cache_file(offline_fields)) as fh:
             ts = float(fh.readline().strip())
             response = fh.read()
     except (OSError, ValueError):
@@ -288,7 +291,7 @@ def _write_cache(response):
         os.makedirs(cache_dir, exist_ok=True)
         prev = os.umask(0o177)  # 0600 -- the credential response is a secret
         try:
-            with open(_cache_file(), "w") as fh:
+            with open(_cache_file(fields), "w") as fh:
                 fh.write("%d\n" % int(time.time()))
                 fh.write(response)
         finally:

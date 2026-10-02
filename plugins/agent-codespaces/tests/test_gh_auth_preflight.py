@@ -291,7 +291,7 @@ def test_a_failed_active_account_is_reported_as_not_logged_in():
 def test_fast_credential_account_never_guesses_when_the_binding_is_unreadable(monkeypatch):
     from agent_codespaces import account_binding, gh_account
 
-    def contended(_name):
+    def contended(_name, **_kw):
         raise RuntimeError("Could not acquire account binding lock (held by another process)")
 
     monkeypatch.setattr(account_binding, "bound_account_or_raise", contended)
@@ -324,7 +324,7 @@ def test_fast_credential_account_uses_binding_without_active_probe(monkeypatch):
 
     monkeypatch.setattr(
         "agent_codespaces.account_binding.bound_account_or_raise",
-        lambda name: "bound-user",
+        lambda name, **_kw: "bound-user",
     )
     monkeypatch.setattr(
         gh_account,
@@ -335,12 +335,27 @@ def test_fast_credential_account_uses_binding_without_active_probe(monkeypatch):
     assert gh_account.fast_credential_account_for_codespace("cs-1") == "bound-user"
 
 
+def test_fast_credential_account_bounds_the_binding_lock_wait(monkeypatch, tmp_path):
+    import time
+
+    from agent_codespaces import account_binding, gh_account
+
+    lock = tmp_path / "account-bindings.lock"
+    lock.write_text("", encoding="utf-8")  # a live holder (fresh, not stale)
+    monkeypatch.setattr(account_binding, "_LOCK_FILE", lock)
+    monkeypatch.setattr(account_binding, "ensure_runtime_dir", lambda: None)
+    started = time.monotonic()
+    assert gh_account.fast_credential_account_for_codespace("cs-1", timeout=0.3) is None
+    assert time.monotonic() - started < 3
+    assert lock.exists()  # a short deadline never steals a live holder's lock
+
+
 def test_fast_credential_account_falls_back_to_active(monkeypatch):
     from agent_codespaces import gh_account
 
     monkeypatch.setattr(
         "agent_codespaces.account_binding.bound_account_or_raise",
-        lambda name: None,
+        lambda name, **_kw: None,
     )
     monkeypatch.setattr(gh_account, "active_account", lambda **_kw: "active-user")
 

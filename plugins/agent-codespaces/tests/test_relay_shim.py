@@ -1184,3 +1184,19 @@ class TestGitCredentialCache:
 
         assert result.returncode == 0
         assert relay.requests[1].decode("utf-8") == request
+
+    def test_relay_outage_still_serves_the_selected_accounts_cached_credential(self, tmp_path):
+        request = "protocol=https\nhost=github.com\n\n"
+        caps = "capabilities=git-credential-username-cache\n\n"
+        cache_dir = tmp_path / "cache"
+        with _ScriptedRelay(caps, self.RESPONSE) as relay:
+            assert _run_git_cache(
+                cache_dir, relay.port, 1500, request, github_account="alice",
+            ).returncode == 0
+
+        result = _run_git_cache(cache_dir, 0, 1500, request, github_account="alice")
+        assert result.returncode == 0
+        assert result.stdout == self.RESPONSE
+        assert "served git credential from short-TTL cache" in result.stderr
+        other = _run_git_cache(cache_dir, 0, 1500, request, github_account="bob")
+        assert other.returncode == 1 and other.stdout == ""  # never another account's

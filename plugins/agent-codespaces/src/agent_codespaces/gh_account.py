@@ -202,7 +202,8 @@ def fast_credential_account_for_codespace(
     from . import account_binding
 
     try:
-        account = account_binding.bound_account_or_raise(name)
+        account = account_binding.bound_account_or_raise(
+            name, timeout=max(0.1, deadline - time.monotonic()))
     except Exception:
         log.warning("CodeSpace %s account binding is unavailable; not guessing an account", name)
         return None
