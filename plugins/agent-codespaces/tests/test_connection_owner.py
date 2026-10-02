@@ -584,6 +584,33 @@ def test_write_and_read_liveness_roundtrip(store):
     assert live is not None
     assert live.pid == os.getpid()
     assert live.interval == 15.0
+    assert live.process_identity  # this process's OS birth identity
+    assert owner.is_owner_live() is True
+
+
+@pytest.mark.parametrize("now_at_pid", ["dead", "reused"])
+def test_a_fresh_beacon_from_a_gone_writer_is_not_live(store, monkeypatch, now_at_pid):
+    """Windows never probes the pid (unknown liveness) and pids get reused: the
+    beacon's OS birth identity must still match the process now at its pid."""
+    from agent_codespaces import owner_identity
+
+    owner._write_liveness(15.0)
+    monkeypatch.setattr(owner, "_pid_alive", lambda _pid: None)  # as on Windows
+    monkeypatch.setattr(owner_identity, "owner_process_identity",
+                        lambda _pid: None if now_at_pid == "dead" else "another-process")
+    monkeypatch.setattr(owner_identity, "_pid_gone", lambda _pid: now_at_pid == "dead")
+    assert owner.read_liveness() is not None  # still fresh
+    assert owner.is_owner_live() is False
+
+
+def test_a_beacon_without_an_identity_keeps_freshness_only(store, monkeypatch):
+    import json
+
+    owner._write_liveness(15.0)
+    raw = json.loads(owner.LIVE_FILE.read_text(encoding="utf-8"))
+    raw.pop("process_identity")  # an older Owner's beacon
+    owner.LIVE_FILE.write_text(json.dumps(raw), encoding="utf-8")
+    monkeypatch.setattr(owner, "_pid_alive", lambda _pid: None)
     assert owner.is_owner_live() is True
 
 

@@ -55,6 +55,7 @@ from dataclasses import asdict, dataclass, field, fields
 from typing import TYPE_CHECKING, Any, Protocol
 
 from .config import RUNTIME_DIR, ensure_runtime_dir
+from .owner_identity import beacon_identity, owner_identity_matches, owner_process_identity
 from .owner_ports import sanitize_port as _sanitize_port
 from .owner_ports import clear_session_forwards, sanitize_hold_forwards, set_hold_forwards
 
@@ -454,10 +455,8 @@ LIVE_FILE = RUNTIME_DIR / "connection-owner.live.json"
 _LIVE_STALE_INTERVALS = 3
 _LIVE_STALE_FLOOR = 45.0
 _PROCESS_STARTED_AT = time.time()
-# A heartbeat timestamp this far in the future is treated as NOT fresh: a bogus
-# future beacon or a backward clock jump must fail safe (a tenant falls back to
-# owning its own relay), while a sub-second skew is tolerated so liveness does not
-# flap on ordinary clock jitter.
+# A future heartbeat (bogus beacon / backward clock jump) is NOT fresh, beyond a
+# sub-second-ish skew, so a tenant fails safe to owning its own relay.
 _LIVE_FUTURE_TOLERANCE = 5.0
 
 
@@ -470,10 +469,9 @@ class OwnerLiveness:
     heartbeat_at: float
     interval: float
     process_started_at: float = 0.0
-    # CodeSpaces with live relay channels, so tenants can safely defer to them.
-    active: tuple[str, ...] = ()
-    # CodeSpaces with a live host-bridge-daemon forward.
-    bridge_forwards: tuple[str, ...] = ()
+    process_identity: str | None = None  # OS birth identity of ``pid`` (beacon writer)
+    active: tuple[str, ...] = ()  # CodeSpaces with live relay channels (tenants defer)
+    bridge_forwards: tuple[str, ...] = ()  # CodeSpaces with a live host-bridge forward
 
     def staleness_threshold(self) -> float:
         return max(_LIVE_STALE_FLOOR, _LIVE_STALE_INTERVALS * max(self.interval, 0.0))
@@ -504,6 +502,7 @@ def _write_liveness(
             "pid": os.getpid(),
             "host": _this_host(),
             "process_started_at": _PROCESS_STARTED_AT,
+            "process_identity": owner_process_identity(os.getpid()),
             "heartbeat_at": time.time(),
             "interval": float(interval),
             "active": sorted(active or ()),
@@ -549,6 +548,7 @@ def read_liveness() -> OwnerLiveness | None:
             heartbeat_at=float(raw.get("heartbeat_at", 0.0)),
             interval=float(raw.get("interval", 0.0)),
             process_started_at=float(raw.get("process_started_at", 0.0)),
+            process_identity=beacon_identity(raw),
             active=tuple(str(cs) for cs in active_raw if isinstance(cs, str)),
             bridge_forwards=tuple(str(cs) for cs in bridge_raw if isinstance(cs, str)),
         )
@@ -559,9 +559,9 @@ def read_liveness() -> OwnerLiveness | None:
 def _pid_alive(pid: int) -> bool | None:
     """Best-effort: is ``pid`` a live process? ``None`` when undeterminable.
 
-    POSIX uses ``os.kill(pid, 0)``. On Windows ``os.kill`` with a non-control
-    signal calls ``TerminateProcess`` (it would KILL the pid), so we never probe
-    there -- return ``None`` and let heartbeat freshness be the sole signal.
+    POSIX uses ``os.kill(pid, 0)``; on Windows that would KILL the pid, so we
+    never probe there (heartbeat freshness plus the beacon's birth identity
+    decide instead).
     """
     if pid <= 0:
         return False
@@ -590,7 +590,7 @@ def _live_snapshot(now: float | None = None) -> OwnerLiveness | None:
         return None
     if not live.is_fresh(now):
         return None
-    if _pid_alive(live.pid) is False:
+    if _pid_alive(live.pid) is False or not owner_identity_matches(live, _this_host()):
         return None
     return live
 
