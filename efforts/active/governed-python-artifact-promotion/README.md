@@ -118,17 +118,31 @@ gate that keeps a promoted release installable under real-world feed lag.
   absorbs the residual cases (a feed temporarily further behind than the
   seasoning window, an unusually slow mirror, etc.).
 - **Trust root.** The manifest's expected digest is **committed into
-  promoted, branch-protected repository metadata** (the manifest itself is
-  a file checked into the promotion commit on `main`/`dev`, protected by
-  the same branch-protection rules as source code) — not merely a value
-  sitting next to the artifact in the same, equally-mutable artifact store.
-  An attacker who can write to the artifact store cannot also forge a
-  branch-protected commit, so replacing both the wheel and its digest
-  together is not possible without compromising repository review controls
-  directly. This is the chosen trust root; a signed attestation against a
-  separately pinned verifier key was considered and rejected for this
-  effort's scope as unnecessary added key-management surface given the
-  branch-protection guarantee already available.
+  promoted, branch-protected repository metadata** — specifically, written
+  into the promoted plugin payload on `main` by the generated release
+  commit (`validate-and-promote.yml:555-597`, `promote_release.py:15-18`
+  write generated release metadata to `main` only, not `dev` — the trust
+  root lives in the independently-installed `main` payload a plugin
+  actually ships from, not in a `dev` snapshot), protected by the same
+  branch-protection rules as source code — not merely a value sitting next
+  to the artifact in the same, equally-mutable artifact store. An attacker
+  who can write to the artifact store cannot also forge a branch-protected
+  commit, so replacing both the wheel and its digest together is not
+  possible without compromising repository review controls directly. This
+  is the chosen trust root; a signed attestation against a separately
+  pinned verifier key was considered and rejected for this effort's scope
+  as unnecessary added key-management surface given the branch-protection
+  guarantee already available.
+- **Artifact publication and durable access.** A built, verified artifact
+  set is only useful if it has a durable, deterministic location a
+  consumer can fetch it from without a separate discovery API. Promoted
+  artifacts are published as **GitHub Release assets on this repository**,
+  one release per promoted plugin-payload version, tagged deterministically
+  from the plugin name and promoted version (e.g.
+  `<plugin>-v<version>`) so an installer can construct the expected
+  release/asset URL directly from the trust-rooted manifest committed on
+  `main`, with no separate lookup/index service to stand up or keep
+  available.
 - **Fallback vs. fail-closed.** "No usable artifact" must not conflate two
   different states: an artifact that was never published for this tuple
   (safe to fall back to from-source) versus a published artifact whose
@@ -203,11 +217,16 @@ gate that keeps a promoted release installable under real-world feed lag.
       as the closure a consumer must later validate against their own
       governed feed.
 - [ ] Specify and implement the manifest's trust root per the committed
-      decision above: the manifest's expected digest is committed into
-      promoted, branch-protected repository metadata. Implement the
-      installer-side check that reads the digest from that
-      branch-protected commit (not from the artifact store) before trusting
-      any downloaded artifact/manifest pair.
+      decision above: the manifest's expected digest is committed into the
+      promoted `main` plugin payload via the generated release commit (not
+      a `dev` snapshot). Implement the installer-side check that reads the
+      digest from that `main`-committed metadata (not from the artifact
+      store) before trusting any downloaded artifact/manifest pair.
+- [ ] Publish the built artifact set as GitHub Release assets on this
+      repository per the deterministic tag/locator scheme decided above
+      (one release per promoted plugin-payload version), so Phase 3 has a
+      durable, discoverable location to fetch from without a separate
+      index service.
 
 ### Phase 3 — Verified consumption with correct fallback
 
@@ -240,6 +259,10 @@ gate that keeps a promoted release installable under real-world feed lag.
 
 ## Validation Plan
 
+- [ ] An end-to-end publication test proves a promoted artifact set is
+      fetchable from its GitHub Release using only the deterministic
+      tag/locator derived from the `main`-committed manifest — no manual
+      discovery step.
 - [ ] A clean-cache test proves third-party resolution uses only the
       governed feed; verify the effective `uv`/`pip` configuration
       independently and never log credentials.
@@ -368,4 +391,17 @@ _Pending Phase 1 spike evidence._
   built, verified, and consumed together as one set, never resolved
   against any package index. Added a representative vendored-lib install
   test to the Validation Plan.
+
+### 2026-10-01 — Fifth review pass: no publication channel; wrong branch for the trust root
+
+- A fifth review round found two remaining gaps: (1) the plan never
+  specified where a built artifact set actually gets published, so Phase 3
+  "locate" logic had nothing durable to locate from — fixed by publishing
+  promoted artifacts as GitHub Release assets on this repository, tagged
+  deterministically from plugin name + promoted version; (2) the trust-root
+  description incorrectly said the manifest is committed to `main`/`dev` —
+  generated release metadata actually lands only on `main`
+  (`validate-and-promote.yml:555-597`, `promote_release.py:15-18`), not
+  `dev`, so the trust root is corrected to name `main` specifically (the
+  payload an installed plugin actually ships from).
 
