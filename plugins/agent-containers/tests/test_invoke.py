@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import sys
 from importlib.metadata import PackageNotFoundError
+from pathlib import Path
 
 from agent_containers import _invoke
 
@@ -116,6 +117,12 @@ def test_payload_root_uses_direct_url_source_path(monkeypatch, tmp_path):
     monkeypatch.setattr(_invoke, "distribution", lambda name: _FakeDist())
 
     assert _invoke.payload_root() == source_root.resolve()
+
+
+def test_path_from_file_url_preserves_unc_authority():
+    assert _invoke._path_from_file_url("file://server/share/agent-containers") == Path(
+        "//server/share/agent-containers"
+    )
 
 
 def test_runtime_root_honors_agent_containers_home(monkeypatch, tmp_path):

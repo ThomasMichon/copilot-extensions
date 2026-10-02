@@ -30,12 +30,20 @@ def _source_plugin_root() -> Path:
             data = None
         url = str((data or {}).get("url") or "").strip()
         if url:
-            parsed = urlparse(url)
-            if parsed.scheme == "file":
-                candidate = Path(url2pathname(parsed.path))
-                if candidate.is_dir() and (candidate / "scripts" / "stamp_build_info.py").is_file():
-                    return candidate.resolve()
+            candidate = _path_from_file_url(url)
+            if candidate and candidate.is_dir() and (candidate / "scripts" / "stamp_build_info.py").is_file():
+                return candidate.resolve()
     return Path(agent_dispatch.__file__).resolve().parent.parent.parent
+
+
+def _path_from_file_url(url: str) -> Path | None:
+    parsed = urlparse(url)
+    if parsed.scheme != "file":
+        return None
+    path = url2pathname(parsed.path)
+    if parsed.netloc and parsed.netloc.casefold() != "localhost":
+        return Path(f"//{parsed.netloc}{path}")
+    return Path(path)
 
 
 def test_version_matches_packaged_metadata_when_unstamped():
@@ -54,6 +62,12 @@ def test_build_info_placeholder_is_empty_so_it_falls_through():
     from agent_dispatch._build_info import BUILD_INFO
 
     assert BUILD_INFO["version"] == ""
+
+
+def test_path_from_file_url_preserves_unc_authority():
+    assert _path_from_file_url("file://server/share/agent-dispatch") == Path(
+        "//server/share/agent-dispatch"
+    )
 
 
 def test_stamp_build_info_writes_pyproject_version(tmp_path):

@@ -162,13 +162,22 @@ def _direct_url_source_root() -> Path | None:
     url = str((data or {}).get("url") or "").strip()
     if not url:
         return None
-    parsed = urlparse(url)
-    if parsed.scheme != "file":
+    candidate = _path_from_file_url(url)
+    if candidate is None:
         return None
-    candidate = Path(url2pathname(parsed.path))
     if candidate.is_dir() and (candidate / "plugin.json").is_file():
         return candidate.resolve()
     return None
+
+
+def _path_from_file_url(url: str) -> Path | None:
+    parsed = urlparse(url)
+    if parsed.scheme != "file":
+        return None
+    path = url2pathname(parsed.path)
+    if parsed.netloc and parsed.netloc.casefold() != "localhost":
+        return Path(f"//{parsed.netloc}{path}")
+    return Path(path)
 
 
 def _payload_root() -> Path:
