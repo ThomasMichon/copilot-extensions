@@ -3422,29 +3422,31 @@ def _monitor_sweep(
                         if callable(config_cache_for_project) and project
                         else contextlib.nullcontext()
                     )
+                    # One per-project config cache for the listing AND the handoff
+                    # processing below (a cutover spawn loads config per record).
                     with config_scope:
                         records = tracking.list_records(cfg.tracking_dir())
-                    for record in records:
-                        worktree_path = getattr(record, "worktree_path", None)
-                        if worktree_path:
-                            try:
-                                if (
-                                    os.path.normcase(os.path.realpath(worktree_path))
-                                    in served_path_keys
-                                ):
+                        for record in records:
+                            worktree_path = getattr(record, "worktree_path", None)
+                            if worktree_path:
+                                try:
+                                    if (
+                                        os.path.normcase(os.path.realpath(worktree_path))
+                                        in served_path_keys
+                                    ):
+                                        continue
+                                except (OSError, ValueError):
+                                    pass
+                            if not record.pending_handoffs:
+                                retire_request = _monitor_pending_handoff_predecessor_retire(record)
+                                if retire_request is None:
                                     continue
-                            except (OSError, ValueError):
-                                pass
-                        if not record.pending_handoffs:
-                            retire_request = _monitor_pending_handoff_predecessor_retire(record)
-                            if retire_request is None:
+                            try:
+                                if not sessions.has_mux_session(record.worktree_id):
+                                    continue
+                            except Exception:
                                 continue
-                        try:
-                            if not sessions.has_mux_session(record.worktree_id):
-                                continue
-                        except Exception:
-                            continue
-                        _monitor_maybe_process_handoff_record(record, governance=governance)
+                            _monitor_maybe_process_handoff_record(record, governance=governance)
                 except _StatusMonitorGovernanceDeferred:
                     raise
                 except Exception:
