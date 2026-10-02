@@ -133,6 +133,32 @@ the new shared lib added to it, in addition to a normal `pyproject.toml`
 dependency + `[tool.uv.sources]` entry. A shared package that exists only as
 source with no installer/dependency wiring is not actually deployable.
 
+**Architectural pattern reconciliation:** this effort adds a new cross-plugin
+shared runtime dependency (`libs/token-resolve/`), so it is checked against
+the two governing patterns rather than treated as pure below-altitude
+plumbing:
+- **`docs/patterns/vendor-pointer.md`** (canonical-to-shipped materialization):
+  `libs/token-resolve/` follows the existing **canonical reference** kind
+  already used by `agent-procutil`, `zdd`, etc. — a live `dev`-branch
+  `[tool.uv.sources]` path reference with no local vendored copy, materialized
+  into a real local copy in each consumer at promotion time. This effort
+  introduces no new vendoring kind; it is one more instance of an
+  already-established, already-compliant pattern.
+- **`docs/patterns/a-la-carte-independence.md`** (independent installability):
+  the shared lib does **not** become a mandatory central coordinator or a
+  runtime dependency on a sibling *plugin*. Each consumer (`agent-dispatch`,
+  `agent-vault`, `agent-index`) gets its own materialized local copy via the
+  same vendored-lib mechanism the existing libs already use — installing any
+  one of these plugins alone still installs and runs standalone, exactly as
+  today, with no dependency on another plugin being present. Cross-platform
+  parity (POSIX + Windows installers, both updated per consumer in Phases
+  2-4) is carried the same way the existing vendored libs already require it.
+- The "no governing vision" conclusion in the header stands: these two
+  patterns govern *how* a cross-plugin shared dependency is vendored and
+  installed (a mechanical/structural concern, already satisfied by following
+  precedent exactly), not *whether* a new architectural capability or
+  guarantee is being introduced (which would need vision-level treatment).
+
 ## Request
 
 Operator (verbatim, private repo name redacted per this repo's public-artifact
@@ -394,3 +420,16 @@ conventions to mirror) to be elaborated once this plan clears review._
   Also removed "flagged by review"-style process narration throughout in
   favor of stating the technical facts/decisions directly (the Journal
   entries already carry the review history).
+
+### 2026-10-02 — Review round 5 (PR #4910)
+- Copilot review: all five findings from round 4 resolved; one new Low
+  finding — the effort adds a new cross-plugin shared runtime dependency,
+  which is architectural enough to warrant explicit reconciliation against
+  `docs/patterns/vendor-pointer.md` and `docs/patterns/a-la-carte-independence.md`,
+  not just a bare "no governing vision" conclusion. Addressed: added an
+  "Architectural pattern reconciliation" subsection to Context confirming
+  the new lib follows the existing canonical-reference vendoring kind
+  (no new pattern introduced) and preserves standalone per-plugin
+  installability (no mandatory coordinator, no cross-plugin runtime
+  dependency) — both already-established patterns, applied rather than
+  reinvented.
