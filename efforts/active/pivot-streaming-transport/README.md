@@ -326,10 +326,15 @@ this phase) is considered.)_
         emit an explicit **ready frame** immediately after queue
         registration (before yielding any real event), and having the
         client: (1) wait for that ready frame, (2) buffer any events
-        received from that point on rather than applying them immediately,
-        (3) run the immediate reconcile pass, then (4) apply the buffered
-        events on top of the reconciled snapshot — so nothing in the
-        handoff window is lost to either side.
+        received from that point on (count only — these are wake signals,
+        not row payloads, consistent with the wake-only model below; there
+        is no per-event state to "apply"), (3) run the immediate reconcile
+        pass, then (4) if any event was buffered during that window,
+        immediately schedule one coalesced full re-fetch afterward (the
+        same debounced wake path ordinary events already use) rather than
+        discarding them or trying to apply them as row-level deltas — so a
+        mutation landing in the handoff window still surfaces promptly
+        instead of waiting for the next long reconcile.
   - [ ] **Scope to the direct (local) path only:**
         `_fetch_rows()` already branches to `_fetch_rows_delegated()` for a
         cross-machine `--machine`. The local coordinator's `/events` stream
@@ -395,22 +400,31 @@ this phase) is considered.)_
         audit is needed once every mutation path publishes at least one
         event, since the relay no longer depends on that event's contents.
   - [ ] **Time-derived fields change with no mutation and no event at all,
-        and need their own refresh path, not a daemon round-trip:**
-        `_build()` expires `activity` after `ACTIVITY_TTL_SECONDS`, advances
-        the "stalled Nm" text purely from `time.time()`, **and** removes a
-        terminal row entirely once `completed_at`/`updated_at` crosses the
-        `--recent-mins` cutoff (`board_cli.py:388-407`) — none of these three
-        transitions is triggered by any task mutation, so neither the event
-        relay above nor a 30-60s reconcile is a sufficient refresh cadence
-        for any of them (the current 2s poll happens to mask this today
-        only because it's frequent enough to feel live). Fixed by a
-        **separate, local, no-network recompute tick** on a short cadence
-        (comparable to today's 2s, e.g. 1-2s) that recalculates all three
-        clock-only transitions — not just the two display-text fields —
-        from the already-cached rows' own stored timestamps: emitting a
-        `delta` for a row whose displayed text changed purely from clock
-        advancement, and a `removed` for a row that has now aged out of
-        `--recent-mins`, purely locally, zero daemon load either way.
+        and need their own refresh path, not a daemon round-trip — and this
+        covers more than the task's own timestamps:** `_build()` expires
+        `activity` after `ACTIVITY_TTL_SECONDS`, advances the "stalled Nm"
+        text purely from `time.time()`, removes a terminal row entirely once
+        `completed_at`/`updated_at` crosses the `--recent-mins` cutoff
+        (`board_cli.py:388-407`), **and** calls `board_fields_for_task()`
+        (`board_cli.py:470-480`), whose own relay-derived freshness/age
+        fields clear `artifacts_summary`/`length_display` once the relay
+        entry itself goes stale (`worktree_status_relay.py:190-202,
+        307-345`) — a fourth clock-only transition, not merely a
+        consequence of the first three. None of these is triggered by any
+        task mutation, so neither the event relay above nor a 30-60s
+        reconcile is a sufficient refresh cadence for any of them (the
+        current 2s poll happens to mask this today only because it's
+        frequent enough to feel live). Fixed by a **separate, local,
+        no-network recompute tick** on a short cadence (comparable to
+        today's 2s, e.g. 1-2s) that recalculates all four clock-only
+        transitions — not just the task-timestamp-derived ones — from
+        already-cached state: this requires retaining the **raw relay
+        entry** alongside each cached row internally (the rendered row
+        alone doesn't carry enough to recompute the relay-staleness
+        transition), emitting a `delta` for a row whose displayed text
+        changed purely from clock advancement, and a `removed` for a row
+        that has now aged out of `--recent-mins`, purely locally, zero
+        daemon load either way.
   - [ ] **Reconnect-gap safety net (non-negotiable, not an optimization):**
         `EventBus.subscribe()` (`events.py`) is a live, in-memory, non-replay
         broadcast — an event published during a dropped/reconnecting SSE
@@ -1427,3 +1441,25 @@ Three more findings:
   part of the redesigned plan actually introduces.
 
 All three replied-to inline.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 8: the recompute tick missed a fourth clock-only transition, and the buffer fix contradicted the wake-only model
+Two findings:
+- **The local recompute tick's "three clock-only transitions" framing was
+  incomplete.** `board_fields_for_task()` (`board_cli.py:470-480`) carries
+  its own relay-derived freshness/age fields that clear
+  `artifacts_summary`/`length_display` once the relay entry itself goes
+  stale (`worktree_status_relay.py`) — a fourth clock-only transition,
+  distinct from the task-timestamp-derived ones. Fixed by requiring the
+  cache to retain the **raw relay entry** alongside each cached row (the
+  rendered row alone doesn't carry enough to recompute this), and widening
+  the recompute tick to cover all four transitions, not three.
+- **Round 7's own fix ("apply the buffered events on top") quietly
+  contradicted the wake-only model it was supposed to fit into** — a
+  buffered event has no row-level state to "apply," since round 4 already
+  established every event is a content-free wake signal, not a transform
+  input. Fixed by making the correct behavior explicit: buffered events are
+  counted only, and if any landed during the reconcile window, schedule one
+  coalesced full re-fetch afterward through the same debounced wake path
+  ordinary events already use — not a second, inconsistent mechanism.
+
+Both replied-to inline.
