@@ -107,6 +107,11 @@ class SshTarget(Target):
             detritus = discover_session_detritus(source, include_sessions)
         except OSError as exc:
             return PushResult(ok=False, detail=f"detritus discovery failed: {exc}")
+        source_arg = runtime.source_arg(source)
+        if source_arg is None:
+            return PushResult(
+                ok=False, detail="failed to convert source path for WSL rsync"
+            )
         remote = f"{host}:{self._remote_path()}/{machine}/"
         # A WSL-wrapped rsync runs ssh inside the same WSL runtime -- a bare
         # "ssh" there is WSL's own, never a cross-runtime mismatch -- so the
@@ -124,7 +129,7 @@ class SshTarget(Target):
                 *rsync_session_filters(include_sessions, detritus.roots),
                 "-e",
                 ssh_cmd,
-                runtime.source_arg(source),
+                source_arg,
                 remote,
             ]
             try:

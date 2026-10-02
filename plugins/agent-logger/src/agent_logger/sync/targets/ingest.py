@@ -59,20 +59,33 @@ class IngestTarget(Target):
         url = self._url()
         if not url:
             return PushResult(ok=False, detail="ingest target requires a url")
-        runtime = sync_base.resolve_rsync_runtime()
+        # ingest speaks rsync's own daemon protocol directly -- it never
+        # shells out to ssh, so a WSL distro with rsync but no ssh client
+        # must still be eligible.
+        runtime = sync_base.resolve_rsync_runtime(require_ssh=False)
         if not runtime.use_wsl and shutil.which("rsync") is None:
             return PushResult(ok=False, detail="rsync not found on PATH")
         try:
             detritus = discover_session_detritus(source, include_sessions)
         except OSError as exc:
             return PushResult(ok=False, detail=f"detritus discovery failed: {exc}")
+        source_arg = runtime.source_arg(source)
+        if source_arg is None:
+            return PushResult(
+                ok=False, detail="failed to convert source path for WSL rsync"
+            )
         dest = f"{url}/{machine}/"
         pw = self._password_file()
         pw_arg = pw
         if pw and runtime.use_wsl:
             # A WSL-wrapped rsync reads its own filesystem view -- convert the
             # native Windows password-file path the same way as the source.
-            pw_arg = sync_base.wsl_posix_path(Path(pw)) or pw
+            pw_arg = sync_base.wsl_posix_path(Path(pw))
+            if pw_arg is None:
+                return PushResult(
+                    ok=False,
+                    detail="failed to convert password-file path for WSL rsync",
+                )
         for _ in range(2):
             cmd = [
                 *runtime.command_prefix,
@@ -84,7 +97,7 @@ class IngestTarget(Target):
             ]
             if pw:
                 cmd += [f"--password-file={pw_arg}"]
-            cmd += [runtime.source_arg(source), dest]
+            cmd += [source_arg, dest]
             try:
                 proc = subprocess.run(
                     cmd,
@@ -138,7 +151,7 @@ class IngestTarget(Target):
     def doctor(self) -> DoctorResult:
         result = DoctorResult(ok=True)
         result.add("url configured", bool(self._url()), self._url())
-        if sync_base.wsl_rsync_available():
+        if sync_base.wsl_rsync_available(require_ssh=False):
             result.add("rsync present", True, "via WSL")
         else:
             result.add("rsync present", shutil.which("rsync") is not None, "")

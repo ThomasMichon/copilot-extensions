@@ -42,8 +42,8 @@ _IS_WINDOWS = platform.system() == "Windows"
 _WSL_PROBE_TIMEOUT = 15
 
 
-def wsl_rsync_available() -> bool:
-    """Whether a usable WSL distro with ``rsync``+``ssh`` is reachable.
+def wsl_rsync_available(*, require_ssh: bool = True) -> bool:
+    """Whether a usable WSL distro with the required tools is reachable.
 
     Windows has no native rsync distribution; the practical options are an
     MSYS2/Cygwin-runtime ``rsync.exe``, or running rsync inside WSL. WSL is
@@ -53,14 +53,21 @@ def wsl_rsync_available() -> bool:
     and the rsync argument parser misreading a bare ``C:\\...`` local source
     path as a ``host:path`` remote spec. Always ``False`` on POSIX (nothing
     to prefer over the system rsync already on ``PATH``).
+
+    ``require_ssh`` gates whether ``ssh`` must also be present: the ``ssh``/
+    ``ssh-tunnel`` targets need it (rsync shells out to it via ``-e``), but
+    ``ingest`` speaks rsync's own daemon protocol directly and never invokes
+    ssh at all -- requiring it there would reject a WSL distro that has rsync
+    but happens to lack an ssh client.
     """
     if not _IS_WINDOWS:
         return False
     if shutil.which("wsl.exe") is None:
         return False
+    check = "command -v rsync" + (" && command -v ssh" if require_ssh else "")
     try:
         proc = subprocess.run(
-            ["wsl.exe", "--", "sh", "-c", "command -v rsync && command -v ssh"],
+            ["wsl.exe", "--", "sh", "-c", check],
             capture_output=True,
             timeout=_WSL_PROBE_TIMEOUT,
             check=False,
@@ -74,8 +81,8 @@ def wsl_rsync_available() -> bool:
 def wsl_posix_path(path: Path) -> str | None:
     """Convert a Windows path to its WSL POSIX form via the authoritative ``wslpath``.
 
-    Returns ``None`` on any failure so callers can fall back rather than hand
-    rsync a malformed argument.
+    Returns ``None`` on any failure so callers can treat the conversion as a
+    hard error rather than silently handing rsync a malformed argument.
     """
     try:
         proc = subprocess.run(
@@ -106,18 +113,29 @@ class RsyncRuntime:
     command_prefix: list[str]
     use_wsl: bool
 
-    def source_arg(self, source: Path) -> str:
-        """Render *source* as an rsync source argument, trailing slash included."""
+    def source_arg(self, source: Path) -> str | None:
+        """Render *source* as an rsync source argument, trailing slash included.
+
+        Returns ``None`` when running under WSL and the ``wslpath`` conversion
+        failed -- callers must treat that as a push error, never fall back to
+        the raw Windows path (which WSL rsync would misparse or simply fail
+        to find).
+        """
         if self.use_wsl:
             converted = wsl_posix_path(source)
-            if converted:
-                return converted.rstrip("/") + "/"
+            if converted is None:
+                return None
+            return converted.rstrip("/") + "/"
         return f"{source}/"
 
 
-def resolve_rsync_runtime() -> RsyncRuntime:
-    """Resolve the rsync runtime to use for this push: WSL-wrapped when available."""
-    use_wsl = wsl_rsync_available()
+def resolve_rsync_runtime(*, require_ssh: bool = True) -> RsyncRuntime:
+    """Resolve the rsync runtime to use for this push: WSL-wrapped when available.
+
+    ``require_ssh`` is forwarded to :func:`wsl_rsync_available` -- pass
+    ``False`` for a target (``ingest``) that never shells out to ssh.
+    """
+    use_wsl = wsl_rsync_available(require_ssh=require_ssh)
     return RsyncRuntime(command_prefix=["wsl.exe", "--"] if use_wsl else [], use_wsl=use_wsl)
 
 
