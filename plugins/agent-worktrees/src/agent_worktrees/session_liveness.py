@@ -65,7 +65,11 @@ def session_liveness(session_id: str | None) -> Liveness:
         sdir = sessions._session_state_dir() / session_id
         if not sdir.is_dir() or sessions._is_detached_session(sdir):
             return "unknown"
-        locks = list(sdir.glob("inuse.*.lock"))
+        # scandir, not glob: glob can swallow an unreadable directory and
+        # return nothing, which would read as "no live lock".
+        with os.scandir(sdir) as entries:
+            locks = [Path(e.path) for e in entries
+                     if e.name.startswith("inuse.") and e.name.endswith(".lock")]
     except OSError:
         return "unknown"
     unknown = False

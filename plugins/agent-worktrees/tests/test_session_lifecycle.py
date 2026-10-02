@@ -1265,3 +1265,18 @@ class TestDeadHeadReclaim:
         assert head_is_provably_dead("s1") is (expected == "dead")
         assert sl.session_liveness("elsewhere") == "unknown"  # not on this machine
         assert sl.session_liveness(None) == "unknown"
+
+    def test_an_unreadable_session_directory_is_unknown_never_dead(self, tmp_path, monkeypatch):
+        from agent_worktrees import session_liveness as sl
+        from agent_worktrees import sessions
+        from agent_worktrees.tracking_session_registration_write import head_is_provably_dead
+
+        monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
+        (tmp_path / "s1").mkdir()
+
+        def _denied(path):
+            raise PermissionError(13, "Access is denied", str(path))
+
+        monkeypatch.setattr(sl.os, "scandir", _denied)
+        assert sl.session_liveness("s1") == "unknown"
+        assert head_is_provably_dead("s1") is False
