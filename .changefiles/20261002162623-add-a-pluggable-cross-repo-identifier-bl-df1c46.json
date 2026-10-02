@@ -1,0 +1,9 @@
+{
+  "comment": "Add a pluggable cross-repo identifier-blocklist sweep: repo visibility tiers, .identifier-blocklist/block-for-<tier>.yaml discovery, and the 'identifiers sweep' CLI surface.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}

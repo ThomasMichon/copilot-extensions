@@ -81,7 +81,15 @@ def _base_env() -> dict[str, str]:
 
     # Keep PATH/SYSTEMROOT so git + python resolve on every platform.
     keep = ("PATH", "SYSTEMROOT", "SystemRoot", "HOME", "USERPROFILE", "TEMP", "TMP")
-    return {k: v for k, v in os.environ.items() if k in keep}
+    env = {k: v for k, v in os.environ.items() if k in keep}
+    # Source 4 (the live agent-worktrees sweep) reads real machine state
+    # (repos.yaml, other repos' .identifier-blocklist/ files) -- disabled by
+    # default so these subprocess-driven tests stay deterministic and
+    # machine-independent regardless of what's actually installed/registered
+    # on the box running them. Tests that specifically exercise source 4
+    # override this.
+    env["COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP"] = "1"
+    return env
 
 
 def test_diff_scope_ignores_pre_existing_leak_in_untouched_file(repo: Path):
@@ -112,6 +120,7 @@ def test_load_identifier_data_merges_plain_and_ci_sources_without_duplicates(
     repo: Path, monkeypatch: pytest.MonkeyPatch
 ):
     module = _load_module(repo)
+    monkeypatch.setenv(module.LIVE_SWEEP_DISABLE_ENV, "1")
     home_dir = repo / "home"
     home_dir.mkdir()
     monkeypatch.setattr(module, "HOME_LIST", home_dir / ".agent-codespaces" / "forbidden-identifiers.txt")
@@ -143,6 +152,105 @@ def test_load_identifier_data_merges_plain_and_ci_sources_without_duplicates(
         "second-token": "why this matters",
         "caseonly": "reason that loses",
     }
+
+
+# ---------------------------------------------------------------------------
+# Source 4: the live agent-worktrees cross-repo sweep
+# ---------------------------------------------------------------------------
+
+def test_live_sweep_disabled_by_default_env_var(repo: Path, monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(repo)
+    monkeypatch.setenv(module.LIVE_SWEEP_DISABLE_ENV, "1")
+    # Even a "found" binary must not be invoked once disabled.
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+    called = []
+    monkeypatch.setattr(
+        module.subprocess, "run",
+        lambda *a, **k: called.append(1) or (_ for _ in ()).throw(AssertionError("should not run")),
+    )
+    assert module._load_live_sweep_identifiers() == []
+    assert called == []
+
+
+def test_live_sweep_absent_when_binary_not_found(repo: Path, monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: None)
+    assert module._load_live_sweep_identifiers() == []
+
+
+def test_live_sweep_contributes_identifiers(repo: Path, monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 0
+        stdout = "swept-token|swept reason\nregex:\\bSWEPT\\b"
+        stderr = ""
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    result = module._load_live_sweep_identifiers()
+    assert result == [
+        ("swept-token", "swept reason"),
+        (r"regex:\bSWEPT\b", None),
+    ]
+
+
+def test_live_sweep_merges_into_load_identifier_data(repo: Path, monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 0
+        stdout = "swept-token|swept reason"
+        stderr = ""
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    identifiers, reasons = module._load_identifier_data()
+    assert "swept-token" in identifiers
+    assert reasons["swept-token"] == "swept reason"
+
+
+def test_live_sweep_silently_ignores_nonzero_exit(repo: Path, monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 1
+        stdout = "irrelevant"
+        stderr = "boom"
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    assert module._load_live_sweep_identifiers() == []
+
+
+def test_live_sweep_silently_ignores_timeout(repo: Path, monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    def _raise(*a, **k):
+        raise module.subprocess.TimeoutExpired(cmd="agent-worktrees", timeout=10)
+
+    monkeypatch.setattr(module.subprocess, "run", _raise)
+    assert module._load_live_sweep_identifiers() == []
+
+
+def test_live_sweep_silently_ignores_empty_output(repo: Path, monkeypatch: pytest.MonkeyPatch):
+    module = _load_module(repo)
+    monkeypatch.delenv(module.LIVE_SWEEP_DISABLE_ENV, raising=False)
+    monkeypatch.setattr(module.shutil, "which", lambda _name: "/usr/bin/agent-worktrees")
+
+    class _FakeResult:
+        returncode = 0
+        stdout = "   \n"
+        stderr = ""
+
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
+    assert module._load_live_sweep_identifiers() == []
 
 
 def test_ci_loader_splits_first_pipe_only(repo: Path):

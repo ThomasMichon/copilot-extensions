@@ -167,12 +167,59 @@ see the Journal entry below. Both are agent-assembled/pushed instead of
   names, etc.; not secret from within private-downstream-repo, only from the public
   repo) and pushes it to the `ThomasMichon/copilot-extensions` repository
   secret via `gh secret set`.
-- [ ] Collaborate with the operator's **private-context work harness agent** to
+- [x] Collaborate with the operator's **private-context work harness agent** to
   assemble the separate `FORBIDDEN_IDS_WORK` list from a source list the
   operator keeps on their work OneDrive, and push it to the repository secret
-  via `gh secret set`.
+  via `gh secret set`. **Done 2026-10-01** -- landed and rotated across the
+  `identifier-leak-guard-scrub` effort/PR #4858 (see that effort's own
+  Journal); confirmed present via `gh secret list`.
 - [x] Document the expected secret format and repository-administration step
   near the workflow/tooling docs touched by the implementation.
+
+### Phase 5 - Centralized, pluggable cross-repo sweep (generalizes Phase 4's manual provisioning)
+
+Phase 4 proved the concept but left `FORBIDDEN_IDS_WORK` provisioning as a
+fully manual, hand-copied step from a single private source file. This phase
+replaces that with a discoverable, pluggable convention any locally
+registered repo can participate in -- both as a *source* of blocklist terms
+and as a *target* repo enforcing them, scoped by its own declared
+audience-exposure tier.
+
+- [x] Add `RepoEntry.visibility` (`private`/`internal`/`public`) to the
+  `agent-worktrees` repos registry, plus `repos set-visibility`/
+  `repos add --visibility`. Unset/unknown resolves to `public` (maximal
+  enforcement) rather than silently under-enforcing an unclassified repo.
+- [x] Add `identifier_blocklist.py`: discovers every locally registered
+  repo's `.identifier-blocklist/block-for-<tier>.yaml`, scoped to a target
+  repo's resolved visibility (`internal` applies to internal+public targets;
+  `public` applies to public targets only; no `block-for-private` tier since
+  nothing is more exposed than private).
+- [x] Add the `identifiers sweep [--repo NAME] [--json]` CLI surface
+  (`identifier_blocklist_cli.py`), wired into `__main__`'s dispatch table.
+- [x] Wire `tools/check-no-internal-identifiers.py` to consume the live
+  sweep as a fourth, best-effort identifier source (`agent-worktrees
+  identifiers sweep --format ci`, invoked with this repo as cwd so it
+  auto-resolves as the sweep target) -- silently absent anywhere
+  `agent-worktrees` isn't installed/registered, opt-out via
+  `COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP=1`. This automatically covers the
+  pre-push git hook AND `create-pr`/`push-changes` (both trigger the same
+  `core.hooksPath` hook via their underlying `git push`) with no separate
+  wiring.
+- [x] Document the convention end-to-end in
+  [`docs/identifier-blocklist.md`](../../../docs/identifier-blocklist.md),
+  including the YAML entry schema (`token`/`kind`/`whole_word`/
+  `case_sensitive`/`reason`) and the regenerated `FORBIDDEN_IDS_WORK`
+  provisioning recipe (now sourced from a live sweep instead of a hand-copied
+  file).
+- [ ] Migrate the harness repo carrying the current `FORBIDDEN_IDS_WORK`
+  source list (private, not named here) to a `.identifier-blocklist/
+  block-for-public.yaml` at its own anchor root, in the new YAML schema, and
+  set its registered `visibility: public`. Retires the old pipe-delimited
+  `.txt` convention that effort's own history section already documents as
+  superseded.
+- [ ] Re-provision `FORBIDDEN_IDS_WORK` from the live sweep's output (rather
+  than the old hand-copied file) once the migration above lands, confirming
+  parity with the current secret content.
 
 ## Validation Plan
 
@@ -411,3 +458,29 @@ _Pending._
   that external agent; this effort stays **Active** (not yet `Done`) until
   that secret lands and the Validation Plan's denylist-backed-scan item can
   be reconfirmed with both secrets present.
+
+### 2026-10-01 - `FORBIDDEN_IDS_WORK` landed; Phase 5 opened for a reusable cross-repo mechanism
+
+- The work-context harness agent's `FORBIDDEN_IDS_WORK` build-out completed:
+  confirmed via `gh secret list` (`FORBIDDEN_IDS_WORK` present, rotated
+  2026-10-01), alongside the pre-existing cleanup of 46 pre-existing-leak
+  files this same expansion surfaced (`#4834`, closed via PR #4858; see the
+  now-closed `identifier-leak-guard-scrub` effort for that cleanup's own
+  record).
+- That whole flow was still fundamentally manual: one operator hand-copied
+  one private file's content into a secret by hand, with no discoverable way
+  for a *second* repo to contribute its own terms, and no distinction
+  between "fully private" and "needs the guard" repos beyond which list
+  happened to get pasted where.
+- Opened Phase 5 to generalize this into the pluggable, cross-repo mechanism
+  `docs/identifier-blocklist.md` now documents: a `visibility` tier per
+  registered repo, a `.identifier-blocklist/block-for-<tier>.yaml` convention
+  any repo can carry, `agent-worktrees identifiers sweep` to aggregate them,
+  and the local guard consuming that sweep as an automatic fourth source
+  (never a new requirement -- silently absent wherever `agent-worktrees`
+  isn't installed/registered).
+- Landed the mechanism itself (registry/CLI/module/docs/tests) this session;
+  the harness-repo migration and secret re-provisioning from the live sweep
+  remain open (Phase 5's last two checkboxes) -- tracked as the natural next
+  slice, not blocking this phase's own PR.
+

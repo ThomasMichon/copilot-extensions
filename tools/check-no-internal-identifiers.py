@@ -14,10 +14,23 @@ A denylist that *named* those strings would itself leak them, so the list is
      production by the ``FORBIDDEN_IDS_FACILITY`` / ``FORBIDDEN_IDS_WORK``
      repository secrets consumed by
      ``.github/workflows/identifier-leak-guard.yml``, which documents the
-     exact provisioning command).
+     exact provisioning command), and
+  4. a best-effort **live cross-repo sweep**, when a locally registered
+     ``agent-worktrees`` installation is discoverable: ``agent-worktrees
+     identifiers sweep --format ci`` (run with this repo as cwd, so it
+     auto-resolves as the sweep target) aggregates every other locally
+     registered repo's own ``.identifier-blocklist/block-for-<tier>.yaml``
+     denylist, scoped to this repo's own registered audience-exposure tier.
+     See ``plugins/agent-worktrees/src/agent_worktrees/identifier_blocklist.py``
+     for the mechanism and ``docs/identifier-blocklist.md`` for the
+     convention. This source is silently absent wherever ``agent-worktrees``
+     isn't installed or this repo isn't registered (a fresh clone, CI) --
+     never required, only additive on a machine that has it. Opt out with
+     ``COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP=1``.
 
-CI entries are case-insensitive literal substrings by default. Prefix a token
-with ``regex:`` to match a Python regular expression instead (for example
+CI entries (sources 3 and 4 share this grammar) are case-insensitive literal
+substrings by default. Prefix a token with ``regex:`` to match a Python
+regular expression instead (for example
 ``regex:\\bexample\\b|Standalone name -- use a generic placeholder``). The
 prefix is a matching mode, not part of the reported match. Double a regex
 alternation pipe (``||``) in the secret to distinguish it from the first
@@ -31,11 +44,16 @@ token, including a bare ``#`` on its own line, which matches almost any
 Markdown heading. Never paste a commented source file straight into
 ``COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI`` (or the secrets above) -- strip
 comments and blank lines first (e.g. ``grep -vE '^\\s*#|^\\s*$' file``).
+Source 4 never has this gotcha: it only ever reads its own generated
+``identifiers sweep`` output, never a hand-pasted file.
 
-With neither configured (a fresh clone / CI) there is nothing to enforce and
-the check is a no-op (exit 0) -- so it is safe to ship in the public repo. On
-your own machine, populate either source and wire this up as a git ``pre-push``
-hook; it then blocks a push that would leak any of your identifiers.
+With none of these configured (a fresh clone with no local ``agent-worktrees``
+registration, or CI with no secret) there is nothing to enforce and the check
+is a no-op (exit 0) -- so it is safe to ship in the public repo. On your own
+machine, populate one of sources 1/2/3 by hand, or simply register this repo
+with ``agent-worktrees`` (source 4) and let the live sweep do the work; wire
+this up as a git ``pre-push`` hook either way, and it blocks a push that would
+leak any of your identifiers.
 
 Scope: by default the guard only scans the files your push actually **changes**
 (``git diff --name-only <base>...HEAD``, base ``origin/main`` -- override via
@@ -63,6 +81,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -72,6 +91,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 HOME_LIST = Path.home() / ".agent-codespaces" / "forbidden-identifiers.txt"
 CI_LIST_ENV = "COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI"
+# Opt-out for source 4 (the live agent-worktrees sweep) -- also what keeps
+# this script's own tests deterministic/machine-independent (set by default
+# in their subprocess harness; see tools/test_check_no_internal_identifiers.py).
+LIVE_SWEEP_DISABLE_ENV = "COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP"
 
 # Files this guard must not flag for merely *implementing* the mechanism.
 SELF = {
@@ -148,6 +171,33 @@ def _load_ci_identifiers(raw: str) -> list[tuple[str, str | None]]:
     return pairs
 
 
+def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
+    """Best-effort source 4: a locally registered ``agent-worktrees``' live
+    cross-repo identifier-blocklist sweep, scoped to this repo as the sweep
+    target (auto-resolved from cwd by ``identifiers sweep``).
+
+    Absent anywhere this isn't installed/registered (a fresh clone, CI) --
+    any failure (missing binary, timeout, non-zero exit, empty output) is
+    silently swallowed so this is purely additive, never a new requirement.
+    Set ``COPILOT_EXTENSIONS_DISABLE_LIVE_SWEEP=1`` to opt out entirely.
+    """
+    if os.environ.get(LIVE_SWEEP_DISABLE_ENV, "").strip().lower() in ("1", "true", "yes"):
+        return []
+    exe = shutil.which("agent-worktrees")
+    if not exe:
+        return []
+    try:
+        proc = subprocess.run(
+            [exe, "identifiers", "sweep", "--format", "ci"],
+            cwd=REPO, capture_output=True, text=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
+        return []
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return []
+    return _load_ci_identifiers(proc.stdout)
+
+
 def _load_identifier_data() -> tuple[list[str], dict[str, str | None]]:
     ids: list[str] = []
     env = os.environ.get("COPILOT_EXTENSIONS_FORBIDDEN_IDS", "")
@@ -161,6 +211,9 @@ def _load_identifier_data() -> tuple[list[str], dict[str, str | None]]:
         pass
     ci_reasons: dict[str, str | None] = {}
     for ident, reason in _load_ci_identifiers(os.environ.get(CI_LIST_ENV, "")):
+        ids.append(ident)
+        ci_reasons.setdefault(ident, reason)
+    for ident, reason in _load_live_sweep_identifiers():
         ids.append(ident)
         ci_reasons.setdefault(ident, reason)
     # De-dupe literals case-insensitively without changing regex escapes.
