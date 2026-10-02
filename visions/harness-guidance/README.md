@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-09-07
+- **Last revised:** 2026-10-02
 - **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/worktree-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -52,6 +52,17 @@ portable, attributable, and intentionally budgeted.
 - **Aggregate document structure** gives independently owned contributions a
   coherent, navigable shape without transferring their authorship to the
   composition authority.
+- **A harness's private state/knowledge home** is a generic concept owned by
+  this guidance and by `harness-knowledge`: a stateless control harness binds
+  a separate private repo for personal state (efforts, logs,
+  credentials-adjacent config) as a normal onboarding phase. It is not GitHub
+  Codespaces' `dotfiles` mechanism — a narrower, specific auto-clone-and-
+  run-on-container-create convention with its own semantics. A consuming
+  harness may happen to name its own bound repo `dotfiles`; shared guidance,
+  skills, and PR/issue titles should name the generic concept ("private state
+  home", "knowledge repo") instead of borrowing that narrower term, so the
+  next harness author isn't misled into assuming Codespaces dotfiles
+  semantics apply here.
 
 ## Features
 

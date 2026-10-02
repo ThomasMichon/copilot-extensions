@@ -5,7 +5,7 @@
   obligations, disposition, and source-control completion.
 - **Scope:** leaf (concrete component; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-09-24
+- **Last revised:** 2026-10-02
 - **Reality docs:** the agent-worktrees plugin `docs/`
 - **Supersedes / superseded by:** none
 
@@ -180,6 +180,20 @@ The worktree owns the ledger of resources it creates or adopts: related
 worktrees, pull requests, environments, sessions, connections, and other
 scarce resources. Exclusive access is fenced, ownership is answerable in both
 directions, and finalization is gated on settlement or an explicit transfer.
+
+### Write guards protect the cooperative path, not every adversarial escape
+
+A family of `preToolUse` hooks (`anchor_write_guard`, `cross_repo_guard`,
+`statelessness_guard`) nudges an agent before it writes somewhere it
+shouldn't — the shared anchor checkout, a different agent-guarded repo, or
+personal state inside a stateless harness. Their harm model is **unreported
+drift**: a dirty anchor that blocks the next deployment pull, state that
+silently never lands anywhere durable — not a security boundary defending
+against a deliberately evasive adversary. They assume a cooperative agent
+that receives and acts on the reminder once it reaches the guard's covered
+path; exhaustively closing every exotic invocation that could evade
+pattern-matching is not the goal, and a gap of that kind is a coverage note,
+not by itself a blocking defect.
 
 ### Pull-request capability
 
@@ -619,6 +633,16 @@ preferred alternative to going through the daemon. A *second, independently
 maintained* implementation of a write — one that could drift from what the
 daemon enforces — is the thing this rules out, not a logged, same-code
 emergency path.
+
+### guard-gaps-are-tracked-not-treated-as-breaches
+
+An unmatched invocation syntax in a write guard (an unusual flag, an
+unconventional command shape) is a coverage gap to widen when convenient —
+not an urgent security bypass to patch before anything else lands. The
+design goal is reminding an agent on the paths it actually takes in
+practice, not exhaustively enumerating every way a command could be phrased
+to evade detection. Treat it accordingly in review: real, but not
+inherently blocking.
 
 ### durable-files-are-persistence-not-a-side-door
 
