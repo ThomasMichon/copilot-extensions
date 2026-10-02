@@ -1130,7 +1130,7 @@ for a local, non-AHP, `exec`-mode plan really execs
 `launch-session.{ps1,sh}` as a REAL subprocess (`_run_relocated_mux_launch`,
 `__main__.py`) -- `--demo` mode only fakes the **data** (`engine_client`'s
 command override + a fixture pivot), not this final launch step, so
-confirming the dialog all the way through would have hand a demo/fictional
+confirming the dialog all the way through would have handed a demo/fictional
 `worktree_id` to the real launch script. Rather than gamble on how
 gracefully that fails (the script is ~2000 lines, unaudited for this),
 **stopped short of pressing either button** and killed the tmux session

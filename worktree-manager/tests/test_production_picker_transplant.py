@@ -508,9 +508,10 @@ def test_manager_acts_on_production_picker_new_decision_with_no_seed_prompt(
 ):
     """An absent/blank seed_prompt (Bare, or a skipped/blank Launch) must
     translate to None, not an empty string, through to LaunchRequest. This
-    only verifies that normalization -- `_resolve_for()` does not yet pass
-    `seed_prompt` on to `engine_client.resolve_launch_plan()` at all (see
-    this effort's own README: that wiring is still an incomplete seam)."""
+    only verifies that normalization -- `_resolve_for()`'s own forwarding of
+    `seed_prompt` to `engine_client.resolve_launch_plan()`'s `seed` kwarg is
+    covered separately, by
+    `test_resolve_for_forwards_seed_prompt_to_resolve_launch_plan`."""
     monkeypatch.setattr(
         runner,
         "run",
@@ -1633,6 +1634,68 @@ def test_resolve_for_reports_remote_plan_unavailable_on_older_engine(monkeypatch
     assert plan is None
     assert code == 1
     assert "could not resolve a launch plan: older engine" in capsys.readouterr().out
+
+
+def test_resolve_for_forwards_seed_prompt_to_resolve_launch_plan(monkeypatch):
+    """`_resolve_for()` must actually thread `LaunchRequest.seed_prompt`
+    through to `engine_client.resolve_launch_plan()`'s own `seed` kwarg --
+    not just normalize it onto the `LaunchRequest` (that's the OTHER,
+    already-covered half, in
+    `test_manager_acts_on_production_picker_new_decision`). Calling
+    `resolve_launch_plan` directly (as those tests do) would still pass if
+    this forwarding were later dropped from `_resolve_for` itself."""
+    from worktree_manager import engine_client
+
+    request = type(
+        "Request",
+        (),
+        {
+            "project": "demo",
+            "worktree_id": None,
+            "mode": "new",
+            "machine": None,
+            "environment": None,
+            "no_mux": False,
+            "seed_prompt": "fix the flaky test",
+        },
+    )()
+    received = {}
+
+    def _fake_resolve(project, **kwargs):
+        received.update(kwargs)
+        return type("Plan", (), {"action": "none", "exit_code": 0})()
+
+    monkeypatch.setattr(engine_client, "resolve_launch_plan", _fake_resolve)
+
+    entrypoint._resolve_for(request)
+    assert received.get("seed") == "fix the flaky test"
+
+
+def test_resolve_for_forwards_none_seed_when_request_has_no_seed_prompt(monkeypatch):
+    from worktree_manager import engine_client
+
+    request = type(
+        "Request",
+        (),
+        {
+            "project": "demo",
+            "worktree_id": None,
+            "mode": "new",
+            "machine": None,
+            "environment": None,
+            "no_mux": False,
+        },
+    )()
+    received = {}
+
+    def _fake_resolve(project, **kwargs):
+        received.update(kwargs)
+        return type("Plan", (), {"action": "none", "exit_code": 0})()
+
+    monkeypatch.setattr(engine_client, "resolve_launch_plan", _fake_resolve)
+
+    entrypoint._resolve_for(request)
+    assert received.get("seed") is None
 
 
 def test_normal_picker_command_uses_production_transplant(monkeypatch):

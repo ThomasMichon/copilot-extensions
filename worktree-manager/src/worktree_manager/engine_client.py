@@ -403,17 +403,20 @@ def repository_token(
 
 # Execution-leg CLI calls (get/set/clear/reserve/renew/release) moved to
 # engine_execution_leg.py purely to control this module's size (module-size
-# gate); imported here (after run_json/EngineError/etc. are defined, to avoid
-# a circular-import ordering issue) and re-exported so every existing
-# `engine_client.execution_leg_*` caller is unaffected.
-from .engine_execution_leg import (  # noqa: E402
-    execution_leg_clear,  # noqa: F401 -- re-export
-    execution_leg_get,  # noqa: F401 -- re-export
-    execution_leg_release,  # noqa: F401 -- re-export
-    execution_leg_renew,  # noqa: F401 -- re-export
-    execution_leg_reserve,  # noqa: F401 -- re-export
-    execution_leg_set,  # noqa: F401 -- re-export
-)
+# gate). Re-exported via a lazy module __getattr__ (PEP 562) at the bottom of
+# this file -- NOT a top-level import -- so `engine_execution_leg.py`'s own
+# `from .engine_client import run_json, ...` can fully resolve this module
+# first without a circular-import deadlock (reproducible if anything ever
+# imports `engine_execution_leg` directly, before `engine_client`: Copilot
+# review finding on PR #4878). See `__getattr__` below.
+_EXECUTION_LEG_NAMES = frozenset({
+    "execution_leg_clear",
+    "execution_leg_get",
+    "execution_leg_release",
+    "execution_leg_renew",
+    "execution_leg_reserve",
+    "execution_leg_set",
+})
 
 
 @dataclass(frozen=True)
@@ -837,3 +840,22 @@ def recent_worktree_messages(
         ],
         runner=runner,
     )
+
+
+def __getattr__(name: str):
+    """Lazily resolve the re-exported `execution_leg_*` names (PEP 562).
+
+    Deferring the import to first access (rather than a top-level import)
+    is what breaks the circular-import deadlock: `engine_execution_leg.py`
+    itself does `from .engine_client import run_json, ...`, which needs this
+    module fully initialized first. A module-level import here would try to
+    import `engine_execution_leg` while THIS module is still mid-init
+    whenever something imports `engine_execution_leg` directly before
+    `engine_client` -- this function is never even called until something
+    does `engine_client.execution_leg_get(...)` etc., well after both
+    modules have finished initializing.
+    """
+    if name in _EXECUTION_LEG_NAMES:
+        from . import engine_execution_leg
+        return getattr(engine_execution_leg, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
