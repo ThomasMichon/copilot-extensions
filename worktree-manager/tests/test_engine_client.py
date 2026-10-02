@@ -1033,6 +1033,27 @@ def test_resolve_bare_resume_skew_retries_without_flag(monkeypatch):
     assert any("--bare-resume" not in c for c in calls)
 
 
+def test_resolve_bare_resume_retry_preserves_seed(monkeypatch):
+    calls = []
+
+    def handler(cmd, kw):
+        calls.append(list(cmd))
+        if "--bare-resume" in cmd:
+            return _fake_completed(cmd, returncode=2,
+                                   stderr="unrecognized arguments: --bare-resume")
+        return _fake_completed(cmd, stdout=json.dumps(_RESUME_PLAN))
+
+    _install_fake(monkeypatch, handler)
+    plan = ec.resolve_launch_plan(
+        "dotfiles", worktree_id="x", bare_resume=True, seed="fix the thing")
+    assert plan.is_exec
+    # Both the original (rejected) attempt AND the degraded retry must carry
+    # --seed -- the retry rebuilds its own argv from the original kwargs, so
+    # a seed dropped from that rebuild would silently vanish on exactly the
+    # path meant to gracefully degrade one unsupported flag, not all of them.
+    assert all("--seed" in c and "fix the thing" in c for c in calls)
+
+
 def test_resolve_error_envelope_surfaced(monkeypatch):
     payload = json.dumps({"version": 1, "error": "no such worktree"})
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd, returncode=1, stdout=payload))
