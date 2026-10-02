@@ -394,23 +394,36 @@ this phase) is considered.)_
         not a return to 2s polling) that re-diffs the complete board against
         the tracked snapshot the same way `--subscribe` already does today,
         catching anything the event stream missed.
-  - [ ] **Serialize every full re-fetch (event-woken, reconcile, or debounce
-        flush) against the others:** more than one of these can be triggered
-        close together (an event wakes a fetch just as the long reconcile's
-        own timer also fires); running them concurrently risks the same
-        stale-overwrite race either way — a slower fetch that started
-        earlier finishing *after* a faster, later one would re-emit the
-        older state, visibly reverting a row until the next pass. Fixed by a
-        single snapshot-owner lock: exactly one fetch-diff-emit sequence
-        runs at a time; a trigger arriving while one is in flight queues
+  - [ ] **Serialize every writer of the tracked snapshot against the
+        others, including the time-derived recompute tick above:** more
+        than one of these can run close together (an event wakes a fetch
+        just as the long reconcile's own timer also fires, or the fast
+        local recompute tick fires mid-fetch) — running any two
+        concurrently risks the same stale-overwrite race: a slower writer
+        that started earlier finishing *after* a faster, later one would
+        re-emit older state, visibly reverting a row (including non-time
+        fields the recompute tick never touched, if it reads a stale cached
+        row while a full fetch is publishing newer task state). Fixed by a
+        single snapshot-owner lock shared by **every** writer — the
+        event-woken full re-fetch, the long reconcile, and the local
+        recompute tick's own read-recompute-diff-emit sequence all take the
+        same lock; a trigger arriving while another writer holds it queues
         (coalescing with any already-pending debounced wake) rather than
         running concurrently.
-  - [ ] **Degradation is the existing code, not a new path:** if
-        `stream_events()` raises (coordinator unreachable, non-2xx, stream
-        error) at any point — including after already running for a while —
-        fall back to today's unmodified poll-and-diff loop (`_fetch_rows` +
-        `time.sleep(interval)`) for the rest of the channel's life, the exact
-        branch Phase 1 shipped. No third code path.
+  - [ ] **A transient SSE failure degrades to polling temporarily, not
+        permanently:** falling back to poll-and-diff forever on the very
+        first `stream_events()` failure contradicts this design's own
+        stated goal (the CLI, not the Picker, owns reconnecting to its
+        daemon) and means one transient blip or a routine daemon-generation
+        cutover disables the Phase 3 speedup for the rest of a long-lived
+        Picker channel. Instead: on failure, fall back to poll-and-diff
+        immediately (correctness first), but keep retrying the SSE
+        connection with bounded backoff in the background; on a successful
+        reconnect, run one full reconcile pass (catching anything missed
+        while on the poll fallback) and resume the event-woken relay. Only
+        settle into *permanent* polling once reconnect retries are
+        genuinely exhausted (a bounded cap, not indefinite retry either) —
+        not on the first failure.
 - [ ] **3b — agent-bridge daemon-side cache (land first; smaller, no new
       failure mode):** `AgentResolver`'s per-call resolver scan is the actual
       cost (Phase 2's `incomplete_namespaces` work was about tolerating its
@@ -1236,3 +1249,28 @@ All three replied-to inline (one reply per thread; the `--limit` finding and
 the time-derived-fields finding and the concurrency finding each had a
 duplicate noted on a second line in the same file, addressed by the same
 single design change rather than two separate patches).
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 5: the new mechanisms from round 4 had their own two gaps
+Round 5 reviewed round 4's redesign itself and found two gaps in the
+mechanisms it introduced:
+
+- **The new time-derived recompute tick wasn't covered by the snapshot lock
+  round 4 added for the other writers.** It reads cached rows and emits
+  deltas just like the event-woken fetch and the reconcile do, so without
+  the same lock it can read a stale cached row while a full fetch is
+  concurrently publishing newer task state, then emit that stale row
+  afterward and revert non-time fields the tick never meant to touch.
+  Fixed by widening the snapshot-owner lock to cover all three writers —
+  the event-woken fetch, the long reconcile, and the recompute tick's own
+  read-recompute-diff-emit sequence all take the same lock now.
+- **Falling back to polling permanently on the very first SSE failure
+  contradicts this phase's own premise** (the CLI owns reconnecting to its
+  daemon) and means one transient blip disables the whole speedup for a
+  long-lived channel's remaining lifetime. Fixed by keeping poll-and-diff
+  as the *immediate* correctness fallback but adding bounded-backoff SSE
+  reconnect attempts in the background; a successful reconnect runs one
+  full reconcile (covering anything missed while on the fallback) before
+  resuming the event-woken relay, and only a genuinely exhausted retry
+  budget settles into permanent polling.
+
+Both replied-to inline with the concrete fix.
