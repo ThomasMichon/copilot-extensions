@@ -202,8 +202,13 @@ class SessionForwards:
                 self._local[key] = entry
             if not await self._ensure(f"local forward {key[1]}->{venue} for {key[0]}", entry[1]):
                 self._local.pop(key, None)
-                if key in dynamic and self._note_local_failure(key):
-                    await self._reassign_dynamic_local_forward(key, venue, entry[1], fixed_hosts)
+                if key in dynamic:
+                    if not _local_port_in_use(key[1]):
+                        # A transport outage, not a bind conflict: keep retrying
+                        # the assigned port so its URL stays stable.
+                        self._local_failures.pop(key, None)
+                    elif self._note_local_failure(key):
+                        await self._reassign_dynamic_local_forward(key, venue, entry[1], fixed_hosts)
                 continue
             self._local_failures.pop(key, None)
             if not self._record_assigned_local_port(key, venue, entry[1], fixed_hosts):
@@ -564,6 +569,21 @@ def make_local_forward_factory(
         return _LocalForwardChannel(forward_cls(ssh_config, venue_port, local_port=host_port))
 
     return factory
+
+
+def _local_port_in_use(port: int) -> bool:
+    """Whether another process holds host loopback ``port`` (a proven local bind
+    conflict), probed by binding it; any other outcome is not a conflict."""
+    import errno
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        try:
+            probe.bind(("127.0.0.1", int(port)))
+        except OSError as exc:
+            # 10013 (WSAEACCES): Windows' answer for a port another process holds exclusively.
+            return exc.errno in {errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", -1), 10013}
+    return False
 
 
 def _bound_local_port(channel: RelayChannel) -> int | None:

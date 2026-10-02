@@ -318,7 +318,9 @@ async def test_dynamic_local_forward_keeps_assigned_port_across_reconnects_and_o
     assert restarted.active_local_forwards() == {"cs-1": {49152: 3000}}
 
 
-async def test_dynamic_local_forward_reassigns_after_repeated_rebind_failures(store):
+async def test_dynamic_local_forward_reassigns_after_repeated_rebind_failures(store, monkeypatch):
+    monkeypatch.setattr(sf, "_local_port_in_use", lambda port: port == 49152)
+
     class Forward:
         def __init__(self, cfg, remote_port, *, local_port):
             self.remote_port = remote_port
@@ -362,6 +364,29 @@ async def test_dynamic_local_forward_reassigns_after_repeated_rebind_failures(st
     assert owner.get_hold("cs-1").local_forwards == {"49153": 3000}
     assert owner.get_hold("cs-1").assigned_local_forwards == {"49153": 3000}
     assert forwards.active_local_forwards() == {"cs-1": {49153: 3000}}
+
+
+async def test_a_transport_outage_never_reassigns_a_dynamic_local_forward(store, monkeypatch):
+    """Failures while the assigned port is still bindable are SSH/venue outages:
+    the stable host port is kept and retried, never replaced."""
+    monkeypatch.setattr(sf, "_local_port_in_use", lambda port: False)
+    calls = []
+
+    def make(codespace, host_port, venue_port):
+        calls.append(host_port)
+        return FakeChannel((codespace, host_port, venue_port), fail_start=True)  # ssh down
+
+    owner.hold("cs-1", "cli:t", daemon_port=41234, mux_session="wt-x",
+               local_forwards={49152: 3000})
+    h = owner.get_hold("cs-1")
+    h.assigned_local_forwards = {"49152": 3000}
+    owner._write_holds({"cs-1": h})
+    forwards = sf.SessionForwards(_any_factory({}), local_factory=make)
+    for _ in range(sf.LOCAL_REBIND_FAILURES_BEFORE_REASSIGN + 2):
+        await forwards.reconcile({h.codespace: h for h in owner.list_holds()})
+
+    assert 0 not in calls  # never asked the kernel for a replacement port
+    assert owner.get_hold("cs-1").assigned_local_forwards == {"49152": 3000}
 
 
 async def test_new_dynamic_local_forward_stops_when_assignment_record_fails(store):
@@ -504,7 +529,8 @@ def test_active_local_forward_beacon_uses_owner_liveness_threshold(store):
     assert olf.read_active_local_forwards(now=now) == {}
 
 
-async def test_dynamic_reassignment_stops_replacement_when_hold_was_released(store):
+async def test_dynamic_reassignment_stops_replacement_when_hold_was_released(store, monkeypatch):
+    monkeypatch.setattr(sf, "_local_port_in_use", lambda port: port == 49152)
     channels = []
 
     class Forward:

@@ -711,6 +711,31 @@ def test_dynamic_local_forward_assignment_timeout_reports_pending_success(seams,
     assert "pre-upgrade Owner" in out["error"]
 
 
+def test_rejoin_whose_owner_never_reports_keeps_a_prior_dynamic_forward_pending(
+    seams, monkeypatch, capsys,
+):
+    prior = types.SimpleNamespace(
+        sessions={"cli:anchor-example-web@cs-1": {
+            "mux_session": "wt-anchor-example-web", "confirmed": True,
+        }},
+        reverse_forwards={},
+        local_forwards={"49152": 3000},
+        assigned_local_forwards={"49152": 3000},
+    )
+    monkeypatch.setattr(owner, "get_hold", lambda *a, **k: prior)
+
+    def never_ready(*_a, **_k):
+        raise TimeoutError("the Connection Owner beacon never became ready")
+
+    monkeypatch.setattr(detach, "_reported_local_forwards", never_ready)
+    rc = detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout=_CREATED))
+
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["local_forwards_pending"] == {"0": 3000}
+    assert "never became ready" in out["error"]
+
+
 def test_launch_without_local_forwards_keeps_existing_ones(seams, capsys):
     detach.cmd_detach(_args(), ssh_session=_ssh(seams, stdout=_CREATED))
     assert "local_forwards" not in seams.holds[0][1]

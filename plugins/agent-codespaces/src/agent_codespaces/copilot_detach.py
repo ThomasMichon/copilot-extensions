@@ -360,9 +360,20 @@ def _reported_local_forwards(
     )
 
 
-def _pending_local_forwards(requested: dict[int, int], fallback: dict[str, int]) -> dict[int, int]:
+def _pending_local_forwards(
+    requested: dict[int, int], fallback: dict[str, int], assigned: dict[str, int] | None = None,
+) -> dict[int, int]:
+    """The ``0:venue`` forward still awaiting a host port. A rejoin without
+    ``--forward`` falls back to the prior forwards, where a dynamic one is
+    stored as its concrete assigned port: that is still a ``0:venue`` request."""
     wanted = dict(requested) if requested else _int_port_map(fallback)
-    return {0: wanted[0]} if 0 in wanted else {}
+    if 0 in wanted:
+        return {0: wanted[0]}
+    if not requested:
+        for host, venue in _int_port_map(assigned or {}).items():
+            if wanted.get(host) == venue:
+                return {0: venue}
+    return {}
 
 
 def _local_forwards_ready(
@@ -691,7 +702,7 @@ def cmd_detach(
             )
         except TimeoutError as exc:
             reported_local = {host: venue for host, venue in local_forwards.items() if host != 0}
-            local_pending = _pending_local_forwards(local_forwards, prior_local)
+            local_pending = _pending_local_forwards(local_forwards, prior_local, prior_assigned_local)
             local_forward_error = str(exc)
         forwards_ready = (
             _venue_ports_listening(args.name, sorted(reverse_forwards)) if reverse_forwards else {}
