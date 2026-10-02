@@ -1,0 +1,9 @@
+{
+  "comment": "A live-session message's default delivery is now \"steer\" instead of \"queue\" when the caller omits --delivery / the delivery field entirely -- this covers ACP-interop relays and other agent-to-agent sends that posted directly against the live-messages API. Queueing behind a busy session's current turn could take a very long time to reach the receiver; steering injects at the running turn's next step instead. Pass --delivery queue (or delivery=\"queue\") explicitly to opt back into end-of-turn delivery.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "minor"
+    }
+  ]
+}

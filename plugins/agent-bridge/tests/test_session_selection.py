@@ -581,7 +581,7 @@ def test_cmd_send_resolves_worktree_handle_and_delivers(monkeypatch, capsys):
     assert client.delivered == [
         {"session_id": "live-sess-1", "sender": "contributor_user@peer",
          "body": "please rebase", "reply_to": "wt-caller",
-         "kind": "prompt", "wait": False, "delivery": "queue"}
+         "kind": "prompt", "wait": False, "delivery": "steer"}
     ]
 
 
@@ -637,7 +637,31 @@ def test_live_message_delivery_precedence():
     assert m._live_message_delivery(
         argparse.Namespace(steer=False, interrupt=False, delivery="queue")
     ) == "queue"
-    assert m._live_message_delivery(argparse.Namespace()) == "queue"
+    assert m._live_message_delivery(argparse.Namespace()) == "steer"
+
+
+def test_live_sender_label_matches_reply_to_worktree_handle(monkeypatch):
+    # Regression: the rendered envelope's `from=` (sender) must be the SAME
+    # resolvable worktree handle as `reply-to=`, not the raw
+    # `agent-worktrees get worktree-dir` path. A receiver that tries
+    # `send <from>` because no explicit reply-to guidance applies (the
+    # default "prompt" kind) would otherwise hit a non-resolvable path.
+    monkeypatch.setattr(
+        m, "_worktrees_get",
+        lambda key: r"D:\Src\proj.worktrees\wt-abc123" if key == "worktree-dir" else None,
+    )
+    args = argparse.Namespace()
+    assert m._live_sender_label(args) == "wt-abc123"
+    assert m._live_reply_to(args) == "wt-abc123"
+
+
+def test_live_sender_label_falls_back_when_no_worktree(monkeypatch):
+    from agent_bridge import session_targeting_cli
+
+    monkeypatch.setattr(m, "_worktrees_get", lambda key: None)
+    monkeypatch.delenv("USER", raising=False)
+    monkeypatch.setattr(session_targeting_cli.socket, "gethostname", lambda: "test-host")
+    assert m._live_sender_label(argparse.Namespace()) == "test-host"
 
 
 class _KindCapturingClient(_LiveFakeClient):

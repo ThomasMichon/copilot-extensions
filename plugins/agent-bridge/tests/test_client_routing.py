@@ -273,6 +273,6 @@ def test_live_message_payload_includes_non_default_delivery(cfg_dir: Path, monke
         "session-1",
         sender="dispatch",
         body="wake",
-        delivery="steer",
+        delivery="queue",
     )
-    assert calls[0][2]["delivery"] == "steer"
+    assert calls[0][2]["delivery"] == "queue"

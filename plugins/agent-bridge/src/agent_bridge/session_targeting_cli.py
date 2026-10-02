@@ -144,7 +144,18 @@ def _live_sender_label(args: argparse.Namespace) -> str:
     explicit = getattr(args, "sender", None)
     if explicit:
         return explicit
-    return _core()._get_caller_id() or os.environ.get("USER") or socket.gethostname()
+    # Reuse the SAME worktree-handle resolution as _live_reply_to(), not
+    # _get_caller_id() (which returns the raw `agent-worktrees get
+    # worktree-dir` path). A mismatch here is exactly the bug this guards
+    # against: the receiver's rendered envelope shows `from="<this value>"`,
+    # and without explicit reply-to guidance an agent naturally tries
+    # `send <from> ...` first. A raw directory path is never a valid send
+    # target (the bridge resolves handles against the short worktree_id,
+    # i.e. the basename) -- so sender and reply-to must agree.
+    handle = _caller_worktree_handle()
+    if handle:
+        return handle
+    return os.environ.get("USER") or socket.gethostname()
 
 
 def _live_message_kind(args: argparse.Namespace) -> str:
@@ -160,7 +171,13 @@ def _live_message_delivery(args: argparse.Namespace) -> str:
         return "steer"
     if getattr(args, "interrupt", False):
         return "interrupt"
-    return getattr(args, "delivery", None) or "queue"
+    # "steer" (not "queue") is the fallback for a caller that omits the
+    # `--delivery` attribute entirely (e.g. a namespace built by hand rather
+    # than argparse) -- a queued message against a busy agent can sit for a
+    # long turn before the receiver ever sees it, which defeats the point of
+    # live inter-agent messaging (ACP interop, agent-to-agent sends). Pass
+    # `--delivery queue` explicitly to opt back into queueing.
+    return getattr(args, "delivery", None) or "steer"
 
 
 def _deliver_to_live_session(client, args: argparse.Namespace, session_id: str, prompt: str) -> None:
@@ -709,7 +726,7 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     send_p.add_argument("--notify", action="store_true", help="Shorthand for --kind notify (informational; no work expected).")
     send_p.add_argument("--status-check", dest="status_check", action="store_true", help="Shorthand for --kind status-check (asks for a terse status ack).")
     delivery_group = send_p.add_mutually_exclusive_group()
-    delivery_group.add_argument("--delivery", choices=["queue", "steer", "interrupt"], default="queue", help="Delivery urgency when targeting a live session: queue (default) sends after the current turn, steer injects at the running turn's next step, interrupt aborts the current turn first.")
+    delivery_group.add_argument("--delivery", choices=["queue", "steer", "interrupt"], default="steer", help="Delivery urgency when targeting a live session: steer (default) injects at the running turn's next step, queue sends after the current turn finishes (can take a long time against a busy agent), interrupt aborts the current turn first.")
     delivery_group.add_argument("--steer", action="store_true", help="Shorthand for --delivery steer when targeting a live session.")
     delivery_group.add_argument("--interrupt", action="store_true", help="Shorthand for --delivery interrupt when targeting a live session.")
     send_p.add_argument("--no-wait", action="store_true", help="Return immediately without waiting for response")

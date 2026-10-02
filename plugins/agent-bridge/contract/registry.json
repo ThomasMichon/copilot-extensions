@@ -73,9 +73,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/models.py",
-          "sha256": "713bf04a93fcf284b832459c2e295dd38ef5a9dfa5ded7a6b09367b3033c838e",
+          "sha256": "e4f842222c4466de80c78659c66cff56f7f9f52003a45558e9c978f6852a2282",
           "semantic": false,
-          "non_semantic_reason": "Live-message request/response models gained an optional delivery urgency field; the representative session-create wire shape is unchanged."
+          "non_semantic_reason": "Live-message request/response models gained an optional delivery urgency field, then its default changed from \"queue\" to \"steer\" (noted inline on the field, not the docstring, to stay within the module's grandfathered line-count ceiling); the representative session-create wire shape is unchanged."
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/health.py",
@@ -91,9 +91,9 @@
         },
         {
           "path": "plugins/agent-bridge/src/agent_bridge/routes/remote.py",
-          "sha256": "0e402bba48d8fa4e76802354375b226dcab26db8281d563a912d309db478facf",
+          "sha256": "0681dae3b74117b088261689bcfff87e93e97323eccf41aea1e847e81eabc136",
           "semantic": false,
-          "non_semantic_reason": "Remote live-message pass-through gained an optional delivery field; the registered remote session-create fixture is unchanged."
+          "non_semantic_reason": "Remote live-message pass-through gained an optional delivery field, then its default changed from \"queue\" to \"steer\"; the registered remote session-create fixture is unchanged."
         },
         {
           "path": "plugins/agent-bridge/tests/test_wire_compat.py",
