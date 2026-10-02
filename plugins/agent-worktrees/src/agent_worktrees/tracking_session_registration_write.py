@@ -54,6 +54,36 @@ from . import obligations, tracking, tracking_write
 from .tracking_session_registry import _start_session_activation
 
 
+def head_is_provably_dead(head_session: str | None) -> bool:
+    """True only when ``head_session``'s conversation exists on this machine
+    and no live Copilot holds its ``inuse.<pid>.lock``.
+
+    A head whose directory isn't here (or that can't be read) is never
+    called dead, so a live head is never displaced on uncertain evidence.
+    """
+    if not head_session:
+        return False
+    try:
+        from . import sessions
+
+        state_dir = sessions._session_state_dir()
+        if not (state_dir / head_session).is_dir():
+            return False
+        live_pid, _stale = sessions._session_entry_lock_state(state_dir, head_session)
+        return live_pid is None
+    except Exception:
+        return False
+
+
+def head_hold_note(session_id: str, head: str | None) -> str:
+    """A bind-session stderr note when ``session_id`` didn't become the head
+    (never silent about who still holds it); empty when it did."""
+    if not head or head == session_id:
+        return ""
+    why = "" if head_is_provably_dead(head) else " (its Copilot is still running)"
+    return f"bind-session: {session_id} is bound but NOT the head; the head is still {head}{why}.\n"
+
+
 def apply_session_register(args: dict) -> dict:
     """Registered as the ``session_register`` verb. Mirrors the former
     ``tracking_session_registry.register_session`` transaction exactly --
@@ -153,19 +183,29 @@ def apply_session_register(args: dict) -> dict:
                         if linked_handoff is not None else None
                     ),
                 }
-            if (
-                not candidate_token
-                and record.resolved_head_session is None
-                and (
-                    entry.state == "active"
-                    or (
-                        entry.state == "yielded"
-                        and (
-                            not record.head_transitions
-                            or record.head_transitions[-1].session_id == session_id
-                        )
+            current_head = record.resolved_head_session
+            vacant_claim = current_head is None and (
+                entry.state == "active"
+                or (
+                    entry.state == "yielded"
+                    and (
+                        not record.head_transitions
+                        or record.head_transitions[-1].session_id == session_id
                     )
                 )
+            )
+            # A head whose Copilot is gone never blocks the session actually
+            # running here: a resumed session (or an explicit bind, from any
+            # prior state) takes over, so the ledger can't stay stuck on it.
+            dead_claim = (
+                current_head is not None
+                and current_head != session_id
+                and (entry.state in ("active", "yielded") or source == "bind")
+                and head_is_provably_dead(current_head)
+            )
+            if (
+                not candidate_token
+                and (vacant_claim or dead_claim)
                 and (
                     source == "bind"
                     or tracking._pending_handoffs_all_from_yielded(record)
@@ -184,19 +224,24 @@ def apply_session_register(args: dict) -> dict:
                 # NEWER yielded lineage -- `resolved_head_session` deliberately
                 # hides every yielded session, so a genuinely newer head that
                 # has since yielded its own handoff would also read as "no
-                # head" here.
-                if entry.state == "yielded":
+                # head" here. That guard doesn't apply to a dead head: its
+                # process is gone, so the running session takes over.
+                if entry.state != "active":
                     entry.state = "active"
                 tracking._cancel_pending_handoffs(record)
                 tracking._append_head_transition(
-                    record, session_id, reason="rebind", at=event_at,
+                    record, session_id,
+                    reason="reclaim" if dead_claim and not vacant_claim else "rebind",
+                    at=event_at,
                 )
             elif activation_added:
                 tracking._next_lifecycle_revision(record, session_id)
             tracking.save_record(record, yaml_path)
             return {"ok": True, "linked_handoff": None}
 
-        had_active_head = record.resolved_head_session is not None
+        current_head = record.resolved_head_session
+        dead_head = current_head is not None and head_is_provably_dead(current_head)
+        had_active_head = current_head is not None and not dead_head
         new_entry = tracking.SessionEntry(
             session_id=session_id,
             started_at=event_at,
@@ -235,7 +280,10 @@ def apply_session_register(args: dict) -> dict:
             tracking._append_head_transition(
                 record,
                 session_id,
-                reason="rebind" if source == "bind" else "initial",
+                reason=(
+                    "reclaim" if dead_head
+                    else "rebind" if source == "bind" else "initial"
+                ),
                 at=event_at,
             )
         tracking.save_record(record, yaml_path)

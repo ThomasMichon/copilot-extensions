@@ -1162,3 +1162,78 @@ class TestListSessionsEnvelopeHead:
         assert captured["sessions"][0]["interface"] == "unknown"
         assert captured["sessions"][0]["origin"] == "unknown"
         assert captured["sessions"][0]["provenance_conflict"] is True
+
+
+class TestDeadHeadReclaim:
+    """A head whose Copilot is gone never blocks the session running here."""
+
+    @staticmethod
+    def _dead(monkeypatch, *dead: str) -> None:
+        from agent_worktrees import tracking_session_registration_write as w
+
+        monkeypatch.setattr(w, "head_is_provably_dead", lambda sid: sid in dead)
+
+    def test_a_resumed_session_takes_over_a_dead_head(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        tracking.register_session("wt-1", "new")
+        assert load_record(tmp_tracking_dir / "wt-1.yaml").resolved_head_session == "old"
+        self._dead(monkeypatch, "old")
+        tracking.register_session("wt-1", "new")  # its resume's sessionStart
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.resolved_head_session == "new"
+        assert rec.replayed_head_transition.reason == "reclaim"
+
+    def test_a_live_head_is_never_displaced(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        tracking.register_session("wt-1", "new")
+        self._dead(monkeypatch)  # nothing is dead
+        tracking.register_session("wt-1", "new")
+        tracking.register_session("wt-1", "new", source="bind")
+        assert load_record(tmp_tracking_dir / "wt-1.yaml").resolved_head_session == "old"
+
+    def test_a_new_session_claims_a_dead_head(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        self._dead(monkeypatch, "old")
+        tracking.register_session("wt-1", "fresh")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.resolved_head_session == "fresh"
+        assert rec.replayed_head_transition.reason == "reclaim"
+
+    def test_bind_revives_a_handed_off_session_over_a_dead_head(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """The operator resumes an earlier orchestrator after a wrong
+        successor took the head and then died: the explicit bind wins."""
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "orchestrator")
+        tracking.register_session("wt-1", "stray")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        link_succession(rec, "orchestrator", "stray")
+        self._dead(monkeypatch, "stray")
+        tracking.register_session("wt-1", "orchestrator", source="bind")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.resolved_head_session == "orchestrator"
+        assert rec.session_entry("orchestrator").state == "active"
+
+    def test_head_is_provably_dead_needs_local_evidence(self, tmp_path, monkeypatch):
+        from agent_worktrees import sessions
+        from agent_worktrees.tracking_session_registration_write import head_is_provably_dead
+
+        monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
+        (tmp_path / "gone").mkdir()
+        (tmp_path / "gone" / "inuse.999999.lock").write_text("")
+        monkeypatch.setattr(sessions, "_is_copilot_process", lambda pid: False)
+        assert head_is_provably_dead("gone") is True
+        assert head_is_provably_dead("elsewhere") is False  # no dir here
+        assert head_is_provably_dead(None) is False
+        monkeypatch.setattr(sessions, "_is_copilot_process", lambda pid: True)
+        assert head_is_provably_dead("gone") is False

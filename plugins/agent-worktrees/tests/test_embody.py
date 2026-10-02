@@ -695,6 +695,67 @@ class TestCmdEmbody:
         assert out["dry_run"] is True and out["would"] == "create"
         assert out["cmd"] == ["copilot"]
 
+    def _stub_existing(self, monkeypatch, tmp_path, wt="wtR"):
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: wt)
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+        (tmp_path / f"{wt}.yaml").write_text("x")
+        monkeypatch.setattr(
+            m.tracking, "load_record",
+            lambda p: type("Rec", (), {"worktree_path": f"/w/{wt}"})(),
+        )
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        monkeypatch.setattr(sessions, "resolve_resume_target", lambda rec: "head-1")
+
+    @pytest.mark.parametrize(
+        "extra, resumed",
+        [
+            ({}, "head-1"),  # bringing a worktree back resumes its head
+            ({"seed": "new task"}, None),  # a seed is a new task: fresh
+            ({"seed": "carry on", "resume_head": True}, "head-1"),
+            ({"fresh": True}, None),
+            ({"copilot_args": ["--resume=other"]}, None),  # caller chose
+        ],
+    )
+    def test_dry_run_resumes_the_head_conversation(
+        self, monkeypatch, capfd, tmp_path, extra, resumed,
+    ):
+        self._stub_existing(monkeypatch, tmp_path)
+        monkeypatch.setattr(sessions, "mux_new_session",
+                            lambda *a, **k: pytest.fail("dry-run must not spawn"))
+        rc = m.cmd_embody(_ns(worktree_id="wtR", dry_run=True, **extra))
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["resume_session"] == resumed
+        assert out["cmd"] == (["copilot", "--resume=head-1"] if resumed else ["copilot"])
+
+    def test_create_resumes_the_head_conversation(self, monkeypatch, capfd, tmp_path):
+        self._stub_existing(monkeypatch, tmp_path)
+        monkeypatch.setattr(sessions, "session_id_is_live", lambda rec, sid: False)
+        spawned = {}
+
+        def _spawn(wt, wd, cmd, env, **k):
+            spawned["cmd"] = cmd
+            return {"ok": True, "session": f"wt-{wt}", "new_pane": "%5", "error": None}
+
+        monkeypatch.setattr(sessions, "mux_new_session", _spawn)
+        rc = m.cmd_embody(_ns(worktree_id="wtR"))
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["created"] is True and out["resume_session"] == "head-1"
+        assert spawned["cmd"] == ["copilot", "--resume=head-1"]
+
+    def test_a_head_running_outside_the_mux_is_never_forked(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        self._stub_existing(monkeypatch, tmp_path)
+        monkeypatch.setattr(sessions, "session_id_is_live", lambda rec, sid: True)
+        monkeypatch.setattr(sessions, "mux_new_session",
+                            lambda *a, **k: pytest.fail("must not fork a live head"))
+        rc = m.cmd_embody(_ns(worktree_id="wtR"))
+        assert rc == 3
+        assert "already running" in capfd.readouterr().out
+
 
 # -- cmd_embody --anchor: deliver directly in the anchor, no worktree ------
 def _stub_anchor_config(monkeypatch, *, repo_name="example-web", anchor="/w/anchor"):
