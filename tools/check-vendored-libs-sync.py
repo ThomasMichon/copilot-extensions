@@ -175,6 +175,20 @@ def _declared_version(lib_dir: Path) -> str | None:
     return m.group(1) if m else None
 
 
+def _is_cross_checked(
+    real_paths: list[Path], pointer_paths: list[Path], editable_consumers: list[str],
+) -> bool:
+    """True when this lib has more than one copy/consumer this check
+    actually cross-verifies: 2+ real copies, or real copies alongside a
+    pointer in EITHER form (a ``VENDOR_POINTER.json`` copy or a `uv`-
+    editable canonical-reference consumer). Shared by ``verify()``,
+    ``_print_list()``, and ``main()``'s success count so the three never
+    drift apart on what counts as "checked" (PR #4954 review: the inventory
+    and success-count predicates had fallen out of sync with ``verify()``'s
+    own, newly-expanded one)."""
+    return len(real_paths) >= 2 or bool((pointer_paths or editable_consumers) and real_paths)
+
+
 def verify() -> list[str]:
     """Return human-readable problems; empty means the check passes."""
     problems: list[str] = []
@@ -258,10 +272,12 @@ def verify() -> list[str]:
 
 def _print_list() -> None:
     base = PLUGINS_DIR.parent
+    editable_consumers_by_lib = _editable_pointer_consumers()
     for lib, paths in sorted(_lib_copies().items()):
         pointer_paths = [p for p in paths if _is_pointer_copy(p)]
         real_paths = [p for p in paths if not _is_pointer_copy(p)]
-        if len(real_paths) < 2 and not (pointer_paths and real_paths):
+        editable_consumers = editable_consumers_by_lib.get(lib, [])
+        if not _is_cross_checked(real_paths, pointer_paths, editable_consumers):
             continue
         compare_root = real_paths[0] if real_paths else paths[0]
         ver = _declared_version(compare_root) or "?"
@@ -270,6 +286,8 @@ def _print_list() -> None:
             extras.append(f"{len(real_paths)} real")
         if pointer_paths:
             extras.append(f"{len(pointer_paths)} pointer")
+        if editable_consumers:
+            extras.append(f"{len(editable_consumers)} uv-editable")
         print(f"{lib}  (v{ver}, {', '.join(extras)}):")
         for p in real_paths:
             print(f"    {p.relative_to(base)}")
@@ -277,6 +295,10 @@ def _print_list() -> None:
             print("    [pointer copies excluded from byte-identity comparison]")
             for p in pointer_paths:
                 print(f"    {p.relative_to(base)}")
+        if editable_consumers:
+            print("    [uv-editable consumers, no local copy -- canonical IS their payload]")
+            for name in editable_consumers:
+                print(f"    {name} (via libs/{lib})")
 
 
 def main() -> int:
@@ -299,11 +321,13 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    editable_consumers_by_lib = _editable_pointer_consumers()
     shared = {}
     for lib, paths in _lib_copies().items():
         pointer_paths = [p for p in paths if _is_pointer_copy(p)]
         real_paths = [p for p in paths if not _is_pointer_copy(p)]
-        if len(real_paths) >= 2 or (pointer_paths and real_paths):
+        editable_consumers = editable_consumers_by_lib.get(lib, [])
+        if _is_cross_checked(real_paths, pointer_paths, editable_consumers):
             shared[lib] = paths
     print(f"check-vendored-libs-sync: OK ({len(shared)} shared libs in sync).")
     return 0

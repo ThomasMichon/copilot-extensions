@@ -221,3 +221,30 @@ def test_verify_fails_closed_on_symlinked_consumer_pyproject(fake_repo: Path):
     with pytest.raises(SystemExit, match="(?i)symlink"):
         check_vendored_libs_sync.verify()
 
+
+def test_list_and_main_report_an_editable_pointer_only_lib_too(
+    fake_repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+):
+    """The regression this test exists for (PR #4954 review): a lib with one
+    real copy plus a `uv`-editable-pointer consumer (no VENDOR_POINTER.json
+    copy at all) is now cross-checked against canonical by `verify()`, but
+    `_print_list()`'s inventory and `main()`'s success count had their own,
+    separate predicates that never learned about the editable-pointer form --
+    both must count/list this lib too, not just `verify()`."""
+    _seed_real_lib(fake_repo, "libs/shared-lib", content="value = 1\n")
+    _seed_real_lib(
+        fake_repo, "plugins/agent-worktrees/libs/shared-lib", content="value = 1\n",
+    )
+    _seed_editable_pointer_consumer(fake_repo, "plugins/agent-bridge", "shared-lib")
+
+    check_vendored_libs_sync._print_list()
+    list_out = capsys.readouterr().out
+    assert "shared-lib" in list_out
+    assert "agent-bridge" in list_out
+
+    monkeypatch.setattr("sys.argv", ["check-vendored-libs-sync.py"])
+    exit_code = check_vendored_libs_sync.main()
+    main_out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "OK (1 shared libs in sync)" in main_out
+
