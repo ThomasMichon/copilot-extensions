@@ -9,16 +9,14 @@ from .engine_live_screens import ProgressScreen
 from .seed_prompt_screen import SeedPromptScreen
 
 # picker-new-session-prompt-and-composer Phase A: the prompt collected here
-# is persisted (`agent-worktrees create`/`resolve --new --seed`) and now
-# delivered end-to-end. Both seams are closed: engine_client.resolve_launch_
-# plan() forwards --seed, and launch-session.{ps1,sh} call `agent-worktrees
-# embody --worktree-id` right after creating a worktree's FIRST live mux
-# session, triggering embody's own "already embodies this worktree" resume
-# branch to claim + deliver any pending seed. Validated live (non-`--demo`):
-# a real worktree with --seed, a mux pane stood up externally (mirroring
-# what the launcher does), then `embody --worktree-id` reported
-# `"resumed": true, "seeded": true` -- the exact contract this screen
-# depends on.
+# is persisted (`agent-worktrees create`/`resolve --new --seed`) and
+# delivered end-to-end: `engine_client.resolve_launch_plan()` forwards
+# `--seed`, and `launch-session.{ps1,sh}` call `agent-worktrees embody
+# --worktree-id` right after creating a worktree's FIRST live mux session,
+# triggering embody's own "already embodies this worktree" resume branch to
+# claim + deliver any pending seed. Not delivered for No Mux (direct launch,
+# no mux pane for embody to find) or Bare (no Copilot bootstrap at all) --
+# `_open_optmenu()` skips the prompt screen entirely for either.
 _SEED_PROMPT_ENABLED = True
 
 class PickerScreenMaintenanceActionsMixin:

@@ -4457,8 +4457,7 @@ def test_new_worktree_no_mux_skips_seed_prompt(monkeypatch):
     entirely -- a typed prompt would be persisted but never delivered (or
     delivered unexpectedly later, if a mux session is created afterward).
     Confirming Create with No Mux selected must go straight to the launch
-    decision, never opening SeedPromptScreen, mirroring the Bare path
-    (found by Copilot review on PR #4893)."""
+    decision, never opening SeedPromptScreen, mirroring the Bare path."""
     from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
     monkeypatch.setattr(ema, "_SEED_PROMPT_ENABLED", True)
     src = _fixture_source()
