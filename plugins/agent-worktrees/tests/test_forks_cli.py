@@ -78,6 +78,47 @@ def test_set_explicit_account_overrides_resolution(monkeypatch, capfd):
     assert payload["forks"][0]["account"] == "explicit"
 
 
+def test_set_with_owner_override_and_explicit_account_records_real_owner(capfd):
+    """``forks set --owner alias --account bob`` records a DIFFERENT PR-head
+    owner (alias) than the actual authenticated login (bob, the explicit
+    --account) -- real_owner must track bob, the identity create-pr's live
+    pre-check gate will actually validate against, not fall back to alias
+    (which would make a LATER create-pr call authenticated as bob silently
+    re-ask, or worse, let a stale alias-recorded identity mask an actual
+    account mismatch)."""
+    rc = forks_cli.cmd_forks_dispatch(
+        [
+            "set", "org/widgets", "--owner", "alias", "--account", "bob",
+        ],
+    )
+    assert rc == 0
+    capfd.readouterr()
+
+    from agent_worktrees import fork_pr
+    entry = fork_pr.find_fork("org/widgets", "bob")
+    assert entry is not None
+    assert entry.owner == "alias"
+    assert entry.real_owner == "bob"
+
+
+def test_set_rejects_non_default_ambient_authority(monkeypatch, capfd):
+    """Unlike create-pr's gate, 'forks set' had no authority check of its
+    own -- an approval recorded while GH_HOST points at an Enterprise host
+    carries no authority scoping, so the same repo+account+owner could
+    later pass the github.com gate once GH_HOST is cleared, against an
+    unrelated same-named repo. Reject here too, before resolving any
+    credential or persisting anything."""
+    monkeypatch.setenv("GH_HOST", "github.example.com")
+    rc = forks_cli.cmd_forks_dispatch(
+        ["set", "octo-org/widgets", "--owner", "octocat", "--account", "explicit"],
+    )
+    assert rc == 1
+    assert "non-default" in capfd.readouterr().out
+
+    from agent_worktrees import fork_pr
+    assert fork_pr.find_forks_for_repo("octo-org/widgets") == []
+
+
 def test_set_with_token_stdin_derives_scope_create_pr_would_compute(monkeypatch, capfd):
     """``--token-stdin`` must derive the SAME scope create_pr's gate would
     compute for a token_command/token_env-bound repo (``_token_scope``,

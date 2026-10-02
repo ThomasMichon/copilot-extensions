@@ -235,6 +235,24 @@ def _dispatch_sub(sub: str, rest: list[str], fork_pr, _opt) -> int:
         if not owner:
             output.err("forks set requires --owner <login>")
             return 1
+        bare_prcfg = cfg.PRConfig(provider="github")
+        # Unlike create-pr's gate (resolve_fork_publish), this command has
+        # no per-repo pr.api_base to consult -- but an entry recorded here
+        # is NOT scoped by authority (host) either, so a non-default
+        # ambient GH_HOST must be rejected here too: otherwise an approval
+        # minted while pointed at an Enterprise host could later be
+        # silently reused once GH_HOST is cleared, against an unrelated
+        # same-named repo on github.com (see fork_pr._non_default_authority).
+        non_default_authority = fork_pr._non_default_authority(bare_prcfg)
+        if non_default_authority:
+            output.err(
+                f"forks set: refusing to record an approval while GitHub "
+                f"authority is non-default ('{non_default_authority}') -- "
+                f"this registry is not scoped by authority. Clear GH_HOST "
+                f"(and any pr.api_base override) back to the default "
+                f"github.com before using 'forks set'."
+            )
+            return 1
         account = _opt("--account")
         if account is not None and "--token-stdin" in rest:
             output.err("forks set: --account and --token-stdin are mutually exclusive")
@@ -255,6 +273,13 @@ def _dispatch_sub(sub: str, rest: list[str], fork_pr, _opt) -> int:
             # reproduce this, since create-pr never guesses a login for an
             # opaque token.
             account = fork_pr._token_scope(token)
+            # The scope above is an opaque hashed token identifier, not a
+            # login, and resolving the token's actual login would require a
+            # live API call this offline pre-seeding path must not make --
+            # fall back to the given --owner; create-pr's own live
+            # pre-check (run with this same token at actual publish time)
+            # still independently validates the real identity then.
+            real_owner = owner
         elif account is None:
             # Same resolver create_pr's gate checks against (not the bare
             # account mapping) -- see fork_pr._resolve_fork_credential.
@@ -262,9 +287,21 @@ def _dispatch_sub(sub: str, rest: list[str], fork_pr, _opt) -> int:
             # default covers the common account-mapping/ambient-auth case
             # only. Use --token-stdin instead for a repo using
             # pr.token_command/token_env.
-            _token, account = fork_pr._resolve_fork_credential(
-                repo, cfg.PRConfig(provider="github"),
-            )
+            _token, account = fork_pr._resolve_fork_credential(repo, bare_prcfg)
+            # Unlike an EXPLICIT --account below, this resolved value is
+            # not necessarily the exact login string the live provider API
+            # would itself return (e.g. a differently-formatted active-
+            # account marker) -- leave real_owner to record_confirmation's
+            # own default (falls back to owner) rather than asserting an
+            # equivalence this resolver doesn't actually guarantee.
+            real_owner = ""
+        else:
+            # An explicit --account IS the login that create-pr's own
+            # resolution will authenticate as for this repo+account scope
+            # -- record it as real_owner so a later --owner override
+            # doesn't mask the actual identity the live pre-check must
+            # validate against (see resolve_fork_publish).
+            real_owner = account
         if not account:
             # An empty scope can never be looked up later --
             # resolve_fork_publish only consults the registry when
@@ -287,6 +324,7 @@ def _dispatch_sub(sub: str, rest: list[str], fork_pr, _opt) -> int:
             remote=_opt("--remote") or "fork",
             account=account,
             notes=_opt("--notes"),
+            real_owner=real_owner,
         )
         output.ok(
             f"Fork for '{repo}' confirmed (owner={owner}, account={account or '(none)'}) "

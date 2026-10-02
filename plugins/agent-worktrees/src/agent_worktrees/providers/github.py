@@ -684,23 +684,15 @@ class GitHubProvider:
 
         Native ``enable_auto_merge`` arms successfully even when a required
         review is what's actually blocking the merge -- GitHub queues it
-        indefinitely rather than refusing, so a self-merge repo whose sole
-        maintainer will never supply that second review would otherwise sit
-        armed forever (#3296 follow-up). This distinguishes that specific
-        case from every other reason ``enable_auto_merge`` might be
-        preferred (pending checks, a genuinely multi-reviewer repo, etc.).
+        indefinitely rather than refusing (#3296 follow-up).
 
-        Reads ``gh pr view --json mergeStateStatus,reviewDecision,baseRefName``
-        for the live gate, then -- only when ``reviewDecision`` is
-        ``REVIEW_REQUIRED`` -- the newer branch **rulesets** API
-        (``repos/{repo}/rules/branches/{base}``, then
-        ``repos/{repo}/rulesets/{id}`` for each matching ``pull_request`` rule)
-        for whether the acting identity can bypass it
-        (``current_user_can_bypass`` in ``"always"``/``"pull_requests_only"``).
-        Classic (non-ruleset) branch protection has no per-actor bypass
-        signal at all, so ``bypassable`` is ``None`` (unknown, not "no") when
-        rulesets don't apply or can't be read -- callers must treat ``None``
-        as "do not attempt a bypass", never as an affirmative yes.
+        Reads ``gh pr view --json mergeStateStatus,reviewDecision,baseRefName``,
+        then -- only when ``reviewDecision`` is ``REVIEW_REQUIRED`` -- the
+        branch **rulesets** API for whether the acting identity can bypass
+        it (``current_user_can_bypass``). Classic branch protection has no
+        per-actor bypass signal, so ``bypassable`` is ``None`` (unknown, not
+        "no") when rulesets don't apply -- callers must treat ``None`` as
+        "do not attempt a bypass", never as an affirmative yes.
 
         Returns ``(False, None)`` when no review is required (or the read
         itself fails) -- the ordinary auto-merge path is correct there.
@@ -868,8 +860,7 @@ class GitHubProvider:
     ) -> tuple[str, str] | None:
         """Create (or read, if it already exists) the caller's fork via
         ``POST /repos/<repo>/forks``. Owner from :meth:`resolve_fork_owner`;
-        ``api_base`` resolved once so both calls hit the SAME host. ``None``
-        on any failure: no ``gh`` auth, non-2xx, or a missing ``clone_url``."""
+        ``api_base`` resolved once so both calls hit the SAME host."""
         owner = self.resolve_fork_owner(api_base=api_base, token=token)
         if not owner:
             return None
@@ -889,7 +880,17 @@ class GitHubProvider:
         clone_url = data.get("clone_url") or data.get("ssh_url") or ""
         if not isinstance(clone_url, str) or not clone_url:
             return None
-        return (owner, clone_url)
+        # The GET and this POST are separate calls; a concurrent ambient
+        # account switch between them can create the fork under a
+        # DIFFERENT login. Trust the POST response's own owner.login and
+        # fail closed on any mismatch/missing value.
+        resp_owner = data.get("owner")
+        resp_login = resp_owner.get("login") if isinstance(resp_owner, dict) else None
+        if not isinstance(resp_login, str) or not resp_login:
+            return None
+        if resp_login.casefold() != owner.casefold():
+            return None
+        return (resp_login, clone_url)
 
     _THREADS_QUERY = (
         "query($owner:String!,$name:String!,$number:Int!){"

@@ -558,9 +558,28 @@ def resolve_fork_publish(
     # pr.fork.remote later changes (including to an existing remote such
     # as 'origin'), reusing the old approval would repoint a DIFFERENT
     # remote than the one actually approved.
-    already_confirmed = confirmed_entry is not None and (
-        not prcfg.fork.owner or prcfg.fork.owner == confirmed_entry.owner
-    ) and prcfg.fork.remote == confirmed_entry.remote
+    if prcfg.fork.owner:
+        owner_matches = prcfg.fork.owner == confirmed_entry.owner if confirmed_entry else False
+    else:
+        # No override requested this call: the PR head will display
+        # whatever the real authenticated identity turns out to be, which
+        # the live pre-check below validates against real_owner. Only
+        # treat this as the SAME approval the entry already covers when
+        # the entry itself was ALSO confirmed without an override (its
+        # owner equals its real_owner) -- if it was confirmed WITH an
+        # override, clearing that override now is itself a configuration
+        # change (the displayed PR-head owner will differ from what was
+        # approved) and must re-ask BEFORE any mutation, rather than
+        # running _ensure_fork_and_remote first and only then failing with
+        # a misleading "concurrent identity change" error below.
+        owner_matches = confirmed_entry is not None and (
+            confirmed_entry.owner == (confirmed_entry.real_owner or confirmed_entry.owner)
+        )
+    already_confirmed = (
+        confirmed_entry is not None
+        and owner_matches
+        and prcfg.fork.remote == confirmed_entry.remote
+    )
     # The live-owner pre-check validates the ACTUAL AUTHENTICATED identity
     # (real_owner) -- it must run regardless of whether pr.fork.owner is
     # configured. The override only changes which login names the PR head;

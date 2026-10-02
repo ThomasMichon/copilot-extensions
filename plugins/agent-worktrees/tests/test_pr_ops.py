@@ -1061,6 +1061,61 @@ class TestCreatePRForkFlow:
         entry2 = fork_pr.find_fork(repo, "override-login")
         assert entry2.real_owner == "alice-real-login"
 
+    def test_clearing_owner_override_requires_reconfirmation(
+        self, pr_repo, tmp_path, monkeypatch,
+    ):
+        """A prior approval confirmed WITH an explicit pr.fork.owner
+        override (owner='alias', real_owner='alice') is a DIFFERENT
+        approval than a later call with that override CLEARED -- the PR
+        head will now display the real identity ('alice') instead of the
+        approved alias. This must re-prompt BEFORE any mutation (the
+        normal needs_confirmation path), not run the fork/remote bootstrap
+        first and only then fail with a misleading 'concurrent identity
+        change' error -- the real_owner itself never actually changed."""
+        config_with_override, wid, _wt_path, _remote_dir = pr_repo
+        config_with_override = self._fork_config(
+            config_with_override, tmp_path, owner="alias",
+        )
+
+        fork_dir = tmp_path / "fork-clear-override.git"
+        git_ops.git("init", "--bare", "-b", "master", str(fork_dir))
+        fake = self._fake_provider("alice", str(fork_dir))
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: fake,
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.providers.account_token_for_slug",
+            lambda *a, **k: None,
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.fork_pr._resolve_fork_credential",
+            lambda slug, prcfg: (None, "clear-override-login"),
+        )
+
+        from agent_worktrees import fork_pr
+        repo = "acme/clear-override-repo"
+        first = pr_ops.create_pr(
+            wid, config_with_override, confirm_fork=True, target_repo=repo,
+        )
+        assert first["success"] is True, first
+        entry = fork_pr.find_fork(repo, "clear-override-login")
+        assert entry.owner == "alias"
+        assert entry.real_owner == "alice"
+
+        # Same repo/account, override now cleared.
+        config_no_override = self._fork_config(config_with_override, tmp_path)
+        res = pr_ops.create_pr(
+            wid, config_no_override, target_repo=repo,
+            branch="feature/clear-override-2",
+        )  # no confirm_fork -- must re-ask, not mutate then error
+
+        assert res["success"] is False, res
+        assert res["needs_confirmation"] == "fork_setup", res
+        # Nothing was mutated: the original approval is untouched.
+        entry2 = fork_pr.find_fork(repo, "clear-override-login")
+        assert entry2.owner == "alias"
+        assert entry2.real_owner == "alice"
+
     def test_configured_owner_mismatch_forces_reconfirmation(
         self, pr_repo, tmp_path, monkeypatch,
     ):

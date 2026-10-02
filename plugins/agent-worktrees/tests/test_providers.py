@@ -1173,7 +1173,10 @@ class TestGitHubProvider:
             calls.append((list(args), kw.get("env")))
             if "user" in args:
                 return _proc(stdout="octocat\n")
-            return _proc(stdout=json.dumps({"clone_url": "https://x/o/r.git"}))
+            return _proc(stdout=json.dumps({
+                "clone_url": "https://x/o/r.git",
+                "owner": {"login": "octocat"},
+            }))
 
         monkeypatch.setattr(github, "run_cli", fake_run)
 
@@ -1189,6 +1192,38 @@ class TestGitHubProvider:
         ]
         # Both calls authenticated with the SAME token.
         assert calls[0][1] == calls[1][1]
+
+    def test_ensure_fork_rejects_post_response_owner_mismatch(self, monkeypatch):
+        """A concurrent ambient-auth identity switch between the GET
+        (resolve_fork_owner) and this POST can create the fork under a
+        DIFFERENT login than the GET saw -- the POST response's own
+        owner.login is authoritative and a mismatch must fail closed
+        rather than silently return a clone_url for the wrong account."""
+        from agent_worktrees.providers import github
+
+        def fake_run(args, **kw):
+            if "user" in args:
+                return _proc(stdout="alice\n")
+            return _proc(stdout=json.dumps({
+                "clone_url": "https://x/o/r.git",
+                "owner": {"login": "bob"},
+            }))
+
+        monkeypatch.setattr(github, "run_cli", fake_run)
+
+        assert github.GitHubProvider().ensure_fork("o/r") is None
+
+    def test_ensure_fork_rejects_post_response_missing_owner(self, monkeypatch):
+        from agent_worktrees.providers import github
+
+        def fake_run(args, **kw):
+            if "user" in args:
+                return _proc(stdout="octocat\n")
+            return _proc(stdout=json.dumps({"clone_url": "https://x/o/r.git"}))
+
+        monkeypatch.setattr(github, "run_cli", fake_run)
+
+        assert github.GitHubProvider().ensure_fork("o/r") is None
 
     def test_ensure_fork_never_posts_when_owner_unresolvable(self, monkeypatch):
         """The POST that actually creates/verifies the fork must never run
