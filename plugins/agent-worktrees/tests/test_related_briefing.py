@@ -81,6 +81,49 @@ class TestRenderBriefing:
 
         assert "**Not available on this machine.**" in text
 
+    def test_current_checkout_overrides_stale_unavailability(self):
+        """A self-referential entry (this session's own repo) must never
+        contradict the session's own observable checkout, even when the
+        resolved config (e.g. a stale `locus.machines` list) says the repo
+        is unavailable on this machine."""
+        entry = RelatedEntry(
+            name="example-repo",
+            locus=Locus(preferred="local", machines=["dev6", "cloud1"]),
+        )
+        resolution = related.build_resolution(
+            entry, current_machine="host-book2", repo_class=None,
+            repo_path=None, adopted=False,
+        )
+        assert resolution.available_here is False  # the stale config fact
+
+        text = related_briefing.render_briefing(
+            entry, resolution, doc_relpath=None,
+            current_checkout_path="D:/Src/example-repo.worktrees/wt-1",
+        )
+
+        assert "**Not available on this machine.**" not in text
+        assert "currently working in" in text
+        assert "D:/Src/example-repo.worktrees/wt-1" in text
+        assert "not checked out on" not in text.lower()
+        assert "already in this repo's checkout" in text
+
+    def test_current_checkout_without_override_still_shows_unavailable(self):
+        """Confirms the override is additive: a normal (non-self) entry with
+        the exact same stale-config shape is unaffected."""
+        entry = RelatedEntry(
+            name="some-other-repo",
+            locus=Locus(preferred="local", machines=["dev6", "cloud1"]),
+        )
+        resolution = related.build_resolution(
+            entry, current_machine="host-book2", repo_class=None,
+            repo_path=None, adopted=False,
+        )
+
+        text = related_briefing.render_briefing(entry, resolution, doc_relpath=None)
+
+        assert "**Not available on this machine.**" in text
+        assert "currently working in" not in text
+
 
 class TestPointerLine:
     def test_empty_list_renders_nothing(self):
@@ -175,6 +218,41 @@ class TestWriteRelatedBriefings:
         content = briefing.read_text(encoding="utf-8")
         assert "example-repo -- generated operating guide" in content
         assert "An example product repo." in content
+
+    def test_self_referential_entry_gets_current_checkout_override(
+        self, tmp_path: Path, monkeypatch,
+    ):
+        """When the related entry's name matches the worktree record's own
+        repo, write_related_briefings must pass the real checkout path
+        through so render_briefing never contradicts it."""
+        entry = RelatedEntry(
+            name="example-repo",
+            locus=Locus(preferred="local", machines=["dev6", "cloud1"]),
+        )
+        topology = RelatedConfig(
+            primary="example-repo", related={"example-repo": entry},
+        )
+        self._patch_topology(monkeypatch, tmp_path, topology)
+        config = SimpleNamespace(
+            machine="host-book2",
+            default_repo=SimpleNamespace(anchor=str(tmp_path)),
+        )
+        record = SimpleNamespace(repo="example-repo", worktree_path=str(tmp_path))
+
+        session_id = "test-session-0003"
+        self._session_dir(session_id).mkdir(parents=True)
+
+        written = related_briefing.write_related_briefings(
+            config, record, cwd=str(tmp_path), session_id=session_id,
+        )
+
+        assert written == ["example-repo"]
+        content = (
+            self._session_dir(session_id)
+            / "files" / "related-briefings" / "example-repo.md"
+        ).read_text(encoding="utf-8")
+        assert "**Not available on this machine.**" not in content
+        assert "currently working in" in content
 
     def test_missing_session_id_returns_empty(self, tmp_path: Path, monkeypatch):
         entry = RelatedEntry(name="example-repo", locus=Locus(preferred="local"))

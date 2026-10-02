@@ -309,6 +309,77 @@ def test_render_local_cache_reports_root_error_without_raising(
     assert result.changed == []
 
 
+def test_render_local_cache_write_incapable_destination_leaves_checked_in_floor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write-incapable local-cache destination must report a blocking
+    finding and leave the checked-in floor as the only available content --
+    no exception raised to the caller, and no partial/corrupt sibling file
+    left behind. The write failure (e.g. a read-only target directory) is
+    injected by monkeypatching ``os.replace`` (not ``_atomic_write``
+    itself) to fail only for this one destination's final rename --
+    chmod'ing a real directory read-only is not a reliable write-blocker
+    on Windows, and occupying the destination path with a directory is
+    rejected earlier, by the existing-file regular-file check, before any
+    write is attempted. Patching below ``_atomic_write`` (rather than
+    replacing it outright) lets the *real* writer run up to that point --
+    it still creates its temp file, writes and fsyncs it, and its own
+    ``finally`` cleanup still unlinks that temp file on the injected
+    failure -- so this test genuinely exercises that cleanup path rather
+    than asserting a tautology about a destination that was never
+    attempted. The patched branch's own invocation is tracked explicitly
+    (``replace_calls``) and the resulting finding is asserted exactly,
+    rather than merely ``blocking >= 1`` -- an early-return from some
+    unrelated blocking condition could otherwise satisfy every other
+    assertion in this test without the injected failure path ever having
+    run at all."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _plugin, source = _write_plugin(tmp_path, "market", "policy")
+    specs, _unknown = projections._load_specs(
+        repo, [source], projections.Result(operation="test")
+    )
+    checked_in = _projection(repo, "policy")
+    checked_in.parent.mkdir(parents=True, exist_ok=True)
+    checked_in_content = projections.render_projection(specs[0]).content
+    checked_in.write_bytes(checked_in_content)
+
+    local_path = checked_in.parent / "fallback.local.instructions.md"
+    real_replace = projections.os.replace
+    replace_calls: list[Path] = []
+
+    def _replace_write_incapable(src: object, dst: object) -> None:
+        if Path(dst) == local_path:
+            replace_calls.append(Path(dst))
+            raise OSError(13, "Permission denied: simulated write-incapable target")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(projections.os, "replace", _replace_write_incapable)
+
+    result = projections.render_local_cache(repo, lambda: [source])
+
+    # The injected failure branch genuinely ran exactly once -- proves this
+    # test exercises the real writer's replace call, not some unrelated
+    # earlier blocking path that happens to satisfy the assertions below.
+    assert replace_calls == [local_path]
+    assert result.blocking == 1
+    assert [f.check for f in result.findings] == ["projection-local-cache"]
+    assert "could not write local cache" in result.findings[0].message
+    assert result.changed == []
+    # The checked-in floor -- the only available content -- is untouched.
+    assert checked_in.read_bytes() == checked_in_content
+    # No partial/corrupt sibling was left behind: the destination never
+    # came into existence (the real writer's own `os.replace` is exactly
+    # what was made to fail), and its temp file was genuinely created and
+    # then genuinely cleaned up by the real `_atomic_write`'s own
+    # `finally` block -- not merely never attempted.
+    assert not local_path.exists()
+    leftovers = [p.name for p in checked_in.parent.iterdir()]
+    assert not any(
+        name.startswith(".fallback.local.instructions.md.") for name in leftovers
+    )
+
+
 def test_render_local_cache_reconciles_stale_siblings_when_source_disabled(
     tmp_path: Path,
 ) -> None:

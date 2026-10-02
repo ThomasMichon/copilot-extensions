@@ -38,20 +38,34 @@ extends: "../other-repo/.agent-dispatch/recipes/foo.yaml"  # cross-repo, explici
 ```
 
 - **global** — a `global:<name>` ref resolves against an in-code registry
-  (new module `registrar_recipes.py`), one entry per archetype. A global
-  recipe is a dict template using the same `{placeholder}` / `_Safe`
-  str.Formatter substitution `recipes/registry.py` already implements for
-  ad-hoc CLI recipes (reuse that helper rather than re-inventing it — it is
-  pure string substitution, not coupled to the CLI-recipe shape).
+  (`registrar_recipes.py`'s `GLOBAL_RECIPES`), one entry per archetype. A
+  global recipe is a dict template whose string fields use `{placeholder}`
+  tokens, filled by a plain, never-raising regex substitution
+  (`substitute_placeholders`/`_PLACEHOLDER_RE`) that matches only a bare
+  `{identifier}` token and leaves every other brace content (JSON-like
+  prose, format specs, mismatched braces) completely untouched — this is
+  deliberate: a template's prose may legitimately contain literal braces
+  (e.g. a worker-guidance string documenting an expected JSON shape), and a
+  full format-mini-language parser (`str.Formatter`) raises on exactly that
+  content.
 - **repo-local** / **cross-repo** — both are plain file paths (relative to
   the repo root or elsewhere), read and decoded the same way
-  `read_declaration_file_set` already reads any declaration file. No new
-  I/O primitive needed.
-- A recipe template's own placeholders are filled from the declaration's
-  top-level keys (minus `extends` itself) — i.e. `extends:` + ordinary
-  override keys sit side by side in the same file, not under a nested
-  `params:` block, so a thin declaration reads like today's declarations
-  with one more key.
+  `read_declaration_file_set` already reads any declaration file (same
+  `.yaml`/`.yml`/`.json` suffix contract). No new I/O primitive needed.
+- **Placeholder sources and precedence** — a recipe template's placeholders
+  are filled from two sources. Every ordinary top-level override key
+  (`name`, `repo`, `owner`, ... — minus the reserved `extends`/`params`
+  keys) is used for substitution **and** deep-merged into the resolved
+  output, since it's a legitimate declaration field in its own right. A
+  reserved `params:` block supplies **substitution-only** values — needed
+  when a template placeholder isn't itself a valid top-level declaration
+  field (e.g. a provider login interpolated into a nested `spec.command`
+  string) — and is **never** merged into the resolved output. When the
+  same key appears in both, the `params:` value wins (substitution-only
+  intentionally takes precedence, since it exists specifically to let an
+  author adjust a substituted value without also changing what the
+  resolved declaration contains). Only scalar (`str`/`int`/`float`/`bool`)
+  values from either source are usable as substitutions.
 
 ## Merge semantics
 

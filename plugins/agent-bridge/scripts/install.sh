@@ -375,15 +375,38 @@ _is_venv_corruption() {
 # (src/agent_bridge.egg-info), one level deeper than the root-level glob --
 # the exact location that shadowed a real fix and broke a live deployment
 # before being caught (registrar.py's `no_pair` field, same incident).
+#
+# An explicit-$1 scrub_dir only reaches the ONE vendored lib the caller
+# happens to name -- it silently misses any lib resolved TRANSITIVELY while
+# installing agent-bridge itself (agent-procutil, dropin-registry,
+# plugin-activation, plugin-resolve: pulled in via agent-bridge's own
+# `[tool.uv.sources]` workspace path deps, never given their own dedicated
+# install call here) even though each is its own independent setuptools
+# build root under "$PLUGIN_DIR/libs/<name>/" and accumulates the identical
+# stale build/egg-info residue. That gap self-reinvited the exact #3444/
+# #3456 bug class: a stale libs/agent-procutil/build/lib shadowing a fresh
+# src/agent_procutil and crashing every headless-spawn session host with
+# `ImportError: cannot import name 'JobHandle'`. agent-dispatch's own
+# install.sh (copilot-extensions#2863) already fixed this the right way --
+# glob every immediate child of libs/ unconditionally, since directory names
+# under libs/ don't map 1:1 to package names (e.g. agent-zdd -> libs/zdd) and
+# an enumerated allowlist drifts out of sync with new/renamed vendored libs.
 _scrub_payload_build_artifacts() {
     # $1 (optional): an additional local source directory to scrub, for a
-    # vendored dependency (ssh-manager, credential-relay, zdd, ...) installed
-    # from its OWN source tree rather than "$PLUGIN_DIR" -- that tree uses the
-    # same setuptools src-layout and accumulates the identical stale
-    # build/egg-info residue, which "$PLUGIN_DIR"-only scrubbing never
-    # reaches (copilot-extensions#3456 review).
+    # vendored dependency installed from its OWN source tree OUTSIDE
+    # "$PLUGIN_DIR/libs/" (e.g. a marketplace layout resolving a lib from a
+    # sibling checkout) -- the libs/*/ glob below only reaches vendored libs
+    # that actually live under this payload's own libs/ directory. Harmless
+    # to pass a dir the glob already covered: rm -rf on an already-scrubbed
+    # path is a no-op.
     rm -rf "$PLUGIN_DIR/build" "$PLUGIN_DIR"/*.egg-info \
            "$PLUGIN_DIR"/src/*.egg-info 2>/dev/null || true
+    local lib_dir
+    for lib_dir in "$PLUGIN_DIR"/libs/*/; do
+        [[ -d "$lib_dir" ]] || continue
+        rm -rf "${lib_dir}build" "${lib_dir}"*.egg-info \
+               "${lib_dir}"src/*.egg-info 2>/dev/null || true
+    done
     local extra_dir="$1"
     if [[ -n "$extra_dir" && "$extra_dir" != "$PLUGIN_DIR" ]]; then
         rm -rf "$extra_dir/build" "$extra_dir"/*.egg-info \

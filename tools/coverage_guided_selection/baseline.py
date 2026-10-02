@@ -34,7 +34,11 @@ import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 
-BASELINE_SCHEMA_VERSION = 1
+BASELINE_SCHEMA_VERSION = 2
+# v1: {schema_version, plugin, cov_source, generated_at, tests, coverage}
+# v2: adds `measured_commit` (the `dev` SHA this run was measured against,
+#     see `correlation.py`) -- nullable, so a v1 consumer that only reads
+#     the fields it already knows about is unaffected.
 
 # Environment variables that can silently narrow which tests pytest
 # actually collects/runs (e.g. `PYTEST_ADDOPTS=-k smoke` or `-m guard`)
@@ -153,6 +157,71 @@ class BaselineCollectionError(RuntimeError):
         )
 
 
+def _timeout_error(exc: subprocess.TimeoutExpired, *, timeout_s: float) -> BaselineCollectionError:
+    def _decode(value) -> str:
+        return value.decode() if isinstance(value, bytes) else (value or "")
+
+    return BaselineCollectionError(
+        -1,
+        _decode(exc.stdout),
+        f"timed out after {timeout_s}s" + ((": " + _decode(exc.stderr)) if exc.stderr else ""),
+    )
+
+
+def _project_has_dev_extra(project_dir: Path) -> bool:
+    pyproject = project_dir / "pyproject.toml"
+    if not pyproject.is_file():
+        return False
+    try:
+        import tomllib
+
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    extras = data.get("project", {}).get("optional-dependencies", {})
+    return "dev" in extras
+
+
+def _prepare_project_venv(project_dir: Path, tmp_path: Path, *, timeout_s: float) -> Path:
+    """Build an ephemeral venv with `project_dir`'s own package installed
+    editable (so its `[tool.uv.sources]` vendored path dependencies resolve
+    exactly the way `tools/run-plugin-tests.py`'s own cached-venv builder
+    does -- see that script's `_ensure_venv`), plus the coverage-collection
+    extras on top. Needed for any plugin with real dependencies (e.g.
+    `agent-ssh`'s vendored `libs/ssh-manager`/`libs/agent-procutil`
+    references) -- a bare `uv run --with` ephemeral venv (the no-`project_dir`
+    path below) has no project context to resolve those from and only works
+    for a dependency-free, script-only plugin like `ai-attribution`.
+
+    POSIX-only (`venv/bin/python`) -- this is scoped to this pipeline's own
+    `ubuntu-latest` runners, not a general cross-platform contract.
+    """
+    venv_dir = tmp_path / "venv"
+    try:
+        subprocess.run(
+            ["uv", "venv", str(venv_dir)],
+            check=True, capture_output=True, text=True, timeout=timeout_s,
+        )
+        python_exe = venv_dir / "bin" / "python"
+        spec = ".[dev]" if _project_has_dev_extra(project_dir) else "."
+        subprocess.run(
+            ["uv", "pip", "install", "--python", str(python_exe), "-e", spec],
+            cwd=project_dir, check=True, capture_output=True, text=True, timeout=timeout_s,
+        )
+        subprocess.run(
+            [
+                "uv", "pip", "install", "--python", str(python_exe),
+                "coverage", "pytest-cov", "pytest-json-report",
+            ],
+            check=True, capture_output=True, text=True, timeout=timeout_s,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise BaselineCollectionError(exc.returncode, exc.stdout or "", exc.stderr or "") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise _timeout_error(exc, timeout_s=timeout_s) from exc
+    return python_exe
+
+
 def collect_baseline(
     *,
     cwd: Path,
@@ -160,11 +229,30 @@ def collect_baseline(
     cov_source: str,
     plugin: str,
     timeout_s: float = 300.0,
+    measured_commit: str | None = None,
+    project_dir: Path | None = None,
 ) -> dict:
     """Run `test_path` under coverage and return a portable baseline dict.
 
     `cov_source` is the `--cov` target (an import path or directory,
     relative to `cwd`) whose lines are attributed to tests.
+
+    `measured_commit` is the `dev` commit SHA this run's coverage was
+    actually measured against -- e.g. the promotion gate's own `dev_head`
+    (see `correlation.py` and this effort's own 2026-10-01 storage/
+    correlation Journal entry). Embedding it directly in the baseline makes
+    a single baseline file self-correlating, without requiring a reader to
+    cross-reference a second file (`.github/release-pipeline-state.json`)
+    to know what it was measured against. Optional here (a local/manual run
+    has no promotion commit to record), but required by `correlation.py`'s
+    own writer before a baseline is checked into `main`.
+
+    `project_dir`, when given, is a plugin's own root (containing its
+    `pyproject.toml`) -- the coverage run installs that project editable
+    (with its `dev` extra, if declared) into an ephemeral venv first, so a
+    plugin with real dependencies (vendored path deps included) can be
+    measured, not just a dependency-free script plugin. Omit it for a
+    plugin like `ai-attribution` with no installable package.
 
     Raises `BaselineCollectionError` for any outcome other than a clean,
     fully-passing run (exit code 0) -- a baseline is only ever earned from
@@ -180,28 +268,27 @@ def collect_baseline(
         cov_data_file = tmp_path / ".coverage"
         json_report_file = tmp_path / "report.json"
         out_file = tmp_path / "baseline.json"
+        driver_args = [
+            test_path, cov_source, str(cwd),
+            str(cov_data_file), str(json_report_file), str(out_file),
+        ]
+
+        if project_dir is not None:
+            python_exe = _prepare_project_venv(project_dir, tmp_path, timeout_s=timeout_s)
+            command = [str(python_exe), str(driver_file), *driver_args]
+        else:
+            command = [
+                "uv", "run",
+                "--with", "pytest-cov",
+                "--with", "coverage",
+                "--with", "pytest-json-report",
+                "python", str(driver_file), *driver_args,
+            ]
 
         proc = None
         try:
             proc = subprocess.run(
-                [
-                    "uv",
-                    "run",
-                    "--with",
-                    "pytest-cov",
-                    "--with",
-                    "coverage",
-                    "--with",
-                    "pytest-json-report",
-                    "python",
-                    str(driver_file),
-                    test_path,
-                    cov_source,
-                    str(cwd),
-                    str(cov_data_file),
-                    str(json_report_file),
-                    str(out_file),
-                ],
+                command,
                 cwd=cwd,
                 env=_subprocess_env(cov_data_file),
                 capture_output=True,
@@ -213,16 +300,7 @@ def collect_baseline(
             # exit: translate it into the same error contract instead of
             # letting it escape as an undocumented `TimeoutExpired`, so every
             # caller only ever needs to catch `BaselineCollectionError`.
-            raise BaselineCollectionError(
-                -1,
-                (exc.stdout or b"").decode() if isinstance(exc.stdout, bytes) else (exc.stdout or ""),
-                f"timed out after {timeout_s}s"
-                + (
-                    (": " + ((exc.stderr or b"").decode() if isinstance(exc.stderr, bytes) else (exc.stderr or "")))
-                    if exc.stderr
-                    else ""
-                ),
-            ) from exc
+            raise _timeout_error(exc, timeout_s=timeout_s) from exc
         if proc.returncode != 0:
             raise BaselineCollectionError(proc.returncode, proc.stdout, proc.stderr)
 
@@ -233,6 +311,7 @@ def collect_baseline(
         "plugin": plugin,
         "cov_source": cov_source,
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "measured_commit": measured_commit,
         "tests": {nodeid: {"duration_s": d} for nodeid, d in merged["durations"].items()},
         "coverage": merged["coverage"],
     }
@@ -269,6 +348,17 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
     parser.add_argument("--plugin", required=True)
     parser.add_argument("--cwd", default=".")
     parser.add_argument("--out", required=True)
+    parser.add_argument(
+        "--measured-commit",
+        default=None,
+        help="the dev commit SHA this run is measured against (see correlation.py)",
+    )
+    parser.add_argument(
+        "--project-dir",
+        default=None,
+        help="a plugin's own root (pyproject.toml) to install editable before "
+             "collecting -- needed for a plugin with real dependencies",
+    )
     args = parser.parse_args(argv)
 
     baseline = collect_baseline(
@@ -276,6 +366,8 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI
         test_path=args.test_path,
         cov_source=args.cov_source,
         plugin=args.plugin,
+        measured_commit=args.measured_commit,
+        project_dir=Path(args.project_dir) if args.project_dir else None,
     )
     Path(args.out).write_text(json.dumps(baseline, indent=2, sort_keys=True))
     print(f"wrote baseline for {args.plugin} to {args.out}")

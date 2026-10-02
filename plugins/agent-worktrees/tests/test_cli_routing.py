@@ -694,6 +694,41 @@ def test_cancel_handoff_is_no_project_command():
     assert "cancel-handoff" in m._NO_PROJECT_COMMANDS
 
 
+@pytest.mark.guard
+def test_forks_is_no_project_command():
+    """'forks' manages a machine-global registry (forks.yaml), like its
+    'accounts' sibling -- it must run from a neutral cwd without resolving
+    a project, and must be excluded from project-scoped CLI help."""
+    assert "forks" in m._NO_PROJECT_COMMANDS
+    assert "forks" in m.front_door_cli._PROJECT_IRRELEVANT_COMMANDS
+    assert m._is_no_project_invocation(["forks", "list"])
+    assert m._is_no_project_invocation(["forks", "set", "owner/repo", "--owner", "me"])
+
+
+def test_forks_dispatch_runs_from_neutral_cwd_without_resolving_project(
+    monkeypatch, tmp_path, capsys,
+):
+    """Functional (not just membership) proof: 'forks' must actually reach
+    forks_cli.cmd_forks_dispatch via main()'s own routing from a cwd with no
+    adopted project, never touching project resolution on the way there."""
+    m.cfg.set_active_project(None)
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        m,
+        "_git_toplevel",
+        lambda _path: pytest.fail("forks dispatch tried to resolve project context"),
+    )
+    monkeypatch.setattr(
+        m,
+        "_resolve_active_project",
+        lambda _project: pytest.fail("forks dispatch tried to resolve an active project"),
+    )
+
+    assert m.main(["forks", "list"]) == 0
+    assert "No forks confirmed yet." in capsys.readouterr().out
+
+
 def test_removed_terminal_profile_commands_not_registered():
     parser = m.build_parser()
 

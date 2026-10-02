@@ -34,6 +34,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT))
 
 from tools.coverage_guided_selection import baseline as baseline_mod  # noqa: E402
+from tools.coverage_guided_selection import correlation  # noqa: E402
 from tools.coverage_guided_selection import fallback, select  # noqa: E402
 
 
@@ -246,6 +247,32 @@ class TestComputeFallbackSet:
         assert first.selected_tests == second.selected_tests
 
 
+class TestCorrelation:
+    def test_baseline_path_on_main_is_one_file_per_plugin(self) -> None:
+        assert (
+            correlation.baseline_path_on_main("ai-attribution")
+            == ".github/coverage-baselines/ai-attribution.json"
+        )
+        assert (
+            correlation.baseline_path_on_main("agent-worktrees")
+            == ".github/coverage-baselines/agent-worktrees.json"
+        )
+
+    def test_require_measured_commit_returns_the_sha_when_present(self) -> None:
+        baseline = {**_synthetic_baseline(), "measured_commit": "abc123"}
+        assert correlation.require_measured_commit(baseline) == "abc123"
+
+    def test_require_measured_commit_rejects_a_missing_sha(self) -> None:
+        baseline = {**_synthetic_baseline(), "measured_commit": None}
+        with pytest.raises(correlation.BaselineCorrelationError):
+            correlation.require_measured_commit(baseline)
+
+    def test_require_measured_commit_rejects_an_absent_key(self) -> None:
+        baseline = _synthetic_baseline()  # no "measured_commit" key at all
+        with pytest.raises(correlation.BaselineCorrelationError):
+            correlation.require_measured_commit(baseline)
+
+
 class TestBaselineCollectionErrorContract:
     """Fast, mocked tests for the two non-clean collection outcomes --
     neither spawns a real subprocess, so both run in the always-on
@@ -294,6 +321,48 @@ class TestBaselineCollectionErrorContract:
         # need to catch `BaselineCollectionError`; confirm the raw
         # `TimeoutExpired` never escapes as the exception type itself.
         assert not isinstance(exc_info.value, subprocess_module.TimeoutExpired)
+
+    def test_measured_commit_round_trips_into_the_baseline_dict(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Mocked, no real subprocess: the driver's own out-file argument is
+        # the 6th positional arg after the driver script path (see
+        # _DRIVER_SCRIPT's own argv unpacking), so a fake "subprocess" just
+        # has to write valid merged JSON there and report success.
+        import json as json_module
+
+        def _fake_run(args, **kwargs):
+            out_file = Path(args[-1])
+            out_file.write_text(
+                json_module.dumps({"durations": {}, "coverage": {}})
+            )
+            return type(
+                "FakeCompletedProcess",
+                (),
+                {"returncode": 0, "stdout": "", "stderr": ""},
+            )()
+
+        monkeypatch.setattr(baseline_mod.subprocess, "run", _fake_run)
+        result = baseline_mod.collect_baseline(
+            cwd=tmp_path,
+            test_path="tests",
+            cov_source="src",
+            plugin="mocked",
+            measured_commit="deadbeef",
+        )
+        assert result["measured_commit"] == "deadbeef"
+        assert result["schema_version"] == baseline_mod.BASELINE_SCHEMA_VERSION
+
+        # Omitting it entirely must still produce a valid (locally-usable)
+        # baseline -- only `correlation.require_measured_commit` enforces
+        # its presence, not `collect_baseline` itself.
+        local_result = baseline_mod.collect_baseline(
+            cwd=tmp_path,
+            test_path="tests",
+            cov_source="src",
+            plugin="mocked",
+        )
+        assert local_result["measured_commit"] is None
 
 
 def test_collect_baseline_round_trips_against_a_real_plugin_suite() -> None:
@@ -420,3 +489,45 @@ def test_collect_baseline_attributes_fixture_setup_and_teardown_coverage(
         "a line executed only during fixture setup/teardown must still be "
         f"attributed to the test using that fixture; got {attributed_tests!r}"
     )
+
+
+def test_collect_baseline_with_project_dir_resolves_real_plugin_dependencies() -> None:
+    # Regression/proof test for the Phase 1 pilot wiring (agent-ssh): a
+    # plugin with real dependencies (including `[tool.uv.sources]` vendored
+    # path deps) cannot be measured via the bare ephemeral `uv run --with`
+    # venv the ai-attribution pilot used -- it needs `project_dir` to
+    # install the plugin editable (with its vendored deps resolved) first.
+    # Picks `agent-ssh` specifically because it is both small (16 test
+    # files) and has real vendored path dependencies
+    # (agent-ssh-manager/agent-procutil/agent-zdd/agent-dropin-registry),
+    # so this proves the general case, not just a dependency-free plugin.
+    if os.environ.get("CGS_RUN_INTEGRATION_TEST") != "1":
+        pytest.skip(
+            "opt-in only: set CGS_RUN_INTEGRATION_TEST=1 to run the real "
+            "uv/coverage subprocess integration test"
+        )
+    plugin_dir = _REPO_ROOT / "plugins" / "agent-ssh"
+    if not plugin_dir.is_dir():
+        pytest.skip("agent-ssh plugin not present in this checkout")
+
+    result = baseline_mod.collect_baseline(
+        cwd=_REPO_ROOT,
+        test_path="plugins/agent-ssh/tests",
+        cov_source="plugins/agent-ssh/src/agent_ssh",
+        plugin="agent-ssh",
+        project_dir=plugin_dir,
+        timeout_s=180.0,
+    )
+
+    assert result["plugin"] == "agent-ssh"
+    assert len(result["tests"]) > 0, "expected at least one parsed test duration"
+    assert len(result["coverage"]) > 0, (
+        "expected at least one attributed source file under "
+        "plugins/agent-ssh/src/agent_ssh -- an empty coverage map would "
+        "mean the editable install/vendored deps silently failed to "
+        "resolve and the suite ran against nothing real"
+    )
+    for file_coverage in result["coverage"].values():
+        for tests in file_coverage.values():
+            for test_id in tests:
+                assert test_id in result["tests"]

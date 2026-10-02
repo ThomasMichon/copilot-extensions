@@ -109,23 +109,48 @@ order.
 ## Plan
 
 ### Phase 0 — Design spike: coverage mechanism + storage format
-- [ ] Pick the concrete coverage-collection mechanism (`coverage.py` dynamic
+- [x] Pick the concrete coverage-collection mechanism (`coverage.py` dynamic
       contexts is the leading candidate named during inception; confirm it
       scales to this repo's per-plugin `.test-venvs` isolation model).
-- [ ] Decide the baseline artifact's storage location and correlation
+      **Decided 2026-10-01** (Phase 0 pilot, PR #4807): `coverage.py`
+      dynamic contexts, via an ephemeral `uv run --with coverage --with
+      pytest-cov --with pytest-json-report` ephemeral ancillary venv (not
+      `.test-venvs` directly — that cache has no coverage-context
+      pass-through yet; wiring it into the cache is Phase 1 scope).
+- [x] Decide the baseline artifact's storage location and correlation
       mechanism — `dev`-resident vs. `main`-published-and-pointer-linked
       (the vision deliberately left this open; this effort makes the call).
       Must satisfy the vision's attribution-correctness Behavior: measured
       against `dev`'s own pre-vendor-materialization source form.
+      **Decided 2026-10-01:** the baseline is checked into `main`,
+      piggybacking on the promotion pipeline's own existing
+      commit-per-promotion + `promote-<timestamp>-<sha>` tag — this repo
+      already has a trusted, audited correlation mechanism
+      (`.github/release-pipeline-state.json`'s `last_promotion.dev_head`,
+      recording the exact `dev` commit each `main` promotion was measured
+      against) rather than needing to invent a GitHub-Release-asset path
+      with no existing analog in this pipeline. Attribution correctness is
+      unaffected either way: measurement happens against `dev`'s own source
+      form regardless of which branch later stores the resulting JSON. See
+      this entry's own Journal note for the fuller rationale and the
+      rejected alternative (a GitHub Release asset tied to the same tag).
 - [ ] Spike coverage collection inside `validate-and-promote.yml`'s existing
       `full`/`worktree-manager` jobs (no new job; instrument the existing
       one) and confirm the artifact it produces round-trips through the
       chosen storage/correlation mechanism.
 
 ### Phase 1 — Baseline generation + correlation at the promotion gate
-- [ ] Instrument the promotion gate's full-suite run to emit a durable,
+- [x] Instrument the promotion gate's full-suite run to emit a durable,
       versioned baseline (test → covered lines/branches).
-- [ ] Publish baselines **atomically**: since `validate-and-promote.yml` runs
+      **Wired 2026-10-02** for one pilot plugin (`agent-ssh`, PR TBD): the
+      `full` matrix job's own `agent-ssh` leg now also runs
+      `coverage_guided_selection.baseline`'s `--project-dir`-aware
+      collection (needed to resolve `agent-ssh`'s own vendored
+      dependencies, unlike the dependency-free `ai-attribution` Phase 0
+      pilot) and uploads the resulting baseline as a build artifact.
+      Expanding to the remaining 8 plugins in this matrix is the next
+      increment, not yet done.
+- [x] Publish baselines **atomically**: since `validate-and-promote.yml` runs
       per-plugin suites as separate matrix jobs (plus `worktree-manager`
       separately), never persist per-job coverage results directly as a
       selectable generation. Aggregate first, and create the generation only
@@ -133,12 +158,22 @@ order.
       succeeded — the same all-required-jobs-green condition the `promote`
       job itself already gates on — so a job failure/cancellation can never
       leave a partial, silently-incomplete baseline live for selection.
-- [ ] Implement baseline correlation: durably tie the artifact to the exact
+      **Satisfied by construction:** the per-job artifact is never itself
+      "the baseline" -- only `promote_release.py`'s own commit (which only
+      ever runs once `gate`+`full`+`worktree-manager`+`guards-full-sweep`
+      have all succeeded) actually checks a baseline into `main`'s tree.
+- [x] Implement baseline correlation: durably tie the artifact to the exact
       `dev` commit it was measured against, resolvable later by commit
-      ancestry.
-- [ ] Implement the "correlation loop never silently breaks" Behavior:
+      ancestry. **Done** via the `measured_commit` field (Phase 0's own
+      storage/correlation decision) plus ordinary git ancestry on `main`
+      once checked in.
+- [x] Implement the "correlation loop never silently breaks" Behavior:
       surface a visible failure (not a silent gap) if a promotion run
-      cannot record/correlate its baseline.
+      cannot record/correlate its baseline. **Done:**
+      `promote_release.py`'s own `measured_commit` consistency check fails
+      the promotion outright (not silently) if a downloaded baseline
+      artifact doesn't match the exact `dev` commit this run is promoting
+      -- a stale/mis-targeted artifact can never be silently checked in.
 
 ### Phase 2 — Nearest-ancestor resolution + attribution remap/invalidate
 - [ ] Given an arbitrary fork-point commit, resolve the newest baseline
@@ -260,6 +295,149 @@ copilot-extensions-specific Phase 1.
 _Pending review of this plan._
 
 ## Journal
+
+### 2026-10-02 — Phase 1 pilot: real promotion-gate wiring for `agent-ssh`
+Operator asked to actually get a baseline committed to `main`, "so we can
+incrementally work towards full coverage across all plugins" -- driving
+Phase 1 for real, one plugin at a time, same pilot-first pattern as
+Phase 0.
+
+**Picked `agent-ssh`** (16 test files, smallest in `validate-and-promote.yml`'s
+own `full` matrix) deliberately *not* because it's dependency-free like the
+Phase 0 `ai-attribution` pilot, but because it *does* have real vendored
+path dependencies (`agent-ssh-manager`, `agent-procutil`, `agent-zdd`,
+`agent-dropin-registry` via its own `[tool.uv.sources]`) -- proving the
+general case a bare ephemeral `uv run --with` venv (Phase 0's own approach)
+cannot handle, not just the easy one.
+
+**`tools/coverage_guided_selection/baseline.py`:** added an optional
+`project_dir` parameter. When given, `collect_baseline` builds a real
+ephemeral venv via `uv venv` + `uv pip install -e .[dev]` (mirroring
+`tools/run-plugin-tests.py`'s own `_ensure_venv` cached-venv pattern, cwd'd
+to the plugin's own root so its vendored `[tool.uv.sources]` resolve) before
+adding the coverage-collection extras -- validated directly against
+`agent-ssh`'s real suite (187 collected test cases across 16 files, 10
+source files attributed) via a new, real integration test
+(`test_collect_baseline_with_project_dir_resolves_real_plugin_dependencies`).
+
+**`tools/promote_release.py`:** added `_write_coverage_baselines_into_scratch`
++ a `coverage_baselines_dir` parameter/`--coverage-baselines-dir` CLI flag.
+Each `*.json` baseline is checked into the generated commit's own tree at
+`COVERAGE_BASELINES_DIR` (`.github/coverage-baselines/`), but only after
+verifying its own `measured_commit` matches this promotion's exact `dev_head`
+-- a mismatch raises `PromotionError` outright (the "correlation loop never
+silently breaks" Behavior), never a silent skip. `_tree_excluding_state`
+(the existing no-op-promotion content comparison) now also excludes
+`COVERAGE_BASELINES_DIR`, alongside the pre-existing pipeline-state
+exclusion, so a freshly re-collected baseline with no real `dev` content
+change never forces a vacuous promotion. 4 new tests (27 total, all
+passing): a matching baseline checks in correctly, a mismatched
+`measured_commit` is refused, omitting `coverage_baselines_dir` entirely
+stays fully valid (today's real default, before any plugin is wired), and
+a baseline-only "change" is correctly a no-op.
+
+**`validate-and-promote.yml`:** the `full` matrix job's `agent-ssh` leg
+(`if: matrix.plugin == 'agent-ssh'`) now also runs the above collection and
+uploads the result as a build artifact (`continue-on-error: true` -- a
+baseline is optional evidence, never a gate on the trusted
+`run-plugin-tests.py` run alongside it). The `promote` job downloads any
+`coverage-baseline-*` artifacts (also best-effort: no artifact at all,
+e.g. before this plugin's own collection step ran or succeeded, is just the
+"no baselines this run" case `_write_coverage_baselines_into_scratch`
+already handles) and passes the directory to both
+`promote_release.py` invocations (dry-run and `--push`).
+
+**Verified directly**, not just by code reading: the exact CLI invocation
+the new `full` matrix step runs
+(`python tools/coverage_guided_selection/baseline.py plugins/agent-ssh/tests
+--cov-source plugins/agent-ssh/src/agent_ssh --plugin agent-ssh
+--project-dir plugins/agent-ssh --measured-commit <sha> --out <path>`)
+produces a real baseline (187 tests, 10 covered files, correct
+`measured_commit`) when run directly in this checkout.
+
+**Review response (same PR):** three real findings addressed before
+merge. (1) A missing/transiently-failed collection could silently promote
+with no baseline recorded at all despite `agent-ssh` being "enrolled" --
+added a hard, fail-loud "Verify enrolled coverage baselines were actually
+collected" step in the `promote` job (the collection step itself stays
+`continue-on-error` so a coverage-tool bug never blocks a real release
+`run-plugin-tests.py` already validated; this new step is the actual
+enforcement point). (2) A more serious correctness bug:
+`_write_coverage_baselines_into_scratch` only overlaid this run's own
+freshly-collected files, never seeding what already existed on `main` --
+since `scratch` starts from a plain `dev` checkout with no baselines at
+all, any promotion round with no fresh collection for an already-published
+plugin would have silently dropped its last-known-good baseline entirely
+(the same regression class `_seed_versions_from_main` already exists to
+prevent for version numbers). Added `_seed_coverage_baselines_from_main`,
+called before the fresh overlay, plus a regression test
+(`test_promote_preserves_an_existing_main_baseline_when_no_fresh_one_is_collected`).
+(3) This Journal entry's own "not yet done" note (see below) originally
+implied this PR's own merge could validate the real round trip -- corrected
+to name the actual sequencing (workflow YAML resolves from `main`, not
+`dev`; a baseline-only change is a deliberate no-op) rather than overclaim.
+
+**Not yet done** (left for the next increment): watching this actually land
+through a live `validate-and-promote.yml` run and confirming a real
+baseline reaches `main`. This needs more than just this PR merging to
+`dev` -- important timing/sequencing the first version of this note
+glossed over (review finding, PR #4902):
+`repository_dispatch`/`workflow_run`-triggered runs of this workflow always
+resolve its own YAML from `main`, not `dev` (see this file's own top-of-file
+comment on why), so the promotion that first lands THIS wiring still runs
+the *old* workflow and cannot use it. Only the **next** promotion after
+that -- once this wiring itself is live on `main` -- can actually attempt
+collection. And that next promotion must carry a **genuine new `dev`
+content change**: a coverage-baseline update alone is deliberately excluded
+from the no-op-promotion comparison (see
+`test_promote_a_second_time_with_only_a_coverage_baseline_change_is_a_no_op`),
+so a promotion with nothing else to promote stays a no-op and checks in no
+baseline either. The real validation step is watching the first ordinary
+promotion *after* this wiring reaches `main` and confirming
+`.github/coverage-baselines/agent-ssh.json` actually appears in that
+commit -- not assuming this PR's own merge proves the round trip.
+
+### 2026-10-01 — Phase 0 storage/correlation decision: check into `main`
+Resolving this Phase 0 Plan item's own open question, per the operator's
+proposal (either check the baseline into `main` as part of the promotion
+push, tied to the `dev` commit it was measured against, or attach it as a
+release artifact associated with that commit).
+
+Investigated this repo's actual promotion mechanics
+(`.github/workflows/validate-and-promote.yml`, `tools/promote_release.py`)
+before deciding, rather than picking abstractly:
+- Every `dev`→`main` promotion already creates a new `main` commit, pushes
+  an annotated tag (`promote-<timestamp>-<main-sha-prefix>`) on it, **and**
+  writes `.github/release-pipeline-state.json` on `main` recording
+  `last_promotion.dev_head` -- the exact `dev` commit that promotion was
+  measured/built against. This correlation mechanism already exists,
+  already ships, and is already trusted by the rest of the pipeline (it's
+  what `promote_release.py`'s own monotonic-promotion guard reads).
+- There is **no existing GitHub Release object** anywhere in this
+  pipeline -- only git tags. A release-artifact path would mean building
+  an entirely new correlation mechanism (tag -> release -> asset, a new
+  `gh release create` call, new token scope, a new fetch path for the
+  selector) that duplicates what the commit + tag + state file already do,
+  for no correctness benefit: attribution correctness is unaffected either
+  way, since the coverage *measurement* happens against `dev`'s own source
+  form in the `full`/`worktree-manager` jobs regardless of which branch
+  later stores the resulting JSON.
+
+**Decision:** check each baseline generation into `main`'s own tree (e.g.
+`.github/coverage-baselines/<plugin>.json`, alongside the existing
+`release-pipeline-state.json`), piggybacking on the commit + tag the
+promotion pipeline already creates per run. Embed the measured `dev_head`
+directly in the baseline JSON itself (redundant with, but independently
+self-describing from, the pipeline state file's own `last_promotion.dev_head`)
+so a baseline file is correlatable on its own without cross-referencing a
+second file. This is "durably published elsewhere" per the vision's own
+`baseline correlation` Concept (relative to `dev`, the contribution
+branch), not "resident on the contribution branch" -- a vision-compliant
+choice the vision itself deliberately left open for this effort to make.
+
+Not yet done (left for the next increment, per Phase 0's own remaining
+checklist item): actually wiring this into `validate-and-promote.yml`'s
+real jobs and confirming the round-trip against a real promotion run.
 
 ### 2026-10-01 — Phase 0 kickoff: pilot-first sequencing + fallback-curation refinement
 - Operator (via a downstream consumer repository's session that had just

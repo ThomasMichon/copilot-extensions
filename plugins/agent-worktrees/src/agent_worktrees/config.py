@@ -1244,12 +1244,12 @@ def load_config(
 ) -> Config:
     """Load config; memoized inside ``cached_load_config_scope()`` (see
     :mod:`agent_worktrees.config_cache`), else identical to the unwrapped loader."""
-    return memoize_in_scope(
-        _load_config_uncached,
-        path,
-        include_control_plane_related_pr=include_control_plane_related_pr,
-        project=project,
-    )
+    with inrepo_config_source.resolution_budget():  # one git-probe budget per whole load
+        return memoize_in_scope(
+            _load_config_uncached, path,
+            include_control_plane_related_pr=include_control_plane_related_pr,
+            project=project,
+        )
 
 
 def load_project_config(

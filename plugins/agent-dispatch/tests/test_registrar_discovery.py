@@ -460,6 +460,101 @@ def test_read_declaration_file_non_mapping(tmp_path):
         read_declaration_file(f)
 
 
+# -- extends: resolution, wired into read_declaration_file_set ---------------
+
+def test_read_declaration_file_set_resolves_extends_against_repo_root(tmp_path):
+    """Phase 3's own validation contract: a resolved `extends:` declaration
+    must behave *identically* to a hand-written direct declaration with the
+    same effective fields -- compare the full `ProfileDeclaration`, not just
+    a couple of fields a regression in `kind`/`owner`/`concurrency`/filters
+    could slip past."""
+    repo_root = tmp_path / "repo"
+    recipe_dir = repo_root / "recipes"
+    recipe_dir.mkdir(parents=True)
+    template = {
+        "labels": ["from-recipe"],
+        "owner": "team:example",
+        "description": "a recipe-templated lane",
+        "concurrency": 2,
+    }
+    (recipe_dir / "lane.json").write_text(json.dumps(template), encoding="utf-8")
+    declaration_dir = repo_root / ".agent-dispatch" / "registrar"
+    declaration_dir.mkdir(parents=True)
+
+    extends_path = declaration_dir / "concrete.json"
+    extends_path.write_text(
+        json.dumps({"extends": "./recipes/lane.json", "name": "concrete-lane"}),
+        encoding="utf-8",
+    )
+    direct_path = declaration_dir / "direct.json"
+    direct_path.write_text(
+        json.dumps({**template, "name": "concrete-lane"}), encoding="utf-8"
+    )
+
+    (resolved,) = read_declaration_file_set(extends_path, repo_root=repo_root)
+    (direct,) = read_declaration_file_set(direct_path, repo_root=repo_root)
+
+    assert resolved == direct
+
+
+def test_read_declaration_file_set_resolves_extends_against_declaration_dir_without_repo_root(
+    tmp_path,
+):
+    recipe_dir = tmp_path / "recipes"
+    recipe_dir.mkdir()
+    (recipe_dir / "lane.json").write_text(
+        json.dumps({"name": "template-name", "labels": ["from-recipe"]}),
+        encoding="utf-8",
+    )
+    path = tmp_path / "concrete.json"
+    path.write_text(
+        json.dumps({"extends": "./recipes/lane.json", "name": "concrete-lane"}),
+        encoding="utf-8",
+    )
+
+    (declaration,) = read_declaration_file_set(path)
+
+    assert declaration.name == "concrete-lane"
+    assert declaration.labels == ("from-recipe",)
+
+
+def test_read_declaration_file_set_extends_params_do_not_leak_as_unknown_keys(tmp_path):
+    """A `params:`-only substitution value (not a valid top-level
+    declaration field on its own) must never survive into the resolved
+    declaration -- otherwise `load_declaration` would reject it as an
+    unknown key, even though it was only ever meant to fill a placeholder."""
+    recipe_dir = tmp_path / "recipes"
+    recipe_dir.mkdir()
+    (recipe_dir / "lane.json").write_text(
+        json.dumps({"description": "login: {producer_login}"}), encoding="utf-8"
+    )
+    path = tmp_path / "concrete.json"
+    path.write_text(
+        json.dumps(
+            {
+                "extends": "./recipes/lane.json",
+                "name": "concrete-lane",
+                "params": {"producer_login": "issue-bot"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    (declaration,) = read_declaration_file_set(path)
+
+    assert declaration.name == "concrete-lane"
+    assert declaration.description == "login: issue-bot"
+
+
+def test_read_declaration_file_set_without_extends_is_unaffected(tmp_path):
+    path = tmp_path / "plain.json"
+    path.write_text(json.dumps({"name": "plain", "labels": ["x"]}), encoding="utf-8")
+
+    (declaration,) = read_declaration_file_set(path)
+
+    assert declaration.name == "plain"
+
+
 def test_read_location_scans_sorted_and_stamps_owner(tmp_path):
     (tmp_path / "b.json").write_text(json.dumps({"name": "b"}), encoding="utf-8")
     (tmp_path / "a.yaml").write_text("name: a\n", encoding="utf-8")

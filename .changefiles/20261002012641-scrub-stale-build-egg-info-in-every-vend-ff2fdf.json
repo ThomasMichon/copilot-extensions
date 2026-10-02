@@ -1,0 +1,9 @@
+{
+  "comment": "Scrub stale build/egg-info in every vendored libs/*/ dir before+after install, not just explicitly-named scrub_dir libs -- agent-procutil, dropin-registry, plugin-activation, and plugin-resolve are resolved transitively and were never reached, letting a stale libs/agent-procutil/build/lib silently re-shadow a fresh src/ and crash agent-bridge create with ImportError: cannot import name 'JobHandle' on every later install",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

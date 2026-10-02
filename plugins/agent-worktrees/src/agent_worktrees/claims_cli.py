@@ -8,9 +8,11 @@ from pathlib import Path
 
 from . import (
     activity,
+    claim_history,
     claims_annotate,
     claims_find_cli,
     claims_handoff_cli,
+    claims_history_cli,
     claims_owner,
     claims_transitive_cli,
     obligations,
@@ -75,7 +77,9 @@ def add_parsers(sub) -> None:
         "to list every unsettled obligation anywhere in a worktree's whole "
         "subtree (itself + every worktree it created, transitively) -- "
         "a diagnostic convenience, never a substitute for the per-hop "
-        "finalize gate",
+        "finalize gate, OR 'history <ref>' to list the durable, ordered "
+        "claim/release/settle event history recorded for a claimed "
+        "resource (today: pr-kind only)",
     )
     p.add_argument(
         "--remove",
@@ -291,6 +295,8 @@ def cmd_claims(args: argparse.Namespace) -> int:
         return claims_find_cli.cmd_claims_find(args, target[1:])
     if target and target[0] == "transitive":
         return _claims_transitive(args, target[1] if len(target) > 1 else None)
+    if target and target[0] == "history":
+        return _claims_history(args, target[1] if len(target) > 1 else None)
     worktree_id = target[0] if target else None
     return _claims_show(args, worktree_id)
 def _require_coordination_readiness(
@@ -487,6 +493,7 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
                 "kind": kind,
                 "ref": ref,
                 "note": getattr(args, "note", "") or "",
+                "session_id": claim_history.current_session_id(),
             },
         )
     except tracking_write.AmbiguousWriteOutcome as exc:
@@ -582,6 +589,7 @@ def _claims_release(args: argparse.Namespace, ref: str) -> int:
                 "yaml_path": str(rec_path),
                 "ref": ref,
                 "remove": bool(getattr(args, "remove", False)),
+                "session_id": claim_history.current_session_id(),
             },
         )
     except tracking_write.AmbiguousWriteOutcome as exc:
@@ -654,6 +662,7 @@ def _claims_settle(args: argparse.Namespace, ref: str) -> int:
                 "yaml_path": str(rec_path),
                 "ref": ref,
                 "disposition": disposition,
+                "session_id": claim_history.current_session_id(),
             },
         )
     except tracking_write.AmbiguousWriteOutcome as exc:
@@ -722,6 +731,22 @@ def _claims_sweep(args: argparse.Namespace) -> int:
                 )
                 if flipped:
                     tracking.save_record(rec, rec_path)
+                    # Append immediately, still inside this record's own
+                    # lock, using THIS record's own machine (never the
+                    # ambient config's -- a renamed/migrated machine can
+                    # differ) -- never deferred to a later batch pass,
+                    # so a later record's failure can't silently drop an
+                    # already-persisted transition's history entry.
+                    for c in flipped:
+                        claim_history.record_event(
+                            kind=c.kind, ref=c.ref, worktree_id=rec.worktree_id,
+                            machine=rec.machine, event="released",
+                            # A `pr`-kind claim swept this way is a clean,
+                            # provably-merged hand-back (RELEASED), never
+                            # an involuntary reclaim -- only a non-pr kind
+                            # is genuinely `abandoned` here.
+                            note="merged" if c.state == obligations.RELEASED else "abandoned",
+                        )
         else:
             before = {c.ref: c.state for c in rec.resources}
             flipped = tracking.sweep_abandoned_obligations(
@@ -782,6 +807,14 @@ def _claims_reconcile_at_rest(args: argparse.Namespace) -> int:
                 flipped = tracking.release_at_rest_resources(rec, save=False)
                 if flipped:
                     tracking.save_record(rec, rec_path)
+                    # Same immediate-append, same-record-lock,
+                    # record-owned-machine discipline as `_claims_sweep`.
+                    for c in flipped:
+                        claim_history.record_event(
+                            kind=c.kind, ref=c.ref, worktree_id=rec.worktree_id,
+                            machine=rec.machine, event="released",
+                            note="at-rest-reconciled",
+                        )
         else:
             before = {c.ref: c.state for c in rec.resources}
             flipped = tracking.release_at_rest_resources(rec, save=False)
@@ -979,4 +1012,12 @@ def _claims_transitive(args: argparse.Namespace, worktree_id: str | None) -> int
         infer_worktree_id=_infer_worktree_id,
         json_error=_json_error,
         json_output=_json_output,
+    )
+
+
+def _claims_history(args: argparse.Namespace, ref: str | None) -> int:
+    """``claims history <ref>`` -- delegates to ``claims_history_cli``
+    (kept a separate module for the module-size cap)."""
+    return claims_history_cli.cmd_claims_history(
+        args, ref, json_error=_json_error, json_output=_json_output,
     )

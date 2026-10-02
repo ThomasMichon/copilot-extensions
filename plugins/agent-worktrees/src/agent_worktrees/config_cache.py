@@ -112,7 +112,14 @@ def cached_load_config_scope():
     the block is open (entries never expire -- the block itself bounds their
     lifetime). For a longer-lived or multi-thread cache, use
     :class:`ConfigCacheSession` directly instead.
+
+    Inside an already-active session (e.g. a resident monitor's TTL-bounded
+    one) this reuses it rather than masking it with a fresh, empty cache.
     """
+    active = _current_session.get()
+    if active is not None:
+        yield active
+        return
     with ConfigCacheSession(ttl=None).scope() as session:
         yield session
 
@@ -136,3 +143,10 @@ def memoize_in_scope(
         return fn(*args, **kwargs)
     key = (fn, args, tuple(sorted(kwargs.items())))
     return session.get_or_compute(key, lambda: fn(*args, **kwargs))
+
+
+def project_scope(cache_for_project, project):
+    """``cache_for_project(project).scope()``, or a no-op when either is absent."""
+    if callable(cache_for_project) and project:
+        return cache_for_project(project).scope()
+    return contextlib.nullcontext()

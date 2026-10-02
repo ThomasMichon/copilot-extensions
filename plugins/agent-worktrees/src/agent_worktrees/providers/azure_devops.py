@@ -444,10 +444,17 @@ class AzureDevOpsProvider:
         return None
 
     def ensure_fork(
-        self, repo: str, *, token: str | None = None,
+        self, repo: str, *, api_base: str = "", token: str | None = None,
     ) -> tuple[str, str] | None:
         """Not implemented: fork-mode publishing is GitHub-only today."""
-        _ = (repo, token)
+        _ = (repo, api_base, token)
+        return None
+
+    def resolve_fork_owner(
+        self, *, api_base: str = "", token: str | None = None,
+    ) -> str | None:
+        """Not implemented: fork-mode publishing is GitHub-only today."""
+        _ = (api_base, token)
         return None
 
     def add_label(

@@ -18,6 +18,8 @@ from agent_worktrees import config as cfg
 from agent_worktrees import git_ops, tracking
 from agent_worktrees.git_ops import PushResult
 
+_REAL_LOAD_CONFIG = cfg.load_config
+
 
 def _write_record(tracking_dir: Path, wt_id: str, worktree_path: Path, repo: str):
     rec = tracking.WorktreeRecord(
@@ -280,6 +282,39 @@ class TestStatusRecordsLedger:
         # ANCHOR path -- neither worktree's own path.
         assert fetch_calls == [("origin", str(anchor))]
         assert recorded == ["owner/repo"]
+
+    def test_status_loads_config_once_for_many_records(self, tmp_path, monkeypatch):
+        """The fleet read shares one config load across every serialized row
+        (controller findings used to reload it once per record)."""
+        cli, _anchor, _fetches, _recorded = self._setup(tmp_path, monkeypatch)
+        monkeypatch.setattr(cli.tracking, "is_repo_fetch_fresh", lambda repo: True)
+        config = cli.cfg.load_config()
+        records = []
+        for i in range(8):
+            path = tmp_path / f"wt{i}"
+            path.mkdir()
+            records.append(tracking.WorktreeRecord(
+                worktree_id=f"wt{i}", branch=f"worktree/wt{i}", worktree_path=str(path),
+                repo="owner/repo", machine="m", platform=cfg.detect_platform(),
+                started_at="", last_resumed_at="", resume_count=0, title=None,
+                status="active", completed_at=None,
+                controllers=[tracking.ControllerRelation(
+                    kind="session", source="explicit", relation_revision=1,
+                    created_at="", state="ended")],
+                controller_revision=1,
+            ))
+        monkeypatch.setattr(cli.tracking, "list_records", lambda *a, **k: records)
+        loads = {"n": 0}
+
+        def _uncached(*a, **k):
+            loads["n"] += 1
+            return config
+
+        monkeypatch.setattr(cli.cfg, "load_config", _REAL_LOAD_CONFIG)
+        monkeypatch.setattr(cli.cfg, "_load_config_uncached", _uncached)
+        rc = cli.cmd_status(cli.build_parser().parse_args(["status", "--json"]))
+        assert rc == 0
+        assert loads["n"] <= 2  # the command's own load + one shared by all rows
 
     def test_status_skips_fetch_entirely_when_repo_already_fresh(
         self, tmp_path, monkeypatch,

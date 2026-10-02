@@ -30,7 +30,7 @@ import tempfile
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from dropin_registry import Finding, ScanAuthority, WarningTracker
 from plugin_activation import ActivationReport
@@ -38,6 +38,12 @@ from plugin_activation import ActivationReport
 from .install_paths import install_dir as dispatch_install_dir
 from . import repo_config
 from .registrar import ProfileDeclaration, RegistrarError, load_declaration
+from .registrar_lane_aliases import (  # noqa: F401 -- re-exported for existing call sites/tests
+    ENFORCE_REGISTERED_REPOS_ENV,
+    _derive_git_remote_alias,
+    agent_backed_enforcement_enabled,
+    known_lane_aliases,
+)
 
 if TYPE_CHECKING:
     from .registrar_registry import CombinedRegistrarReport, RegistrarCandidate
@@ -89,12 +95,22 @@ class Pointer:
     plain ``dir`` pointer from a ``repo`` pointer (whose ``location`` is a repo root
     and whose declarations live under :data:`INREPO_SUBDIR`). ``owner`` is provenance
     stamped onto every declaration read through this pointer.
+
+    ``aliases`` are canonical lane identities (``identity.canonicalize_remote``
+    shape, e.g. ``host/owner/name``) this ``repo``-kind pointer is agent-backed
+    for -- the actual, trustworthy repo identity. ``name`` is a free-form label
+    (the registrar CLI accepts any name; it is not derived from or validated
+    against the repo's real remote), so it must never itself be treated as a
+    repo identity -- see :func:`agent_dispatch.queue_agent_backed_repo.
+    AgentBackedRepoMixin._require_agent_backed_repo`, which matches a task's
+    lane against this set, never against pointer ``name``\\ s.
     """
 
     name: str
     location: str
     kind: str = "dir"
     owner: str | None = None
+    aliases: tuple[str, ...] = ()
 
     def resolved_location(self) -> Path:
         """The directory to scan for declaration documents.
@@ -116,10 +132,16 @@ class Pointer:
         stem = Path(self.location).expanduser().name or self.name
         return f"repo:{stem}" if self.kind == "repo" else f"pointer:{self.name}"
 
-    def to_dict(self) -> dict[str, str]:
-        d: dict[str, str] = {"name": self.name, "location": self.location, "kind": self.kind}
+    def to_dict(self) -> dict[str, str | list[str]]:
+        d: dict[str, str | list[str]] = {
+            "name": self.name,
+            "location": self.location,
+            "kind": self.kind,
+        }
         if self.owner:
             d["owner"] = self.owner
+        if self.aliases:
+            d["aliases"] = list(self.aliases)
         return d
 
     @classmethod
@@ -138,15 +160,41 @@ class Pointer:
         owner = data.get("owner")
         if owner is not None and not isinstance(owner, str):
             raise RegistrarError(f"pointer.owner: expected a string, got {owner!r}")
-        return cls(name=name, location=location, kind=kind, owner=owner or None)
+        raw_aliases = data.get("aliases", [])
+        if not isinstance(raw_aliases, list) or not all(
+            isinstance(a, str) and a for a in raw_aliases
+        ):
+            raise RegistrarError("pointer.aliases: expected a list of non-empty strings")
+        return cls(
+            name=name,
+            location=location,
+            kind=kind,
+            owner=owner or None,
+            aliases=tuple(raw_aliases),
+        )
+
 
 
 def repo_pointer(
     repo_root: str | Path, *, name: str | None = None, owner: str | None = None
 ) -> Pointer:
-    """Build the in-repo pointer for ``repo_root``."""
+    """Build the in-repo pointer for ``repo_root``.
+
+    Auto-derives a canonical lane alias from ``repo_root``'s own ``origin``
+    remote when one is resolvable (best-effort; empty otherwise -- callers
+    needing the agent-backed-repo check to recognize this pointer under a
+    *different* host alias than its own remote must add it explicitly via
+    :func:`add_pointer`'s ``aliases``).
+    """
     root = Path(repo_root).expanduser()
-    return Pointer(name=name or root.name, location=str(root), kind="repo", owner=owner)
+    derived = _derive_git_remote_alias(root)
+    return Pointer(
+        name=name or root.name,
+        location=str(root),
+        kind="repo",
+        owner=owner,
+        aliases=(derived,) if derived else (),
+    )
 
 
 # -- pointer-registry persistence (the thin index) ---------------------------
@@ -206,25 +254,78 @@ def save_pointers(pointers: Iterable[Pointer], base: Path | None = None) -> Path
     return path
 
 
+_UNSET: Any = object()
+
+
 def add_pointer(
     name: str,
     location: str | Path,
     *,
     kind: str = "dir",
-    owner: str | None = None,
+    owner: str | None | Any = _UNSET,
+    aliases: Iterable[str] | None = None,
     base: Path | None = None,
 ) -> Pointer:
     """Add (or replace) a pointer by ``name`` and persist. Returns the stored pointer.
 
     Idempotent: re-adding the same ``name`` with the same target is a no-op; re-adding
     with a *different* target replaces it (the pointer index has one entry per name).
+
+    ``aliases`` are canonical lane identities (see :class:`Pointer`) this
+    ``repo``-kind pointer is agent-backed for. Pass them explicitly whenever a
+    lane is known under a host alias that doesn't match ``location``'s own git
+    remote (e.g. a reverse-proxy alias or a bare ``owner/name`` form alongside
+    the real origin remote). Passing ``aliases=None`` (the default) **preserves
+    an existing pointer's own aliases** rather than re-deriving and silently
+    discarding them, *provided* ``location`` and ``kind`` are unchanged from
+    the current record -- an explicit ``aliases`` argument always replaces
+    them, and any change of ``location``/``kind`` always re-derives/resets
+    them (preserving a prior target's aliases across a genuine retarget would
+    leave an old repo lane wrongly authorized). For a brand-new ``kind="repo"``
+    pointer, or an existing one being retargeted, with no ``aliases`` given,
+    one is auto-derived from ``location``'s own ``origin`` remote on a
+    best-effort basis (never fatal if that fails -- the pointer is just not
+    recognized as backing any lane until an alias is added).
+
+    ``owner`` follows the identical same-target-preservation rule: omitting it
+    entirely (the default) preserves the current record's ``owner`` when
+    ``location``/``kind`` are unchanged -- re-registering to only add an
+    alias must never silently clear an existing declared owner. Pass
+    ``owner=None`` explicitly to clear it, or any string to set/replace it.
     """
     if not name or not all(c.isalnum() or c in "-_" for c in name):
         raise RegistrarError(f"pointer name {name!r}: use only letters, digits, '-' and '_'")
-    pointer = Pointer(name=name, location=str(Path(location).expanduser()), kind=kind, owner=owner)
-    Pointer.from_dict(pointer.to_dict())  # validate kind/shape via the loader
+    resolved_location = str(Path(location).expanduser())
     existing = load_pointers(base)
     current = next((p for p in existing if p.name == name), None)
+    retargeted = current is not None and (
+        current.location != resolved_location or current.kind != kind
+    )
+    if owner is _UNSET:
+        resolved_owner = current.owner if (current is not None and not retargeted) else None
+    else:
+        resolved_owner = owner
+    if aliases is not None:
+        from .identity import canonicalize_remote
+
+        normalized_aliases: list[str] = []
+        for alias in aliases:
+            canonical = canonicalize_remote(alias)
+            if not canonical:
+                raise RegistrarError(f"pointer alias {alias!r} is not a valid canonical lane")
+            normalized_aliases.append(canonical)
+        alias_tuple = tuple(dict.fromkeys(normalized_aliases))  # de-dup, keep order
+    elif current is not None and not retargeted:
+        alias_tuple = current.aliases  # same target -- preserve, never silently discard
+    elif kind == "repo":
+        derived = _derive_git_remote_alias(Path(resolved_location))
+        alias_tuple = (derived,) if derived else ()
+    else:
+        alias_tuple = ()
+    pointer = Pointer(
+        name=name, location=resolved_location, kind=kind, owner=resolved_owner, aliases=alias_tuple
+    )
+    Pointer.from_dict(pointer.to_dict())  # validate kind/shape via the loader
     if current == pointer:
         return pointer  # truly idempotent: identical entry, don't rewrite the file
     others = [p for p in existing if p.name != name]
@@ -314,6 +415,11 @@ def read_declaration_file_set(
             f"{p}: declaration could not be read: {exc}"
         ) from exc
     data = dict(_decode(text, p.suffix, where=str(p)))
+    if "extends" in data:
+        from .registrar_recipes import resolve_extends
+
+        base_dir = Path(repo_root).expanduser() if repo_root is not None else p.parent
+        data = resolve_extends(data, base_dir=base_dir)
     if data.get("kind") == "reviewer-loop":
         from .reviewer_loops import expand_reviewer_loop
 

@@ -514,6 +514,17 @@ def release_all_resources(
     *,
     save: bool = True,
 ) -> list[ResourceClaim]:
+    """Release every live, non-session claim this worktree holds.
+
+    Does **not** itself feed :mod:`claim_history` -- ``save=False`` is a
+    real, commonly-used in-memory-only mode (``finalize.py`` always calls
+    it this way, folding the persist into its own later ``update_status``
+    save), and emitting a durable "released" event before anything is
+    actually written to disk would record a transition that a subsequent
+    save failure could silently undo. The caller records history only
+    after ITS OWN save is confirmed to have happened -- see
+    ``finalize.py``'s own call site.
+    """
     tracking = _tracking()
     released = [claim for claim in record.resources if claim.is_live and claim.kind != "session"]
     for claim in released:

@@ -29,6 +29,7 @@ from agent_dispatch.queue_common import CreationOutcome as _CommonCreationOutcom
 from agent_dispatch.queue_common import Task as _CommonTask
 from agent_dispatch.queue_common import TaskAttachmentEntry as _CommonTaskAttachmentEntry
 from agent_dispatch.queue_storage import QueueStorageMixin
+from agent_dispatch.queue_agent_backed_repo import AgentBackedRepoMixin
 from agent_dispatch.identity import canonical_reviewer_target as _IdentityReviewerTarget
 from agent_dispatch.payload import is_blob_ref as _PayloadIsBlobRef
 
@@ -36,6 +37,12 @@ from agent_dispatch.payload import is_blob_ref as _PayloadIsBlobRef
 @pytest.mark.guard
 def test_task_queue_inherits_the_storage_mixin():
     assert QueueStorageMixin in TaskQueue.__mro__
+
+
+@pytest.mark.guard
+def test_task_queue_inherits_the_agent_backed_repo_mixin():
+    assert AgentBackedRepoMixin in TaskQueue.__mro__
+    assert callable(AgentBackedRepoMixin._require_agent_backed_repo)
 
 
 @pytest.mark.guard

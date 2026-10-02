@@ -1397,6 +1397,20 @@ class TestAgentWorktreesPython:
     """_agent_worktrees_python resolves the junction-free current-version marker
     (the retired .venv junction must not be traversed -- #581/#1085/#1106)."""
 
+    @pytest.fixture(autouse=True)
+    def _clear_ambient_agent_rt_root_override(self, monkeypatch):
+        """``_agent_worktrees_python`` honors ``AGENT_RT_ROOT`` as a resolution
+        override with priority over the default ``~/.agent-worktrees`` (see
+        ``test_honors_agent_rt_root_override`` below) -- any host that
+        genuinely has this set ambiently (the facility's own convention: every
+        plugin's ``resolve-runtime.ps1``/``resolve-runtime.sh`` honors the
+        same override) bypasses every other test's ``os.path.expanduser``
+        monkeypatch entirely, silently resolving the REAL ambient
+        ``AGENT_RT_ROOT`` instead of the test's isolated ``tmp_path``. Clear it
+        by default so these tests are deterministic regardless of the host's
+        own environment; the one test that needs it sets its own override."""
+        monkeypatch.delenv("AGENT_RT_ROOT", raising=False)
+
     def _make_slot(self, root, ver):
         import os
         import sys

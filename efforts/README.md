@@ -49,6 +49,7 @@ that pattern to this repository.
 | [Native-Construct Convergence](active/native-construct-convergence/README.md) | Active | #985 |
 | [Plugin Process Hygiene](active/plugin-process-hygiene/README.md) | Active | #736 |
 | [Tiered Payload Provisioning](active/tiered-payload-provisioning/README.md) | Draft | See effort |
+| [Governed Python Artifact Promotion](active/governed-python-artifact-promotion/README.md) | Draft | #4876 |
 | [Progressive Context Disclosure](active/progressive-context-disclosure/README.md) | Active | #1612 |
 | [Restricted Venue Targets](active/restricted-venue-targets/README.md) | Draft | #1188 |
 | [Test Portfolio Rationalization](active/test-portfolio-rationalization/README.md) | Active | #1303 |

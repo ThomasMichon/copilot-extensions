@@ -204,8 +204,10 @@ The essential one is **send**:
 
 ```bash
 <agent-bridge catalog argv[0]> send <agent|machine|codespace:name|container:name> "<prompt>"
-<agent-bridge catalog argv[0]> agents          # list cwd-project agents (--json)
-<agent-bridge catalog argv[0]> machines        # list cwd-project machines + SSH readiness (--json)
+<agent-bridge catalog argv[0]> agents              # list cwd-project agents
+<agent-bridge catalog argv[0]> machines            # list cwd-project machines + SSH readiness
+<agent-bridge catalog argv[0]> --json agents       # --json is a TOP-LEVEL flag -- it must come
+<agent-bridge catalog argv[0]> --json machines     # BEFORE the subcommand, not after it; `agents --json` fails
 <agent-bridge catalog argv[0]> --project <repo> agents
 <agent-bridge catalog argv[0]> agents --all-projects
 ```

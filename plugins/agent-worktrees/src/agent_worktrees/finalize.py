@@ -2026,13 +2026,10 @@ def validate_and_finalize(
 
         # Update tracking
         if record:
-            # Citadel E1b cascade (#877): a parent that owns outbound worktree
-            # resources hands them back on finalize -- release the live claims so
-            # the ledger stops asserting the parent holds them, and SURFACE the
-            # children so their downstream cleanup isn't silently forgotten. The
-            # child records keep their own owner_ref; the claimant-liveness gate
-            # now sees this parent as terminal (gone), so the children become
-            # orphans governed by their own prune safety.
+            # Citadel E1b cascade (#877): release live outbound claims so the
+            # ledger stops asserting the parent holds them, surfacing children
+            # for downstream cleanup; the claimant-liveness gate now sees this
+            # parent as terminal, so children become orphans under their own prune safety.
             released = tracking.release_all_resources(record, save=False)
             tracking.update_status(record, "finalized")
             # Warn about (never auto-release) any real CodeSpace claim(s) this worktree still holds
@@ -2059,6 +2056,7 @@ def validate_and_finalize(
             except Exception:
                 pass
             if released:
+                from . import claim_history
                 output.warn(
                     f"Released {len(released)} downstream worktree resource(s) "
                     f"owned by {worktree_id} (finalized) -- review/clean them:"
@@ -2068,6 +2066,8 @@ def validate_and_finalize(
                     if c.note:
                         label += f" ({c.note})"
                     print(label)
+                    claim_history.record_claim_released(
+                        c, worktree_id=worktree_id, machine=record.machine, note="finalized")
 
             # Obligation settlement, upward (resource-obligation-settlement Ph3):
             # this worktree finalizing means its OWN work is safe, so settle the

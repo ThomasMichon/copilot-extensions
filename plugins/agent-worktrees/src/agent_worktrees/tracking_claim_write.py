@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import activity, obligations, tracking, tracking_write
+from . import activity, claim_history, obligations, tracking, tracking_write
 
 
 def apply_claim_add(args: dict) -> dict:
@@ -98,6 +98,10 @@ def apply_claim_add(args: dict) -> dict:
         state=obligations.ACTIVE,
         reopened=reopened,
     )
+    claim_history.record_event(
+        kind=kind, ref=ref, worktree_id=worktree_id, machine=record.machine,
+        event="claimed", session_id=args.get("session_id"),
+    )
     return {
         "ok": True,
         "state": obligations.ACTIVE,
@@ -140,6 +144,10 @@ def apply_claim_release(args: dict) -> dict:
 
     activity.log_event(
         "claim_released", worktree_id=worktree_id, kind=kind, ref=ref, action=action
+    )
+    claim_history.record_event(
+        kind=kind, ref=ref, worktree_id=worktree_id, machine=record.machine,
+        event=action, session_id=args.get("session_id"),
     )
     return {"ok": True, "action": action}
 
@@ -207,6 +215,10 @@ def apply_claim_settle(args: dict) -> dict:
     activity.log_event(
         "claim_settled", worktree_id=worktree_id, kind=settled.kind, ref=ref,
         disposition=disposition,
+    )
+    claim_history.record_event(
+        kind=settled.kind, ref=ref, worktree_id=worktree_id, machine=record.machine,
+        event="settled", note=disposition, session_id=args.get("session_id"),
     )
     return {"ok": True, "kind": settled.kind, "disposition": disposition}
 

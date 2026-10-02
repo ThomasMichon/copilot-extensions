@@ -223,15 +223,20 @@ real code, not assumption:
       claiming (clearing) it under a race-safe write-guard immediately
       before delivery, restoring it only on an unconfirmed delivery, and an
       explicit `--seed` supersedes/clears any stale pending one too.
-      **Two seams still incomplete, tracked here, not elsewhere:**
-      (1) the Picker's OWN live flow never calls `resolve --new --seed`
-      (`engine_client.resolve_launch_plan()` has no `--seed` kwarg --
-      blocked on its own module-size hard cap; this is why item 2's screen
-      stays gated off), and (2) `launch-session.{ps1,sh}` itself never
-      calls `agent-worktrees embody` after creating a worktree's pane, so
-      nothing ever triggers delivery for a Picker-originated creation even
-      once seam (1) lands. Direct `agent-worktrees create --seed`/`embody`
-      usage (bypassing the Picker entirely) already works end-to-end today.
+      **Two seams, one now closed (2026-10-01, see Journal):**
+      (1) **closed** -- the Picker's live flow now calls `resolve --new
+      --seed` (`engine_client.resolve_launch_plan()` gained a `seed` kwarg
+      once `engine_client.py`'s module-size cap was relieved by extracting
+      `engine_execution_leg.py`); `__main__.py`'s `_resolve_for()` threads
+      `LaunchRequest.seed_prompt` through. (2) **still open** --
+      `launch-session.{ps1,sh}` itself never calls `agent-worktrees embody`
+      after creating a worktree's pane, so nothing ever triggers delivery
+      for a Picker-originated creation even with seam (1) closed -- the
+      Journal has a concrete hook point (right after the `new-session`
+      call) from actually reading the script, not a guess. `_SEED_PROMPT_
+      ENABLED` stays `False` until seam (2) lands too. Direct
+      `agent-worktrees create --seed`/`embody` usage (bypassing the Picker
+      entirely) already works end-to-end today.
 - [ ] Confirm the end-to-end behavior matches `agent-worktrees copilot
       --seed`'s own documented contract ("Seed prompt injected as the
       session's first interactive turn once Copilot is ready") -- the
@@ -326,7 +331,14 @@ real code, not assumption:
       confirm the new session's first interactive turn is that prompt, with
       no race against the auto-update/bootstrap sequence. Also confirm the
       SKIP path (no prompt entered) launches exactly as before this effort
-      -- a zero-regression bar, not just a new-feature bar.
+      -- a zero-regression bar, not just a new-feature bar. **Partially
+      validated 2026-10-01 (live TTY, `--demo` mode, see Journal):** the
+      UI chain itself (options dialog -> `SeedPromptScreen` -> typed text
+      captured correctly) confirmed in a REAL terminal via `tmux`, not just
+      Pilot. **Still outstanding:** the actual end-to-end delivery (typed
+      prompt -> real worktree -> first interactive Copilot turn) needs a
+      REAL (non-`--demo`) worktree-creation target, since demo mode only
+      fakes data up to -- not through -- the final `_run_launch` step.
   - [ ] Confirm behavior with "Bare" selected: no prompt screen is shown at
         all (nothing to seed).
 - [ ] Phase B: from a live coordinator, use the Tasks pane's new "New
@@ -1082,3 +1094,147 @@ confirming the tags/criteria vocabulary accessor in `registrar.py`/
 `overrides.py`) -- plus Phase A's still-gated final seams (`engine_client.py`
 module split + `launch-session.{ps1,sh}` embody call). See the rewritten
 Plan items above for the concrete recommended shape of each.
+
+### 2026-10-01 (later still) — A new validation capability, proven: live-TTY driving of the real Picker via tmux, safely, through demo mode
+The operator pointed out this session could create a real mux (tmux) pane,
+launch the actual production Picker inside it, and drive/scrape it via the
+TTY -- a genuinely different validation tier than the Pilot-test harness
+(headless, in-process) Phase A's own tests have used so far. Tried it, and
+it works, with one important safety boundary identified along the way.
+
+**What was proven, concretely:** in a fresh, disposable `tmux` session
+(`tmux new-session -d`), ran `worktree-manager picker --demo` (the
+existing, already-shipped preview mode -- real Picker app/screens/rendering,
+fixture data, see `preview.py`'s own docstring) inside a fresh copilot-
+extensions worktree with `_SEED_PROMPT_ENABLED` temporarily flipped `True`
+(an uncommitted local edit, reverted immediately after). Drove it with
+`tmux send-keys` and read it back with `tmux capture-pane -p`:
+1. `Enter` on the Worktrees pivot opened the real `ScopeDlgScreen` ("New
+   worktree" options dialog) -- rendered correctly in a genuine terminal.
+2. Tabbing to "Create" and confirming opened the real `SeedPromptScreen` --
+   its exact copy ("fire and forget", "Leave blank to launch as before")
+   rendered correctly.
+3. Typing `Fix the frobnicator` via `tmux send-keys` landed correctly in
+   the textarea, read back byte-for-byte via `capture-pane`.
+
+This is real, independent proof (not a Pilot/mocked assertion) that items
+1-3's UI chain -- the extracted `field_widgets.compose_field` helper, the
+new `SeedPromptScreen`, and its wiring into `_open_optmenu()` -- behaves
+exactly as designed in an actual terminal, closing part of the gap the
+Plan's own "Validation Plan" section asks for.
+
+**The safety boundary found, and respected:** neither this screen's
+"Launch" nor "Skip" button is a safe stopping point -- both proceed to
+`_confirm_new_worktree` -> `_decide` -> (eventually) `_run_launch`, which
+for a local, non-AHP, `exec`-mode plan really execs
+`launch-session.{ps1,sh}` as a REAL subprocess (`_run_relocated_mux_launch`,
+`__main__.py`) -- `--demo` mode only fakes the **data** (`engine_client`'s
+command override + a fixture pivot), not this final launch step, so
+confirming the dialog all the way through would have handed a demo/fictional
+`worktree_id` to the real launch script. Rather than gamble on how
+gracefully that fails (the script is ~2000 lines, unaudited for this),
+**stopped short of pressing either button** and killed the tmux session
+outright (`tmux kill-session`) the moment the typed-prompt capture was
+confirmed -- a guaranteed-clean abort with no subprocess ever spawned.
+**This boundary is the thing to remember for whoever picks up item 4's
+remaining validation:** a true end-to-end "launch lands as the first
+interactive turn" proof needs a REAL (non-demo) worktree-creation target --
+not `--demo` mode -- precisely because demo mode stops faking data exactly
+at the point this validation cares about.
+
+**Reusable takeaway for future live-TTY validation in this repo:** `tmux`
+is genuinely available on this Windows machine (a `psmux`-branded Windows
+build, reports `tmux 3.3.5`, already used for every live worktree's own
+mux pane) -- `tmux new-session -d -s <name> "<cmd>"`,
+`tmux send-keys -t <name> "<text>" Enter`, `tmux capture-pane -t <name> -p`,
+`tmux kill-session -t <name>` is the whole toolkit. One gotcha: this
+session's own shell is itself inside a `psmux` pane, so a nested
+`tmux new-session` needs `PSMUX_SESSION` unset first (`psmux: sessions
+should be nested with care` is a soft warning, not a hard failure, but the
+nested session silently never gets created unless the var is cleared for
+that one call).
+
+### 2026-10-01 (later still) — Phase A seam 1 closed: engine_client.py split + --seed forwarding; seam 2 investigated, not rushed
+Picked up driving immediately after proving the live-TTY technique above.
+With a genuine way to validate the Picker's live TUI now in hand, went
+after Phase A item 4's two still-incomplete seams.
+
+**Seam 1 -- closed, tested, ready for its own PR:**
+`engine_client.py` was at 999/1000 lines (confirmed via direct line count),
+the "zero slack" state the previous session's handoff flagged. Extracted
+the six `execution_leg_*` CLI calls (`get`/`set`/`clear`/`reserve`/`renew`/
+`release`, a cohesive ~180-line concern already used by `ahp_provider.py`)
+into a new sibling module, `engine_execution_leg.py`. The first draft
+re-exported these via a top-level import (`# noqa: F401`/`E402`,
+mirroring `steering.py`'s own re-export convention) placed after
+`run_json`/`EngineError`/etc. -- but Copilot review correctly flagged this
+as a reproducible circular-import deadlock: `engine_execution_leg.py`
+itself does `from .engine_client import run_json, ...`, so importing
+`engine_execution_leg` directly (before `engine_client`) hits
+`engine_client`'s own top-level `from .engine_execution_leg import (...)`
+line while `engine_execution_leg` is still mid-init -> `ImportError` on a
+not-yet-defined name. Fixed properly: the re-export is now a **lazy module
+`__getattr__`** (PEP 562) at the bottom of `engine_client.py` -- the import
+of `engine_execution_leg` happens only on first actual attribute access
+(`engine_client.execution_leg_get(...)` etc.), well after either possible
+import order has already finished. Verified directly: imported
+`engine_execution_leg` first, then `engine_client` first, confirmed both
+resolve to the identical function object.
+
+`engine_client.py` ends at 861 lines (not 832 -- that was the first
+draft's count before the `__getattr__` fix added a little back) with real
+room left. Added an optional `seed: str | None = None` kwarg to
+`resolve_launch_plan()`, forwarded as `--seed <text>` to `agent-worktrees
+resolve` (confirmed via its own `--help`: `--new`-only, already
+engine-side-rejected alongside
+`--machine`, so deliberately NOT re-validated here -- the engine owns that
+contract). Threaded through the one real call site that needed it:
+`__main__.py`'s `_resolve_for()` now passes
+`seed=getattr(req, "seed_prompt", None)` -- `LaunchRequest.seed_prompt` and
+the TUI's own `_confirm_new_worktree`/`_decide(...)` -> `action == "new"`
+handling in the picker loop (`seed_prompt=str(opts.get("seed_prompt") or
+"") or None`) were ALREADY wired by the earlier session; this was
+genuinely the only missing link. 3 new tests in `test_engine_client.py`
+(forwards `--seed`, omits it when falsy, confirms the bare-resume
+degradation retry carries it too). Full targeted suite (`test_engine_
+client.py`, `test_ahp_provider.py`, `test_picker_app.py`): 115 passed.
+Module-size gate: OK repo-wide. `_SEED_PROMPT_ENABLED` stays `False` --
+seam 2 (below) isn't done yet, so flipping it would still silently discard
+a typed prompt in the live Picker.
+
+**Seam 2 -- investigated this session, NOT implemented, with a concrete
+hook point now identified (read `launch-session.ps1` directly, ~2000
+lines, rather than guessing):** the pane-creation block
+(`bin/launch-session.ps1`, around the `& $script:AwPsmuxBin new-session -d
+-s $sessName ... @paneCmd` call) hands `$paneCmd` -- which already IS the
+real `copilot --allow-all ...` invocation, wrapped through
+`pane-wrapper.ps1` -- directly to `new-session`. There is no separate
+"shell waiting, then run a command" moment inside the pane: Copilot starts
+running the instant the pane exists. This confirms (doesn't just restate)
+the prior session's own finding: delivery cannot be threaded into the pane
+command itself -- it has to happen by sending keystrokes into the
+ALREADY-RUNNING pane once Copilot's prompt is ready, which is exactly what
+`sessions.mux_seed_pane`/`agent-worktrees embody`'s existing `pending_seed`
+delivery path already does. **The concrete next step:** call
+`agent-worktrees embody --worktree-id <id>` as a plain foreground
+subprocess AFTER the `new-session` block above succeeds (not before, not
+woven into `$paneCmd`), guarded to only fire for a genuinely new worktree
+with a seed actually pending (`$Mode -eq 'new'` and the resolved plan
+carried a seed) -- `embody` already knows how to find the live pane and
+wait for Copilot's prompt via its own resume-branch delivery path, so this
+script needs no pane-ready-detection logic of its own, only the one call
+in the right place.
+
+**Why this wasn't implemented this session, having found the hook point:**
+`launch-session.ps1` is genuinely ~2000 lines of production launch
+machinery this session read only the relevant slice of, not audited
+end-to-end; a change here needs the full "validate beyond unit tests" bar
+(a real, non-`--demo` worktree creation, watched live) the harness's own
+policy requires for a shared launch path this consequential -- rushing the
+edit now, in the same session that just finished reading the slice, is
+exactly the kind of under-cooked attempt Phase A item 4's own prior
+"deliberately not started" entry warned against repeating. Flipping
+`_SEED_PROMPT_ENABLED` and doing that real end-to-end validation (ideally
+via the now-proven `tmux send-keys`/`capture-pane` technique, against a
+disposable throwaway worktree, cleaned up via `finalize --abandon`
+afterward) is the concrete next session's starting point.

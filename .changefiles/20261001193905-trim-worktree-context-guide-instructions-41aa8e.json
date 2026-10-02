@@ -1,0 +1,9 @@
+{
+  "comment": "Trim worktree-context-guide.instructions.md back under the 4KB projection byte budget (regressed by #4868's related-repo-briefings addition).",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -233,6 +233,48 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
       - name: Full suite - ${{ matrix.plugin }}
         run: python tools/run-plugin-tests.py ${{ matrix.plugin }}
+      - name: Coverage baseline - ${{ matrix.plugin }} (pilot plugins only)
+        # Phase 1 pilot (efforts/active/coverage-guided-ci): coverage
+        # collection is wired for one plugin at a time, starting with
+        # agent-ssh (smallest in this matrix, 16 test files, but still a
+        # real dependency-having plugin -- proves the `project_dir`
+        # editable-install path, not just a dependency-free script
+        # plugin). Independent of, and in addition to, the trusted
+        # `run-plugin-tests.py` run above -- this step's own failure never
+        # fails this job (see `continue-on-error` below): a baseline is
+        # optional evidence relative to `run-plugin-tests.py`'s own real
+        # test outcome, but the `promote` job's own "Verify enrolled
+        # coverage baselines were actually collected" step makes an
+        # ENROLLED plugin's baseline a hard requirement regardless -- keep
+        # this `if:` condition's plugin list in exact sync with that step's
+        # own list. Expand both lists together as later pilots prove out.
+        if: matrix.plugin == 'agent-ssh'
+        continue-on-error: true
+        run: |
+          python tools/coverage_guided_selection/baseline.py \
+            "plugins/${{ matrix.plugin }}/tests" \
+            --cov-source "plugins/${{ matrix.plugin }}/src/agent_ssh" \
+            --plugin "${{ matrix.plugin }}" \
+            --project-dir "plugins/${{ matrix.plugin }}" \
+            --measured-commit "${{ needs.gate.outputs.sha }}" \
+            --out "${{ matrix.plugin }}.json"
+      - name: Upload coverage baseline - ${{ matrix.plugin }}
+        if: matrix.plugin == 'agent-ssh'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          # The ARTIFACT's own name carries the `coverage-baseline-` prefix
+          # `download-artifact`'s own `pattern:` matches against below; the
+          # uploaded FILE's name is deliberately just `<plugin>.json` --
+          # `download-artifact --merge-multiple` preserves each artifact's
+          # own uploaded file name verbatim, and `promote_release.py`'s own
+          # `_write_coverage_baselines_into_scratch` keys each plugin by
+          # that file's name (`<plugin>.json`), so the two must match
+          # exactly, or verification below silently fails every run.
+          name: coverage-baseline-${{ matrix.plugin }}
+          path: ${{ matrix.plugin }}.json
+          if-no-files-found: ignore
+          retention-days: 7
 
   worktree-manager:
     name: worktree-manager (out-of-plugin, full)
@@ -564,6 +606,50 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Download coverage baselines (pilot plugins only; best-effort)
+        if: steps.decide.outputs.proceed == 'true'
+        # Not every promotion run has a baseline artifact yet (only the
+        # pilot plugin(s) in `full`'s own Coverage-baseline step produce
+        # one, and that step is itself best-effort / continue-on-error) --
+        # `actions/download-artifact` has no built-in "zero matches is
+        # fine" mode for `pattern`, so this step tolerates that itself
+        # rather than failing the whole promotion over optional evidence.
+        # The NEXT step enforces the real guarantee: any plugin actually
+        # enrolled in collection must have produced one, or promotion fails
+        # loudly -- this step alone never silently drops that requirement.
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: coverage-baseline-*
+          path: coverage-baselines
+          merge-multiple: true
+      - name: Verify enrolled coverage baselines were actually collected
+        if: steps.decide.outputs.proceed == 'true'
+        # `continue-on-error: true` on both the `full` job's own collection
+        # step and this job's download step above means every failure
+        # point along the way is individually soft -- collection failing,
+        # the artifact never existing, or the download failing would all
+        # otherwise let promotion succeed with no baseline recorded at
+        # all, defeating the "correlation loop never silently breaks"
+        # Behavior for a plugin that IS supposed to have one. This step is
+        # the one hard gate: an ENROLLED plugin's baseline is REQUIRED,
+        # never optional -- only a plugin not yet in this list is allowed
+        # to have none.
+        #
+        # Keep this list in exact sync with `full` job's own
+        # `if: matrix.plugin == '...'` collection-step condition above --
+        # that's the single other place a plugin gets "enrolled".
+        run: |
+          missing=()
+          for plugin in agent-ssh; do
+            if [ ! -f "coverage-baselines/${plugin}.json" ]; then
+              missing+=("$plugin")
+            fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Enrolled plugin(s) missing a collected coverage baseline this run: ${missing[*]} -- refusing to promote without the evidence these plugins are supposed to produce."
+            exit 1
+          fi
       - name: Promote (push a candidate branch; report-only if push=false)
         id: promote
         if: steps.decide.outputs.proceed == 'true'
@@ -588,13 +674,21 @@ jobs:
           # comparison), but it surfaced this real structural gap: nothing
           # here actually pinned promotion to what `gate` validated.
           DEV_SHA: ${{ needs.gate.outputs.sha }}
+          # `promote_release.py`'s own `measured_commit` consistency check
+          # (see `_write_coverage_baselines_into_scratch`) refuses any
+          # baseline not measured against this exact `DEV_SHA` -- a stale
+          # artifact from a superseded run can never be silently checked
+          # in by passing this directory, whether or not it's empty.
+          COVERAGE_BASELINES_DIR: coverage-baselines
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "$PUSH_INPUT" = "false" ]; then
-            python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main
+            python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
+              --coverage-baselines-dir "$COVERAGE_BASELINES_DIR"
             echo "land=false" >> "$GITHUB_OUTPUT"
           else
             python tools/promote_release.py --dev-ref "$DEV_SHA" --main-ref origin/main \
-              --push --candidate-branch "$CANDIDATE_BRANCH"
+              --push --candidate-branch "$CANDIDATE_BRANCH" \
+              --coverage-baselines-dir "$COVERAGE_BASELINES_DIR"
             echo "land=true" >> "$GITHUB_OUTPUT"
             # Consumed changefiles are no longer swept off `dev` by this
             # run: `purge-consumed-changefiles.yml` does that once daily

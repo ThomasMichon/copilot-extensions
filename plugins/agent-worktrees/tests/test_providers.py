@@ -1123,6 +1123,134 @@ class TestGitHubProvider:
         assert observed.observed_at == "2026-09-05T06:01:02+00:00"
         assert captured["args"][2:4] == ["--hostname", "github.example"]
 
+    def test_resolve_fork_owner_success(self, monkeypatch):
+        from agent_worktrees.providers import github
+
+        captured = {}
+
+        def fake_run(args, **kw):
+            captured["args"] = args
+            captured["env"] = kw.get("env")
+            return _proc(stdout="octocat\n")
+
+        monkeypatch.setattr(github, "run_cli", fake_run)
+
+        owner = github.GitHubProvider().resolve_fork_owner(token="tok-123")
+
+        assert owner == "octocat"
+        assert captured["args"] == [
+            "gh", "api", "--hostname", "github.com", "user", "--jq", ".login",
+        ]
+        # The token must propagate into the environment the command runs
+        # with, not just be accepted and ignored.
+        assert captured["env"] is not None
+
+    def test_resolve_fork_owner_failure_returns_none(self, monkeypatch):
+        from agent_worktrees.providers import github
+
+        monkeypatch.setattr(
+            github, "run_cli", lambda args, **kw: _proc(returncode=1, stderr="no auth"),
+        )
+
+        assert github.GitHubProvider().resolve_fork_owner() is None
+
+    def test_resolve_fork_owner_blank_login_returns_none(self, monkeypatch):
+        from agent_worktrees.providers import github
+
+        monkeypatch.setattr(github, "run_cli", lambda args, **kw: _proc(stdout="  \n"))
+
+        assert github.GitHubProvider().resolve_fork_owner() is None
+
+    def test_ensure_fork_delegates_to_resolve_fork_owner_then_posts(self, monkeypatch):
+        """ensure_fork's refactor must still: resolve the login first (via
+        resolve_fork_owner), THEN issue the mutating POST -- and the SAME
+        token must flow to both calls."""
+        from agent_worktrees.providers import github
+
+        calls = []
+
+        def fake_run(args, **kw):
+            calls.append((list(args), kw.get("env")))
+            if "user" in args:
+                return _proc(stdout="octocat\n")
+            return _proc(stdout=json.dumps({
+                "clone_url": "https://x/o/r.git",
+                "owner": {"login": "octocat"},
+            }))
+
+        monkeypatch.setattr(github, "run_cli", fake_run)
+
+        result = github.GitHubProvider().ensure_fork("o/r", token="shared-tok")
+
+        assert result == ("octocat", "https://x/o/r.git")
+        assert len(calls) == 2
+        assert calls[0][0] == [
+            "gh", "api", "--hostname", "github.com", "user", "--jq", ".login",
+        ]
+        assert calls[1][0][:6] == [
+            "gh", "api", "--hostname", "github.com", "-X", "POST",
+        ]
+        # Both calls authenticated with the SAME token.
+        assert calls[0][1] == calls[1][1]
+
+    def test_ensure_fork_rejects_post_response_owner_mismatch(self, monkeypatch):
+        """A concurrent ambient-auth identity switch between the GET
+        (resolve_fork_owner) and this POST can create the fork under a
+        DIFFERENT login than the GET saw -- the POST response's own
+        owner.login is authoritative and a mismatch must fail closed
+        rather than silently return a clone_url for the wrong account."""
+        from agent_worktrees.providers import github
+
+        def fake_run(args, **kw):
+            if "user" in args:
+                return _proc(stdout="alice\n")
+            return _proc(stdout=json.dumps({
+                "clone_url": "https://x/o/r.git",
+                "owner": {"login": "bob"},
+            }))
+
+        monkeypatch.setattr(github, "run_cli", fake_run)
+
+        assert github.GitHubProvider().ensure_fork("o/r") is None
+
+    def test_ensure_fork_rejects_post_response_missing_owner(self, monkeypatch):
+        from agent_worktrees.providers import github
+
+        def fake_run(args, **kw):
+            if "user" in args:
+                return _proc(stdout="octocat\n")
+            return _proc(stdout=json.dumps({"clone_url": "https://x/o/r.git"}))
+
+        monkeypatch.setattr(github, "run_cli", fake_run)
+
+        assert github.GitHubProvider().ensure_fork("o/r") is None
+
+    def test_ensure_fork_never_posts_when_owner_unresolvable(self, monkeypatch):
+        """The POST that actually creates/verifies the fork must never run
+        when the non-mutating login resolution already failed."""
+        from agent_worktrees.providers import github
+
+        def fake_run(args, **kw):
+            if "user" in args:
+                return _proc(returncode=1, stderr="no auth")
+            raise AssertionError("POST must not run when login resolution failed")
+
+        monkeypatch.setattr(github, "run_cli", fake_run)
+
+        assert github.GitHubProvider().ensure_fork("o/r") is None
+
+    def test_ensure_fork_post_failure_returns_none(self, monkeypatch):
+        from agent_worktrees.providers import github
+
+        def fake_run(args, **kw):
+            if "user" in args:
+                return _proc(stdout="octocat\n")
+            return _proc(returncode=1, stderr="gh: HTTP 403")
+
+        monkeypatch.setattr(github, "run_cli", fake_run)
+
+        assert github.GitHubProvider().ensure_fork("o/r") is None
+
     def test_publish_source_marker_creates_pr_comment(self, monkeypatch):
         from agent_worktrees.providers import github
 
