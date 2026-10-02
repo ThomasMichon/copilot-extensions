@@ -284,9 +284,11 @@ default would hide or `403`/`404` the other org's CodeSpaces entirely.
   mapped account plus the ambient one and merge, tagging each CodeSpace with its
   owning account. Per-CodeSpace ops (stop/delete/ssh) then pin `gh` to that
   account.
-- **Auth preflight** verifies each mapped account is logged in with the
-  `codespace` scope, surfacing the account's recorded `accounts.yaml` login flow
-  as the remedy.
+- **Auth preflight** verifies only the accounts that serve a CodeSpace -- bound
+  to a live CodeSpace, owning one, or configured for a repo -- plus the active
+  account when a CodeSpace uses ambient ownership. Each must be logged in with
+  the `codespace` scope; the remedy is the account's recorded `accounts.yaml`
+  login flow.
 - **Fully additive:** with no `account_map` configured, everything collapses to
   a single ambient `gh` call — today's behavior.
 

@@ -545,3 +545,18 @@ def test_serving_accounts_skip_bindings_for_deleted_codespaces():
                return_value=MagicMock(repos={})):
         assert ap.codespace_scope_accounts(live_only=True) == (("alice", "stale"), False)
 
+
+def test_serving_accounts_include_ambient_and_mapped_owners_of_live_codespaces():
+    from agent_codespaces import auth_preflight as ap
+    from agent_codespaces.account_binding import AccountBinding
+
+    bindings = [AccountBinding(codespace="cs-bound", account="alice", bound_at=0.0)]
+    live = [SimpleNamespace(name="cs-bound", account="alice"),
+            SimpleNamespace(name="cs-ambient", account=""),
+            SimpleNamespace(name="cs-mapped", account="carol")]
+    with patch("agent_codespaces.account_binding.list_bindings", return_value=bindings), \
+         patch("agent_codespaces.lifecycle.list_codespaces", return_value=live), \
+         patch("agent_codespaces.config.load_merged_config",
+               return_value=MagicMock(repos={})):
+        assert ap.codespace_scope_accounts(live_only=True) == (("alice", "carol"), True)
+

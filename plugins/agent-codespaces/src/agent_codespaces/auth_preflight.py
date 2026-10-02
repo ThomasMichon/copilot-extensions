@@ -80,12 +80,12 @@ def _timeout_finding(login: str) -> str:
             "GitHub -- retry once GitHub is reachable")
 
 
-def _live_codespace_names() -> set[str] | None:
-    """Names of the CodeSpaces that still exist, or None when they can't be listed."""
+def _live_codespaces() -> list | None:
+    """The CodeSpaces that still exist, or None when they can't be listed."""
     try:
         from .lifecycle import list_codespaces
 
-        return {cs.name for cs in list_codespaces()}
+        return list(list_codespaces())
     except Exception:
         log.debug("could not list CodeSpaces; keeping every account binding", exc_info=True)
         return None
@@ -94,21 +94,20 @@ def _live_codespace_names() -> set[str] | None:
 def codespace_scope_accounts(*, live_only: bool = False) -> tuple[tuple[str, ...], bool]:
     """``(explicit_accounts, uses_ambient)`` for CodeSpace operations.
 
-    ``live_only`` ignores bindings whose CodeSpace no longer exists: only
-    ``delete_codespace`` unbinds, so a CodeSpace deleted elsewhere leaves its
-    binding behind. When CodeSpaces can't be listed, every binding is kept.
+    ``live_only`` judges against the CodeSpaces that exist now: it ignores
+    bindings whose CodeSpace is gone (only ``delete_codespace`` unbinds, so one
+    deleted elsewhere leaves its binding behind), and counts a live CodeSpace
+    that is neither bound nor owned by a mapped account (an empty ``account``)
+    as ambient ownership. When CodeSpaces can't be listed, every binding is
+    kept and ambient use comes from configured repos alone.
     """
     accounts: list[str] = []
     uses_ambient = False
+    bindings: list = []
     try:
         from . import account_binding
 
         bindings = account_binding.list_bindings()
-        if live_only and bindings:
-            live = _live_codespace_names()
-            if live is not None:
-                bindings = [b for b in bindings if b.codespace in live]
-        accounts.extend(b.account for b in bindings if b.account)
     except Exception:
         log.debug("could not read CodeSpace account bindings", exc_info=True)
     try:
@@ -124,8 +123,16 @@ def codespace_scope_accounts(*, live_only: bool = False) -> tuple[tuple[str, ...
                 uses_ambient = True
     except Exception:
         log.debug("could not resolve configured CodeSpace repo accounts", exc_info=True)
+    live = _live_codespaces() if live_only and (bindings or accounts) else None
+    if live is not None:
+        names = {cs.name for cs in live}
+        bindings = [b for b in bindings if b.codespace in names]
+        bound = {b.codespace for b in bindings}
+        unbound = [cs for cs in live if cs.name not in bound]
+        uses_ambient = uses_ambient or any(not getattr(cs, "account", "") for cs in unbound)
+        accounts.extend(cs.account for cs in unbound if getattr(cs, "account", ""))
     seen: list[str] = []
-    for account in accounts:
+    for account in [*(b.account for b in bindings if b.account), *accounts]:
         if account and account not in seen:
             seen.append(account)
     return tuple(seen), uses_ambient
