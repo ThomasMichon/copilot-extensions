@@ -425,12 +425,17 @@ class TestBaselineCollectionErrorContract:
 
         for name in ALWAYS_SCRUB_NAMES:
             monkeypatch.setenv(name, "ambient-leak-should-not-survive")
+        monkeypatch.setenv("PYTHONPATH", "/some/stale/source/tree")
         env = baseline_mod._subprocess_env(
             tmp_path / ".coverage", tmp_path / "sandbox"
         )
         for name in ALWAYS_SCRUB_NAMES:
             assert name not in env, f"{name} should be scrubbed from the baseline subprocess env"
         assert env["COVERAGE_FILE"] == str(tmp_path / ".coverage")
+        # An ambient PYTHONPATH must never take import precedence over the
+        # repository's own `tools/` path, the same override
+        # `run-plugin-tests.py` always applies.
+        assert env["PYTHONPATH"] == str(_REPO_ROOT / "tools")
 
 
 def test_collect_baseline_round_trips_against_a_real_plugin_suite() -> None:

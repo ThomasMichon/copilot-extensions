@@ -336,6 +336,13 @@ def _subprocess_env(cov_data_file: Path, sandbox: Path) -> dict:
     # the real validation gate runs under (see `collect_baseline`'s own
     # docstring).
     env = isolated_environment(os.environ, sandbox)
+    # Match `run-plugin-tests.py`'s own override exactly (not just leave
+    # `isolated_environment`'s caller-preserved `PYTHONPATH` as-is): without
+    # this, an ambient stale source tree on `PYTHONPATH` could still take
+    # import precedence in this baseline's own pytest run even though the
+    # trusted validation run never would, breaking the "same conditions"
+    # contract this isolation exists to provide.
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
     # Never let a cached dev-venv's own interpreter/env leak into the
     # ephemeral baseline run (mirrors test-supervisor's own caller-env
     # scrubbing for the same reason: these describe the *caller's* bootstrap
