@@ -701,11 +701,16 @@ def cmd_attached(args: argparse.Namespace) -> int:
         return 1
     finally:
         if attached_hold_id:
-            stop_keeper(
-                args.target,
-                hold_id=attached_hold_id,
-                probe=lambda mux: _probe_hold(ssh_config, mux),
-            )
+            # Best-effort, like the detached cleanup: a keeper-lock failure here
+            # must not replace the attached session's own result.
+            try:
+                stop_keeper(
+                    args.target,
+                    hold_id=attached_hold_id,
+                    probe=lambda mux: _probe_hold(ssh_config, mux),
+                )
+            except (RuntimeError, OSError) as exc:
+                print(f"[WARN] could not release the attached hold: {exc}", file=sys.stderr)
 
 
 def _reap_child(proc: Any, timeout: float = 10.0) -> None:

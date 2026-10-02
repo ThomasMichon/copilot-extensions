@@ -959,6 +959,34 @@ def test_attached_reaps_ssh_child_when_hold_bookkeeping_fails(seams, monkeypatch
     assert seams.stop_keeper == [("devbox", seams.keeper[0][1]["hold_id"])]
 
 
+def test_attached_result_survives_a_failed_final_hold_release(seams, monkeypatch, capsys):
+    monkeypatch.setattr(
+        detach, "_ssh_config",
+        lambda target: types.SimpleNamespace(
+            config_file=None, port=None, identity_file=None, extra_options={}, ssh_target=target),
+    )
+    monkeypatch.setattr(detach, "_ensure_posix", lambda _cfg: None)
+    monkeypatch.setattr(detach, "_ensure_remote_tooling", lambda _cfg: None)
+    monkeypatch.setattr(detach, "resolve_daemon_port", lambda: 41234)
+    monkeypatch.setattr(detach, "resolve_local_auth_token", lambda: "tok")
+    monkeypatch.setattr(
+        detach, "run_venue_copilot",
+        lambda _identity, *, connect, **_kwargs: connect("agent-worktrees copilot --anchor"),
+    )
+    monkeypatch.setattr(
+        detach.subprocess, "Popen",
+        lambda argv, **kw: types.SimpleNamespace(pid=999, wait=lambda timeout=None: 7),
+    )
+
+    def failing_stop(*_a, **_k):
+        raise RuntimeError("Could not acquire forward-keeper state lock")
+
+    monkeypatch.setattr(detach, "stop_keeper", failing_stop)
+
+    assert detach.cmd_attached(_args(detach=False, workspace="/workspaces/repo", copilot_args=[])) == 7
+    assert "could not release the attached hold" in capsys.readouterr().err
+
+
 def test_keeper_hold_store_uses_sanitized_keeper_state_path(tmp_path, monkeypatch):
     store = detach.KeeperStore(tmp_path)
     monkeypatch.setattr(detach, "_STORE", store)

@@ -504,7 +504,7 @@ def test_failed_rejoin_restores_the_running_sessions_tenant(seams, monkeypatch, 
     assert detach.cmd_detach(_args(), ssh_session=_ssh(seams)) == 1
     assert seams.releases == []
     restore = [k for _a, k in seams.holds if k.get("restore") is not None]
-    assert restore and restore[0]["restore"] == prior
+    assert restore and restore[0]["restore"] == {**prior, "assigned_local_forwards": {}}
 
 
 def test_reverse_forward_specs_are_validated():
