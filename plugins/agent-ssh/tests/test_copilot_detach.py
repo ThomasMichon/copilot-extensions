@@ -606,6 +606,14 @@ def test_workspace_resolution_order_prefers_explicit_then_host_config(tmp_path: 
     )
 
 
+def test_workspace_normalization_trims_slashes_but_keeps_the_root():
+    assert detach._normalize_workspace("/workspaces/repo//") == "/workspaces/repo"
+    assert detach._normalize_workspace("/") == "/"
+    assert detach._normalize_workspace(" /// ") == "/"
+    with pytest.raises(ValueError):
+        detach._normalize_workspace("  ")
+
+
 def test_copilot_config_set_writes_host_workspace(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(detach, "_copilot_config_path", lambda: tmp_path / "copilot-hosts.json")
 

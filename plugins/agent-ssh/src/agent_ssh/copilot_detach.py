@@ -70,7 +70,9 @@ def _with_caller_model(requested: list[str]) -> list[str]:
 
 
 def _normalize_workspace(value: str) -> str:
-    workspace = value.strip().rstrip("/")
+    stripped = value.strip()
+    # Trim trailing slashes, but keep the root itself ("/", "//") as "/".
+    workspace = stripped.rstrip("/") or ("/" if stripped.startswith("/") else "")
     if not workspace:
         raise ValueError(
             "agent-ssh copilot could not resolve a remote workspace. Pass "
