@@ -815,6 +815,78 @@ for the declaration schema reference, the available worker identities, and a
 worked example for standing up a new declaration from scratch.
 
 
+### Registrar `extends:` -- recipe references
+
+Any registrar declaration file (not just `repository-issue-loop`/
+`reviewer-loop`) may carry an `extends:` key instead of (or in addition to)
+spelling out every field directly:
+
+```yaml
+extends: "global:<name>"                 # plugin-shipped recipe (none shipped yet)
+# or
+extends: "./recipes/my-loop.yaml"        # repo-local, relative to the repo root
+# or
+extends: "../other-repo/.../recipe.yaml" # cross-repo, an explicit path
+
+# ordinary override keys sit alongside `extends:`, same file:
+name: concrete-lane
+repo: owner/name
+```
+
+Resolution happens once, before any other registrar processing: `extends:`
+is replaced by its referenced recipe document, every string leaf of that
+document is filled from the declaration's own scalar override values
+(`{param}`-style placeholders -- see below), then the declaration's own
+keys (everything except `extends`/`params`) are **deep-merged over** the
+filled template -- a nested mapping (`forge:`, `pool:`, `reservation:`,
+...) merges key-by-key; a list or scalar is replaced wholesale, never
+concatenated; the declaration's own value always wins on conflict -- and
+the result is an ordinary `kind:`-shaped declaration indistinguishable from
+one written out by hand. A declaration with no `extends:` key is
+completely unaffected.
+
+**Placeholder substitution.** A recipe template's string fields may contain
+`{param}` tokens, filled from the declaration's own scalar (`str`/`int`/
+`float`/`bool`) field values before the deep-merge step:
+
+```yaml
+# the recipe template:
+spec:
+  command: ["review", "{repo}", "--login", "{producer_login}"]
+
+# the concrete declaration:
+extends: "./recipes/review-loop.yaml"
+repo: owner/name          # an ordinary field: fills {repo} AND is merged into the output
+params:
+  producer_login: issue-bot  # substitution-only: fills {producer_login}, never merged in
+```
+
+An ordinary override field (like `repo` above) both fills a placeholder
+*and* becomes part of the resolved declaration, since it's a legitimate
+field in its own right. The reserved `params:` block is for a value the
+template needs purely for substitution but that isn't itself a valid
+top-level declaration field (e.g. a provider login interpolated into a
+nested command string) -- it's used to fill placeholders and then
+discarded, never merged into the output. If the same key appears in both
+an ordinary field and `params:`, the `params:` value wins for substitution
+(only for substitution -- the ordinary field still ends up in the resolved
+declaration as always). An unresolved placeholder (no matching override or
+`params` entry) is left completely intact, and only a bare `{identifier}`
+token is ever recognized -- a template's prose may freely contain literal
+unrelated braces (e.g. documenting an expected JSON shape like
+`{"decision": "emit"}`) without being mistaken for a placeholder or
+breaking substitution.
+
+A repo-local or cross-repo ref is a plain file path (relative paths resolve
+against the repo root when known, otherwise the declaration file's own
+directory), read with the same suffix contract (`.yaml`/`.yml`/`.json`)
+every other declaration file uses; a `global:<name>` ref looks up a
+plugin-shipped recipe built into
+`agent_dispatch.registrar_recipes.GLOBAL_RECIPES` (currently empty -- no
+built-in recipes ship yet). There is no path-traversal hardening on a
+file-path ref today; a declaration author is already a trusted party for
+the repo's own registrar declarations.
+
 ### Reactive webhook producer (`agent-dispatch webhook`)
 
 A small HTTP app that maps two generic, forge-neutral event shapes onto tasks:

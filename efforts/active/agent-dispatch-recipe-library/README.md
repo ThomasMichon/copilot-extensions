@@ -257,21 +257,49 @@ below — read it before starting any Phase 3 work).
       webhook/websocket as emitter *triggers* rather than separate `kind`
       values. **Tracked as its own follow-on slice** (sub-plan §*Sub-PRs*,
       item 4) — not a blocking dependency for `extends:` itself.
-- [ ] Introduce `extends:` in a registrar declaration: a reference to a
+- [x] Introduce `extends:` in a registrar declaration: a reference to a
       global (plugin-shipped), repo-local, or cross-repo recipe, plus a
       `emitter:`/`evaluator:` block of template-injected or direct param
       values. A global recipe provides the core scripts/prompts; a
       declaration fills in only its own variables (which may themselves be
-      script references for the remaining gaps).
+      script references for the remaining gaps). **Resolution mechanism +
+      template-injected param substitution landed**
+      (`registrar_recipes.py`: `resolve_extends`/`resolve_recipe_ref`/
+      `deep_merge`/`substitute_placeholders`, wired as a pre-expansion step
+      ahead of `read_declaration_file_set`'s existing `kind`-dispatch —
+      zero changes to that dispatch or any direct declaration's behavior).
+      A resolved template's string fields are filled from the
+      declaration's own scalar override values first (`{param}`-style,
+      unresolved placeholders left intact), then the declaration's keys are
+      deep-merged over the result. `global:` recipe refs resolve against an
+      (currently empty) in-code registry — see the next item.
 - [ ] Ship the four already-existing archetypes (reviewer,
       conflict-resolution, goal-driven, repository-issue-loop) as
       `extends:`-able global recipes under this model, with no behavior
       change to their existing direct-declaration path (backward
-      compatible).
+      compatible). **Not yet started** — the resolution mechanism above
+      supports `global:` refs structurally, but `GLOBAL_RECIPES` ships no
+      entries yet (sub-plan §*Sub-PRs* item 2).
 - [ ] Tests: an `extends:`-based declaration referencing each existing
       archetype behaves identically to today's direct `kind:` declaration
       with the same effective params; a repo-local and a cross-repo recipe
-      reference both resolve correctly.
+      reference both resolve correctly. **Repo-local/cross-repo path-ref
+      coverage landed** (38 new tests: 31 unit in `test_registrar_recipes.py`
+      for the mechanism itself including placeholder substitution (and its
+      doubled-brace exclusion), the `params:` no-leak contract,
+      `params:`-over-override substitution precedence, and cyclic-reference
+      rejection (including a cycle routed through a tuple), 4 integration
+      tests in `test_registrar_discovery.py` proving the pre-expansion
+      wiring (including a full `ProfileDeclaration` equality check against
+      a hand-written direct declaration), 1 CLI-level regression test in
+      `test_cli.py` proving a reviewer-loop declaration's repo-root-relative
+      `extends:` ref resolves correctly end-to-end, and 2 tests in
+      `test_registrar_registry.py` proving a transient recipe-file I/O
+      failure is classified indeterminate (not invalid) and that a
+      plugin-contributed declaration's `extends:` ref resolves against the
+      plugin root, not the registrar subdirectory).
+      Left **unchecked**: the "each existing archetype" half is blocked on
+      the global-recipes item above and is not complete until that lands.
 
 ### Phase 4 — Reviewer-recipe delta (Request item b's remainder)
 - [ ] Add a **configurable stale-exit parameter** to the reviewer recipe
@@ -562,3 +590,251 @@ _Pending review._
   deliver value.
 - Next: sub-PR 1 (the `extends:` resolution mechanism + repo-local/
   cross-repo refs, no global recipes yet).
+
+### 2026-10-01 (same day) — Phase 3 sub-PR 1: `extends:` resolution mechanism landed
+- Implemented `registrar_recipes.py` per the sub-plan: `resolve_recipe_ref`
+  (three ref kinds — `global:<name>` against an in-code `GLOBAL_RECIPES`
+  registry, currently empty; repo-local/cross-repo plain file paths,
+  resolved relative to a caller-supplied base directory), `deep_merge`
+  (nested-mapping recursion, declaration overrides win, lists/scalars
+  replaced wholesale — never concatenated), and `resolve_extends` (the
+  public entry point: a no-op passthrough for a declaration with no
+  `extends:` key, so every declaration can run through it unconditionally).
+- Wired as a pre-expansion step in `registrar_discovery.py`'s
+  `read_declaration_file_set`, immediately after decoding and before the
+  existing `kind`-dispatch (`reviewer-loop`/`repository-issue-loop`/else) —
+  confirmed zero changes to that dispatch or any of its three branches.
+  Base directory for relative refs: the known `repo_root` when the caller
+  supplies one, else the declaration file's own parent directory (never bare
+  CWD, so resolution stays deterministic and test-friendly).
+- No path-traversal hardening yet (a `../` cross-repo ref is read as freely
+  as a repo-local one) — explicitly deferred per the sub-plan's own Sub-PR
+  4, not an oversight.
+- 18 new tests, all passing: 15 unit tests (`test_registrar_recipes.py` —
+  `deep_merge` semantics, all three `resolve_recipe_ref` kinds including
+  failure modes, `resolve_extends`'s passthrough/merge/non-mapping-template
+  paths) + 3 integration tests (`test_registrar_discovery.py` — the
+  pre-expansion wiring resolves against `repo_root` when given, falls back
+  to the declaration directory otherwise, and a plain declaration with no
+  `extends:` is provably unaffected).
+- Validation: full `agent-dispatch` suite (3 runs) — every run showed the
+  same two pre-existing, unrelated flakes already documented or newly
+  confirmed as environmental: the Windows long-path/unicode `test_procutil.py`
+  failures from Phase 2 (not re-triggered this run, suite composition
+  varies by sub-suite grouping) and one new one-off,
+  `test_coordinator.py::test_abandoned_passive_reap_status_lifecycle_reflects_the_live_loop`
+  (a 5-second timing-sensitive background-loop assertion that failed once
+  under heavy parallel sub-suite load, then passed cleanly re-run in
+  isolation — confirmed a load-timing flake, not a regression). Every
+  registrar/recipes-related test passed cleanly in every run, including the
+  two full clean sub-suites (843 + 432 passed) each time.
+- Module size: `registrar_discovery.py`'s 6-line addition stayed well under
+  its own cap; `registrar_recipes.py` is a new file (no cap impact).
+- Next: sub-PR 2 (ship the four archetype global recipes).
+
+### 2026-10-01 (same day) — Review feedback on sub-PR 1
+- Automated review caught a real, pre-existing-shaped bug: `_reviewer_loop_declarations`
+  (`reviewer_loop_commands.py`) called `read_declaration_file_set(path)`
+  **before** deriving `repo_root`, so a reviewer-loop declaration's
+  `extends:` repo-local refs would have resolved against the registrar
+  directory instead of the actual repo root — `_repository_issue_loop_declarations`
+  (`loop_commands.py`) already gets this ordering right, confirming the
+  correct pattern to copy. Fixed by reordering: derive `repo_root` first,
+  then pass it into `read_declaration_file_set`.
+- Fixed a real encoding-error gap: `Path.read_text()` raises
+  `UnicodeDecodeError` (a `UnicodeError`, not an `OSError`) for an
+  invalid-UTF-8 recipe file, which escaped `registrar_recipes.py`'s
+  `RegistrarError` boundary entirely. Added an explicit `except UnicodeError`
+  branch (matching `read_declaration_file_set`'s own existing pattern) plus
+  a regression test.
+- Strengthened the repo-root integration test to compare the **complete**
+  resolved `ProfileDeclaration` against a hand-written direct declaration
+  with the same effective fields (owner, description, concurrency — not
+  just name/labels), per Phase 3's own validation contract ("behaves
+  identically to today's direct `kind:` declaration").
+- Corrected two inaccuracies this same Journal/Plan had introduced: the
+  Tests checkbox was marked done while its own text said the per-archetype
+  half is still blocked (reverted to unchecked), and the test count was
+  off (20 claimed vs. 18 actual: 15 unit + 3 integration).
+- Added `extends:` user documentation (reference syntax, merge semantics,
+  a worked repo-local example) to `plugins/agent-dispatch/README.md` in
+  this same PR rather than deferring it to sub-PR 3 — the review correctly
+  pointed out the mechanism is already live/usable for repo-local and
+  cross-repo refs, so deferring its documentation would leave shipped
+  syntax undocumented.
+
+### 2026-10-01 (same day) — Review feedback, round 2
+- Fixed a real gap: `extends: null` (a present key with a null value) was
+  conflated with an absent `extends:` key (`data.get("extends")` returning
+  `None` either way), silently bypassing `resolve_recipe_ref`'s own
+  validation and surfacing a confusing downstream "unknown key: extends"
+  error instead. Fixed by checking key membership (`"extends" not in data`)
+  before reading the value, so a present-but-malformed ref always reaches
+  `resolve_recipe_ref`'s clear error. Added a regression test.
+- Implemented the sub-plan's own stated design gap: `{placeholder}`-style
+  substitution from the declaration's own scalar override values into a
+  resolved template's string fields, before the deep-merge step — the
+  review correctly caught that `resolve_extends` only deep-merged and never
+  substituted, despite the sub-plan explicitly specifying "a global recipe
+  template using `{placeholder}` ... substitution". Added
+  `substitute_placeholders` (first version via `str.Formatter`/`.vformat`,
+  replaced in round 3 below with a plain regex once that approach proved
+  unsafe). Only scalar (`str`/`int`/`float`/`bool`) override values are
+  usable as substitutions; an unresolved placeholder is left intact, never
+  an error.
+- Added a real CLI-level regression test (`test_cli.py`) that exercises the
+  actual `_reviewer_loop_declarations` repo-root-derivation fix from round 1
+  through the real CLI (`reviewer-loop inspect`), not just a direct call
+  with `repo_root` already supplied — the review correctly noted the
+  existing integration test couldn't have caught the original bug since it
+  passed `repo_root` explicitly rather than letting the caller derive it.
+- Corrected the PR description and this Journal's test counts again (24
+  total: 20 unit + 3 integration + 1 CLI-level regression) after the new
+  tests landed.
+
+### 2026-10-01 (same day) — Review feedback, round 3
+- Fixed a real crash: `str.Formatter().vformat()` (round 2's substitution
+  implementation) raises `ValueError` on literal braces in template prose
+  that aren't a valid format spec — e.g. a worker-guidance string
+  documenting an expected JSON shape like `Return {"decision": "emit"}` —
+  and that exception escaped the `RegistrarError` boundary entirely.
+  Replaced the whole substitution engine with a plain regex
+  (`_PLACEHOLDER_RE = r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}"`) that only ever
+  matches a bare `{identifier}` token and can never raise — any other
+  brace content (JSON-like prose, format specs, mismatched braces) is left
+  completely untouched, a strictly safer contract than the one this sub-PR
+  originally shipped.
+- Fixed a real validation gap: `_load_recipe_document` decoded any file
+  regardless of suffix (`_decode` treats every non-`.json` suffix as YAML),
+  so a `.txt` ref would have been silently accepted even though
+  `read_declaration_file_set` itself rejects an unsupported declaration
+  suffix. Added the identical suffix check (`.yaml`/`.yml`/`.json`) ahead
+  of decoding.
+- Fixed a real design gap: a scalar override used purely to fill a
+  placeholder (e.g. `producer_login`, not itself a valid top-level
+  declaration field) was also being deep-merged into the resolved output,
+  so `load_declaration` would reject it downstream as an unknown key.
+  Introduced a reserved `params:` block: substitution-only values that are
+  used to fill placeholders but are never merged into the resolved
+  declaration — an ordinary override field (like `repo`) still does both,
+  since it's a legitimate field in its own right. Added a
+  `read_declaration_file_set`-level integration test proving a `params:`
+  value survives substitution but never appears as a stray key on the
+  resolved `ProfileDeclaration`.
+- Documented placeholder substitution and the `params:` block in
+  `plugins/agent-dispatch/README.md` (the earlier round only documented
+  `extends:`'s ref syntax and deep-merge, not substitution itself).
+- Final count: 29 new tests (24 unit, 4 integration, 1 CLI-level
+  regression). Full affected-file suite green (266 passed).
+
+### 2026-10-01 (same day) — Review feedback, round 4
+- Fixed a real gap: `Path()`/`.resolve()`/`.read_text()` can raise a bare
+  `ValueError` (e.g. an embedded NUL byte in the ref), not just
+  `OSError`/`UnicodeError` — that escaped the `RegistrarError` boundary
+  entirely. Wrapped path construction and the read call in `except
+  ValueError` too, translating both to `RegistrarError`. Added a
+  regression test (an embedded `\x00` in the ref).
+- Fixed a real documentation/design-drift gap: the sub-plan doc
+  (`phase-3-extends-registrar.md`) still described the original plan
+  (placeholders filled only from top-level override keys, explicitly "not
+  under a nested `params:` block") even though the landed design added the
+  `params:` block in round 3. Reconciled the sub-plan with the actual
+  contract, including the previously-undocumented precedence rule (a key
+  present in both an ordinary override and `params:` uses the `params:`
+  value for substitution, while the ordinary override field still ends up
+  in the resolved output as always) — also corrected the sub-plan's
+  `str.Formatter`/`_Safe` reuse claim, since round 3 replaced that approach
+  with a plain regex after finding it unsafe.
+- Added a dedicated precedence test and updated the README's substitution
+  section to state the same precedence rule.
+- Final count: 31 new tests (26 unit, 4 integration, 1 CLI-level
+  regression). Full affected-file suite green (268 passed).
+
+### 2026-10-01 (same day) — Review feedback, round 5
+- Fixed a real correctness bug: `_load_recipe_document` wrapped every
+  `OSError` as a plain `RegistrarError`, but
+  `registrar_registry._classify_declaration()` only preserves a plugin
+  declaration's last-known state for `RegistrarIndeterminateError`
+  specifically — so a transient permission/read race on an `extends:`
+  target would have been classified as a permanently invalid entry,
+  withdrawing a previously active unit on what might be a one-tick
+  filesystem hiccup. Split `OSError` (→ `RegistrarIndeterminateError`,
+  matching `read_declaration_file_set`'s own identical branch for the
+  direct declaration read) from `ValueError` (→ stays `RegistrarError`, a
+  genuinely permanent problem). Added the analogous retention regression
+  test in `test_registrar_registry.py`
+  (`test_indeterminate_extends_recipe_read_retains_only_that_document`),
+  mirroring the existing direct-declaration version of the same test.
+- Addressed five low-severity documentation/prose-polish findings: removed
+  review-history narration from the sub-plan doc, the plugin README, the
+  `registrar_recipes.py` module comment, and a test docstring, replacing
+  each with timeless current-state rationale (no "this was originally
+  planned as X" / "a prior version did Y" framing in durable references).
+- Final count: 32 new tests (26 unit, 4 integration, 1 CLI-level
+  regression, 1 registrar-registry retention test). Full affected-file
+  suite green (311 passed).
+
+### 2026-10-01 (same day) — Review feedback, round 6
+- Fixed a real crash: `substitute_placeholders`'s unconditional recursion
+  never terminates on a YAML document's self-referential alias (a
+  mapping/list that, directly or transitively, contains itself) —
+  `RecursionError` is not a `RegistrarError`, so one malformed recipe could
+  abort the whole registrar scan rather than fail that single declaration.
+  Added on-stack ancestor tracking (object ids currently being recursed
+  into, not every object ever seen) so a true cycle raises a clear
+  `RegistrarError`, while a non-cyclic *shared* reference (the same
+  sub-object reachable from two different sibling branches — an ordinary
+  YAML anchor reused twice, never from itself) still resolves normally.
+  Added both a cyclic-mapping and cyclic-list regression test, plus a
+  shared-non-cyclic-reference test proving the fix doesn't overreach.
+- The remaining four items this round's overview listed as "still open"
+  were stale GitHub review-thread markers for content already fixed in
+  earlier rounds (confirmed by re-reading the current file content — no
+  further change needed).
+- Final count: 35 new tests (29 unit, 4 integration, 1 CLI-level
+  regression, 1 registrar-registry retention test). Full affected-file
+  suite green (314 passed).
+
+### 2026-10-01 (same day) — Review feedback, round 7
+- Fixed a real bug: `registrar_registry._classify_declaration()` already
+  receives `plugin_root` but called `read_declaration_file(path,
+  allow_plugin_companion=True)` without threading it through, so a
+  plugin-contributed declaration's `extends:` ref resolved against the
+  registrar subdirectory instead of the plugin root — a recipe placed at
+  the plugin root (the documented, intended convention for a
+  plugin-shipped recipe) would never be found. Passed
+  `repo_root=plugin_root` through that call site. Added a regression test
+  with the recipe genuinely at the plugin root (not beside the
+  declaration, which the existing retention test from round 5 happened to
+  use and would have missed this exact gap).
+- The remaining four items this round's overview listed as "still open"
+  were, again, stale GitHub review-thread markers for content already
+  fixed in earlier rounds.
+- Final count: 36 new tests (29 unit, 4 integration, 1 CLI-level
+  regression, 2 registrar-registry tests). Full affected-file suite green
+  (315 passed).
+
+### 2026-10-01 (same day) — Review feedback, round 8
+- Fixed a real substitution-contract violation: `_PLACEHOLDER_RE` matched a
+  `{identifier}` token even when doubled up in extra braces (`{{name}}`),
+  silently substituting `{x}` for `{{name}}` with `params={"name": "x"}` —
+  but `{{`/`}}` is a literal-brace escaping convention (mirroring
+  `str.format`'s own), not a placeholder, and the documented contract is
+  "bare `{identifier}` only". Added `(?<!\{)`/`(?!\})` guards so a doubled
+  brace never matches at all. Added a regression test.
+- Fixed a real gap in round 6's own cycle-detection fix: the tuple branch
+  of `substitute_placeholders` dropped the current `_ancestors` set
+  entirely (called the recursive step with none), so a cycle routed
+  through a tuple (a mapping containing a tuple that contains that same
+  mapping) would recurse past the tuple undetected into `RecursionError` —
+  exactly the failure mode round 6 was meant to close. Fixed by threading
+  `_ancestors` through the tuple branch unchanged (a tuple itself can't be
+  a cycle point since it's immutable, so no new marker is added there, but
+  its elements still need the accumulated ancestor chain). Added a
+  regression test with a cycle specifically routed through a tuple.
+- The remaining five items this round's overview listed as "still open"
+  were, again, stale GitHub review-thread markers for content already
+  fixed in earlier rounds.
+- Final count: 38 new tests (31 unit, 4 integration, 1 CLI-level
+  regression, 2 registrar-registry tests). Full affected-file suite green
+  (317 passed).

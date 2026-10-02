@@ -1,0 +1,9 @@
+{
+  "comment": "registrar: introduce extends: declaration resolution (recipe refs + deep-merge), repo-local/cross-repo refs",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    }
+  ]
+}
