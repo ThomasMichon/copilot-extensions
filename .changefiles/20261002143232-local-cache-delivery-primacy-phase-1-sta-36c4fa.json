@@ -1,0 +1,17 @@
+{
+  "comment": "local-cache-delivery-primacy Phase 1: stale-sibling precedence fix (marker-provenance comparison replaces existence-only preference) in the local-cache preamble/catch-all; two shipped templates trimmed to stay under the per-file budget",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    },
+    {
+      "plugin": "context-handoff",
+      "type": "dev"
+    }
+  ]
+}

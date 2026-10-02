@@ -4,6 +4,17 @@
 behaviors `resilient-safety-boundary`, `ambient-delivery-fails-open`,
 `resume-stable-context`).
 
+> **Precedence note (`local-cache-delivery-primacy`):** the gitignored
+> local cache this pattern describes is the **primary** delivery path for
+> worktree-scoped projected instruction content -- it reflects the
+> currently installed payload, not a sync-lagged approximation of it. The
+> checked-in copy below is strictly the **fallback**: the floor a session
+> falls back to only when no pre-session hook could render anything
+> fresher, or hasn't yet had the chance to. Precedence between the two is
+> decided by comparing their own embedded marker `pluginVersion` (§2),
+> never by the local file's mere existence -- a stale leftover must not be
+> able to outrank a genuinely newer checked-in copy.
+
 ## Problem
 
 [`session-scoped-dynamic-guidance.md`](session-scoped-dynamic-guidance.md)
@@ -78,20 +89,32 @@ what's already installed right now, what would the correct projection look
 like," which is cheap, safe to run unprompted, and requires no repository
 write permission of any kind.
 
-### 2. The checked-in file prefers its local sibling
+### 2. The checked-in file defers to its local sibling by provenance, not existence
 
 The checked-in projection template gains a short, literal preamble ahead of
 its rendered body:
 
 ```markdown
-> If `<sourceId>.local.instructions.md` exists in this same directory, prefer
-> its contents over the rest of this file -- it reflects the currently
-> installed payload; this file reflects the last synced-and-reviewed state.
+> If `<sourceId>.local.instructions.md` exists here, compare
+> `pluginVersion` and prefer whichever is newer. On a tie, compare
+> `templateSha256`: matching means prefer local; differing means
+> prefer this checked-in file.
 ```
 
 This is the common-case path: once a source has been synced in at least once,
 its checked-in file self-directs to its own fresher sibling with no
-additional lookup.
+additional lookup -- but the comparison is by **declared version**, not mere
+presence, so a stale sibling left over from an earlier render (a boot where
+nothing re-rendered it since) can never outrank a checked-in copy that has
+since moved ahead. A render *timestamp* cannot serve this role: an
+older/regressed installed payload rendered *after* the checked-in copy
+advances would still carry the later timestamp and win, recreating the exact
+staleness bug this comparison exists to prevent -- and a changing timestamp
+field would break this render's own byte-determinism. The markers' existing
+`pluginVersion` (and `templateSha256` as the tie-break for an ambiguous equal
+version with differing content, since a version string is not an immutable
+source identity) are what `render_projection()` already stamps into every
+rendered file, so no new field is needed.
 
 ### 3. A repo-wide catch-all for sources with no checked-in file yet
 
@@ -104,11 +127,15 @@ repo-wide, unconditionally-loaded static projection closes that gap:
 applyTo: "**"
 ---
 
-Check `.github/instructions/**/*.local.instructions.md` for any files present
-now, read each one, and treat its contents as authoritative for this session
--- in addition to, and preferred over, any checked-in
-`.instructions.md` file already loaded for the same plugin and source. Their
-absence is not an error.
+Check `.github/instructions/**/*.local.instructions.md` for any files
+present now and read each one. When a checked-in `.instructions.md` file
+exists for the same plugin and source, compare both files' embedded
+marker `pluginVersion` fields and prefer whichever is newer; on a tie,
+compare `templateSha256` instead of whole-file bytes (which always
+differ -- only the checked-in file carries the preamble) -- prefer the
+checked-in file only if that hash differs too, otherwise the local file
+stays authoritative. With no checked-in file yet for that path, the
+local file is authoritative on its own. Their absence is not an error.
 ```
 
 This file is the one thing every launch path -- hooked or hookless, worktree
@@ -181,6 +208,10 @@ projection, unchanged, still the durable and reviewable record. A
 write-incapable launch path (one that cannot write even a gitignored local
 file) simply never populates the local tier and falls through to exactly
 what it gets today -- no regression, and no session-facing error either way.
+"Floor" here means the guaranteed-present fallback, never the *preferred*
+tier when something fresher is actually available (see the precedence note
+above) -- a floor a stale local artifact can silently stand on top of is not
+a floor at all.
 
 ## Rationale
 
@@ -218,6 +249,10 @@ scenario, given only a frozen snapshot) confirmed the preamble and the
 catch-all each independently drive an agent to the fresher
 `.local.instructions.md` content over a stale or absent checked-in file
 (see the effort README's own Journal for the scenarios and results).
+`efforts/active/local-cache-delivery-primacy` Phase 1 later replaced the
+existence-only precedence this proof covered with the marker-provenance
+comparison §2/§3 above describe, closing the stale-sibling gap that
+existence-only check left open.
 
 ## See Also
 

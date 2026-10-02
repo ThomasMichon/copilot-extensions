@@ -222,7 +222,18 @@ should remain discoverable from the concise ambient kernel.
 Critical safety and publication constraints should retain a minimal static
 fallback when a launch path cannot load the richer plugin-owned guidance.
 Plugin setup should own any compatibility/fallback prose through a stable,
-idempotently reconciled marker or dedicated rule file.
+idempotently reconciled marker or dedicated rule file. For worktree-scoped
+projected instruction content specifically, the lifecycle-hook-rendered,
+gitignored local cache is the **primary** delivery path -- it reflects the
+currently installed payload, not a sync-lagged approximation of it. The
+checked-in, scheduled-sync-worker-maintained copy is strictly the
+**fallback**: the floor a session falls back to only when no pre-session
+hook could render anything fresher (a fully hookless/headless/sandboxed
+launch) or hasn't yet had the chance to (a pre-sync gap on an otherwise
+hook-capable path). A fallback a stale leftover local artifact can
+silently outrank is not actually safe, so precedence between the two must
+be decided by stable content provenance (e.g. a declared version), never
+by the local artifact's mere existence or render recency.
 
 ### ambient-delivery-fails-open
 

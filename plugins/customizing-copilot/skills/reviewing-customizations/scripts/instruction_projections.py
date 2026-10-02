@@ -835,11 +835,9 @@ def render_projection(
 ) -> RenderedProjection:
     """Render one deterministic UTF-8/LF projection.
 
-    When ``include_prefer_local`` (default), the body gains a short
-    preamble preferring its own gitignored ``*.local.instructions.md``
-    sibling when present (``docs/patterns/worktree-scoped-dynamic-
-    guidance.md`` §2). ``render_local_cache`` passes ``False`` here when
-    rendering the sibling's *own* content -- it must never point at itself.
+    ``include_prefer_local`` (default) adds a marker-provenance precedence
+    preamble (``worktree-scoped-dynamic-guidance.md`` §2); ``render_local_
+    cache`` passes ``False`` for the sibling's own content.
     """
     text = spec.template_content.decode("utf-8")
     lines = text.splitlines(keepends=True)
@@ -850,10 +848,13 @@ def render_projection(
         local_cache_name = PurePosixPath(
             local_sibling_destination(spec.destination)
         ).name
+        # pluginVersion tie -> compare templateSha256 (not whole-file
+        # bytes -- only this file has the preamble): match=local wins.
         preamble = (
-            f"\n> If `{local_cache_name}` exists here, prefer it -- it reflects\n"
-            "> the currently installed payload; this file reflects the last\n"
-            "> synced-and-reviewed state.\n"
+            f"\n> If `{local_cache_name}` exists here, compare\n"
+            "> `pluginVersion` and prefer whichever is newer. On a tie,\n"
+            "> compare `templateSha256`: matching means prefer local;\n"
+            "> differing means prefer this checked-in file.\n"
         )
     else:
         preamble = ""
@@ -909,8 +910,7 @@ def local_sibling_destination(destination: str) -> str:
 
     See ``docs/patterns/worktree-scoped-dynamic-guidance.md``: every
     checked-in destination gets exactly one worktree-local, gitignored
-    sibling in the same directory, holding a freshly re-rendered copy of the
-    currently installed payload.
+    sibling holding a freshly re-rendered copy of the installed payload.
     """
     if destination.endswith(_LOCAL_CACHE_SUFFIX):
         raise ValueError(f"destination {destination!r} is already a local cache path")
