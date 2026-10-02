@@ -405,15 +405,7 @@ conflict-dispatch label there.
 - [x] Confirm the launch-script-ownership question specifically now produces
       a correct "this belongs to copilot-extensions, resolve via `related
       resolve`" answer rather than a false positive.
-- [x] Deferred to the downstream consumer repo's own private companion
-      effort (not citable here per this repo's identifier-neutrality rule
-      -- see Participants above): Phase 5's own acceptance (that its
-      scheduled worker produces a clean auto-merged PR at least once, and
-      that a deliberately-forced conflict correctly routes to its
-      reconciler rather than silently overwriting or blocking) is **that
-      downstream companion effort's own validation item**, not this
-      repo's -- this repo cannot verify a private repo's runtime behavior,
-      and this Plan does not gate on it.
+- [x] Deferred to `the downstream consumer repo's own private companion effort (not citable here per this repo's identifier-neutrality rule -- see Participants above)`: Phase 5's own acceptance (that its scheduled worker produces a clean auto-merged PR at least once, and that a deliberately-forced conflict correctly routes to its reconciler rather than silently overwriting or blocking) is **that downstream companion effort's own validation item**, not this repo's -- this repo cannot verify a private repo's runtime behavior, and this Plan does not gate on it.
 
 ### Phase 7 -- Worktree-scoped dynamic guidance for projected instructions
 Closes a gap found while a downstream consumer repo drove Phase 5 to a live
