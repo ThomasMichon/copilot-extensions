@@ -133,6 +133,34 @@ gate that keeps a promoted release installable under real-world feed lag.
   pinned verifier key was considered and rejected for this effort's scope
   as unnecessary added key-management surface given the branch-protection
   guarantee already available.
+- **Credential separation is a required, not-yet-designed precondition of
+  the trust root above.** The stated separation only holds if the
+  credential that can publish Release assets is independent of the
+  credential that can land the promotion commit to `main`. As currently
+  configured, the promotion PAT holds Contents + PR write, and the `main`
+  gate admits any owner-authored `release/promote-*` branch by prefix and
+  author (`.github/workflows/ci.yml:125-127`) — if that same credential
+  also publishes Release assets, compromising the artifact writer is
+  sufficient to land a forged digest too, collapsing the intended
+  separation. Phase 2 must either (a) introduce an independently
+  constrained publisher credential used only for Release-asset writes, with
+  no path to satisfying the `main` gate, or (b) add a separately-keyed
+  signature as defense in depth if credential separation alone cannot be
+  achieved. This is an open precondition, not yet resolved by this effort;
+  do not implement Phase 2's publication step until one option is chosen
+  and the chosen option's actual isolation is verified against the real
+  credential/workflow configuration (not assumed).
+- **Hermetic build inputs are part of artifact identity.** Existing
+  first-party packages use open-ended build requirements (e.g.
+  `libs/agent-procutil/pyproject.toml` declares `setuptools>=83.0.0`), so
+  the same payload/platform/ABI key could select a different build backend
+  version on a later promotion and produce different wheel bytes for a
+  nominally identical identity — and an isolated build would otherwise
+  download that backend from a public index, contradicting the
+  governed-only acquisition goal. The build-tool closure (the exact
+  resolved versions of `build-system.requires`, e.g. `setuptools`) must
+  itself be pinned to a governed-feed-resolved version and its digest
+  folded into the artifact's identity, not left open-ended.
 - **Artifact publication and durable access.** A built, verified artifact
   set is only useful if it has a durable, deterministic location a
   consumer can fetch it from without a separate discovery API. Promoted
@@ -210,12 +238,24 @@ gate that keeps a promoted release installable under real-world feed lag.
       vendored lib alongside the plugin's own wheel, as one set covered by
       the same manifest. Never attempt to resolve a vendored lib through
       the governed feed or any package index.
+- [ ] Pin the **build-tool closure** itself (e.g. the exact `setuptools`
+      version satisfying `build-system.requires`) to a governed-feed-
+      resolved version, and fold its digest into artifact identity so a
+      nominally identical payload/platform/ABI key cannot silently produce
+      different wheel bytes on a later promotion, and an isolated build
+      never needs to reach a public index for its own build backend.
 - [ ] Resolve and pin a reproducible third-party dependency closure against
       a public reference index at promotion time, **constrained to
       seasoned versions** (see the lag-tolerant closure selection decision
       above — never simply "newest compatible"); record it in the manifest
       as the closure a consumer must later validate against their own
       governed feed.
+- [ ] **Before implementing publication:** resolve the credential-separation
+      precondition in Context — either an independently constrained
+      Release-asset-publishing credential with no path to satisfying the
+      `main` promotion gate, or a separately-keyed signature as defense in
+      depth. Verify the chosen option against the actual credential/workflow
+      configuration, not an assumption.
 - [ ] Specify and implement the manifest's trust root per the committed
       decision above: the manifest's expected digest is committed into the
       promoted `main` plugin payload via the generated release commit (not
@@ -259,6 +299,14 @@ gate that keeps a promoted release installable under real-world feed lag.
 
 ## Validation Plan
 
+- [ ] A credential-isolation test proves the credential that publishes
+      Release assets **cannot** independently satisfy the `main` promotion
+      gate (and vice versa) — the core guarantee the trust root depends on.
+- [ ] An offline repeat-build test proves two promotions of the same
+      payload/platform/ABI produce byte-identical (or digest-identical)
+      wheels, with the build-tool closure itself resolved only from the
+      governed feed and never from a public index during an isolated
+      build.
 - [ ] An end-to-end publication test proves a promoted artifact set is
       fetchable from its GitHub Release using only the deterministic
       tag/locator derived from the `main`-committed manifest — no manual
@@ -404,4 +452,23 @@ _Pending Phase 1 spike evidence._
   (`validate-and-promote.yml:555-597`, `promote_release.py:15-18`), not
   `dev`, so the trust root is corrected to name `main` specifically (the
   payload an installed plugin actually ships from).
+
+### 2026-10-01 — Sixth review pass: credential separation and build hermeticity
+
+- A sixth review round found the trust root's separation claim was not
+  actually established by the real credential configuration: the promotion
+  PAT (Contents + PR write) can satisfy the `main` gate for any
+  owner-authored `release/promote-*` branch, so if that same credential
+  also publishes Release assets, compromising the artifact writer is
+  sufficient to forge the digest it's supposed to be checked against —
+  collapsing the intended separation. Recorded as an explicit, unresolved
+  precondition: Phase 2 must introduce an independently constrained
+  publisher credential (or a separately-keyed signature as defense in
+  depth) and verify the actual isolation before implementing publication.
+  A second, previously-missed finding: open-ended build requirements (e.g.
+  `setuptools>=83.0.0`) mean the same payload/platform/ABI identity could
+  select a different build backend and produce different bytes later, and
+  an isolated build would otherwise reach a public index for that backend.
+  Fixed by folding a governed-feed-resolved build-tool closure digest into
+  artifact identity, with an offline repeat-build validation case.
 
