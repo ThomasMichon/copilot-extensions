@@ -134,30 +134,17 @@ dependency + `[tool.uv.sources]` entry. A shared package that exists only as
 source with no installer/dependency wiring is not actually deployable.
 
 **Architectural pattern reconciliation:** this effort adds a new cross-plugin
-shared runtime dependency (`libs/token-resolve/`), so it is checked against
-the two governing patterns rather than treated as pure below-altitude
-plumbing:
-- **`docs/patterns/vendor-pointer.md`** (canonical-to-shipped materialization):
-  `libs/token-resolve/` follows the existing **canonical reference** kind
-  already used by `agent-procutil`, `zdd`, etc. — a live `dev`-branch
-  `[tool.uv.sources]` path reference with no local vendored copy, materialized
-  into a real local copy in each consumer at promotion time. This effort
-  introduces no new vendoring kind; it is one more instance of an
-  already-established, already-compliant pattern.
-- **`docs/patterns/a-la-carte-independence.md`** (independent installability):
-  the shared lib does **not** become a mandatory central coordinator or a
-  runtime dependency on a sibling *plugin*. Each consumer (`agent-dispatch`,
-  `agent-vault`, `agent-index`) gets its own materialized local copy via the
-  same vendored-lib mechanism the existing libs already use — installing any
-  one of these plugins alone still installs and runs standalone, exactly as
-  today, with no dependency on another plugin being present. Cross-platform
-  parity (POSIX + Windows installers, both updated per consumer in Phases
-  2-4) is carried the same way the existing vendored libs already require it.
-- The "no governing vision" conclusion in the header stands: these two
-  patterns govern *how* a cross-plugin shared dependency is vendored and
-  installed (a mechanical/structural concern, already satisfied by following
-  precedent exactly), not *whether* a new architectural capability or
-  guarantee is being introduced (which would need vision-level treatment).
+shared runtime dependency (`libs/token-resolve/`), checked against the two
+governing patterns rather than treated as pure below-altitude plumbing:
+`docs/patterns/vendor-pointer.md` (canonical-to-shipped materialization) —
+`libs/token-resolve/` follows the existing canonical-reference kind already
+used by `agent-procutil`/`zdd` (no new vendoring kind introduced); and
+`docs/patterns/a-la-carte-independence.md` (independent installability) —
+each consumer gets its own materialized copy, so no plugin depends on
+another being present, exactly like the existing vendored libs. The "no
+governing vision" conclusion stands: these two patterns govern *how* a
+shared dependency is vendored (already satisfied by following precedent),
+not *whether* a new architectural capability is introduced.
 
 ## Request
 
@@ -177,135 +164,54 @@ corrections to the same original ask, not a change in intent.
 ## Plan
 
 ### Phase 1 — Extract the shared helper
-- [ ] Create a new small vendored lib (`libs/token-resolve/` — mirrors the
-      existing `libs/<name>/` vendoring convention used by `agent-procutil`,
-      `zdd`, etc.) exposing:
-      - `run_token_command(command: str) -> str | None` — the low-level
-        primitive (parses with `shlex.split`, runs without a shell, returns
-        stripped stdout), lifted from agent-dispatch's `_run_token_command()`.
-        **Preserve the existing 30-second subprocess timeout**
-        (`timeout=30` in the agent-dispatch original) — the extraction must
-        carry this over explicitly, not silently drop it; without it, a
-        failed or interactively-prompting credential command could hang the
-        caller indefinitely, which is exactly the kind of behavior-change
-        Phase 2's "no behavior change" requirement means to rule out.
-        **Launch it consoleless:** pass `agent_procutil`'s
-        `**no_window_kwargs()` to the `subprocess.run(...)` call (a no-op off
-        Windows) — several consumers (e.g. `agent-index`) run this from a
-        headless background service, and a plain subprocess launch can flash
-        a visible console window on Windows. Add a headless-child test case
-        alongside the POSIX/Windows parsing cases.
-        **The timeout must own the complete process tree, not just the
-        direct child — on BOTH platforms, not just Windows:**
-        `no_window_kwargs()` only hides the console — it does not contain
-        descendants, and a plain `subprocess.run(..., timeout=30)` only
-        kills the direct child on timeout, leaking any descendant a
-        misbehaving/hanging credential command spawned. Per
-        `docs/patterns/windows-background-process-launch.md`'s launch-kind
-        matrix ("timeout owns the complete tree"), this is a "short-lived
-        child with captured/redirected stdio" launch kind, and containment
-        needs an explicit strategy per platform — **`agent_procutil`'s
-        `spawn_in_kill_on_close_job` does NOT solve this on its own**: off
-        Windows it is a bare `asyncio.create_subprocess_exec(...)` returning
-        `(process, None)` with zero containment (`agent_procutil/__init__.py:326-332`),
-        and even on Windows, job assignment can itself silently fail (the
-        function already tolerates and logs that case, per its own
-        docstring). Required for genuine cross-platform containment:
-        - **POSIX:** launch with `start_new_session=True` (a new process
-          group via `setsid`), and on timeout/cancellation kill the whole
-          group with `os.killpg(os.getpgid(pid), signal.SIGKILL)` instead of
-          a bare `process.kill()`/`.terminate()` on the root PID alone.
-        - **Windows:** use the job-object containment
-          (`spawn_in_kill_on_close_job`, bound to a kill-on-close Job
-          Object) as already planned, but treat a `None` `JobHandle` return
-          (job creation/assignment failed) as "containment not guaranteed"
-          rather than silently treating it as equivalent success — surface
-          or log this degraded case rather than claiming full containment
-          happened.
-        - Note during implementation that `spawn_in_kill_on_close_job` is
-          `async` (`asyncio.subprocess.Process`-based) while
-          `run_token_command()`'s existing call sites are synchronous —
-          resolve this bridging (e.g. a small sync wrapper running its own
-          short-lived event loop) as part of Phase 1, rather than silently
-          reverting to a non-tree-owning `subprocess.run`.
-        - Validation: a mocked-flags/ordinary subprocess test proves wiring,
-          not behavior. Add a focused live regression on **both** platforms
-          proving the full tree exits on a forced timeout (a child that
-          spawns its own descendant, timeout forced, zero surviving
-          processes observed) — the Windows leg additionally follows the
-          pattern doc's "Review and validation" section (≥2 cycles, Win32
-          window enumeration), kept out of the fast required CI lane (needs
-          a Windows host) per the doc's own guidance; the POSIX leg can run
-          in the ordinary Linux test lane since it needs no special host.
-      - `resolve_direct_first(direct_var, command_var) -> str | None` —
-        direct env wins, else fetch via command. Mirrors
-        `resolve_control_token()`'s existing precedence.
-      - `resolve_command_first(direct_var, command_var) -> str | None` —
-        command is tried first, falls back to the raw direct env value only
-        if the command is unset or fails/returns empty. Mirrors
-        `producer_capability()`'s existing precedence.
-- [ ] **`token-resolve`'s own `pyproject.toml` must declare its
-      `agent_procutil` dependency as a canonical-reference vendor pointer**,
-      not just rely on a consumer happening to have it installed already:
-      `dependencies = ["agent-procutil"]` plus a `[tool.uv.sources]` entry
-      `agent-procutil = { path = "../agent-procutil", editable = true }`,
-      exactly matching the existing nested-dependency pattern in
-      `libs/ssh-manager/pyproject.toml:15-25` (ssh-manager has the identical
-      shape: it also imports `agent_procutil` and is itself consumed as a
-      vendor pointer by multiple plugins) — required so a consumer that also
-      depends on `agent-procutil` directly doesn't hit a `uv` editable/
-      non-editable resolution conflict on the same path.
-- [ ] **Windows-safe command parsing, including quoting:** the existing
-      agent-dispatch `_run_token_command()` parses with plain `shlex.split()`
-      (POSIX mode), which treats backslash as an escape character and
-      mangles an ordinary Windows path command like
-      `C:\Tools\vault.exe read secret` into `C:Toolsvault.exe read secret`.
-      Switching to `shlex.split(command, posix=False)` alone is **not
-      sufficient**: non-POSIX mode leaves surrounding quote characters
-      literally IN each token (`shlex.split('"C:\Tools\vault.exe" read
-      secret', posix=False)` returns `['"C:\Tools\vault.exe"', 'read',
-      'secret']` — the leading/trailing `"` survives in `argv[0]`, which
-      `subprocess.run` would then try to execute as a literal path
-      containing quote characters and fail). The shared primitive must, on
-      the Windows branch, additionally strip one matching pair of
-      leading/trailing quote characters (`"` or `'`) from each split token
-      before building `argv`. Add explicit test cases for both an
-      unquoted and a quoted Windows path command (not just POSIX ones) to
-      Phase 1's unit tests.
-- [ ] Unit tests for the new lib covering both resolvers (direct value,
-      command fetch, neither set, command failure, command producing empty
-      output) plus the low-level primitive directly (POSIX, Windows-style
-      unquoted, and Windows-style quoted command strings).
-- [ ] **Register the new lib's tests in CI**, not just locally: add
-      `python -m pytest -q libs/token-resolve/tests` to the shared-library
-      test lane in `.github/workflows/ci.yml` (~lines 345-356, alongside the
-      existing `libs/agent-procutil/tests`, `libs/zdd/tests`, etc. entries) —
-      a lib with tests that only ever run locally leaves regressions
-      unchecked in the gate that actually blocks merges. **This lane runs on
-      `ubuntu-latest` only** — since the Windows-safe parsing fix branches on
-      `os.name == "nt"`, the Windows code path is never actually exercised
-      there. Add a small dedicated `windows-latest` job (following the
-      existing narrow-scope pattern already used by `windows-hooks`/
-      `bootstrap-killswitch-powershell-5-1` — checkout, `setup-python`, `pip
-      install pytest`, then `python -m pytest -q libs/token-resolve/tests`
-      only) so the Windows branch has real CI coverage, not just local
-      developer-machine testing. **Path-gate it** (per `TESTING.md:139-140`'s
-      "gate specialized suites by changed paths so unrelated pull requests
-      do not pay their cost" rule): the job must skip unless
-      `libs/token-resolve/**` or its own CI wiring in
-      `.github/workflows/ci.yml` changed, following this workflow's existing
-      changed-path-gating approach (e.g. the `discover` job's
-      `--changed`-mode plugin detection that `worktrees-windows-launch`
-      conditions on via `needs.discover.outputs.heavy`) rather than running
-      an unconditional Windows runner allocation on every PR regardless of
-      relevance. **Wire it into the required gate:** add the new job's name
-      to `pr-gate`'s own `needs:` list (`.github/workflows/ci.yml:~772-780`)
-      — a job that exists but isn't listed there can fail silently without
-      blocking the one aggregate check branch protection actually watches;
-      a path-gated job that's conditionally skipped is still safe to list
-      there (`pr-gate`'s own check already tolerates "skipped" results, per
-      its own `bad = ... if info["result"] not in ("success", "skipped")`
-      logic).
+
+A new small vendored lib (`libs/token-resolve/` — mirrors the existing
+`libs/<name>/` vendoring convention used by `agent-procutil`, `zdd`, etc.),
+lifting agent-dispatch's existing `resolve_control_token()`/
+`_run_token_command()` logic. Scope note: this phase carries several
+cross-platform correctness requirements surfaced across review — treat the
+cited precedent docs as authoritative for exact mechanics during
+implementation rather than re-deriving them here.
+
+- [ ] `run_token_command(command: str) -> str | None` — the low-level
+      primitive. Preserve the existing 30-second timeout, launch consoleless
+      (`agent_procutil.no_window_kwargs()`), and contain the full process
+      tree on timeout on **both** platforms (POSIX: new process group +
+      `killpg`; Windows: `agent_procutil.spawn_in_kill_on_close_job`, which
+      is a no-op off Windows and can itself fail — don't trust it alone) per
+      `docs/patterns/windows-background-process-launch.md`'s launch-kind
+      matrix ("timeout owns the complete tree"). Parse with
+      `shlex.split(command, posix=(os.name != "nt"))`, then strip one
+      matching pair of leading/trailing quote characters from each token on
+      the Windows branch (`posix=False` alone leaves literal quotes in
+      `argv[0]`). Declare the `agent_procutil` dependency in
+      `token-resolve`'s own `pyproject.toml`/`[tool.uv.sources]` as a
+      canonical-reference vendor pointer, matching `libs/ssh-manager`'s
+      existing nested-dependency pattern (`ssh-manager/pyproject.toml:15-25`).
+- [ ] `resolve_direct_first(direct_var, command_var)` — direct env wins,
+      else fetch via command. Mirrors `resolve_control_token()`'s existing
+      precedence.
+- [ ] `resolve_command_first(direct_var, command_var)` — command tried
+      first, falls back to the raw direct value only if the command is
+      unset/fails/empty. Mirrors `producer_capability()`'s existing
+      precedence.
+- [ ] Unit tests: both resolvers (direct value, command fetch, neither set,
+      command failure/empty output) plus the primitive directly (POSIX,
+      Windows unquoted, Windows quoted command strings, headless-child
+      launch) and a cross-platform live regression proving full tree exit
+      on a forced timeout (kept out of the fast required CI lane on the
+      Windows leg, which needs a real Windows host; the POSIX leg runs in
+      the ordinary Linux lane).
+- [ ] Register `libs/token-resolve/tests` in the shared-library CI lane
+      (`.github/workflows/ci.yml`'s existing `libs/agent-procutil/tests`
+      etc. list). Add a small, **path-gated** `windows-latest` job (skip
+      unless `libs/token-resolve/**` or its own CI wiring changed, per
+      `TESTING.md`'s "gate specialized suites by changed paths" rule;
+      mirrors the existing narrow-scope `windows-hooks` job) so the Windows
+      parsing branch gets real CI coverage. Wire this job's name into
+      `pr-gate`'s own `needs:` list (`pr-gate` already tolerates a
+      "skipped" result, so a path-gated job is safe to list there).
+
 
 ### Phase 2 — Migrate agent-dispatch onto the shared lib
 - [ ] Replace `agent-dispatch`'s own `resolve_control_token()` with a thin
@@ -353,16 +259,10 @@ corrections to the same original ask, not a change in intent.
       model, adapted to agent-vault's own installer layout).
 - [ ] Tests mirroring agent-dispatch's existing coverage shape.
 - [ ] **Docs, in this phase:** add `AGENT_VAULT_CORE_TOKEN_COMMAND` to
-      `agent-vault`'s own documented env-var table in this same PR, not
-      deferred to a later phase — a new var ships documented, not with a
-      pending TODO. Drafted entry (adapt to the table's exact existing
-      column shape):
-      > `AGENT_VAULT_CORE_TOKEN_COMMAND` — command whose stdout (stripped)
-      > is the core bearer token, fetched on demand and never persisted.
-      > Only consulted when `AGENT_VAULT_CORE_TOKEN` is unset (direct value
-      > wins when both are present, matching `resolve_direct_first()`'s
-      > precedence). Absent both, the core attaches no bearer token at all
-      > (the pre-existing no-token behavior is unchanged).
+      `agent-vault`'s own env-var table (not deferred to a later phase):
+      command whose stdout (stripped) is the core bearer token, fetched on
+      demand and never persisted; only consulted when `AGENT_VAULT_CORE_TOKEN`
+      is unset (direct value wins, matching `resolve_direct_first()`).
 
 ### Phase 4 — Expand scope to agent-dispatch's remaining token and agent-index
 
@@ -394,31 +294,14 @@ working this phase). Summary:
       separate engine venv (`ENGINE_VENV_PYTHON`) preinstall paths in
       `install.sh`/`install.ps1` — adding the new lib to only one leaves the
       other's install broken.
-- [ ] **Docs, in this phase:** add `AGENT_DISPATCH_TOKEN_COMMAND`,
-      `AGENT_INDEX_ADO_TOKEN_COMMAND`, and `AGENT_INDEX_GITHUB_TOKEN_COMMAND`
-      to their respective plugins' env-var tables in this same PR. Drafted
-      entries (adapt to each table's exact existing column shape):
-      > `AGENT_DISPATCH_TOKEN_COMMAND` — command whose stdout (stripped) is
-      > the plain client/server bearer, fetched on demand and never
-      > persisted. Consulted at every consumption site this phase
-      > consolidated (`client_token()` and its callers, `_cmd_serve`,
-      > `build_app()`/`serve()`'s default-`cfg` path) and propagated to the
-      > detached waiter and spawned peers; only `config.py:231`'s
-      > `load_config()` read stays raw/unresolved, by design. Only
-      > consulted when `AGENT_DISPATCH_TOKEN` is unset (direct env wins).
-      >
-      > `AGENT_INDEX_ADO_TOKEN_COMMAND` — command whose stdout (stripped) is
-      > the Azure DevOps source's PAT, fetched on demand and never
-      > persisted. Full precedence: an explicit `token=` constructor
-      > argument wins outright, then `AGENT_INDEX_ADO_TOKEN` (direct env),
-      > then this command — unchanged from today otherwise.
-      >
-      > `AGENT_INDEX_GITHUB_TOKEN_COMMAND` — command whose stdout (stripped)
-      > is the GitHub source's token, fetched on demand and never
-      > persisted. Full precedence: an explicit `token=` constructor
-      > argument wins outright, then `AGENT_INDEX_GITHUB_TOKEN` (direct
-      > env), then this command, then the ambient `GH_TOKEN`/`GITHUB_TOKEN`
-      > CLI fallbacks (unchanged).
+- [ ] **Docs, in this phase:** add each new var to its plugin's env-var
+      table — `AGENT_DISPATCH_TOKEN_COMMAND` (consulted at every
+      consumption site this phase consolidated, excluding the deliberately-
+      raw `config.py:231`; direct env wins when set);
+      `AGENT_INDEX_ADO_TOKEN_COMMAND` (precedence: constructor `token=` →
+      direct env → this command); `AGENT_INDEX_GITHUB_TOKEN_COMMAND`
+      (precedence: constructor `token=` → direct env → this command →
+      ambient `GH_TOKEN`/`GITHUB_TOKEN`, unchanged).
 
 ### Phase 5 — Final documentation sweep
 - [ ] Confirm every `_COMMAND` var introduced in Phases 2-4 actually landed
@@ -744,3 +627,16 @@ conventions to mirror) to be elaborated once this plan clears review._
   `AGENT_INDEX_ADO_TOKEN_COMMAND`, and `AGENT_INDEX_GITHUB_TOKEN_COMMAND`
   directly in their introducing phases; added the unsafe-bind error-message
   update to the `_cmd_serve` sub-task.
+
+### 2026-10-02 — Round 15, scoping pass (not a new review round)
+- 14 rounds of review had progressively dug into implementation-level detail
+  (exact subprocess-containment mechanics, line-by-line doc drafts) more
+  suited to Phase 1-5 *execution* than plan *review*. Per operator
+  direction, this pass condenses the plan's standing sections (Phase 1's
+  cross-platform containment spec, the architectural-pattern-reconciliation
+  paragraph, and the drafted env-var doc blocks) down to the essential
+  correctness requirements and precedent citations, trusting implementation
+  to work out exact mechanics against the cited docs rather than
+  re-deriving them here. No requirement was dropped, only the exposition
+  shortened (746 → 629 lines). This is the final scoping/fix pass for this
+  review cycle.
