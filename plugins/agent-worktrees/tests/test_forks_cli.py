@@ -78,6 +78,32 @@ def test_set_explicit_account_overrides_resolution(monkeypatch, capfd):
     assert payload["forks"][0]["account"] == "explicit"
 
 
+def test_set_with_token_stdin_and_real_owner_override(monkeypatch, capfd):
+    """--token-stdin alone cannot know the token's actual login without a
+    live API call this offline pre-seeding path must not make -- when
+    pr.fork.owner differs from the token's true identity, --real-owner
+    lets the operator state it explicitly so the later live pre-check
+    validates the TRUE login, not the (possibly different) --owner."""
+    import io
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("ghp_exampletoken\n"))
+    rc = forks_cli.cmd_forks_dispatch(
+        [
+            "set", "org/widgets", "--owner", "alias", "--token-stdin",
+            "--real-owner", "alice",
+        ],
+    )
+    assert rc == 0
+    capfd.readouterr()
+
+    from agent_worktrees import fork_pr
+    expected_scope = fork_pr._token_scope("ghp_exampletoken")
+    entry = fork_pr.find_fork("org/widgets", expected_scope)
+    assert entry is not None
+    assert entry.owner == "alias"
+    assert entry.real_owner == "alice"
+
+
 def test_set_with_owner_override_and_explicit_account_records_real_owner(capfd):
     """``forks set --owner alias --account bob`` records a DIFFERENT PR-head
     owner (alias) than the actual authenticated login (bob, the explicit

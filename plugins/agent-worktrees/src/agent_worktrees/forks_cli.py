@@ -36,7 +36,8 @@ def _forks_usage() -> None:
     print("  list                                List confirmed forks")
     print("  show <repo> [--account A]           Show a repo's confirmed fork(s) --")
     print("                                      all accounts, or just one with --account")
-    print("  set <repo> --owner <login> [--remote R] [--account A | --token-stdin] [--notes T]")
+    print("  set <repo> --owner <login> [--remote R] [--account A | --token-stdin]")
+    print("              [--real-owner L] [--notes T]")
     print("                                      Pre-approve a repo's fork (e.g. during")
     print("                                      setup) without waiting for create-pr to ask.")
     print("                                      --account defaults to the resolved account/")
@@ -48,6 +49,13 @@ def _forks_usage() -> None:
     print("                                      that scope, and the token is read from stdin")
     print("                                      rather than argv so it never lands in shell")
     print("                                      history or a process listing.")
+    print("                                      --real-owner names the ACTUAL authenticated")
+    print("                                      login when it differs from --owner (e.g. a")
+    print("                                      pr.fork.owner override, or a --token-stdin")
+    print("                                      token whose true login isn't --owner) -- the")
+    print("                                      live pre-check validates against this, not")
+    print("                                      --owner, so omitting it when they differ")
+    print("                                      causes a spurious re-prompt later.")
     print("  remove <repo> [--account A]         Forget a repo's confirmation(s) -- every")
     print("                                      account for this repo, or just one with")
     print("                                      --account (create-pr will ask again)")
@@ -80,7 +88,7 @@ _KNOWN_OPTIONS: dict[str, dict[str, bool]] = {
     "show": {"--account": True, "--json": False},
     "set": {
         "--owner": True, "--remote": True, "--account": True,
-        "--token-stdin": False, "--notes": True,
+        "--token-stdin": False, "--notes": True, "--real-owner": True,
     },
     "remove": {"--account": True},
     "rm": {"--account": True},
@@ -227,7 +235,7 @@ def _dispatch_sub(sub: str, rest: list[str], fork_pr, _opt) -> int:
         if not rest or rest[0].startswith("-"):
             output.err(
                 "Usage: forks set <repo> --owner <login> [--remote R] "
-                "[--account A | --token-stdin] [--notes T]"
+                "[--account A | --token-stdin] [--real-owner L] [--notes T]"
             )
             return 1
         repo = rest[0]
@@ -235,6 +243,7 @@ def _dispatch_sub(sub: str, rest: list[str], fork_pr, _opt) -> int:
         if not owner:
             output.err("forks set requires --owner <login>")
             return 1
+        explicit_real_owner = _opt("--real-owner")
         bare_prcfg = cfg.PRConfig(provider="github")
         # Unlike create-pr's gate (resolve_fork_publish), this command has
         # no per-repo pr.api_base to consult -- but an entry recorded here
@@ -275,11 +284,13 @@ def _dispatch_sub(sub: str, rest: list[str], fork_pr, _opt) -> int:
             account = fork_pr._token_scope(token)
             # The scope above is an opaque hashed token identifier, not a
             # login, and resolving the token's actual login would require a
-            # live API call this offline pre-seeding path must not make --
-            # fall back to the given --owner; create-pr's own live
-            # pre-check (run with this same token at actual publish time)
-            # still independently validates the real identity then.
-            real_owner = owner
+            # live API call this offline pre-seeding path must not make.
+            # Without --real-owner, fall back to --owner (the pr.fork.owner
+            # override this token will authenticate under might differ
+            # from its true login -- pass --real-owner explicitly in that
+            # case so the later live pre-check validates the TRUE login,
+            # not the override).
+            real_owner = explicit_real_owner or owner
         elif account is None:
             # Same resolver create_pr's gate checks against (not the bare
             # account mapping) -- see fork_pr._resolve_fork_credential.
@@ -293,15 +304,18 @@ def _dispatch_sub(sub: str, rest: list[str], fork_pr, _opt) -> int:
             # would itself return (e.g. a differently-formatted active-
             # account marker) -- leave real_owner to record_confirmation's
             # own default (falls back to owner) rather than asserting an
-            # equivalence this resolver doesn't actually guarantee.
-            real_owner = ""
+            # equivalence this resolver doesn't actually guarantee, unless
+            # --real-owner was given explicitly.
+            real_owner = explicit_real_owner or ""
         else:
             # An explicit --account IS the login that create-pr's own
             # resolution will authenticate as for this repo+account scope
             # -- record it as real_owner so a later --owner override
             # doesn't mask the actual identity the live pre-check must
-            # validate against (see resolve_fork_publish).
-            real_owner = account
+            # validate against (see resolve_fork_publish). An explicit
+            # --real-owner still wins if given (e.g. --account names a
+            # mapped login distinct from the actual GitHub login).
+            real_owner = explicit_real_owner or account
         if not account:
             # An empty scope can never be looked up later --
             # resolve_fork_publish only consults the registry when

@@ -1236,6 +1236,45 @@ class TestCreatePRForkFlow:
         assert "needs_confirmation" not in res3, res3
         assert res3["success"] is True, res3
 
+    def test_login_comparisons_are_case_insensitive(
+        self, pr_repo, tmp_path, monkeypatch,
+    ):
+        """GitHub logins are case-insensitive ('octocat' and 'OctoCat' name
+        the same account) -- a stored confirmation recorded under one
+        casing must still silently match when the live provider (or a
+        pr.fork.owner override) later resolves/names the SAME login with
+        different casing. A casing-only difference must never be treated
+        as a changed/unapproved identity."""
+        config, wid, _wt_path, _remote_dir = pr_repo
+        config = self._fork_config(config, tmp_path)  # no owner override
+
+        fork_dir = tmp_path / "fork-case-insensitive.git"
+        git_ops.git("init", "--bare", "-b", "master", str(fork_dir))
+        # The live provider resolves a DIFFERENT casing than what's stored.
+        fake = self._fake_provider("OctoCat", str(fork_dir))
+        monkeypatch.setattr(
+            "agent_worktrees.providers.get_provider", lambda name: fake,
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.providers.account_token_for_slug",
+            lambda *a, **k: None,
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.fork_pr._resolve_fork_credential",
+            lambda slug, prcfg: (None, "case-login"),
+        )
+
+        from agent_worktrees import fork_pr
+        repo = "acme/case-insensitive-repo"
+        fork_pr.record_confirmation(repo, "octocat", account="case-login")
+
+        res = pr_ops.create_pr(
+            wid, config, target_repo=repo,
+        )  # no confirm_fork -- a casing-only difference must still match
+
+        assert "needs_confirmation" not in res, res
+        assert res["success"] is True, res
+
     def test_inconclusive_live_owner_check_fails_closed(
         self, pr_repo, tmp_path, monkeypatch,
     ):

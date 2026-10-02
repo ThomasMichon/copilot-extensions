@@ -411,6 +411,17 @@ def _resolve_live_fork_owner(prcfg, token: str | None) -> str | None:
         return None
 
 
+def _logins_equal(a: str | None, b: str | None) -> bool:
+    """GitHub logins are case-insensitive (``octocat`` and ``OctoCat`` name
+    the same account) -- every identity comparison in the confirmation gate
+    must treat a casing-only difference as the SAME login, never as a
+    changed/unapproved identity. ``None`` never equals a real string (an
+    unresolved/inconclusive lookup must still fail closed elsewhere)."""
+    if a is None or b is None:
+        return a == b
+    return a.casefold() == b.casefold()
+
+
 def _non_default_authority(prcfg) -> str:
     """A non-default GitHub authority (host) that ANY part of the fork-PR
     flow could actually run against -- the resolved ``authority_endpoint``
@@ -559,7 +570,10 @@ def resolve_fork_publish(
     # as 'origin'), reusing the old approval would repoint a DIFFERENT
     # remote than the one actually approved.
     if prcfg.fork.owner:
-        owner_matches = prcfg.fork.owner == confirmed_entry.owner if confirmed_entry else False
+        owner_matches = (
+            _logins_equal(prcfg.fork.owner, confirmed_entry.owner)
+            if confirmed_entry else False
+        )
     else:
         # No override requested this call: the PR head will display
         # whatever the real authenticated identity turns out to be, which
@@ -572,8 +586,8 @@ def resolve_fork_publish(
         # approved) and must re-ask BEFORE any mutation, rather than
         # running _ensure_fork_and_remote first and only then failing with
         # a misleading "concurrent identity change" error below.
-        owner_matches = confirmed_entry is not None and (
-            confirmed_entry.owner == (confirmed_entry.real_owner or confirmed_entry.owner)
+        owner_matches = confirmed_entry is not None and _logins_equal(
+            confirmed_entry.owner, confirmed_entry.real_owner or confirmed_entry.owner,
         )
     already_confirmed = (
         confirmed_entry is not None
@@ -594,7 +608,7 @@ def resolve_fork_publish(
     if already_confirmed and not confirm_fork:
         live_real_owner = _resolve_live_fork_owner(prcfg, fork_token)
         expected_real_owner = confirmed_entry.real_owner or confirmed_entry.owner
-        if live_real_owner != expected_real_owner:
+        if not _logins_equal(live_real_owner, expected_real_owner):
             return {
                 "needs_confirmation": "fork_setup",
                 "repo": default_pr_repo,
@@ -637,9 +651,9 @@ def resolve_fork_publish(
     # silent skip (already_confirmed, no confirm_fork) must never let such
     # a race silently re-point the stored approval at an identity nobody
     # actually confirmed this call.
-    identity_changed = confirmed_entry is not None and (
-        confirmed_entry.owner != fork_owner
-        or (confirmed_entry.real_owner or confirmed_entry.owner) != real_owner
+    identity_changed = confirmed_entry is not None and not (
+        _logins_equal(confirmed_entry.owner, fork_owner)
+        and _logins_equal(confirmed_entry.real_owner or confirmed_entry.owner, real_owner)
     )
     if identity_changed and already_confirmed and not confirm_fork:
         return {"error": (
