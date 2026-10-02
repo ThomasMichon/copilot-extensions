@@ -826,6 +826,14 @@ if ($kind -eq 'local') {
     $git = Get-GitInfo -Path $repoRoot
     $commit = $git.commit; $branch = $git.branch; $dirty = $git.dirty
 }
+# #935/#<issue>: when self-staged, $PluginDir is a throwaway per-invocation copy
+# under .install-stage/<ts>-<pid>/ that is eventually reaped -- persisting it as
+# source.path permanently freezes future version-drift detection against that
+# one-time snapshot (bootstrap-check.* reads THIS path's pyproject.toml to
+# decide whether a reconcile is needed). Get-SourceKind already resolves the
+# ORIGINAL marketplace payload path via COPILOT_PLUGIN_STAGED_FROM for the same
+# reason; record that same stable path here too, not the ephemeral stage dir.
+$sourcePath = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
 $manifest = [ordered]@{
     schema_version = 3
     service        = 'agent-ssh'
@@ -833,7 +841,7 @@ $manifest = [ordered]@{
     deployed_by    = "$($env:COMPUTERNAME.ToLower())-windows"
     source         = [ordered]@{
         kind    = $kind
-        path    = ($PluginDir -replace '\\', '/')
+        path    = ($sourcePath -replace '\\', '/')
         repo    = 'copilot-extensions'
         plugin  = 'agent-ssh'
         version = $ver

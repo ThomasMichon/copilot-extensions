@@ -643,6 +643,15 @@ if [[ "$KIND" == "local" ]]; then
     read -r _c _b _d <<< "$(_git_info "$REPO_ROOT")"
     COMMIT="\"$_c\""; BRANCH="\"$_b\""; DIRTY="$_d"
 fi
+# #935/#<issue>: when self-staged, $PLUGIN_DIR is a throwaway per-invocation
+# copy under .install-stage/<ts>-<pid>/ that is eventually reaped -- persisting
+# it as source.path permanently freezes future version-drift detection against
+# that one-time snapshot (bootstrap-check.* reads THIS path's pyproject.toml to
+# decide whether a reconcile is needed). _source_kind and the payload-dir
+# marker above already resolve the ORIGINAL marketplace payload path via
+# COPILOT_PLUGIN_STAGED_FROM for the same reason; record that same stable path
+# in the manifest too, not the ephemeral stage dir.
+SOURCE_PATH="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
 TMP="$MANIFEST_PATH.tmp"
 cat > "$TMP" << EOF
 {
@@ -652,7 +661,7 @@ cat > "$TMP" << EOF
   "deployed_by": "$(hostname)-$(uname -s | tr '[:upper:]' '[:lower:]')",
   "source": {
     "kind": "$KIND",
-    "path": "$PLUGIN_DIR",
+    "path": "$SOURCE_PATH",
     "repo": "copilot-extensions",
     "plugin": "agent-ssh",
     "version": "$VER",
