@@ -441,11 +441,6 @@ def cmd_embody(args: argparse.Namespace) -> int:
         profile=selection.profile,
         preflight=launch_preflight,
     )
-    resume_target = embody_resume.resume_target(args, record, seed, make_new=make_new)
-    refusal = embody_resume.live_head_refusal(record, resume_target, wt_id)
-    if refusal:
-        return _json_error(refusal, exit_code=3)
-    launch_cmd = embody_resume.with_resume(launch_cmd, resume_target)
     env = _apply_assignment_env(
         _build_env(
             selection.profile,
@@ -535,7 +530,15 @@ def cmd_embody(args: argparse.Namespace) -> int:
         # sessions (agent-bridge's `cli-mode launch`) sets this.
         if getattr(args, "ensure_mux", False):
             sessions.ensure_mux_available()
-        result = sessions.mux_new_session(wt_id, work_dir, launch_cmd, env)
+        # Resolved here, from the record re-read under the lifecycle fence, so
+        # a head that advanced (or a process that started) during preflight or
+        # the lock wait is what's resumed -- or refused.
+        resume_target = embody_resume.resume_target(args, launch_record, seed, make_new=make_new)
+        refusal = embody_resume.live_head_refusal(resume_target, wt_id)
+        if refusal:
+            return _json_error(refusal, exit_code=3)
+        result = sessions.mux_new_session(
+            wt_id, work_dir, embody_resume.with_resume(launch_cmd, resume_target), env)
     finally:
         lifecycle_lock.release()
     if not result.get("ok"):

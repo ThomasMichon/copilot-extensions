@@ -55,22 +55,14 @@ from .tracking_session_registry import _start_session_activation
 
 
 def head_is_provably_dead(head_session: str | None) -> bool:
-    """True only when ``head_session``'s conversation exists on this machine
-    and no live Copilot holds its ``inuse.<pid>.lock``.
-
-    A head whose directory isn't here (or that can't be read) is never
-    called dead, so a live head is never displaced on uncertain evidence.
-    """
-    if not head_session:
-        return False
+    """True only when ``head_session``'s conversation is on this machine and
+    every Copilot that held it is provably gone (``session_liveness``). An
+    unreadable lock directory or an unavailable process probe is unknown,
+    never dead, so a live head is never displaced on uncertain evidence."""
     try:
-        from . import sessions
+        from .session_liveness import session_liveness
 
-        state_dir = sessions._session_state_dir()
-        if not (state_dir / head_session).is_dir():
-            return False
-        live_pid, _stale = sessions._session_entry_lock_state(state_dir, head_session)
-        return live_pid is None
+        return session_liveness(head_session) == "dead"
     except Exception:
         return False
 
@@ -80,7 +72,12 @@ def head_hold_note(session_id: str, head: str | None) -> str:
     (never silent about who still holds it); empty when it did."""
     if not head or head == session_id:
         return ""
-    why = "" if head_is_provably_dead(head) else " (its Copilot is still running)"
+    from .session_liveness import session_liveness
+
+    why = {
+        "live": " (its Copilot is still running)",
+        "unknown": " (whether its Copilot is running can't be confirmed on this machine)",
+    }.get(session_liveness(head), "")
     return f"bind-session: {session_id} is bound but NOT the head; the head is still {head}{why}.\n"
 
 
@@ -200,7 +197,7 @@ def apply_session_register(args: dict) -> dict:
             dead_claim = (
                 current_head is not None
                 and current_head != session_id
-                and (entry.state in ("active", "yielded") or source == "bind")
+                and (entry.state in ("active", "yielded", "handed-off") or source == "bind")
                 and head_is_provably_dead(current_head)
             )
             if (

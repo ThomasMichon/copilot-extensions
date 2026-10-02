@@ -1224,16 +1224,44 @@ class TestDeadHeadReclaim:
         assert rec.resolved_head_session == "orchestrator"
         assert rec.session_entry("orchestrator").state == "active"
 
-    def test_head_is_provably_dead_needs_local_evidence(self, tmp_path, monkeypatch):
+    def test_a_resumed_handed_off_orchestrator_reclaims_at_session_start(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        """No explicit bind needed: the original orchestrator's own resume
+        (its sessionStart registration) takes back a dead successor's head."""
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "orchestrator")
+        tracking.register_session("wt-1", "stray")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        link_succession(rec, "orchestrator", "stray")
+        self._dead(monkeypatch, "stray")
+        tracking.register_session("wt-1", "orchestrator")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.resolved_head_session == "orchestrator"
+        assert rec.replayed_head_transition.reason == "reclaim"
+
+    @pytest.mark.parametrize("states, expected", [
+        ([False], "dead"),  # its process is provably gone (or the PID was reused)
+        ([], "dead"),  # no lock left at all
+        ([True], "live"),
+        ([None], "unknown"),  # access denied / no process probe on this platform
+        ([False, None], "unknown"),
+        ([False, True], "live"),
+    ])
+    def test_session_liveness_only_says_dead_on_proof(self, tmp_path, monkeypatch, states, expected):
+        from agent_worktrees import session_liveness as sl
         from agent_worktrees import sessions
         from agent_worktrees.tracking_session_registration_write import head_is_provably_dead
 
         monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
-        (tmp_path / "gone").mkdir()
-        (tmp_path / "gone" / "inuse.999999.lock").write_text("")
-        monkeypatch.setattr(sessions, "_is_copilot_process", lambda pid: False)
-        assert head_is_provably_dead("gone") is True
-        assert head_is_provably_dead("elsewhere") is False  # no dir here
-        assert head_is_provably_dead(None) is False
-        monkeypatch.setattr(sessions, "_is_copilot_process", lambda pid: True)
-        assert head_is_provably_dead("gone") is False
+        (tmp_path / "s1").mkdir()
+        answers = {}
+        for i, state in enumerate(states):
+            pid = 1000 + i
+            (tmp_path / "s1" / f"inuse.{pid}.lock").write_text("")
+            answers[pid] = state
+        monkeypatch.setattr(sl, "copilot_pid_state", lambda pid: answers[pid])
+        assert sl.session_liveness("s1") == expected
+        assert head_is_provably_dead("s1") is (expected == "dead")
+        assert sl.session_liveness("elsewhere") == "unknown"  # not on this machine
+        assert sl.session_liveness(None) == "unknown"

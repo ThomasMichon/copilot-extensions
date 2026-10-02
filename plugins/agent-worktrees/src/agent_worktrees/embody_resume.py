@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 
 from . import sessions
+from .session_liveness import session_liveness
 
 
 def resume_target(
@@ -32,13 +33,18 @@ def with_resume(launch_cmd, target: str | None) -> list[str]:
     return [*launch_cmd, f"--resume={target}"] if target else list(launch_cmd)
 
 
-def live_head_refusal(record, target: str | None, worktree_id: str) -> str | None:
-    """Why ``target`` must not be resumed here: its Copilot is already running
-    outside this worktree's mux (a bare terminal), and a second process on one
-    conversation would fork it."""
-    if target and record is not None and sessions.session_id_is_live(record, target):
-        return (
-            f"head session {target} is already running outside wt-{worktree_id}; "
-            "attach to it there, or pass --fresh"
-        )
-    return None
+def live_head_refusal(target: str | None, worktree_id: str) -> str | None:
+    """Why ``target`` must not be resumed in a new process: its Copilot is
+    still running (outside this worktree's mux), or that can't be ruled out
+    here -- a second process on one conversation would fork it."""
+    if not target:
+        return None
+    state = session_liveness(target)
+    if state == "dead":
+        return None
+    if state == "live":
+        return (f"head session {target} is already running outside wt-{worktree_id}; "
+                "attach to it there, or pass --fresh")
+    return (f"can't confirm head session {target} has stopped (no process probe on this platform, "
+            f"or its lock directory is unreadable); once it has, pass --copilot-arg=--resume={target}, "
+            "or --fresh")
