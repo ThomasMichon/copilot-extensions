@@ -163,6 +163,29 @@ class TestPingAction:
         source.supports.assert_not_called()
         token_validator.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_capabilities_advertise_username_keyed_git_cache(self):
+        source = MagicMock(spec=CredentialSource)
+        source.name = "source"
+        server = CredentialRelayServer(
+            port=0,
+            sources=[source],
+            policy=RelayPolicy(allowed_actions=frozenset({"get"})),
+        )
+        await server.start()
+        try:
+            reader, writer = await asyncio.open_connection("127.0.0.1", server.port)
+            writer.write(b"capabilities\n\n")
+            await writer.drain()
+            response = await asyncio.wait_for(reader.readuntil(b"\n\n"), timeout=1)
+            writer.close()
+            await writer.wait_closed()
+        finally:
+            await server.stop()
+
+        assert response == b"capabilities=git-credential-username-cache\n\n"
+        source.supports.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Source Routing Tests

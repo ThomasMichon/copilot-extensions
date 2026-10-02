@@ -581,15 +581,57 @@ class _SilentRelay:
                     pass
 
 
-def _run_git_cache(cache_dir, port: int, ttl: int, request: str):
+def _run_git_cache(cache_dir, port: int, ttl: int, request: str, *, github_account: str = ""):
+    env = {k: v for k, v in os.environ.items() if k != "LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT"}
+    if github_account:
+        env["LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT"] = github_account
     return subprocess.run(
         [sys.executable, "-c", _git_cache_python(), str(port), str(cache_dir), str(ttl)],
         input=request,
         text=True,
         capture_output=True,
-        timeout=10,
+        timeout=20,
         check=False,
+        env=env,
     )
+
+
+class _ScriptedRelay:
+    """Answers successive connections with successive responses."""
+
+    def __init__(self, *responses: str) -> None:
+        self.responses = [r.encode("utf-8") for r in responses]
+        self.requests: list[bytes] = []
+        self._ready = threading.Event()
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self.port = 0
+
+    def __enter__(self):
+        self._thread.start()
+        if not self._ready.wait(timeout=5):  # pragma: no cover
+            raise RuntimeError("relay did not start")
+        return self
+
+    def __exit__(self, *_exc):
+        self._thread.join(timeout=10)
+
+    def _serve(self) -> None:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            sock.listen(2)
+            self.port = sock.getsockname()[1]
+            self._ready.set()
+            for response in self.responses:
+                conn, _addr = sock.accept()
+                with conn:
+                    request = b""
+                    while b"\n\n" not in request:
+                        chunk = conn.recv(4096)
+                        if not chunk:
+                            break
+                        request += chunk
+                    self.requests.append(request)
+                    conn.sendall(response)
 
 
 def _bash_candidates():
@@ -1116,3 +1158,29 @@ class TestGitCredentialCache:
         assert result.returncode == 0
         assert result.stdout == self.RESPONSE
         assert "fresh-token" in next(cache_dir.glob("*.gitcred")).read_text(encoding="utf-8")
+
+    def test_account_named_only_when_relay_caches_by_username(self, tmp_path):
+        request = "protocol=https\nhost=github.com\n\n"
+        caps = "capabilities=git-credential-username-cache\n\n"
+        with _ScriptedRelay(caps, self.RESPONSE) as relay:
+            result = _run_git_cache(
+                tmp_path / "cache", relay.port, 1500, request, github_account="alice",
+            )
+
+        assert result.returncode == 0
+        assert relay.requests[0] == b"capabilities\n\n"
+        assert relay.requests[1].decode("utf-8") == (
+            "protocol=https\nhost=github.com\nusername=alice\n\n"
+        )
+
+    def test_older_relay_never_receives_an_account(self, tmp_path):
+        """An older relay caches by (protocol, host) only and answers the
+        unknown capabilities action with nothing, so no account is named."""
+        request = "protocol=https\nhost=github.com\n\n"
+        with _ScriptedRelay("", self.RESPONSE) as relay:
+            result = _run_git_cache(
+                tmp_path / "cache", relay.port, 1500, request, github_account="alice",
+            )
+
+        assert result.returncode == 0
+        assert relay.requests[1].decode("utf-8") == request

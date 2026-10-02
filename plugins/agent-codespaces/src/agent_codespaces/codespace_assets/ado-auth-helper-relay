@@ -215,12 +215,44 @@ def _request_fields(data):
 
 
 fields = _request_fields(stdin_data)
+
+
+def _relay_caches_by_username():
+    # An older relay caches git credentials by (protocol, host) only, so naming
+    # an account there could return a credential cached for another account.
+    # It answers the unknown capabilities action with nothing.
+    if not port:
+        return False
+    data = b""
+    try:
+        s = socket.create_connection(("localhost", port), timeout=5)
+    except OSError:
+        return False
+    try:
+        s.settimeout(5)
+        s.sendall(b"capabilities\n\n")
+        while b"\n\n" not in data:
+            chunk = s.recv(1024)
+            if not chunk:
+                break
+            data += chunk
+    except OSError:
+        return False
+    finally:
+        s.close()
+    for line in data.decode("utf-8", "replace").splitlines():
+        if line.startswith("capabilities="):
+            return "git-credential-username-cache" in line.split("=", 1)[1].split(",")
+    return False
+
+
 github_account = os.environ.get("LC_GIT_CREDENTIAL_RELAY_GITHUB_ACCOUNT", "").strip()
 if (
     github_account
     and fields.get("protocol", "https").lower() == "https"
     and fields.get("host", "").lower() == "github.com"
     and not fields.get("username")
+    and _relay_caches_by_username()
 ):
     stdin_data = stdin_data.rstrip("\n")
     stdin_data += "\nusername=" + github_account + "\n\n"

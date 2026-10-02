@@ -80,14 +80,35 @@ def _timeout_finding(login: str) -> str:
             "GitHub -- retry once GitHub is reachable")
 
 
-def codespace_scope_accounts() -> tuple[tuple[str, ...], bool]:
-    """``(explicit_accounts, uses_ambient)`` for CodeSpace operations."""
+def _live_codespace_names() -> set[str] | None:
+    """Names of the CodeSpaces that still exist, or None when they can't be listed."""
+    try:
+        from .lifecycle import list_codespaces
+
+        return {cs.name for cs in list_codespaces()}
+    except Exception:
+        log.debug("could not list CodeSpaces; keeping every account binding", exc_info=True)
+        return None
+
+
+def codespace_scope_accounts(*, live_only: bool = False) -> tuple[tuple[str, ...], bool]:
+    """``(explicit_accounts, uses_ambient)`` for CodeSpace operations.
+
+    ``live_only`` ignores bindings whose CodeSpace no longer exists: only
+    ``delete_codespace`` unbinds, so a CodeSpace deleted elsewhere leaves its
+    binding behind. When CodeSpaces can't be listed, every binding is kept.
+    """
     accounts: list[str] = []
     uses_ambient = False
     try:
         from . import account_binding
 
-        accounts.extend(account_binding.bound_accounts())
+        bindings = account_binding.list_bindings()
+        if live_only and bindings:
+            live = _live_codespace_names()
+            if live is not None:
+                bindings = [b for b in bindings if b.codespace in live]
+        accounts.extend(b.account for b in bindings if b.account)
     except Exception:
         log.debug("could not read CodeSpace account bindings", exc_info=True)
     try:
@@ -386,13 +407,13 @@ def run_github_credential_preflight(account: str | None = None) -> GithubCredent
 def run_github_credential_doctor_checks() -> list[GithubCredentialPreflight]:
     """One relay credential preflight per CodeSpace-serving account.
 
-    Bound/configured accounts are each checked; the active account is added
-    only when some CodeSpace operation still uses ambient ownership (or when
-    nothing is bound at all).
+    Accounts bound to a still-existing CodeSpace, and configured repo accounts,
+    are each checked; the active account is added only when some CodeSpace
+    operation still uses ambient ownership (or when nothing is bound at all).
     """
     from . import gh_account
 
-    accounts, uses_ambient = codespace_scope_accounts()
+    accounts, uses_ambient = codespace_scope_accounts(live_only=True)
     targets: list[str | None] = list(accounts)
     if uses_ambient or not targets:
         active = gh_account.active_account()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from dropin_registry import ScanAuthority, ScanSnapshot
@@ -98,7 +99,7 @@ def test_preflight_ignores_mapped_non_codespace_account_for_other_owner():
   - Token scopes: 'gist', 'repo'
 """
     with patch("subprocess.run") as run, \
-         patch("agent_codespaces.account_binding.bound_accounts", return_value=()), \
+         patch("agent_codespaces.account_binding.list_bindings", return_value=[]), \
          patch("agent_codespaces.config.load_merged_config") as load_cfg, \
          patch("agent_codespaces.gh_account.account_for_repo") as account_for_repo:
         load_cfg.return_value = MagicMock(
@@ -493,4 +494,26 @@ def test_doctor_adds_the_active_account_when_ambient_ownership_is_in_use(capsys)
     assert seen == ["bob", "alice"]
     out = capsys.readouterr().out
     assert "for 'bob'" in out and "for 'alice'" in out
+
+
+def test_serving_accounts_skip_bindings_for_deleted_codespaces():
+    from agent_codespaces import auth_preflight as ap
+    from agent_codespaces.account_binding import AccountBinding
+
+    bindings = [
+        AccountBinding(codespace="cs-live", account="alice", bound_at=0.0),
+        AccountBinding(codespace="cs-gone", account="stale", bound_at=0.0),
+    ]
+    live = [SimpleNamespace(name="cs-live")]
+    with patch("agent_codespaces.account_binding.list_bindings", return_value=bindings), \
+         patch("agent_codespaces.lifecycle.list_codespaces", return_value=live), \
+         patch("agent_codespaces.config.load_merged_config",
+               return_value=MagicMock(repos={})):
+        assert ap.codespace_scope_accounts(live_only=True) == (("alice",), False)
+        assert ap.codespace_scope_accounts() == (("alice", "stale"), False)
+    with patch("agent_codespaces.account_binding.list_bindings", return_value=bindings), \
+         patch("agent_codespaces.lifecycle.list_codespaces", side_effect=RuntimeError("offline")), \
+         patch("agent_codespaces.config.load_merged_config",
+               return_value=MagicMock(repos={})):
+        assert ap.codespace_scope_accounts(live_only=True) == (("alice", "stale"), False)
 

@@ -341,7 +341,12 @@ relay profile itself stays account-free, and a missing/ambiguous GitHub
 credential warns during launch rather than blocking the session; `doctor`
 continues to report it. If GCM still cannot serve the selected account, sign in
 to GitHub in GCM for that account; the relay never substitutes a `gh auth token`
-for git `get`/`fill` (git `store`/`erase` still go to GCM as usual).
+for git `get`/`fill`. The CodeSpace helper acknowledges git `store`/`erase`
+locally without contacting the relay, so they never change host GCM. The
+account is named only when the running relay advertises the
+`git-credential-username-cache` capability. An older bridge relay caches git
+credentials per host, so against one the helper sends the request without an
+account, as it did before.
 
 Provisioning installs the relay-first wrapper only as `~/ado-auth-helper`.
 It deliberately leaves `~/azure-auth-helper` to the native Azure tooling so
