@@ -209,7 +209,7 @@ real code, not assumption:
       (`_SEED_PROMPT_ENABLED = False` in `engine_maintenance_actions.py`)
       until the two seams in the next item are complete -- see there and
       the Journal for why.
-- [~] **Persist the prompt at creation time; deliver it on first attach**
+- [x] **Persist the prompt at creation time; deliver it on first attach**
       (current design, replacing the Picker-specific launch-script argument
       chain originally planned here -- see the Journal for the full
       redesign history). `agent-worktrees create`/`resolve --new` gained
@@ -223,30 +223,56 @@ real code, not assumption:
       claiming (clearing) it under a race-safe write-guard immediately
       before delivery, restoring it only on an unconfirmed delivery, and an
       explicit `--seed` supersedes/clears any stale pending one too.
-      **Two seams, one now closed (2026-10-01, see Journal):**
+      **Both seams now closed (2026-10-01/02, see Journal):**
       (1) **closed** -- the Picker's live flow now calls `resolve --new
       --seed` (`engine_client.resolve_launch_plan()` gained a `seed` kwarg
       once `engine_client.py`'s module-size cap was relieved by extracting
       `engine_execution_leg.py`); `__main__.py`'s `_resolve_for()` threads
-      `LaunchRequest.seed_prompt` through. (2) **still open** --
-      `launch-session.{ps1,sh}` itself never calls `agent-worktrees embody`
-      after creating a worktree's pane, so nothing ever triggers delivery
-      for a Picker-originated creation even with seam (1) closed -- the
-      Journal has a concrete hook point (right after the `new-session`
-      call) from actually reading the script, not a guess. `_SEED_PROMPT_
-      ENABLED` stays `False` until seam (2) lands too. Direct
-      `agent-worktrees create --seed`/`embody` usage (bypassing the Picker
-      entirely) already works end-to-end today.
-- [ ] Confirm the end-to-end behavior matches `agent-worktrees copilot
+      `LaunchRequest.seed_prompt` through. (2) **closed** --
+      `launch-session.{ps1,sh}` now call `agent-worktrees embody
+      --worktree-id <id>` (detached, best-effort) immediately after their
+      own CREATE-branch `new-session`/`tmux new-session` call succeeds --
+      never on the JOIN branch (an already-live session already had its
+      chance). embody's own "already embodies this worktree" resume branch
+      (the mux session now exists) claims + delivers any pending seed via
+      its existing ready-poll/send-keys path; a no-op when nothing is
+      pending costs one cheap venv-python round trip, dispatched detached so
+      the operator's attach never waits on embody's own (up to 180s)
+      seed-ready-timeout. Validated LIVE (non-`--demo`): created a real,
+      disposable worktree with `--seed`, stood up its `wt-<id>` mux pane
+      manually (mirroring exactly what the launcher's own create-branch
+      does), then called `agent-worktrees embody --worktree-id <id>
+      --seed-ready-timeout 3 --json` and confirmed the exact JSON contract
+      this hook depends on: `"created": false, "resumed": true, "seeded":
+      true`. Cleaned up (`remove-system`) immediately after. `_SEED_PROMPT_
+      ENABLED` flipped to `True` in `engine_maintenance_actions.py`; 5
+      pre-existing New-worktree confirm tests (written before this flip)
+      updated for the now-unconditional extra screen hop (2 Enter presses:
+      textarea->buttons, then activate Launch). Full `production_picker` +
+      `test_launch_session_unwrap.py` suite: 895 passed, 1 skipped, clean
+      (three transient Textual-pilot timing flakes along the way, each
+      confirmed pre-existing/unrelated by isolated re-run against the
+      unmodified baseline).
+- [x] Confirm the end-to-end behavior matches `agent-worktrees copilot
       --seed`'s own documented contract ("Seed prompt injected as the
       session's first interactive turn once Copilot is ready") -- the
       prompt must not race the auto-update/bootstrap flow the operator
-      explicitly wants to skip past.
-- [ ] Tests: the new field-rendering helper (unit), the new creation-prompt
-      screen (modal behavior: submit/skip/escape), the decision-dict/
-      `LaunchRequest`/launch-script argument threading (each layer, not just
-      end-to-end), and a regression check that `ScopeDlgScreen`/steer
-      behavior is completely unchanged when no prompt is ever entered.
+      explicitly wants to skip past. **Confirmed 2026-10-01/02:** embody's
+      own ready-poll (`sessions.mux_seed_pane`) only types the seed once
+      Copilot's own input caret is detected ready (stable across two polls),
+      and the detached dispatch means this poll runs concurrently with --
+       never ahead of -- the launcher's own auto-update/bootstrap flow and
+      the operator's attach.
+- [x] Tests: the new field-rendering helper (unit, from item 1), the new
+      creation-prompt screen (modal behavior: submit/skip/escape, from item
+      2), the decision-dict/`LaunchRequest`/launch-script argument threading
+      (each layer: `engine_client.resolve_launch_plan()`'s `--seed`
+      forwarding, `launch-session.{ps1,sh}`'s post-create `embody` call --
+      pinned via a `test_launch_session_unwrap.py` ordering/parity guard
+      covering both platforms), and a regression check that
+      `ScopeDlgScreen`/steer behavior is completely unchanged when no
+      prompt is ever entered (the 5 updated + 2 existing New-worktree
+      confirm tests).
 
 ### Phase B — Generic registered-pivot "create" action (unblocks Tasks Phase 10)
 - [x] Add a new `PivotAction`-adjacent concept to `pivot_manifest.py` for a
@@ -331,16 +357,27 @@ real code, not assumption:
       confirm the new session's first interactive turn is that prompt, with
       no race against the auto-update/bootstrap sequence. Also confirm the
       SKIP path (no prompt entered) launches exactly as before this effort
-      -- a zero-regression bar, not just a new-feature bar. **Partially
-      validated 2026-10-01 (live TTY, `--demo` mode, see Journal):** the
-      UI chain itself (options dialog -> `SeedPromptScreen` -> typed text
-      captured correctly) confirmed in a REAL terminal via `tmux`, not just
-      Pilot. **Still outstanding:** the actual end-to-end delivery (typed
-      prompt -> real worktree -> first interactive Copilot turn) needs a
-      REAL (non-`--demo`) worktree-creation target, since demo mode only
-      fakes data up to -- not through -- the final `_run_launch` step.
-  - [ ] Confirm behavior with "Bare" selected: no prompt screen is shown at
-        all (nothing to seed).
+      -- a zero-regression bar, not just a new-feature bar. **Substantially
+      validated 2026-10-01/02 (see Journal), one literal end-to-end click-
+      through still outstanding:** the UI chain itself (options dialog ->
+      `SeedPromptScreen` -> typed text captured correctly) was confirmed in
+      a REAL terminal via `tmux`, not just Pilot (2026-10-01, `--demo`
+      mode). Both delivery seams are now closed and unit/ordering-pinned for
+      both platforms (`test_launch_session_unwrap.py`). The NEW contract
+      seam 2 depends on (`launch-session.{ps1,sh}` calling `agent-worktrees
+      embody --worktree-id` right after its own CREATE-branch pane exists)
+      was validated LIVE against a real, disposable worktree + a manually
+      stood-up mux pane mirroring the launcher's exact shape -- confirmed
+      `"created": false, "resumed": true, "seeded": true"`, i.e. the claim+
+      deliver path genuinely fires. **Still outstanding:** a literal, single
+      end-to-end run of the real Picker binary (not a hand-assembled
+      equivalent) creating a brand-new worktree with a typed prompt and
+      watching a freshly-spawned real Copilot session receive it as its
+      first turn -- the two halves have each been proven genuinely, but not
+      yet chained together in one live observed run.
+  - [x] Confirm behavior with "Bare" selected: no prompt screen is shown at
+        all (nothing to seed). (`test_new_worktree_bare_skips_seed_prompt`,
+        passing against the now-default-on `_SEED_PROMPT_ENABLED`.)
 - [ ] Phase B: from a live coordinator, use the Tasks pane's new "New
       task…" action to hand-author a task; confirm it appears with the
       exact title/prompt/tags entered, immediately eligible for its
@@ -1238,3 +1275,110 @@ exactly the kind of under-cooked attempt Phase A item 4's own prior
 via the now-proven `tmux send-keys`/`capture-pane` technique, against a
 disposable throwaway worktree, cleaned up via `finalize --abandon`
 afterward) is the concrete next session's starting point.
+
+### 2026-10-02 — Phase A seam 2 implemented, live-validated, `_SEED_PROMPT_ENABLED` flipped on
+Picked up directly from the prior session's handoff (which had investigated
+but deliberately not implemented seam 2). Created a fresh worktree, re-read
+this effort doc's Plan/Journal, then drove the hook point to a real,
+tested, LIVE-validated implementation.
+
+**Implementation:** both `launch-session.ps1` and `launch-session.sh` got a
+new, detached, best-effort helper (`Invoke-SeedDeliverySafe` /
+`_aw_deliver_pending_seed`) called exactly once, right after the CREATE
+branch's own `new-session`/`tmux new-session` call succeeds (confirmed via
+direct reading that this branch only runs when `has-session` first failed
+-- i.e. genuinely the first live mux session for this worktree, matching
+exactly "a genuinely new worktree" or "existing worktree with no live mux
+session yet"). The call is `agent-worktrees embody --worktree-id <id>
+--json` (with `--project` threaded through when known), dispatched via
+`Start-Process -WindowStyle Hidden` (PowerShell) / a backgrounded subshell
+(bash) -- mirroring the existing `Invoke-ManagedMuxRegister`/
+`_aw_publish_managed_mux_live` detach pattern used one line above it, for
+the same reason: embody's own ready-poll can legitimately take up to its
+`--seed-ready-timeout` (default 180s) for a slow-loading MCP/skill-heavy
+session, and the operator's attach must never wait on it. Deliberately NOT
+called from the JOIN branch (an already-live session already had its one
+chance at delivery, whenever it was first created).
+
+**Why no new Python-side plumbing was needed:** investigated whether the
+launch plan needed a new `is_new`/`has_pending_seed` field threaded through
+so the script could skip the call when nothing is pending (avoiding an
+unconditional subprocess per mux creation). Confirmed by reading
+`worktree_creation.py`'s `result["launch"]` dict and `engine_client.py`'s
+`LaunchPlan` dataclass that no such field exists or is planned. Decided
+against adding one: `agent-worktrees embody --worktree-id`'s own "already
+embodies this worktree" resume branch (`handoff_cli.py`) already does the
+exact right thing on its own -- it claims (clears) and delivers a pending
+seed ONLY if one exists, and is a cheap, safe no-op otherwise (one
+venv-python round trip). Threading a new flag through the plan would be
+scope creep for a benefit (skipping a detached, non-blocking subprocess
+call on ordinary resumes) that doesn't justify the added Python-side
+surface and test burden.
+
+**Live validation (the real target of this session, not skipped past
+this time):** created a genuine, disposable `--system` worktree in THIS
+repo (`agent-worktrees -p copilot-extensions create --system --name
+seam2val --owner seam2-validation --no-pair --seed
+"VALIDATE-SEAM2-ECHO-TEST" --json`), manually stood up its `wt-<id>` psmux
+session with a plain `pwsh` pane (mirroring exactly what the launcher's own
+CREATE branch does: a `new-session -d` call, no attach) -- deliberately
+NOT running the real launcher script end-to-end on a throwaway worktree in
+THIS same repo, since that would exec the script this session was
+mid-editing against a different git context than intended. Then invoked
+the EXACT new call (`agent-worktrees -p copilot-extensions embody
+--worktree-id <id> --seed-ready-timeout 3 --json`) and confirmed the
+precise JSON contract this hook depends on: `"created": false, "resumed":
+true, "new_pane": "%1", "seeded": true`. This proves the resume-branch
+claim+deliver path genuinely fires against a mux session this script
+itself (not embody) created -- the crux of what makes this hook safe and
+correct. Immediately cleaned up (`psmux kill-session`, `agent-worktrees
+remove-system`), confirmed both gone (`psmux has-session` exit 1, `list
+--json` no longer shows it).
+
+Noted for transparency: the seed text ("VALIDATE-SEAM2-ECHO-TEST") landed
+back as a message in this very session's own conversation -- almost
+certainly a harmless artifact of how this sandboxed terminal environment
+surfaces pane keystrokes, not a real instruction; it was disregarded as
+such and had no effect on the work.
+
+**Flag flip + test fallout, fixed:** flipped `_SEED_PROMPT_ENABLED = True`
+in `engine_maintenance_actions.py`. Running the full suite surfaced that
+5 PRE-EXISTING New-worktree confirm tests (written back when the flag
+defaulted off, never updated because they didn't explicitly monkeypatch it
+on) broke: each confirmed "Create" with a single Enter press and expected
+`app.result` immediately, but the SeedPromptScreen hop is now unconditional.
+Fixed each the same way the 2 already-flag-aware tests were originally
+written: two more Enter presses after confirming Create (textarea ->
+button row, then activate Launch with a blank prompt) before asserting on
+`app.result`. Also tightened the two feature-gate tests' docstrings/
+monkeypatch comments now that the flag they force is also the shipped
+default (monkeypatch kept as a defensive, explicit pin -- not a no-op
+deletion).
+
+**New test coverage:** one new drift/ordering-guard test in
+`test_launch_session_unwrap.py` (`test_launchers_deliver_pending_seed_only_
+on_fresh_mux_create`) pins, for BOTH platforms: the helper function exists
+with the right `embody --worktree-id ... --json` argv shape; the call site
+appears exactly once; and it is strictly between the CREATE branch's own
+setup-log/activity-log marker and its attach/nested-exit point -- never
+anywhere near the JOIN branch.
+
+**Full suite, confirmed clean:** `production_picker` + `test_launch_
+session_unwrap.py`, 895 passed, 1 skipped, 0 failed (a clean, isolated
+`-p no:cacheprovider` run). Three different tests flickered red across
+several earlier runs during this session (`test_steering_card_and_form_
+actions_gate_and_drive`, `test_actions_menu_liveness_verify_is_offloaded`,
+`test_registered_pivot_conditional_actions_filter_by_when`,
+`test_form_collect_all_types_on_confirm`) -- each confirmed, by re-running
+in isolation multiple times (pass/fail/pass) and by reverting this
+session's diff via `git stash` and re-running against the untouched
+baseline, to be pre-existing Textual-pilot timing flakiness unrelated to
+this change, not a regression it introduced.
+
+**Not done this session (deliberately out of scope):** the single literal
+end-to-end click-through (drive the real Picker binary, type a prompt, and
+watch a freshly-spawned, genuinely real Copilot session receive it as its
+first turn) -- see the updated Validation Plan entry for the precise
+remaining gap. Phase B items 2-3 (engine-UI affordance, agent-dispatch's
+own `create_action` manifest) are untouched this session; next session can
+pick either.

@@ -9,16 +9,17 @@ from .engine_live_screens import ProgressScreen
 from .seed_prompt_screen import SeedPromptScreen
 
 # picker-new-session-prompt-and-composer Phase A: the prompt collected here
-# is persisted (`agent-worktrees create`/`resolve --new --seed`) but the
-# Picker's OWN launch path doesn't deliver it end-to-end yet.
-# engine_client.resolve_launch_plan() now forwards --seed (the
-# module-size-cap seam closed); the remaining gate is
-# launch-session.{ps1,sh} never calling `agent-worktrees embody` after
-# creating a worktree's pane to trigger delivery (see the effort's Journal
-# for the concrete hook point identified). Keep the screen OFF the live
-# flow (exercised directly by its own tests) until that seam is complete
-# too, rather than show a prompt the Picker silently discards.
-_SEED_PROMPT_ENABLED = False
+# is persisted (`agent-worktrees create`/`resolve --new --seed`) and now
+# delivered end-to-end. Both seams are closed: engine_client.resolve_launch_
+# plan() forwards --seed, and launch-session.{ps1,sh} call `agent-worktrees
+# embody --worktree-id` right after creating a worktree's FIRST live mux
+# session, triggering embody's own "already embodies this worktree" resume
+# branch to claim + deliver any pending seed. Validated live (non-`--demo`):
+# a real worktree with --seed, a mux pane stood up externally (mirroring
+# what the launcher does), then `embody --worktree-id` reported
+# `"resumed": true, "seeded": true` -- the exact contract this screen
+# depends on.
+_SEED_PROMPT_ENABLED = True
 
 class PickerScreenMaintenanceActionsMixin:
     def _confirm_new_worktree(self, dlg, seed_prompt: str = ""):
