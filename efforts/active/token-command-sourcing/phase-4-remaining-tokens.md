@@ -97,6 +97,27 @@ risk profiles:
   `AGENT_DISPATCH_TOKEN_COMMAND`. Add it there too (lines ~161-164 is where
   the tuple is consumed) — this is distinct from the `peer-launch` sync
   above, not covered by it.
+- **A third, genuinely separate translation site: the detached waiter's
+  `--shared` re-exec.** `execution_cli.py:_spawn_detached_waiter()`
+  (`:108-123`) rewrites a `--shared` invocation for its detached child by
+  translating `AGENT_DISPATCH_SHARED_URL` → `AGENT_DISPATCH_URL` and
+  copying `AGENT_DISPATCH_SHARED_TOKEN`/`AGENT_DISPATCH_SHARED_CONTROL_TOKEN`
+  → `AGENT_DISPATCH_TOKEN`/`AGENT_DISPATCH_CONTROL_TOKEN` in the re-exec'd
+  env — but only the raw values, never the `_COMMAND` variants. If an
+  operator configures only `AGENT_DISPATCH_SHARED_TOKEN_COMMAND` (no raw
+  shared token), the detached child gets no matching local `_COMMAND` var,
+  and if a stale local `AGENT_DISPATCH_TOKEN` happens to already be present
+  in the parent's environment (inherited from elsewhere), the child
+  silently uses that stale value instead. Fix: add the matching `_COMMAND`
+  translation alongside each existing raw-value translation —
+  `AGENT_DISPATCH_SHARED_TOKEN_COMMAND` → `AGENT_DISPATCH_TOKEN_COMMAND` and
+  `AGENT_DISPATCH_SHARED_CONTROL_TOKEN_COMMAND` →
+  `AGENT_DISPATCH_CONTROL_TOKEN_COMMAND` — and, when only the shared
+  `_COMMAND` form is set (no raw shared token), explicitly clear any
+  inherited local `AGENT_DISPATCH_TOKEN`/`AGENT_DISPATCH_CONTROL_TOKEN` from
+  `env` so a stale direct value can never silently win over the intended
+  command-sourced one. Add a dedicated regression test exercising
+  `--shared --detach` with only the `_COMMAND` variants configured.
 
 ## agent-index: `AGENT_INDEX_ADO_TOKEN` and `AGENT_INDEX_GITHUB_TOKEN`
 

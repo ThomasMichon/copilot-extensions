@@ -209,7 +209,15 @@ corrections to the same original ask, not a change in intent.
       test lane in `.github/workflows/ci.yml` (~lines 345-356, alongside the
       existing `libs/agent-procutil/tests`, `libs/zdd/tests`, etc. entries) —
       a lib with tests that only ever run locally leaves regressions
-      unchecked in the gate that actually blocks merges.
+      unchecked in the gate that actually blocks merges. **This lane runs on
+      `ubuntu-latest` only** — since the Windows-safe parsing fix branches on
+      `os.name == "nt"`, the Windows code path is never actually exercised
+      there. Add a small dedicated `windows-latest` job (following the
+      existing narrow-scope pattern already used by `windows-hooks`/
+      `bootstrap-killswitch-powershell-5-1` — checkout, `setup-python`, `pip
+      install pytest`, then `python -m pytest -q libs/token-resolve/tests`
+      only) so the Windows branch has real CI coverage, not just local
+      developer-machine testing.
 
 ### Phase 2 — Migrate agent-dispatch onto the shared lib
 - [ ] Replace `agent-dispatch`'s own `resolve_control_token()` with a thin
@@ -257,8 +265,11 @@ working this phase). Summary:
       override) and at `build_app()`/`serve()`'s own default-`cfg` path;
       update the `no_cli_prompts.py` standalone helper; propagate through the
       canonical `libs/peer-launch/peer_launch.py` source (re-synced to all 8
-      consumer plugins, each needing its own changefile) and
-      `agent-containers`' separate `copilot_detach.py` allowlist.
+      consumer plugins, each needing its own changefile), `agent-containers`'
+      separate `copilot_detach.py` allowlist, and the detached waiter's
+      `--shared` re-exec translation (`execution_cli.py:_spawn_detached_waiter()`)
+      — including clearing a stale inherited local token when only the
+      shared `_COMMAND` form is configured.
 - [ ] `agent-index`: add `AGENT_INDEX_ADO_TOKEN_COMMAND` and
       `AGENT_INDEX_GITHUB_TOKEN_COMMAND`, each preserving its source's
       existing explicit-constructor-override precedence ahead of both the
@@ -478,3 +489,19 @@ conventions to mirror) to be elaborated once this plan clears review._
   extracted Phase 4's full per-call-site inventory and precedence design to
   `phase-4-remaining-tokens.md`, leaving a short summary + link in the main
   Plan (557 → 459 lines).
+
+### 2026-10-02 — Review round 9 (PR #4910)
+- Copilot review: four findings resolved (per-plugin changefiles, command-aware
+  config at all server entry points, Phase 4 extraction, PR description); one
+  new finding plus one lingering pre-existing gap. New: `execution_cli.py`'s
+  `_spawn_detached_waiter()` translates a `--shared` invocation's raw shared
+  tokens for its re-exec'd child but never the `_COMMAND` variants, so a
+  `_COMMAND`-only shared configuration leaves the detached child with no
+  matching local `_COMMAND` var (and risks a stale inherited local token
+  silently winning). Pre-existing: the CI shared-library lane only runs on
+  `ubuntu-latest`, so the Windows-safe parsing fix's `os.name == "nt"` branch
+  is never actually exercised by CI. Addressed: added the matching
+  `_COMMAND` translations (plus clearing a stale inherited local token) to
+  the detached-waiter sub-task, with a dedicated regression test requirement;
+  added a small dedicated `windows-latest` CI job (following the existing
+  narrow-scope `windows-hooks` pattern) to Phase 1.
