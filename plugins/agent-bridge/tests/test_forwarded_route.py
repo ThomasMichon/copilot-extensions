@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -440,6 +442,34 @@ def test_install_sh_forward_classifier(active, expected, tmp_path):
     assert _install_sh_active_is_forward(active, tmp_path) is expected
 
 
+@pytest.mark.skipif(os.name == "nt", reason="a POSIX bash environment is needed")
+@pytest.mark.parametrize(
+    ("active", "runtime", "expected"),
+    [
+        (FORWARD, True, True),
+        (BOUND_PIDLESS, True, False),
+        (BOUND_PIDLESS, False, True),  # nothing can read the table: fail closed
+    ],
+)
+def test_install_sh_forward_guard_uses_the_managed_runtime(active, runtime, expected, tmp_path):
+    """Before this run's slot exists, the guard still reads the route through the
+    managed runtime resolver; with no interpreter at all it fails closed."""
+    install_dir = tmp_path / "agent-bridge"
+    install_dir.mkdir()
+    (install_dir / "active.json").write_text(json.dumps({"active": active}))
+    text = _INSTALL_SH.read_text(encoding="utf-8")
+    fn = text.split("_active_is_forward() {", 1)[1].split("\n}\n\n_active_host", 1)[0]
+    rt = f"printf '%s' '{sys.executable}'" if runtime else "return 1"
+    script = (
+        f"INSTALL_DIR={install_dir!s}; VENV_DIR={tmp_path!s}/missing; PATH=/nonexistent\n"
+        f"_rt_python() {{ {rt}; }}\n_bootstrap_python() {{ return 1; }}\n"
+        "_active_is_forward() {" + fn + "\n}\n_active_is_forward\n"
+    )
+    bash = shutil.which("bash")
+    result = subprocess.run([bash, "-c", script], capture_output=True, text=True)
+    assert (result.returncode == 0) is expected
+
+
 def test_install_sh_update_checks_forward_before_lifecycle_actions():
     text = _INSTALL_SH.read_text(encoding="utf-8")
     helper = text.split("_update_lifecycle_drain_stop() {", 1)[1].split("\n}\n\n_update_lifecycle_start", 1)[0]
@@ -579,6 +609,7 @@ def test_install_sh_update_drain_is_pinned_to_the_validated_predecessor(signatur
         "_update_lifecycle_still_targets_predecessor() { return 0; }\n"
         '_drain_service() { echo "DRAIN=${AGENT_BRIDGE_BASE_URL:-}"; }\n'
         "do_stop() { :; }\n_warn() { echo \"WARN $*\"; }\n"
+        f"_route_python() {{ printf '%s' '{sys.executable}'; }}\n"
         "_pinned_base_url() {" + helpers + "\n}\n"
         f"_update_lifecycle_drain_stop '{signature}'\n"
         'echo "AFTER=${AGENT_BRIDGE_BASE_URL:-unset}"\n'

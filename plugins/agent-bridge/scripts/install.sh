@@ -683,11 +683,10 @@ _active_is_forward() {
     # forwards to (a venue launcher wrote it): marked "forwarded", or the older
     # launcher form with a port but no bind/daemon pid/generation. Never start a
     # local daemon over it -- it would take the route over from the host.
+    # Fails closed: a routing table no interpreter can read counts as a forward.
     local aj="$INSTALL_DIR/active.json" py=""
     [[ -f "$aj" ]] || return 1
-    py="$VENV_DIR/bin/python"
-    [[ -x "$py" ]] || py="$(command -v python3 || command -v python || true)"
-    [[ -n "$py" ]] || return 1
+    py="$(_route_python)" || return 0
     "$py" - "$aj" <<'PYEOF' 2>/dev/null
 import json, sys
 try:
@@ -703,12 +702,23 @@ sys.exit(0 if port > 0 and fwd else 1)
 PYEOF
 }
 
+_route_python() {
+    # An interpreter that can read active.json, resolved like the rest of this
+    # installer: the managed runtime (_rt_python), then the current venv link
+    # or PATH python (_bootstrap_python), then PATH directly. These guards run
+    # before this run's slot exists, so $VENV_DIR alone is not enough.
+    local py=""
+    py="$(_rt_python 2>/dev/null)" && [[ -x "$py" ]] && { printf '%s' "$py"; return 0; }
+    py="$(_bootstrap_python 2>/dev/null)" && [[ -n "$py" ]] && { printf '%s' "$py"; return 0; }
+    py="$(command -v python3 || command -v python || true)"
+    [[ -n "$py" ]] || return 1
+    printf '%s' "$py"
+}
+
 _active_signature() {
     local aj="$INSTALL_DIR/active.json" py=""
     [[ -f "$aj" ]] || return 1
-    py="$VENV_DIR/bin/python"
-    [[ -x "$py" ]] || py="$(command -v python3 || command -v python || true)"
-    [[ -n "$py" ]] || return 1
+    py="$(_route_python)" || return 1
     "$py" - "$aj" <<'PYEOF' 2>/dev/null
 import json, sys
 try:
@@ -761,9 +771,7 @@ _pinned_base_url() {
         echo "http://127.0.0.1:${PORT}"
         return 0
     fi
-    py="${VENV_DIR:-}/bin/python"
-    [[ -x "$py" ]] || py="$(command -v python3 || command -v python || true)"
-    [[ -n "$py" ]] || return 1
+    py="$(_route_python)" || return 1
     "$py" -c 'import json, sys
 a = json.loads(sys.argv[1])
 port = int(a["port"])
