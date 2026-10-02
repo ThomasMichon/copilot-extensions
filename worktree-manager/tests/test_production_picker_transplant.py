@@ -1695,7 +1695,12 @@ def test_resolve_for_forwards_none_seed_when_request_has_no_seed_prompt(monkeypa
     monkeypatch.setattr(engine_client, "resolve_launch_plan", _fake_resolve)
 
     entrypoint._resolve_for(request)
-    assert received.get("seed") is None
+    # Explicit `in` check: `.get("seed")` would also pass if `_resolve_for`
+    # silently stopped passing `seed` at all (dict.get returns None for a
+    # missing key too) -- this must prove the kwarg was passed as None, not
+    # merely absent.
+    assert "seed" in received
+    assert received["seed"] is None
 
 
 def test_normal_picker_command_uses_production_transplant(monkeypatch):

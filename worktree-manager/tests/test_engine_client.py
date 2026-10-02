@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 
 import pytest
 
@@ -1052,6 +1053,32 @@ def test_resolve_bare_resume_retry_preserves_seed(monkeypatch):
     # a seed dropped from that rebuild would silently vanish on exactly the
     # path meant to gracefully degrade one unsupported flag, not all of them.
     assert all("--seed" in c and "fix the thing" in c for c in calls)
+
+
+def test_importing_engine_execution_leg_directly_before_engine_client_works():
+    """A genuine cold-import-order regression test (Copilot review finding
+    on the lazy `__getattr__` re-export): every OTHER test in this suite
+    (including this file's own `from worktree_manager import engine_client`
+    at module scope) already imports `engine_client` first, so none of them
+    would catch a regression back to a top-level `from .engine_execution_leg
+    import ...` in `engine_client.py` -- that shape only deadlocks when
+    `engine_execution_leg` is the FIRST of the two modules actually
+    imported. A fresh subprocess is the only way to force that cold order;
+    an in-process import (even via `importlib.reload`) would still see
+    `engine_client` already fully initialized from this file's own import
+    at the top."""
+    script = (
+        "import worktree_manager.engine_execution_leg as eel\n"
+        "from worktree_manager import engine_client\n"
+        "assert engine_client.execution_leg_get is eel.execution_leg_get\n"
+        "print('OK')\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "OK" in proc.stdout
 
 
 def test_resolve_error_envelope_surfaced(monkeypatch):
