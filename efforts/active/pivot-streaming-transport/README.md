@@ -337,18 +337,24 @@ this phase) is considered.)_
   - [ ] A task whose lifecycle event moves it outside the board's current
         filter window (aged out of `--recent-mins`, no longer matching
         `--label`, past `--limit`) emits `removed`, not `delta`.
-  - [ ] **Activity-only mutations need their own event** (round-1 review
-        finding): `POST /tasks/{id}/activity` (`coordinator_tasks.py:781-788`)
-        calls `_guard()` with no `event_type`, so `queue.set_activity()`
-        publishes nothing to the bus today — yet `activity`/
-        `activity_updated_at` drive the board's `wt_live` liveness flag and
-        subtitle, currently refreshed on the existing 2s poll. Relaying only
-        today's lifecycle events would silently regress those fields to the
-        30-60s reconcile cadence. Add a `task.activity_updated` event
-        (`_guard(..., "task.activity_updated")`, same pattern every other
-        mutating endpoint already uses) so activity updates ride the fast
-        relay path too, rather than special-casing a slower cadence for
-        just this one field.
+  - [ ] **Every eventless mutation that drives a board-visible field needs an
+        event** (round-1 found `activity`; round-2 found a second one —
+        treat this as a general requirement, not a one-off patch):
+        `POST /tasks/{id}/activity` (`coordinator_tasks.py:781-788`) and
+        `POST /tasks/{id}/heartbeat` both call `_guard()` with no
+        `event_type`, so neither `queue.set_activity()` nor the heartbeat
+        handler publishes anything today — yet `activity`/
+        `activity_updated_at` drive `wt_live` and the subtitle, and the
+        heartbeat's `lease_expires_at`/`updated_at` drive row sort order
+        (`_build()`), all currently refreshed on the existing 2s poll.
+        Relaying only today's named lifecycle events would silently regress
+        every one of these fields to the 30-60s reconcile cadence. Add
+        `task.activity_updated` and `task.heartbeat` events (same
+        `_guard(..., event_type)` pattern every other mutating endpoint
+        already uses) so both ride the fast relay path — audit every other
+        `_guard()` call site in `coordinator_tasks.py` for the same gap
+        before considering 3a's event coverage complete, rather than fixing
+        findings one at a time as review happens to surface them.
   - [ ] **Reconnect-gap safety net (non-negotiable, not an optimization):**
         `EventBus.subscribe()` (`events.py`) is a live, in-memory, non-replay
         broadcast — an event published during a dropped/reconnecting SSE
@@ -360,6 +366,18 @@ this phase) is considered.)_
         not a return to 2s polling) that re-diffs the complete board against
         the tracked snapshot the same way `--subscribe` already does today,
         catching anything the event stream missed.
+  - [ ] **Serialize the reconcile against the live event stream** (round-2
+        review finding): running the background reconcile's fetch/diff/emit
+        concurrently with the SSE consumer risks a race — if the reconcile's
+        snapshot is fetched *before* a mutation, but an event for that same
+        mutation is applied *after* the fetch and *before* the reconcile's
+        diff/emit runs, the reconcile's stale view would re-emit the row's
+        *old* state, visibly reverting it in the Picker until the next
+        reconcile pass. Fixed by a single snapshot-owner lock: the reconcile
+        holds one serialization guard across its entire fetch → diff → emit
+        sequence; any event the SSE consumer receives while that guard is
+        held is queued and applied only after the reconcile releases it,
+        never interleaved mid-reconcile.
   - [ ] **Degradation is the existing code, not a new path:** if
         `stream_events()` raises (coordinator unreachable, non-2xx, stream
         error) at any point — including after already running for a while —
@@ -396,6 +414,62 @@ this phase) is considered.)_
         caller (the CLI's ordinary `--subscribe` poll tick) keeps the cheap
         unconditional cache read; only the bounded initial-scan retry path
         pays for a forced rescan, exactly the callers that need one.
+  - [ ] **A stalled or crashed refresh task must not serve a stale roster as
+        complete forever** (round-2 review finding): moving the scan to a
+        background task adds a new failure mode the current per-call scan
+        doesn't have — if that task exits or hangs after one successful
+        scan, every subsequent O(1) read keeps returning an
+        apparently-complete old snapshot, and neither `incomplete_namespaces`
+        nor the CLI's retry logic has any way to detect it (nothing failed;
+        nothing is marked incomplete). Fixed by two requirements together:
+        (a) the background task is **supervised** — a process-level
+        watchdog restarts it if it exits or stops making progress, the same
+        standard this codebase already holds every other long-lived loop
+        to; and (b) every cache entry carries a **freshness deadline**
+        (its own namespace's `last_refreshed_at` plus a bound meaningfully
+        larger than the normal refresh period, e.g. 3× the refresh
+        interval) — a namespace whose deadline has passed is reported as
+        incomplete in that response's `incomplete_namespaces`, the same
+        signal a genuinely-failing resolver already produces, rather than
+        silently served as current. This deadline mechanism is also what
+        makes an **old CLI** (one that never sends `force_refresh`, see the
+        protocol-gating bullet below) still eventually recover from a
+        genuinely stuck namespace: the deadline expiring forces the
+        response to mark it incomplete even without any client-side
+        force-refresh request at all.
+  - [ ] **A namespace that has never completed its first scan is not the
+        same as one with a last-known-good value** (round-2 review finding):
+        the last-known-good design above only covers a namespace that has
+        *previously* succeeded at least once. While the daemon is still
+        warming up, `GET /api/v1/agents` must not answer with an
+        empty/unpopulated cache for a namespace with no prior successful
+        scan and no incomplete marker — `_fetch_complete_initial_rows()`
+        would have nothing to detect and would publish that gap as
+        authoritative immediately. The cache therefore has an explicit
+        **uninitialized** state per namespace (distinct from
+        last-known-good-but-currently-failing), and any namespace still in
+        that state is *always* reported in `incomplete_namespaces` until its
+        first successful scan completes — never silently omitted as if it
+        had simply resolved to zero agents.
+  - [ ] **`force_refresh` is a protocol-gated capability, not an additive
+        response field** (round-2 review finding): unlike Phase 2's
+        `incomplete_namespaces` (an additive, tolerant-reader *response*
+        field correctly exempted from a version bump per `protocol.py`'s
+        own documented rule), `force_refresh` is a new **request** parameter
+        with real server behavior — exactly the case `protocol.py:13-19`
+        says must bump `HTTP_PROTOCOL_VERSION`. Bump it, add a
+        `FORCE_REFRESH_PROTOCOL_VERSION` constant (following the existing
+        `RELAY_INTERRUPT_PROTOCOL_VERSION`/`FAILED_ACP_HANDSHAKE_PROTOCOL_
+        VERSION` precedent in the same file), and gate the CLI's use of the
+        query param through `BridgeClient.daemon_supports()` so an old
+        daemon that doesn't understand the param is never sent it.
+        **Reverse skew** (an old CLI, with no knowledge of `force_refresh`
+        at all, talking to a new cached daemon) is covered by the freshness
+        deadline above, not by the protocol gate: an old CLI's retry loop
+        just repeats plain `GET`s, but once a stuck namespace's deadline
+        expires the daemon reports it incomplete on its own, giving the old
+        CLI's existing retry-on-incomplete logic something real to react to
+        without needing the new parameter at all.
 - [ ] **3c — agent-bridge roster-change SSE (deferred; do not start until 3b
       is shipped and measured insufficient):** add a genuine
       `GET /api/v1/agents/stream` daemon route that pushes `delta`/`removed`
@@ -980,3 +1054,62 @@ into the 3a/3b plan above:
 All four replied-to inline with the concrete fix and the exact README lines
 revised, per this effort's established review-response convention (state the
 fix, don't just acknowledge).
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 2: five more gaps in the 3a/3b detail, all fixed
+Round 2 reviewed the round-1 fixes themselves and found deeper detail gaps in
+exactly the two areas round 1 touched -- a pattern worth naming: a fix that
+names the right mechanism (an event, a cache) still needs its *own* failure
+modes worked through before it's actually complete.
+
+- **3a -- every eventless mutation, not just the one round 1 found.** Audited
+  `coordinator_tasks.py`'s other `_guard()` call sites past `activity`:
+  `POST /tasks/{id}/heartbeat` also publishes nothing, yet
+  `lease_expires_at`/`updated_at` (which `_build()` uses for row sort order)
+  update on every heartbeat -- the same 2s-poll-observes-it,
+  reconcile-only-sees-it gap. Fixed by adding `task.heartbeat` alongside
+  `task.activity_updated`, and generalized the requirement: audit *every*
+  `_guard()` call in that file for a missing `event_type` before considering
+  3a's event coverage complete, rather than patching one field at a time as
+  review happens to surface each.
+- **3a -- the reconcile and the live stream can race.** If the background
+  reconcile fetches its snapshot just before a mutation, but the matching
+  event is consumed and applied just after that fetch and before the
+  reconcile's own diff/emit runs, the reconcile's stale view re-emits the
+  row's *old* state, visibly reverting a just-applied update until the next
+  reconcile pass. Fixed by a single snapshot-owner lock: the reconcile holds
+  one serialization guard across its whole fetch-diff-emit sequence, and any
+  event arriving while it's held is queued, never interleaved mid-reconcile.
+- **3b -- a stalled background scan is a new, silent-forever failure mode.**
+  Moving the resolver scan off the request path means a dead or hung
+  refresh task would leave every read serving an apparently-complete old
+  snapshot with no signal anything is wrong -- the current per-request scan
+  has no equivalent failure shape. Fixed by requiring the background task be
+  supervised (restarted on exit/hang, same standard every other long-lived
+  loop in this codebase is already held to) plus a per-namespace freshness
+  deadline: a namespace whose last successful scan is older than the
+  deadline reports as incomplete, the same signal a genuinely-failing
+  resolver already produces.
+- **3b -- "last-known-good" doesn't cover "never scanned yet."** The
+  previous design's last-known-good retention only handles a namespace that
+  has *previously* succeeded; during daemon warm-up a namespace with no
+  prior scan at all would read as an empty-but-apparently-complete cache,
+  defeating `_fetch_complete_initial_rows()`'s detection entirely. Fixed by
+  an explicit uninitialized-per-namespace state, always reported incomplete
+  until that namespace's first successful scan.
+- **3b -- `force_refresh` needs the repo's own protocol-version gate, and an
+  explicit reverse-skew story.** `force_refresh` is a new request parameter
+  with real server behavior, not an additive response field -- exactly the
+  case `protocol.py`'s own documented rule requires a `HTTP_PROTOCOL_VERSION`
+  bump for (unlike Phase 2's key-presence approach, which was correctly
+  exempt as tolerant-reader-only). Fixed by requiring the bump plus a
+  `BridgeClient.daemon_supports()` gate, following the file's own
+  `RELAY_INTERRUPT_PROTOCOL_VERSION` precedent -- and, separately, specified
+  that an **old CLI talking to a new daemon** (one that never sends
+  `force_refresh` at all) is covered by the freshness-deadline mechanism
+  above, not by the protocol gate: the deadline expiring makes the daemon
+  self-report a stuck namespace as incomplete regardless of what the caller
+  requested, so the old CLI's existing retry-on-incomplete logic still has
+  something real to react to.
+
+All five replied-to inline with the concrete fix and the exact README
+section revised, continuing the same review-response convention.
