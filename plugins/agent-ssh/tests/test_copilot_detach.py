@@ -674,6 +674,22 @@ def test_copilot_config_cli_refuses_corrupt_existing_file(tmp_path: Path, monkey
     assert config.read_text(encoding="utf-8") == '{"hosts": {'
 
 
+@pytest.mark.parametrize("action", ["set", "list"])
+def test_copilot_config_cli_reports_filesystem_errors_as_failures(action, monkeypatch, capsys):
+    """A read-only home (or any other OSError) is a [FAIL] result, not a traceback."""
+    def _denied(*_a, **_k):
+        raise PermissionError("read-only file system")
+
+    monkeypatch.setattr(detach, "set_host_workspace", _denied)
+    monkeypatch.setattr(detach, "_load_copilot_config", _denied)
+    argv = ["copilot-config", action]
+    if action == "set":
+        argv += ["devbox", "--workspace", "/workspaces/new"]
+
+    assert main(argv) == 2
+    assert "[FAIL] read-only file system" in capsys.readouterr().err
+
+
 def test_missing_workspace_error_names_configuration_options(monkeypatch):
     monkeypatch.setattr(detach, "_workspace_from_host_config", lambda target: None)
 

@@ -194,7 +194,7 @@ def _cmd_copilot_config(args: argparse.Namespace) -> int:
     if args.action == "set":
         try:
             path = copilot_detach.set_host_workspace(args.target, args.workspace)
-        except ValueError as exc:
+        except (ValueError, OSError) as exc:
             print(f"[FAIL] {exc}", file=sys.stderr)
             return 2
         print(f"[OK] set {args.target} workspace to {args.workspace} in {path}")
@@ -202,7 +202,7 @@ def _cmd_copilot_config(args: argparse.Namespace) -> int:
 
     try:
         raw = copilot_detach._load_copilot_config()
-    except copilot_detach.CopilotConfigError as exc:
+    except (copilot_detach.CopilotConfigError, OSError) as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)
         return 2
     hosts = raw.get("hosts") if isinstance(raw, dict) else None
