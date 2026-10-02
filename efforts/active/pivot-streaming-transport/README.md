@@ -424,15 +424,23 @@ this phase) is considered.)_
         `POST /tasks/{id}/activity` and `POST /tasks/{id}/heartbeat`
         (`coordinator_tasks.py`, `_guard()` called with no `event_type`), the
         MCP heartbeat path's own `_mutate(..., None)` call (`mcp_http.py`),
-        **and the manual recovery entry points** — `POST /recover`
+        **the manual recovery entry points** — `POST /recover`
         (`coordinator_tasks.py:888-891`) and MCP `dispatch_recover`
         (`mcp_http.py:801-805`) both call `queue.reconcile_liveness()`
         directly with no event published at all, even though that call can
-        requeue, suspend, or dead-letter rows. Add an event — any
+        requeue, suspend, or dead-letter rows — **and `POST /tasks/{id}/
+        steer/take`** (`coordinator_tasks.py:870-881`), which calls
+        `queue.take_steer()` (`queue_steering.py:358-373`) updating
+        `lease_expires_at`/`last_seen_at`/`updated_at` — all board-sort- and
+        liveness-relevant (`_build()` sorts by `updated_at`,
+        `board_cli.py:329-332`) — with no event either. Add an event — any
         `event_type`, e.g. `task.activity_updated`/`task.heartbeat`/
-        `task.recovered` — to each of these specific call sites; no other
-        audit is needed once every mutation path publishes at least one
-        event, since the relay no longer depends on that event's contents.
+        `task.recovered`/`task.steer_taken` — to each of these specific
+        call sites; **treat this list itself as provisional, not closed**
+        — require the implementer to audit every `queue`-mutating route in
+        both `coordinator_tasks.py` and `mcp_http.py` for a missing
+        `event_type` before considering 3a's event coverage complete,
+        rather than trusting this enumerated list to be exhaustive.
   - [ ] **Time-derived fields change with no mutation and no event at all,
         and need their own refresh path, not a daemon round-trip — and this
         covers more than the task's own timestamps:** `_build()` expires
@@ -524,7 +532,8 @@ this phase) is considered.)_
       scan instead of paying for N. The CLI's `--subscribe` loop keeps its
       current shape (poll on `--interval`, diff, emit) — only what each tick
       costs changes.
-  - [ ] **Preserve the initial-scan recovery contract:**
+  - [ ] **Preserve the initial-scan recovery contract — including what
+        happens if every forced rescan still fails:**
         `_fetch_complete_initial_rows()` relies on each retried
         `GET /api/v1/agents` call actually re-scanning so an incomplete
         namespace has a real chance to resolve on a later attempt — a pure
@@ -543,6 +552,19 @@ this phase) is considered.)_
         caller (the CLI's ordinary `--subscribe` poll tick) keeps the cheap
         unconditional cache read; only the bounded initial-scan retry path
         pays for a forced rescan, exactly the callers that need one.
+        **Retry exhaustion itself must not silently become success:**
+        `_fetch_complete_initial_rows()` today returns whatever `rows` it
+        has after its bounded retries regardless of outcome, and the
+        `begin`/`row`/`done` envelope it emits carries no incomplete
+        marker at all — if every forced rescan still fails and no
+        last-known-good exists for a namespace, this design would still
+        publish that partial roster as the initial snapshot, exactly what
+        the uninitialized-state bullet below exists to prevent. The
+        exhausted-retry path must therefore either keep retrying under a
+        different, non-silent contract (e.g. block/poll further rather than
+        giving up and publishing) or the envelope itself must carry an
+        explicit partial-snapshot marker the Picker can show as "still
+        discovering" rather than a clean, falsely-complete roster.
   - [ ] **A stalled or crashed refresh task must not serve a stale roster as
         complete forever, and the recovery can't be merely passive:**
         moving the scan to a
@@ -575,6 +597,24 @@ this phase) is considered.)_
         instead of waiting to notice staleness) rather than the only path
         that can ever trigger a rescan, which is what actually preserves
         reverse skew.
+  - [ ] **The uninitialized state must exist before daemon startup even
+        discovers which namespaces exist at all, not only per already-known
+        namespace:** production startup serves a placeholder `AgentResolver`
+        with an **empty** namespace set while `topology_ready` is still
+        false (`app.py:388-393,471-484`; `service_start_cli.py:167-170`),
+        and the `agents` route reads it with no readiness gate at all
+        (`routes/agents.py:10-25`). The per-namespace uninitialized state
+        above only protects a namespace the cache already *knows about* —
+        with zero namespaces registered yet, there is nothing to mark
+        incomplete, so a subscriber during this window would receive a
+        clean, authoritative-looking **empty** roster. Fixed by a
+        **global** discovery-readiness flag, distinct from and checked
+        before any per-namespace state: while provider discovery itself
+        hasn't completed at least once, the route reports the whole
+        response as incomplete (not just an empty `incomplete_namespaces`
+        list), giving `_fetch_complete_initial_rows()`'s retry loop
+        something to react to even when there isn't yet a single namespace
+        to name.
   - [ ] **A namespace that has never completed its first scan is not the
         same as one with a last-known-good value:**
         the last-known-good design above only covers a namespace that has
@@ -1580,3 +1620,38 @@ Two findings:
   like `agent-dispatch watch`.
 
 Both replied-to inline.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 11: a third eventless mutation, retry exhaustion as silent success, and no gate before any namespace exists at all
+One new high-severity finding plus two previously-missed:
+
+- **New, high: `GET /api/v1/agents` has no gate at all before provider
+  discovery has ever completed once.** The per-namespace uninitialized
+  state only protects a namespace the cache already knows about; production
+  startup serves a placeholder resolver with an **empty** namespace set
+  while `topology_ready` is false, and the route reads it with no readiness
+  check — a subscriber in that window gets a clean, authoritative-looking
+  empty roster, since there's nothing to mark incomplete when there are no
+  namespaces yet. Fixed by a **global** discovery-readiness flag, checked
+  before any per-namespace state, so the whole response reports incomplete
+  during that window rather than an empty one reporting complete.
+- **Previously missed: `POST /tasks/{id}/steer/take` is a third silent
+  mutation**, alongside activity/heartbeat/recover — it updates
+  `lease_expires_at`/`last_seen_at`/`updated_at` (board-sort-relevant) with
+  no event. Folded into the same requirement, and — since this is now the
+  *third* round an enumerated "complete" list of eventless mutations turned
+  out not to be — reframed the whole requirement as explicitly provisional:
+  require an audit of every `queue`-mutating route in both touched files,
+  not trust in the specific names listed.
+- **Previously missed: forced-rescan exhaustion can still silently become a
+  successful publish.** `_fetch_complete_initial_rows()` returns whatever
+  rows it has after its bounded retries regardless of outcome, with no
+  incomplete marker on the envelope at all — if every forced rescan
+  genuinely fails and there's no last-known-good, this design would still
+  publish that partial roster as the initial snapshot, exactly what the
+  uninitialized-state bullet exists to prevent. Required the exhausted-retry
+  path to either keep retrying under a different contract or carry an
+  explicit partial-snapshot marker, rather than defaulting to silent
+  success.
+
+All three replied-to inline (one new thread; two on previously-missed
+findings).
