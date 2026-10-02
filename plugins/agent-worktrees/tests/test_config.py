@@ -1533,7 +1533,7 @@ class TestInRepoConfigCommittedRefResolution:
 
         def slow_git(*args, timeout, **_kw):
             timeouts.append(timeout)
-            clock["t"] += timeout  # worst case: each launch uses all it's given
+            clock["t"] += timeout  # worst case: each launch uses all the time it is given
             if args[0] == "symbolic-ref":
                 return types.SimpleNamespace(returncode=0, stdout="refs/remotes/origin/main\n")
             if args[0] == "show-ref":
