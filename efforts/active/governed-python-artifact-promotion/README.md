@@ -136,24 +136,66 @@ answer against the actual repository/CI configuration:
   routinely pin versions a real governed feed doesn't carry yet; the
   resolver needs a seasoning/age constraint (or equivalent), tuned from
   Phase 1's measured lag.
-- **Trust root:** a digest sitting next to the artifact in the same mutable
-  store it describes doesn't authenticate anything; it needs to be rooted
-  in something an attacker can't co-replace with the artifact (e.g.
-  branch-protected committed metadata, or a signed attestation).
-- **Credential separation:** whatever trust root is chosen must be verified
-  against the *actual* promotion credential and branch-protection
-  configuration — a trust root undermined by the same credential that can
-  write the artifact store is not a trust root.
+- **Trust root -- resolved (2026-10-01):** `.github/workflows/validate-and-promote.yml`'s
+  `promote` job confirms "branch-protected committed metadata" does **not**
+  hold as a trust root here: `main` carries a zero-bypass PR-required
+  ruleset, but the candidate PR that lands on it is itself authored and
+  squash-merged by `APERTURE_RELEASE_TOKEN` (a fine-grained PAT scoped
+  Contents: Read/write + Pull requests: Read/write -- see that job's
+  `env.GH_TOKEN` and its surrounding comment block). Any digest committed
+  to `main` by this same pipeline is only as trustworthy as that one PAT --
+  an attacker (or bug) that can push the artifact can push the matching
+  digest too. The fix is to root trust in a signer this PAT does not
+  control: GitHub's native Artifact Attestations
+  (`actions/attest-build-provenance`, Sigstore-backed, keyless OIDC
+  signing). The signing identity is GitHub's own short-lived OIDC token for
+  that exact workflow run/job/ref (subject binds repo + workflow path +
+  ref), independently verifiable via `gh attestation verify` against
+  Sigstore's public transparency log -- not a value this repo's own commits
+  or `APERTURE_RELEASE_TOKEN` can produce. Neither `id-token:` nor any
+  `attest`/`sigstore`/`cosign` usage exists anywhere in `.github/workflows/`
+  today (confirmed absent in both `ci.yml` and `validate-and-promote.yml`),
+  so this is net-new infrastructure for Phase 2, not a reuse of an existing
+  mechanism.
+- **Credential separation -- resolved (2026-10-01):** confirmed against the
+  actual configuration (`validate-and-promote.yml` lines ~104-108 and
+  ~455-510): the `promote` job's `main-promotion` environment holds both
+  repo-write authority (`APERTURE_RELEASE_TOKEN`) and would be the natural
+  place to also build/publish artifacts -- that single job must **not**
+  be the one requesting the attestation's `id-token: write`. Phase 2 must
+  run artifact build + attestation signing in a job/step that does **not**
+  have `APERTURE_RELEASE_TOKEN` in scope (e.g. a separate job keyed only to
+  `needs.gate.outputs.sha`, with its own minimal `permissions: id-token:
+  write` and no `contents: write`), so that compromising the PAT does not
+  also grant the ability to forge a passing attestation, and vice versa.
+  This is the concrete form of "an independently constrained publisher
+  credential" named in the original finding.
 - **Build hermeticity:** open-ended build-system requirements (e.g.
   `setuptools>=83.0.0`) can produce different bytes for a nominally
   identical artifact identity across promotions; identity needs to account
-  for the resolved build-tool closure too.
-- **Vendored first-party libs:** covered by the complete first-party
-  closure in Phase 2 above, not resolved via any package index.
-- **Publication channel:** artifacts need a durable, deterministic
-  location consumers can fetch from without a separate discovery service
-  (e.g. a repository release mechanism) — the exact mechanism is a Phase 2
-  decision.
+  for the resolved build-tool closure too. _(Not yet resolved -- next in
+  queue.)_
+- **Vendored first-party libs -- resolved (2026-10-01):** `tools/materialize_main.py`
+  already enumerates exactly the set this effort needs. Its
+  `materialize_uv_editable_ref_into()` walks each consumer's
+  `[tool.uv.sources]` entries, materializes every referenced `libs/<lib>`
+  (recursing into a materialized lib's own nested `[tool.uv.sources]`
+  entries), and accumulates them in a `materialized_libs` set -- each
+  materialized `libs/<lib>/` carries its own untouched `pyproject.toml` and
+  is independently buildable as a normal wheel. Phase 2 should reuse this
+  exact enumeration (not re-derive it) as the authoritative per-plugin
+  artifact set: the plugin's own wheel plus one wheel per entry in
+  `materialized_libs`, each keyed by the same payload-hash + platform +
+  architecture + Python-ABI identity scheme.
+- **Publication channel -- resolved (2026-10-01):** GitHub Release assets,
+  confirmed consistent with an existing precedent already in this repo:
+  `ci.yml` (~line 636) already consumes a third-party dependency (`psmux`)
+  via a deterministic `.../releases/download/v<version>/<fixed-filename>`
+  URL. Phase 2 adopts the same shape for first-party artifacts: a
+  deterministic tag per promotion (`<plugin>-v<version>`) with fixed,
+  predictable asset filenames (one per platform/arch/ABI, plus one per
+  vendored lib wheel), requiring no separate discovery service and matching
+  a pattern this codebase already trusts.
 
 ## Validation Plan
 
@@ -181,7 +223,34 @@ _Pending Phase 1 spike evidence._
 
 ## Journal
 
-### 2026-10-01 — Kickoff and review
+### 2026-10-01 - Four Open Design Questions resolved concretely
+
+- Read `.github/workflows/validate-and-promote.yml`'s `promote` job in full
+  (the `main-promotion` environment, `APERTURE_RELEASE_TOKEN` scope and
+  comments, and the `release/promote-<run id>` branch + squash-merge flow),
+  `ci.yml`'s existing `psmux` GitHub Release consumption, and
+  `tools/materialize_main.py`'s `materialize_uv_editable_ref_into()` /
+  `materialized_libs` enumeration, per the Open Design Questions section's
+  own instruction to verify against the real configuration rather than
+  assume.
+- Resolved **trust root** and **credential separation** together: the
+  promotion PAT that can write `main` must not be the same credential that
+  signs/attests the published artifact; GitHub Artifact Attestations
+  (Sigstore/OIDC, `actions/attest-build-provenance`) is the concrete
+  mechanism, run from a job scoped to `id-token: write` only, separate from
+  the job holding `APERTURE_RELEASE_TOKEN`. Neither exists in this repo's
+  workflows yet -- confirmed net-new for Phase 2.
+- Resolved **vendored first-party libs**: reuse `materialize_main.py`'s
+  existing `materialized_libs` enumeration directly rather than re-deriving
+  which `libs/<lib>` trees need their own wheel.
+- Resolved **publication channel**: GitHub Release assets, validated against
+  the existing `psmux` download precedent in `ci.yml` rather than assumed
+  from scratch.
+- **Still open:** build hermeticity (next in queue -- needs each plugin's/
+  lib's resolved build-tool closure folded into artifact identity). Phase 1
+  spike (governed-feed-only install + timing baseline) has not started.
+
+### 2026-10-01 - Kickoff and review
 
 - Effort created after reconciling against existing work (agent-index
   client/server split already landed elsewhere; installer execution,
