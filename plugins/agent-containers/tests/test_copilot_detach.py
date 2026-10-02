@@ -483,6 +483,27 @@ def test_ensure_keeper_os_error_fails_launch_without_starting_session(seams, mon
 
 
 
+def test_a_no_relay_launch_keeps_the_shared_keepers_relay(tmp_path, monkeypatch):
+    """A later --no-relay session must not respawn the shared keeper without the
+    credential-relay forward an earlier session's hold still relies on."""
+    monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
+    monkeypatch.setattr(shared_forward_keeper, "pid_alive", lambda pid: pid == 100)
+    forward_keeper._STORE.write("repo-1", {
+        "keeper_protocol": 2, "pid": 100, "mux": "wt-anchor-repo", "venue_port": 41234,
+        "relay_port": 18080, "host_relay_port": 28080,
+        "holds": {"anchor-repo@repo-1": {"mux": "wt-anchor-repo", "updated_at": 1000.0}},
+    })
+    spawned = []
+    out = forward_keeper.ensure_running(
+        "repo-1", venue_port=41234, mux="wt-anchor-other", hold_id="other@repo-1",
+        relay_port=None, host_relay_port=None, popen=lambda *a, **k: spawned.append(a),
+    )
+    assert out["started"] is False and spawned == []
+    state = forward_keeper.read_state("repo-1")
+    assert (state["relay_port"], state["host_relay_port"]) == (18080, 28080)
+    assert set(state["holds"]) == {"anchor-repo@repo-1", "other@repo-1"}
+
+
 def test_forward_keeper_holds_share_one_container_forward(tmp_path, monkeypatch):
     monkeypatch.setattr(forward_keeper, "_STORE", shared_forward_keeper.KeeperStore(tmp_path))
     monkeypatch.setattr(shared_forward_keeper, "pid_alive", lambda pid: pid == 100)

@@ -138,6 +138,10 @@ def ensure_running(
             hold_id,
             mux,
         )
+        if not (relay_port and host_relay_port) and existing.get("relay_port") and existing.get("host_relay_port"):
+            # A --no-relay launch doesn't need the relay, but other holds on the
+            # shared keeper may: keep it rather than respawn the keeper without it.
+            relay_port, host_relay_port = int(existing["relay_port"]), int(existing["host_relay_port"])
         can_reuse = (
             existing.get("keeper_protocol") == holds.protocol
             and _STORE.alive(name)
