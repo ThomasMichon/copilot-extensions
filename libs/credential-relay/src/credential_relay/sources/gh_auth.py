@@ -63,7 +63,11 @@ class GhAuthSource:
         if not self.supports(action, fields):
             return None
         host = _normalize_host(fields.get("host"))
-        argv = ["gh", "auth", "token", "--hostname", host]
+        argv = ["gh", "auth", "token"]
+        # Pin the host only when the request names one or an account is bound;
+        # an unbound hostless request keeps gh's own GH_HOST/default behavior.
+        if self._account or fields.get("host"):
+            argv += ["--hostname", host]
         if self._account:
             argv += ["--user", self._account]
         try:

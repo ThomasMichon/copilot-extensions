@@ -632,6 +632,23 @@ class TestGhAuthSource:
         assert result is not None
         assert "token=gho_active" in result
         assert "username=" not in result
+        assert mock_exec.call_args[0] == ("gh", "auth", "token")
+
+    @pytest.mark.asyncio
+    async def test_get_github_token_without_account_pins_an_explicit_host(self):
+        source = GhAuthSource()
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"gho_active\n", b""))
+
+        with patch(
+            "credential_relay.sources.gh_auth"
+            ".asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=mock_proc,
+        ) as mock_exec:
+            await source.resolve("get-github-token", {"host": "github.com"})
+
         assert mock_exec.call_args[0] == (
             "gh", "auth", "token", "--hostname", "github.com",
         )

@@ -383,9 +383,28 @@ def run_github_credential_preflight(account: str | None = None) -> GithubCredent
     return asyncio.run(github_credential_preflight(account))
 
 
+def run_github_credential_doctor_checks() -> list[GithubCredentialPreflight]:
+    """One relay credential preflight per CodeSpace-serving account.
+
+    Bound/configured accounts are each checked; the active account is added
+    only when some CodeSpace operation still uses ambient ownership (or when
+    nothing is bound at all).
+    """
+    from . import gh_account
+
+    accounts, uses_ambient = codespace_scope_accounts()
+    targets: list[str | None] = list(accounts)
+    if uses_ambient or not targets:
+        active = gh_account.active_account()
+        if active not in targets:
+            targets.append(active)
+    return [run_github_credential_preflight(account) for account in targets]
+
+
 def emit_github_credential_doctor(result: GithubCredentialPreflight) -> None:
     if result.ok:
-        print("[OK] github.com credential relay preflight can produce a credential.")
+        who = f" for '{result.account}'" if result.account else ""
+        print(f"[OK] github.com credential relay preflight can produce a credential{who}.")
         return
     print("[github-credential] relay credential issue:", file=sys.stderr)
     print(

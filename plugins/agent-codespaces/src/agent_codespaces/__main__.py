@@ -2987,16 +2987,18 @@ def _require_codespace_scope(op: str) -> int | None:
 def _cmd_doctor(*, json_output: bool = False) -> int:
     """Check gh auth, relay credential readiness, and provider hygiene."""
     auth_findings = _gh_auth_preflight()
-    from .auth_preflight import emit_github_credential_doctor, run_github_credential_preflight
-    from .gh_account import active_account
+    from .auth_preflight import emit_github_credential_doctor, run_github_credential_doctor_checks
 
-    github_credential = run_github_credential_preflight(active_account())
+    github_credentials = run_github_credential_doctor_checks()
+    # Summary entry (back-compat): the first failing account's result, else the first.
+    github_credential = next((c for c in github_credentials if not c.ok), github_credentials[0])
     provider_reports = scan_config_providers()
     has_findings = bool(auth_findings or provider_reports.findings or not github_credential.ok)
 
     if json_output:
         print(json.dumps({"gh": {"ok": not auth_findings, "findings": auth_findings},
                           "github_credential": github_credential.to_dict(),
+                          "github_credentials": [c.to_dict() for c in github_credentials],
                           "plugin_manifests": provider_reports.active_plugins.to_dict(),
                           "config_d": provider_reports.config_d.to_dict()},
                          indent=2, sort_keys=True))
@@ -3009,7 +3011,8 @@ def _cmd_doctor(*, json_output: bool = False) -> int:
         for finding in auth_findings:
             print(f"  - {finding}", file=sys.stderr)
 
-    emit_github_credential_doctor(github_credential)
+    for credential in github_credentials:
+        emit_github_credential_doctor(credential)
 
     plugin_report = provider_reports.active_plugins
     print(f"[plugin-manifests] authority: {plugin_report.authority.value}")

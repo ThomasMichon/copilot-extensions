@@ -451,3 +451,46 @@ def test_doctor_reports_github_credential_issue(capsys):
     err = capsys.readouterr().err
     assert "github-credential-unavailable" in err
     assert "sign in" in err
+
+
+def test_doctor_checks_every_serving_account_not_only_the_active_one(capsys):
+    seen = []
+
+    async def _per_account(account=None):
+        seen.append(account)
+        if account == "bob":
+            return GithubCredentialPreflight(
+                ok=False, reason_code="github-credential-unavailable",
+                detail="no GCM entry for bob", remedy="sign in as bob", account="bob",
+            )
+        return GithubCredentialPreflight(ok=True, source="git-credential", account=account)
+
+    with patch.object(m, "_gh_auth_preflight", return_value=[]), \
+         patch.object(m, "scan_config_providers", return_value=_clean_provider_reports()), \
+         patch("agent_codespaces.auth_preflight.codespace_scope_accounts",
+               return_value=(("bob",), False)), \
+         patch("agent_codespaces.gh_account.active_account", return_value="alice"), \
+         patch("agent_codespaces.auth_preflight.github_credential_preflight", _per_account):
+        assert m._cmd_doctor() == 1
+    assert seen == ["bob"]  # ambient alice is not a serving account here
+    assert "no GCM entry for bob" in capsys.readouterr().err
+
+
+def test_doctor_adds_the_active_account_when_ambient_ownership_is_in_use(capsys):
+    seen = []
+
+    async def _ok(account=None):
+        seen.append(account)
+        return GithubCredentialPreflight(ok=True, source="git-credential", account=account)
+
+    with patch.object(m, "_gh_auth_preflight", return_value=[]), \
+         patch.object(m, "scan_config_providers", return_value=_clean_provider_reports()), \
+         patch("agent_codespaces.auth_preflight.codespace_scope_accounts",
+               return_value=(("bob",), True)), \
+         patch("agent_codespaces.gh_account.active_account", return_value="alice"), \
+         patch("agent_codespaces.auth_preflight.github_credential_preflight", _ok):
+        assert m._cmd_doctor() == 0
+    assert seen == ["bob", "alice"]
+    out = capsys.readouterr().out
+    assert "for 'bob'" in out and "for 'alice'" in out
+
