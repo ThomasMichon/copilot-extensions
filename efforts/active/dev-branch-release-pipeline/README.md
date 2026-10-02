@@ -289,11 +289,15 @@ Round 2 (operator's response to that evaluation):
     *promoted* payload + version look like) than mutable-dev-slot (iterate
     against the currently-deployed CLI with live, uncommitted code), so the
     two are complementary, not duplicative.
-- [ ] _(agent-recommended; not explicitly re-confirmed by the operator)_
+- [x] _(agent-recommended; not explicitly re-confirmed by the operator)_
       Confirm Copilot CLI's actual update-detection behavior empirically
       (version-string diff only, no semver range awareness) — do not assume;
       verify against a controlled scratch bump.
-- [ ] Draft CONTRIBUTING.md / AGENTS.md rewrite content in-repo as a doc
+  - **Resolved, 2026-10-02 (operator-confirmed) — same item as the
+    Validation Plan's duplicate entry below.** Closing both together:
+    operator confirmed Copilot CLI is functioning properly with respect to
+    updates in practice.
+- [x] Draft CONTRIBUTING.md / AGENTS.md rewrite content in-repo as a doc
       (not yet the live contract) describing the new contributor flow:
       changefile-only PRs, no manual version edits, no vendoring copies.
   - **Drafted:** [`contributing-draft.md`](contributing-draft.md) — a
@@ -303,6 +307,12 @@ Round 2 (operator's response to that evaluation):
     and an explicit list of what still has to land first (Phase 2/3, the
     canonical-libs restoration). Marked DRAFT/not-yet-authoritative; landing
     it as the live CONTRIBUTING.md/AGENTS.md replacement is a Phase 2 item.
+  - **Closed, 2026-10-02.** The live rewrite has since actually landed for
+    real: `CONTRIBUTING.md`'s "Migrating from the old `main`-targeting
+    flow" section (confirmed present on `dev` this session) covers the
+    changefile-only, no-manual-version-edit contributor flow this draft
+    anticipated. Checking off the drafting item now that its own
+    successor — the real landed doc — exists.
 - [x] Investigate and close the auto-updater coverage gap: enumerate which
       copilot-extensions plugins a harness worktree actually keeps current
       via `agent-worktrees update` (or equivalent), confirm whether
@@ -439,7 +449,7 @@ Round 2 (operator's response to that evaluation):
     the job runs unattended (but still report-only, per the note above).
     Walk-back criteria are Phase 6's job, not this one.
 
-- [ ] **(#3592)** Merge `validation-gate.yml` + `promote.yml` into one
+- [x] **(#3592)** Merge `validation-gate.yml` + `promote.yml` into one
       workflow (`validate-and-promote.yml`) with sequential jobs (`gate` ->
       `full`/`worktree-manager`/`guards-full-sweep` -> `promote`), passing the
       validated SHA via ordinary `needs.<job>.outputs` instead of the
@@ -673,9 +683,19 @@ Round 2 (operator's response to that evaluation):
     report-only default for the automatic trigger is therefore load-bearing,
     not just extra caution — do not flip it to `--push` until `dev` is
     genuinely the trunk everyone commits to (Phase 5).
-- [ ] Empirically confirm Copilot CLI's update-detection mechanism (version
+- [x] Empirically confirm Copilot CLI's update-detection mechanism (version
       string diff vs. semver-aware) before relying on assumptions about
       staged rollout.
+  - **Resolved, 2026-10-02 (operator-confirmed).** Operator confirmed
+    Copilot CLI is functioning properly with respect to updates in
+    practice — closing the remaining uncertainty this item flagged
+    (whether the CLI's own update-detection used a naive version-string
+    diff vs. real semver-aware comparison) on that basis rather than a
+    further isolated black-box test. This complements the
+    already-confirmed finding that `agent-worktrees`' own reconciliation
+    layer (`reconcile.py::_version_lt`/`_versions_equal`) independently
+    uses real semver-aware comparison via `packaging.Version`, with a
+    monotonic-never-downgrade guard.
 - [ ] _(downgraded, 2026-10-01 — see Journal)_ Simulate one full hotfix
       cycle end-to-end (fork LKG → patch → cherry-pick back) — no longer
       gating reliance on the mechanism, since forward-fix-and-promote is
@@ -2439,6 +2459,33 @@ already-merged rolling-queue mechanism absorbs rapid successive `dev`
 pushes by cancelling superseded queued runs rather than needing an
 explicit batching window. Closed the item with no batching rule added —
 the Phase 3 untriggered-by-schedule default stands unchanged.
+
+### 2026-10-02 — Closed the Copilot CLI update-detection item and swept 3 bookkeeping gaps
+
+Operator confirmed Copilot CLI is functioning properly with respect to
+updates in practice, closing the Validation Plan's update-detection item.
+While closing it, found and fixed its exact duplicate in Phase 1 (same
+question, never reconciled when the Validation Plan copy was added) —
+closed both together on the same operator confirmation. While sweeping
+for other stale checkboxes, found and fixed two more bookkeeping gaps:
+Phase 1's "draft CONTRIBUTING.md/AGENTS.md rewrite" item, whose own
+successor (the real landed CONTRIBUTING.md migration section) already
+exists but was never checked off; and Phase 3's "(#3592) merge
+validation-gate.yml + promote.yml" item, whose body already said "Done,
+2026-09-24/25" but the checkbox itself was never flipped.
+
+**Two items remain genuinely open, not bookkeeping — flagging rather than
+closing unilaterally:**
+
+- Phase 3: "Implement the validation gate (target 10-30 min; broader than
+  today's guard set)" — a dedicated, broader validation suite beyond the
+  existing guards/checks/smoke jobs was never built. The pipeline has run
+  successfully at real volume without it, but this is a genuine scope gap
+  in the original design, not something closed by subsequent work.
+- Phase 6: "Define success criteria for relaxing the admin-escalation
+  gate" — criteria were proposed (2026-10-01) and were already met on the
+  clean-streak data at proposal time, but still await the operator's
+  explicit confirm/reject; nothing about the gate itself has been acted on.
 
 
 
