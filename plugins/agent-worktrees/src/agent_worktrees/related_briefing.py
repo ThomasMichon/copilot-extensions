@@ -60,6 +60,7 @@ def render_briefing(
     resolution: related.Resolution,
     *,
     doc_relpath: str | None,
+    current_checkout_path: str | None = None,
 ) -> str:
     """Render the deterministic markdown skeleton for one related repo.
 
@@ -67,6 +68,13 @@ def render_briefing(
     ``explore`` prose (the same sentences ``related resolve`` prints) rather
     than inventing new wording -- this generator's job is composition and
     delivery, not a new source of truth for what those sentences say.
+
+    ``current_checkout_path``, when set, means this entry describes the
+    **same repo this session is already checked out in** (cwd-derived, not a
+    config fact). Resolved config can lag reality (e.g. a `locus.machines`
+    list that hasn't been updated to include this machine yet) -- without
+    this override a self-referential entry could flatly contradict the
+    session's own observable checkout, which is worse than merely stale.
     """
     name = entry.name
     lines = [f"# {name} -- generated operating guide", ""]
@@ -76,6 +84,16 @@ def render_briefing(
         "-- never hand-edit this file; it is recomputed every session and "
         "any edit is lost."
     )
+    if current_checkout_path:
+        lines.append("")
+        lines.append(
+            "> **This is the repository this session is currently working "
+            f"in** -- its checkout is at `{current_checkout_path}`. Some "
+            "facts below come from resolved config that may not yet list "
+            "this machine; trust your own checkout over a stale config fact "
+            "and report the drift to the operator rather than treating it "
+            "as unavailable."
+        )
     lines.append("")
     lines.append(f"- **Role:** {entry.role or '_(unset)_'}")
     ownership = related.effective_ownership(entry)
@@ -87,7 +105,8 @@ def render_briefing(
     lines.append(f"- **Locus:** {locus_desc}")
     lines.append(f"- **Delegate:** {resolution.delegate_via or 'none'}")
     lines.append(f"- **Editing model:** {resolution.editing_model or 'unknown'}")
-    if not resolution.available_here:
+    available_here = resolution.available_here or bool(current_checkout_path)
+    if not available_here:
         lines.append("- **Not available on this machine.**")
     if entry.summary:
         lines.append("")
@@ -97,20 +116,30 @@ def render_briefing(
     lines.append("")
     lines.append("## How to make a change")
     lines.append("")
-    if resolution.steps:
+    if current_checkout_path:
+        lines.append(
+            f"- You are already in this repo's checkout (`{current_checkout_path}`) "
+            "-- work here directly rather than provisioning another venue."
+        )
+    elif resolution.steps:
         for step in resolution.steps:
             lines.append(f"- {step}")
     else:
         lines.append(
             f"- Resolve the checkout with `agent-worktrees repos find {name}`."
         )
-    if resolution.notes:
+    notes = resolution.notes
+    if current_checkout_path:
+        # Suppress a stale "not checked out here" note that would otherwise
+        # contradict the self-identification callout above.
+        notes = [n for n in notes if "not checked out on" not in n.lower()]
+    if notes:
         lines.append("")
         lines.append("## Notes")
         lines.append("")
-        for note in resolution.notes:
+        for note in notes:
             lines.append(f"- {note}")
-    if resolution.explore:
+    if resolution.explore and not current_checkout_path:
         lines.append("")
         lines.append("## Exploring / reading the code")
         lines.append("")
@@ -225,6 +254,8 @@ def write_related_briefings(
         return []
 
     written: list[str] = []
+    current_repo_name = (getattr(record, "repo", "") or "").strip()
+    current_checkout_path = (getattr(record, "worktree_path", "") or cwd or "").strip()
     for entry in topology.related.values():
         safe = _safe_filename(entry.name)
         if not safe:
@@ -241,9 +272,13 @@ def write_related_briefings(
                 adopted=adopted,
                 base_repo=base_repo,
             )
+            is_current = bool(current_repo_name) and entry.name == current_repo_name
             doc_path = related.doc_abs_path(cwd, entry)
             doc_relpath = str(doc_path) if doc_path.is_file() else None
-            content = render_briefing(entry, resolution, doc_relpath=doc_relpath)
+            content = render_briefing(
+                entry, resolution, doc_relpath=doc_relpath,
+                current_checkout_path=(current_checkout_path if is_current else None),
+            )
             target = files_dir / f"{safe}.md"
             if _atomic_write(files_dir, target, content):
                 written.append(entry.name)

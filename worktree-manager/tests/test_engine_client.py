@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 
 import pytest
 
@@ -837,6 +838,28 @@ def test_resolve_new_sends_new_flag(monkeypatch):
     assert plan.is_exec
 
 
+def test_resolve_new_with_seed_forwards_seed_flag(monkeypatch):
+    def handler(cmd, kw):
+        assert "--new" in cmd
+        assert "--seed" in cmd
+        assert cmd[cmd.index("--seed") + 1] == "fix the thing"
+        return _fake_completed(cmd, stdout=json.dumps(_RESUME_PLAN))
+
+    _install_fake(monkeypatch, handler)
+    plan = ec.resolve_launch_plan("dotfiles", new=True, seed="fix the thing")
+    assert plan.is_exec
+
+
+def test_resolve_without_seed_omits_seed_flag(monkeypatch):
+    def handler(cmd, kw):
+        assert "--seed" not in cmd
+        return _fake_completed(cmd, stdout=json.dumps(_RESUME_PLAN))
+
+    _install_fake(monkeypatch, handler)
+    ec.resolve_launch_plan("dotfiles", new=True, seed=None)
+    ec.resolve_launch_plan("dotfiles", new=True, seed="")
+
+
 def test_resolve_base_sends_base_flag(monkeypatch):
     def handler(cmd, kw):
         assert "--base" in cmd
@@ -1009,6 +1032,53 @@ def test_resolve_bare_resume_skew_retries_without_flag(monkeypatch):
     assert plan.is_exec
     assert any("--bare-resume" in c for c in calls)
     assert any("--bare-resume" not in c for c in calls)
+
+
+def test_resolve_bare_resume_retry_preserves_seed(monkeypatch):
+    calls = []
+
+    def handler(cmd, kw):
+        calls.append(list(cmd))
+        if "--bare-resume" in cmd:
+            return _fake_completed(cmd, returncode=2,
+                                   stderr="unrecognized arguments: --bare-resume")
+        return _fake_completed(cmd, stdout=json.dumps(_RESUME_PLAN))
+
+    _install_fake(monkeypatch, handler)
+    plan = ec.resolve_launch_plan(
+        "dotfiles", worktree_id="x", bare_resume=True, seed="fix the thing")
+    assert plan.is_exec
+    # Both the original (rejected) attempt AND the degraded retry must carry
+    # --seed -- the retry rebuilds its own argv from the original kwargs, so
+    # a seed dropped from that rebuild would silently vanish on exactly the
+    # path meant to gracefully degrade one unsupported flag, not all of them.
+    assert all("--seed" in c and "fix the thing" in c for c in calls)
+
+
+def test_importing_engine_execution_leg_directly_before_engine_client_works():
+    """A genuine cold-import-order regression test for the lazy
+    `__getattr__` re-export: every OTHER test in this suite (including this
+    file's own `from worktree_manager import engine_client` at module
+    scope) already imports `engine_client` first, so none of them would
+    catch a regression back to a top-level `from .engine_execution_leg
+    import ...` in `engine_client.py` -- that shape only deadlocks when
+    `engine_execution_leg` is the FIRST of the two modules actually
+    imported. A fresh subprocess is the only way to force that cold order;
+    an in-process import (even via `importlib.reload`) would still see
+    `engine_client` already fully initialized from this file's own import
+    at the top."""
+    script = (
+        "import worktree_manager.engine_execution_leg as eel\n"
+        "from worktree_manager import engine_client\n"
+        "assert engine_client.execution_leg_get is eel.execution_leg_get\n"
+        "print('OK')\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "OK" in proc.stdout
 
 
 def test_resolve_error_envelope_surfaced(monkeypatch):

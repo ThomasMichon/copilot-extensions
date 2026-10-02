@@ -816,6 +816,21 @@ def cmd_register(args: argparse.Namespace) -> int:
     output.ok(f"Project '{project}' registered")
     print(f"  Config:  {config_path}")
     print(f"  Usage:   {project}")
+
+    # Best-effort: a related-repo entry for this project may exist (declared
+    # by the operator's bound knowledge repo), and adopting it here is exactly
+    # the "this repo is now present on this machine" moment that entry's
+    # locus.machines list should reflect -- see related_machine_presence.
+    try:
+        from . import related_machine_presence
+
+        reg_config = cfg.load_config(config_path)
+        related_machine_presence.record_local_presence(
+            reg_config, project, machine, cwd=str(repo_dir),
+        )
+    except Exception:
+        pass
+
     return 0
 
 

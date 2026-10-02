@@ -1206,6 +1206,7 @@ def _resolve_for(req) -> "tuple[object | None, int]":
             target_machine=getattr(req, "machine", None),
             target_environment=getattr(req, "environment", None),
             target_no_mux=getattr(req, "no_mux", False),
+            seed=getattr(req, "seed_prompt", None),
         )
     except EngineFeatureUnavailable as e:
         print(f"error: could not resolve a launch plan: {e}")
