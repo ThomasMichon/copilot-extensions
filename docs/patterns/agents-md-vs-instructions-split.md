@@ -79,8 +79,8 @@ For any paragraph of agent-facing guidance, ask:
    plugin's static `.github/instructions` projection -- naming the exact
    symptom and the command/skill/doc that resolves it -- not just a skill
    whose description happens to mention it. See
-   `efforts/active/ambient-guidance-navigability` (the audit that motivated
-   this question) and `customizing-copilot:reviewing-customizations`'
+   `efforts/2026/10/02 ambient-guidance-navigability` (the audit that
+   motivated this question) and `customizing-copilot:reviewing-customizations`'
    `troubleshooting-index.json` registry + coverage guard, which enforces
    that every category a plugin claims to own is actually backed by such a
    row.
@@ -138,7 +138,7 @@ leaving placement to each contributor's judgment call.
   worked PR-conduct precedent this pattern generalizes.
 - `ThomasMichon/copilot-extensions#2825` -- the tracking issue for the
   repo-wide audit this pattern's heuristic is meant to drive.
-- `efforts/active/ambient-guidance-navigability/README.md` -- the coverage
-  half of this question: a fail-closed registry + guard test proving every
-  claimed troubleshooting category actually has an ambient pointer row, not
-  just a skill trigger.
+- `efforts/2026/10/02 ambient-guidance-navigability/README.md` -- the
+  coverage half of this question: a fail-closed registry + guard test
+  proving every claimed troubleshooting category actually has an ambient
+  pointer row, not just a skill trigger.

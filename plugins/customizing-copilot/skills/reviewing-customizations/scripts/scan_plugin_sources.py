@@ -306,7 +306,7 @@ def _plugin_commit(footprint: Path) -> str:
     Deliberately never attempts to resolve a commit for a plain
     installed-plugins payload copy (no local git history to read there) --
     that remains a genuinely unsolved case (see
-    ``efforts/active/ambient-guidance-navigability``'s Journal), not
+    ``efforts/2026/10/02 ambient-guidance-navigability``'s Journal), not
     something to guess at. **Callers must only invoke this against a
     trusted-checkout footprint** (``controlled`` -- this reviewing repo's
     own tree -- or one resolved via the ``agent-worktrees-repo`` source
@@ -361,7 +361,7 @@ def resolve_pinned_commits(sources: list[PluginSource]) -> dict[str, str]:
     silently vacuously trusted. This is an honestly **partial** resolver: it
     closes the immutable-pin gap for self-hosted/directory-marketplace
     sources today, and does not invent an answer for externally-installed
-    ones (see ``efforts/active/ambient-guidance-navigability``'s tracked
+    ones (see ``efforts/2026/10/02 ambient-guidance-navigability``'s tracked
     follow-up, issue #3132, for that remaining half).
     """
     pinned: dict[str, str] = {}

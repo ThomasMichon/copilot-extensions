@@ -2,7 +2,7 @@
 lifecycle boundaries worktree-scoped-dynamic-guidance depends on: create,
 resume, and ``sessionStart`` (see ``test_hook_ipc.py`` for the sessionStart
 coverage). See ``docs/patterns/worktree-scoped-dynamic-guidance.md`` and
-``efforts/active/ambient-guidance-navigability`` Phase 7.
+``efforts/2026/10/02 ambient-guidance-navigability`` Phase 7.
 
 This module invokes customizing-copilot's own declared, versioned
 ``render-local-cache`` CLI (``manage-instruction-projections.py``) across a

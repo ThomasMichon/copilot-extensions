@@ -206,7 +206,7 @@ attempt a privileged sync merely to see current guidance.
 `instruction_projections.render_local_cache()` and
 `local_sibling_destination()` are the reference implementation of this
 pattern's render side, landed as part of
-`efforts/active/ambient-guidance-navigability` Phase 7
+`efforts/2026/10/02 ambient-guidance-navigability` Phase 7
 ([ThomasMichon/copilot-extensions#4674](https://github.com/ThomasMichon/copilot-extensions/issues/4674)).
 The per-file "prefer local" preamble (step 2), the repo-wide catch-all
 projection (step 3, opted out of its own local cache per step 1's
@@ -225,6 +225,6 @@ catch-all each independently drive an agent to the fresher
 - [`session-scoped-dynamic-guidance.md`](session-scoped-dynamic-guidance.md)
   -- the sibling pattern for per-session computed facts; read both before
   choosing where new dynamic content belongs.
-- `efforts/active/ambient-guidance-navigability/README.md` (Phase 2 --
+- `efforts/2026/10/02 ambient-guidance-navigability/README.md` (Phase 2 --
   `projection-reflect`, the sync mechanism this pattern's checked-in floor
   depends on; Phase 7 -- this pattern's own implementation)

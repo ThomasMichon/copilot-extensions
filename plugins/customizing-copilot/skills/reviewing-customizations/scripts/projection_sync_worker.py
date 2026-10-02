@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """projection-sync-worker: the one-shot deterministic sync tool.
 
-Phase 2 of ``efforts/active/ambient-guidance-navigability``: the "given a
+Phase 2 of ``efforts/2026/10/02 ambient-guidance-navigability``: the "given a
 consumer repo, do everything a scheduled/non-agentic run needs to decide in
 one pass" tool the Plan calls for. ``instruction_projections.py`` provides
 the mechanism (render/write/lock via ``sync_repository``, validate/compare

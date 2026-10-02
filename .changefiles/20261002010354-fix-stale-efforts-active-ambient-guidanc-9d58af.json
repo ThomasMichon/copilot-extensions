@@ -1,0 +1,13 @@
+{
+  "comment": "Fix stale efforts/active/ambient-guidance-navigability path references after the effort's archive move",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}
