@@ -2281,3 +2281,17 @@ matching the stricter check `agent-containers`' own `lifecycle.py`
 already applies. Added a regression test for a `none`-mode container
 reporting an unexpected extra network; all tests, module-size, and docs
 checks still pass.
+
+### 2026-10-03 — Review round 4 (PR #5095): none-mode key-only match, doc polish
+The `none`-mode comparison from round 3 was itself still too strict: it
+compared the WHOLE `EndpointSettings` value to `{}`, but a legitimate
+`--network none` container's "none" entry still carries real (non-empty)
+endpoint metadata -- only the NETWORK KEY is the actual isolation
+invariant, matching `agent-containers`' own check exactly. Fixed to
+compare `set(networks.keys())` against `{"none"}` instead of the whole
+dict. Also documented `--reinstall`'s normalization in the module's own
+passthrough-contract docstring (a previously-missed finding) and added
+a regression test for a `none`-mode container with real endpoint
+metadata attached. All tests, module-size, and docs-consistency checks
+still pass; a fresh Docker-backed end-to-end run confirmed the fix
+doesn't disturb the common case.

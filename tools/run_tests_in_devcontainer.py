@@ -24,8 +24,9 @@ Usage::
 
 Everything after the recognized flags below (or a literal ``--`` anywhere in
 the remaining arguments) passes through to ``tools/run-plugin-tests.py``
-inside the container, with one normalization (``--base`` rewritten to its
-resolved SHA) and three exceptions: ``--allow-host-state`` is rejected,
+inside the container, with two normalizations (``--base`` rewritten to its
+resolved SHA; ``--reinstall`` applied to the prep pass then stripped from
+the real pass) and three exceptions: ``--allow-host-state`` is rejected,
 ``--admission-wait``'s host-wide lease loses cross-process coordination
 in-container, and an over-ceiling resource-limit override is rejected.
 """
@@ -178,12 +179,11 @@ def _devcontainer_exe() -> str:
 
 
 def _per_instance_config(instance_label: str) -> tuple[Path, str]:
-    """Write a copy of ``DEVCONTAINER_CONFIG`` with its workspace volume
-    name made unique to this invocation, so each run gets its own fresh
-    volume instead of reusing one fixed, shared one. Returns the temp
-    config path and volume name, so the caller can remove that volume
-    at teardown. Written as literally ``devcontainer.json`` -- the
-    devcontainer CLI rejects any other ``--config`` basename."""
+    """Write a copy of ``DEVCONTAINER_CONFIG`` with its workspace volume name made unique
+    to this invocation, so each run gets its own fresh volume instead of reusing one fixed,
+    shared one. Returns the temp config path and volume name, so the caller can remove that
+    volume at teardown. Written as literally ``devcontainer.json`` -- the devcontainer CLI
+    rejects any other ``--config`` basename."""
     volume_name = f"{BASE_VOLUME_NAME}-{instance_label}"
     text = DEVCONTAINER_CONFIG.read_text()
     if BASE_VOLUME_NAME not in text:

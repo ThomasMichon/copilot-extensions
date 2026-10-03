@@ -126,15 +126,17 @@ def disconnect_container_networks(container_id: str) -> None:
         # `NetworkMode` reflects CREATION-time config, not live state -- a
         # later `docker network connect` can attach a real network to a
         # "none"-mode container while this field stays frozen at "none".
-        # Docker's own real shape for an untouched --network none
-        # container is exactly one entry keyed "none" -> {}; anything
-        # else means a network was attached after creation and must not
-        # be silently trusted as still isolated.
-        if networks != {"none": {}}:
+        # Only the NETWORK KEY is the isolation invariant (matching
+        # `agent-containers`' own restricted-fleet check) -- a legitimate
+        # `--network none` container's single "none" entry still carries
+        # real `EndpointSettings` metadata, so comparing the whole value
+        # to `{}` would wrongly reject it.
+        attached = set(networks.keys())
+        if attached != {"none"}:
             raise SystemExit(
                 f"container {container_id} reports network mode 'none' but its attached "
-                f"networks are {networks!r}, not the expected {{'none': {{}}}} -- refusing "
-                "to assume it is still isolated."
+                f"networks are {sorted(attached)!r}, not just 'none' -- refusing to assume "
+                "it is still isolated."
             )
         return
     if not networks:

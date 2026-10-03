@@ -1587,6 +1587,21 @@ def test_disconnect_container_networks_no_op_for_none_mode() -> None:
     assert run.call_count == 1  # only the inspect call -- nothing to disconnect
 
 
+def test_disconnect_container_networks_no_op_for_none_mode_with_real_endpoint_metadata() -> None:
+    # Only the NETWORK KEY is the isolation invariant -- a legitimate
+    # `--network none` container's single "none" entry still carries real
+    # (non-empty) EndpointSettings metadata; comparing the whole value to
+    # `{}` would wrongly reject this common, safe shape.
+    inspect_result = mock.Mock(
+        returncode=0,
+        stdout='none\t{"none": {"NetworkID": "abc", "EndpointID": "def"}}',
+        stderr="",
+    )
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=inspect_result) as run:
+        wrapper._net_scope.disconnect_container_networks("abc123")
+    assert run.call_count == 1
+
+
 def test_disconnect_container_networks_fails_closed_for_none_mode_with_extra_network() -> None:
     # NetworkMode reflects CREATION-time config, not live state -- a later
     # `docker network connect` can attach a real network to a
@@ -1598,7 +1613,7 @@ def test_disconnect_container_networks_fails_closed_for_none_mode_with_extra_net
         try:
             wrapper._net_scope.disconnect_container_networks("abc123")
         except SystemExit as exc:
-            assert "not the expected" in str(exc)
+            assert "not just 'none'" in str(exc)
         else:
             raise AssertionError("expected SystemExit")
 
