@@ -72,12 +72,17 @@ BASE_VOLUME_NAME = "copilot-extensions-test-isolation-ws"
 # surfaces). The checkout snapshot plus a fresh venv comfortably fits.
 WORKSPACE_VOLUME_SIZE = "4g"
 
-# Hard ceilings this wrapper's OWN container enforces (kept in sync by
-# hand with devcontainer.json's `runArgs`/tmpfs `size=`) -- see
+# Hard ceilings this wrapper's OWN container enforces (kept in sync with
+# devcontainer.json's `runArgs`/tmpfs `size=`), plus reserved overhead
+# and `run-plugin-tests.py`'s own argparse defaults -- all consumed by
 # `_reject_resource_overrides_exceeding_container_ceilings`.
 _CONTAINER_MEMORY_MB_CEILING = 14 * 1024
 _CONTAINER_PIDS_CEILING = 512
 _CONTAINER_TMP_MB_CEILING = 6144
+_CONTAINER_OVERHEAD_MB = 512
+_CONTAINER_PIDS_RESERVED = 32
+_RUNNER_DEFAULT_MEMORY_MB = 4096
+_RUNNER_DEFAULT_TEMP_MB = 2048
 
 # Excluded from the point-in-time copy made into the container even if
 # `git ls-files` would otherwise include them -- belt-and-suspenders only
@@ -95,10 +100,10 @@ EXCLUDED_TOP_LEVEL = {
 
 def _minimal_repo_selection_env() -> dict[str, str]:
     """A blanket ``GIT_*`` strip used only by
-    `_discover_configured_clean_filters`, which runs BEFORE
-    `_scrubbed_git_env`'s overrides exist. `check-attr` never invokes a
-    clean filter, but still needs `core.fsmonitor=false` (confirmed live
-    `GIT_OPTIONAL_LOCKS=0` can make read-only probes consult a hook) and
+    `_discover_configured_clean_filters`, before `_scrubbed_git_env`'s
+    overrides exist. `check-attr` never invokes a clean filter, but
+    still needs `core.fsmonitor=false` (confirmed `GIT_OPTIONAL_LOCKS=0`
+    can make read-only probes consult a hook) and
     `GIT_NO_LAZY_FETCH=1`/`GIT_NO_REPLACE_OBJECTS=1`."""
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     env["GIT_TERMINAL_PROMPT"] = "0"
@@ -114,12 +119,12 @@ def _minimal_repo_selection_env() -> dict[str, str]:
 def _discover_configured_clean_filters() -> list[str]:
     """Discover every distinct Git ``filter`` attribute name assigned to
     any TRACKED path, honoring the WORKING-TREE `.gitattributes` (not
-    `--cached`, confirmed live to silently miss an uncommitted edit). A
+    `--cached`, confirmed to silently miss an uncommitted edit). A
     read-only probe invokes a configured `filter.<name>.clean` for any
-    path needing re-hashing, OR `filter.<name>.process` (higher-
-    precedence) if ALSO configured -- both confirmed live to execute
-    host code during `git status`, so `_scrubbed_git_env` neutralizes
-    both for every name here. FAILS CLOSED on any subprocess failure."""
+    path needing re-hashing, OR `.process` (higher-precedence) if ALSO
+    configured -- both confirmed to execute host code during `git
+    status`, so `_scrubbed_git_env` neutralizes both. FAILS CLOSED on
+    any subprocess failure."""
     env = _minimal_repo_selection_env()
     ls = subprocess.run(["git", "-C", str(REPO), "ls-files", "-z"], capture_output=True, timeout=60, env=env)
     if ls.returncode != 0:
@@ -140,14 +145,14 @@ def _discover_configured_clean_filters() -> list[str]:
 
 
 def _scrubbed_git_env() -> dict[str, str]:
-    """Ambient environment with EVERY inherited ``GIT_*`` variable removed
-    (matching `tools/agent_bridge_contract_git.py`'s hardened env).
+    """Ambient environment with EVERY inherited ``GIT_*`` variable
+    removed (matching `agent_bridge_contract_git.py`'s hardened env).
     Forces `GIT_OPTIONAL_LOCKS=0`, `GIT_NO_LAZY_FETCH=1`/
     `GIT_NO_REPLACE_OBJECTS=1`, disabled global/system config,
     `core.fsmonitor=false`, and for every `_discover_configured_clean_
-    filters` name, both `filter.<name>.clean` forced to `cat` and
-    `filter.<name>.process` forced empty (confirmed live: `process`
-    still runs host code even with `clean` alone neutralized)."""
+    filters` name, both `.clean` forced to `cat` and `.process` forced
+    empty (confirmed live: `process` runs host code even with `clean`
+    alone neutralized)."""
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_OPTIONAL_LOCKS"] = "0"
@@ -180,9 +185,9 @@ def _per_instance_config(instance_label: str) -> tuple[Path, str]:
     name made unique to this invocation, so each run gets its own fresh,
     isolated workspace instead of reusing one fixed, shared volume.
     Returns the temp config path and volume name, so the caller can
-    remove that volume at teardown. Written into a fresh temp DIRECTORY
-    as literally ``devcontainer.json`` -- the devcontainer CLI rejects
-    any other ``--config`` basename."""
+    remove that volume at teardown. Written as literally
+    ``devcontainer.json`` -- the devcontainer CLI rejects any other
+    ``--config`` basename."""
     volume_name = f"{BASE_VOLUME_NAME}-{instance_label}"
     text = DEVCONTAINER_CONFIG.read_text()
     if BASE_VOLUME_NAME not in text:
@@ -197,12 +202,11 @@ def _per_instance_config(instance_label: str) -> tuple[Path, str]:
 
 
 def _create_bounded_volume(volume_name: str) -> None:
-    """Create the per-invocation workspace volume up front, as a
-    size-bounded tmpfs-backed volume (not Docker's default unbounded
-    local-disk volume) -- see ``WORKSPACE_VOLUME_SIZE``. ``devcontainer
-    up`` creates the volume implicitly if absent, with Docker's own
-    unbounded default; creating it explicitly first means it just
-    reuses this one instead."""
+    """Create the per-invocation workspace volume up front, size-bounded
+    and tmpfs-backed (not Docker's unbounded default) -- see
+    ``WORKSPACE_VOLUME_SIZE``. Creating it explicitly first means
+    ``devcontainer up`` just reuses this one instead of implicitly
+    creating an unbounded one."""
     res = subprocess.run(
         [
             "docker", "volume", "create",
@@ -279,15 +283,13 @@ def _tracked_paths(*, include_untracked: bool) -> list[str]:
 def _warn_about_dirty_tracked_files() -> None:
     """Print a clear, explicit stderr warning naming every tracked file
     with an uncommitted modification -- the tracked-files-only boundary
-    is about which PATHS are copied, not which BYTES; a secret pasted
-    into an otherwise-tracked file and never committed is still copied
-    in. Fails CLOSED (raises) if ``git status`` itself cannot be run.
-    ``--ignore-submodules=all`` is required: ``git status`` otherwise
-    recursively inspects any initialized submodule, consulting a
-    SUBMODULE-specific `filter.<name>.clean`/`.process` assignment
-    `_discover_configured_clean_filters` never covers (superproject
-    tracked paths only). The snapshot never copies submodule contents
-    anyway (see `_write_tar_of_repo`)."""
+    is about which PATHS are copied, not BYTES; an uncommitted secret in
+    an otherwise-tracked file is still copied in. Fails CLOSED if ``git
+    status`` can't run. ``--ignore-submodules=all`` is required: ``git
+    status`` otherwise recursively inspects any initialized submodule,
+    consulting a SUBMODULE-specific filter assignment
+    `_discover_configured_clean_filters` never covers -- the snapshot
+    never copies submodule contents anyway."""
     res = subprocess.run(
         ["git", "-C", str(REPO), "status", "--porcelain=v1", "--untracked-files=no",
          "--ignore-submodules=all"],
@@ -318,13 +320,11 @@ def _warn_about_dirty_tracked_files() -> None:
 
 def _warn_about_hidden_tracked_file_flags() -> None:
     """Print a clear, explicit stderr warning naming every tracked file
-    whose index entry carries ``assume-unchanged`` or ``skip-worktree``.
-    ``git status`` is NOT fail-closed for these paths: both flags
-    suppress reporting an on-disk difference, while the snapshot still
-    archives current bytes regardless. ``git ls-files -v`` marks a
-    flagged entry with a lowercase letter (assume-unchanged) or
-    uppercase ``S`` (skip-worktree); ordinary is uppercase (``H``). Fails
-    CLOSED on a failed ``ls-files``."""
+    whose index entry carries ``assume-unchanged`` or ``skip-worktree``:
+    both suppress ``git status`` reporting an on-disk difference, while
+    the snapshot still archives current bytes. ``git ls-files -v`` marks
+    a flagged entry with a lowercase letter or uppercase ``S``; ordinary
+    is uppercase ``H``. Fails CLOSED on a failed ``ls-files``."""
     res = subprocess.run(
         ["git", "-C", str(REPO), "ls-files", "-v", "--cached"],
         capture_output=True, timeout=60, env=_scrubbed_git_env(),
@@ -378,9 +378,7 @@ _ALL_LONG_FLAGS = _VALUE_CONSUMING_FLAGS | _BARE_FLAGS
 
 def _canonicalize_flag(name: str) -> str:
     """Resolve a bare long-flag token to its canonical name via
-    argparse's unambiguous-prefix abbreviation against
-    `_ALL_LONG_FLAGS` -- without this, an abbreviated flag goes
-    unrecognized downstream."""
+    argparse's unambiguous-prefix abbreviation against `_ALL_LONG_FLAGS`."""
     if name in _ALL_LONG_FLAGS or not name.startswith("--") or len(name) <= 2:
         return name
     matches = [flag for flag in _ALL_LONG_FLAGS if flag.startswith(name)]
@@ -389,43 +387,64 @@ def _canonicalize_flag(name: str) -> str:
 
 def _reject_resource_overrides_exceeding_container_ceilings(passthrough: list[str]) -> None:
     """Reject a `--max-memory-mb`/`--max-processes`/`--max-temp-mb`
-    override exceeding this wrapper's own container ceiling -- those
-    flags otherwise pass through unmodified, but the container's fixed,
-    lower outer limits would silently preempt a larger request (a
-    mismatch not otherwise named as an exception alongside
-    `--allow-host-state`/`--admission-wait`). A non-integer value is left
-    for the inner runner's own argparse to reject."""
-    ceilings = {
-        "--max-memory-mb": _CONTAINER_MEMORY_MB_CEILING,
-        "--max-processes": _CONTAINER_PIDS_CEILING,
-        "--max-temp-mb": _CONTAINER_TMP_MB_CEILING,
-    }
+    combination this wrapper's container can't honor -- a third exception
+    alongside `--allow-host-state`/`--admission-wait`. Resolves each
+    flag's LAST occurrence (matching argparse semantics, so an earlier
+    unsafe value superseded by a safe one is never wrongly rejected) and,
+    for any not given, the inner runner's own default. Checks
+    `--max-processes` against a REDUCED ceiling, and memory+temp
+    COMBINED against a reduced memory ceiling: `/tmp` is memory-backed
+    tmpfs sharing the SAME cgroup, so two individually-safe values can
+    together still exceed it."""
+    requested = {"--max-memory-mb": None, "--max-processes": None, "--max-temp-mb": None}
     for i, arg in enumerate(passthrough):
         name, eq, value_str = arg.partition("=")
         canonical = _canonicalize_flag(name)
-        if canonical not in ceilings:
+        if canonical not in requested:
             continue
         if not eq:
             value_str = passthrough[i + 1] if i + 1 < len(passthrough) else ""
         try:
-            requested = int(value_str)
+            requested[canonical] = int(value_str)
         except ValueError:
             continue
-        if requested > ceilings[canonical]:
-            raise SystemExit(
-                f"{canonical} {requested} exceeds this wrapper's container "
-                f"ceiling ({ceilings[canonical]}) -- the outer container "
-                "would silently preempt it. Lower the override, or run "
-                "tools/run-plugin-tests.py directly (outside the "
-                "devcontainer) for a larger value."
-            )
+    memory_mb = requested["--max-memory-mb"]
+    if memory_mb is None:
+        memory_mb = _RUNNER_DEFAULT_MEMORY_MB
+    temp_mb = requested["--max-temp-mb"]
+    if temp_mb is None:
+        temp_mb = _RUNNER_DEFAULT_TEMP_MB
+    processes = requested["--max-processes"]
+
+    if temp_mb > _CONTAINER_TMP_MB_CEILING:
+        raise SystemExit(
+            f"--max-temp-mb {temp_mb} exceeds /tmp's physical tmpfs ceiling "
+            f"({_CONTAINER_TMP_MB_CEILING} MiB) -- ENOSPC regardless of "
+            "memory budget. Lower it, or run run-plugin-tests.py directly."
+        )
+    effective_memory_ceiling = _CONTAINER_MEMORY_MB_CEILING - _CONTAINER_OVERHEAD_MB
+    if memory_mb + temp_mb > effective_memory_ceiling:
+        raise SystemExit(
+            f"--max-memory-mb {memory_mb} plus --max-temp-mb {temp_mb} "
+            f"({memory_mb + temp_mb} MiB combined) exceeds the effective "
+            f"container memory budget ({effective_memory_ceiling} MiB) -- "
+            "/tmp is memory-backed tmpfs, sharing the SAME --memory "
+            "cgroup. Lower one or both, or run run-plugin-tests.py "
+            "directly."
+        )
+    effective_pids_ceiling = _CONTAINER_PIDS_CEILING - _CONTAINER_PIDS_RESERVED
+    if processes is not None and processes > effective_pids_ceiling:
+        raise SystemExit(
+            f"--max-processes {processes} exceeds the effective container "
+            f"PID budget ({effective_pids_ceiling}) -- would be silently "
+            "preempted. Lower it, or run run-plugin-tests.py directly."
+        )
 
 
 def _resolve_base_ref(passthrough: list[str]) -> str:
-    """Best-effort extraction of the ``--base`` value, so
-    ``_materialized_git_dir`` includes exactly that ref's closure. Falls
-    back to the runner's default when absent; recognizes an
-    abbreviation -- see `_canonicalize_flag`."""
+    """Best-effort extraction of the ``--base`` value for
+    ``_materialized_git_dir``'s object closure. Falls back to the
+    runner's default when absent."""
     resolved = "origin/main"
     for i, arg in enumerate(passthrough):
         name, eq, value = arg.partition("=")
@@ -440,9 +459,8 @@ def _resolve_base_ref(passthrough: list[str]) -> str:
 
 def _changed_mode_active(passthrough: list[str]) -> bool:
     """Whether an invocation resolves targets via ``changed_plugins()``
-    -- true for explicit ``--changed``, AND the runner's own default (no
-    ``--all``, no explicit plugin names). Only then does an unresolvable
-    ``--base`` matter."""
+    -- true for ``--changed``, AND the runner's default (no ``--all``,
+    no plugin names)."""
     has_all = False
     has_positional = False
     skip_next = False
@@ -540,24 +558,20 @@ _MINIMAL_GIT_CONFIG = (
 def _materialized_git_dir(stack: contextlib.ExitStack, passthrough: list[str]) -> Path:
     """Return a path to a self-contained ``.git`` directory to copy into
     the container, containing ONLY the object closure of ``HEAD`` and the
-    ``--changed`` diff base -- never the full repository history.
-    Copying the full local git database (every branch, stash, reflog, and
-    unreachable object) into a container with outbound networking would
-    let an adversarial/buggy test exfiltrate local-only content unrelated
-    to the plugin suite being run. Instead: ``git bundle create`` with
-    only ``HEAD`` and (when it resolves locally) the ``--base`` ref
-    `run-plugin-tests.py --changed`` will diff against, then ``git clone
-    --bare`` that bundle into a fresh directory. ``main`` rewrites
-    ``--base``'s own value to this same resolved SHA first (see
-    `_rewrite_base_to_resolved_sha`), so the clone needs no named ref.
-    The index is rebuilt from ``HEAD`` (``git read-tree HEAD``) rather
-    than copied: the host's real index can reference a staged blob
-    unreachable from both tips, which the bundle would then be missing --
-    a copied index pointing at a missing object breaks `git diff`/`status`
-    outright. Staging isn't preserved, but every modification is still
-    visible as an ordinary working-tree difference (`_tracked_paths`
-    copies the file's CURRENT content regardless). ``config`` is replaced
-    with a fresh, credential-free one and ``hooks`` is dropped."""
+    ``--changed`` diff base -- never the full repository history (every
+    branch/stash/reflog/unreachable object), which a container with
+    outbound networking could otherwise exfiltrate. ``git bundle
+    create`` with only ``HEAD`` and (when resolvable) the ``--base`` ref,
+    then ``git clone --bare`` into a fresh directory; ``main`` rewrites
+    ``--base`` to the same resolved SHA first (see
+    `_rewrite_base_to_resolved_sha`) so the clone needs no named ref. The
+    index is rebuilt from ``HEAD`` rather than copied: the host's real
+    index can reference a staged blob unreachable from both tips, which
+    the bundle would then be missing -- a copied index pointing at a
+    missing object breaks `git diff`/`status` outright. Staging isn't
+    preserved, but every modification is still visible as an ordinary
+    working-tree difference (`_tracked_paths` copies CURRENT content
+    regardless). ``config`` is fresh/credential-free; ``hooks`` dropped."""
     tmp_dir = Path(tempfile.mkdtemp(prefix="devcontainer-test-isolation-git-"))
     stack.callback(shutil.rmtree, tmp_dir, ignore_errors=True)
     bundle_file = tmp_dir / "snapshot.bundle"
@@ -641,19 +655,16 @@ def _write_tar_of_repo(dest: Path, passthrough: list[str], *, include_untracked:
     tree -- ``.git`` is handled separately via ``_materialized_git_dir``;
     everything else comes from ``_tracked_paths``, so gitignored (and,
     unless ``include_untracked``) untracked files are never included.
-
-    An absent path (e.g. an unstaged deletion, which ``ls-files --cached``
-    still lists) is checked via ``os.path.lexists`` and silently skipped.
-    An initialized submodule (a ``160000``-mode path that's a real
-    directory on disk) is added as an empty directory entry only
-    (``recursive=False``), never its contents. A tracked path's own
-    ANCESTOR directory can be replaced with a symlink to outside
-    ``REPO`` -- confirmed live that ``lexists`` alone misses this (it
-    checks only the FINAL component); each path's PARENT directory (not
-    the leaf, which may legitimately be a tracked symlink) has its real
-    path checked against ``REPO``'s, failing closed on an escape.
-
-    Also warns (``_warn_about_dirty_tracked_files``,
+    An absent path (e.g. an unstaged deletion) is checked via
+    ``os.path.lexists`` and silently skipped. An initialized submodule
+    (a ``160000``-mode path that's a real directory on disk) is added
+    as an empty directory entry only (``recursive=False``), never its
+    contents. A tracked path's own ANCESTOR directory can be replaced
+    with a symlink to outside ``REPO`` -- confirmed live that
+    ``lexists`` alone misses this; each path's PARENT directory (not the
+    leaf, which may legitimately be a tracked symlink) has its real path
+    checked against ``REPO``'s, failing closed on an escape. Also warns
+    (``_warn_about_dirty_tracked_files``,
     ``_warn_about_hidden_tracked_file_flags``) before copying anything.
     """
     _warn_about_dirty_tracked_files()
@@ -681,13 +692,11 @@ def _populate_workspace(container_id: str, passthrough: list[str], *, include_un
     container's workspace VOLUME (never a host bind). A freshly created
     Docker volume is root-owned, so a one-off root ``chmod`` opens its
     empty PERMISSION bits first (root remains OWNER; `--cap-drop=ALL`
-    means even root can't `chown`). Extraction runs AS ``vscode``, so
-    the checkout ends up natively ``vscode``-owned -- matters since
-    Git's "dubious ownership" check inspects the working-tree ROOT's
-    owner, and the mountpoint stays root-owned for the container's
+    blocks `chown`). Extraction runs AS ``vscode``, so Git's "dubious
+    ownership" check (which inspects the working-tree ROOT's owner)
+    passes -- the mountpoint stays root-owned for the container's
     lifetime; the devcontainer spec's `safe.directory` exemption covers
-    that gap. The permission-opening pass only targets files/directories,
-    never a symlink (`chmod` on one dereferences it)."""
+    that gap. The permission pass skips symlinks (`chmod` dereferences)."""
     chmod_root = subprocess.run(
         ["docker", "exec", "-u", "root", container_id,
          "chmod", "0777", CONTAINER_WORKSPACE],
@@ -743,13 +752,13 @@ def _run_tests(container_id: str, config_path: Path, passthrough: list[str]) -> 
 def _tear_down(container_id: str, volume_name: str) -> None:
     """Remove the container, then the per-invocation volume it owned --
     both failures are surfaced, since a failed removal leaves a live
-    container running or an orphaned volume on the host. Each removal is
-    individually guarded against ``subprocess.SubprocessError``/
-    ``OSError`` so an exception from one can never skip the other. Every
-    ``docker`` call runs with ``start_new_session=True``: without it, a
-    terminal Ctrl-C's ``SIGINT`` reaches these children too (same
-    foreground process group), which retain the default handler --
-    `_cleanup_signals_deferred` only protects the Python PARENT."""
+    container running or an orphaned volume. Each removal is guarded
+    against ``subprocess.SubprocessError``/``OSError`` so one exception
+    never skips the other. Every ``docker`` call runs with
+    ``start_new_session=True``: without it, a terminal Ctrl-C's
+    ``SIGINT`` reaches these children too (same process group), which
+    retain the default handler -- `_cleanup_signals_deferred` only
+    protects the Python PARENT."""
     errors: list[str] = []
     try:
         res = subprocess.run(
@@ -774,14 +783,12 @@ def _tear_down(container_id: str, volume_name: str) -> None:
 
 
 def _cleanup_orphan(instance_label: str, volume_name: str) -> None:
-    """Best-effort cleanup when ``devcontainer up`` itself fails (timeout,
-    a failure during ``onCreateCommand``, or unparseable output): a
+    """Best-effort cleanup when ``devcontainer up`` itself fails: a
     container may have been created under this instance's id-label even
     though ``_bring_up`` never returned an id. Finds and removes it by
-    label, then removes the volume. Every subprocess call is individually
-    guarded so one failing step never skips the rest, and this function
-    itself never raises. Every call runs with ``start_new_session=True``
-    (see `_tear_down`'s docstring)."""
+    label, then removes the volume. Every call is individually guarded
+    so one failing step never skips the rest, never raises itself, and
+    runs with ``start_new_session=True`` (see `_tear_down`)."""
     container_ids: list[str] = []
     try:
         find = subprocess.run(
@@ -846,23 +853,19 @@ def _cleanup_signals_deferred():
     (``_tear_down``/``_cleanup_orphan``): RECORD receipt instead of acting
     immediately, restore the previous handlers once cleanup finishes, then
     raise `_TerminationRequested` if one was recorded AND no exception is
-    propagating. Plain ``signal.SIG_IGN`` would DISCARD a signal (not
-    defer it), letting `main` silently return 0 for a cancelled run;
-    replaying unconditionally could instead REPLACE a genuine failure
-    already propagating -- a single ``sys.exc_info()`` check covers both.
+    propagating -- plain ``SIG_IGN`` would DISCARD a signal, letting
+    `main` return 0 for a cancelled run; replaying unconditionally could
+    REPLACE a genuine failure already propagating.
 
     Installing/restoring TWO handlers isn't atomic -- a signal mid-swap
-    can hit whichever OLD handler is still active for the second one
-    (confirmed live). ``pthread_sigmask`` blocks both for each swap,
-    restoring the EXACT prior mask via ``SIG_SETMASK`` (never
-    ``SIG_UNBLOCK``, which would silently unblock a caller-pre-blocked
-    signal, confirmed live). Such a signal arriving during ``yield``
-    stays PENDING until unblocked -- unblocking only at the FINAL
-    restore step would deliver it to the already-restored OLD handler,
-    bypassing the replay decision (confirmed live); exit therefore
-    flushes first (brief ``SIG_UNBLOCK``
-    while `_record` is still installed), then restores handlers in their
-    own separately-masked swap."""
+    can hit whichever OLD handler is active for the second one (confirmed
+    live). ``pthread_sigmask`` blocks both for each swap, restoring the
+    EXACT prior mask via ``SIG_SETMASK`` (never ``SIG_UNBLOCK``, which
+    would unblock a caller-pre-blocked signal, confirmed live). Such a
+    pending signal would otherwise be delivered to the already-restored
+    OLD handler at the final unmask, bypassing the replay decision
+    (confirmed live); exit flushes it to `_record` first, then restores
+    handlers in their own separately-masked swap."""
     received: list[int] = []
 
     def _record(signum: int, frame: object) -> None:
@@ -876,12 +879,9 @@ def _cleanup_signals_deferred():
     try:
         yield
     finally:
-        # Flush any signal already pending (e.g. a caller-pre-blocked
-        # mask) to `_record` -- still active here -- before touching
-        # the handlers at all.
+        # Flush any pending signal to `_record` (still active) first.
         caller_mask = signal.pthread_sigmask(signal.SIG_UNBLOCK, _CLEANUP_DEFERRED_SIGNALS)
         signal.pthread_sigmask(signal.SIG_SETMASK, caller_mask)
-        # Now restore the old handlers, atomically.
         pre_restore_mask = signal.pthread_sigmask(signal.SIG_BLOCK, _CLEANUP_DEFERRED_SIGNALS)
         try:
             for sig, handler in previous.items():

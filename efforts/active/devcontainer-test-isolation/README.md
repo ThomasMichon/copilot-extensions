@@ -1990,3 +1990,45 @@ live check confirmed the new rejection fires correctly end-to-end;
 pass. Docker cleanup (no leftover `test-isolation` volumes) and host
 `git status --short` reconfirmed clean of anything beyond this round's
 own diff.
+
+### 2026-10-03 — Review round 15 (twenty-seventh pass): MEDIUM combined-resource-budget mismatch fixed
+A twenty-seventh review pass of commit `9758470cb` surfaced 1 new MEDIUM
+against the previous round's own resource-ceiling check: it validated
+`--max-memory-mb`, `--max-processes`, and `--max-temp-mb` INDEPENDENTLY
+against each raw outer ceiling, but `/tmp`'s tmpfs is memory-backed, so
+process RSS and temp-dir usage draw from the SAME `--memory` cgroup --
+e.g. `--max-memory-mb 14336 --max-temp-mb 6144` (each individually at
+its own ceiling) would still total 20480 MiB against a single 14 GiB
+cgroup, getting OOM-killed despite passing both individual checks. The
+review also flagged that the previous check could wrongly reject a
+VALID repeated-flag invocation (argparse itself uses only the LAST
+occurrence of a repeated flag; the old check raised on the FIRST
+occurrence it saw, before ever reaching a later, safe override).
+
+Fixed by rewriting the check to first resolve each flag's LAST
+occurrence (matching argparse semantics) and, for any not given, the
+inner runner's own default (4096 MiB memory, 2048 MiB temp), THEN
+validate: `--max-temp-mb` alone against `/tmp`'s physical tmpfs ceiling
+(a hard ENOSPC limit regardless of memory budget), memory+temp
+COMBINED against a reduced effective memory ceiling (reserving 512 MiB
+for container overhead), and `--max-processes` against a reduced
+effective PID ceiling (reserving 32 for the container/runner's own
+infra processes) -- confirmed live via `--max-memory-mb 14336
+--max-temp-mb 6144` (exit 1, clear combined-budget message, no Docker
+invoked).
+
+Re-validated end-to-end: the full unit test suite (110 tests -- replaced
+the three independent-ceiling tests with ones matching the new combined
+semantics, added a repeated-flag-last-wins regression, a safe-combination
+pass-through regression, and a combined-budget-exceeded regression)
+passes; `check-module-size.py --changed-since origin/dev` passes right
+at the cap (1000 lines, after yet another large condensing pass -- the
+module has now hit the cap on effectively every substantive round this
+session; a genuine multi-module split remains the correct Phase 2
+follow-up, repeatedly noted and still not yet scheduled); a fresh
+Docker-backed end-to-end run (`ai-attribution`, 98 passed / 6 skipped)
+confirms the common case still works; a dedicated live check confirmed
+the new combined-budget rejection fires correctly; `check-docs-
+consistency.py` and `check-effort-vision-structure.py` both pass. Docker
+cleanup (no leftover `test-isolation` volumes) and host `git status
+--short` reconfirmed clean of anything beyond this round's own diff.

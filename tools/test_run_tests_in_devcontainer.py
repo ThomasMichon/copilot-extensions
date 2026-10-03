@@ -372,17 +372,13 @@ def test_bring_up_raises_when_container_id_missing_from_output(tmp_path: Path) -
             raise AssertionError("expected SystemExit")
 
 
-def test_reject_resource_overrides_allows_values_at_or_below_ceiling() -> None:
-    # Right at the ceiling must still pass -- this is an upper bound,
-    # not a stricter-than-documented cap.
-    wrapper._reject_resource_overrides_exceeding_container_ceilings(
-        ["--max-memory-mb", str(wrapper._CONTAINER_MEMORY_MB_CEILING),
-         "--max-processes", str(wrapper._CONTAINER_PIDS_CEILING),
-         "--max-temp-mb", str(wrapper._CONTAINER_TMP_MB_CEILING)]
-    )
+def test_reject_resource_overrides_allows_defaults() -> None:
+    # No overrides at all -- the inner runner's own defaults (4096 MiB
+    # memory, 2048 MiB temp) must always be safe.
+    wrapper._reject_resource_overrides_exceeding_container_ceilings([])
 
 
-def test_reject_resource_overrides_rejects_memory_mb_above_container_ceiling() -> None:
+def test_reject_resource_overrides_rejects_memory_mb_alone_above_combined_budget() -> None:
     # The exact finding this closes: `--max-memory-mb 16000` is valid to
     # `run-plugin-tests.py` but would be silently preempted by the
     # container's own fixed `--memory=14g` ceiling regardless of what the
@@ -398,7 +394,33 @@ def test_reject_resource_overrides_rejects_memory_mb_above_container_ceiling() -
         raise AssertionError("expected SystemExit")
 
 
-def test_reject_resource_overrides_rejects_processes_above_container_ceiling() -> None:
+def test_reject_resource_overrides_rejects_memory_and_temp_combination_exceeding_shared_cgroup() -> None:
+    # The exact regression this closes: each flag ALONE sitting right at
+    # its own raw outer ceiling (14336 MiB memory, 6144 MiB temp) still
+    # passed the previous, independent-only check -- but `/tmp` is
+    # memory-backed tmpfs, so both draw from the SAME `--memory` cgroup,
+    # and the combination would still be OOM-killed. Confirmed live by
+    # inspection of the container's own `runArgs`.
+    try:
+        wrapper._reject_resource_overrides_exceeding_container_ceilings(
+            ["--max-memory-mb", str(wrapper._CONTAINER_MEMORY_MB_CEILING),
+             "--max-temp-mb", str(wrapper._CONTAINER_TMP_MB_CEILING)]
+        )
+    except SystemExit as exc:
+        assert "combined" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit for the combined memory+temp budget")
+
+
+def test_reject_resource_overrides_allows_a_safe_combined_memory_and_temp_budget() -> None:
+    # A combination comfortably within the shared cgroup budget (well
+    # under the reserved-overhead-adjusted ceiling) must still pass.
+    wrapper._reject_resource_overrides_exceeding_container_ceilings(
+        ["--max-memory-mb", "8000", "--max-temp-mb", "2000"]
+    )
+
+
+def test_reject_resource_overrides_rejects_processes_above_effective_pid_budget() -> None:
     try:
         wrapper._reject_resource_overrides_exceeding_container_ceilings(
             ["--max-processes", "600"]
@@ -409,7 +431,7 @@ def test_reject_resource_overrides_rejects_processes_above_container_ceiling() -
         raise AssertionError("expected SystemExit")
 
 
-def test_reject_resource_overrides_rejects_temp_mb_above_container_ceiling() -> None:
+def test_reject_resource_overrides_rejects_temp_mb_above_physical_tmpfs_ceiling() -> None:
     try:
         wrapper._reject_resource_overrides_exceeding_container_ceilings(
             ["--max-temp-mb=7000"]
@@ -436,6 +458,18 @@ def test_reject_resource_overrides_ignores_non_integer_value() -> None:
     # reject -- this check must not itself crash on one.
     wrapper._reject_resource_overrides_exceeding_container_ceilings(
         ["--max-memory-mb", "not-a-number"]
+    )
+
+
+def test_reject_resource_overrides_uses_the_last_repeated_occurrence() -> None:
+    # The exact regression this closes: argparse itself would use only
+    # the LAST `--max-memory-mb` value for a repeated flag -- an earlier,
+    # unsafe value superseded by a later, safe one must never be wrongly
+    # rejected (confirmed this was previously broken: the check raised
+    # on the FIRST occurrence it saw, before ever reaching the later,
+    # safe one).
+    wrapper._reject_resource_overrides_exceeding_container_ceilings(
+        ["--max-memory-mb", "20000", "--max-memory-mb", "4096"]
     )
 
 
