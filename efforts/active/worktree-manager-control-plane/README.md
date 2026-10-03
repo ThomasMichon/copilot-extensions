@@ -958,8 +958,16 @@ claiming discipline alone.
   regression test; (4) the approval still listed "add the required
   Documentation impact statement to the PR description" as an open
   low-severity finding (CONTRIBUTING.md's required-before-opening
-  statement, not the README content itself, which was already in place) —
-  addressed by editing the PR description before merge. Validation:
+  statement, not the README content itself, which was already in place).
+  **Correction to this entry's first draft:** that draft claimed the
+  statement was "addressed by editing the PR description before merge,"
+  but the `gh pr edit` used to do so silently truncated the body at an
+  un-escaped backtick in a PowerShell argument — the PR merged with the
+  edit never actually applied, so the low-severity finding was in fact
+  still open at merge time (caught by this very journal PR's own Copilot
+  review, round 2, auditing the inaccurate claim against the live PR
+  record). Fixed post-merge by re-editing #4986's description via a
+  `--body-file`, verified present in the PR's current body. Validation:
   targeted `test_doctor.py` (8/8 after the fixes), full `worktree-manager`
   suite (1407 passed, the same 9 pre-existing Windows
   symlink-privilege/daemon-race failures noted in the prior session's
