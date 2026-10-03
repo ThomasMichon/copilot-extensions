@@ -1333,7 +1333,15 @@ def test_live_mapping_republished_on_a_backstop_cadence_without_a_restart(
         daemon_result["rc"] = mux_daemon.run_daemon_foreground(
             tmp_path,
             poll_interval_s=0.01,
-            max_iterations=300,
+            # 60 iterations (matching the sibling restart-republish test's own
+            # bound just above) already gives the 0.05s backstop cadence ~12
+            # chances to fire -- far more than the 2 observations this test
+            # needs. A much larger bound here previously made the daemon
+            # thread's own per-iteration file-I/O overhead (write_lock_data +
+            # read_lock_data every loop, independent of poll_interval_s) the
+            # dominant cost on a slower filesystem, occasionally outrunning
+            # even this test's already-"generous" 15s thread.join below.
+            max_iterations=60,
             # Same lock/generation the whole run -- only the backstop cadence
             # (never a generation change) can explain a second observation.
             backstop_interval_s=0.05,
@@ -1342,17 +1350,36 @@ def test_live_mapping_republished_on_a_backstop_cadence_without_a_restart(
     thread = threading.Thread(target=_run)
     thread.start()
     try:
-        _wait_for(lambda: len(observed) >= 1, timeout=5.0)
+        # Generous timeouts throughout: this exercises a real background
+        # thread, a real local TCP server, and real file I/O -- on a heavily
+        # loaded shared machine (many concurrent, unrelated processes) these
+        # can each individually stall well past what the daemon's own actual
+        # (sub-second) workload would ever need. Widening the wait budget
+        # costs nothing when the daemon finishes quickly, and is the only
+        # way to avoid a false failure when it doesn't.
+        _wait_for(lambda: len(observed) >= 1, timeout=30.0)
         first_count = len(observed)
         # No generation change ever happens (same server/lock for the whole
         # run) -- a second (and further) republish can only come from the
-        # backstop timer. Generous timeout: under a loaded full-suite run the
-        # daemon thread's 300 iterations can take noticeably longer than
-        # wall-clock ``poll_interval_s * max_iterations`` would suggest.
-        _wait_for(lambda: len(observed) > first_count, timeout=10.0)
+        # backstop timer.
+        _wait_for(lambda: len(observed) > first_count, timeout=30.0)
     finally:
+        # Join the daemon thread BEFORE closing the fake observation server.
+        # The request/response ``observed.append(...)`` that satisfies the
+        # _wait_for above happens server-side mid-RPC -- the client
+        # (wcs_client.request) still has its own follow-up ``release()``
+        # call (a SEPARATE connection) to make for that same round-trip
+        # before run_daemon_foreground's current iteration is done. Closing
+        # the server here (the original order) could tear its listening
+        # socket down while that in-flight ``release()`` is still dialing
+        # it, and on a loaded Windows box that raced half-open connect can
+        # hang for the OS's full TCP connect timeout instead of failing
+        # fast -- exactly the "daemon_result never gets set" symptom this
+        # guarded against. ``max_iterations`` already bounds the daemon's
+        # own runtime deterministically, so joining first (instead of
+        # relying on close() to unstick it) is both correct and sufficient.
+        thread.join(timeout=60)
         server.close()
-        thread.join(timeout=15)
 
     assert daemon_result.get("rc") == 0
     assert len(observed) >= 2

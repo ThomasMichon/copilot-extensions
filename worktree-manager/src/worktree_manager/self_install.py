@@ -173,6 +173,26 @@ def version_slot(version: str, root: Path | None = None) -> Path:
     return (root or default_root()) / VERSIONS_DIR / version
 
 
+def _slot_is_complete(slot: Path) -> bool:
+    """``True`` only when ``slot`` holds an actually-runnable payload copy.
+
+    ``needs_install()`` previously asked only ``slot.is_dir()`` -- true for
+    an EXISTING BUT EMPTY directory too, which is exactly what a
+    ``_copy_payload()`` failure partway through ``shutil.rmtree``/
+    ``shutil.copytree`` (a Windows ``PermissionError``/WinError 32 from a
+    slot still held open by another process's cwd -- copilot-extensions#4999)
+    can leave behind: the ``current-version`` marker already (from a prior,
+    genuinely successful install) names this exact version, so a later
+    ``needs_install()`` call silently treated the now-broken, empty slot as
+    a valid, already-current install forever -- ``worktree-manager`` then
+    fails every subsequent run with ``No module named worktree_manager``.
+    Checking for the one file that matters at runtime (the package entry
+    point ``_copy_payload`` must have copied in) catches that corruption
+    immediately instead of only after the crash it causes.
+    """
+    return (slot / "src" / "worktree_manager" / "__init__.py").is_file()
+
+
 def _binstub_files() -> list[str]:
     if os.name == "nt":
         return ["worktree-manager.cmd", "worktree-manager.ps1", "worktree-manager"]
@@ -328,7 +348,7 @@ def _core_install_satisfied(version: str, root: Path | None = None) -> bool:
     r = root or default_root()
     return (
         current_version(r) == version
-        and version_slot(version, r).is_dir()
+        and _slot_is_complete(version_slot(version, r))
         and binstub_present() is not None
         and not _binstubs_are_stale()
     )
@@ -592,6 +612,36 @@ def _reap_stranded_cutover_passive(root: Path, mux_daemon_cutover) -> None:
 
 
 def _copy_payload(payload_dir: Path, slot: Path) -> None:
+    try:
+        _copy_payload_unsafe(payload_dir, slot)
+    except RuntimeError:
+        # Already our one normalized, self_install()-caught boundary type --
+        # re-raise as-is (don't re-wrap).
+        raise
+    except OSError as e:
+        # shutil.rmtree(slot)/shutil.copytree() can themselves raise a bare
+        # OSError -- most notably a Windows PermissionError (WinError 32)
+        # when the slot directory is still held open by another process's
+        # cwd (a stranded OR still-legitimately-running mux-daemon pinned
+        # there -- see copilot-extensions#4999). shutil.rmtree's own
+        # (non-``ignore_errors``) tree walk removes files as it goes, so a
+        # failure partway through can leave the slot an EXISTING, mostly or
+        # fully EMPTIED directory on disk -- and an uncaught OSError here
+        # would propagate straight out of self_install() (which, like
+        # _materialize_payload_pointers' own boundary below, only catches
+        # RuntimeError), skipping its established "remove the broken slot,
+        # report action='error'" cleanup entirely. Previously a later
+        # needs_install() check asked only ``version_slot(...).is_dir()`` --
+        # true for an empty directory too -- so that broken, empty slot
+        # would then be silently treated as a valid install forever (see
+        # the paired ``_slot_is_complete`` fix). Normalizing to RuntimeError
+        # here (the same boundary _materialize_payload_pointers already
+        # uses for its own unexpected failures) routes this through
+        # self_install()'s existing cleanup-and-report path instead.
+        raise RuntimeError(f"copying payload into {slot} failed: {e}") from e
+
+
+def _copy_payload_unsafe(payload_dir: Path, slot: Path) -> None:
     if slot.exists():
         shutil.rmtree(slot)
     if payload_dir.is_symlink():
