@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -106,9 +106,22 @@ test("isStale honors a custom heartbeatTimeoutMs", () => {
   assert.equal(isStale(descriptor, { heartbeatTimeoutMs: 60_000 }), false);
 });
 
-test("isStale is true when updatedAt/startedAt are both missing or unparsable", () => {
+test("isStale is true when updatedAt is present but unparsable (real corruption signal)", () => {
   assert.equal(isStale({ pid: process.pid, updatedAt: "not-a-date" }), true);
-  assert.equal(isStale({ pid: process.pid }), true);
+});
+
+test("isStale is FALSE for a live pid with no updatedAt key at all -- legacy/pre-heartbeat compatibility", () => {
+  // A descriptor entirely missing `updatedAt` (as opposed to one present but
+  // garbage) is treated as pid-liveness-only -- a future rolling update
+  // where an already-running older session never learned to write this
+  // field must not have its still-alive descriptor reaped on heartbeat
+  // grounds it was never taught to satisfy.
+  assert.equal(isStale({ pid: process.pid }), false);
+  assert.equal(isStale({ pid: process.pid, startedAt: new Date(Date.now() - 1_000_000).toISOString() }), false);
+});
+
+test("isStale is still true for a DEAD pid with no updatedAt key -- liveness alone still governs", () => {
+  assert.equal(isStale({ pid: deadPid() }), true);
 });
 
 test("sweepStale removes only genuinely stale descriptors and leaves live ones", () => {
@@ -167,7 +180,7 @@ test("a written-and-reread descriptor still parses with the fields isStale needs
   assert.equal(isStale(reread), false);
 });
 
-// --- TOCTOU regression coverage (PR #5036 review) ---
+// --- TOCTOU regression coverage ---
 //
 // A sweep's staleness snapshot can go stale itself: the owning session can
 // refresh its own heartbeat between the snapshot read and the delete. These
@@ -189,6 +202,11 @@ test("reapIfStillStale does NOT delete a file that was refreshed after the snaps
   assert.equal(result.removed, false);
   assert.equal(existsSync(path), true);
   assert.equal(result.descriptor.pid, process.pid);
+  // The atomic-claim mechanism renames the file away and back -- confirm it
+  // actually landed back at the ORIGINAL path (not stuck under a
+  // `.reap-claim.` name) and left no claim artifact behind.
+  assert.deepEqual(readdirSync(dir), ["racing-session.json"]);
+  assert.deepEqual(JSON.parse(readFileSync(path, "utf-8")).pid, process.pid);
 });
 
 test("reapIfStillStale DOES delete a file that is still stale on revalidation", () => {

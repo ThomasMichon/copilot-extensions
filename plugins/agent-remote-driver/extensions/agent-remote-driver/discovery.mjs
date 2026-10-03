@@ -9,7 +9,7 @@
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { writeFileSync, renameSync, chmodSync } from "node:fs";
+import { writeFileSync, renameSync, chmodSync, unlinkSync } from "node:fs";
 
 // Discovery root: a per-machine (not per-repo) directory, matching the
 // vision's "user-global, not per-repo/per-worktree" install requirement.
@@ -84,6 +84,20 @@ export function writeDescriptorAtomic(path, descriptor) {
   } catch {
     /* best-effort; not fatal on platforms without POSIX perms (e.g. Windows) */
   }
-  renameSync(tmpPath, path);
+  try {
+    renameSync(tmpPath, path);
+  } catch (e) {
+    // A failed rename must not leave a credential-bearing temp file behind
+    // -- it carries the same bearer token as the real descriptor. Clean up,
+    // then surface the ORIGINAL error (the cleanup attempt's own outcome is
+    // never more important than why the write actually failed).
+    try {
+      unlinkSync(tmpPath);
+    } catch {
+      /* best-effort; the original rename error is what the caller needs */
+    }
+    throw e;
+  }
 }
+
 

@@ -53,6 +53,7 @@ import { joinSession } from "@github/copilot-sdk/extension";
 import { createDriverServer, MAX_SSE_CLIENTS } from "./driver-server.mjs";
 import { discoveryDir, descriptorPath, generateToken, buildDescriptor, writeDescriptorAtomic } from "./discovery.mjs";
 import { sweepStale } from "./registry.mjs";
+import { boundedRetry, installSignalCleanup, createIntervalTimer } from "./lifecycle.mjs";
 
 const FLUSH_MS = 250; // drain the forwarded-event queue to SSE subscribers
 const MAX_QUEUE = 2_000; // bounded buffer; drop OLDEST on overflow (honest reduced fidelity)
@@ -73,8 +74,6 @@ const state = {
   startedAt: new Date().toISOString(),
   pendingEvents: [],
   listeners: new Set(),
-  flusher: null,
-  heartbeat: null,
 };
 
 function enqueue(event) {
@@ -160,19 +159,14 @@ function sweepFleetHygiene() {
 }
 
 async function listenWithBoundedRetry(driverServer) {
-  let lastErr;
-  for (let attempt = 1; attempt <= MAX_LISTEN_ATTEMPTS; attempt += 1) {
-    try {
-      return await driverServer.listen();
-    } catch (e) {
-      lastErr = e;
-      extLog(`listen attempt ${attempt}/${MAX_LISTEN_ATTEMPTS} failed: ${e.message}`);
-    }
-  }
-  // Degrade silently, matching the rest of this module's best-effort
-  // posture: a session this extension cannot make drivable still runs
-  // exactly as it would without the extension present. Never retry forever.
-  throw lastErr;
+  return boundedRetry(
+    () => driverServer.listen(),
+    MAX_LISTEN_ATTEMPTS,
+    (attempt, e) => extLog(`listen attempt ${attempt}/${MAX_LISTEN_ATTEMPTS} failed: ${e.message}`),
+  );
+  // Degrade silently on exhaustion, matching the rest of this module's
+  // best-effort posture: a session this extension cannot make drivable
+  // still runs exactly as it would without the extension present.
 }
 
 // --- Extension ---
@@ -204,32 +198,16 @@ try {
 }
 
 if (port !== null) {
-  state.flusher = setInterval(flush, FLUSH_MS);
-  if (typeof state.flusher.unref === "function") state.flusher.unref();
+  const flusher = createIntervalTimer(flush, FLUSH_MS);
+  flusher.start();
 
-  state.heartbeat = setInterval(() => {
+  const heartbeat = createIntervalTimer(() => {
     if (state.descriptorWritten) writeDescriptor(port, token); // refresh updatedAt in place
   }, HEARTBEAT_MS);
-  if (typeof state.heartbeat.unref === "function") state.heartbeat.unref();
+  heartbeat.start();
 }
 
-for (const sig of ["SIGINT", "SIGTERM"]) {
-  const handler = () => {
-    cleanupDescriptor();
-    // Registering a listener suppresses Node's default termination for this
-    // signal, so returning here would leave the process alive with the
-    // heartbeat interval still armed -- which would simply recreate the
-    // descriptor this handler just removed on its next tick. Remove this
-    // listener (so the re-raise cannot recurse into it) and re-send the
-    // identical signal: with no listener left, the OS's default disposition
-    // actually terminates the process. Matches
-    // context-handoff/extensions/context-handoff/crash-diagnostics.mjs's
-    // established pattern.
-    process.off(sig, handler);
-    process.kill(process.pid, sig);
-  };
-  process.on(sig, handler);
-}
+installSignalCleanup(["SIGINT", "SIGTERM"], cleanupDescriptor);
 process.on("exit", cleanupDescriptor);
 // A crash (uncaught exception / unhandled rejection) must still clean up the
 // descriptor -- otherwise the crashed session orphans a discovery file that

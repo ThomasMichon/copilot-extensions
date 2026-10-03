@@ -458,3 +458,44 @@ real spawned-and-exited child processes for pid-liveness, a real
 scenarios including a 25-session synthetic fleet. README's *Fleet hygiene*
 section documents the design and the explicit limitation (pid-reuse edge
 case) rather than claiming it fully closed.
+
+### 2026-10-03 — Second review round: closing the TOCTOU for real, plus three more fixes
+
+PR #5036's Copilot review round caught that the first-pass TOCTOU fix
+(re-read-then-unlink) still had its own narrower race: the owner's heartbeat
+rename could land between the re-read and the unlink. Closed properly with
+an atomic claim: `reapIfStillStale` now does `renameSync(path, claimPath)`
+first (atomic on both POSIX and Windows — whichever write wins the instant
+wins outright, with no window where a concurrent writer and the reaper can
+act on the same path), revalidates staleness against the claimed copy
+(immune to further races since nothing else references `claimPath`), and
+either deletes it or renames it back if the owner's write actually won.
+
+Three more real findings, all fixed:
+- `writeDescriptorAtomic` leaked its temp file (which carries the bearer
+  token) on a failed rename — now cleaned up in all cases, with the
+  original error still surfaced.
+- A legacy-descriptor compatibility gap: a future rolling update where an
+  already-running OLDER session was never taught to write `updatedAt` would
+  have its still-alive descriptor reaped purely for predating a protocol
+  change. `isStale` now treats a descriptor with NO `updatedAt` key at all
+  (not just one present-but-garbage) as pid-liveness-only. Cannot occur
+  today (every descriptor this version writes always carries the field) —
+  pure forward compatibility, not a current bug.
+- `reapIfStillStale`'s unlink-failure reporting was wrong: any unlink error
+  (including a genuine permission/I/O failure) was reported as
+  `removed: true`. Now only ENOENT (already gone) counts as a successful
+  reap; other failures are reported honestly.
+
+Also extracted the SDK-free process lifecycle (bounded listen-retry,
+signal-cleanup-then-reraise, the heartbeat/flush interval timer) out of the
+SDK-coupled `extension.mjs` into `lifecycle.mjs` — the review's direct ask
+("add coverage... extracting this lifecycle would allow deterministic
+tests without loading joinSession()"). 13 new tests exercise it with fully
+injected dependencies (a fake process-like object for signals, a fake
+timer scheduler) — no real OS signals or real waiting required.
+
+13 new `node --test` cases this round (61 total for the plugin, all
+passing). Comments that referenced "PR #5036" directly were reworded to stay
+timeless per review feedback; the PR's own description now carries the
+required Documentation impact statement.

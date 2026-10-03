@@ -1,0 +1,9 @@
+{
+  "comment": "Close TOCTOU via atomic claim-rename, fix temp-file leak on rename failure, extract testable lifecycle helpers (second review round)",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "dev"
+    }
+  ]
+}

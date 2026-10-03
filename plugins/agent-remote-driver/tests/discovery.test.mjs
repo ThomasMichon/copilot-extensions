@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -108,7 +108,7 @@ test("authorizes rejects when no token is configured", () => {
   assert.equal(authorizes("Bearer anything", undefined), false);
 });
 
-// --- writeDescriptorAtomic (PR #5036 review: atomicity regression) ---
+// --- writeDescriptorAtomic (atomicity regression coverage) ---
 
 test("writeDescriptorAtomic writes the full, valid JSON content to the target path", () => {
   const dir = tmpDir();
@@ -128,6 +128,24 @@ test("writeDescriptorAtomic never leaves a .tmp file behind on success", () => {
 
   const names = readdirSync(dir);
   assert.deepEqual(names, ["s1.json"]);
+});
+
+test("writeDescriptorAtomic cleans up the credential-bearing temp file when the rename itself fails", () => {
+  const dir = tmpDir();
+  // Make the final rename destination an existing DIRECTORY, not a file --
+  // renaming a file onto a directory fails cross-platform, simulating a
+  // real rename failure (e.g. a permission error) without relying on
+  // platform-specific permission APIs.
+  const path = join(dir, "s1.json");
+  mkdirSync(path);
+
+  assert.throws(() => writeDescriptorAtomic(path, buildDescriptor({ sessionId: "s1", pid: process.pid, port: 1, token: "secret-token" })));
+
+  // The temp file (which carried the real bearer token) must not survive a
+  // failed rename -- leaving it behind would accumulate credential-bearing
+  // files indefinitely across repeated heartbeat failures.
+  const leftoverTmp = readdirSync(dir).filter((n) => n.endsWith(".tmp"));
+  assert.deepEqual(leftoverTmp, []);
 });
 
 test("writeDescriptorAtomic replaces an existing descriptor's full content (the heartbeat-rewrite case)", () => {

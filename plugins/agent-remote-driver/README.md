@@ -139,21 +139,42 @@ this plugin addresses both directly:
   driver server's own `listen()` is retried a bounded 3 times on a bind
   race, then gives up and degrades silently (the session still runs exactly
   as it would without the extension) -- it never retry-loops indefinitely.
-  A crash (`uncaughtException`/`unhandledRejection`) still runs descriptor
-  cleanup before the process exits, so a crashed session's own entry doesn't
-  linger as "discoverable" any longer than its next heartbeat-timeout window.
+  A crash this process catches (`uncaughtException`/`unhandledRejection`)
+  still runs descriptor cleanup before the process exits -- its entry is
+  gone immediately, not merely stale. A crash that bypasses all JS handlers
+  entirely (`SIGKILL`, OOM-killer, host reboot) gets no such cleanup: its
+  descriptor physically persists on disk until something actively sweeps
+  the directory (the next session to start, or `bin/list-sessions.mjs`) --
+  there is no background timer that deletes it on its own. What the
+  heartbeat timeout actually guarantees is *correctness for a reader*: any
+  sweep that runs, whenever it runs, will correctly classify that entry as
+  stale once its last heartbeat is more than ~90s old, never "unbounded
+  staleness before anyone notices" -- but the file's physical removal still
+  depends on a sweep actually happening.
   `SIGINT`/`SIGTERM` handlers remove themselves and re-raise the signal
   after cleanup, so Node's default termination still actually happens
   (a listener alone would otherwise suppress it and leave the heartbeat
   timer re-creating the descriptor it just removed).
 - **No TOCTOU between a sweep's staleness snapshot and its delete.** A sweep
   lists descriptors as a snapshot, but the owning session can legitimately
-  refresh its heartbeat before the sweep acts on it. `reapIfStillStale`
-  re-reads and re-validates staleness immediately before unlinking, so a
-  descriptor that went fresh again between the snapshot and the delete
-  survives. The heartbeat rewrite itself is atomic (temp file + rename,
-  `writeDescriptorAtomic`), so a concurrent reader never observes a
-  half-written descriptor mid-refresh in the first place.
+  refresh its heartbeat before the sweep acts on it. A plain re-read before
+  deleting still leaves a narrower race (the owner's fresh rename could land
+  between that re-read and the unlink), so `reapIfStillStale` instead CLAIMS
+  the entry first -- an atomic `renameSync(path, claimPath)`, which cannot
+  be interleaved with the owner's own atomic write -- then revalidates
+  staleness against the claimed copy and only deletes (or restores it,
+  losing the claim race gracefully) based on that. The heartbeat rewrite
+  itself is also atomic (temp file + rename, `writeDescriptorAtomic`), so a
+  concurrent reader never observes a half-written descriptor mid-refresh in
+  the first place.
+- **Forward-compatible with a future heartbeat-protocol change.** A
+  descriptor with NO `updatedAt` key at all (as opposed to one present but
+  unparseable) is treated as pid-liveness-only, never reaped on heartbeat
+  grounds -- so an already-running session launched by an OLDER version of
+  this plugin during a rolling update is never deleted just for predating a
+  protocol change it was never taught to satisfy. Every descriptor this
+  version of the plugin writes already carries `updatedAt`, so this case
+  cannot occur today; it is pure forward-compatibility.
 
 
 
@@ -206,10 +227,15 @@ directory this process can create and write to.
   unit-testable with a fake driver.
 - [`extensions/agent-remote-driver/discovery.mjs`](extensions/agent-remote-driver/discovery.mjs) --
   pure helpers: descriptor path/shape, token generation, bearer-token
-  verification.
+  verification, and the atomic (temp file + rename) descriptor writer.
 - [`extensions/agent-remote-driver/registry.mjs`](extensions/agent-remote-driver/registry.mjs) --
-  fleet hygiene: pid-liveness + heartbeat-qualified staleness, stale-descriptor
-  sweeping, and the aggregated live-session list.
+  fleet hygiene: pid-liveness + heartbeat-qualified staleness, atomic-claim
+  stale-descriptor reaping (no TOCTOU), and the aggregated live-session list.
+- [`extensions/agent-remote-driver/lifecycle.mjs`](extensions/agent-remote-driver/lifecycle.mjs) --
+  SDK-free process-lifecycle helpers (bounded retry, remove-then-reraise
+  signal cleanup, a start/stop-able interval timer), every dependency
+  injected so each is independently unit-testable without a real SDK
+  session, real OS signals, or real timers.
 - [`bin/list-sessions.mjs`](bin/list-sessions.mjs) -- the one aggregation CLI
   a fleet controller should use instead of its own directory scan + probes.
 - [`tests/`](tests/) -- `node --test` coverage for all of the above.
