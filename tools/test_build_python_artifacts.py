@@ -1146,14 +1146,14 @@ def test_resolve_toolchain_lock_creates_venv_and_installs(
         # the `<venv_python> -c <script> setuptools wheel` version query
         return subprocess.CompletedProcess(
             cmd, 0,
-            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0"}),
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
             stderr="",
         )
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
     lock = bpa.resolve_toolchain_lock(venv_dir)
 
-    assert lock.packages == {"setuptools": "84.1.0", "wheel": "0.44.0"}
+    assert lock.packages == {"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}
     assert lock.venv_python == venv_python
     assert any(cmd[:2] == ["uv", "venv"] for cmd in calls)
     assert any(cmd[:3] == ["uv", "pip", "install"] for cmd in calls)
@@ -1166,11 +1166,15 @@ def test_resolve_toolchain_lock_reuses_existing_venv(
     # Regression: a second call with the SAME venv_dir (the mechanism a
     # caller uses to share one toolchain lock across several plugins in
     # one promotion run) must not re-create or re-install -- only read
-    # back the already-installed versions.
+    # back the already-installed versions. Requires a matching provenance
+    # marker (see `_write_provenance_marker`) -- without one, reuse would
+    # be refused and this venv rebuilt instead (see the provenance tests
+    # below).
     venv_dir = tmp_path / "toolchain-venv"
     venv_python = bpa._venv_python_path(venv_dir)
     venv_python.parent.mkdir(parents=True, exist_ok=True)
     venv_python.write_text("", encoding="utf-8")
+    btl._write_provenance_marker(venv_dir, "https://example.internal/simple/")
     calls: list[list[str]] = []
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
@@ -1179,15 +1183,95 @@ def test_resolve_toolchain_lock_reuses_existing_venv(
         assert cmd[:3] != ["uv", "pip", "install"]
         return subprocess.CompletedProcess(
             cmd, 0,
-            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0"}),
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
             stderr="",
         )
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
     lock = bpa.resolve_toolchain_lock(venv_dir)
 
-    assert lock.packages == {"setuptools": "84.1.0", "wheel": "0.44.0"}
+    assert lock.packages == {"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}
     assert len(calls) == 1
+
+
+def test_resolve_toolchain_lock_rebuilds_when_provenance_marker_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: an interpreter existing at venv_dir is NOT itself a
+    # trust signal -- a venv published before this provenance check
+    # existed (no marker at all) must never be silently reused just
+    # because `venv_python.is_file()` happens to be true; it must be
+    # quarantined aside and rebuilt from the currently-validated index.
+    _assume_governed_feed_configured(monkeypatch)
+    venv_dir = tmp_path / "toolchain-venv"
+    venv_python = bpa._venv_python_path(venv_dir)
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("stale-unmarked-interpreter", encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        calls.append(cmd)
+        if cmd[:2] == ["uv", "venv"]:
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("rebuilt", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    lock = bpa.resolve_toolchain_lock(venv_dir)
+
+    assert any(cmd[:2] == ["uv", "venv"] for cmd in calls)
+    assert any(cmd[:3] == ["uv", "pip", "install"] for cmd in calls)
+    assert lock.venv_python.read_text(encoding="utf-8") == "rebuilt"
+    # The stale, unmarked venv was quarantined aside, never deleted.
+    quarantined = list(venv_dir.parent.glob(f".{venv_dir.name}.untrusted-*"))
+    assert len(quarantined) == 1
+    assert bpa._venv_python_path(quarantined[0]).read_text(
+        encoding="utf-8"
+    ) == "stale-unmarked-interpreter"
+
+
+def test_resolve_toolchain_lock_rebuilds_when_provenance_marker_mismatched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: a venv published from a DIFFERENT index than the one
+    # currently validated (e.g. built under a prior/different trust
+    # policy) must never be reused just because its marker exists --
+    # only an EXACT match to the currently validated index is trusted.
+    _assume_governed_feed_configured(monkeypatch)
+    venv_dir = tmp_path / "toolchain-venv"
+    venv_python = bpa._venv_python_path(venv_dir)
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
+    btl._write_provenance_marker(venv_dir, "https://different.example/simple/")
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[:2] == ["uv", "venv"]:
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa.resolve_toolchain_lock(venv_dir)
+
+    assert btl._provenance_matches(venv_dir, "https://example.internal/simple/")
+    quarantined = list(venv_dir.parent.glob(f".{venv_dir.name}.untrusted-*"))
+    assert len(quarantined) == 1
 
 
 def test_resolve_toolchain_lock_venv_creation_failure_raises(
@@ -1506,7 +1590,7 @@ def test_resolve_toolchain_lock_recovers_from_prior_interrupted_setup(
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         return subprocess.CompletedProcess(
             cmd, 0,
-            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0"}),
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
             stderr="",
         )
 
@@ -1517,7 +1601,7 @@ def test_resolve_toolchain_lock_recovers_from_prior_interrupted_setup(
     assert not venv_dir.exists()
 
     lock = bpa.resolve_toolchain_lock(venv_dir)
-    assert lock.packages == {"setuptools": "84.1.0", "wheel": "0.44.0"}
+    assert lock.packages == {"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}
 
 
 def test_resolve_toolchain_lock_leaves_no_staging_directory_behind(
@@ -1536,7 +1620,7 @@ def test_resolve_toolchain_lock_leaves_no_staging_directory_behind(
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         return subprocess.CompletedProcess(
             cmd, 0,
-            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0"}),
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
             stderr="",
         )
 
@@ -1564,6 +1648,8 @@ def test_build_wheel_with_toolchain_uses_no_build_isolation(
     seen_cmd: list[str] = []
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[0] == str(toolchain.venv_python):
+            return _dispatch_toolchain_subprocess(cmd, kwargs, toolchain)
         seen_cmd.extend(cmd)
         (_staging_dir_from_cmd(cmd) / "demo-1.0-py3-none-any.whl").write_bytes(b"x")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -1681,7 +1767,7 @@ def test_resolve_toolchain_lock_defers_to_winner(
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         return subprocess.CompletedProcess(
             cmd, 0,
-            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0"}),
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
             stderr="",
         )
 
@@ -1750,7 +1836,7 @@ def test_resolve_toolchain_lock_uses_unique_staging_dirs_per_call(
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         return subprocess.CompletedProcess(
             cmd, 0,
-            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0"}),
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
             stderr="",
         )
 
@@ -1795,7 +1881,7 @@ def test_resolve_toolchain_lock_pins_install_to_validated_index_only(
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         return subprocess.CompletedProcess(
             cmd, 0,
-            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0"}),
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
             stderr="",
         )
 
@@ -1814,6 +1900,129 @@ def test_resolve_toolchain_lock_pins_install_to_validated_index_only(
     assert "UV_FIND_LINKS" not in install_env
 
 
+def test_resolve_toolchain_lock_strips_uv_constraint_and_override_vars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: `--no-config` does not suppress `UV_CONSTRAINT`/
+    # `UV_OVERRIDE`/`UV_BUILD_CONSTRAINT` -- any of these could redirect
+    # the setuptools/wheel/packaging install to a direct URL regardless of
+    # `--index-url`, bypassing the validated governed feed entirely.
+    monkeypatch.setattr(
+        btl, "_validated_trusted_index_url",
+        lambda env: "https://governed.example/simple/",  # noqa: ARG005
+    )
+    monkeypatch.setenv("UV_CONSTRAINT", "https://untrusted.example/constraints.txt")
+    monkeypatch.setenv("UV_OVERRIDE", "https://untrusted.example/overrides.txt")
+    monkeypatch.setenv("UV_BUILD_CONSTRAINT", "https://untrusted.example/build-constraints.txt")
+    venv_dir = tmp_path / "toolchain-venv"
+    seen_envs: list[dict] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        seen_envs.append(kwargs.get("env") or {})
+        if cmd[:2] == ["uv", "venv"]:
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa.resolve_toolchain_lock(venv_dir)
+
+    for env in seen_envs[:2]:  # the uv venv and uv pip install calls
+        assert "UV_CONSTRAINT" not in env
+        assert "UV_OVERRIDE" not in env
+        assert "UV_BUILD_CONSTRAINT" not in env
+
+
+def test_resolve_toolchain_lock_strips_pythonpath_and_pythonhome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: an ambient PYTHONPATH/PYTHONHOME must never reach the
+    # subprocesses that invoke a specific interpreter directly -- an
+    # ambient module on PYTHONPATH could otherwise shadow the locked
+    # setuptools/wheel/packaging, or PYTHONHOME could redirect the
+    # interpreter's own standard-library resolution entirely.
+    _assume_governed_feed_configured(monkeypatch)
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "shadow-modules"))
+    monkeypatch.setenv("PYTHONHOME", str(tmp_path / "other-home"))
+    venv_dir = tmp_path / "toolchain-venv"
+    seen_envs: list[dict] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        seen_envs.append(kwargs.get("env") or {})
+        if cmd[:2] == ["uv", "venv"]:
+            staging_python = bpa._venv_python_path(Path(cmd[3]))
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa.resolve_toolchain_lock(venv_dir)
+
+    assert len(seen_envs) == 3  # uv venv, uv pip install, version query
+    for env in seen_envs:
+        assert "PYTHONPATH" not in env
+        assert "PYTHONHOME" not in env
+
+
+def test_query_marker_environment_strips_pythonpath_and_pythonhome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "shadow-modules"))
+    monkeypatch.setenv("PYTHONHOME", str(tmp_path / "other-home"))
+    seen_env = {}
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        seen_env.update(kwargs.get("env") or {})
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout=json.dumps({"python_version": "3.12"}), stderr=""
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa._query_marker_environment(tmp_path / "python")
+
+    assert "PYTHONPATH" not in seen_env
+    assert "PYTHONHOME" not in seen_env
+
+
+def test_build_wheel_strips_pythonpath_and_pythonhome_from_build_subprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: the final `uv build --no-build-isolation` call itself
+    # inherited the caller's ambient PYTHONPATH/PYTHONHOME, letting an
+    # ambient module shadow the locked setuptools even though the
+    # manifest claims the locked venv was authoritative.
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path / "shadow-modules"))
+    monkeypatch.setenv("PYTHONHOME", str(tmp_path / "other-home"))
+    seen_envs: list[dict] = []
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        seen_envs.append(kwargs.get("env") or {})
+        (_staging_dir_from_cmd(cmd) / "demo-1.0-py3-none-any.whl").write_bytes(b"x")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa.build_wheel(tmp_path / "src", tmp_path / "dist")
+
+    assert len(seen_envs) == 1
+    assert "PYTHONPATH" not in seen_envs[0]
+    assert "PYTHONHOME" not in seen_envs[0]
+
+
 # --- build-system.requires enforcement against the locked toolchain -----
 
 
@@ -1822,6 +2031,68 @@ def _write_build_system_requires(source_dir: Path, requires: list[str]) -> None:
     requires_toml = ", ".join(json.dumps(r) for r in requires)
     (source_dir / "pyproject.toml").write_text(
         f"[build-system]\nrequires = [{requires_toml}]\n", encoding="utf-8"
+    )
+
+
+def _run_build_requires_check_inline(payload_json: str) -> str:
+    """Executes `_BUILD_REQUIRES_CHECK_SCRIPT` directly in THIS test
+    process via `exec`, feeding it ``payload_json`` on a fake stdin and
+    capturing what it prints -- the same real script
+    `_assert_toolchain_satisfies_build_requires` now runs via subprocess
+    through the locked toolchain's own interpreter (where `packaging` is
+    guaranteed present), exercised here against the real script source
+    without needing an actual toolchain venv."""
+    import contextlib
+    import io
+
+    original_stdin = sys.stdin
+    buf = io.StringIO()
+    sys.stdin = io.StringIO(payload_json)
+    try:
+        with contextlib.redirect_stdout(buf):
+            try:
+                exec(
+                    compile(
+                        btl._BUILD_REQUIRES_CHECK_SCRIPT,
+                        "<build-requires-check>",
+                        "exec",
+                    ),
+                    {"__name__": "__main__"},
+                )
+            except SystemExit:
+                pass
+    finally:
+        sys.stdin = original_stdin
+    return buf.getvalue()
+
+
+def _dispatch_toolchain_subprocess(
+    cmd, kwargs, toolchain, *, marker_environment: dict | None = None
+):
+    """Shared `fake_run` dispatcher for `build_wheel(..., toolchain=...)`
+    tests below: routes the two distinct subprocess calls
+    `_assert_toolchain_satisfies_build_requires` (and the
+    `ToolchainLock.marker_environment` property it always reads) invoke
+    through the locked toolchain's own interpreter -- the marker-
+    environment query and the build-requires check script itself (run for
+    real via `_run_build_requires_check_inline`, so these tests exercise
+    the actual comparison logic rather than a reimplementation of it)."""
+    assert cmd[0] == str(toolchain.venv_python)
+    assert cmd[1] == "-c"
+    script = cmd[2]
+    if script == btl._MARKER_ENV_QUERY_SCRIPT:
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=json.dumps(
+                marker_environment
+                if marker_environment is not None
+                else {"python_version": "3.12", "sys_platform": "win32"}
+            ),
+            stderr="",
+        )
+    assert script == btl._BUILD_REQUIRES_CHECK_SCRIPT
+    return subprocess.CompletedProcess(
+        cmd, 0, stdout=_run_build_requires_check_inline(kwargs["input"]), stderr=""
     )
 
 
@@ -1835,7 +2106,7 @@ def test_build_wheel_rejects_toolchain_below_declared_build_requires(
     )
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
-        raise AssertionError("uv build must never run once the pre-check fails")
+        return _dispatch_toolchain_subprocess(cmd, kwargs, toolchain)
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
     with pytest.raises(bpa.ArtifactBuildError):
@@ -1852,6 +2123,8 @@ def test_build_wheel_accepts_toolchain_meeting_declared_build_requires(
     )
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[0] == str(toolchain.venv_python):
+            return _dispatch_toolchain_subprocess(cmd, kwargs, toolchain)
         (_staging_dir_from_cmd(cmd) / "demo-1.0-py3-none-any.whl").write_bytes(b"x")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
@@ -1873,6 +2146,8 @@ def test_build_wheel_matches_build_requires_name_case_insensitively(
     )
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[0] == str(toolchain.venv_python):
+            return _dispatch_toolchain_subprocess(cmd, kwargs, toolchain)
         (_staging_dir_from_cmd(cmd) / "demo-1.0-py3-none-any.whl").write_bytes(b"x")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
@@ -1894,7 +2169,7 @@ def test_build_wheel_rejects_build_requires_for_packages_outside_toolchain(
     )
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
-        raise AssertionError("uv build must never run once the pre-check fails")
+        return _dispatch_toolchain_subprocess(cmd, kwargs, toolchain)
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
     with pytest.raises(bpa.ArtifactBuildError):
@@ -1917,11 +2192,8 @@ def test_build_wheel_ignores_build_requires_with_inapplicable_marker(
     def fake_run(cmd, **kwargs):  # noqa: ARG001
         if cmd[0] == str(toolchain.venv_python):
             # the marker-environment query against the locked interpreter
-            return subprocess.CompletedProcess(
-                cmd, 0,
-                stdout=json.dumps({"python_version": "3.12", "sys_platform": "win32"}),
-                stderr="",
-            )
+            # reports python_version "3.12", so the marker does not apply
+            return _dispatch_toolchain_subprocess(cmd, kwargs, toolchain)
         (_staging_dir_from_cmd(cmd) / "demo-1.0-py3-none-any.whl").write_bytes(b"x")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
@@ -1946,13 +2218,10 @@ def test_build_wheel_evaluates_markers_against_locked_interpreter(
     )
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
-        if cmd[0] == str(toolchain.venv_python):
-            return subprocess.CompletedProcess(
-                cmd, 0,
-                stdout=json.dumps({"python_version": "2.7", "sys_platform": "win32"}),
-                stderr="",
-            )
-        raise AssertionError("uv build must never run once the pre-check fails")
+        return _dispatch_toolchain_subprocess(
+            cmd, kwargs, toolchain,
+            marker_environment={"python_version": "2.7", "sys_platform": "win32"},
+        )
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
     with pytest.raises(bpa.ArtifactBuildError):
@@ -2027,34 +2296,68 @@ def test_build_wheel_rejects_unparseable_build_requires_entry(
     )
 
     def fake_run(cmd, **kwargs):  # noqa: ARG001
-        raise AssertionError("uv build must never run once the pre-check fails")
+        return _dispatch_toolchain_subprocess(cmd, kwargs, toolchain)
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
     with pytest.raises(bpa.ArtifactBuildError):
         bpa.build_wheel(src_dir, tmp_path / "dist", toolchain=toolchain)
 
 
-def test_assert_toolchain_satisfies_build_requires_fails_closed_without_packaging(
+def test_assert_toolchain_satisfies_build_requires_runs_check_inside_toolchain_venv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # Regression: on a genuinely clean machine missing the third-party
-    # `packaging` library (present today only transitively via pytest),
-    # this must fail closed with an actionable message, not a bare
-    # ModuleNotFoundError traceback.
+    # Regression: the [build-system].requires verification must run
+    # through the LOCKED toolchain's own interpreter (where `packaging` is
+    # guaranteed present, since it is one of this toolchain's own locked
+    # packages) rather than importing `packaging` in the calling process
+    # -- a genuinely clean machine with just Python and `uv` installed
+    # would not have `packaging` importable here at all. Verified by
+    # confirming the actual work is delegated to a subprocess invoking
+    # `toolchain.venv_python` (never computed in-process).
     src_dir = tmp_path / "src"
     _write_build_system_requires(src_dir, ["setuptools>=60.0.0"])
     toolchain = bpa.ToolchainLock(
         tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
     )
+    seen_cmds: list[list[str]] = []
 
-    real_import = __import__
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        seen_cmds.append(cmd)
+        return _dispatch_toolchain_subprocess(cmd, kwargs, toolchain)
 
-    def blocking_import(name, *args, **kwargs):
-        if name.startswith("packaging"):
-            raise ModuleNotFoundError(f"No module named {name!r}")
-        return real_import(name, *args, **kwargs)
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    btl._assert_toolchain_satisfies_build_requires(src_dir, toolchain)  # must not raise
+    assert any(
+        cmd[0] == str(toolchain.venv_python) and cmd[2] == btl._BUILD_REQUIRES_CHECK_SCRIPT
+        for cmd in seen_cmds
+    )
 
-    monkeypatch.setattr("builtins.__import__", blocking_import)
+
+def test_assert_toolchain_satisfies_build_requires_fails_closed_when_toolchain_lacks_packaging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: a toolchain venv genuinely missing `packaging` (e.g. an
+    # on-disk venv published before this toolchain locked it) must fail
+    # closed through the normal subprocess-failure path, with an
+    # actionable message, not a bare, hard-to-diagnose traceback.
+    src_dir = tmp_path / "src"
+    _write_build_system_requires(src_dir, ["setuptools>=60.0.0"])
+    toolchain = bpa.ToolchainLock(
+        tmp_path / "toolchain-venv" / "python",
+        {"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"},
+    )
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        if cmd[2] == btl._MARKER_ENV_QUERY_SCRIPT:
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout=json.dumps({"python_version": "3.12"}), stderr=""
+            )
+        return subprocess.CompletedProcess(
+            cmd, 1, stdout="",
+            stderr="ModuleNotFoundError: No module named 'packaging'",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
     with pytest.raises(bpa.ArtifactBuildError, match="packaging"):
         btl._assert_toolchain_satisfies_build_requires(src_dir, toolchain)
 

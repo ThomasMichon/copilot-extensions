@@ -223,7 +223,7 @@ jobs:
         # Every tracked, non-test source module must stay within its line-count
         # cap, or its grandfathered ceiling for pre-existing offenders -- the
         # componentization failure that let queue.py reach ~7,200 lines had no
-        # automated guard before this. See CONTRIBUTING.md  Code Style. Runs
+        # automated guard before this. See CONTRIBUTING.md § Code Style. Runs
         # unconditionally (push/workflow_dispatch too) so the full-tree state
         # this repo's own widen job and doc/watchdog tooling depend on is
         # never scoped away.

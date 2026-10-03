@@ -41,8 +41,84 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only on 3.10
 #: `pyproject.toml` under `plugins/` and `libs/` uses the same
 #: `setuptools.build_meta` backend (confirmed by this effort's own Build
 #: hermeticity survey), so pinning these two is sufficient to make every
-#: wheel in a run reproducible without a per-backend scheme.
-_LOCKED_TOOLCHAIN_PACKAGES = ("setuptools", "wheel")
+#: wheel in a run reproducible without a per-backend scheme. ``packaging``
+#: is also locked here -- not because any build backend needs it, but so
+#: `_assert_toolchain_satisfies_build_requires`'s own `[build-system].
+#: requires` verification can run INSIDE this governed-feed-sourced venv
+#: (via its own interpreter) rather than depending on `packaging` being
+#: importable in whatever process happens to be running this tool, which
+#: would otherwise always fail on a genuinely clean machine with just
+#: Python and `uv` installed.
+_LOCKED_TOOLCHAIN_PACKAGES = ("setuptools", "wheel", "packaging")
+
+#: Interpreter-selection environment variables that could let an ambient
+#: process redirect a DIRECTLY-INVOKED interpreter (the locked toolchain's
+#: own venv interpreter, or a caller-selected `--python`) onto modules or
+#: a standard library other than its own -- `PYTHONPATH` can shadow a
+#: locked package (e.g. the pinned `setuptools`) with an ambient copy
+#: reachable on that path, and `PYTHONHOME` can redirect the interpreter's
+#: own standard-library resolution entirely, even though the manifest
+#: claims the locked venv was authoritative. Stripped from every
+#: subprocess that invokes a specific interpreter path directly (the
+#: toolchain version/marker-environment queries, and the final `uv build
+#: --no-build-isolation` build itself in `build_python_artifacts.py`) --
+#: this repo's own managed-runtime probes apply the same isolation (see
+#: `plugins/agent-worktrees/scripts/install.sh:1025-1031`).
+_PYTHON_RUNTIME_ENV_VARS = ("PYTHONPATH", "PYTHONHOME")
+
+
+def sanitize_subprocess_env(env: dict | None = None) -> dict:
+    """A copy of ``env`` (or the current process environment, if ``env``
+    is ``None``) with every variable in `_PYTHON_RUNTIME_ENV_VARS`
+    stripped -- the shared sanitization every subprocess that runs a
+    SPECIFIC interpreter path directly must apply. Never used for a
+    subprocess that merely invokes `uv` as a command (venv creation,
+    package installation): those have their own, separate index-related
+    sanitization in `resolve_toolchain_lock`, which also strips these same
+    two variables as part of its broader stripped-variable set."""
+    sanitized = dict(os.environ) if env is None else dict(env)
+    for var in _PYTHON_RUNTIME_ENV_VARS:
+        sanitized.pop(var, None)
+    return sanitized
+
+
+#: The file published atomically alongside a shared `--toolchain-venv`,
+#: recording the governed index it was actually built from -- so a LATER
+#: call sharing the same ``venv_dir`` can verify the existing venv
+#: genuinely came from the currently-validated governed feed before
+#: trusting its mere presence (`venv_python.is_file()`) as a completion
+#: signal. Without this, a venv built before this machine's trust policy
+#: existed, or from a since-revoked/different index, would be silently
+#: reused and trusted forever just because an interpreter happens to
+#: exist at the expected path.
+_PROVENANCE_MARKER_NAME = ".governed-feed-provenance.json"
+
+
+def _write_provenance_marker(venv_dir: Path, validated_index_url: str) -> None:
+    """Records ``validated_index_url`` into ``venv_dir``'s own provenance
+    marker -- called on the staging directory BEFORE the atomic rename
+    that publishes it, so the marker and the venv it describes always
+    arrive together, never as two separate, racy writes."""
+    marker = {"validated_index_url": validated_index_url}
+    (venv_dir / _PROVENANCE_MARKER_NAME).write_text(
+        json.dumps(marker), encoding="utf-8"
+    )
+
+
+def _provenance_matches(venv_dir: Path, validated_index_url: str) -> bool:
+    """Whether ``venv_dir``'s own provenance marker records EXACTLY
+    ``validated_index_url`` -- a missing, unreadable, or mismatched marker
+    (including a venv published before this check existed, which never
+    wrote one at all) returns ``False``, never treated as "probably fine"."""
+    marker_path = venv_dir / _PROVENANCE_MARKER_NAME
+    try:
+        data = json.loads(marker_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return (
+        isinstance(data, dict)
+        and data.get("validated_index_url") == validated_index_url
+    )
 
 
 class ArtifactBuildError(Exception):
@@ -117,7 +193,7 @@ def _query_marker_environment(python_exe: Path) -> dict:
     venv."""
     result = subprocess.run(
         [str(python_exe), "-c", _MARKER_ENV_QUERY_SCRIPT],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=sanitize_subprocess_env(),
     )
     if result.returncode != 0:
         raise ArtifactBuildError(
@@ -344,16 +420,21 @@ def _governed_feed_configured(*, env: dict | None = None) -> bool:
 
 def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> ToolchainLock:
     """Resolves one pinned build-toolchain venv at ``venv_dir`` and returns
-    its exact installed ``setuptools``/``wheel`` versions.
+    its exact installed ``setuptools``/``wheel``/``packaging`` versions.
 
     If ``venv_dir`` already holds a venv from an earlier call in this same
-    process or a previous invocation of this script (its own interpreter
-    already exists on disk), venv creation and package installation are
-    skipped and only the already-installed versions are read back -- this
-    is how a caller shares ONE toolchain lock across several plugins in one
-    promotion run without this tool needing to build more than one plugin
-    per process invocation: pass the same ``venv_dir`` (``--toolchain-venv``
-    on the CLI) to every invocation in that run.
+    process or a previous invocation of this script, AND that venv's own
+    provenance marker (`_provenance_matches`) confirms it was published
+    from EXACTLY the index validated for THIS call, venv creation and
+    package installation are skipped and only the already-installed
+    versions are read back -- this is how a caller shares ONE toolchain
+    lock across several plugins in one promotion run without this tool
+    needing to build more than one plugin per process invocation: pass the
+    same ``venv_dir`` (``--toolchain-venv`` on the CLI) to every invocation
+    in that run. An existing venv whose provenance does not match (or
+    carries none at all -- e.g. published before this check existed) is
+    never trusted on interpreter-presence alone: it is quarantined aside
+    and rebuilt fresh, exactly as if ``venv_dir`` had never existed.
 
     Never resolves from an untrusted index: this call itself first
     resolves the effective default index, verifying it is both non-public
@@ -385,13 +466,49 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
         raise ArtifactBuildError(
             "no affirmatively trusted governed package feed is configured "
             "on this machine (checked uv's effective default index -- "
-            "UV_DEFAULT_INDEX/UV_INDEX_URL or the user-level uv.toml's "
-            "index-url / [[index]] default=true -- against the explicit "
-            f"trust policy in {_TRUSTED_INDEX_HOSTS_ENV_VAR}) -- refusing "
-            "to install the build toolchain, which would otherwise "
-            "silently resolve setuptools/wheel from an unverified index"
+            "UV_DEFAULT_INDEX/UV_INDEX_URL or the user-level or "
+            "system-level uv.toml's (e.g. %PROGRAMDATA%, /etc/uv, "
+            "/etc/xdg/uv) index-url / [[index]] default=true -- against "
+            f"the explicit trust policy in {_TRUSTED_INDEX_HOSTS_ENV_VAR}) "
+            "-- refusing to install the build toolchain, which would "
+            "otherwise silently resolve setuptools/wheel/packaging from "
+            "an unverified index"
         )
     venv_python = _venv_python_path(venv_dir)
+    if venv_python.is_file() and not _provenance_matches(venv_dir, validated_index_url):
+        # An interpreter existing at this shared path is not itself a
+        # trust signal: it could be a venv built before this machine's
+        # trust policy existed, built from a since-revoked/different
+        # index, or simply never published by this function at all.
+        # Never silently reuse it just because the version query below
+        # would happily succeed against it -- quarantine it aside (never
+        # delete outright, so a genuinely mismatched venv remains
+        # available for postmortem) and fall through to a fresh build
+        # from the currently-validated index, exactly as if venv_dir had
+        # never existed.
+        try:
+            quarantine_dir = Path(
+                tempfile.mkdtemp(
+                    dir=venv_dir.parent, prefix=f".{venv_dir.name}.untrusted-"
+                )
+            )
+            quarantine_dir.rmdir()  # mkdtemp pre-creates it; rename needs no destination
+            venv_dir.rename(quarantine_dir)
+        except OSError:
+            # Lost a race with a concurrent rebuild/quarantine of this
+            # same path -- re-check rather than assume: if the path now
+            # genuinely matches, the race resolved itself benignly;
+            # otherwise this is a real failure, not a benign lost race.
+            if not (
+                venv_python.is_file()
+                and _provenance_matches(venv_dir, validated_index_url)
+            ):
+                raise ArtifactBuildError(
+                    f"{venv_dir}: existing toolchain venv does not carry "
+                    "provenance matching the currently validated governed "
+                    f"index ({validated_index_url}), and it could not be "
+                    "quarantined for a rebuild"
+                )
     if not venv_python.is_file():
         venv_dir.parent.mkdir(parents=True, exist_ok=True)
         staging_venv_dir = Path(
@@ -403,17 +520,24 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
         # environment-based package sources (UV_EXTRA_INDEX_URL/
         # UV_FIND_LINKS are flat-file/extra-index sources independent of
         # the default-index machinery entirely, confirmed common on this
-        # repo's own clean-room runners) or, for `UV_VENV_SEED`, as a way
-        # for `uv venv` itself to pre-install setuptools/wheel/pip from
-        # whatever ambient source it would otherwise use -- which the
-        # later bare `uv pip install setuptools wheel` could then leave
-        # untouched if it considers the unconstrained requirement already
-        # satisfied, silently bypassing the validated index entirely. Used
-        # for BOTH the `uv venv` and `uv pip install` calls below.
-        sanitized_env = dict(env)
+        # repo's own clean-room runners), as a way to redirect a specific
+        # requirement to a direct URL regardless of index (`UV_CONSTRAINT`/
+        # `UV_OVERRIDE` for the main install, `UV_BUILD_CONSTRAINT` for any
+        # source-distribution build dependencies `uv pip install` itself
+        # needs), or, for `UV_VENV_SEED`, as a way for `uv venv` itself to
+        # pre-install setuptools/wheel/pip from whatever ambient source it
+        # would otherwise use -- which the later bare `uv pip install`
+        # could then leave untouched if it considers the unconstrained
+        # requirement already satisfied, silently bypassing the validated
+        # index entirely. Also strips `PYTHONPATH`/`PYTHONHOME` (the same
+        # interpreter-redirection vectors stripped everywhere a specific
+        # interpreter is invoked directly -- see `sanitize_subprocess_env`).
+        # Used for BOTH the `uv venv` and `uv pip install` calls below.
+        sanitized_env = sanitize_subprocess_env(env)
         for var in (
             "UV_INDEX", "UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_CONFIG_FILE",
             "UV_EXTRA_INDEX_URL", "UV_FIND_LINKS", "UV_VENV_SEED",
+            "UV_CONSTRAINT", "UV_BUILD_CONSTRAINT", "UV_OVERRIDE",
         ):
             sanitized_env.pop(var, None)
         try:
@@ -447,6 +571,12 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             # venv into its real location via a single rename -- a retry
             # after any earlier failure never finds a partially built
             # venv_dir, since venv_dir never existed until this point.
+            # The provenance marker is written into the staging directory
+            # BEFORE the rename, so it is published atomically together
+            # with the venv it describes -- a later call reusing this
+            # exact path can verify it actually came from the currently-
+            # validated governed index, never trusting mere interpreter
+            # presence (see the provenance check above).
             # Never pre-delete an existing venv_dir: a concurrent caller
             # sharing this same path may have already published its OWN
             # complete venv (and may already be building against it) --
@@ -458,6 +588,7 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             # with no real winner must still surface as a build failure,
             # never a silently swallowed exception that leaves nothing at
             # venv_dir for the version query below to find.
+            _write_provenance_marker(staging_venv_dir, validated_index_url)
             try:
                 staging_venv_dir.rename(venv_dir)
             except OSError as exc:
@@ -477,7 +608,7 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             "print(json.dumps({p: m.version(p) for p in sys.argv[1:]}))",
             *_LOCKED_TOOLCHAIN_PACKAGES,
         ],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=sanitize_subprocess_env(),
     )
     if query.returncode != 0:
         raise ArtifactBuildError(
@@ -497,6 +628,68 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             f"{missing} -- refusing to record an incomplete toolchain lock"
         )
     return ToolchainLock(venv_python, packages)
+
+
+#: Runs entirely INSIDE the locked toolchain venv's own interpreter (see
+#: `_assert_toolchain_satisfies_build_requires`), where `packaging` is
+#: guaranteed importable because it is one of this toolchain's own locked
+#: packages -- never imported in the calling process, which may have no
+#: `packaging` at all on a genuinely clean machine. Reads a JSON payload
+#: from stdin (``requires``, ``locked_packages``, ``marker_environment``)
+#: and prints a single JSON result line: ``{"ok": true}`` or
+#: ``{"ok": false, "error": "..."}``. Stops at the first unsatisfied/
+#: unparseable/unlocked requirement, mirroring the prior in-process
+#: implementation's own fail-fast behavior.
+_BUILD_REQUIRES_CHECK_SCRIPT = (
+    "import json, sys\n"
+    "from packaging.requirements import InvalidRequirement, Requirement\n"
+    "from packaging.utils import canonicalize_name\n"
+    "from packaging.version import InvalidVersion, Version\n"
+    "\n"
+    "def _fail(error):\n"
+    "    print(json.dumps({'ok': False, 'error': error}))\n"
+    "    sys.exit(0)\n"
+    "\n"
+    "payload = json.loads(sys.stdin.read())\n"
+    "locked = {\n"
+    "    canonicalize_name(name): version\n"
+    "    for name, version in payload['locked_packages'].items()\n"
+    "}\n"
+    "marker_environment = payload['marker_environment']\n"
+    "for raw in payload['requires']:\n"
+    "    try:\n"
+    "        req = Requirement(raw)\n"
+    "    except InvalidRequirement as exc:\n"
+    "        _fail(f'unparseable [build-system].requires entry {raw!r}: {exc}')\n"
+    "    if req.marker is not None and not req.marker.evaluate(\n"
+    "        environment=marker_environment\n"
+    "    ):\n"
+    "        continue  # this constraint does not apply in this environment\n"
+    "    canonical_name = canonicalize_name(req.name)\n"
+    "    locked_version_str = locked.get(canonical_name)\n"
+    "    if locked_version_str is None:\n"
+    "        _fail(\n"
+    "            f'declares an applicable build requirement {raw!r} for '\n"
+    "            f'{req.name!r}, which this locked toolchain does not pin '\n"
+    "            'at all -- --no-build-isolation means nothing installs it '\n"
+    "            'automatically, so this cannot be verified as satisfied'\n"
+    "        )\n"
+    "    try:\n"
+    "        locked_version = Version(locked_version_str)\n"
+    "    except InvalidVersion as exc:\n"
+    "        _fail(\n"
+    "            f'locked toolchain version {locked_version_str!r} for '\n"
+    "            f'{req.name!r} is not a valid version: {exc}'\n"
+    "        )\n"
+    "    if not req.specifier.contains(locked_version, prereleases=True):\n"
+    "        _fail(\n"
+    "            f'locked {req.name} {locked_version_str} does not satisfy '\n"
+    "            f'its own declared build requirement {raw!r} -- refusing '\n"
+    "            'to build with --no-build-isolation against an '\n"
+    "            'insufficient pinned toolchain'\n"
+    "        )\n"
+    "print(json.dumps({'ok': True}))\n"
+)
 
 
 def _read_build_system_requires(source_dir: Path) -> list[str]:
@@ -536,74 +729,53 @@ def _assert_toolchain_satisfies_build_requires(
 
     Also fails closed on any OTHER applicable requirement naming a
     package this toolchain does not lock at all (anything outside
-    `setuptools`/`wheel`) -- `--no-build-isolation` means nothing installs
-    it automatically, so silently treating "not one of the packages we
-    lock" as "therefore satisfied" would let a genuinely unmet build
-    dependency through undetected. Package names are compared PEP 503-
-    canonicalized (case-insensitive, `-`/`_`/`.` runs collapsed) since
-    `Requirement.name` preserves the source's own literal spelling (e.g.
-    `Setuptools` must still match the locked `setuptools` entry).
+    `setuptools`/`wheel`/`packaging`) -- `--no-build-isolation` means
+    nothing installs it automatically, so silently treating "not one of
+    the packages we lock" as "therefore satisfied" would let a genuinely
+    unmet build dependency through undetected. Package names are compared
+    PEP 503-canonicalized (case-insensitive, `-`/`_`/`.` runs collapsed)
+    since `Requirement.name` preserves the source's own literal spelling
+    (e.g. `Setuptools` must still match the locked `setuptools` entry).
 
-    Requires the third-party `packaging` library -- not declared as a
-    repo-wide dependency anywhere (this repo has no root `pyproject.toml`/
-    `requirements.txt`); today it is present only transitively via `pytest`
-    in CI/dev environments. A genuinely clean machine with just Python and
-    `uv` installed, running this CLI directly, will not have it -- this
-    fails closed with an actionable message rather than a bare
-    `ModuleNotFoundError` traceback. Declaring/bootstrapping it as a real
-    tool-level dependency (or performing this check inside the already-
-    governed-feed-sourced toolchain venv instead of this calling process)
-    is a deliberately named, not-yet-implemented follow-up."""
-    try:
-        from packaging.requirements import InvalidRequirement, Requirement
-        from packaging.utils import canonicalize_name
-        from packaging.version import InvalidVersion, Version
-    except ModuleNotFoundError as exc:
+    Requires the third-party `packaging` library, but never imports it in
+    THIS (calling) process -- this repo has no root `pyproject.toml`/
+    `requirements.txt` declaring it as a tool-level dependency, and a
+    genuinely clean machine with just Python and `uv` installed would not
+    have it importable here. Instead, the actual parsing/comparison runs
+    as a subprocess THROUGH ``toolchain.venv_python`` itself, where
+    `packaging` is guaranteed present: it is one of the packages this
+    toolchain locks (`_LOCKED_TOOLCHAIN_PACKAGES`), installed from the
+    same validated governed feed as `setuptools`/`wheel`. This also means
+    the comparison runs under the SAME interpreter whose
+    `marker_environment` it evaluates markers against."""
+    requires = _read_build_system_requires(source_dir)
+    payload = json.dumps(
+        {
+            "requires": requires,
+            "locked_packages": toolchain.packages,
+            "marker_environment": toolchain.marker_environment,
+        }
+    )
+    result = subprocess.run(
+        [str(toolchain.venv_python), "-c", _BUILD_REQUIRES_CHECK_SCRIPT],
+        input=payload, capture_output=True, text=True,
+        env=sanitize_subprocess_env(),
+    )
+    if result.returncode != 0:
         raise ArtifactBuildError(
-            "the 'packaging' library is required to verify "
-            "[build-system].requires against the locked toolchain, but is "
-            f"not importable in this environment ({exc}) -- install it "
-            "(e.g. `pip install packaging`) before running this tool "
-            "directly outside this repo's own CI/dev environment"
+            f"{source_dir}: could not verify [build-system].requires "
+            f"against the locked toolchain via {toolchain.venv_python}:\n"
+            f"{result.stdout}\n{result.stderr}"
+        )
+    try:
+        outcome = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise ArtifactBuildError(
+            f"{source_dir}: build-requirement verification via "
+            f"{toolchain.venv_python} produced non-JSON output: {exc}"
         ) from exc
-
-    locked_by_canonical_name = {
-        canonicalize_name(name): version for name, version in toolchain.packages.items()
-    }
-
-    for raw in _read_build_system_requires(source_dir):
-        try:
-            req = Requirement(raw)
-        except InvalidRequirement as exc:
-            raise ArtifactBuildError(
-                f"{source_dir}: unparseable [build-system].requires entry "
-                f"{raw!r}: {exc}"
-            ) from exc
-        if req.marker is not None and not req.marker.evaluate(
-            environment=toolchain.marker_environment
-        ):
-            continue  # this constraint does not apply in this environment
-        canonical_name = canonicalize_name(req.name)
-        locked = locked_by_canonical_name.get(canonical_name)
-        if locked is None:
-            raise ArtifactBuildError(
-                f"{source_dir}: declares an applicable build requirement "
-                f"{raw!r} for {req.name!r}, which this locked toolchain "
-                "does not pin at all -- --no-build-isolation means nothing "
-                "installs it automatically, so this cannot be verified as "
-                "satisfied"
-            )
-        try:
-            locked_version = Version(locked)
-        except InvalidVersion as exc:
-            raise ArtifactBuildError(
-                f"locked toolchain version {locked!r} for {req.name!r} is "
-                f"not a valid version: {exc}"
-            ) from exc
-        if not req.specifier.contains(locked_version, prereleases=True):
-            raise ArtifactBuildError(
-                f"{source_dir}: locked {req.name} {locked} does not satisfy "
-                f"its own declared build requirement {raw!r} -- refusing to "
-                "build with --no-build-isolation against an insufficient "
-                "pinned toolchain"
-            )
+    if not outcome.get("ok"):
+        raise ArtifactBuildError(
+            f"{source_dir}: "
+            f"{outcome.get('error', 'unknown build-requirement verification failure')}"
+        )
