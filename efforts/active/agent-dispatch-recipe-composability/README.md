@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (`plugins/agent-dispatch`)
 - **Branch(es):** per-phase PRs against `dev`
 - **Created:** 2026-10-02
-- **Status:** Draft
+- **Status:** In Progress (Phase 1 done)
 - **Vision:** `visions/plugins/agent-dispatch/README.md` §*extend-any-declaration*
   (added by this effort's own Provenance entry) — generalizes *loop-recipes*
   and *The recipe* from "extend one of four named, plugin-shipped archetypes
@@ -114,12 +114,12 @@ fit an existing archetype.
 ## Plan
 
 ### Phase 1 — Recursive `extends:` resolution (any base, not only a named recipe)
-- [ ] Generalize `resolve_extends` so that when a resolved template itself
+- [x] Generalize `resolve_extends` so that when a resolved template itself
       carries an `extends:` key, that is resolved recursively (depth > 1)
       before merging — today's single-hop-only resolution is the literal
       gap between "extend a named recipe" and "extend any already-resolved
       declaration."
-- [ ] **Each hop resolves its own nested `extends:` ref against its own
+- [x] **Each hop resolves its own nested `extends:` ref against its own
       canonical base directory, not the original caller's `base_dir`.**
       `resolve_recipe_ref`/`_load_recipe_document` take a single caller-
       supplied `base_dir` today (`registrar_recipes.py:207-275`) because
@@ -130,20 +130,20 @@ fit an existing archetype.
       declaration's directory. Otherwise a cross-repo base's own
       repo-relative `./...` ref would incorrectly resolve against the
       *consuming* repo instead of the base's own repository.
-- [ ] Add a chain-depth/cycle guard distinct from
+- [x] Add a chain-depth/cycle guard distinct from
       `substitute_placeholders`'s existing cyclic-*value* guard (tracks
       resolved *ref identities* — the fully-resolved absolute path, or
       `global:<name>` — across the chain, not object ids within one
       template) — a ref chain that revisits the same resolved identity
       raises a clear `RegistrarError` naming the full chain, never a
       `RecursionError`.
-- [ ] Confirm (already true today, verify with a test) that a repo-local or
+- [x] Confirm (already true today, verify with a test) that a repo-local or
       cross-repo `extends:` ref may point at **any** valid declaration
       document, not only a document authored as a "recipe template" —
       extending a real, already-used direct declaration as a base is not a
       new acceptance rule, just a consequence of chaining working
       correctly.
-- [ ] Tests: a 2-hop chain (declaration → repo-local recipe → `global:`
+- [x] Tests: a 2-hop chain (declaration → repo-local recipe → `global:`
       recipe); a 3-hop chain; **a chain whose hops span two different
       repository roots**, proving each hop's own nested ref resolves
       against *its own* directory rather than the original caller's; a
@@ -151,6 +151,27 @@ fit an existing archetype.
       named; placeholder substitution and override deep-merge both still
       apply correctly at every hop, in order (closest override wins,
       matching today's single-hop contract).
+- [ ] **Known gap, not yet closed** (surfaced in PR #4968 round 5):
+      per-hop directory provenance is proven for exactly one
+      path-dependent field on one kind -- `kind: emitter`'s own
+      `spec.cwd`. Two other kind-specific expansion paths resolve their
+      own path-dependent fields against the *outer* leaf file/`repo_root`
+      entirely outside `resolve_extends` (discarded once it returns a
+      plain dict): `reviewer_loops.expand_reviewer_loop`'s own
+      `emitter.cwd` handling, and
+      `repository_issue_loops.expand_repository_issue_loop`'s
+      `worker_identity` resolution via the caller's `repo_root`.
+      Extending a cross-repo `reviewer-loop`/`repository-issue-loop` base
+      through a chain may therefore still misattribute one of those
+      fields to the wrong repo. Closing this fully likely needs
+      `resolve_extends`'s per-hop directory tracking threaded out to
+      `read_declaration_file_set` (a public-signature change spanning
+      `registrar_recipes.py` and `registrar_discovery.py`), not just
+      `registrar_recipes.py` alone -- scoped as its own follow-up slice
+      rather than folded into this phase, since no real consumer needs
+      cross-repo chaining of those two kinds today (the motivating
+      consumer only needs `repository-issue-loop`'s forthcoming `script`
+      provider, Phase 2 below, chained same-repo).
 
 ### Phase 2 — `script` backlog provider (first script-path-hook realization)
 - [ ] Add a `script` forge provider for `repository_issue_loop`
@@ -240,6 +261,68 @@ detailed here once implementation starts, if it grows beyond what the Plan
 items above already specify._
 
 ## Journal
+
+### 2026-10-02 — Plan reviewed (PR #4962, 3 rounds) + Phase 1 landed
+- PR #4962 (the plan itself) went through 3 Copilot review rounds: round 1
+  flagged per-hop base-directory semantics, a private-identifier leak in
+  the new Provenance entry, a missing Documentation impact statement, and
+  a missing active-effort index row; round 2 flagged unbounded script
+  execution (CWD/timeout) in the Phase 2 plan and a missing required
+  Coordination section. All fixed and verified by direct content
+  inspection; round 3 repeated the same 4 items verbatim against the
+  already-fixed commit (a known stale-thread-tracking artifact, not new
+  substance) and was treated as a clean pass per the commented-review-
+  verdict policy. Merged via maintainer bypass.
+- **Phase 1 landed** (`registrar_recipes.py`, 2 implementation review
+  rounds): `resolve_extends` now recurses when a resolved template itself
+  carries an `extends:` key, threading a per-hop base directory so each
+  hop's own nested ref (or relative `spec.cwd`) resolves against *its own*
+  directory rather than the original caller's -- the exact bug a single
+  shared `base_dir` across every hop would have reproduced. A `_chain` of
+  resolved ref identities (a canonicalized absolute path, or
+  `global:<name>`) detects a cyclic chain and raises `RegistrarError`
+  naming the full chain; a `_MAX_CHAIN_DEPTH` guard catches an acyclic but
+  unreasonably long chain the same way. Both `RuntimeError` and `OSError`
+  from a failed `.resolve()` (a symlink loop surfaces as either, depending
+  on Python version) convert to `RegistrarError`/`RegistrarIndeterminateError`
+  respectively, never an uncaught bare exception. A `global:` recipe's own
+  payload root (`_plugin_payload_root`) is resolved lazily -- only when a
+  global template actually needs it -- via `COPILOT_PLUGIN_ROOT` (never
+  `AGENT_DISPATCH_INSTALL_DIR`, which names the runtime-state root in the
+  general installed-service case, not the validated payload attribution)
+  or a `plugin.json`-marker walk, with the installed-wheel-packaging gap
+  documented honestly rather than papered over (no shipped recipe needs
+  this today). An `emitter` base's own relative `spec.cwd` is absolutized
+  against the directory it actually *originated* from -- tracked across
+  any number of intermediate hops that inherit but don't resolve the
+  placeholder themselves (`_resolve_extends_tracking_cwd_origin`'s
+  `pending_cwd_origin`), applied only **after** placeholder substitution
+  (never before -- that would corrupt an outer-supplied absolute value,
+  or misjudge a still-unresolved deferred placeholder as a literal
+  relative path), and reset the instant a hop's own override replaces the
+  field outright (deep-merge precedence, left to the existing downstream
+  leaf-file rebase exactly as an un-inherited `cwd` always was) -- so
+  `read_declaration_file_set`'s single leaf-file-only path rebase doesn't
+  silently run a chained base emitter from the wrong repository even
+  across multiple non-resolving hops.
+  **16 new tests** across 4 review rounds: chaining (2-hop, 3-hop with
+  overrides at each hop, chained placeholders, a cross-repo-rooted chain
+  with a same-named decoy proving per-hop directory resolution, a
+  `global:` recipe's nested ref against the attributed payload root, a
+  cyclic chain naming the full chain, an acyclic chain past the max
+  depth, an absolute symlinked ref canonicalizing to its real target,
+  extending an arbitrary direct declaration); `spec.cwd` provenance
+  (absolutizing against its own directory, an outer-filled placeholder
+  recognized as absolute, a still-deferred placeholder left untouched, an
+  origin preserved across an unresolving intermediate hop, an own-override
+  resetting inherited-origin tracking); and resolution-failure
+  classification (`RuntimeError` -> `RegistrarError`, `OSError` ->
+  `RegistrarIndeterminateError`, both mocked rather than relying on
+  flaky/slow real symlink-loop detection).
+  Full `agent-dispatch` suite green (836+480+494+622+580+773, all 6
+  sub-suites) both before and after.
+- Next: Phase 2 (`script` `ForgeProvider` adapter for
+  `repository_issue_loop`).
 
 ### 2026-10-02 — Effort created; vision updated; issue filed
 - Captured the operator's two-round request verbatim (see Request).

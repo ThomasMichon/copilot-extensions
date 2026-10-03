@@ -11,9 +11,10 @@ zero changes -- this module's only job is that one resolution step.
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from .recipes import EXTERNAL_AUTHOR_CLAUSE, RESOLUTION_CLAUSE, STAGNATION_CLAUSE, SUSPEND_CLAUSE
@@ -275,7 +276,175 @@ def resolve_recipe_ref(ref: object, *, base_dir: Path) -> Mapping[str, Any]:
     return _load_recipe_document(ref, base_dir=base_dir)
 
 
-def resolve_extends(data: Mapping[str, Any], *, base_dir: Path) -> dict[str, Any]:
+def _plugin_payload_root() -> Path:
+    """Resolve this running plugin's own payload root -- the directory a
+    ``global:`` recipe's nested repo-relative ``extends:`` ref (or relative
+    ``spec.cwd``) resolves against (a ``global:`` ref has no on-disk file
+    backing it to derive a directory from the way a repo-local/cross-repo
+    ref's own file does).
+
+    Tried in order: the installed runtime's own attributed
+    ``COPILOT_PLUGIN_ROOT`` (``peer_environment`` maps a peer's
+    ``payloadRoot`` to exactly this var -- the validated payload
+    attribution, not a runtime-state directory); walking up from this
+    module's own file to the first ancestor directory containing a
+    ``plugin.json`` marker -- the same marker file ``registrar_registry.py``
+    itself validates a plugin root against -- which is what a dev checkout
+    or a test run resolves through instead. Deliberately **not**
+    ``AGENT_DISPATCH_INSTALL_DIR``: that var names the agent-dispatch
+    *runtime state* root (normally ``~/.agent-dispatch``) in the general
+    installed-service case -- ``peer_environment`` happens to repurpose it
+    for a peer's ``pluginRoot`` in one specific launch path, but treating
+    it as a general payload-root fallback would silently resolve under the
+    wrong directory for every *other* launch path that sets it to runtime
+    state instead. **Not reliable for every installed-wheel deployment**:
+    the wheel's own packaging (``pyproject.toml``'s
+    ``[tool.setuptools.package-data]``) does not ship ``plugin.json``
+    alongside the installed Python package, so neither source is
+    guaranteed in that specific case -- this is a known, documented gap,
+    deliberately not papered over, that only matters once a ``global:``
+    recipe actually needs a nested relative ref/cwd (none does today; see
+    :func:`resolve_extends`'s lazy call). Deliberately never
+    ``Path(__file__).resolve().parent`` on its own: this module lives
+    under the plugin's ``src/agent_dispatch/`` Python package directory,
+    several levels below the actual payload root.
+    """
+    env_root = os.environ.get("COPILOT_PLUGIN_ROOT")
+    if env_root:
+        return Path(env_root).expanduser()
+    candidate = Path(__file__).resolve().parent
+    for ancestor in (candidate, *candidate.parents):
+        if (ancestor / "plugin.json").is_file():
+            return ancestor
+    raise RegistrarError(
+        "extends: could not resolve this plugin's own payload root (no "
+        "COPILOT_PLUGIN_ROOT and no ancestor plugin.json found) -- needed "
+        "to resolve a global: recipe's own nested extends: ref or "
+        "relative spec.cwd"
+    )
+
+
+#: A ref chain longer than this raises a clear `RegistrarError` instead of
+#: letting a long (but non-cyclic) chain exhaust the Python recursion limit
+#: with a bare `RecursionError` -- `_classify_declaration`
+#: (`registrar_registry.py`) only catches `RegistrarError`, so an
+#: unbounded chain could otherwise abort an entire plugin's declaration
+#: scan, not just the one malformed recipe. No real recipe chain is
+#: remotely this deep; this is a safety rail, not a realistic ceiling.
+_MAX_CHAIN_DEPTH = 50
+
+
+def _ref_identity(ref: str, *, base_dir: Path) -> tuple[str, Path | None]:
+    """Resolve ``ref``'s stable, canonical identity (for cycle detection
+    across a chain) -- a fully-resolved absolute path for a repo-local or
+    cross-repo ref, or the literal ``global:<name>`` string for a global
+    ref. Returns the resolved ``Path`` too (``None`` for a global ref, which
+    has no on-disk file) so a caller resolving a file ref doesn't need to
+    redo the same path math.
+
+    An **absolute** ref is canonicalized (``.resolve()``) exactly like a
+    relative one, not left as an uninterpreted string: an absolute symlink
+    (or a path containing ``..``) would otherwise both (a) derive the wrong
+    *next* base directory for a nested ref inside the referenced document,
+    and (b) fail to collapse to the same cycle identity as an equivalent
+    differently-spelled path to the same real file.
+    """
+    if ref.startswith("global:"):
+        return ref, None
+    path = Path(ref)
+    try:
+        if not path.is_absolute():
+            path = base_dir / path
+        path = path.resolve()
+    except ValueError as exc:
+        raise RegistrarError(
+            f"extends: recipe ref {ref!r} could not be resolved to a path: {exc}"
+        ) from exc
+    except RuntimeError as exc:
+        # A symlink loop -- Path.resolve() raises RuntimeError for this on
+        # some Python versions (OSError on newer ones, handled below). A
+        # genuinely malformed ref, not a transient condition.
+        raise RegistrarError(
+            f"extends: recipe ref {ref!r} could not be resolved to a path "
+            f"(symlink loop?): {exc}"
+        ) from exc
+    except OSError as exc:
+        # Indeterminate, not invalid -- mirrors _load_recipe_document's own
+        # OSError handling: a transient permission/read race resolving the
+        # path must not be classified the same as a genuinely malformed
+        # ref, so a plugin declaration's last-known state is preserved
+        # rather than this one ref aborting the whole scan.
+        from .registrar_discovery import RegistrarIndeterminateError
+
+        raise RegistrarIndeterminateError(
+            f"extends: could not resolve recipe ref {ref!r} to a path: {exc}"
+        ) from exc
+    return str(path), path
+
+
+_PureAnyPath = (PurePosixPath, PureWindowsPath)
+
+
+def _absolutize_emitter_cwd(template: Mapping[str, Any], *, directory: Path) -> dict[str, Any]:
+    """Absolutize an ``emitter`` template's own relative ``spec.cwd``
+    against the directory the template was itself loaded from, before it is
+    merged upward into whatever extends it.
+
+    Without this, a chained declaration's flattening loses each hop's own
+    path provenance: ``read_declaration_file_set``'s own downstream
+    ``_resolve_declaration_paths`` (``registrar_discovery.py``) rebases a
+    relative ``spec.cwd`` only against the *outermost* (leaf) declaration
+    file's own directory, so a repo-A declaration extending an ordinary
+    repo-B emitter with ``cwd: .`` would otherwise run in repo A instead of
+    repo B. Mirrors that same function's own absolute-path detection
+    (POSIX/Windows, not just the current platform's `Path`) so a `cwd`
+    this function already absolutized at an earlier hop -- or one the
+    recipe author wrote as a genuinely absolute path -- is left untouched.
+    Applied only to the just-resolved *template*, never to the current
+    level's own override fields: those belong to the file that is
+    currently being resolved, which `read_declaration_file_set`'s existing
+    single rebase (against that same file's own directory) already handles
+    correctly once this function's caller finishes merging.
+
+    **Must run after placeholder substitution, never before**: a `cwd`
+    may itself be a `{placeholder}` an outer hop's own override supplies
+    (e.g. `cwd: "{workdir}"`, filled by `workdir: /abs/path` one level up).
+    Called on the already-``substitute_placeholders``-filled template, so
+    an outer-supplied absolute value is correctly recognized as absolute
+    rather than naively joined onto this hop's directory while still a raw
+    placeholder string. A placeholder that remains unresolved even after
+    this level's own substitution (deferred to a *still further* outer
+    hop) is left completely alone here -- this function only ever
+    recognizes a cwd as a needs-absolutizing relative path once it is a
+    genuine, fully-resolved path string, never a partially-filled one.
+    """
+    if template.get("kind") != "emitter":
+        return dict(template)
+    spec = template.get("spec")
+    if not isinstance(spec, Mapping):
+        return dict(template)
+    cwd = spec.get("cwd")
+    if not isinstance(cwd, str) or not cwd:
+        return dict(template)
+    if _PLACEHOLDER_RE.search(cwd):
+        # Still has an unresolved {placeholder} -- not yet a real path;
+        # leave it for whichever hop's own substitution ultimately fills
+        # it (this function only recognizes a fully-resolved relative
+        # path, never guesses at a partially-filled one).
+        return dict(template)
+    is_absolute = Path(cwd).is_absolute() or any(
+        cls(cwd).is_absolute() for cls in _PureAnyPath
+    )
+    if is_absolute:
+        return dict(template)
+    new_spec = dict(spec)
+    new_spec["cwd"] = str((directory / cwd).resolve())
+    return {**template, "spec": new_spec}
+
+
+def resolve_extends(
+    data: Mapping[str, Any], *, base_dir: Path, _chain: tuple[str, ...] = ()
+) -> dict[str, Any]:
     """Expand an ``extends:``-bearing declaration mapping into its fully
     resolved, ordinary ``kind:``-shaped form.
 
@@ -292,6 +461,26 @@ def resolve_extends(data: Mapping[str, Any], *, base_dir: Path) -> dict[str, Any
       into the output, since those are legitimate declaration fields in
       their own right.
 
+    **Chaining:** a resolved template may itself carry an ``extends:`` key
+    -- that is resolved recursively, against *its own* base directory (a
+    repo-local/cross-repo ref's own file's directory, or the plugin's own
+    payload root for a ``global:`` ref -- :func:`_plugin_payload_root`,
+    resolved lazily, only when actually needed), before this level's
+    placeholder substitution and override merge run. ``_chain`` tracks the
+    resolved *identity* of every ref followed so far in this resolution (a
+    fully-resolved absolute path, or a ``global:<name>`` string) -- not
+    object ids within one template, which is what
+    :func:`substitute_placeholders`'s own cyclic-value guard already
+    covers. A ref chain that revisits an identity already in ``_chain``
+    raises a clear :class:`RegistrarError` naming the full chain; a chain
+    longer than :data:`_MAX_CHAIN_DEPTH` (an acyclic but unreasonably long
+    chain) raises the same way. Neither ever surfaces a bare
+    ``RecursionError``. (This guards the *reference* chain only; a
+    top-level declaration file that is itself re-reachable through its own
+    chain of refs -- rather than one of the refs repeating -- is not
+    separately seeded into ``_chain`` here, since the top-level document
+    is loaded once by the caller and is not itself a ref.)
+
     The resolved template's string fields are filled first (unresolved
     placeholders left intact), then the ordinary override fields are
     deep-merged *over* the filled template -- the declaration wins on
@@ -302,14 +491,100 @@ def resolve_extends(data: Mapping[str, Any], *, base_dir: Path) -> dict[str, Any
     (that would bypass validation and surface as a misleading unrelated
     error further down the pipeline).
     """
+    resolved, _pending_cwd_origin = _resolve_extends_tracking_cwd_origin(
+        data, base_dir=base_dir, _chain=_chain
+    )
+    return resolved
+
+
+def _resolve_extends_tracking_cwd_origin(
+    data: Mapping[str, Any], *, base_dir: Path, _chain: tuple[str, ...]
+) -> tuple[dict[str, Any], Path | None]:
+    """:func:`resolve_extends`'s actual implementation, additionally
+    returning the directory a still-unresolved inherited ``spec.cwd``
+    placeholder *originated* from (``None`` once resolved, not pending, or
+    not applicable).
+
+    A placeholder may survive more than one hop (e.g. a root template sets
+    ``cwd: "{workdir}"``, an intermediate hop extends it without supplying
+    ``workdir``, and only the leaf declaration finally does) -- the
+    directory it must eventually be absolutized against is the **root
+    template's own directory** (where the field was written), never
+    whichever hop happens to be the one that finally fills the
+    placeholder. This return value carries that origin forward across
+    every such hop until the placeholder is actually filled (or the field
+    is overridden outright by a hop's own explicit `spec.cwd`, which resets
+    provenance to that hop -- correctly left for the existing downstream
+    leaf-file rebase to handle, same as an un-inherited `cwd` always was).
+
+    **Scope, stated plainly rather than overclaimed:** this origin-tracking
+    covers exactly one path-dependent field on exactly one kind --
+    ``kind: emitter``'s own ``spec.cwd``. Other kinds resolve their own
+    path-dependent fields against the *outer* leaf file/`repo_root`
+    entirely outside this function (`reviewer_loops.expand_reviewer_loop`'s
+    own `emitter.cwd` handling; `repository_issue_loops.expand_repository_issue_loop`'s
+    `worker_identity` resolution via the caller's `repo_root`), and this
+    recursive resolver's internal per-hop directory tracking is discarded
+    once it returns a plain merged dict -- it does not and cannot reach
+    those later, kind-specific expansion steps. Extending a cross-repo
+    `reviewer-loop`/`repository-issue-loop` base through a chain may
+    therefore still misattribute one of *those* fields to the wrong repo
+    today; this is a known, tracked gap (see the effort's own Plan), not a
+    blanket guarantee that every field of every kind is chain-safe.
+    """
     if "extends" not in data:
-        return dict(data)
-    template = resolve_recipe_ref(data["extends"], base_dir=base_dir)
+        return dict(data), None
+    ref = data["extends"]
+    if not isinstance(ref, str) or not ref:
+        raise RegistrarError(f"extends: expected a non-empty string ref, got {ref!r}")
+    identity, resolved_path = _ref_identity(ref, base_dir=base_dir)
+    if identity in _chain:
+        chain_display = " -> ".join((*_chain, identity))
+        raise RegistrarError(
+            f"extends: cyclic reference chain detected: {chain_display}"
+        )
+    if len(_chain) >= _MAX_CHAIN_DEPTH:
+        chain_display = " -> ".join((*_chain, identity))
+        raise RegistrarError(
+            f"extends: reference chain exceeds the maximum depth of "
+            f"{_MAX_CHAIN_DEPTH} (chain: {chain_display})"
+        )
+    template = resolve_recipe_ref(ref, base_dir=base_dir)
     if not isinstance(template, Mapping):
         raise RegistrarError(
-            f"extends: recipe {data['extends']!r} resolved to a non-mapping "
+            f"extends: recipe {ref!r} resolved to a non-mapping "
             f"document ({type(template).__name__})"
         )
+    # The next hop's own base directory is only needed if there IS a next
+    # hop (this template has its own extends:) or if it carries a relative
+    # spec.cwd to absolutize -- resolved lazily so a `global:` recipe with
+    # neither never pays for (or depends on) `_plugin_payload_root()`.
+    if "extends" in template or (
+        template.get("kind") == "emitter"
+        and isinstance(template.get("spec"), Mapping)
+        and isinstance(template["spec"].get("cwd"), str)
+    ):
+        next_base_dir = resolved_path.parent if resolved_path is not None else _plugin_payload_root()
+    else:
+        next_base_dir = None
+    pending_cwd_origin: Path | None = None
+    if "extends" in template:
+        template, pending_cwd_origin = _resolve_extends_tracking_cwd_origin(
+            template, base_dir=next_base_dir, _chain=_chain + (identity,)
+        )
+    if pending_cwd_origin is None and next_base_dir is not None:
+        # This hop's own (non-inherited, or no-longer-pending) template
+        # may itself carry a relative spec.cwd -- that field was written
+        # here, so if it is still unresolved after this hop, THIS hop's
+        # directory is its origin for any still-further outer fill.
+        spec = template.get("spec")
+        if (
+            template.get("kind") == "emitter"
+            and isinstance(spec, Mapping)
+            and isinstance(spec.get("cwd"), str)
+            and spec.get("cwd")
+        ):
+            pending_cwd_origin = next_base_dir
     params_block = data.get("params", {})
     if not isinstance(params_block, Mapping):
         raise RegistrarError(
@@ -324,4 +599,28 @@ def resolve_extends(data: Mapping[str, Any], *, base_dir: Path) -> dict[str, Any
         if isinstance(value, (str, int, float, bool))
     }
     filled_template = substitute_placeholders(template, scalar_params)
-    return deep_merge(filled_template, overrides)
+    if pending_cwd_origin is not None:
+        # Deliberately after substitute_placeholders, not before: a cwd
+        # may itself be a {placeholder} this level's own scalar_params
+        # supplies (e.g. an absolute workdir filled in by an outer
+        # override) -- absolutizing first would wrongly treat the raw
+        # placeholder text as an unresolved relative path segment.
+        spec = filled_template.get("spec")
+        cwd = spec.get("cwd") if isinstance(spec, Mapping) else None
+        if isinstance(cwd, str) and cwd and not _PLACEHOLDER_RE.search(cwd):
+            filled_template = _absolutize_emitter_cwd(
+                filled_template, directory=pending_cwd_origin
+            )
+            pending_cwd_origin = None
+        # else: still unresolved (deferred to a still-further outer hop)
+        # -- keep propagating the same origin upward untouched.
+    overrides_spec = overrides.get("spec")
+    if isinstance(overrides_spec, Mapping) and "cwd" in overrides_spec:
+        # This hop's own override fields set spec.cwd directly (not
+        # inherited) -- deep_merge below makes that win outright, so any
+        # still-pending inherited origin no longer applies: the effective
+        # cwd now belongs to *this* hop, which the existing downstream
+        # leaf-file rebase already handles correctly once merging
+        # finishes (the same as an un-inherited cwd always was).
+        pending_cwd_origin = None
+    return deep_merge(filled_template, overrides), pending_cwd_origin
