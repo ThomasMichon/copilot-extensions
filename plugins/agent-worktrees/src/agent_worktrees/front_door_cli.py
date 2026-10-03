@@ -232,7 +232,6 @@ _NO_PROJECT_COMMANDS = {
     "-h",
     "repos",
     "accounts",
-    "identifiers",
     "forks",
     "copilot-identity",
     "related",
@@ -298,6 +297,14 @@ def _is_no_project_invocation(args_list: list[str]) -> bool:
         # neutral/HOME cwd (the bare-resume case a session id exists
         # precisely to recover from) must reach that resolution instead of
         # being rejected here before cmd_get() ever runs.
+        return True
+    if command == "identifiers" and "--repo" in args_list[1:]:
+        # `identifiers sweep --repo NAME` names its own sweep target
+        # explicitly and never consults CWD -- it must work from any
+        # directory (the documented live-guard invocation from an
+        # unrelated repo's own pre-push hook). The bare form (no --repo)
+        # still auto-resolves its target from CWD via `cfg.active_project()`,
+        # so it keeps needing ordinary project resolution here.
         return True
     return command == "config-root" and any(
         arg == "--destination" or arg.startswith("--destination=") for arg in args_list[1:]

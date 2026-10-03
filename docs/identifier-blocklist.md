@@ -63,9 +63,12 @@ manages can use it, not just this one):
 4. **`check-no-internal-identifiers.py` consumes the sweep automatically**,
    as a fourth, best-effort identifier source: when `agent-worktrees` is
    installed and reachable on `PATH`, the guard shells out to `identifiers
-   sweep --format ci` (scoped to this repo via cwd auto-resolution) and folds
-   the result in alongside whatever `COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI`
-   (or the other two sources) already supplied. Absent anywhere
+   sweep --format json` (scoped to this repo via cwd auto-resolution) and
+   folds the result in alongside whatever `COPILOT_EXTENSIONS_FORBIDDEN_IDS_CI`
+   (or the other two sources) already supplied. The JSON format is used
+   (rather than the CLI's own default `ci` text format) so a parse failure
+   in one peer repo's blocklist still surfaces whatever entries DID parse
+   successfully. Absent anywhere
    `agent-worktrees` isn't installed or this repo isn't registered (a fresh
    clone, CI), this source silently contributes nothing -- it's additive,
    never a new requirement. Opt out entirely with
@@ -99,7 +102,7 @@ Each entry under the top-level `entries:` list is a mapping:
 
 | Field | Required | Meaning |
 |---|---|---|
-| `token` | yes | The literal substring, or (when `kind: regex`) a Python regular-expression fragment. |
+| `token` | yes | The literal substring, or (when `kind: regex`) a Python regular-expression fragment. Must not contain a newline or semicolon -- the CI consumer treats both as entry delimiters. A `kind: regex` token must compile and must not match the empty string (which would flag every file). |
 | `kind` | no (default `literal`) | `literal` matches as a plain, case-insensitive substring. `regex` treats `token` as a full Python regex fragment. |
 | `whole_word` | no (default `false`) | Wrap the token in `\b...\b` boundaries (auto-escaping a literal token first). Prefer this over hand-writing a regex for "don't flag this as a substring of another word." |
 | `case_sensitive` | no (default `false`) | Match this token's exact case only (scoped with an inline `(?-i:...)` group, so the rest of the pattern and every other entry stays case-insensitive). |

@@ -187,7 +187,13 @@ def test_live_sweep_contributes_identifiers(repo: Path, monkeypatch: pytest.Monk
 
     class _FakeResult:
         returncode = 0
-        stdout = "swept-token|swept reason\nregex:\\bSWEPT\\b"
+        stdout = json.dumps({
+            "error": None,
+            "entries": [
+                {"token": "swept-token", "reason": "swept reason"},
+                {"token": r"regex:\bSWEPT\b", "reason": None},
+            ],
+        })
         stderr = ""
 
     monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
@@ -245,7 +251,10 @@ def test_live_sweep_merges_into_load_identifier_data(repo: Path, monkeypatch: py
 
     class _FakeResult:
         returncode = 0
-        stdout = "swept-token|swept reason"
+        stdout = json.dumps({
+            "error": None,
+            "entries": [{"token": "swept-token", "reason": "swept reason"}],
+        })
         stderr = ""
 
     monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
@@ -262,7 +271,7 @@ def test_live_sweep_raises_on_nonzero_exit(repo: Path, monkeypatch: pytest.Monke
 
     class _FakeResult:
         returncode = 1
-        stdout = "irrelevant"
+        stdout = json.dumps({"error": "boom", "entries": []})
         stderr = "boom"
 
     monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
@@ -279,7 +288,10 @@ def test_live_sweep_failure_preserves_partial_entries(repo: Path, monkeypatch: p
 
     class _FakeResult:
         returncode = 1
-        stdout = "still-valid|a reason"
+        stdout = json.dumps({
+            "error": "one peer repo's blocklist failed to parse",
+            "entries": [{"token": "still-valid", "reason": "a reason"}],
+        })
         stderr = "one peer repo's blocklist failed to parse"
 
     monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())
@@ -297,7 +309,10 @@ def test_load_identifier_data_fails_loud_on_live_sweep_failure(
 
     class _FakeResult:
         returncode = 1
-        stdout = "still-valid|a reason"
+        stdout = json.dumps({
+            "error": "boom",
+            "entries": [{"token": "still-valid", "reason": "a reason"}],
+        })
         stderr = "boom"
 
     monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: _FakeResult())

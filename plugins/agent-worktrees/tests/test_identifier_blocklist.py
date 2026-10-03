@@ -12,9 +12,18 @@ from agent_worktrees import repos
 
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch) -> Path:
-    """Redirect ~ so the registry reads/writes under a tmp dir."""
+    """Redirect ~ so the registry reads/writes under a tmp dir.
+
+    Every repo in this file is registered with an explicit ``plat="windows"``
+    path (so fixtures read naturally regardless of which OS authored them),
+    so ``_current_platform()`` must be pinned to ``"windows"`` too --
+    otherwise ``RepoEntry.local_path()`` resolves against whatever OS the
+    test suite actually runs on (Ubuntu in CI), finds no matching path, and
+    every sweep silently skips every source.
+    """
     monkeypatch.setattr(repos.Path, "home", lambda: tmp_path)
     monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    monkeypatch.setattr(repos, "_current_platform", lambda: "windows")
     return tmp_path
 
 
@@ -219,6 +228,41 @@ def test_parse_blocklist_file_rejects_non_boolean_case_sensitive(tmp_path: Path)
     f = tmp_path / "block-for-public.yaml"
     f.write_text("entries:\n  - token: x\n    case_sensitive: 1\n", encoding="utf-8")
     with pytest.raises(iblk.BlocklistParseError, match="'case_sensitive' must be a boolean"):
+        iblk.parse_blocklist_file(f, "r", "public")
+
+
+def test_parse_blocklist_file_rejects_uncompilable_regex(tmp_path: Path):
+    f = tmp_path / "block-for-public.yaml"
+    f.write_text("entries:\n  - token: '('\n    kind: regex\n", encoding="utf-8")
+    with pytest.raises(iblk.BlocklistParseError, match="invalid regex"):
+        iblk.parse_blocklist_file(f, "r", "public")
+
+
+def test_parse_blocklist_file_rejects_regex_matching_empty_string(tmp_path: Path):
+    f = tmp_path / "block-for-public.yaml"
+    f.write_text("entries:\n  - token: 'x*'\n    kind: regex\n", encoding="utf-8")
+    with pytest.raises(iblk.BlocklistParseError, match="matches the empty string"):
+        iblk.parse_blocklist_file(f, "r", "public")
+
+
+def test_parse_blocklist_file_accepts_valid_regex(tmp_path: Path):
+    f = tmp_path / "block-for-public.yaml"
+    f.write_text(r"entries:" "\n  - token: '\\bexample\\b'\n    kind: regex\n", encoding="utf-8")
+    entries = iblk.parse_blocklist_file(f, "r", "public")
+    assert entries[0].token == r"regex:\bexample\b"
+
+
+def test_parse_blocklist_file_rejects_token_with_newline(tmp_path: Path):
+    f = tmp_path / "block-for-public.yaml"
+    f.write_text("entries:\n  - token: \"alpha\\nbeta\"\n", encoding="utf-8")
+    with pytest.raises(iblk.BlocklistParseError, match="newline or semicolon"):
+        iblk.parse_blocklist_file(f, "r", "public")
+
+
+def test_parse_blocklist_file_rejects_token_with_semicolon(tmp_path: Path):
+    f = tmp_path / "block-for-public.yaml"
+    f.write_text("entries:\n  - token: 'alpha;beta'\n", encoding="utf-8")
+    with pytest.raises(iblk.BlocklistParseError, match="newline or semicolon"):
         iblk.parse_blocklist_file(f, "r", "public")
 
 

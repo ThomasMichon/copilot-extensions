@@ -180,11 +180,34 @@ def _compile_internal_token(raw: dict, *, context: str) -> str:
     token = str(raw.get("token", "") or "").strip()
     if not token:
         raise BlocklistParseError(f"{context}: missing required 'token' field")
+    if "\n" in token or "\r" in token or ";" in token:
+        raise BlocklistParseError(
+            f"{context}: 'token' may not contain a newline or semicolon -- "
+            "the CI consumer treats both as entry delimiters, so this value "
+            "is unrepresentable in that grammar"
+        )
     kind = str(raw.get("kind", "literal") or "literal").strip().lower()
     if kind not in ("literal", "regex"):
         raise BlocklistParseError(
             f"{context}: unknown kind '{kind}' (expected 'literal' or 'regex')"
         )
+    if kind == "regex":
+        # A hand-authored pattern can be wrong in two ways a schema check
+        # alone can't catch: it may simply not compile, or it may compile
+        # but match the empty string -- which would flag every file in a
+        # scan, effectively blocking every push. Catch both here, where the
+        # source file and entry index are still available for the message,
+        # rather than letting a broken pattern surface downstream as an
+        # opaque regex error (or worse, silently over-match).
+        try:
+            compiled = _re.compile(token)
+        except _re.error as exc:
+            raise BlocklistParseError(f"{context}: invalid regex '{token}': {exc}") from exc
+        if compiled.match(""):
+            raise BlocklistParseError(
+                f"{context}: regex '{token}' matches the empty string, which "
+                "would flag every file -- narrow the pattern"
+            )
     whole_word = _require_bool(raw, "whole_word", context=context)
     case_sensitive = _require_bool(raw, "case_sensitive", context=context)
 

@@ -17,10 +17,13 @@ A denylist that *named* those strings would itself leak them, so the list is
      exact provisioning command), and
   4. a best-effort **live cross-repo sweep**, when a locally registered
      ``agent-worktrees`` installation is discoverable: ``agent-worktrees
-     identifiers sweep --format ci`` (run with this repo as cwd, so it
+     identifiers sweep --format json`` (run with this repo as cwd, so it
      auto-resolves as the sweep target) aggregates every other locally
      registered repo's own ``.identifier-blocklist/block-for-<tier>.yaml``
      denylist, scoped to this repo's own registered audience-exposure tier.
+     The JSON format (rather than the CLI's own default ``ci`` text format)
+     is used so a parse failure in one peer repo's blocklist still carries
+     whatever entries DID parse successfully, for :class:`LiveSweepFailure`.
      See ``plugins/agent-worktrees/src/agent_worktrees/identifier_blocklist.py``
      for the mechanism and ``docs/identifier-blocklist.md`` for the
      convention. This source is silently absent wherever ``agent-worktrees``
@@ -201,10 +204,14 @@ def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
     different: that is a genuinely broken *local configuration*, not mere
     absence, so it is never silently swallowed. It raises
     :class:`LiveSweepFailure`, which still carries whatever identifiers the
-    sweep DID manage to parse before failing (its own CLI still prints
-    every successfully-parsed peer's entries to stdout even on failure; see
-    ``identifier_blocklist_cli.py``) so a caller can use them defensively
-    while still treating the overall result as a failure.
+    sweep DID manage to parse before failing, so a caller can use them
+    defensively while still treating the overall result as a failure. This
+    is why the sweep is invoked with ``--format json`` rather than the
+    default ``ci`` text format: the CI format is deliberately all-or-nothing
+    on failure (nothing at all on stdout, to avoid ever piping a silently
+    partial denylist into a consumer that might ignore the exit code), so
+    only the JSON diagnostic format actually carries the partially-parsed
+    entries this class promises.
 
     One specific nonzero-exit case is NOT a configuration failure, though:
     an installed ``agent-worktrees`` old enough to predate this feature
@@ -223,7 +230,7 @@ def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
         return []
     try:
         proc = subprocess.run(
-            [exe, "identifiers", "sweep", "--format", "ci"],
+            [exe, "identifiers", "sweep", "--format", "json"],
             cwd=REPO, capture_output=True, text=True, timeout=10, check=False,
         )
     except (OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
@@ -237,9 +244,31 @@ def _load_live_sweep_identifiers() -> list[tuple[str, str | None]]:
         # project on this machine -- benign absence, not a configuration
         # failure. (output.err prints to stdout, not stderr, so check both.)
         return []
-    pairs = _load_ci_identifiers(proc.stdout) if proc.stdout.strip() else []
+    try:
+        payload = json.loads(proc.stdout) if proc.stdout.strip() else {}
+    except json.JSONDecodeError:
+        if proc.returncode == 0:
+            # Exit 0 with unparseable stdout should never happen from a
+            # well-behaved sweep; treat it the same as "nothing to report"
+            # rather than failing the push over a tooling quirk this guard
+            # can't diagnose.
+            return []
+        raise LiveSweepFailure(
+            "agent-worktrees identifiers sweep failed: could not parse its "
+            "--format json output as JSON",
+            [],
+        ) from None
+    pairs = [
+        (
+            "regex:" + e["token"][len("regex:"):]
+            if str(e.get("token", "")).lower().startswith("regex:")
+            else str(e.get("token", "")).lower(),
+            (str(e["reason"]).strip() or None) if e.get("reason") else None,
+        )
+        for e in payload.get("entries", [])
+    ]
     if proc.returncode != 0:
-        detail = (proc.stderr.strip() or proc.stdout.strip() or "no details")
+        detail = payload.get("error") or (proc.stderr.strip() or "no details")
         raise LiveSweepFailure(
             f"agent-worktrees identifiers sweep failed: {detail}", pairs,
         )

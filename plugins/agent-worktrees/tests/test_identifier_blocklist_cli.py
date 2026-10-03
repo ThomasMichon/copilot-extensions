@@ -13,9 +13,17 @@ from agent_worktrees import repos
 
 @pytest.fixture
 def home(tmp_path: Path, monkeypatch) -> Path:
-    """Redirect ~ so the registry reads/writes under a tmp dir."""
+    """Redirect ~ so the registry reads/writes under a tmp dir.
+
+    Every repo in this file is registered with an explicit ``plat="windows"``
+    path, so ``_current_platform()`` must be pinned to ``"windows"`` too --
+    otherwise ``RepoEntry.local_path()`` resolves against whatever OS the
+    test suite actually runs on (Ubuntu in CI), finds no matching path, and
+    every sweep silently skips every source.
+    """
     monkeypatch.setattr(repos.Path, "home", lambda: tmp_path)
     monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    monkeypatch.setattr(repos, "_current_platform", lambda: "windows")
     return tmp_path
 
 
