@@ -2,9 +2,9 @@
 
 - **Slug:** `dev-branch-release-pipeline`
 - **Repo:** copilot-extensions
-- **Branch(es):** working branches off current `main` for Phase 1 tooling;
-  `dev` created 2026-09-23 (Phase 2, in progress — see Plan's sequencing note
-  before assuming it's "live").
+- **Branch(es):** `dev` is live and the normal contribution target
+  (promoted to `main` by the CI pipeline); Phase 7 work branches off `dev`
+  per the current contributor flow.
 - **Created:** 2026-09-22
 - **Status:** Active (reopened 2026-10-02 for Phase 7 — see Journal)
 - **Vision:** none yet for the pipeline itself — this effort may spawn a
@@ -1831,7 +1831,7 @@ efforts' own PRs).
     *own* new logic and passed `main-gate` cleanly, unassisted — merged with
     a plain `gh pr merge --squash`, no `--admin` required, dogfooding the
     fix on its first real use.
-  - **Separately, root-cause layer**: this machine's (`atlas-core`) local
+  - **Separately, root-cause layer**: this machine's local
     **anchor checkout** of `copilot-extensions` was still sitting on an old,
     already-merged topic branch (`fix/efforts-completion-gate-owner-version-
     drift`) whose on-disk `.agent-worktrees/config.yaml` still read
