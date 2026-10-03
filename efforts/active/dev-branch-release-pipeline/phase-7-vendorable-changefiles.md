@@ -75,9 +75,14 @@ changefiles and auto-bumps."
       vendorable's own manifest version auto-bumps every one of its
       registered consumers too (real vendored copies and `uv`-editable
       pointer consumers alike, per `check-vendored-libs-sync.py`'s existing
-      consumer map), AND keeps every one of the vendorable's own real
-      vendored copies (e.g. `plugins/agent-worktrees/libs/zdd/pyproject.toml`)
-      at the same version as its canonical manifest — preserving
+      consumer map **combined with** `check-version-bump.py`'s
+      `_vendored_consumers()` map — the latter is the only place
+      `installer-engine`/`peer-launch` consumers are registered at all, so
+      the aggregator must use the union of both, not `check-vendored-libs-
+      sync.py`'s map alone), AND keeps every one of the vendorable's own
+      real vendored copies (e.g.
+      `plugins/agent-worktrees/libs/zdd/pyproject.toml`) at the same
+      version as its canonical manifest — preserving
       `lib_bumps_from_diff()`'s existing real-copy-plus-canonical rewrite
       (`tools/accumulate_bumps.py:480-520`), which `check-vendored-libs-sync.py`
       already requires to agree. A consumer no longer needs its own
@@ -169,7 +174,43 @@ changefiles and auto-bumps."
       `_write_instruction_projection_owners()`), so this closes the actual
       gap rather than only inspecting write-call return values. `main`
       still needs a real, internally-consistent version even though `dev`
-      no longer does.
+      no longer does. Two more CI call sites beyond `tools/hooks/pre-push`
+      and `ci.yml`'s own direct invocation also need updating in the same
+      pass: `.github/workflows/module-size-baseline-widen-verify.yml:30-31`
+      and `.github/workflows/validate-and-promote.yml:328-331` both invoke
+      `check-version-consistency.py` today — the former must stop calling a
+      retired file, the latter must call the new post-generation invariant
+      instead.
+- [ ] Update `tools/preview_release.py` for the same seeding/propagation
+      model as promotion: its `build()` currently reads the checked-out
+      plugin's own version directly and filters pending changefiles to
+      entries naming that plugin by name (`preview_release.py:151-158`), so
+      once per-plugin manifests carry only the `"0.0.0"` placeholder, an
+      unmodified preview would report a bogus `0.0.x` hypothetical version
+      and never show a consumer's bump when it was reached only through a
+      vendorable's propagated changefile. Preview must seed from the same
+      last-shipped-on-`main` source and apply the same coalesced
+      consumer/vendorable bump resolution promotion does, not recompute its
+      own narrower approximation.
+- [ ] Give a local dev checkout (built straight off `dev`, never promoted)
+      a non-release identity distinct from both a real shipped version and
+      the bare `"0.0.0"` placeholder, or route local installs through a
+      generated preview/dev slot instead of the raw repo-tree version —
+      `agent-bridge`'s own install script derives its immutable slot from
+      `pyproject.toml` and explicitly **rejects** a `plugin.json` version of
+      `"0.0.0"` as a downgrade from any already-shipped install
+      (`scripts/install.sh:242-250,1901-1932`), so placeholder values as
+      currently scoped would break the documented pre-merge local-install
+      path outright, including a repeated local install over an existing
+      release. This needs its own resolved design, not just a validation
+      afterthought — raise it back to the operator if the resolution isn't
+      a clear implementation detail once scoped.
+- [ ] Extend the placeholder-conversion inventory and migration to cover
+      every vendorable's own `libs/<lib>/pyproject.toml` (canonical and
+      every real copy), not just per-plugin manifests and hook-owned
+      literals — the "every version field reads `0.0.0`" decision applies
+      there too, and vendorable seeding from `main` (above) already assumes
+      `dev` itself retains no real version to fall back on.
 - [ ] Update `CONTRIBUTING.md`'s "Release & Versioning" section to describe
       the new model end to end: vendorable manifests, bidirectional
       changefile correctness against fresh `dev`, placeholder versions, and
@@ -214,9 +255,27 @@ changefiles and auto-bumps."
       highest-precedence requested level — never double-incremented and
       never resolved to an arbitrary level.
 - [ ] A non-Python vendorable with no `pyproject.toml` (`installer-engine`,
-      `peer-launch`) has a working changefile target and participates in
+      `peer-launch`) has a working changefile target, participates in
       reverse (over-coverage) checking the same as a `pyproject.toml`-backed
-      vendorable.
+      vendorable, AND is actually auto-bumped by the aggregator (not merely
+      accepted as a valid changefile target).
+- [ ] `module-size-baseline-widen-verify.yml` and `validate-and-promote.yml`
+      both still pass after the `check-version-consistency.py` migration —
+      the former no longer calls a retired file, the latter calls the new
+      post-generation invariant at the right point in the promotion flow.
+- [ ] `tools/preview_release.py` reports the real hypothetical version for
+      a plugin reached only through a vendorable's propagated changefile
+      (not just one with its own direct entry), and never reports a bogus
+      `0.0.x` preview derived from the `"0.0.0"` placeholder.
+- [ ] A local install from a `dev` checkout (never promoted) succeeds, both
+      fresh and as a repeat install over an existing real-versioned
+      release — confirm `agent-bridge`'s install script's downgrade
+      rejection does not fire against whatever non-release identity this
+      phase gives a local `dev` checkout.
+- [ ] Every vendorable's own `libs/<lib>/pyproject.toml` (canonical and
+      real copies) reads `"0.0.0"` on `dev` alongside the per-plugin
+      manifests, and vendorable seeding (above) still recovers its real
+      last-shipped version from `main` with no local fallback needed.
 - [ ] Every catalog-only field (e.g. `agent-pull-requests`'s
       `defaultEnabled: false`) survives unchanged in the generated `main`
       snapshot's `marketplace.json`, sourced from its new canonical location
