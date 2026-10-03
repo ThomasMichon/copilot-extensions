@@ -846,9 +846,6 @@ worktree-manager.
       smaller opt-out-toggle cleanup this supersedes).
 
 ### Phase 7 — Health, updating & presets (Ongoing)
-- [ ] `doctor`/validation breadth, plugin updating & alignment, and
-      git-referenced presets. Closes installer §`health-doctoring-and-validation`,
-      §`plugin-updating-and-alignment`, §`git-referenced-presets`.
 - [x] **Stranded cutover passive blocking a bare `self-install`.** A passive
       mux-daemon left behind by a crashed/interrupted `self_update()`
       (`spawn_passive` pins its `cwd` inside the version slot being cut
@@ -897,22 +894,17 @@ worktree-manager.
       only for whatever further cross-plugin alignment surfacing doctor/
       configurator work turns up. Closes installer
       §`plugin-updating-and-alignment`.
-- [ ] ~~Git-referenced presets~~ **superseded** — see the 2026-10-03 Journal
-      entry below. The installer §`git-referenced-presets` vision text (a
-      human ingesting a shareable config bundle by Git reference) has been
-      **revised in place** to §`harness-plugin-onboard-presets`: a
-      `<repo>-harness` plugin shipping its own onboard config (related-repo
-      declarations, CodeSpace/venue settings) as part of its payload,
-      discovered and merged the same way `agent-codespaces`'
+- [ ] **Harness-plugin onboard presets.** Closes installer
+      §`harness-plugin-onboard-presets` (revised in place from the earlier
+      §`git-referenced-presets`, see the 2026-10-03 Journal entry for the
+      supersession history): a `<repo>-harness` plugin ships its own onboard
+      config (related-repo declarations, CodeSpace/venue settings) as part
+      of its payload, discovered/merged the same way `agent-codespaces`'
       `load_merged_config()` already layers per-repo
-      `.agent-codespaces/config.yaml` files across adopted repos — with
-      Worktree Manager eventually reading that merged result into its own
-      `harness_state`/`doctor` surface (`build_state()` in
-      `harness_state.py` is the existing registered-projects-manifest +
-      plugin-reconciliation sweep this would extend). No design doc exists
-      yet for the harness-plugin-onboard-preset mechanism itself — that is
-      the next real open item once someone picks this phase back up, not
-      the original git-ref-ingestion design.
+      `.agent-codespaces/config.yaml` across adopted repos, with Worktree
+      Manager eventually folding that merged result into its own
+      `harness_state`/`doctor` surface. No design doc exists yet — that is
+      the next real open item if this phase is picked up again.
 
 ### Phase 8 — Reconcile deferred backlog
 

@@ -231,9 +231,7 @@ payload** — related-repo declarations, CodeSpace/venue support, and more —
 discovered and merged automatically, the same layered way CodeSpace config
 already merges a generic `config.yaml` across every adopted repo, to
 preconfigure related repos, accounts, and venue settings for a specific work
-arrangement in one step. **Supersedes** an earlier, abandoned design
-(ingesting a shareable config bundle by explicit Git reference, chosen by a
-human at onboarding time): a plugin-carried preset is adopted the same way the
+arrangement in one step. A plugin-carried preset is adopted the same way the
 plugin itself is, with no separate reference-resolution step a human must
 remember to repeat.
 
