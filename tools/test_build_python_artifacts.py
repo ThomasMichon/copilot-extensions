@@ -1118,8 +1118,12 @@ def test_resolve_toolchain_lock_creates_venv_and_installs(
     def fake_run(cmd, capture_output, text):  # noqa: ARG001
         calls.append(cmd)
         if cmd[:2] == ["uv", "venv"]:
-            venv_python.parent.mkdir(parents=True, exist_ok=True)
-            venv_python.write_text("", encoding="utf-8")
+            # cmd[2] is the STAGING dir -- resolve_toolchain_lock builds
+            # there first and only renames into venv_dir after both steps
+            # succeed.
+            staging_python = bpa._venv_python_path(Path(cmd[2]))
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("", encoding="utf-8")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         if cmd[:3] == ["uv", "pip", "install"]:
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -1188,12 +1192,12 @@ def test_resolve_toolchain_lock_install_failure_raises(
 ):
     _assume_governed_feed_configured(monkeypatch)
     venv_dir = tmp_path / "toolchain-venv"
-    venv_python = bpa._venv_python_path(venv_dir)
 
     def fake_run(cmd, capture_output, text):  # noqa: ARG001
         if cmd[:2] == ["uv", "venv"]:
-            venv_python.parent.mkdir(parents=True, exist_ok=True)
-            venv_python.write_text("", encoding="utf-8")
+            staging_python = bpa._venv_python_path(Path(cmd[2]))
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("", encoding="utf-8")
             return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="install failed")
 
@@ -1261,17 +1265,30 @@ def test_resolve_toolchain_lock_missing_package_raises(
 # --- governed-feed enforcement ------------------------------------------
 
 
-def test_governed_feed_configured_via_env_var():
+def test_governed_feed_configured_via_default_index_env_vars():
     assert bpa._governed_feed_configured(env={"UV_INDEX_URL": "https://example.internal/simple/"})
     assert bpa._governed_feed_configured(env={"UV_DEFAULT_INDEX": "https://example.internal/simple/"})
-    assert bpa._governed_feed_configured(env={"UV_INDEX": "https://example.internal/simple/"})
+
+
+def test_governed_feed_not_configured_via_supplemental_uv_index_alone():
+    # Regression: UV_INDEX (plural) only adds a SUPPLEMENTAL index -- `uv`
+    # still falls back to public PyPI for anything it doesn't resolve, so
+    # this alone must never satisfy the governed-feed-only contract.
+    assert not bpa._governed_feed_configured(env={"UV_INDEX": "https://example.internal/simple/"})
+
+
+def test_governed_feed_not_configured_when_default_index_is_public_pypi():
+    # Regression: an explicitly configured default that just points AT
+    # public PyPI itself is not a governed feed.
+    assert not bpa._governed_feed_configured(env={"UV_DEFAULT_INDEX": "https://pypi.org/simple"})
+    assert not bpa._governed_feed_configured(env={"UV_INDEX_URL": "https://PyPI.org/simple/"})
 
 
 def test_governed_feed_not_configured_with_empty_env():
     assert not bpa._governed_feed_configured(env={})
 
 
-def test_governed_feed_configured_via_user_uv_toml_windows(
+def test_governed_feed_configured_via_user_uv_toml_index_url_windows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setattr(bpa.sys, "platform", "win32")
@@ -1279,6 +1296,45 @@ def test_governed_feed_configured_via_user_uv_toml_windows(
     uv_toml.parent.mkdir(parents=True)
     uv_toml.write_text('index-url = "https://example.internal/simple/"\n', encoding="utf-8")
     assert bpa._governed_feed_configured(env={"APPDATA": str(tmp_path)})
+
+
+def test_governed_feed_configured_via_user_uv_toml_default_index_posix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(bpa.sys, "platform", "linux")
+    uv_toml = tmp_path / "uv" / "uv.toml"
+    uv_toml.parent.mkdir(parents=True)
+    uv_toml.write_text(
+        '[[index]]\nname = "governed"\nurl = "https://example.internal/simple/"\ndefault = true\n',
+        encoding="utf-8",
+    )
+    assert bpa._governed_feed_configured(env={"XDG_CONFIG_HOME": str(tmp_path)})
+
+
+def test_governed_feed_not_configured_via_supplemental_index_table_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: an `[[index]]` entry with no `default = true` only adds
+    # a supplemental index -- `uv` still falls back to public PyPI for the
+    # default, so this alone must not satisfy the gate.
+    monkeypatch.setattr(bpa.sys, "platform", "win32")
+    uv_toml = tmp_path / "uv" / "uv.toml"
+    uv_toml.parent.mkdir(parents=True)
+    uv_toml.write_text(
+        '[[index]]\nname = "extra"\nurl = "https://example.internal/simple/"\n',
+        encoding="utf-8",
+    )
+    assert not bpa._governed_feed_configured(env={"APPDATA": str(tmp_path)})
+
+
+def test_governed_feed_not_configured_when_uv_toml_default_index_is_public_pypi(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(bpa.sys, "platform", "win32")
+    uv_toml = tmp_path / "uv" / "uv.toml"
+    uv_toml.parent.mkdir(parents=True)
+    uv_toml.write_text('index-url = "https://pypi.org/simple"\n', encoding="utf-8")
+    assert not bpa._governed_feed_configured(env={"APPDATA": str(tmp_path)})
 
 
 def test_governed_feed_not_configured_when_uv_toml_has_no_index(
@@ -1289,16 +1345,6 @@ def test_governed_feed_not_configured_when_uv_toml_has_no_index(
     uv_toml.parent.mkdir(parents=True)
     uv_toml.write_text('# no index configured here\n', encoding="utf-8")
     assert not bpa._governed_feed_configured(env={"APPDATA": str(tmp_path)})
-
-
-def test_governed_feed_configured_via_user_uv_toml_posix(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setattr(bpa.sys, "platform", "linux")
-    uv_toml = tmp_path / "uv" / "uv.toml"
-    uv_toml.parent.mkdir(parents=True)
-    uv_toml.write_text('index-url = "https://example.internal/simple/"\n', encoding="utf-8")
-    assert bpa._governed_feed_configured(env={"XDG_CONFIG_HOME": str(tmp_path)})
 
 
 def test_governed_feed_not_configured_ignores_malformed_uv_toml(
@@ -1330,6 +1376,73 @@ def test_resolve_toolchain_lock_refuses_when_no_governed_feed_configured(
     with pytest.raises(bpa.ArtifactBuildError):
         bpa.resolve_toolchain_lock(tmp_path / "toolchain-venv")
     assert calls == []  # never even attempted `uv venv`/`uv pip install`
+
+
+# --- resolve_toolchain_lock staging/atomic-publish behavior -------------
+
+
+def test_resolve_toolchain_lock_recovers_from_prior_interrupted_setup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: a FIRST attempt where `uv venv` succeeds but `uv pip
+    # install` fails (simulating an interrupted/failed setup) must not
+    # leave behind a venv that looks complete -- a retry must redo both
+    # steps, not skip straight to the (forever-failing) version query.
+    _assume_governed_feed_configured(monkeypatch)
+    venv_dir = tmp_path / "toolchain-venv"
+    attempt = {"n": 0}
+
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        if cmd[:2] == ["uv", "venv"]:
+            staging_python = bpa._venv_python_path(Path(cmd[2]))
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            attempt["n"] += 1
+            if attempt["n"] == 1:
+                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="interrupted")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError):
+        bpa.resolve_toolchain_lock(venv_dir)
+    assert not bpa._venv_python_path(venv_dir).is_file()
+    assert not venv_dir.exists()
+
+    lock = bpa.resolve_toolchain_lock(venv_dir)
+    assert lock.packages == {"setuptools": "84.1.0", "wheel": "0.44.0"}
+
+
+def test_resolve_toolchain_lock_leaves_no_staging_directory_behind(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _assume_governed_feed_configured(monkeypatch)
+    venv_dir = tmp_path / "toolchain-venv"
+
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        if cmd[:2] == ["uv", "venv"]:
+            staging_python = bpa._venv_python_path(Path(cmd[2]))
+            staging_python.parent.mkdir(parents=True, exist_ok=True)
+            staging_python.write_text("", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    bpa.resolve_toolchain_lock(venv_dir)
+    leftovers = list(tmp_path.glob(".toolchain-venv.staging-*"))
+    assert leftovers == []
 
 
 # --- build_wheel with a locked toolchain --------------------------------
