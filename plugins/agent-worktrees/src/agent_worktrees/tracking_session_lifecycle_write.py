@@ -113,38 +113,24 @@ def apply_session_link_succession(args: dict) -> dict:
         # Idempotency: a retried call that's already linked to this exact
         # successor must not append a second "reassigned" entry -- ownership
         # did not change, only the retry replayed an already-settled link.
-        # `link_succession`'s `handed-off` branch creates/links a real
-        # handoff (`record.handoffs`), so an explicit handoff_token already
-        # linked there is the signal (mirrors session_register's own
-        # already_linked check) -- an auto-generated token (handoff_token is
-        # None) always names a genuinely fresh handoff, so no check applies.
-        # Every OTHER predecessor_state (e.g. "concluded") takes the direct
-        # branch instead, which never touches record.handoffs at all -- the
-        # signal there is the succession link itself already being in place.
-        if predecessor_state == "handed-off":
-            already_linked = bool(
-                handoff_token
-                and any(
-                    h.token == handoff_token
-                    and h.state == "linked"
-                    and h.successor == successor_id
-                    for h in record.handoffs
-                )
-            )
-        else:
-            pred = record.session_entry(predecessor_id)
-            succ = record.session_entry(successor_id)
-            # Only the succession LINK itself (who points to whom) signals
-            # an already-settled retry -- the predecessor's own state value
-            # is separate repairable metadata: a later call correcting it
-            # (e.g. handed-off -> concluded) with the same link unchanged
-            # must still count as idempotent, not a fresh reassignment.
-            already_linked = bool(
-                pred is not None
-                and succ is not None
-                and pred.successor == successor_id
-                and succ.predecessor == predecessor_id
-            )
+        # The succession link itself (who points to whom) is the only
+        # reliable signal, uniform across both of `link_succession`'s
+        # branches: the `handed-off` branch creates a NEW handoff object
+        # (``manual-<n>``) on every call lacking an explicit `handoff_token`
+        # -- so a token-presence check alone would miss a tokenless retry --
+        # while the direct (e.g. "concluded") branch never touches
+        # `record.handoffs` at all. The predecessor's own recorded state
+        # value is separate repairable metadata (a later call correcting it,
+        # e.g. handed-off -> concluded, for an otherwise-unchanged link must
+        # still count as idempotent), so it is deliberately excluded here.
+        pred = record.session_entry(predecessor_id)
+        succ = record.session_entry(successor_id)
+        already_linked = bool(
+            pred is not None
+            and succ is not None
+            and pred.successor == successor_id
+            and succ.predecessor == predecessor_id
+        )
         try:
             tracking.link_succession(
                 record,

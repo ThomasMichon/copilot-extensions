@@ -198,6 +198,39 @@ def test_link_succession_feeds_claim_history_once_for_an_explicit_token_retry(
     assert [e["event"] for e in events] == ["reassigned"]
 
 
+def test_link_succession_feeds_claim_history_once_for_a_default_tokenless_retry(
+    record_path,
+):
+    """A retry with NO explicit ``handoff_token`` (the CLI's default) makes
+    `link_succession` generate a fresh ``manual-<n>`` token on every call --
+    the handoff-token-presence check alone would miss this, so idempotency
+    must come from the succession link itself already being in place."""
+    from agent_worktrees import claim_history, obligations
+    from agent_worktrees.tracking import ResourceClaim
+
+    record = load_record(record_path)
+    record.sessions.append(SessionEntry("new", "2026-01-01T00:00:00"))
+    record.resources = [
+        ResourceClaim(kind="pr", ref="o/r#1", state=obligations.ACTIVE),
+    ]
+    save_record(record, record_path)
+
+    args = {
+        "worktree_id": "wt-1",
+        "yaml_path": str(record_path),
+        "predecessor": "solo",
+        "successor": "new",
+        "predecessor_state": "handed-off",
+    }
+    result1 = tracking_session_lifecycle_write.apply_session_link_succession(args)
+    assert result1["ok"] is True
+    result2 = tracking_session_lifecycle_write.apply_session_link_succession(args)
+    assert result2["ok"] is True
+
+    events = claim_history.history_for_ref("o/r#1")
+    assert [e["event"] for e in events] == ["reassigned"]
+
+
 def test_link_succession_feeds_claim_history_once_for_a_concluded_retry(
     record_path,
 ):
