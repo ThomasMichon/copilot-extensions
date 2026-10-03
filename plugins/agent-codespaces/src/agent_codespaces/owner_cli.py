@@ -56,17 +56,24 @@ def owner_log_path():
 def _rotate_at_start(path) -> None:
     """Shift ``owner.log`` to ``.1`` (and on) when it's past the size cap. Best
     effort: a predecessor still writing it (Windows refuses the rename) just
-    means this Owner appends and the next start rotates."""
+    means this Owner appends and the next start rotates.
+
+    The active file is staged aside first, and the backups shift only once that
+    succeeded: a refused rename then leaves every backup where it was. A staged
+    file left by an interrupted rotation is finished on the next start."""
     import os
 
+    staged = path.with_name(f"{path.name}.rotating")
     try:
-        if path.stat().st_size < OWNER_LOG_MAX_BYTES:
-            return
+        if not staged.exists():
+            if path.stat().st_size < OWNER_LOG_MAX_BYTES:
+                return
+            os.replace(path, staged)
         for n in range(OWNER_LOG_BACKUPS - 1, 0, -1):
             older = path.with_name(f"{path.name}.{n}")
             if older.exists():
                 os.replace(older, path.with_name(f"{path.name}.{n + 1}"))
-        os.replace(path, path.with_name(f"{path.name}.1"))
+        os.replace(staged, path.with_name(f"{path.name}.1"))
     except OSError:
         pass
 

@@ -312,3 +312,44 @@ def test_the_owner_log_rotates_only_when_an_owner_starts(monkeypatch, tmp_path):
     monkeypatch.setattr(os, "replace", busy)
     owner_cli._rotate_at_start(log)  # never raises; this Owner appends instead
     assert log.read_text("utf-8") == "y" * 20
+
+
+def test_a_held_open_log_leaves_every_backup_in_place(monkeypatch, tmp_path):
+    """Only the active file is held open by a predecessor: its refused rename
+    must come before any backup moves, or the history would be shifted and the
+    oldest backup overwritten without the active file ever rotating."""
+    import os
+
+    from agent_codespaces import owner_cli
+
+    monkeypatch.setattr(owner_cli, "OWNER_LOG_MAX_BYTES", 10)
+    log = tmp_path / "owner.log"
+    log.write_text("z" * 20, "utf-8")
+    for n, text in ((1, "one"), (2, "two"), (3, "three")):
+        (tmp_path / f"owner.log.{n}").write_text(text, "utf-8")
+    real = os.replace
+
+    def active_held(src, dst):
+        if str(src) == str(log):
+            raise PermissionError("in use by the previous Owner")
+        return real(src, dst)
+
+    monkeypatch.setattr(os, "replace", active_held)
+    owner_cli._rotate_at_start(log)
+    assert log.read_text("utf-8") == "z" * 20
+    for n, text in ((1, "one"), (2, "two"), (3, "three")):
+        assert (tmp_path / f"owner.log.{n}").read_text("utf-8") == text
+
+
+def test_an_interrupted_rotation_finishes_at_the_next_start(monkeypatch, tmp_path):
+    from agent_codespaces import owner_cli
+
+    monkeypatch.setattr(owner_cli, "OWNER_LOG_MAX_BYTES", 10)
+    log = tmp_path / "owner.log"
+    (tmp_path / "owner.log.rotating").write_text("staged", "utf-8")
+    (tmp_path / "owner.log.1").write_text("one", "utf-8")
+    log.write_text("new", "utf-8")
+    owner_cli._rotate_at_start(log)
+    assert (tmp_path / "owner.log.1").read_text("utf-8") == "staged"
+    assert (tmp_path / "owner.log.2").read_text("utf-8") == "one"
+    assert log.read_text("utf-8") == "new" and not (tmp_path / "owner.log.rotating").exists()
