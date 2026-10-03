@@ -561,3 +561,34 @@ def test_terminate_mux_daemon_pid_refuses_a_root_mismatched_real_process():
     finally:
         proc.kill()
         proc.wait(timeout=10)
+
+
+def test_spawn_passive_never_pins_cwd_inside_the_target_slot(tmp_path, monkeypatch):
+    """Cross-version process isolation invariant (copilot-extensions#4999,
+    #5053, docs/patterns/graceful-daemon-cutover.md): a spawned passive's
+    ``cwd`` must never be inside the version slot it serves. On Windows, a
+    process's cwd holds an open directory handle for the process's whole
+    lifetime -- pinning it to ``slot`` is what let a stranded (or merely
+    still-running) passive block every subsequent ``shutil.rmtree(slot)``
+    self-install attempt targeting that exact slot."""
+    root = tmp_path / "root"
+    slot = root / "versions" / "9.9.9-test"
+    (slot / "src").mkdir(parents=True)
+
+    captured: dict[str, object] = {}
+
+    class _FakePopen:
+        def __init__(self, argv, **kwargs):
+            captured["argv"] = argv
+            captured["kwargs"] = kwargs
+            self.pid = 123456
+
+    monkeypatch.setattr(mdc.subprocess, "Popen", _FakePopen)
+
+    mdc.spawn_passive(slot, root=root, port=54321)
+
+    cwd = captured["kwargs"]["cwd"]
+    assert cwd == str(root), "spawn_passive must launch from the stable root, not the slot"
+    assert not str(Path(cwd).resolve()).startswith(str(slot.resolve())), (
+        "spawn_passive's cwd must never be inside the target version slot"
+    )

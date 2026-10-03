@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import secrets
 import shlex
-import signal
 import socket
 import subprocess
 import sys
@@ -15,7 +14,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from agent_procutil import detached_kwargs, windowless_daemon_kwargs
-from zdd import breadcrumb, routing
+from zdd import breadcrumb, diagnostics, routing
 from zdd.cutover import CutoverOrchestrator
 
 from . import mux_daemon_process
@@ -259,6 +258,20 @@ def adopt_kind() -> str:
 
 
 def spawn_passive(slot: Path, *, root: Path, port: int):
+    """Spawn a passive mux-daemon candidate serving ``slot``'s payload.
+
+    Cross-version process isolation invariant (see
+    ``docs/patterns/graceful-daemon-cutover.md``): a spawned child's ``cwd``
+    must never be pinned inside the version slot it serves. ``slot`` is
+    reachable solely as a ``PYTHONPATH`` entry below -- the child's working
+    directory is ``root`` (the stable install root, never itself replaced)
+    instead. Pinning ``cwd`` to ``slot`` was the direct cause of
+    copilot-extensions#4999/#5053: on Windows, a process's cwd holds an open
+    directory handle for as long as the process lives, so any later
+    self-install targeting that exact slot (a retry, or a second payload at
+    the same version) collided with `shutil.rmtree(slot)` for as long as this
+    passive (or its abandoned remains) kept running.
+    """
     pythonpath = [str(slot / "src")]
     libs_dir = slot / "libs"
     if libs_dir.is_dir():
@@ -277,7 +290,7 @@ def spawn_passive(slot: Path, *, root: Path, port: int):
         "--passive",
     ]
     kwargs: dict[str, object] = {
-        "cwd": str(slot),
+        "cwd": str(root),
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
@@ -387,32 +400,31 @@ def _ps_env_without_width_override() -> dict[str, str]:
 def _terminate_mux_daemon_pid(pid: int, *, root: Path) -> bool:
     """Terminate ``pid`` after verifying it is a mux-daemon bound to ``root``.
 
-    KNOWN GAP (copilot-extensions#5006): identity here is established by
-    command-line shape + ``--root=`` match, then the kill is issued
-    separately by bare PID -- if the process exits and the OS reuses its
-    PID between those two steps, an unrelated process could be signaled
-    instead. Closing this properly needs a captured process start-time
-    bound through ``zdd.diagnostics.terminate_pid_if_identity``, recorded
-    in the cutover breadcrumb at spawn time -- a cross-cutting ``zdd``
-    schema change tracked separately rather than folded into whichever
-    caller happens to touch this function next.
+    This is the ONE legitimate PID-kill fallback this module uses: the
+    ``_legacy_lock_cutover`` caller only ever reaches here for a resident
+    that predates the cutover protocol entirely (no routing-table entry,
+    so there is no IPC endpoint to ask it to drain/self-retire -- see the
+    cross-version isolation invariant in
+    ``docs/patterns/graceful-daemon-cutover.md``). Every protocol-aware
+    resident is instead asked to retire itself over IPC
+    (``ControlClient.drain``/``shutdown``); this function is never called
+    for one.
+
+    Routed entirely through ``zdd.diagnostics.terminate_pid_if_identity``
+    -- the shared, identity-bound termination primitive -- rather than a
+    bare ``os.kill``/``taskkill`` by PID. A process-start-time token is
+    captured immediately after the cmdline/root identity check above, and
+    the kill itself is issued through an OS object (a Windows handle /
+    POSIX pidfd) bound to that exact ``(pid, start_time)`` pair, so a PID
+    the OS has since reused for an unrelated process can never be signaled
+    in its place (closes copilot-extensions#5006 for this call site).
     """
     if pid not in _iter_mux_daemon_pids() or not _pid_matches_root(pid, root=root):
         return False
-    try:
-        if os.name == "nt":
-            result = subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-            )
-            return result.returncode == 0
-        os.kill(pid, signal.SIGTERM)
-        return True
-    except OSError:
+    start_time = diagnostics.process_start_time(pid)
+    if start_time is None:
         return False
+    return bool(diagnostics.terminate_pid_if_identity(pid, start_time).get("killed"))
 
 
 def _reap_abandoned_passive(root: Path, record: dict | None) -> dict:

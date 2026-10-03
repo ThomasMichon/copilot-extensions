@@ -370,6 +370,30 @@ agent-bridge needs.
    live-daemon activation is operator-gated (agent-bridge is the launcher the
    harness itself runs under).
    (agent-bridge is the launcher the harness itself runs under).
+8. **Cross-version process isolation: no reach-in, discovery + IPC only, and
+   old versions self-retire.** A process belonging to version `N` must never
+   (a) spawn a child with its `cwd`, working directory, or any other
+   filesystem presence pinned inside a *different* version's slot — not an
+   older version's, and not a newer one mid-install — or (b) terminate
+   another version's resident daemon by a bare PID lookup. The only sanctioned
+   way to interact with another version's daemon is to **discover** its
+   reserved endpoint via the routing table (`zdd.routing`) and **talk to it
+   over the existing control-plane IPC** (health/drain/shutdown). The daemon
+   being cut away from is responsible for **retiring itself** on receiving
+   that request (or, for a pre-protocol legacy resident, on losing the
+   routing table's "active" claim) — the orchestrating process only ever
+   asks, it never reaches in and kills. A kill-by-PID fallback is permitted
+   **only** for a legacy resident that predates this protocol entirely (no
+   routing-table entry, hence no IPC endpoint to ask), lives in one central,
+   shared primitive (`zdd.diagnostics.terminate_pid_if_identity` —
+   identity-bound via a captured process-start-time token, immediately before
+   signaling, never a bare `os.kill`/`taskkill` by PID alone), and is only
+   ever invocable against a version strictly older than the caller's own.
+   Violating (a) is what let a spawned/stranded passive's open `cwd` handle
+   block every later `shutil.rmtree(slot)` self-install attempt on Windows
+   (copilot-extensions#4999); violating (b) with a bare PID kill reopens the
+   TOCTOU race where the OS reuses that PID for an unrelated process between
+   the identity check and the signal (copilot-extensions#5006).
 
 ## Cross-platform parity (Windows `install.ps1` ↔ POSIX `install.sh`)
 
