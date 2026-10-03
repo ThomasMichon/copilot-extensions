@@ -512,7 +512,7 @@ win grows with build complexity.
   adding `ToolchainLock.marker_environment` (cached, queried once via a
   tiny stdlib-only script run THROUGH `toolchain.venv_python` itself,
   returning the same keys `packaging.markers.default_environment()` would)
-  and passing it to every `Marker.evaluate(environment=...)` call. 8 more
+  and passing it to every `Marker.evaluate(environment=...)` call. 6 more
   unit tests (106 total). Re-verified for real (with the new trust-policy
   variable set to this machine's actual governed-feed host) that
   `agent-bridge` still builds correctly, and confirmed the tool now fails
@@ -547,10 +547,39 @@ win grows with build complexity.
   there (Python resolves a free variable via the DEFINING module's own
   globals, not the importer's) -- updated the two affected tests to patch
   the real defining module instead. Confirmed `tools/check-module-size.py`
-  now passes for this diff. This slice has now gone through 7 automated
-  review rounds, each finding genuine, progressively narrower issues --
-  consistent with this effort's own documented review history on its
-  prior slice.
+  now passes for this diff.
+- An eighth review round found 5 more real issues: (1) the governed-feed
+  gate only validated the EFFECTIVE DEFAULT index, but `uv pip install`
+  can also consult SUPPLEMENTAL indexes (`UV_INDEX`, or a plain `[[index]]`
+  entry with no `default = true`) -- a trusted default alongside an
+  untrusted supplemental index passed the gate while the actual install
+  could still source packages from the untrusted one. Fixed by pinning
+  the install to EXACTLY the one validated URL (`uv pip install
+  --no-config --index-url <validated-url>`, with `UV_INDEX`/
+  `UV_INDEX_URL`/`UV_DEFAULT_INDEX`/`UV_CONFIG_FILE` stripped from its own
+  subprocess environment) instead of merely confirming "some index looks
+  fine" and trusting `uv`'s own ambient config to pick the real one used.
+  (2) the staging directory name was unique only per PID, so two threads
+  in the same process sharing a PID could collide and mutate each other's
+  in-progress venv -- fixed with `tempfile.mkdtemp` under `venv_dir.parent`
+  for genuine per-call uniqueness. (3) a rename failure during publish was
+  unconditionally swallowed as if a concurrent winner always existed --
+  a genuine permission/filesystem/invalid-destination error with no real
+  winner present would fall through to a later crash launching a
+  nonexistent interpreter; fixed to confirm the destination genuinely
+  exists before treating the failure as benign, otherwise re-raising as
+  `ArtifactBuildError` with the original cause. (4) a documentation-
+  process finding: the prior Journal entry's arithmetic was wrong (100 + 8
+  ≠ 106; corrected to 100 + 6 = 106, matching the real measured count).
+  (5) the new module's own docstring baked in a PR/review-round reference
+  -- corrected to describe only the timeless technical reason for the
+  split, per `CONTRIBUTING.md`'s "describe current state, not review
+  history" rule. 4 more unit tests (110 total). Re-verified for real:
+  `agent-bridge` still builds correctly with the install now explicitly
+  pinned to this machine's governed index. This slice has now gone
+  through 8 automated review rounds, each finding genuine, progressively
+  narrower issues -- consistent with this effort's own documented review
+  history on its prior slice.
 - Real smoke test (not just mocked unit tests): built `agent-bridge` (10
   wheels) then `agent-worktrees` (its own wheel + vendored libs) against
   the SAME `--toolchain-venv` -- both manifests recorded the identical

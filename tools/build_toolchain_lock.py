@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Build-toolchain lock resolution for `tools/build_python_artifacts.py`.
 
-Split out of that module (review round 7 on
-`ThomasMichon/copilot-extensions#5042`) purely to stay under
-`tools/check-module-size.py`'s 1,000-line cap for new/unbaselined files --
-this is a component boundary, not a reusability concern: every name here is
-still imported back into, and re-exported by, `build_python_artifacts.py`,
-which remains the sole public entry point and CLI.
+Split out of that module to stay under `tools/check-module-size.py`'s
+1,000-line cap for new/unbaselined files -- this is a component boundary,
+not a reusability concern: every name here is still imported back into,
+and re-exported by, `build_python_artifacts.py`, which remains the sole
+public entry point and CLI.
 
 Owns the Phase 2 Build hermeticity direction of the
 `governed-python-artifact-promotion` effort
@@ -28,6 +27,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.parse
 from pathlib import Path
 
@@ -275,6 +275,28 @@ def _effective_default_index_url(env: dict) -> str | None:
     return None
 
 
+def _validated_trusted_index_url(env: dict) -> str | None:
+    """The effective default index URL, but ONLY if it is both non-public
+    AND affirmatively trusted (see `_governed_feed_configured`'s own
+    docstring for the allowlist rationale) -- returns the concrete URL
+    (rather than just a bool) so a caller can pin `uv` to EXACTLY this one
+    index at install time, instead of merely confirming "some index looks
+    fine" and then trusting `uv`'s own ambient config to pick the real one
+    used -- which could still consult an untrusted SUPPLEMENTAL index
+    (`UV_INDEX`, or a plain `[[index]]` entry with no `default = true`)
+    that this check never validated."""
+    trusted_hosts = _trusted_index_hosts(env)
+    if not trusted_hosts:
+        return None
+    url = _effective_default_index_url(env)
+    if not url or _is_public_pypi_url(url):
+        return None
+    host = _url_host(url)
+    if host is None or host.lower() not in trusted_hosts:
+        return None
+    return url
+
+
 def _governed_feed_configured(*, env: dict | None = None) -> bool:
     """Whether `uv`'s EFFECTIVE DEFAULT index in this environment is both
     (a) not a public PyPI-family host, AND (b) affirmatively trusted by
@@ -292,14 +314,7 @@ def _governed_feed_configured(*, env: dict | None = None) -> bool:
     `tools/check-feed-neutrality.py`); only each machine's own local
     configuration ever names its real, trusted feed."""
     env = dict(os.environ) if env is None else env
-    trusted_hosts = _trusted_index_hosts(env)
-    if not trusted_hosts:
-        return False
-    url = _effective_default_index_url(env)
-    if not url or _is_public_pypi_url(url):
-        return False
-    host = _url_host(url)
-    return host is not None and host.lower() in trusted_hosts
+    return _validated_trusted_index_url(env) is not None
 
 
 def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> ToolchainLock:
@@ -316,14 +331,22 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
     on the CLI) to every invocation in that run.
 
     Never resolves from an untrusted index: this call itself first
-    verifies the effective default index is both non-public AND
-    affirmatively trusted by this machine's own explicit policy
-    (``_governed_feed_configured``), failing closed rather than letting
+    resolves the effective default index, verifying it is both non-public
+    AND affirmatively trusted by this machine's own explicit policy
+    (``_validated_trusted_index_url``), failing closed rather than letting
     `uv venv`/`uv pip install` silently resolve `setuptools`/`wheel` from
     an unverified index on a runner with no trust policy configured at
-    all.
+    all. The install itself is then pinned to EXACTLY that one validated
+    URL (``--index-url`` plus ``--no-config``, with any ambient
+    supplemental-index environment variable stripped) -- never merely
+    "some index looked fine, trust `uv`'s own ambient config to pick the
+    real one," which could still let an untrusted SUPPLEMENTAL index
+    (`UV_INDEX`, or a plain `[[index]]` entry with no `default = true`)
+    supply the actual packages.
 
-    Built in a staging directory and published into ``venv_dir`` only via
+    Built in a staging directory -- a genuinely unique one per call
+    (`tempfile.mkdtemp`, not merely PID-qualified, since two threads in the
+    same process share a PID) -- and published into ``venv_dir`` only via
     an atomic rename AFTER both `uv venv` and `uv pip install` succeed --
     never directly into ``venv_dir`` -- so an interrupted or partially
     failed setup never leaves a venv on disk that a later call's own
@@ -331,7 +354,9 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
     already-installed one (which would otherwise skip straight to the
     version query and fail there forever, requiring a manual delete to
     recover)."""
-    if not _governed_feed_configured():
+    env = dict(os.environ)
+    validated_index_url = _validated_trusted_index_url(env)
+    if validated_index_url is None:
         raise ArtifactBuildError(
             "no affirmatively trusted governed package feed is configured "
             "on this machine (checked uv's effective default index -- "
@@ -343,9 +368,10 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
         )
     venv_python = _venv_python_path(venv_dir)
     if not venv_python.is_file():
-        staging_venv_dir = venv_dir.parent / f".{venv_dir.name}.staging-{os.getpid()}"
-        if staging_venv_dir.exists():
-            shutil.rmtree(staging_venv_dir, ignore_errors=True)
+        venv_dir.parent.mkdir(parents=True, exist_ok=True)
+        staging_venv_dir = Path(
+            tempfile.mkdtemp(dir=venv_dir.parent, prefix=f".{venv_dir.name}.staging-")
+        )
         try:
             venv_cmd = ["uv", "venv", str(staging_venv_dir)]
             if python:
@@ -357,10 +383,23 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
                     f"{result.stdout}\n{result.stderr}"
                 )
             staging_venv_python = _venv_python_path(staging_venv_dir)
+            # Strip any ambient SUPPLEMENTAL-index variable -- the install
+            # must consult ONLY the one validated URL, passed explicitly
+            # below, never whatever `uv` would otherwise additionally
+            # source from the environment or a project/user config file.
+            install_env = dict(env)
+            for var in (
+                "UV_INDEX", "UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_CONFIG_FILE",
+            ):
+                install_env.pop(var, None)
             install = subprocess.run(
-                ["uv", "pip", "install", "--python", str(staging_venv_python),
-                 *_LOCKED_TOOLCHAIN_PACKAGES],
-                capture_output=True, text=True,
+                [
+                    "uv", "pip", "install", "--no-config",
+                    "--index-url", validated_index_url,
+                    "--python", str(staging_venv_python),
+                    *_LOCKED_TOOLCHAIN_PACKAGES,
+                ],
+                capture_output=True, text=True, env=install_env,
             )
             if install.returncode != 0:
                 raise ArtifactBuildError(
@@ -376,14 +415,20 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
             # complete venv (and may already be building against it) --
             # clobbering it here would violate the "unchanged shared lock"
             # promise and could break an in-flight build. If the rename
-            # itself fails because venv_dir now exists (we lost the race
-            # between our own absence check above and this point), defer
-            # to whichever publisher won and discard our own copy instead.
-            venv_dir.parent.mkdir(parents=True, exist_ok=True)
+            # itself fails, confirm a winner's venv is genuinely present
+            # (venv_python now exists) before treating it as a benign lost
+            # race -- a permission/filesystem/invalid-destination error
+            # with no real winner must still surface as a build failure,
+            # never a silently swallowed exception that leaves nothing at
+            # venv_dir for the version query below to find.
             try:
                 staging_venv_dir.rename(venv_dir)
-            except OSError:
-                pass
+            except OSError as exc:
+                if not venv_python.is_file():
+                    raise ArtifactBuildError(
+                        f"could not publish toolchain venv {staging_venv_dir} "
+                        f"to {venv_dir}: {exc}"
+                    ) from exc
         finally:
             if staging_venv_dir.exists():
                 shutil.rmtree(staging_venv_dir, ignore_errors=True)
