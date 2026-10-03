@@ -10,18 +10,26 @@ See ``efforts/active/pivot-streaming-transport/phase-3-design.md`` for the
 full design this implements. Summary of the architecture actually used here,
 which intentionally differs from that document's own multi-writer framing
 (every requirement it lists is still satisfied, just by a simpler
-mechanism): :func:`run_relay` runs a **single** control loop in the calling
-thread. A dedicated reader thread does nothing but turn
-``DispatchClient.stream_events()`` SSE frames into items on a queue; every
-actual board mutation -- the event-woken re-fetch, the long reconcile, the
-local recompute tick, and the transient-failure poll fallback -- runs
-one-at-a-time inside that same control loop. A single-threaded control loop
-needs no explicit lock to serialize those writers against each other (there
-is only ever one of them running at a time, by construction), and an event
-that arrives while a fetch is in flight is simply not read off the queue
-until the fetch finishes -- so it is picked up on the very next loop
-iteration, which is exactly the "trailing dirty flag" behavior the design
-document describes, without a separate flag to get wrong.
+mechanism): a **single** control loop drives the whole relay for a CLI
+process's lifetime (:func:`run_relay`, via the iterative :func:`_drive`, a
+plain ``while`` loop -- not two functions calling each other, which is
+still unbounded recursion in Python even split across functions). A
+dedicated reader thread does nothing but
+turn ``DispatchClient.stream_events()`` SSE frames into items on a queue;
+every actual board mutation -- the event-woken re-fetch, the long
+reconcile, the local recompute tick, and the transient-failure poll
+fallback -- runs one-at-a-time inside that same control loop. A
+single-threaded control loop needs no explicit lock to serialize those
+writers against each other (there is only ever one of them running at a
+time, by construction), and an event that arrives while a fetch is in
+flight is simply not read off the queue until the fetch finishes -- so it
+is picked up on the very next loop iteration, which is exactly the
+"trailing dirty flag" behavior the design document describes, without a
+separate flag to get wrong. Reconnects are iterative, not recursive
+(:func:`_event_loop`/:func:`_reconnect_loop` each return a plain result
+object instead of calling each other directly), so a channel that
+reconnects many times over a long process lifetime never grows the Python
+call stack.
 """
 
 from __future__ import annotations
@@ -68,9 +76,15 @@ class RelayUnavailable(Exception):
     """The daemon doesn't advertise ready-frame support at all -- there is no
     observable subscription barrier to reconcile against (``stream_events()``
     is a lazy generator: calling it proves nothing was even attempted).
-    Raised only before any frame has been emitted for this relay attempt, so
-    the caller can fall back to the unmodified poll loop for the whole
-    connection's lifetime without risking a double-emission."""
+    Raised only by :func:`run_relay`'s own first connection attempt, before
+    any frame has been emitted for this relay invocation, so the caller can
+    fall back to the unmodified poll loop for the whole connection's
+    lifetime without risking a double-emission. A daemon that stops
+    advertising support *after* the relay is already running (mid-reconnect)
+    is treated as an ordinary connection failure instead -- see
+    :func:`_reconnect_loop` -- since frames have already been emitted and
+    the caller's own "fall back to its stale initial snapshot" contract no
+    longer applies at that point."""
 
 
 class HealthCheckFailed(Exception):
@@ -102,7 +116,9 @@ def _build_client(args) -> DispatchClient:
     zero-downtime coordinator-generation cutover follows the new bind/port
     instead of retrying a client built against the retired one -- the same
     pattern ``ResolvingDispatchClient`` already exists to solve for
-    long-running supervisors.
+    long-running supervisors. May raise (e.g. ``_endpoint()`` finds no
+    routing info at all) -- every caller treats that as a transient,
+    retryable failure, never an uncaught crash.
     """
     from . import board_cli
 
@@ -220,50 +236,6 @@ class _Snapshot:
         )
 
 
-def run_relay(args, out, *, initial_rows: list, interval: float) -> int:
-    """Run Phase 3a's event-woken relay for the direct (local) path.
-
-    ``args``/``out``/``initial_rows`` mirror ``board_cli._run_stream``'s own
-    locals (the caller has already emitted the initial ``begin``/``row``/
-    ``done`` envelope using ``initial_rows``). Returns 0 the same way
-    ``board_cli.poll_loop`` does (clean ``KeyboardInterrupt`` or a closed
-    pipe); raises :class:`RelayUnavailable` instead of returning if the
-    daemon never advertised ready-frame support in the first place, so the
-    caller can fall back to its own unmodified poll loop for this
-    connection's entire remaining lifetime. A transient initial ``/health``
-    failure (network hiccup, not a version-skew case) is never collapsed
-    into that same permanent bailout -- it routes through the bounded
-    reconnect path instead, same as any other mid-connection failure.
-    """
-    client = _build_client(args)
-    try:
-        try:
-            supported = _daemon_supports_ready_frame(client)
-        except HealthCheckFailed:
-            return _reconnect_loop(args, out, initial_rows, interval)
-        if not supported:
-            raise RelayUnavailable("daemon does not advertise events_ready_frame")
-
-        snapshot = _Snapshot(args)
-        # Prime the snapshot so the recompute tick has something to read
-        # even before the first event-woken/long-reconcile fetch runs.
-        primed = snapshot.full_refetch()
-        prev = primed if primed is not None else initial_rows
-
-        reader = _Reader(client)
-        reader.start()
-        if not _wait_for_ready(reader, READY_FRAME_TIMEOUT_SECONDS):
-            # Advertised support but the frame never arrived in time (or the
-            # connection failed before it did): a genuine stream failure,
-            # not a version-skew case -- degrade via the normal reconnect
-            # path, not a permanent bailout.
-            return _reconnect_loop(args, out, prev, interval)
-
-        return _event_loop(args, out, reader, snapshot, prev, interval)
-    finally:
-        client.close()
-
-
 def _emit_diff(out, prev: list[dict], curr: list[dict]) -> tuple[bool, list[dict]]:
     """Diff ``curr`` against ``prev`` and emit delta/removed frames. Returns
     ``(ok, new_prev)`` -- ``ok`` is False once the reader has closed the
@@ -280,13 +252,145 @@ def _emit_diff(out, prev: list[dict], curr: list[dict]) -> tuple[bool, list[dict
     return True, curr
 
 
+class _Connected:
+    """A live, ready relay connection -- the state :func:`_event_loop` needs
+    to keep driving it, and what :func:`_reconnect_loop` hands back on a
+    successful reconnect so the top-level driver can resume the event loop
+    without recursing into it."""
+
+    __slots__ = ("client", "prev", "reader", "snapshot")
+
+    def __init__(self, client, reader, snapshot, prev):
+        self.client = client
+        self.reader = reader
+        self.snapshot = snapshot
+        self.prev = prev
+
+
+class _Disconnected:
+    """A connection attempt or a live connection dropped -- hand ``prev`` to
+    the reconnect loop without recursing into it."""
+
+    __slots__ = ("prev",)
+
+    def __init__(self, prev):
+        self.prev = prev
+
+
+def _connect(
+    args, out, prev: list[dict], *, allow_relay_unavailable: bool
+) -> _Connected | _Disconnected | int:
+    """Establish one fresh relay connection: build a client, confirm
+    ready-frame support, wait for the ready frame, then run the startup
+    reconcile and diff it against ``prev`` *after* the subscription is
+    confirmed live -- never before, and never silently substituted as the
+    new baseline without emitting the diff. Returns a :class:`_Connected` on
+    success, a :class:`_Disconnected` to hand to :func:`_reconnect_loop`, or
+    a plain ``int`` to return immediately (the reader closed the pipe
+    mid-reconcile).
+
+    ``allow_relay_unavailable`` gates whether "daemon doesn't advertise
+    support" raises :class:`RelayUnavailable` (only correct for the very
+    first connection attempt, before any frame has been emitted) or is
+    folded into an ordinary :class:`_Disconnected` (every reconnect attempt
+    after that, where frames have already gone out and the caller's own
+    permanent-poll-loop-with-the-original-snapshot contract no longer
+    applies).
+    """
+    try:
+        client = _build_client(args)
+    except Exception:
+        return _Disconnected(prev)
+
+    try:
+        supported = _daemon_supports_ready_frame(client)
+    except HealthCheckFailed:
+        client.close()
+        return _Disconnected(prev)
+    if not supported:
+        client.close()
+        if allow_relay_unavailable:
+            raise RelayUnavailable("daemon does not advertise events_ready_frame")
+        return _Disconnected(prev)
+
+    reader = _Reader(client)
+    reader.start()
+    # Wait for the ready frame FIRST -- before any reconcile fetch runs --
+    # so a mutation landing between "subscription registered" and "our own
+    # reconcile fetch" is guaranteed to still arrive as a queued event
+    # afterward, rather than being silently missed by both. Only once that
+    # barrier is confirmed does the startup reconcile fetch run.
+    if not _wait_for_ready(reader, READY_FRAME_TIMEOUT_SECONDS):
+        client.close()
+        return _Disconnected(prev)
+
+    snapshot = _Snapshot(args)
+    reconciled = snapshot.full_refetch()
+    if reconciled is None:
+        # Priming failed -- treat as transient (never substitute an empty
+        # snapshot, which would make the next recompute tick emit every
+        # row in `prev` as `removed`).
+        client.close()
+        return _Disconnected(prev)
+
+    ok, new_prev = _emit_diff(out, prev, reconciled)
+    if not ok:
+        client.close()
+        return 0
+    return _Connected(client, reader, snapshot, new_prev)
+
+
+def run_relay(args, out, *, initial_rows: list, interval: float) -> int:
+    """Run Phase 3a's event-woken relay for the direct (local) path.
+
+    ``args``/``out``/``initial_rows`` mirror ``board_cli._run_stream``'s own
+    locals (the caller has already emitted the initial ``begin``/``row``/
+    ``done`` envelope using ``initial_rows``). Returns 0 the same way
+    ``board_cli.poll_loop`` does (clean ``KeyboardInterrupt`` or a closed
+    pipe); raises :class:`RelayUnavailable` instead of returning if the
+    daemon never advertised ready-frame support in the first place, so the
+    caller can fall back to its own unmodified poll loop for this
+    connection's entire remaining lifetime. Every other failure (a
+    transient ``/health`` blip, the coordinator endpoint being briefly
+    unresolvable, the ready frame not arriving in time) routes through the
+    bounded reconnect path instead of raising or crashing.
+    """
+    outcome = _connect(args, out, initial_rows, allow_relay_unavailable=True)
+    return _drive(args, out, outcome, interval)
+
+
+def _drive(
+    args, out, outcome: _Connected | _Disconnected | int, interval: float
+) -> int:
+    """Iteratively alternate between the event loop and the reconnect loop
+    for as long as the channel keeps reconnecting, via a plain ``while``
+    loop -- never by one of those two calling the other, which (even split
+    across two functions) is still unbounded recursion in Python (no tail-
+    call optimization): a long-lived channel that reconnects many times
+    over its life must never grow the call stack. Always closes the client
+    being superseded before moving on."""
+    while True:
+        if isinstance(outcome, int):
+            return outcome
+        if isinstance(outcome, _Disconnected):
+            outcome = _reconnect_loop(args, out, outcome.prev, interval)
+            continue
+        # outcome is a _Connected
+        client = outcome.client
+        outcome = _event_loop(
+            args, out, outcome.reader, outcome.snapshot, outcome.prev, interval
+        )
+        client.close()
+
+
 def _event_loop(
     args, out, reader: _Reader, snapshot: _Snapshot, prev: list[dict], interval: float
-) -> int:
+) -> int | _Disconnected:
     """The single control loop driving every writer for one live SSE
     connection: event-woken re-fetches (debounced + rate-limited), the long
-    reconcile, and the local recompute tick. Returns 0 on a clean exit, or
-    hands off to :func:`_reconnect_loop` the moment the connection drops."""
+    reconcile, and the local recompute tick. Returns ``0`` on a clean exit,
+    or a :class:`_Disconnected` the moment the connection drops (never
+    calls the reconnect loop directly -- see :func:`_drive`)."""
     last_fetch_at = time.monotonic()
     next_recompute_at = last_fetch_at + RECOMPUTE_INTERVAL_SECONDS
     next_reconcile_at = last_fetch_at + LONG_RECONCILE_SECONDS
@@ -301,7 +405,7 @@ def _event_loop(
                 kind = "timer"
 
             if kind == "disconnected":
-                return _reconnect_loop(args, out, prev, interval)
+                return _Disconnected(prev)
 
             if kind == "ready":
                 continue  # a second ready frame would be a protocol bug; ignore
@@ -329,7 +433,7 @@ def _event_loop(
                     # another coalesced "event"/stray "ready": nothing to do,
                     # the upcoming full re-fetch already covers it
                 if disconnected_during_debounce:
-                    return _reconnect_loop(args, out, prev, interval)
+                    return _Disconnected(prev)
 
                 wait_for = refetch_floor - (time.monotonic() - last_fetch_at)
                 if wait_for > 0:
@@ -361,69 +465,66 @@ def _event_loop(
         return 0
 
 
-def _reconnect_loop(args, out, prev: list[dict], interval: float) -> int:
+def _reconnect_loop(args, out, prev: list[dict], interval: float) -> int | _Connected:
     """On an SSE disconnect: fall back to poll-and-diff immediately
     (correctness first), while retrying the relay connection with bounded
     exponential backoff. Each attempt re-resolves the endpoint and builds a
     fresh client (see :func:`_build_client`) rather than retrying a stale
-    one. Once reconnected, a full reconcile pass (a fresh :class:`_Snapshot`)
-    becomes ``prev`` before the event loop resumes -- the fallback poller
-    has already stopped ticking by construction (nothing else runs
-    concurrently in this single control loop), so there is no handoff race
-    to quiesce. Exhausting the bounded retry cap settles into permanent
-    polling for the rest of this process's life."""
+    one. The fallback poll tick keeps running on its own ``interval``
+    cadence throughout the *entire* backoff wait (never just once per
+    attempt) -- a configured 2s ``--subscribe`` must not silently degrade to
+    an 8s/16s/30s refresh just because reconnection is struggling. Once
+    reconnected, a full reconcile pass (a fresh :class:`_Snapshot`) becomes
+    ``prev``, returned as a :class:`_Connected` for the top-level driver to
+    resume the event loop with -- never recurses into it directly.
+    Exhausting the bounded retry cap settles into permanent polling for the
+    rest of this process's life."""
     from . import board_cli
+
+    def _poll_tick(current_prev: list[dict]) -> tuple[bool, list[dict]]:
+        try:
+            curr = board_cli._fetch_rows(args)
+        except Exception:
+            # A transient re-fetch failure must not kill the fallback
+            # channel -- skip this tick and try again next time.
+            return True, current_prev
+        return _emit_diff(out, current_prev, curr)
 
     backoff = INITIAL_RECONNECT_BACKOFF_SECONDS
     for _attempt in range(MAX_RECONNECT_ATTEMPTS):
-        # Correctness first: one ordinary poll tick while attempting to
-        # reconnect, using the exact same poll-and-diff implementation the
-        # non-relay path uses.
-        try:
-            curr = board_cli._fetch_rows(args)
-            ok, prev = _emit_diff(out, prev, curr)
+        # Correctness first: an immediate poll tick before each reconnect
+        # attempt.
+        ok, prev = _poll_tick(prev)
+        if not ok:
+            return 0
+
+        # Wait out this attempt's backoff, but keep polling on --interval's
+        # own cadence throughout rather than blocking for the whole backoff
+        # window in one sleep.
+        deadline = time.monotonic() + backoff
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(interval, remaining))
+            if time.monotonic() >= deadline:
+                break
+            ok, prev = _poll_tick(prev)
             if not ok:
                 return 0
-        except Exception:
-            pass
-        time.sleep(backoff)
         backoff = min(MAX_RECONNECT_BACKOFF_SECONDS, backoff * 2)
 
-        try:
-            client = _build_client(args)
-        except Exception:
-            continue
-        reconnected = False
-        reader = None
-        snapshot = None
-        try:
-            try:
-                if not _daemon_supports_ready_frame(client):
-                    continue
-            except HealthCheckFailed:
-                # Still a transient failure -- stay within this same bounded
-                # retry loop rather than propagating out of it.
-                continue
-            reader = _Reader(client)
-            reader.start()
-            if not _wait_for_ready(reader, READY_FRAME_TIMEOUT_SECONDS):
-                continue
-            snapshot = _Snapshot(args)
-            curr = snapshot.full_refetch()
-            if curr is None:
-                continue
-            ok, prev = _emit_diff(out, prev, curr)
-            if not ok:
-                return 0
-            reconnected = True
-        finally:
-            if not reconnected:
-                try:
-                    client.close()
-                except Exception:
-                    pass
-        if reconnected:
-            return _event_loop(args, out, reader, snapshot, prev, interval)
+        # A daemon that stops advertising support mid-reconnect is just
+        # another connection failure here, not RelayUnavailable -- frames
+        # have already been emitted, so the caller's own
+        # fall-back-to-its-stale-initial-snapshot contract no longer
+        # applies (see `_connect`'s own docstring).
+        outcome = _connect(args, out, prev, allow_relay_unavailable=False)
+        if isinstance(outcome, _Connected):
+            return outcome
+        if isinstance(outcome, int):
+            return outcome
+        prev = outcome.prev
 
     # Retries exhausted: settle into permanent polling for the rest of this
     # process's life, reusing the exact same poll-and-diff implementation.
