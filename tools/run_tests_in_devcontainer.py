@@ -98,8 +98,7 @@ def _minimal_repo_selection_env() -> dict[str, str]:
     """A blanket ``GIT_*`` strip used only by
     `_discover_configured_clean_filters`, which must run BEFORE
     `_scrubbed_git_env`'s own overrides exist. `check-attr` never invokes
-    a clean filter, but this is still a host-side Git probe needing the
-    SAME non-filter protections `_scrubbed_git_env` applies:
+    a clean filter, but still needs the SAME non-filter protections:
     `core.fsmonitor=false` (confirmed live that `GIT_OPTIONAL_LOCKS=0`
     can make even read-only `ls-files`/`check-attr` consult a configured
     hook), and `GIT_NO_LAZY_FETCH=1`/`GIT_NO_REPLACE_OBJECTS=1`."""
@@ -118,15 +117,13 @@ def _discover_configured_clean_filters() -> list[str]:
     """Discover every distinct Git ``filter`` attribute name assigned to
     any TRACKED path, honoring the WORKING-TREE `.gitattributes` (not
     `--cached`, which confirmed live silently misses an uncommitted
-    `.gitattributes` edit assigning a NEW filter). A read-only probe
-    (`status`/`diff`) invokes a configured `filter.<name>.clean` for any
-    path needing re-hashing, OR `filter.<name>.process` (a separate,
-    higher-precedence protocol) if ALSO configured -- both confirmed live
-    to execute host code during an ordinary `git status`, so
+    `.gitattributes` edit). A read-only probe invokes a configured
+    `filter.<name>.clean` for any path needing re-hashing, OR
+    `filter.<name>.process` (higher-precedence) if ALSO configured --
+    both confirmed live to execute host code during `git status`, so
     `_scrubbed_git_env` neutralizes both for every name returned here.
     FAILS CLOSED (raises) on any subprocess failure rather than
-    degrading to an empty list -- "couldn't determine" is not "nothing to
-    neutralize"."""
+    degrading to an empty list."""
     env = _minimal_repo_selection_env()
     ls = subprocess.run(["git", "-C", str(REPO), "ls-files", "-z"], capture_output=True, timeout=60, env=env)
     if ls.returncode != 0:
@@ -149,15 +146,13 @@ def _discover_configured_clean_filters() -> list[str]:
 def _scrubbed_git_env() -> dict[str, str]:
     """Ambient environment with EVERY inherited ``GIT_*`` variable removed
     (a blanket strip, matching `tools/agent_bridge_contract_git.py`'s own
-    hardened environment -- a narrower allowlist could miss a variable
-    like `GIT_TRACE`/`GIT_EXEC_PATH`). Forces a safe set:
-    `GIT_OPTIONAL_LOCKS=0`, `GIT_NO_LAZY_FETCH=1`/
-    `GIT_NO_REPLACE_OBJECTS=1`, disabled global/system config, and
-    `core.fsmonitor=false` plus, for every name from
-    `_discover_configured_clean_filters`, BOTH `filter.<name>.clean`
+    hardened environment). Forces a safe set: `GIT_OPTIONAL_LOCKS=0`,
+    `GIT_NO_LAZY_FETCH=1`/`GIT_NO_REPLACE_OBJECTS=1`, disabled
+    global/system config, and `core.fsmonitor=false` plus, for every name
+    from `_discover_configured_clean_filters`, BOTH `filter.<name>.clean`
     forced to `cat` AND `filter.<name>.process` forced empty (a
-    `process` filter takes precedence over `clean` and still executes
-    host code even with `clean` alone neutralized, confirmed live)."""
+    `process` filter still executes host code even with `clean` alone
+    neutralized, confirmed live)."""
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_OPTIONAL_LOCKS"] = "0"
@@ -188,12 +183,11 @@ def _devcontainer_exe() -> str:
 def _per_instance_config(instance_label: str) -> tuple[Path, str]:
     """Write a copy of ``DEVCONTAINER_CONFIG`` with its workspace volume
     name made unique to this invocation, so each run gets its own fresh,
-    isolated workspace instead of reusing (and accumulating state in) one
-    fixed, shared volume. Returns the temp config path and the volume
-    name it declares, so the caller can remove that exact volume at
-    teardown. Written into a fresh temp DIRECTORY as literally
-    ``devcontainer.json`` -- the devcontainer CLI rejects any ``--config``
-    path whose basename isn't ``devcontainer.json`` or
+    isolated workspace instead of reusing one fixed, shared volume.
+    Returns the temp config path and the volume name, so the caller can
+    remove that exact volume at teardown. Written into a fresh temp
+    DIRECTORY as literally ``devcontainer.json`` -- the devcontainer CLI
+    rejects any ``--config`` path whose basename isn't that or
     ``.devcontainer.json``."""
     volume_name = f"{BASE_VOLUME_NAME}-{instance_label}"
     text = DEVCONTAINER_CONFIG.read_text()
@@ -331,14 +325,12 @@ def _warn_about_dirty_tracked_files() -> None:
 def _warn_about_hidden_tracked_file_flags() -> None:
     """Print a clear, explicit stderr warning naming every tracked file
     whose index entry carries ``assume-unchanged`` or ``skip-worktree``.
-    ``git status`` (and therefore ``_warn_about_dirty_tracked_files``) is
-    NOT a fail-closed dirty-content check for these paths: both flags
-    instruct git to SUPPRESS reporting an on-disk difference, while
-    ``_tracked_paths``/``_write_tar_of_repo`` still archive its actual
-    current bytes regardless. ``git ls-files -v`` marks a flagged entry
-    with a lowercase letter (assume-unchanged) or uppercase ``S``
-    (skip-worktree); an ordinary entry is uppercase (``H``). Fails
-    CLOSED (raises) if ``git ls-files -v`` itself cannot be run."""
+    ``git status`` is NOT a fail-closed dirty-content check for these
+    paths: both flags suppress reporting an on-disk difference, while
+    the snapshot still archives its actual current bytes regardless.
+    ``git ls-files -v`` marks a flagged entry with a lowercase letter
+    (assume-unchanged) or uppercase ``S`` (skip-worktree); an ordinary
+    entry is uppercase (``H``). Fails CLOSED on a failed ``ls-files``."""
     res = subprocess.run(
         ["git", "-C", str(REPO), "ls-files", "-v", "--cached"],
         capture_output=True, timeout=60, env=_scrubbed_git_env(),
@@ -396,13 +388,11 @@ _ALL_LONG_FLAGS = _VALUE_CONSUMING_FLAGS | _BARE_FLAGS
 
 def _canonicalize_flag(name: str) -> str:
     """Resolve a bare (no ``=value`` suffix) long-flag token to its
-    canonical name, honoring argparse's own unambiguous-prefix abbreviation
-    support (e.g. ``--bas`` -> ``--base``) against `_ALL_LONG_FLAGS` --
-    mirrors that parser's own matching. Without this, an abbreviated
-    ``--base`` would go unrecognized: `_resolve_base_ref` would keep the
-    wrong default, and `_changed_mode_active` would misclassify its VALUE
-    token as a positional plugin name. Returns `name` unchanged when it
-    isn't a recognized abbreviation of exactly one known flag."""
+    canonical name, honoring argparse's own unambiguous-prefix
+    abbreviation (e.g. ``--bas`` -> ``--base``) against `_ALL_LONG_FLAGS`.
+    Without this, an abbreviated flag would go unrecognized by
+    `_resolve_base_ref`/`_changed_mode_active`. Returns `name` unchanged
+    when it isn't an unambiguous abbreviation of exactly one known flag."""
     if name in _ALL_LONG_FLAGS or not name.startswith("--") or len(name) <= 2:
         return name
     matches = [flag for flag in _ALL_LONG_FLAGS if flag.startswith(name)]
@@ -412,12 +402,11 @@ def _canonicalize_flag(name: str) -> str:
 def _resolve_base_ref(passthrough: list[str]) -> str:
     """Best-effort extraction of the ``--base`` value a passthrough
     invocation will use, so ``_materialized_git_dir`` can include exactly
-    that ref's object closure (not the whole repository's history) in the
-    bundled snapshot. Falls back to ``tools/run-plugin-tests.py``'s own
-    ``--base`` default when absent -- mirroring that runner's own
-    argparse default. Mirrors argparse's own last-occurrence-wins
-    behavior for a repeated flag. Recognizes an unambiguous abbreviated
-    form too (``--bas``, ``--ba``, ...) -- see `_canonicalize_flag`."""
+    that ref's object closure in the bundled snapshot. Falls back to
+    ``tools/run-plugin-tests.py``'s own ``--base`` default when absent.
+    Mirrors argparse's own last-occurrence-wins behavior for a repeated
+    flag, and recognizes an unambiguous abbreviated form too (``--bas``,
+    ``--ba``, ...) -- see `_canonicalize_flag`."""
     resolved = "origin/main"
     for i, arg in enumerate(passthrough):
         name, eq, value = arg.partition("=")
@@ -434,10 +423,8 @@ def _changed_mode_active(passthrough: list[str]) -> bool:
     """Whether a ``tools/run-plugin-tests.py`` invocation with these
     passthrough args will resolve its targets via ``changed_plugins()`` --
     true for an explicit ``--changed``, AND for that runner's own default
-    (no ``--all``, no explicit plugin names) per its own
-    ``else: targets = changed_plugins(args.base)`` fallback. Only in this
-    case does an unresolvable ``--base`` actually matter -- an explicit
-    plugin name or ``--all`` run never consults it at all."""
+    (no ``--all``, no explicit plugin names). Only in this case does an
+    unresolvable ``--base`` actually matter."""
     has_all = False
     has_positional = False
     skip_next = False
@@ -464,14 +451,10 @@ def _git_rev_parse(ref: str) -> str | None:
     Returns ``None`` (rather than raising) when it doesn't resolve
     locally -- whether that's tolerable is the CALLER's decision:
     `_materialized_git_dir` treats it as fatal when changed-selection
-    mode is active, but tolerates it (falling back to a `HEAD`-only
-    bundle) otherwise.
-
-    Peels to ``ref^{commit}`` rather than resolving ``ref`` bare: plain
-    ``rev-parse --verify`` accepts ANY object type, but the downstream
-    ``git diff <base>...HEAD`` needs a commit-ish -- letting a non-commit
-    object pass here would bypass this contract, only to fail that later
-    diff and silently select no suites. ``--end-of-options`` keeps a ref
+    mode is active, but tolerates it otherwise. Peels to ``ref^{commit}``
+    rather than resolving ``ref`` bare: plain ``rev-parse --verify``
+    accepts ANY object type, but the downstream ``git diff
+    <base>...HEAD`` needs a commit-ish. ``--end-of-options`` keeps a ref
     starting with ``-`` from being misread as a flag."""
     res = subprocess.run(
         ["git", "-C", str(REPO), "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"],
@@ -484,18 +467,16 @@ def _rewrite_base_to_resolved_sha(passthrough: list[str]) -> list[str]:
     """Replace any ``--base`` value (bare, ``=value``, or an unambiguous
     abbreviation -- see `_canonicalize_flag`) in ``passthrough`` with its
     resolved commit SHA, when it resolves on the host -- APPENDING an
-    explicit ``--base <sha>`` instead when ``passthrough`` has no
-    ``--base`` token at all (`tools/run-plugin-tests.py`'s own implicit
-    default, ``origin/main``).
+    explicit ``--base <sha>`` instead when absent entirely (this runner's
+    own implicit default, ``origin/main``).
 
-    A bundle clone never preserves a remote-tracking ref
-    (``refs/remotes/...``) as a named ref -- named directly (the implicit
-    default) or via a ref-relative expression (e.g. ``origin/dev~1``) --
-    EITHER resolves fine on the host but leaves the in-container command
-    with no working named ref. A bare SHA has no such problem. Without the
-    append case, the single MOST COMMON invocation (no ``--all``, no
-    plugin names, no explicit ``--base``) would have nothing to rewrite
-    and silently run no suites. Leaves ``passthrough`` unchanged when the
+    A bundle clone never preserves a remote-tracking ref as a named ref
+    -- named directly (the implicit default) or via a ref-relative
+    expression (e.g. ``origin/dev~1``) -- EITHER resolves fine on the
+    host but leaves the in-container command with no working named ref.
+    A bare SHA has no such problem. Without the append case, the single
+    MOST COMMON invocation would have nothing to rewrite and silently run
+    no suites. Leaves ``passthrough`` unchanged when the
     base doesn't resolve locally (handled separately via
     `_materialized_git_dir`'s own fail-loud guard)."""
     resolved_sha = _git_rev_parse(_resolve_base_ref(passthrough))
@@ -550,26 +531,22 @@ def _materialized_git_dir(stack: contextlib.ExitStack, passthrough: list[str]) -
     the container, containing ONLY the object closure of ``HEAD`` and the
     ``--changed`` diff base -- never the full repository history.
     Copying the full local git database (every branch, stash, reflog, and
-    unreachable object) into a container that deliberately keeps outbound
-    networking would let an adversarial/buggy test enumerate and exfiltrate
-    local-only content having nothing to do with the plugin suite it's
-    meant to run. Instead: ``git bundle create`` with only ``HEAD`` and
-    (when it resolves locally) the ``--base`` ref `run-plugin-tests.py
-    --changed`` will actually diff against, then ``git clone --bare`` that
-    bundle into a fresh directory -- the clone contains exactly the commits
-    reachable from those two tips, nothing else. ``main`` rewrites
-    ``--base``'s own passthrough VALUE to this same resolved commit's SHA
-    first (see `_rewrite_base_to_resolved_sha`), so the bundle clone needs
-    no named ref for it. The index is rebuilt from ``HEAD`` itself (``git
-    read-tree HEAD``) rather than copied: the host's real index can
-    reference a staged blob unreachable from both ``HEAD`` and the base
-    ref, which the bundle would then be missing -- a copied index pointing
-    at a missing object breaks `git diff`/`status` outright. Staging
-    state isn't preserved, but every modification is still visible as an
-    ordinary working-tree difference (`_tracked_paths` copies in the
-    file's actual CURRENT content regardless). As with every materialized
-    copy, ``config`` is replaced with a fresh, credential-free one
-    (``_MINIMAL_GIT_CONFIG``) and ``hooks`` is dropped entirely."""
+    unreachable object) into a container with outbound networking would
+    let an adversarial/buggy test exfiltrate local-only content unrelated
+    to the plugin suite being run. Instead: ``git bundle create`` with
+    only ``HEAD`` and (when it resolves locally) the ``--base`` ref
+    `run-plugin-tests.py --changed`` will diff against, then ``git clone
+    --bare`` that bundle into a fresh directory. ``main`` rewrites
+    ``--base``'s own value to this same resolved SHA first (see
+    `_rewrite_base_to_resolved_sha`), so the clone needs no named ref.
+    The index is rebuilt from ``HEAD`` (``git read-tree HEAD``) rather
+    than copied: the host's real index can reference a staged blob
+    unreachable from both tips, which the bundle would then be missing --
+    a copied index pointing at a missing object breaks `git diff`/`status`
+    outright. Staging isn't preserved, but every modification is still
+    visible as an ordinary working-tree difference (`_tracked_paths`
+    copies the file's CURRENT content regardless). ``config`` is replaced
+    with a fresh, credential-free one and ``hooks`` is dropped."""
     tmp_dir = Path(tempfile.mkdtemp(prefix="devcontainer-test-isolation-git-"))
     stack.callback(shutil.rmtree, tmp_dir, ignore_errors=True)
     bundle_file = tmp_dir / "snapshot.bundle"
@@ -660,26 +637,19 @@ def _write_tar_of_repo(dest: Path, passthrough: list[str], *, include_untracked:
     everything else comes from ``_tracked_paths``, so gitignored (and,
     unless ``include_untracked``) untracked files are never included.
 
-    ``git ls-files --cached`` still lists a path for an unstaged deletion,
-    so each path is checked with ``os.path.lexists`` before archiving; an
-    absent path is silently skipped. An initialized submodule is a single
-    ``160000``-mode path that's a real directory on disk --
-    ``recursive=False`` means it's added as an empty directory entry but
-    its contents are never copied wholesale. A tracked path's own
+    An absent path (e.g. an unstaged deletion, which ``ls-files --cached``
+    still lists) is checked via ``os.path.lexists`` and silently skipped.
+    An initialized submodule (a ``160000``-mode path that's a real
+    directory on disk) is added as an empty directory entry only
+    (``recursive=False``), never its contents. A tracked path's own
     ANCESTOR directory can be replaced with a symlink to outside
-    ``REPO`` -- confirmed live that ``lexists`` alone doesn't catch this
-    (it checks only the FINAL component's own link status; the OS still
-    follows an intermediate symlinked directory), so an external file's
-    real bytes would otherwise be archived under the tracked path's name.
-    Each path's PARENT directory (not the leaf, which may legitimately be
-    a tracked symlink stored as a safe link record) has its real path
-    checked against ``REPO``'s; fails closed rather than silently
-    skipping, since a replaced ancestor is itself an anomaly.
+    ``REPO`` -- confirmed live that ``lexists`` alone misses this (it
+    checks only the FINAL component); each path's PARENT directory (not
+    the leaf, which may legitimately be a tracked symlink) has its real
+    path checked against ``REPO``'s, failing closed on an escape.
 
     Also warns (``_warn_about_dirty_tracked_files``,
-    ``_warn_about_hidden_tracked_file_flags``) about an uncommitted
-    modification, or an assume-unchanged/skip-worktree flag that could
-    hide one, before copying anything.
+    ``_warn_about_hidden_tracked_file_flags``) before copying anything.
     """
     _warn_about_dirty_tracked_files()
     _warn_about_hidden_tracked_file_flags()
@@ -774,17 +744,27 @@ def _tear_down(container_id: str, volume_name: str) -> None:
     removal leaves a live container running or an orphaned volume on the
     host. Each removal is individually guarded against
     ``subprocess.SubprocessError``/``OSError`` so a raised exception from
-    the container removal can never skip the volume removal after it --
-    both are always attempted, and any failure from either is surfaced."""
+    the container removal can never skip the volume removal after it.
+    Every ``docker`` call runs with ``start_new_session=True``: without
+    it, a terminal Ctrl-C delivers ``SIGINT`` to the WHOLE foreground
+    process group, including these children, which retain the default
+    handler -- `_cleanup_signals_deferred` only protects the Python
+    PARENT, not children sharing its process group."""
     errors: list[str] = []
     try:
-        res = subprocess.run(["docker", "rm", "-f", container_id], capture_output=True, text=True, timeout=60)
+        res = subprocess.run(
+            ["docker", "rm", "-f", container_id],
+            capture_output=True, text=True, timeout=60, start_new_session=True,
+        )
         if res.returncode != 0:
             errors.append(f"failed to remove container {container_id}: {res.stderr.strip()}")
     except (subprocess.SubprocessError, OSError) as exc:
         errors.append(f"failed to remove container {container_id}: {exc}")
     try:
-        vol = subprocess.run(["docker", "volume", "rm", volume_name], capture_output=True, text=True, timeout=60)
+        vol = subprocess.run(
+            ["docker", "volume", "rm", volume_name],
+            capture_output=True, text=True, timeout=60, start_new_session=True,
+        )
         if vol.returncode != 0:
             errors.append(f"failed to remove volume {volume_name}: {vol.stderr.strip()}")
     except (subprocess.SubprocessError, OSError) as exc:
@@ -798,18 +778,17 @@ def _cleanup_orphan(instance_label: str, volume_name: str) -> None:
     a failure during ``onCreateCommand``, or unparseable output): a
     container may have been created under this instance's id-label even
     though ``_bring_up`` never returned an id. Finds and removes it by
-    label, then removes the volume. Every subprocess call here is
-    individually guarded against ``subprocess.SubprocessError``/``OSError``
-    so one failing step never skips the rest, and this function itself
-    never raises -- an already-failing startup error must surface, not a
-    secondary cleanup failure. Every failure is still reported to
-    stderr."""
+    label, then removes the volume. Every subprocess call is individually
+    guarded against ``subprocess.SubprocessError``/``OSError`` so one
+    failing step never skips the rest, and this function itself never
+    raises. Every call runs with ``start_new_session=True`` (see
+    `_tear_down`'s docstring for why)."""
     container_ids: list[str] = []
     try:
         find = subprocess.run(
             ["docker", "ps", "-aq", "--filter",
              f"label=devcontainer-test-isolation.instance={instance_label}"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=30, start_new_session=True,
         )
         if find.returncode != 0:
             print(f"warning: orphan-cleanup 'docker ps' failed: {find.stderr.strip()}", file=sys.stderr)
@@ -819,7 +798,10 @@ def _cleanup_orphan(instance_label: str, volume_name: str) -> None:
         print(f"warning: orphan-cleanup 'docker ps' failed: {exc}", file=sys.stderr)
     for container_id in container_ids:
         try:
-            rm = subprocess.run(["docker", "rm", "-f", container_id], capture_output=True, text=True, timeout=60)
+            rm = subprocess.run(
+                ["docker", "rm", "-f", container_id],
+                capture_output=True, text=True, timeout=60, start_new_session=True,
+            )
             if rm.returncode != 0:
                 print(f"warning: orphan-cleanup failed to remove container {container_id}: "
                       f"{rm.stderr.strip()}", file=sys.stderr)
@@ -827,7 +809,10 @@ def _cleanup_orphan(instance_label: str, volume_name: str) -> None:
             print(f"warning: orphan-cleanup failed to remove container {container_id}: {exc}",
                   file=sys.stderr)
     try:
-        vol = subprocess.run(["docker", "volume", "rm", volume_name], capture_output=True, text=True, timeout=60)
+        vol = subprocess.run(
+            ["docker", "volume", "rm", volume_name],
+            capture_output=True, text=True, timeout=60, start_new_session=True,
+        )
         if vol.returncode != 0:
             print(f"warning: orphan-cleanup failed to remove volume {volume_name}: "
                   f"{vol.stderr.strip()}", file=sys.stderr)
@@ -867,17 +852,33 @@ def _cleanup_signals_deferred():
     return 0 for a cancelled run. Replaying unconditionally could instead
     REPLACE a genuine failure already propagating, whether already in
     flight at entry or raised by the cleanup BODY itself. A single
-    ``sys.exc_info()`` check after ``yield`` covers both cases."""
+    ``sys.exc_info()`` check after ``yield`` covers both cases.
+
+    Installing (or restoring) TWO handlers isn't itself atomic -- a
+    signal landing mid-swap would still hit whichever OLD handler is
+    still active for the second one (confirmed live), aborting entry
+    before cleanup starts. ``pthread_sigmask`` blocks both signals for
+    each swap, so any mid-swap signal queues until the FULL new/restored
+    set is already in place."""
     received: list[int] = []
-    previous = {
-        sig: signal.signal(sig, lambda signum, frame: received.append(signum))
-        for sig in _CLEANUP_DEFERRED_SIGNALS
-    }
+
+    def _record(signum: int, frame: object) -> None:
+        received.append(signum)
+
+    signal.pthread_sigmask(signal.SIG_BLOCK, _CLEANUP_DEFERRED_SIGNALS)
+    try:
+        previous = {sig: signal.signal(sig, _record) for sig in _CLEANUP_DEFERRED_SIGNALS}
+    finally:
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, _CLEANUP_DEFERRED_SIGNALS)
     try:
         yield
     finally:
-        for sig, handler in previous.items():
-            signal.signal(sig, handler)
+        signal.pthread_sigmask(signal.SIG_BLOCK, _CLEANUP_DEFERRED_SIGNALS)
+        try:
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
+        finally:
+            signal.pthread_sigmask(signal.SIG_UNBLOCK, _CLEANUP_DEFERRED_SIGNALS)
         if received and sys.exc_info()[0] is not None:
             print(
                 f"warning: received signal {received[0]} during cleanup, "

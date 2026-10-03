@@ -337,11 +337,13 @@ verbatim ask.
       with one deliberate normalization (a resolvable `--base` is rewritten
       to its resolved commit SHA before the in-container invocation is
       assembled; see `TESTING.md` for why) and two known exceptions:
-      `--allow-host-state` is rejected outright (it cannot honor its
-      documented fresh-tmpfs-`$HOME`/no-credentials contract inside this
-      wrapper's own containment), and `--admission-wait`'s host-wide lease
-      loses its cross-process coordination once run inside the container
-      (a tracked Phase 2 gap, see the Validation Plan item below) -- so the
+      `--allow-host-state` is rejected outright (its documented contract --
+      preserve the caller's real HOME/config/credentials -- can't be
+      honored here, since this wrapper's container always gets a fresh,
+      credential-free tmpfs `$HOME` by design), and `--admission-wait`'s
+      host-wide lease loses its cross-process coordination once run inside
+      the container (a tracked Phase 2 gap, see the Validation Plan item
+      below) -- so the
       container adds a real OS-level boundary strictly on top of (never
       instead of, never duplicating) the turn-key runner's existing
       process-level containment. Validated end-to-end against a real
@@ -1801,3 +1803,54 @@ confirms the common case still works; `check-docs-consistency.py` and
 `check-effort-vision-structure.py` both pass. Docker cleanup (no
 leftover `test-isolation` volumes) and host `git status --short`
 reconfirmed clean of anything beyond this round's own diff.
+
+### 2026-10-03 — Review round 15 (twenty-second pass): 1 LOW doc fix (reversed --allow-host-state semantics), 2 previously-missed MEDIUM signal-handling findings addressed
+A twenty-second review pass of commit `304ac1676` confirmed checks green
+and surfaced 1 new LOW plus 2 "previously missed" MEDIUM findings against
+code that hadn't changed recently (both from the SIGTERM/signal-handling
+work several rounds back). LOW: the previous pass's effort-README
+passthrough-exception wording for `--allow-host-state` had the semantics
+EXACTLY BACKWARDS -- it described the flag as requesting a fresh,
+credential-free tmpfs `$HOME` (the wrapper's OWN default behavior),
+when the flag's actual documented contract is the opposite: it requests
+PRESERVING the caller's real HOME/config/credentials. Fixed by rewriting
+that one Plan-item clause to match the wrapper's own correct rejection
+message and `TESTING.md`'s own correct wording.
+
+MEDIUM: cleanup subprocesses (`docker rm`/`docker volume rm`/`docker ps`
+in `_tear_down` and `_cleanup_orphan`) only had `_cleanup_signals_deferred`
+protecting the Python PARENT process -- a terminal Ctrl-C delivers
+`SIGINT` to the WHOLE foreground process group, so these DIRECT
+subprocess children retained the default handler and could die mid-
+removal regardless, leaking a container or volume. Fixed by adding
+`start_new_session=True` to every docker subprocess call in both
+functions, detaching each into its own session/process group so a
+terminal signal no longer reaches them directly.
+
+MEDIUM: `_cleanup_signals_deferred`'s own two-handler install (and later
+restore) wasn't atomic -- a signal landing between the first
+(`signal.signal(SIGINT, ...)`) and second (`SIGTERM`) call would still
+hit whichever OLD handler was still active for the second one (e.g.
+`main`'s own `_raise_on_sigterm`), aborting context entry before cleanup
+even started and leaving the first handler un-restored. Fixed by
+bracketing each handler swap (install and restore) with
+`signal.pthread_sigmask(SIG_BLOCK, ...)`/`SIG_UNBLOCK` around the
+`signal.signal()` calls, so a signal arriving mid-swap queues at the
+kernel level and is only delivered once the FULL new/restored handler
+set is already in place.
+
+Re-validated end-to-end: the full unit test suite (98 tests, including
+3 new regression tests -- `start_new_session=True` assertions for both
+`_tear_down` and `_cleanup_orphan`'s docker calls, and a mock-based test
+confirming the exact BLOCK/UNBLOCK/signal-swap/UNBLOCK ordering in
+`_cleanup_signals_deferred`) passes; `check-module-size.py
+--changed-since origin/dev` passes right at the cap (1000 lines, after
+an aggressive docstring-condensing pass across thirteen functions -- this
+module is now reliably hitting the cap on nearly every substantive round
+and remains a strong candidate for an actual multi-module split, as
+noted in earlier journal entries); a fresh Docker-backed end-to-end run
+(`ai-attribution`, 98 passed / 6 skipped) confirms the common case still
+works; `check-docs-consistency.py` and `check-effort-vision-structure.py`
+both pass. Docker cleanup (no leftover `test-isolation` volumes) and
+host `git status --short` reconfirmed clean of anything beyond this
+round's own diff.

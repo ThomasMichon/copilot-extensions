@@ -1299,6 +1299,12 @@ def test_tear_down_removes_container_then_volume_on_success() -> None:
     assert run.call_count == 2
     assert run.call_args_list[0].args[0] == ["docker", "rm", "-f", "container-5"]
     assert run.call_args_list[1].args[0] == ["docker", "volume", "rm", "volume-5"]
+    # A terminal Ctrl-C delivers SIGINT to the WHOLE foreground process
+    # group -- without `start_new_session=True`, these children retain
+    # the default handler and can die mid-removal despite
+    # `_cleanup_signals_deferred` protecting the Python parent.
+    assert run.call_args_list[0].kwargs["start_new_session"] is True
+    assert run.call_args_list[1].kwargs["start_new_session"] is True
 
 
 def test_tear_down_raises_when_container_removal_fails_but_still_attempts_volume() -> None:
@@ -1346,6 +1352,10 @@ def test_cleanup_orphan_removes_containers_found_by_label_then_volume() -> None:
     assert run.call_args_list[1].args[0] == ["docker", "rm", "-f", "cid-a"]
     assert run.call_args_list[2].args[0] == ["docker", "rm", "-f", "cid-b"]
     assert run.call_args_list[3].args[0] == ["docker", "volume", "rm", "fake-volume"]
+    # Same process-group isolation `_tear_down` applies -- see its own
+    # docstring for why a bare terminal SIGINT would otherwise still
+    # reach these children directly.
+    assert all(call.kwargs["start_new_session"] is True for call in run.call_args_list)
 
 
 def test_cleanup_orphan_warns_but_does_not_raise_on_nonzero_results(capsys) -> None:
@@ -1483,6 +1493,47 @@ def test_cleanup_signals_deferred_records_signals_instead_of_ignoring_them(monke
     # the previous (sentinel) handlers, with nothing raised.
     assert installed_handlers[wrapper.signal.SIGTERM] is sentinel_handler
     assert installed_handlers[wrapper.signal.SIGINT] is sentinel_handler
+
+
+def test_cleanup_signals_deferred_blocks_signals_atomically_during_handler_swap() -> None:
+    # Installing TWO handlers (SIGINT then SIGTERM) is not itself atomic
+    # -- confirmed live that a signal landing between the two
+    # `signal.signal()` calls would still hit whichever OLD handler is
+    # still active for the second one, aborting entry before cleanup even
+    # starts. `pthread_sigmask` must block BOTH signals for the entire
+    # swap (on both the install and the restore side), only unblocking
+    # once the full new/restored handler set is already in place.
+    calls: list[tuple] = []
+    real_sigmask = wrapper.signal.pthread_sigmask
+    real_signal = wrapper.signal.signal
+
+    def tracking_sigmask(how, mask):
+        calls.append(("sigmask", how))
+        return real_sigmask(how, mask)
+
+    def tracking_signal(sig, handler):
+        calls.append(("signal", sig))
+        return real_signal(sig, handler)
+
+    with mock.patch.object(wrapper.signal, "pthread_sigmask", side_effect=tracking_sigmask), \
+         mock.patch.object(wrapper.signal, "signal", side_effect=tracking_signal):
+        with wrapper._cleanup_signals_deferred():
+            pass
+    # Each handler swap (install, then restore) is bracketed by a BLOCK
+    # immediately before it and an UNBLOCK immediately after -- never a
+    # bare pair of `signal.signal()` calls with no surrounding mask.
+    sigmask_calls = [c for c in calls if c[0] == "sigmask"]
+    assert len(sigmask_calls) == 4
+    assert [how for _, how in sigmask_calls] == [
+        wrapper.signal.SIG_BLOCK, wrapper.signal.SIG_UNBLOCK,
+        wrapper.signal.SIG_BLOCK, wrapper.signal.SIG_UNBLOCK,
+    ]
+    # The two `signal.signal()` calls for the install phase both land
+    # strictly between the first BLOCK and its matching UNBLOCK.
+    block_idx = calls.index(("sigmask", wrapper.signal.SIG_BLOCK))
+    unblock_idx = calls.index(("sigmask", wrapper.signal.SIG_UNBLOCK))
+    signal_calls_between = [c for c in calls[block_idx + 1:unblock_idx] if c[0] == "signal"]
+    assert len(signal_calls_between) == 2
 
 
 def test_cleanup_signals_deferred_replays_a_signal_received_during_cleanup() -> None:
