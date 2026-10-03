@@ -174,24 +174,55 @@ def version_slot(version: str, root: Path | None = None) -> Path:
     return (root or default_root()) / VERSIONS_DIR / version
 
 
-def _slot_is_complete(slot: Path) -> bool:
-    """``True`` only when ``slot`` holds every file the shipped binstubs
-    actually need to launch (``uv run --project <slot> python -m
-    worktree_manager``): ``pyproject.toml`` (the `uv` project root),
-    ``src/worktree_manager/__init__.py`` (the package entry point), and
-    ``src/worktree_manager/__main__.py`` (the ``-m`` module target).
-    Directory existence alone proves nothing -- a slot can exist, and even
-    partially survive a failed ``_copy_payload()`` recopy, while still
-    missing one of these and remaining unlaunchable (``No module named
-    worktree_manager`` or an equivalent failure at run time).
+_SLOT_COMPLETE_MARKER = ".install-complete"
+_SLOT_KEY_FILES = (
+    "pyproject.toml",
+    "src/worktree_manager/__init__.py",
+    "src/worktree_manager/__main__.py",
+)
+
+
+def _invalidate_slot_completion(slot: Path) -> None:
+    """Remove ``slot``'s completion marker, if any, before any mutation of
+    ``slot`` begins. A slot is proven complete only by this marker having
+    been published as the LAST step of a fully successful
+    ``_copy_payload_unsafe()`` -- invalidating it first (rather than
+    relying on the mutation that follows to remove it, which can itself
+    fail partway through) guarantees no stale marker from a slot's
+    previous occupant can ever survive an interrupted rebuild of the same
+    path and be mistaken for proof that the NEW content is complete.
     """
-    return all(
-        (slot / rel).is_file()
-        for rel in (
-            "pyproject.toml",
-            "src/worktree_manager/__init__.py",
-            "src/worktree_manager/__main__.py",
-        )
+    try:
+        (slot / _SLOT_COMPLETE_MARKER).unlink()
+    except OSError:
+        pass
+
+
+def _mark_slot_complete(slot: Path) -> None:
+    (slot / _SLOT_COMPLETE_MARKER).write_text("", encoding="utf-8")
+
+
+def _slot_is_complete(slot: Path) -> bool:
+    """``True`` only when ``slot`` is proven complete by its own marker --
+    published solely as the last step of a fully successful payload copy
+    and pointer materialization -- AND still carries the key files the
+    shipped binstubs need to launch (``uv run --project <slot> python -m
+    worktree_manager``: ``pyproject.toml``, ``src/worktree_manager/
+    __init__.py``, and ``src/worktree_manager/__main__.py``).
+
+    The marker alone proves the install completed; it does not prove the
+    slot hasn't been damaged since (a file removed by something outside
+    this module's control after a genuinely successful install). The key
+    files remain a cheap, independent second check against that later
+    damage. Directory existence, or any subset of files present without
+    the marker, proves nothing: a slot can exist, and even partially
+    survive a failed ``_copy_payload()`` recopy (one that imports or
+    materialized libraries it depends on at runtime may still be missing),
+    while still being unlaunchable (``No module named worktree_manager``
+    or an equivalent failure at run time).
+    """
+    return (slot / _SLOT_COMPLETE_MARKER).is_file() and all(
+        (slot / rel).is_file() for rel in _SLOT_KEY_FILES
     )
 
 
@@ -666,6 +697,10 @@ def _copy_payload(payload_dir: Path, slot: Path) -> None:
 
 
 def _copy_payload_unsafe(payload_dir: Path, slot: Path) -> None:
+    # Invalidate completion FIRST, before any mutation -- see
+    # _invalidate_slot_completion's own docstring for why this must not be
+    # left to the rmtree below (which can itself fail partway through).
+    _invalidate_slot_completion(slot)
     if slot.exists():
         shutil.rmtree(slot)
     if payload_dir.is_symlink():
@@ -703,6 +738,9 @@ def _copy_payload_unsafe(payload_dir: Path, slot: Path) -> None:
             "anywhere in it could resolve outside the slot at runtime)"
         )
     _materialize_payload_pointers(payload_dir, slot)
+    # Published only here, as the LAST step of a fully successful copy +
+    # materialization -- this is what proves the slot complete.
+    _mark_slot_complete(slot)
 
 
 # ── legacy artifact recognition + cleanup ────────────────────────────────

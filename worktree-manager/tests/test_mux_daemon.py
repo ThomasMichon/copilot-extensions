@@ -1355,11 +1355,15 @@ def test_live_mapping_republished_on_a_backstop_cadence_without_a_restart(
         # costs nothing when the daemon finishes quickly, and is the only
         # way to avoid a false failure when it doesn't.
         _wait_for(lambda: len(observed) >= 1, timeout=30.0)
-        first_count = len(observed)
-        # No generation change ever happens (same server/lock for the whole
-        # run) -- a second (and further) republish can only come from the
-        # backstop timer.
-        _wait_for(lambda: len(observed) > first_count, timeout=30.0)
+        # Wait for the absolute count, not a delta from a captured snapshot:
+        # on a fast run the daemon can already be well past 2 observations
+        # by the time this thread is next scheduled, making any captured
+        # "first_count" stale and racing this test's own bounded (60
+        # iteration) daemon lifetime for a delta that may never arrive.
+        # The unchanged generation the whole run means only the backstop
+        # cadence can ever produce a 2nd (or later) observation, so >= 2
+        # alone already proves the backstop path fired.
+        _wait_for(lambda: len(observed) >= 2, timeout=30.0)
     finally:
         # Join the daemon thread BEFORE closing the fake observation server.
         # The request/response ``observed.append(...)`` that satisfies the
@@ -1367,14 +1371,15 @@ def test_live_mapping_republished_on_a_backstop_cadence_without_a_restart(
         # (wcs_client.request) still has its own follow-up ``release()``
         # call (a SEPARATE connection) to make for that same round-trip
         # before run_daemon_foreground's current iteration is done. Closing
-        # the server here (the original order) could tear its listening
-        # socket down while that in-flight ``release()`` is still dialing
-        # it, and on a loaded Windows box that raced half-open connect can
-        # hang for the OS's full TCP connect timeout instead of failing
-        # fast -- exactly the "daemon_result never gets set" symptom this
-        # guarded against. ``max_iterations`` already bounds the daemon's
-        # own runtime deterministically, so joining first (instead of
-        # relying on close() to unstick it) is both correct and sufficient.
+        # the server before the thread is joined risks tearing its
+        # listening socket down while that in-flight ``release()`` is
+        # still dialing it, and on a loaded Windows box that raced
+        # half-open connect can hang for the OS's full TCP connect timeout
+        # instead of failing fast -- exactly the "daemon_result never gets
+        # set" symptom this guards against. ``max_iterations`` already
+        # bounds the daemon's own runtime deterministically, so joining
+        # first (instead of relying on close() to unstick it) is both
+        # correct and sufficient.
         thread.join(timeout=60)
         server.close()
 
