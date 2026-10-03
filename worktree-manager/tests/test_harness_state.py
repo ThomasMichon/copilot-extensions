@@ -143,7 +143,10 @@ def test_mis_registered_repos_flags_non_git_checkout(tmp_path: Path):
 
 def test_mis_registered_repos_accepts_real_git_checkouts(tmp_path: Path):
     home = _make_home(tmp_path)
-    (tmp_path / "src" / "dotfiles" / ".git").mkdir()
+    import subprocess
+
+    repo = tmp_path / "src" / "dotfiles"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
     assert mis_registered_repos(home) == []
 
 
@@ -160,12 +163,34 @@ def test_mis_registered_repos_accepts_bare_checkout(tmp_path: Path):
     home = _make_home(tmp_path)
     repo = tmp_path / "src" / "dotfiles"
     import shutil
+    import subprocess
 
     shutil.rmtree(repo)
-    repo.mkdir()
-    (repo / "HEAD").write_text("ref: refs/heads/dev\n")
-    (repo / "objects").mkdir()
+    subprocess.run(["git", "init", "-q", "--bare", str(repo)], check=True)
     assert mis_registered_repos(home) == []
+
+
+def test_mis_registered_repos_rejects_empty_dot_git_directory(tmp_path: Path):
+    """An empty ``.git`` dir (or a bare-looking but non-functional directory)
+    must not pass as a real checkout just because the marker exists."""
+    home = _make_home(tmp_path)
+    (tmp_path / "src" / "dotfiles" / ".git").mkdir()
+    problems = dict(mis_registered_repos(home))
+    assert "dotfiles" in problems
+    assert "not a git checkout" in problems["dotfiles"]
+
+
+def test_mis_registered_repos_uses_exact_platform_not_fallback(tmp_path: Path, monkeypatch):
+    """A repo registered only under a *different* platform's key must be
+    treated as pathless on this platform, never inspected as if it were
+    this platform's own path (unlike ``build_repos()``'s deliberate
+    cross-platform fallback chain)."""
+    from worktree_manager import harness_state
+
+    home = _make_home(tmp_path)
+    monkeypatch.setattr(harness_state, "_exact_platform_key", lambda: "macos")
+    problems = dict(mis_registered_repos(home))
+    assert "dotfiles" not in problems
 
 
 def test_build_projects_joins_config_and_enablement(tmp_path: Path):
