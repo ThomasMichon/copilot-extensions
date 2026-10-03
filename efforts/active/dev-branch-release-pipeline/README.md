@@ -711,8 +711,7 @@ vendorable's own identity):
   is the natural place to finish it rather than opening a third effort for
   the same category of change.
 
-**Plan (confirmed 2026-10-02 — all three design points below are resolved;
-Phase 7 is approved to start):**
+**Plan (confirmed — Phase 7 is approved to start):**
 
 - [ ] Make `check-changefile-presence.py` (and the pre-push hook invoking
       it) check the diff **both directions** against a freshly-fetched
@@ -722,30 +721,27 @@ Phase 7 is approved to start):**
       names only versionable things the SAME diff actually touches (new —
       rejects an added changefile that over-claims, e.g. naming an
       untouched plugin or stale vendorable).
-- [ ] _(agent-recommended elaboration of the Request's "manifests" idea;
-      shape decided 2026-10-02, operator-confirmed)_ Give each vendorable
-      its own version identity by treating the version ALREADY declared in
-      its canonical `libs/<lib>/pyproject.toml` as authoritative — no new
-      manifest file type. `tools/changefile.py add` accepts the vendorable
-      name directly (e.g. `--plugin ssh-manager`) as the versioned thing a
-      PR touches, instead of requiring every one of its consumers to be
-      named individually.
+- [ ] _(agent-recommended elaboration of the Request's "manifests" idea)_
+      Give each vendorable its own version identity by treating the version
+      ALREADY declared in its canonical `libs/<lib>/pyproject.toml` as
+      authoritative — no new manifest file type. `tools/changefile.py add`
+      accepts the vendorable name directly (e.g. `--plugin ssh-manager`) as
+      the versioned thing a PR touches, instead of requiring every one of
+      its consumers to be named individually.
 - [ ] Teach the aggregator (`accumulate_bumps.py`) that bumping a
       vendorable's own manifest version auto-bumps every one of its
       registered consumers too (real vendored copies and `uv`-editable
       pointer consumers alike, per `check-vendored-libs-sync.py`'s existing
       consumer map) — a consumer no longer needs its own separate
       changefile entry for a vendorable-only change.
-- [ ] _(review finding, PR #4974)_ Extend `promote_release.py`'s
-      `_seed_versions_from_main()` to also seed every vendorable's version
-      from its last-shipped value on `main` before applying its next
-      changefile — today it seeds only plugins and standalone consumers
-      (`tools/promote_release.py:135-191`). Without this, an unchanged
-      vendorable would regress to the `0.0.0` placeholder every promotion
-      and each bump would restart from scratch instead of continuing the
-      vendorable's real version history.
-- [ ] _(exact form decided 2026-10-02, operator-confirmed: literal "0.0.0")_
-      Replace real version values across `dev`'s manifests (`plugin.json`,
+- [ ] Extend `promote_release.py`'s `_seed_versions_from_main()` to also
+      seed every vendorable's version from its last-shipped value on `main`
+      before applying its next changefile — today it seeds only plugins and
+      standalone consumers (`tools/promote_release.py:135-191`). Without
+      this, an unchanged vendorable would regress to the `0.0.0` placeholder
+      every promotion and each bump would restart from scratch instead of
+      continuing the vendorable's real version history.
+- [ ] Replace real version values across `dev`'s manifests (`plugin.json`,
       `pyproject.toml`, `.github/plugin/marketplace.json`, checked-in
       `__version__`/`_FALLBACK_VERSION` source assignments) with the
       literal string `"0.0.0"`, and make `promote_release.py` **generate**
@@ -754,21 +750,22 @@ Phase 7 is approved to start):**
       existing valid file — this also finally closes Phase 6's still-open
       "`dev` marketplace placeholder" item instead of leaving it a separate
       loose end.
-- [ ] _(fate decided 2026-10-02, operator-confirmed: delete outright; scope
-      refined by a PR #4974 review finding)_ Delete
-      `check-version-consistency.py` and its pre-push + CI wiring entirely
-      — `dev` carries only `"0.0.0"` placeholders, so cross-file version
-      agreement is meaningless there, closing the hook/CI pressure to
-      hand-edit version fields the Request asks to remove. This does NOT
-      mean the generated `main` snapshot gets no self-check:
-      `accumulate_bumps.py`'s `apply()` currently ignores the return values
-      of `_write_source_fallbacks()`/`_write_instruction_projection_owners()`
-      (`tools/accumulate_bumps.py:387-388`), which is the one real gap the
-      old checker was still catching. Close that gap directly inside
-      `accumulate_bumps.py` instead (fail closed on a dropped write) rather
-      than resurrecting the old checker as a separate file — the operator's
-      concern is hand-edit pressure on `dev`, which a machine-generated
-      `main` snapshot a human never touches doesn't create either way.
+- [ ] Remove `check-version-consistency.py`'s pre-push + CI wiring against
+      `dev` entirely — `dev` carries only `"0.0.0"` placeholders, so
+      cross-file version agreement is meaningless there, closing the
+      hook/CI pressure to hand-edit version fields the Request asks to
+      remove. Retain and refactor the checker's structural validations
+      (rejecting a non-literal/invalid/duplicate fallback assignment,
+      detecting a missing version field or catalog entry, a real mismatch
+      between surfaces) as a **post-generation promotion invariant** that
+      runs against the materialized `main` snapshot before promotion
+      completes — `accumulate_bumps.py`'s `apply()` does not currently
+      guarantee every surface by construction (e.g. it ignores the return
+      values of `_write_source_fallbacks()`/
+      `_write_instruction_projection_owners()`), so this closes the actual
+      gap rather than only inspecting write-call return values. `main`
+      still needs a real, internally-consistent version even though `dev`
+      no longer does.
 - [ ] Update `CONTRIBUTING.md`'s "Release & Versioning" section to describe
       the new model end to end: vendorable manifests, bidirectional
       changefile correctness against fresh `dev`, placeholder versions, and
@@ -776,18 +773,17 @@ Phase 7 is approved to start):**
       number now — no hook/CI path should ever again describe hand-editing
       one.
 
-**Design points — resolved 2026-10-02 (operator-confirmed):**
+**Design points — resolved:**
 
 1. **Placeholder exact form:** literal `"0.0.0"` in every version field
    (not omitted/null) — simplest, keeps every field present and parseable.
 2. **Vendorable manifest shape:** reuse the version already declared in
    `libs/<lib>/pyproject.toml` as authoritative — no new manifest file type.
-3. **`check-version-consistency.py` fate:** deleted outright (not kept
-   disabled-but-present) as a separate file — its one still-useful check
-   (a dropped write during generation) moves into `accumulate_bumps.py`
-   itself instead (see the Plan item above); a standalone cross-file
-   consistency checker has nothing left to catch once `dev` is placeholder-
-   only and `main` is wholly machine-generated.
+3. **`check-version-consistency.py` fate:** its `dev`-side pre-push/CI
+   wiring is removed entirely; its structural validations continue as a
+   post-generation promotion invariant against the `main` snapshot (see the
+   Plan item above) rather than surviving as an unchanged, separately-run
+   file.
 
 ## Validation Plan
 
@@ -908,8 +904,7 @@ Phase 7 is approved to start):**
     correctly resulted in `promote` completing `success` with a graceful
     internal no-op, never a hard failure and never a false promotion.
 
-### Phase 7 validation (not yet planned when the phase was first drafted —
-review finding, PR #4974)
+### Phase 7 validation
 
 - [ ] Bidirectional changefile-presence correctness: a PR touching a
       plugin/vendorable with no changefile still fails (existing behavior);
@@ -934,6 +929,11 @@ review finding, PR #4974)
       `_write_source_fallbacks()`/`_write_instruction_projection_owners()`
       failing) fails the promotion run closed, rather than silently
       producing an inconsistent generated snapshot on `main`.
+- [ ] The refactored post-generation structural validations (non-literal/
+      invalid/duplicate fallback assignment, a missing version field or
+      catalog entry, a real cross-surface mismatch) still fire against the
+      materialized `main` snapshot, with the same fixture cases
+      `check-version-consistency.py`'s own test suite already covers today.
 - [ ] `dev`'s own `plugin.json`/`pyproject.toml`/`marketplace.json`/source
       `__version__` fields all read `"0.0.0"` after this phase lands, and
       nothing on `dev` (docs-consistency/runbook-reference checks, the
