@@ -1262,26 +1262,62 @@ def test_resolve_toolchain_lock_missing_package_raises(
         bpa.resolve_toolchain_lock(venv_dir)
 
 
-# --- governed-feed enforcement ------------------------------------------
+# --- governed-feed enforcement (affirmative trust-policy allowlist) ----
+
+_TRUST_VAR = bpa._TRUSTED_INDEX_HOSTS_ENV_VAR
 
 
 def test_governed_feed_configured_via_default_index_env_vars():
-    assert bpa._governed_feed_configured(env={"UV_INDEX_URL": "https://example.internal/simple/"})
-    assert bpa._governed_feed_configured(env={"UV_DEFAULT_INDEX": "https://example.internal/simple/"})
+    assert bpa._governed_feed_configured(
+        env={"UV_INDEX_URL": "https://example.internal/simple/", _TRUST_VAR: "example.internal"}
+    )
+    assert bpa._governed_feed_configured(
+        env={"UV_DEFAULT_INDEX": "https://example.internal/simple/", _TRUST_VAR: "example.internal"}
+    )
+
+
+def test_governed_feed_not_configured_without_any_trust_policy():
+    # Regression: an affirmatively non-public, explicitly configured
+    # default index must still fail closed if this machine has not
+    # affirmatively asserted ANY trust policy at all -- inferring trust
+    # from "doesn't look like public PyPI" is exactly the inference this
+    # allowlist design replaces.
+    assert not bpa._governed_feed_configured(
+        env={"UV_DEFAULT_INDEX": "https://example.internal/simple/"}
+    )
+
+
+def test_governed_feed_not_configured_when_index_host_not_in_trust_policy():
+    # Regression: a trust policy that simply doesn't name the configured
+    # index's host must not somehow be satisfied by unrelated entries.
+    assert not bpa._governed_feed_configured(
+        env={
+            "UV_DEFAULT_INDEX": "https://unexpected.example/simple/",
+            _TRUST_VAR: "example.internal,other.internal",
+        }
+    )
 
 
 def test_governed_feed_not_configured_via_supplemental_uv_index_alone():
     # Regression: UV_INDEX (plural) only adds a SUPPLEMENTAL index -- `uv`
     # still falls back to public PyPI for anything it doesn't resolve, so
-    # this alone must never satisfy the governed-feed-only contract.
-    assert not bpa._governed_feed_configured(env={"UV_INDEX": "https://example.internal/simple/"})
+    # this alone must never satisfy the governed-feed-only contract, even
+    # with a matching trust policy.
+    assert not bpa._governed_feed_configured(
+        env={"UV_INDEX": "https://example.internal/simple/", _TRUST_VAR: "example.internal"}
+    )
 
 
 def test_governed_feed_not_configured_when_default_index_is_public_pypi():
     # Regression: an explicitly configured default that just points AT
-    # public PyPI itself is not a governed feed.
-    assert not bpa._governed_feed_configured(env={"UV_DEFAULT_INDEX": "https://pypi.org/simple"})
-    assert not bpa._governed_feed_configured(env={"UV_INDEX_URL": "https://PyPI.org/simple/"})
+    # public PyPI itself is not a governed feed, even if (implausibly)
+    # pypi.org were ever listed in the trust policy.
+    assert not bpa._governed_feed_configured(
+        env={"UV_DEFAULT_INDEX": "https://pypi.org/simple", _TRUST_VAR: "pypi.org"}
+    )
+    assert not bpa._governed_feed_configured(
+        env={"UV_INDEX_URL": "https://PyPI.org/simple/", _TRUST_VAR: "pypi.org"}
+    )
 
 
 def test_governed_feed_not_configured_with_empty_env():
@@ -1295,7 +1331,9 @@ def test_governed_feed_configured_via_user_uv_toml_index_url_windows(
     uv_toml = tmp_path / "uv" / "uv.toml"
     uv_toml.parent.mkdir(parents=True)
     uv_toml.write_text('index-url = "https://example.internal/simple/"\n', encoding="utf-8")
-    assert bpa._governed_feed_configured(env={"APPDATA": str(tmp_path)})
+    assert bpa._governed_feed_configured(
+        env={"APPDATA": str(tmp_path), _TRUST_VAR: "example.internal"}
+    )
 
 
 def test_governed_feed_configured_via_user_uv_toml_default_index_posix(
@@ -1308,7 +1346,9 @@ def test_governed_feed_configured_via_user_uv_toml_default_index_posix(
         '[[index]]\nname = "governed"\nurl = "https://example.internal/simple/"\ndefault = true\n',
         encoding="utf-8",
     )
-    assert bpa._governed_feed_configured(env={"XDG_CONFIG_HOME": str(tmp_path)})
+    assert bpa._governed_feed_configured(
+        env={"XDG_CONFIG_HOME": str(tmp_path), _TRUST_VAR: "example.internal"}
+    )
 
 
 def test_governed_feed_not_configured_via_supplemental_index_table_only(
@@ -1324,7 +1364,9 @@ def test_governed_feed_not_configured_via_supplemental_index_table_only(
         '[[index]]\nname = "extra"\nurl = "https://example.internal/simple/"\n',
         encoding="utf-8",
     )
-    assert not bpa._governed_feed_configured(env={"APPDATA": str(tmp_path)})
+    assert not bpa._governed_feed_configured(
+        env={"APPDATA": str(tmp_path), _TRUST_VAR: "example.internal"}
+    )
 
 
 def test_governed_feed_not_configured_when_uv_toml_default_index_is_public_pypi(
@@ -1334,7 +1376,9 @@ def test_governed_feed_not_configured_when_uv_toml_default_index_is_public_pypi(
     uv_toml = tmp_path / "uv" / "uv.toml"
     uv_toml.parent.mkdir(parents=True)
     uv_toml.write_text('index-url = "https://pypi.org/simple"\n', encoding="utf-8")
-    assert not bpa._governed_feed_configured(env={"APPDATA": str(tmp_path)})
+    assert not bpa._governed_feed_configured(
+        env={"APPDATA": str(tmp_path), _TRUST_VAR: "pypi.org"}
+    )
 
 
 def test_governed_feed_not_configured_when_uv_toml_has_no_index(
@@ -1344,7 +1388,9 @@ def test_governed_feed_not_configured_when_uv_toml_has_no_index(
     uv_toml = tmp_path / "uv" / "uv.toml"
     uv_toml.parent.mkdir(parents=True)
     uv_toml.write_text('# no index configured here\n', encoding="utf-8")
-    assert not bpa._governed_feed_configured(env={"APPDATA": str(tmp_path)})
+    assert not bpa._governed_feed_configured(
+        env={"APPDATA": str(tmp_path), _TRUST_VAR: "example.internal"}
+    )
 
 
 def test_governed_feed_not_configured_ignores_malformed_uv_toml(
@@ -1356,7 +1402,9 @@ def test_governed_feed_not_configured_ignores_malformed_uv_toml(
     uv_toml = tmp_path / "uv" / "uv.toml"
     uv_toml.parent.mkdir(parents=True)
     uv_toml.write_text("not = [valid toml", encoding="utf-8")
-    assert not bpa._governed_feed_configured(env={"APPDATA": str(tmp_path)})
+    assert not bpa._governed_feed_configured(
+        env={"APPDATA": str(tmp_path), _TRUST_VAR: "example.internal"}
+    )
 
 
 def test_resolve_toolchain_lock_refuses_when_no_governed_feed_configured(
@@ -1485,7 +1533,8 @@ def test_governed_feed_uv_config_file_is_exclusive(
 ):
     # Regression: UV_CONFIG_FILE disables uv's normal config discovery --
     # a governed user-level uv.toml must NOT be consulted once it's set,
-    # even though it exists and would otherwise satisfy the gate.
+    # even though it exists and would otherwise satisfy the gate (and
+    # even with a trust policy that WOULD accept its host).
     monkeypatch.setattr(bpa.sys, "platform", "win32")
     user_uv_toml = tmp_path / "appdata" / "uv" / "uv.toml"
     user_uv_toml.parent.mkdir(parents=True)
@@ -1493,7 +1542,11 @@ def test_governed_feed_uv_config_file_is_exclusive(
     explicit_config = tmp_path / "explicit-uv.toml"
     explicit_config.write_text("# no index configured here\n", encoding="utf-8")
     assert not bpa._governed_feed_configured(
-        env={"APPDATA": str(tmp_path / "appdata"), "UV_CONFIG_FILE": str(explicit_config)}
+        env={
+            "APPDATA": str(tmp_path / "appdata"),
+            "UV_CONFIG_FILE": str(explicit_config),
+            _TRUST_VAR: "example.internal",
+        }
     )
 
 
@@ -1505,7 +1558,9 @@ def test_governed_feed_uv_config_file_governed_is_honored(
     explicit_config.write_text(
         'index-url = "https://example.internal/simple/"\n', encoding="utf-8"
     )
-    assert bpa._governed_feed_configured(env={"UV_CONFIG_FILE": str(explicit_config)})
+    assert bpa._governed_feed_configured(
+        env={"UV_CONFIG_FILE": str(explicit_config), _TRUST_VAR: "example.internal"}
+    )
 
 
 # --- Test PyPI is treated as public --------------------------------------
@@ -1513,7 +1568,7 @@ def test_governed_feed_uv_config_file_governed_is_honored(
 
 def test_governed_feed_not_configured_when_default_index_is_test_pypi():
     assert not bpa._governed_feed_configured(
-        env={"UV_DEFAULT_INDEX": "https://test.pypi.org/simple"}
+        env={"UV_DEFAULT_INDEX": "https://test.pypi.org/simple", _TRUST_VAR: "test.pypi.org"}
     )
 
 
@@ -1639,11 +1694,90 @@ def test_build_wheel_ignores_build_requires_with_inapplicable_marker(
     )
 
     def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        if cmd[0] == str(toolchain.venv_python):
+            # the marker-environment query against the locked interpreter
+            return subprocess.CompletedProcess(
+                cmd, 0,
+                stdout=json.dumps({"python_version": "3.12", "sys_platform": "win32"}),
+                stderr="",
+            )
         (_staging_dir_from_cmd(cmd) / "demo-1.0-py3-none-any.whl").write_bytes(b"x")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
     bpa.build_wheel(src_dir, tmp_path / "dist", toolchain=toolchain)  # must not raise
+
+
+def test_build_wheel_evaluates_markers_against_locked_interpreter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: markers must evaluate against the LOCKED interpreter's
+    # own environment (queried from toolchain.venv_python), never the
+    # process running this tool -- simulate a locked interpreter reporting
+    # python_version "2.7" so the marker DOES apply, and the (insufficient)
+    # constraint is enforced.
+    src_dir = tmp_path / "src"
+    _write_build_system_requires(
+        src_dir, ['setuptools>=999.0.0; python_version < "3.0"']
+    )
+    toolchain = bpa.ToolchainLock(
+        tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
+    )
+
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        if cmd[0] == str(toolchain.venv_python):
+            return subprocess.CompletedProcess(
+                cmd, 0,
+                stdout=json.dumps({"python_version": "2.7", "sys_platform": "win32"}),
+                stderr="",
+            )
+        raise AssertionError("uv build must never run once the pre-check fails")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError):
+        bpa.build_wheel(src_dir, tmp_path / "dist", toolchain=toolchain)
+
+
+def test_toolchain_lock_marker_environment_is_queried_once_and_cached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    toolchain = bpa.ToolchainLock(tmp_path / "venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"})
+    calls = {"n": 0}
+
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        calls["n"] += 1
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout=json.dumps({"python_version": "3.12"}), stderr=""
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    env1 = toolchain.marker_environment
+    env2 = toolchain.marker_environment
+    assert env1 == {"python_version": "3.12"}
+    assert env1 is env2
+    assert calls["n"] == 1
+
+
+def test_query_marker_environment_nonzero_exit_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError):
+        bpa._query_marker_environment(tmp_path / "python")
+
+
+def test_query_marker_environment_malformed_json_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        return subprocess.CompletedProcess(cmd, 0, stdout="not json", stderr="")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError):
+        bpa._query_marker_environment(tmp_path / "python")
 
 
 def test_build_wheel_rejects_unparseable_build_requires_entry(
