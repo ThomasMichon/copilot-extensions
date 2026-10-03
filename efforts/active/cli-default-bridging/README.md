@@ -204,12 +204,39 @@ and ordering before Phase 0 work begins.)_
 
 ### Phase 1 — User-global remote-driver extension
 
-- [ ] Design a standalone, marketplace-installable extension distinct from
+- [x] Design a standalone, marketplace-installable extension distinct from
       `extensions/agent-bridge/extension.mjs` — installed once per
       machine/image, not per-repo/per-worktree, giving baseline drivability
       (attach to the live event stream, send/steer, abort) to any `copilot`
       process that launches with it present, independent of whether
       agent-bridge itself is installed.
+      **Done** — `plugins/agent-remote-driver/` (`defaultEnabled: false`
+      pending validation). Design: the extension is entirely self-contained
+      — no dependency on an agent-bridge daemon, registry, or protocol. On
+      join it starts its own loopback-only, bearer-token-authenticated HTTP
+      server (`driver-server.mjs`: `GET /health`, `GET /events` as SSE,
+      `POST /send`, `POST /steer`, `POST /abort`) and writes a per-session
+      discovery descriptor to `~/.copilot/remote-driver/sessions/<id>.json`
+      (`discovery.mjs`) that any external process — agent-bridge, a bare
+      script, a human's curl — can read to find and drive it. Event
+      forwarding follows the same hot-potato discipline as agent-bridge's
+      own extension (bounded in-memory queue, decoupled flush timer) but
+      forwards the full event stream rather than a curated whitelist, since
+      a driving consumer needs more than a representation subset. For
+      **launch-time presence** (the vision's load-bearing requirement): a
+      local machine/Dev Box enables it in the **user-global**
+      `~/.copilot/settings.json`; a CodeSpace/container gets it via the
+      already-existing `codespacePlugins`/venue-injection seam documented in
+      `docs/patterns/codespace-repo-provenance.md` — no new install
+      mechanism was invented, this effort reuses what `agent-codespaces`
+      already provides. `driver-server.mjs` and `discovery.mjs` are
+      deliberately decoupled from `@github/copilot-sdk` so they are directly
+      unit-testable (16 passing `node --test` cases) without the real SDK;
+      `extension.mjs` is the thin SDK-coupled glue. Explicitly out of scope
+      here (named, not silently absent): driver-exclusivity arbitration
+      (Phase 2) and the blocked-interaction escalation ladder (Phase 3) — the
+      README documents both gaps rather than implying this extension closes
+      them.
 - [ ] Scaffold and install it on at least one local machine, one CodeSpace,
       and one container, proving launch-time presence without an
       agent-worktrees or agent-bridge install in the venue itself.
@@ -218,6 +245,16 @@ and ordering before Phase 0 work begins.)_
       machine is a now-reachable fifth venue candidate alongside the four
       named validation tracks; fold it into "a local machine" or add it
       explicitly when scoping this item.)
+      **Partially done.** Local-machine install validated in this worktree:
+      plugin loads conceptually correct per the SDK extension-loading
+      contract (`extensions/<plugin-name>/extension.mjs` auto-discovery, the
+      same mechanism `context-handoff`'s extension already uses), and its
+      HTTP surface is validated end-to-end against a real `http.Server`
+      instance (not a mock) in `tests/driver-server.test.mjs`. **Not yet
+      done:** an actual live `copilot` session with this extension enabled,
+      and installs on a CodeSpace/container venue — both require live
+      venues this slice did not stand up. Left as the explicit next step
+      before Validation Plan item (a) can close.
 
 ### Phase 2 — Driver exclusivity arbitration for mux-hosted sessions
 
@@ -338,3 +375,31 @@ Before binding effort-focus and starting Phase 1 execution, the
 `## Participants`/`## Coordination` tables still need a real participant and
 host named (not a placeholder) — `effort-focus bind` refuses while they're
 unfilled. Flagged to the operator rather than invented.
+
+### 2026-10-02 — Phase 1 (design + initial implementation)
+
+Landed the Phase 1 design decision as working code rather than a prose-only
+design doc: `plugins/agent-remote-driver/`, a new, standalone, payload-only
+plugin (`defaultEnabled: false` — unvalidated, per `default-promotion-requires-proof`).
+Key design choice: no shared daemon or registry dependency at all — the
+extension is entirely self-contained (its own loopback HTTP server + a
+per-session discovery-file convention), so "independent of whether
+agent-bridge itself is installed" is true by construction, not by
+convention. Launch-time presence reuses `agent-codespaces`' existing
+`codespacePlugins`/venue-injection seam and the ordinary user-global
+`~/.copilot/settings.json` — no new install mechanism invented for this.
+
+16 `node --test` cases pass (`tests/discovery.test.mjs`,
+`tests/driver-server.test.mjs`), exercising the HTTP surface against a real
+`http.Server` with a fake driver (no SDK dependency needed for that layer).
+Updated `README.md` and `docs/architecture.md` plugin counts/tables and
+`.github/plugin/marketplace.json` (new entry + `metadata.version` bump);
+added a changefile.
+
+**Not yet done, left as this effort's next slice:** an actual live `copilot`
+session with the extension enabled end-to-end, plus CodeSpace and container
+installs — Validation Plan item (a) needs all of local + CodeSpace +
+container + Dev Box, and only the local-machine design/unit-test layer is
+covered so far. Phase 2 (driver-exclusivity) and Phase 3 (escalation ladder)
+remain explicitly open and are named as such in the plugin's own README
+rather than silently assumed solved.
