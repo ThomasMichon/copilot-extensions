@@ -221,6 +221,35 @@ it.** Concretely:
   the owning agent to cover it — not to leave two co-equal paths into the same
   backend.
 
+**This is about the raw adapter, not every script that happens to call the
+backend.** A skill may freely ship (or reference) its own dedicated,
+purpose-built script or tool that itself calls the backend's API/CLI directly
+— that is not a violation, even when the agent that normally owns the domain
+exists and is healthy. The distinction is **raw vs. dedicated access**:
+
+- **Raw access** means the host (the primary agent, or a skill's own prose
+  guidance) is handed the backend's general-purpose adapter itself —
+  unrestricted `az <anything>`, hand-rolled REST calls built inline from a
+  minted token, or equivalent open-ended MCP tool access — and can compose
+  arbitrary requests against it. *This* is what a domain agent must wrap: the
+  raw adapter should not be something the primary agent (or a skill's
+  narrative instructions) reaches for directly, request by request.
+- **A dedicated script or tool** is a fixed, narrow, reviewed, checked-in
+  artifact that performs **one well-defined operation** against the backend
+  (e.g. a script that authors a specific kind of page, or looks up one
+  specific relationship) — not a general-purpose way to call the backend.
+  It may legitimately use the backend's raw CLI/REST internally (sometimes
+  for a good structural reason, like needing to run in an execution
+  environment the owning agent cannot reach), and skills may reference such
+  scripts without routing through the owning agent.
+
+When you find a skill reaching for the backend directly, the fix depends on
+which shape it is: inline raw-adapter guidance (prose instructions to mint a
+token and construct ad hoc calls) should either move behind the owning agent
+or be converted into its own small, dedicated script — either resolves it. An
+already-dedicated script performing one fixed operation needs no further
+change on this axis.
+
 **Worked example (generic).** A domain agent that wraps an issue-tracker MCP
 server is the natural place to also drive that same tracker's CLI/REST calls
 reaching the identical backend — item creation, label updates, link
@@ -228,7 +257,10 @@ verification, token minting for a downstream call. The agent's own doc states
 this scope explicitly (e.g. "the preferred path for this tracker's CLI/REST
 calls too, not just the MCP's own tools"), and a host-level direct CLI call to
 that backend is reserved for the agent being genuinely down, not a shortcut
-taken because a locally available credential/CLI happens to also work.
+taken because a locally available credential/CLI happens to also work. A
+different skill in the same repo may still ship its own dedicated script that
+creates one specific kind of linked artifact directly against the tracker's
+REST API — that script is not expected to route through the domain agent.
 
 This is a design posture, not (yet) a `reviewing-customizations` machine
 check — audit for it by reading a domain agent's actual scope against what
