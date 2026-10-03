@@ -145,11 +145,13 @@ arguments) is passed through to `tools/run-plugin-tests.py` *inside* the
 container -- with one normalization (a `--base` value that resolves on
 the host is rewritten to its resolved commit SHA, or appended when
 changed-selection is active and `--base` was omitted entirely, before
-the in-container invocation is assembled; see below for why) and two
+the in-container invocation is assembled; see below for why) and three
 known exceptions to otherwise-transparent passthrough: `--allow-host-state`
-is rejected outright (see below), and `--admission-wait`'s lease loses its
+is rejected outright (see below), `--admission-wait`'s lease loses its
 host-wide coordination once run inside the container (see the Phase 2
-admission-lease gap below). The wrapper:
+admission-lease gap below), and a `--max-memory-mb`/`--max-processes`/
+`--max-temp-mb` value above the container's own fixed outer ceiling is
+rejected outright (see below). The wrapper:
 
 1. Writes a per-invocation copy of `.devcontainer/test-isolation/devcontainer.json` with
    its workspace volume name made unique to this run, creates that volume
@@ -278,6 +280,17 @@ genuine fix needs a host-side admission mechanism (acquired before
 container startup) rather than relying on the inner runner's own
 container-local lease; tracked as an open Phase 2 item, not silently
 worked around here.
+
+A third exception, for a different reason: the container itself enforces
+FIXED, lower outer resource ceilings (`--memory=14g`, `--pids-limit=512`,
+and `/tmp`'s own `size=6144m` tmpfs) regardless of what the inner runner's
+own `--max-memory-mb`/`--max-processes`/`--max-temp-mb` flags claim. A
+value above the matching outer ceiling would otherwise pass through
+unmodified, then be silently preempted by the container at the wrong
+moment (an OOM-kill, a hit `ENOSPC` on `/tmp`, or a stalled fork) instead
+of the clear, immediate rejection the other two exceptions already give
+-- so the wrapper rejects an over-the-ceiling value outright, before any
+container work begins, naming the exact flag/value/ceiling involved.
 
 Every git subprocess the wrapper runs on the HOST (bundling, cloning,
 reading the dirty/hidden-flag warnings, etc.) forces

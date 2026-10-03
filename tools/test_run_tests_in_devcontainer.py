@@ -372,6 +372,73 @@ def test_bring_up_raises_when_container_id_missing_from_output(tmp_path: Path) -
             raise AssertionError("expected SystemExit")
 
 
+def test_reject_resource_overrides_allows_values_at_or_below_ceiling() -> None:
+    # Right at the ceiling must still pass -- this is an upper bound,
+    # not a stricter-than-documented cap.
+    wrapper._reject_resource_overrides_exceeding_container_ceilings(
+        ["--max-memory-mb", str(wrapper._CONTAINER_MEMORY_MB_CEILING),
+         "--max-processes", str(wrapper._CONTAINER_PIDS_CEILING),
+         "--max-temp-mb", str(wrapper._CONTAINER_TMP_MB_CEILING)]
+    )
+
+
+def test_reject_resource_overrides_rejects_memory_mb_above_container_ceiling() -> None:
+    # The exact finding this closes: `--max-memory-mb 16000` is valid to
+    # `run-plugin-tests.py` but would be silently preempted by the
+    # container's own fixed `--memory=14g` ceiling regardless of what the
+    # inner runner believes it has.
+    try:
+        wrapper._reject_resource_overrides_exceeding_container_ceilings(
+            ["--max-memory-mb", "16000"]
+        )
+    except SystemExit as exc:
+        assert "--max-memory-mb" in str(exc)
+        assert "16000" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+
+
+def test_reject_resource_overrides_rejects_processes_above_container_ceiling() -> None:
+    try:
+        wrapper._reject_resource_overrides_exceeding_container_ceilings(
+            ["--max-processes", "600"]
+        )
+    except SystemExit as exc:
+        assert "--max-processes" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+
+
+def test_reject_resource_overrides_rejects_temp_mb_above_container_ceiling() -> None:
+    try:
+        wrapper._reject_resource_overrides_exceeding_container_ceilings(
+            ["--max-temp-mb=7000"]
+        )
+    except SystemExit as exc:
+        assert "--max-temp-mb" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit")
+
+
+def test_reject_resource_overrides_recognizes_abbreviated_flag() -> None:
+    try:
+        wrapper._reject_resource_overrides_exceeding_container_ceilings(
+            ["--max-memory", "20000"]
+        )
+    except SystemExit as exc:
+        assert "--max-memory-mb" in str(exc)
+    else:
+        raise AssertionError("expected SystemExit for an abbreviated flag")
+
+
+def test_reject_resource_overrides_ignores_non_integer_value() -> None:
+    # A non-integer value is left for the inner runner's own argparse to
+    # reject -- this check must not itself crash on one.
+    wrapper._reject_resource_overrides_exceeding_container_ceilings(
+        ["--max-memory-mb", "not-a-number"]
+    )
+
+
 def test_resolve_base_ref_defaults_to_origin_main() -> None:
     assert wrapper._resolve_base_ref(["agent-worktrees"]) == "origin/main"
     assert wrapper._resolve_base_ref([]) == "origin/main"

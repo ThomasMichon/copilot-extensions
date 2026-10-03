@@ -336,14 +336,17 @@ verbatim ask.
       flags (`--changed`, `--all`, `-k`, etc.) semantically unchanged --
       with one deliberate normalization (a resolvable `--base` is rewritten
       to its resolved commit SHA before the in-container invocation is
-      assembled; see `TESTING.md` for why) and two known exceptions:
+      assembled; see `TESTING.md` for why) and three known exceptions:
       `--allow-host-state` is rejected outright (its documented contract --
       preserve the caller's real HOME/config/credentials -- can't be
       honored here, since this wrapper's container always gets a fresh,
-      credential-free tmpfs `$HOME` by design), and `--admission-wait`'s
+      credential-free tmpfs `$HOME` by design), `--admission-wait`'s
       host-wide lease loses its cross-process coordination once run inside
       the container (a tracked Phase 2 gap, see the Validation Plan item
-      below) -- so the
+      below), and a `--max-memory-mb`/`--max-processes`/`--max-temp-mb`
+      value above the container's own fixed outer ceiling is rejected
+      outright (the outer container would otherwise silently preempt it
+      regardless of what the inner runner believes it has) -- so the
       container adds a real OS-level boundary strictly on top of (never
       instead of, never duplicating) the turn-key runner's existing
       process-level containment. Validated end-to-end against a real
@@ -1944,3 +1947,46 @@ works; `check-docs-consistency.py` and `check-effort-vision-structure.py`
 both pass. Docker cleanup (no leftover `test-isolation` volumes) and
 host `git status --short` reconfirmed clean of anything beyond this
 round's own diff.
+
+### 2026-10-03 — Review round 15 (twenty-sixth pass): MEDIUM resource-override ceiling mismatch fixed
+A twenty-sixth review pass of commit `3d771ef23` confirmed the previous
+submodule-filter-bypass HIGH finding resolved, and surfaced 1
+"previously missed" MEDIUM: `--max-memory-mb`/`--max-processes`/
+`--max-temp-mb` pass through unmodified like any other
+`run-plugin-tests.py` flag, but this wrapper's own container enforces
+FIXED, lower outer ceilings (`--memory=14g`, `--pids-limit=512`, `/tmp`'s
+own `size=6144m` tmpfs) regardless of what the inner runner believes it
+has -- e.g. `--max-memory-mb 16000` is valid to that runner but would be
+silently preempted by the container's own 14 GiB cgroup limit (an
+OOM-kill, not a clean error), the same semantics-mismatch class the
+`--allow-host-state`/`--admission-wait` exceptions already name but this
+third case didn't. Fixed with a new
+`_reject_resource_overrides_exceeding_container_ceilings()` check (a
+third documented exception, wired in right alongside the existing
+`--allow-host-state` rejection in `main()`): any of the three flags
+requesting MORE than the matching outer ceiling now fails loudly,
+naming the exact flag/value/ceiling, before any container work begins
+-- confirmed live via `--max-memory-mb 16000` (exit 1, clear message,
+no Docker invoked at all). Documented the new exception consistently
+across all three places that previously said "two exceptions"
+(`TESTING.md`'s intro, the module's own docstring, and the effort
+README's Plan item) -- the exact kind of inconsistency an earlier round
+this same session was caught and fixed for.
+
+Re-validated end-to-end: the full unit test suite (107 tests, including
+6 new regression tests -- at-ceiling values passing, each of the three
+flags individually rejected above its ceiling with the right message,
+an abbreviated flag form recognized, and a non-integer value correctly
+left for the inner runner's own argparse) passes; `check-module-size.py
+--changed-since origin/dev` passes right at the cap (1000 lines, after
+an unusually large condensing pass across roughly fifteen functions and
+comment blocks -- the module has now hit the cap on effectively every
+substantive round this session; a genuine multi-module split remains
+the right Phase 2 follow-up, noted repeatedly and still not yet
+scheduled); a fresh Docker-backed end-to-end run (`ai-attribution`, 98
+passed / 6 skipped) confirms the common case still works; a dedicated
+live check confirmed the new rejection fires correctly end-to-end;
+`check-docs-consistency.py` and `check-effort-vision-structure.py` both
+pass. Docker cleanup (no leftover `test-isolation` volumes) and host
+`git status --short` reconfirmed clean of anything beyond this round's
+own diff.

@@ -25,9 +25,10 @@ Usage::
 Everything after the recognized flags below (or a literal ``--`` anywhere in
 the remaining arguments) passes through to ``tools/run-plugin-tests.py``
 inside the container, with one normalization (``--base`` rewritten to its
-resolved commit SHA) and two exceptions: ``--allow-host-state`` is
-rejected outright, and ``--admission-wait``'s host-wide lease loses its
-cross-process coordination inside the container.
+resolved commit SHA) and three exceptions: ``--allow-host-state`` is
+rejected outright, ``--admission-wait``'s host-wide lease loses its
+cross-process coordination inside the container, and a resource-limit
+override above the container's own fixed ceiling is rejected outright.
 """
 
 from __future__ import annotations
@@ -47,26 +48,20 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 # A NAMED alternate config (``.devcontainer/<name>/devcontainer.json``),
-# never the canonical ``.devcontainer/devcontainer.json`` root path --
-# this spec is a narrow, test-isolation-only container, not a general
-# development environment, but the canonical path is exactly what
-# standard "Reopen in Container"/`devcontainer up` auto-discovery (and
-# this repo's own Codespaces tooling) picks up with NO explicit choice
-# required. Living at the canonical path would silently hand a direct
-# user an empty workspace (this volume starts empty; only this wrapper
-# ever populates it) instead of a real development environment.
+# never the canonical root path: a narrow, test-isolation-only container,
+# not a general development environment, but the canonical path is what
+# standard "Reopen in Container" auto-discovery picks up with NO
+# explicit choice required -- living there would silently hand a direct
+# user an empty workspace (only this wrapper ever populates it).
 DEVCONTAINER_CONFIG = REPO / ".devcontainer" / "test-isolation" / "devcontainer.json"
 CONTAINER_WORKSPACE = "/workspaces/copilot-extensions"
-#: Must match ``.devcontainer/test-isolation/devcontainer.json``'s ``remoteUser``/
-#: ``containerUser`` -- the non-root user tests actually run as.
+#: Must match the devcontainer spec's ``remoteUser``/``containerUser``.
 REMOTE_USER = "vscode"
 
-# Must match the literal volume name baked into
-# ``.devcontainer/test-isolation/devcontainer.json``'s ``workspaceMount``
-# -- ``_per_instance_config`` below rewrites this to a unique,
-# per-invocation name so concurrent and successive runs each get their
-# own isolated, fresh workspace volume instead of silently sharing (and
-# accumulating state in) one fixed volume.
+# Must match the literal volume name baked into the devcontainer spec's
+# ``workspaceMount`` -- ``_per_instance_config`` rewrites this to a
+# unique, per-invocation name so each run gets its own fresh volume
+# instead of sharing (and accumulating state in) one fixed one.
 BASE_VOLUME_NAME = "copilot-extensions-test-isolation-ws"
 
 # The workspace volume's size is bounded (a tmpfs-backed Docker volume, not
@@ -77,16 +72,20 @@ BASE_VOLUME_NAME = "copilot-extensions-test-isolation-ws"
 # surfaces). The checkout snapshot plus a fresh venv comfortably fits.
 WORKSPACE_VOLUME_SIZE = "4g"
 
+# Hard ceilings this wrapper's OWN container enforces (kept in sync by
+# hand with devcontainer.json's `runArgs`/tmpfs `size=`) -- see
+# `_reject_resource_overrides_exceeding_container_ceilings`.
+_CONTAINER_MEMORY_MB_CEILING = 14 * 1024
+_CONTAINER_PIDS_CEILING = 512
+_CONTAINER_TMP_MB_CEILING = 6144
+
 # Excluded from the point-in-time copy made into the container even if
-# `git ls-files` would otherwise include them: large, host-specific
-# artifacts the test run inside the container does not need and should not
-# reproduce. Belt-and-suspenders only -- `_tracked_paths` already excludes
-# anything gitignored (including `.test-venvs`, which is git-ignored per
-# `TESTING.md`). `.devcontainer` is deliberately NOT excluded: excluding
-# it while rebuilding the index from the full `HEAD` tree (which still
-# lists it) made every in-container checkout appear dirty (`git status`
-# reporting it as "deleted"); the host CLI's own per-run config is
-# already a separate temporary copy (`_per_instance_config`) regardless.
+# `git ls-files` would otherwise include them -- belt-and-suspenders only
+# (`_tracked_paths` already excludes anything gitignored, including
+# `.test-venvs`). `.devcontainer` is deliberately NOT excluded: excluding
+# it made every in-container checkout appear dirty (rebuilt index from
+# the full `HEAD` tree still lists it) -- the per-run config is already a
+# separate temp copy (`_per_instance_config`) regardless.
 EXCLUDED_TOP_LEVEL = {
     ".test-venvs",
     "node_modules",
@@ -97,11 +96,10 @@ EXCLUDED_TOP_LEVEL = {
 def _minimal_repo_selection_env() -> dict[str, str]:
     """A blanket ``GIT_*`` strip used only by
     `_discover_configured_clean_filters`, which runs BEFORE
-    `_scrubbed_git_env`'s own overrides exist. `check-attr` never invokes
-    a clean filter, but still needs `core.fsmonitor=false` (confirmed
-    live that `GIT_OPTIONAL_LOCKS=0` can make even read-only probes
-    consult a configured hook) and `GIT_NO_LAZY_FETCH=1`/
-    `GIT_NO_REPLACE_OBJECTS=1`."""
+    `_scrubbed_git_env`'s overrides exist. `check-attr` never invokes a
+    clean filter, but still needs `core.fsmonitor=false` (confirmed live
+    `GIT_OPTIONAL_LOCKS=0` can make read-only probes consult a hook) and
+    `GIT_NO_LAZY_FETCH=1`/`GIT_NO_REPLACE_OBJECTS=1`."""
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")}
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GIT_OPTIONAL_LOCKS"] = "0"
@@ -181,11 +179,10 @@ def _per_instance_config(instance_label: str) -> tuple[Path, str]:
     """Write a copy of ``DEVCONTAINER_CONFIG`` with its workspace volume
     name made unique to this invocation, so each run gets its own fresh,
     isolated workspace instead of reusing one fixed, shared volume.
-    Returns the temp config path and the volume name, so the caller can
-    remove that exact volume at teardown. Written into a fresh temp
-    DIRECTORY as literally ``devcontainer.json`` -- the devcontainer CLI
-    rejects any ``--config`` basename other than that or
-    ``.devcontainer.json``."""
+    Returns the temp config path and volume name, so the caller can
+    remove that volume at teardown. Written into a fresh temp DIRECTORY
+    as literally ``devcontainer.json`` -- the devcontainer CLI rejects
+    any other ``--config`` basename."""
     volume_name = f"{BASE_VOLUME_NAME}-{instance_label}"
     text = DEVCONTAINER_CONFIG.read_text()
     if BASE_VOLUME_NAME not in text:
@@ -201,11 +198,11 @@ def _per_instance_config(instance_label: str) -> tuple[Path, str]:
 
 def _create_bounded_volume(volume_name: str) -> None:
     """Create the per-invocation workspace volume up front, as a
-    size-bounded tmpfs-backed volume (not the default unbounded local-disk
-    volume) -- see ``WORKSPACE_VOLUME_SIZE``. ``devcontainer up`` creates
-    the volume implicitly if it doesn't already exist, but implicitly means
-    with Docker's own unbounded default; creating it explicitly first with
-    these options means ``devcontainer up`` just reuses it instead."""
+    size-bounded tmpfs-backed volume (not Docker's default unbounded
+    local-disk volume) -- see ``WORKSPACE_VOLUME_SIZE``. ``devcontainer
+    up`` creates the volume implicitly if absent, with Docker's own
+    unbounded default; creating it explicitly first means it just
+    reuses this one instead."""
     res = subprocess.run(
         [
             "docker", "volume", "create",
@@ -251,20 +248,15 @@ def _bring_up(instance_label: str, config_path: Path) -> str:
 def _tracked_paths(*, include_untracked: bool) -> list[str]:
     """Repo-relative paths of files the snapshot should contain --
     deliberately NOT every file physically present under ``REPO``. Default
-    (``include_untracked=False``) is git-TRACKED files only (``git
-    ls-files --cached``): there's no blanket `.gitignore` rule for
-    `.env`-style config, so an untracked-but-not-ignored secret file would
-    otherwise be copied into a container with outbound network access --
-    tracked files are the set contributors/CI already trust to keep
-    secrets out of the repository. ``include_untracked=True`` (the
-    wrapper's ``--include-untracked`` flag) additionally includes
-    untracked-but-not-gitignored files via ``--others --exclude-standard``.
-
-    Known, accepted residual exposure: a tracked path's CURRENT on-disk
-    content is copied (uncommitted edits included), not the
-    last-committed blob, so a secret pasted into an otherwise-tracked
-    file and never committed is still copied in.
-    """
+    (``include_untracked=False``) is git-TRACKED files only: there's no
+    blanket `.gitignore` rule for `.env`-style config, so an untracked-
+    but-not-ignored secret file would otherwise be copied into a
+    container with outbound network access. ``include_untracked=True``
+    (the wrapper's ``--include-untracked`` flag) additionally includes
+    untracked-but-not-gitignored files. Known residual exposure: a
+    tracked path's CURRENT on-disk content is copied, not the last-
+    committed blob, so an uncommitted secret in an otherwise-tracked
+    file is still copied in."""
     args = ["git", "-C", str(REPO), "ls-files", "-z", "--cached"]
     if include_untracked:
         args += ["--others", "--exclude-standard"]
@@ -273,11 +265,9 @@ def _tracked_paths(*, include_untracked: bool) -> list[str]:
         raise SystemExit(
             f"git ls-files failed: {res.stderr.decode(errors='replace').strip()}"
         )
-    # `os.fsdecode` (surrogate-escape), not a plain UTF-8 `.decode()` --
-    # a git-tracked path on Linux is arbitrary bytes, and a plain decode
-    # would raise `UnicodeDecodeError` outright for a valid tracked
-    # filename that happens not to be valid UTF-8, aborting the whole
-    # snapshot over one oddly-named file.
+    # `os.fsdecode` (surrogate-escape): a tracked path is arbitrary bytes
+    # on Linux, and a plain `.decode()` would raise outright for a valid
+    # filename that isn't valid UTF-8.
     paths = [p for p in os.fsdecode(res.stdout).split("\0") if p]
     excluded_prefixes = tuple(f"{name}/" for name in EXCLUDED_TOP_LEVEL)
     return [
@@ -366,22 +356,18 @@ def _warn_about_hidden_tracked_file_flags() -> None:
         print(f"  {path}", file=sys.stderr)
 
 
-# Every `tools/run-plugin-tests.py` flag that consumes a SEPARATE following
-# token as its value (as opposed to a bare `store_true` flag, or the
-# single-token `--flag=value` form, which `.startswith("-")` already
-# catches below) -- kept in sync by hand with that script's own
-# `argparse` definitions, mirrored here only to tell a flag's value token
-# apart from a positional plugin name, never to fully re-parse its CLI.
+# Every `run-plugin-tests.py` flag that consumes a SEPARATE following
+# token as its value -- kept in sync by hand with that script's own
+# argparse, only to tell a flag's value apart from a positional plugin
+# name, never to fully re-parse its CLI.
 _VALUE_CONSUMING_FLAGS = frozenset({
     "--base", "-k", "--admission-wait", "--timeout", "--subsuite-timeout",
     "--plugin-timeout", "--test-timeout", "--max-files-per-sub-suite",
     "--max-processes", "--max-memory-mb", "--max-temp-mb", "--exclude",
 })
 
-# Every bare (`store_true`) `tools/run-plugin-tests.py` flag -- kept in
-# sync by hand alongside `_VALUE_CONSUMING_FLAGS` above, for the same
-# reason: distinguishing a recognized flag from a positional plugin name,
-# never fully re-parsing that runner's CLI.
+# Every bare (`store_true`) flag -- kept in sync alongside
+# `_VALUE_CONSUMING_FLAGS` above, same reason.
 _BARE_FLAGS = frozenset({
     "--all", "--changed", "--reinstall", "--guards", "--collect-only",
     "--list", "--pre-push", "--allow-explicit-tiers", "--allow-host-state",
@@ -392,20 +378,53 @@ _ALL_LONG_FLAGS = _VALUE_CONSUMING_FLAGS | _BARE_FLAGS
 
 def _canonicalize_flag(name: str) -> str:
     """Resolve a bare long-flag token to its canonical name via
-    argparse's own unambiguous-prefix abbreviation (e.g. ``--bas`` ->
-    ``--base``) against `_ALL_LONG_FLAGS` -- without this, an abbreviated
-    flag goes unrecognized by `_resolve_base_ref`/`_changed_mode_active`."""
+    argparse's unambiguous-prefix abbreviation against
+    `_ALL_LONG_FLAGS` -- without this, an abbreviated flag goes
+    unrecognized downstream."""
     if name in _ALL_LONG_FLAGS or not name.startswith("--") or len(name) <= 2:
         return name
     matches = [flag for flag in _ALL_LONG_FLAGS if flag.startswith(name)]
     return matches[0] if len(matches) == 1 else name
 
 
+def _reject_resource_overrides_exceeding_container_ceilings(passthrough: list[str]) -> None:
+    """Reject a `--max-memory-mb`/`--max-processes`/`--max-temp-mb`
+    override exceeding this wrapper's own container ceiling -- those
+    flags otherwise pass through unmodified, but the container's fixed,
+    lower outer limits would silently preempt a larger request (a
+    mismatch not otherwise named as an exception alongside
+    `--allow-host-state`/`--admission-wait`). A non-integer value is left
+    for the inner runner's own argparse to reject."""
+    ceilings = {
+        "--max-memory-mb": _CONTAINER_MEMORY_MB_CEILING,
+        "--max-processes": _CONTAINER_PIDS_CEILING,
+        "--max-temp-mb": _CONTAINER_TMP_MB_CEILING,
+    }
+    for i, arg in enumerate(passthrough):
+        name, eq, value_str = arg.partition("=")
+        canonical = _canonicalize_flag(name)
+        if canonical not in ceilings:
+            continue
+        if not eq:
+            value_str = passthrough[i + 1] if i + 1 < len(passthrough) else ""
+        try:
+            requested = int(value_str)
+        except ValueError:
+            continue
+        if requested > ceilings[canonical]:
+            raise SystemExit(
+                f"{canonical} {requested} exceeds this wrapper's container "
+                f"ceiling ({ceilings[canonical]}) -- the outer container "
+                "would silently preempt it. Lower the override, or run "
+                "tools/run-plugin-tests.py directly (outside the "
+                "devcontainer) for a larger value."
+            )
+
+
 def _resolve_base_ref(passthrough: list[str]) -> str:
-    """Best-effort extraction of the ``--base`` value a passthrough
-    invocation will use, so ``_materialized_git_dir`` includes exactly
-    that ref's closure. Falls back to the runner's own default when
-    absent, mirrors argparse's last-occurrence-wins, and recognizes an
+    """Best-effort extraction of the ``--base`` value, so
+    ``_materialized_git_dir`` includes exactly that ref's closure. Falls
+    back to the runner's default when absent; recognizes an
     abbreviation -- see `_canonicalize_flag`."""
     resolved = "origin/main"
     for i, arg in enumerate(passthrough):
@@ -420,9 +439,8 @@ def _resolve_base_ref(passthrough: list[str]) -> str:
 
 
 def _changed_mode_active(passthrough: list[str]) -> bool:
-    """Whether a ``tools/run-plugin-tests.py`` invocation with these
-    passthrough args resolves targets via ``changed_plugins()`` -- true
-    for an explicit ``--changed``, AND that runner's own default (no
+    """Whether an invocation resolves targets via ``changed_plugins()``
+    -- true for explicit ``--changed``, AND the runner's own default (no
     ``--all``, no explicit plugin names). Only then does an unresolvable
     ``--base`` matter."""
     has_all = False
@@ -451,10 +469,9 @@ def _git_rev_parse(ref: str) -> str | None:
     Returns ``None`` (rather than raising) when unresolvable -- the
     CALLER decides tolerance: `_materialized_git_dir` treats it as fatal
     in changed-selection mode, tolerant otherwise. Peels to
-    ``ref^{commit}``: plain ``rev-parse --verify`` accepts ANY object
-    type, but the downstream diff needs a commit-ish.
-    ``--end-of-options`` keeps a ``-``-prefixed ref from misreading as a
-    flag."""
+    ``ref^{commit}``: plain ``rev-parse --verify`` accepts any object
+    type, but the downstream diff needs a commit-ish; ``--end-of-options``
+    keeps a ``-``-prefixed ref from misreading as a flag."""
     res = subprocess.run(
         ["git", "-C", str(REPO), "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"],
         capture_output=True, text=True, timeout=30, env=_scrubbed_git_env(),
@@ -508,12 +525,9 @@ def _rewrite_base_to_resolved_sha(passthrough: list[str]) -> list[str]:
 
 
 # A fresh, credential-free `.git/config` written into every materialized
-# copy (see `_materialized_git_dir` below) -- deliberately NOT a copy of
-# the host's own config, which may embed an authenticated remote URL,
-# `credential.helper` settings, or other credential-bearing values. None of
-# that is needed for `git diff`/`git status`/`git rev-parse` against
-# already-resolved local refs; losing it only matters for `fetch`/`push`
-# network operations this wrapper's own `git` calls never perform.
+# copy -- deliberately NOT a copy of the host's own config, which may
+# embed an authenticated remote URL or `credential.helper` settings.
+# None of that is needed for local-ref `diff`/`status`/`rev-parse`.
 _MINIMAL_GIT_CONFIG = (
     "[core]\n"
     "\trepositoryformatversion = 0\n"
@@ -559,16 +573,12 @@ def _materialized_git_dir(stack: contextlib.ExitStack, passthrough: list[str]) -
 
     base_ref = _resolve_base_ref(passthrough)
     base_resolves = _git_rev_parse(base_ref) is not None
-    # Changed-selection mode (explicit `--changed`, or the default with no
-    # `--all`/plugin names) is the one mode that diffs against `base_ref`.
-    # `run-plugin-tests.py`'s `changed_plugins()` ignores a nonzero `git
-    # diff` and reports an EMPTY target set rather than erroring, so EITHER
-    # an unresolvable base OR one resolving to an orphan/unrelated-history
-    # commit (no shared ancestor -> `git diff <base>...HEAD` fails with "no
-    # merge base") silently degrades to "No plugin suites to run." instead
-    # of surfacing the real problem. Fail loudly here instead, before any
-    # snapshot work; an `--all`/explicit-plugin run never consults
-    # `base_ref` so an unresolvable default must not block those.
+    # `changed_plugins()` ignores a nonzero `git diff`, reporting an
+    # EMPTY target set rather than erroring -- EITHER an unresolvable
+    # base OR an orphan/unrelated-history one degrades silently to "No
+    # plugin suites to run." instead of the real problem. Fail loudly
+    # before any snapshot work; `--all`/an explicit plugin never
+    # consults `base_ref`.
     if _changed_mode_active(passthrough):
         if not base_resolves:
             raise SystemExit(
@@ -590,10 +600,8 @@ def _materialized_git_dir(stack: contextlib.ExitStack, passthrough: list[str]) -
                 "in-container three-dot diff fail. Correct --base."
             )
     # Only include the base ref's closure when changed-selection actually
-    # consults it -- an `--all` run or an explicit plugin name never uses
-    # `base_ref` at all, so bundling it there would needlessly widen the
-    # minimal-history boundary with unrelated commits/trees/blobs reachable
-    # from a base that may have diverged significantly from `HEAD`.
+    # consults it -- an `--all`/explicit-plugin run never uses `base_ref`,
+    # so bundling it would needlessly widen the minimal-history boundary.
     bundle_refs = (
         ["HEAD", base_ref]
         if base_resolves and _changed_mode_active(passthrough)
@@ -892,14 +900,11 @@ def _cleanup_signals_deferred():
 
 
 def main(argv: list[str] | None = None) -> int:
-    # Converts a SIGTERM into a normal raised exception so this
-    # function's own try/finally cleanup runs -- see
-    # `_TerminationRequested`'s docstring. SIGINT needs no equivalent
-    # handler (Python already raises `KeyboardInterrupt`) --
-    # `_cleanup_signals_deferred` protects against a REPEAT of either
-    # during cleanup itself. The previous handler is restored in the
-    # outer `finally` below, since `main` is also invoked in-process by
-    # this module's own tests.
+    # Converts SIGTERM into a normal raised exception so this function's
+    # own try/finally cleanup runs -- see `_TerminationRequested`.
+    # SIGINT needs no equivalent handler (Python already raises
+    # `KeyboardInterrupt`); the previous handler is restored below,
+    # since `main` is also invoked in-process by this module's tests.
     previous_sigterm_handler = signal.signal(signal.SIGTERM, _raise_on_sigterm)
     try:
         ap = argparse.ArgumentParser(
@@ -917,16 +922,13 @@ def main(argv: list[str] | None = None) -> int:
                              "necessarily gitignored, so this is opt-in, not default)"
                          ))
         ns, passthrough = ap.parse_known_args(argv)
-        # "--" is argparse's own flags/positionals separator, not a real
-        # run-plugin-tests.py argument -- strip every occurrence (not just a
-        # leading one), since it can appear anywhere in the extras list
-        # (e.g. ``--all -- -k some_filter`` leaves it in the MIDDLE).
+        # "--" is argparse's own flags/positionals separator -- strip
+        # every occurrence (not just a leading one), since it can appear
+        # anywhere (e.g. ``--all -- -k some_filter``).
         passthrough = [arg for arg in passthrough if arg != "--"]
-        # `--allow-host-state`'s documented contract (preserve the
-        # caller's real HOME/config/credentials) cannot be honored here --
-        # the container always gets a fresh, credential-free tmpfs $HOME
-        # by design. Reject rather than silently proceed without the
-        # credentials a credential-dependent test asked for.
+        # `--allow-host-state`'s contract (preserve the caller's real
+        # HOME/config/credentials) can't be honored -- the container
+        # always gets a fresh, credential-free tmpfs $HOME by design.
         if any(
             _canonicalize_flag(arg.partition("=")[0]) == "--allow-host-state"
             for arg in passthrough
@@ -940,23 +942,21 @@ def main(argv: list[str] | None = None) -> int:
                 "tools/run-plugin-tests.py directly (outside the "
                 "devcontainer) for an --allow-host-state check instead."
             )
-        # Rewriting `--base` to its resolved SHA here (before EITHER the
-        # snapshot is built or the in-container command is assembled) means
-        # both consistently see and use the SAME resolved commit, including
-        # for a ref-relative expression that would otherwise fail to resolve
-        # again inside the materialized bundle clone -- see
-        # `_rewrite_base_to_resolved_sha`'s own docstring.
+        # A third documented exception, alongside the two above -- see
+        # the function's own docstring.
+        _reject_resource_overrides_exceeding_container_ceilings(passthrough)
+        # Rewriting `--base` to its resolved SHA here means both the
+        # snapshot and the in-container command see the SAME resolved
+        # commit -- see `_rewrite_base_to_resolved_sha`.
         passthrough = _rewrite_base_to_resolved_sha(passthrough)
 
         instance_label = uuid.uuid4().hex[:12]
         config_path, volume_name = _per_instance_config(instance_label)
         # `container_id` doubles as the lifecycle marker the `finally`
         # below uses to pick cleanup: still `None` means `_bring_up`
-        # never returned one (orphan cleanup, regardless of `--keep`), a
-        # real id means normal teardown. One try/finally spanning the
-        # whole lifecycle (vs. two separate blocks with a gap) means no
-        # window where a SIGTERM/SIGINT could raise before any cleanup
-        # guard is active and leak both the container and its volume.
+        # never returned one, a real id means normal teardown. One
+        # try/finally spanning the whole lifecycle means no window where
+        # a signal could raise before any cleanup guard is active.
         container_id: str | None = None
         result: int | None = None
         primary_failed = False
