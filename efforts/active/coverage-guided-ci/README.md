@@ -132,7 +132,7 @@ order.
       recording the exact `dev` commit each `main` promotion was measured
       against). The full per-line coverage map itself is published
       separately as a **GitHub Release asset**, tagged on the `dev`
-      commit it was measured against (`coverage-baselines-<dev_head[:12]>`).
+      commit it was measured against (`coverage-baselines-<dev_head>`).
       Attribution correctness is unaffected either way: measurement
       happens against `dev`'s own source form regardless of which
       branch/mechanism later stores the resulting JSON, and Phase 2's
@@ -390,7 +390,7 @@ document the original decision checked into `main` into two pieces:
   full baseline was.
 - The full per-line coverage map itself, published as a **GitHub Release**
   asset (one asset per plugin), tagged on the measured `dev` commit itself
-  (`coverage-baselines-<dev_head[:12]>` — deliberately NOT the promotion's
+  (`coverage-baselines-<dev_head>` — deliberately NOT the promotion's
   own eventual `main`-side tag, whose name isn't knowable until after a
   real post-merge squash-merge; see `tools/promote_release.py`'s own
   `candidate_branch` docstring for why that's a separate, later-known
