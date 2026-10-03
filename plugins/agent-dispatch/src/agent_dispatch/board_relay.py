@@ -73,11 +73,24 @@ class RelayUnavailable(Exception):
     connection's lifetime without risking a double-emission."""
 
 
+class HealthCheckFailed(Exception):
+    """``client.health()`` itself failed (network hiccup, timeout, transient
+    5xx) -- distinct from a successful response that simply lacks the
+    ``events_ready_frame`` capability flag. A caller must not collapse this
+    into "daemon doesn't support the fast path": that would turn one
+    transient health-check blip into a permanent fallback for the whole
+    connection's lifetime instead of a bounded, retryable failure."""
+
+
 def _daemon_supports_ready_frame(client: DispatchClient) -> bool:
+    """Raises :class:`HealthCheckFailed` if ``health()`` itself fails, so the
+    caller can route a transient failure through its own reconnect/retry
+    path rather than treating it as "capability not advertised" (which would
+    permanently disable the relay instead of retrying)."""
     try:
         health = client.health()
-    except Exception:
-        return False
+    except Exception as exc:
+        raise HealthCheckFailed(str(exc)) from exc
     return bool(isinstance(health, dict) and health.get("events_ready_frame"))
 
 
@@ -217,11 +230,18 @@ def run_relay(args, out, *, initial_rows: list, interval: float) -> int:
     pipe); raises :class:`RelayUnavailable` instead of returning if the
     daemon never advertised ready-frame support in the first place, so the
     caller can fall back to its own unmodified poll loop for this
-    connection's entire remaining lifetime.
+    connection's entire remaining lifetime. A transient initial ``/health``
+    failure (network hiccup, not a version-skew case) is never collapsed
+    into that same permanent bailout -- it routes through the bounded
+    reconnect path instead, same as any other mid-connection failure.
     """
     client = _build_client(args)
     try:
-        if not _daemon_supports_ready_frame(client):
+        try:
+            supported = _daemon_supports_ready_frame(client)
+        except HealthCheckFailed:
+            return _reconnect_loop(args, out, initial_rows, interval)
+        if not supported:
             raise RelayUnavailable("daemon does not advertise events_ready_frame")
 
         snapshot = _Snapshot(args)
@@ -377,7 +397,12 @@ def _reconnect_loop(args, out, prev: list[dict], interval: float) -> int:
         reader = None
         snapshot = None
         try:
-            if not _daemon_supports_ready_frame(client):
+            try:
+                if not _daemon_supports_ready_frame(client):
+                    continue
+            except HealthCheckFailed:
+                # Still a transient failure -- stay within this same bounded
+                # retry loop rather than propagating out of it.
                 continue
             reader = _Reader(client)
             reader.start()
