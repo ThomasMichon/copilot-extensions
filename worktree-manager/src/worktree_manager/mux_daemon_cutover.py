@@ -355,6 +355,18 @@ def _iter_mux_daemon_pids() -> set[int]:
 
 
 def _terminate_mux_daemon_pid(pid: int, *, root: Path) -> bool:
+    """Terminate ``pid`` after verifying it is a mux-daemon bound to ``root``.
+
+    KNOWN GAP (copilot-extensions#5006): identity here is established by
+    command-line shape + ``--root=`` match, then the kill is issued
+    separately by bare PID -- if the process exits and the OS reuses its
+    PID between those two steps, an unrelated process could be signaled
+    instead. Closing this properly needs a captured process start-time
+    bound through ``zdd.diagnostics.terminate_pid_if_identity``, recorded
+    in the cutover breadcrumb at spawn time -- a cross-cutting ``zdd``
+    schema change tracked separately rather than folded into whichever
+    caller happens to touch this function next.
+    """
     if pid not in _iter_mux_daemon_pids() or not _pid_matches_root(pid, root=root):
         return False
     try:
