@@ -44,6 +44,7 @@ finally:
 
 
 def test_scrubbed_git_env_removes_repository_context_variables(monkeypatch) -> None:
+    monkeypatch.setattr(wrapper, "_discover_configured_clean_filters", lambda: [])
     monkeypatch.setenv("GIT_DIR", "/somewhere/else/.git")
     monkeypatch.setenv("GIT_WORK_TREE", "/somewhere/else")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.foo")
@@ -93,7 +94,73 @@ def test_scrubbed_git_env_removes_repository_context_variables(monkeypatch) -> N
     assert env["GIT_CONFIG_VALUE_0"] == "false"
 
 
-def test_tracked_paths_defaults_to_cached_only_and_filters_excluded_prefixes() -> None:
+def test_scrubbed_git_env_appends_discovered_clean_filter_overrides(monkeypatch) -> None:
+    monkeypatch.setattr(wrapper, "_discover_configured_clean_filters", lambda: ["lfs", "custom"])
+    env = wrapper._scrubbed_git_env()
+    assert env["GIT_CONFIG_COUNT"] == "3"
+    assert env["GIT_CONFIG_KEY_0"] == "core.fsmonitor"
+    assert env["GIT_CONFIG_KEY_1"] == "filter.lfs.clean"
+    assert env["GIT_CONFIG_VALUE_1"] == "cat"
+    assert env["GIT_CONFIG_KEY_2"] == "filter.custom.clean"
+    assert env["GIT_CONFIG_VALUE_2"] == "cat"
+
+
+def test_discover_configured_clean_filters_finds_assigned_filter(tmp_path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / ".gitattributes").write_text("secret.bin filter=redact\n")
+    (repo / "secret.bin").write_text("hello")
+    (repo / "plain.txt").write_text("hi")
+    _run_git(["git", "-C", str(repo), "add", "."], check=True)
+    _run_git(["git", "-C", str(repo), "commit", "-q", "-m", "initial"], check=True)
+    monkeypatch.setattr(wrapper, "REPO", repo)
+    names = wrapper._discover_configured_clean_filters()
+    assert names == ["redact"]
+
+
+def test_discover_configured_clean_filters_empty_on_no_assignments(tmp_path, monkeypatch) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / "plain.txt").write_text("hi")
+    _run_git(["git", "-C", str(repo), "add", "."], check=True)
+    _run_git(["git", "-C", str(repo), "commit", "-q", "-m", "initial"], check=True)
+    monkeypatch.setattr(wrapper, "REPO", repo)
+    assert wrapper._discover_configured_clean_filters() == []
+
+
+def test_clean_filter_neutralized_during_status_probe(tmp_path, monkeypatch) -> None:
+    # Reproduces the live finding: a configured `filter.<name>.clean`
+    # command executes during an ordinary `git status` once a same-size
+    # content edit forces git to actually re-hash rather than trust
+    # stat/size alone. `_scrubbed_git_env()` must neutralize it (override
+    # to `cat`) while `git status` still correctly reports the file as
+    # modified.
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    marker = tmp_path / "filter-ran.marker"
+    script = tmp_path / "fake-clean-filter.sh"
+    script.write_text(f'#!/bin/sh\ntouch "{marker}"\ncat\n')
+    script.chmod(0o755)
+    (repo / ".gitattributes").write_text("watched.txt filter=probe\n")
+    (repo / "watched.txt").write_text("aaaa")
+    _run_git(["git", "-C", str(repo), "add", "."], check=True)
+    _run_git(["git", "-C", str(repo), "commit", "-q", "-m", "initial"], check=True)
+    _run_git(["git", "-C", str(repo), "config", "filter.probe.clean", str(script)], check=True)
+    # Same-size edit -- forces git to re-hash content rather than trust
+    # the cached stat/size comparison.
+    (repo / "watched.txt").write_text("bbbb")
+    monkeypatch.setattr(wrapper, "REPO", repo)
+    env = wrapper._scrubbed_git_env()
+    assert not marker.exists()
+    status = real_subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain"], capture_output=True, text=True, env=env,
+    )
+    assert "watched.txt" in status.stdout
+    assert not marker.exists(), "clean filter ran despite the override -- neutralization failed"
+
+
+def test_tracked_paths_defaults_to_cached_only_and_filters_excluded_prefixes(monkeypatch) -> None:
+    monkeypatch.setattr(wrapper, "_discover_configured_clean_filters", lambda: [])
     fake_result = mock.Mock(
         returncode=0,
         stdout=b"TESTING.md\0.test-venvs/linux/foo\0.devcontainer/devcontainer.json\0tools/x.py\0",
@@ -359,7 +426,8 @@ def test_changed_mode_active_with_abbreviated_base_flag_does_not_misclassify_val
     assert wrapper._changed_mode_active(["--bas=origin/dev"]) is True
 
 
-def test_git_rev_parse_returns_sha_on_success() -> None:
+def test_git_rev_parse_returns_sha_on_success(monkeypatch) -> None:
+    monkeypatch.setattr(wrapper, "_discover_configured_clean_filters", lambda: [])
     fake_result = mock.Mock(returncode=0, stdout="deadbeef\n", stderr="")
     with mock.patch.object(wrapper.subprocess, "run", return_value=fake_result) as run:
         result = wrapper._git_rev_parse("origin/dev")
@@ -705,6 +773,39 @@ def test_materialized_git_dir_raises_when_changed_mode_active_and_base_unresolva
         except SystemExit as exc:
             assert "origin/main" in str(exc)
             assert "does not resolve" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+
+
+def test_materialized_git_dir_raises_when_base_resolves_but_shares_no_merge_base(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    # A base that RESOLVES (to some commit) can still have no common
+    # ancestor with HEAD (an orphan/unrelated-history branch) -- the
+    # downstream three-dot diff would fail with "no merge base," which
+    # `run-plugin-tests.py` ignores the same way it ignores an
+    # unresolvable ref, silently reporting zero changed plugins. This
+    # must fail loudly instead.
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    (repo / "tracked.txt").write_text("v1\n")
+    _run_git(["git", "-C", str(repo), "add", "."], check=True)
+    _run_git(["git", "-C", str(repo), "commit", "-q", "-m", "main commit"], check=True)
+
+    _run_git(["git", "-C", str(repo), "checkout", "-q", "--orphan", "unrelated"], check=True)
+    _run_git(["git", "-C", str(repo), "rm", "-rq", "--cached", "."], check=True)
+    (repo / "other.txt").write_text("unrelated history\n")
+    _run_git(["git", "-C", str(repo), "add", "."], check=True)
+    _run_git(["git", "-C", str(repo), "commit", "-q", "-m", "unrelated root"], check=True)
+    _run_git(["git", "-C", str(repo), "branch", "origin/main", "unrelated"], check=True)
+    _run_git(["git", "-C", str(repo), "checkout", "-q", "main"], check=True)
+
+    monkeypatch.setattr(wrapper, "REPO", repo)
+    with contextlib.ExitStack() as stack:
+        try:
+            wrapper._materialized_git_dir(stack, [])
+        except SystemExit as exc:
+            assert "no merge base" in str(exc)
         else:
             raise AssertionError("expected SystemExit")
 
@@ -1706,7 +1807,7 @@ def test_main_cleans_up_orphan_when_create_bounded_volume_itself_fails(monkeypat
 
 
 def _load_devcontainer_config() -> dict:
-    # `.devcontainer/devcontainer.json` is JSONC (it carries extensive
+    # `.devcontainer/test-isolation/devcontainer.json` is JSONC (it carries extensive
     # `//` explanatory comments) -- strip full-line and trailing `//`
     # comments before parsing, mirroring the same crude-but-sufficient
     # approach used to hand-validate this file during development.

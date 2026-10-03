@@ -273,7 +273,7 @@ verbatim ask.
       read-write bind of the host checkout (confirmed live to let an
       adversarial test mutate the real host checkout, which is a regression
       versus the existing `run-plugin-tests.py` containment, not an
-      improvement). `.devcontainer/devcontainer.json`'s `workspaceMount`
+      improvement). `.devcontainer/test-isolation/devcontainer.json`'s `workspaceMount`
       overrides the default bind entirely with a container-local, size-
       bounded Docker VOLUME -- the host checkout is never mounted into the
       container at all, in any form. `tools/run_tests_in_devcontainer.py`
@@ -406,7 +406,7 @@ verbatim ask.
 
 ## Proposal
 
-Phase 1 delivered `.devcontainer/devcontainer.json` (the hardened,
+Phase 1 delivered `.devcontainer/test-isolation/devcontainer.json` (the hardened,
 workspace-volume-backed spec) and `tools/run_tests_in_devcontainer.py` (the
 opt-in wrapper that brings it up, populates it, and runs
 `tools/run-plugin-tests.py` inside it), both live-validated end-to-end
@@ -1604,3 +1604,66 @@ a dedicated `devcontainer read-configuration --workspace-folder .` (no
 auto-discovered anymore. Docker cleanup and host `git status --short`
 reconfirmed clean of anything beyond this round's own diff (a clean git
 rename, not a copy-and-delete).
+
+### 2026-10-03 — Review round 15 (eighteenth pass): 4 findings addressed (neutralize clean filters, validate merge-base, fix stale path references)
+An eighteenth review pass surfaced four more findings. HIGH: disabling
+`core.fsmonitor` only closed ONE host-code-execution path during a
+read-only probe -- a `.gitattributes`-assigned `filter.<name>.clean`
+command still runs during `git status`'s content comparison for any path
+needing re-hashing, confirmed live in a throwaway repo: a toy clean-filter
+script DID execute and leave a marker once a same-size content edit
+forced git to actually re-hash rather than trust cached stat/size. Fixed
+with a new `_discover_configured_clean_filters()` helper (`git check-attr
+filter --cached --stdin -z` fed `git ls-files -z`, parsing the NUL-
+separated triples for every distinct assigned filter name) whose output
+now feeds `_scrubbed_git_env()`'s existing `GIT_CONFIG_COUNT`/`KEY_N`/
+`VALUE_N` override mechanism, forcing every discovered `filter.<name>.
+clean` to `cat` (a safe passthrough) alongside the existing
+`core.fsmonitor=false` override. While building this, live reproduction
+surfaced a SECOND, more subtle gap: the discovery step's own `ls-files`/
+`check-attr` calls (via a new minimal-env helper,
+`_minimal_repo_selection_env`) could themselves still trigger a
+configured `core.fsmonitor` hook once `GIT_OPTIONAL_LOCKS=0` prevented a
+cached index refresh -- confirmed live via a dedicated repro script
+(marker created during the discovery step itself, before the final
+probe even ran). Fixed by forcing the same `core.fsmonitor=false`
+override into `_minimal_repo_selection_env()` too, not just the final
+`_scrubbed_git_env()` result -- confirmed via the same repro script that
+the marker is no longer created at any stage.
+
+MEDIUM: `_git_rev_parse` only confirmed a base ref resolved to SOME
+commit, not that it shares any history with HEAD -- an orphan/unrelated-
+history commit can resolve fine but make the downstream three-dot diff
+fail with "no merge base," which `run-plugin-tests.py` silently treats
+as zero changed plugins (the same silent-false-negative class the
+unresolvable-base fix already closed). Fixed by adding a `git merge-base
+<base> HEAD` check alongside the existing resolvability check in
+`_materialized_git_dir`'s changed-mode guard, failing loudly with the
+same "refuse to build a misleading snapshot" framing when it doesn't
+succeed.
+
+LOW (x2): fixed two stale `.devcontainer/devcontainer.json` references
+left over from the canonical-path move two passes ago -- this effort
+README's own Proposal section and workspace-storage-model Plan item (both
+describing CURRENT state, not historical narration), and a comment in
+`test_run_tests_in_devcontainer.py` naming the wrong JSONC config file
+for `_load_devcontainer_config()`.
+
+Re-validated end-to-end: the full unit test suite (93 tests, including 6
+new regression tests -- clean-filter discovery with and without an
+assigned filter, a real-git clean-filter-neutralization-during-status
+regression mirroring the manual repro, an updated `GIT_CONFIG_COUNT`
+assertion for discovered-filter overrides, and a real-git orphan-history
+merge-base-failure regression) passes; two pre-existing tests that
+broadly mocked `wrapper.subprocess.run` needed updating to also stub
+`_discover_configured_clean_filters` (their mock otherwise leaked into
+the new internal discovery calls `_scrubbed_git_env()` now makes,
+corrupting the mocked return value's interpretation). `check-module-
+size.py --changed-since origin/dev` passes right at the cap (1000 lines,
+after another docstring-condensing pass); a fresh Docker-backed
+end-to-end run (`ai-attribution`, 98 passed / 6 skipped) confirms the
+common case still works; `check-docs-consistency.py` and
+`check-effort-vision-structure.py` both pass. Docker cleanup and host
+`git status --short` reconfirmed clean of anything beyond this round's
+own diff.
+
