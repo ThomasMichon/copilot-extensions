@@ -1,0 +1,9 @@
+{
+  "comment": "claim_history: feed worktree run's own PR-claim save sites into the ownership ledger",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -10,7 +10,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import activity, finalize as fin, git_ops, obligations, output, sessions, tracking
+from . import (
+    activity, claim_history, finalize as fin, git_ops, obligations, output,
+    sessions, tracking,
+)
 from . import claims_cli
 from . import config as cfg
 from . import managed_worktree_guard as remove_guard
@@ -516,6 +519,15 @@ def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | 
         record = tracking.load_record(rec_path)
         tracking.add_resource_claim(record, claim, save=False)
         tracking.save_record(record, rec_path)
+    if claim.kind == "pr":
+        # worktree-claims-transitive-finalization Phase 3b: feed this
+        # mutation into the same append-only ownership ledger `pr_ops.py`
+        # and the daemon claim verbs already feed, after the save above
+        # is durably confirmed (never before).
+        claim_history.record_pr_event(
+            claim.ref, worktree_id=record.worktree_id, machine=record.machine,
+            event="claimed",
+        )
     return claim
 
 
@@ -610,6 +622,18 @@ def cmd_run(args: argparse.Namespace) -> int:
                 ]
                 tracking.add_resource_claim(owner_record, claim, save=False)
                 tracking.save_record(owner_record, owner_path)
+            if claim.kind == "pr":
+                # worktree-claims-transitive-finalization Phase 3b: this is
+                # the actual live save site for `run`'s produced PR claim
+                # (the pending-ref placeholder above is replaced with the
+                # real claim here) -- feed it into the same append-only
+                # ownership ledger `pr_ops.py` and the daemon claim verbs
+                # already feed, only after the save above is durably
+                # confirmed.
+                claim_history.record_pr_event(
+                    claim.ref, worktree_id=owner_record.worktree_id,
+                    machine=owner_record.machine, event="claimed",
+                )
             return True
         except Exception as exc:
             output.err(f"run: could not settle pending ownership: {exc}")

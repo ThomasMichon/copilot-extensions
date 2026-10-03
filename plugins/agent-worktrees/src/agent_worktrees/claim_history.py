@@ -14,12 +14,21 @@ release paths. Every call site records history only AFTER its own save is
 durably confirmed -- never before, or a save failure could leave a false
 event for a mutation that never actually persisted.
 
+``worktree run``'s own PR-claim persistence path (``worktree_ops_cli.py``)
+is also wired (worktree-claims-transitive-finalization Phase 3b,
+2026-10-03): tracing its save semantics found **two** distinct append+save
+sites for a produced ``pr``-kind claim -- ``cmd_run``'s own
+``_finish_pending`` closure (the actual live site: it replaces the
+pending-``workdir`` placeholder with the real claim once the inner command
+returns) and ``_journal_run_claim`` (a separately-tested pure helper not
+currently called from ``cmd_run``'s own live flow, but sharing the exact
+same append+save shape, so left wired for parity rather than silently
+missing the ledger if it's ever reconnected or reused). Both record an
+``event="claimed"`` entry only after their own save is durably confirmed.
+
 **Explicitly NOT yet covered by this slice** (tracked as a remaining
 follow-up, not silently dropped):
 
-- ``worktree run``'s own PR-claim persistence path (``worktree_ops_cli.py``)
-  -- a distinct, less-central mutation surface deferred for a follow-up
-  pass rather than wired in without fully tracing its own save semantics.
 - Claim-handoff bundle transitions (``claim_handoffs.py``'s offer/accept/
   decline/cancel) -- an explicit, deliberate hand-off between worktrees is
   real reassignment history this ledger should eventually include, but

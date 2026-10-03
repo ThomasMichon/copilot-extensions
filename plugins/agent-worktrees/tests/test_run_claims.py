@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 from agent_worktrees import __main__ as m
-from agent_worktrees import tracking
+from agent_worktrees import claim_history, tracking
 
 
 class TestClaimFromRunOutput:
@@ -131,6 +131,31 @@ class TestJournalRunClaim:
         reloaded = tracking.load_record(tmp_path / "wt-A.yaml")
         assert [(c.kind, c.ref) for c in reloaded.resources] == \
             [("pr", "https://github.com/o/r/pull/42")]
+
+    def test_journals_pr_claim_feeds_claim_history(self, tmp_path: Path, monkeypatch):
+        """worktree-claims-transitive-finalization Phase 3b: this save site
+        shares the same append+save shape as `cmd_run`'s own live
+        `_finish_pending` path -- feed the same ledger after its own save
+        is confirmed, never before."""
+        self._make_caller(tmp_path, monkeypatch)
+        owner_ref = "anomalous-potato/test-chamber/wt-A#s1"
+        out = json.dumps({"success": True, "pr_opened": True,
+                          "pr": {"ref": "https://github.com/o/r/pull/42"}})
+        m._journal_run_claim(owner_ref, out)
+        events = claim_history.history_for_ref("https://github.com/o/r/pull/42")
+        assert [e["event"] for e in events] == ["claimed"]
+        assert events[0]["worktree_id"] == "wt-A"
+        assert events[0]["machine"] == "anomalous-potato"
+
+    def test_journals_worktree_claim_does_not_feed_claim_history(
+            self, tmp_path: Path, monkeypatch):
+        self._make_caller(tmp_path, monkeypatch)
+        owner_ref = "anomalous-potato/test-chamber/wt-A#s1"
+        out = json.dumps({"worktree": {"id": "wt-B", "machine": "anomalous-potato",
+                                       "repo": "copilot-extensions"}})
+        m._journal_run_claim(owner_ref, out)
+        assert claim_history.history_for_ref(
+            "anomalous-potato/copilot-extensions/wt-B") == []
 
     def test_missing_caller_record_is_noop(self, tmp_path: Path, monkeypatch):
         monkeypatch.setattr("agent_worktrees.config.tracking_dir",
