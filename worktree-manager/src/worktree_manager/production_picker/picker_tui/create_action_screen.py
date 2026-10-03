@@ -3,9 +3,9 @@
 Collects a registered pivot's ``create_action.fields`` (text/textarea/choice/
 multichoice, with ``show_when`` conditional visibility -- the exact
 ``pivot_create_action.CreateAction`` schema) and dismisses with the
-submitted values, or ``None`` on Cancel/Escape. Mirrors ``SeedPromptScreen``'s
-shape (a lean, purpose-built modal, not a reuse of ``PivotFormScreen`` --
-there is no card, no draft, no Save/Reset, just Confirm/Cancel) while reusing
+submitted values, or ``None`` on Cancel/Escape. A lean, purpose-built modal
+(a card, no draft, no Save/Reset, just Confirm/Cancel) -- not a reuse of
+``PivotFormScreen`` -- while reusing
 :class:`~.field_questions.FieldQuestionsMixin` for the multi-field tab/
 conditional/advance/collect mechanics ``PivotFormScreen`` already relies on.
 

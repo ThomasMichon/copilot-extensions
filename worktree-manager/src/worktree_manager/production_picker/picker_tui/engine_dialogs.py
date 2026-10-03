@@ -25,6 +25,7 @@ from .engine_helpers import (
     C_WARN,
     MAINT_ACTION_DESC,
 )
+from .field_widgets import compose_field
 
 class QuitConfirmScreen(ModalScreen[bool]):
     """Native modal confirm for Esc/q on a top-level picker view (#88 F4;
@@ -676,8 +677,20 @@ class ScopeDlgScreen(ModalScreen[bool]):
     **Native-focus internals (#88 NF1):** the toggles are a native Textual
     ``SelectionList`` (one tab-stop; arrow to move, Space to toggle) and
     the button row is a :class:`FocusGroup` (one tab-stop; ◀▶ to choose,
-    Enter to activate). Tab moves between the two. Esc/q cancel via
-    ``BINDINGS``.
+    Enter to activate). Tab moves between the two (three, with
+    ``show_prompt`` -- see below). Esc/q cancel via ``BINDINGS``.
+
+    ``show_prompt`` (picker-new-session-prompt-and-composer Phase A, folded
+    into this one dialog rather than a second screen the operator must step
+    through): when set, an optional free-text prompt field is composed
+    ABOVE the options list -- the dialog's full content stack is then
+    *header -> prompt -> options -> buttons*, with exactly three focus
+    stops (prompt box, options list, buttons), Tab cycling between them and
+    wrapping. The caller reads the collected text off ``self.seed_prompt``
+    (set the instant Confirm is pressed) after ``push_screen`` dismisses
+    ``True`` -- never meaningful otherwise. The New-worktree dialog
+    (``_open_optmenu``) is this flag's only caller; Clean/Sync never sets
+    it, so its dialog is pixel-for-pixel unchanged.
     """
 
     CSS = """
@@ -719,6 +732,9 @@ class ScopeDlgScreen(ModalScreen[bool]):
         background: green; color: white; text-style: bold;
     }
     ScopeDlgScreen #scope-prompt { height: auto; padding: 0 0 1 0; }
+    ScopeDlgScreen #scope-seed-hint { color: grey; height: auto; padding: 0 0 1 0; }
+    ScopeDlgScreen TextArea { border: round grey; background: $surface; }
+    ScopeDlgScreen #scope-opts-label { height: auto; color: grey; padding: 1 0 0 0; }
     ScopeDlgScreen #scope-impact { height: auto; padding: 1 0 0 0; }
     ScopeDlgScreen #scope-buttons { width: 1fr; height: auto; padding: 1 0 0 0; }
     """
@@ -727,10 +743,17 @@ class ScopeDlgScreen(ModalScreen[bool]):
         Binding("q", "cancel", show=False),
     ]
 
-    def __init__(self, dlg, impact_fn=None) -> None:
+    def __init__(self, dlg, impact_fn=None, *, show_prompt: bool = False) -> None:
         super().__init__()
         self._dlg = dlg
         self._impact_fn = impact_fn      # (ids:set) -> list[(id4, machine_env, title)]
+        self._show_prompt = show_prompt
+        self.seed_prompt = ""            # set on Confirm when show_prompt is True
+        if show_prompt:
+            self._prompt_widgets, self._prompt_rec = compose_field(
+                {"name": "prompt", "type": "textarea"}, 0)
+        else:
+            self._prompt_widgets, self._prompt_rec = (), None
 
     def _union(self) -> set:
         s: set = set()
@@ -751,6 +774,14 @@ class ScopeDlgScreen(ModalScreen[bool]):
         with Vertical(id="scope-frame"):
             yield Static(Text(dlg.get("prompt", "Select:"), style=C_HEADER),
                          id="scope-prompt")
+            if self._show_prompt:
+                yield Static(
+                    "Prompt (optional, gets queued as this session's first "
+                    "interactive turn once Copilot is ready):",
+                    id="scope-seed-hint",
+                )
+                yield from self._prompt_widgets
+                yield Static("Additional options:", id="scope-opts-label")
             yield _ScopeSelectionList(
                 *[(self._opt_prompt(o), i, o["on"]) for i, o in enumerate(opts)],
                 id="scope-opts")
@@ -809,8 +840,25 @@ class ScopeDlgScreen(ModalScreen[bool]):
             self, event: SelectionList.SelectedChanged) -> None:
         self._sync_from_selection()
 
+    def _advance_focus(self, widget) -> None:
+        """Enter from the (optional) prompt textarea (``_AutoExpandTextArea``'s
+        own accept-and-advance mechanic) advances to the options list -- the
+        next stop in the documented content stack (prompt -> list ->
+        buttons). Only reachable when ``show_prompt`` composed the textarea
+        in the first place."""
+        try:
+            self.query_one("#scope-opts", SelectionList).focus()
+        except Exception:
+            pass
+
+    def _collect_prompt(self) -> str:
+        return str(self._prompt_rec["primary"].text).strip() if self._prompt_rec else ""
+
     def on_focus_group_activated(self, event: FocusGroup.Activated) -> None:
-        self.dismiss(event.value == "confirm")
+        confirmed = event.value == "confirm"
+        if confirmed and self._show_prompt:
+            self.seed_prompt = self._collect_prompt()
+        self.dismiss(confirmed)
 
     def action_cancel(self) -> None:
         self.dismiss(False)

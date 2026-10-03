@@ -288,6 +288,44 @@ real code, not assumption:
       `ScopeDlgScreen`/steer behavior is completely unchanged when no
       prompt is ever entered (the 5 updated + 2 existing New-worktree
       confirm tests).
+- [x] **UX follow-up (operator request, 2026-10-03): fold the separate
+      `SeedPromptScreen` step into `ScopeDlgScreen` itself** -- one dialog,
+      not two the operator steps through in sequence. Content stack:
+      header -> optional Prompt field -> "Additional options:" -> the
+      existing Anchor/Bare/No Mux/AHP `SelectionList` -> Create/Cancel,
+      with exactly three focus stops (prompt box, options list, buttons)
+      and Create as the still-default stop. **Done:** `ScopeDlgScreen`
+      gained a `show_prompt` constructor flag (Clean/Sync never sets it, so
+      its dialog is pixel-for-pixel unchanged) that composes the same
+      `field_widgets.compose_field` textarea `SeedPromptScreen` used,
+      directly above the options list; `self.seed_prompt` is set the
+      instant Confirm is pressed (read by the caller via a kept screen
+      reference, never via the dismiss value, which stays a plain `bool`
+      for every other caller). `_open_optmenu()` composes ONE
+      `ScopeDlgScreen(dlg, show_prompt=...)` instead of chaining a second
+      screen; the compatibility gating (Bare/No Mux/Anchor repo/remote
+      silently drop whatever was typed, since none of those targets can
+      ever deliver it) now runs once, at Confirm time, reading the live
+      checkbox state instead of being resolved before a second screen even
+      opened. `SeedPromptScreen` itself (now dead code -- its only caller
+      was `_open_optmenu()`) and its dedicated test file were deleted
+      rather than left stale. Render- and live-TTY-verified (tmux,
+      `--demo`): the merged dialog's content stack renders exactly as
+      specified, Tab cycles prompt -> list -> buttons (wrapping back to
+      prompt from buttons) and Enter in the prompt box advances straight to
+      the list, a typed prompt lands in the textarea correctly, and
+      Escape cancels cleanly with no side effects. 9 New-worktree dialog
+      tests rewritten for the one-screen flow (2 renamed
+      `..._skips_seed_prompt` -> `..._drops_seed_prompt` to describe the
+      new silent-drop-not-skip semantics) plus 1 new dedicated focus-stops
+      test; a dialog-focus assumption in the pre-existing
+      `test_scope_dialog_highlight_is_focus_gated` (Clean/Sync-adjacent but
+      exercising the New-worktree dialog) also needed its Tab count fixed.
+      Full suite: 1551 passed, 3 skipped, 3 failed -- all 3 confirmed
+      pre-existing (same `test_mux_daemon.py`/`test_update.py`/
+      `test_trusted_materializer_parity.py` class flagged in this effort's
+      own prior Journal entries), none touching any file this change
+      modified.
 
 ### Phase B — Generic registered-pivot "create" action (unblocks Tasks Phase 10)
 - [x] Add a new `PivotAction`-adjacent concept to `pivot_manifest.py` for a
@@ -1801,3 +1839,84 @@ available. Everything the GENERIC mechanism needs has now been proven at
 every tier this project recognizes (unit, Pilot/headless, rendered
 screenshot, and live interactive TTY) except that final live-coordinator
 tier.
+
+### 2026-10-03 — UX follow-up: fold SeedPromptScreen into ScopeDlgScreen (one dialog, not two)
+Resumed in a fresh worktree (the prior two PRs had merged and finalized).
+Operator asked for the New-worktree flow's prompt field to live in the SAME
+dialog as the Anchor/Bare/No Mux/AHP options, with a specific content stack
+(header -> Prompt -> "Additional options:" -> checkboxes -> Create/Cancel)
+and exactly three focus stops (prompt box, list, buttons), Create still the
+default. This was a genuine design ask, not a bug -- Phase A's original
+design (item 2's own Plan text) deliberately built `SeedPromptScreen` as a
+SEPARATE screen specifically because `ScopeDlgScreen` didn't support a
+prompt field at all; the operator is now asking for exactly the opposite
+shape.
+
+**Design:** rather than fork a new dialog class, gave `ScopeDlgScreen`
+itself an optional `show_prompt` constructor flag. Clean/Sync (the OTHER
+caller of this same class) never sets it, so its dialog's compose/CSS/
+focus-default path is untouched -- confirmed by `test_scope_dialog_uses_
+native_selectionlist_and_focusgroup` (Clean modal) passing unmodified.
+When set, `compose()` yields the exact same `field_widgets.compose_field`
+textarea `SeedPromptScreen` used, directly above the options
+`SelectionList`, with a header `Static` labeling it and a second one
+labeling the list ("Additional options:"). `self.seed_prompt` is a plain
+instance attribute set the instant Confirm is pressed (`on_focus_group_
+activated`, before `dismiss`) -- NOT threaded through the dismiss value
+(which stays a plain `bool` for every other existing caller); `_open_
+optmenu()` keeps its own reference to the pushed screen instance and reads
+`scr.seed_prompt` from its `_after` closure once `confirmed` comes back
+`True`. Added `_advance_focus` (the same name/contract
+`CreateActionScreen`/`PivotFormScreen`/the old `SeedPromptScreen` all use)
+so Enter in the prompt box advances straight to the options list, matching
+every other field's accept-and-advance convention in this project rather
+than introducing a new one.
+
+The compatibility gating that used to decide WHETHER to even open a second
+screen (Bare/No Mux/Anchor repo/remote can never deliver a seed) now runs
+once, in `_open_optmenu`'s `_after` callback, reading the dialog's live
+checkbox state at Confirm time -- functionally identical outcome (those
+four cases still silently drop whatever was typed) but resolved a beat
+later than before, since there is no longer an intermediate screen boundary
+to gate at all. A remote target is the one case resolved BEFORE the dialog
+opens (remote-ness can't change via a checkbox), so its prompt field is
+never even composed (`show_prompt=False` from the start) rather than
+composed-then-ignored.
+
+`SeedPromptScreen` itself became genuinely dead code (its only caller was
+`_open_optmenu`) -- deleted the module, its dedicated test file
+(`test_seed_prompt_screen.py`), and its re-export from `engine.py`/
+`__all__`, rather than leave an orphaned class around. Updated
+`create_action_screen.py`'s one stale docstring comparison to it.
+
+**Tests:** rewrote the 9 New-worktree dialog tests in `test_picker_tui.py`
+for the one-screen flow -- no more chained `await pilot.press("enter")`
+hops into a second screen; two tests renamed
+(`..._skips_seed_prompt` -> `..._drops_seed_prompt`) since the new
+semantics is "silently drop at confirm time," not "skip opening a screen."
+Added a new dedicated `test_new_worktree_dialog_focus_stops_prompt_list_
+buttons` asserting the full three-stop Tab cycle (buttons -> wraps to
+prompt -> list -> buttons) AND the Enter-from-prompt-advances-to-list
+behavior explicitly, since none of the rewritten tests individually prove
+the wrap-around by itself. One pre-existing, unrelated-looking test
+(`test_scope_dialog_highlight_is_focus_gated`) turned out to exercise the
+New-worktree dialog too and had its own single-Tab assumption broken by the
+new prompt-box stop -- fixed its Tab count with a comment explaining why.
+
+**Render + live-TTY verification** (this effort's own established bar):
+captured the merged dialog via `picker_capture.capture_modal_async`
+(SVG -> PNG) -- confirms the exact requested content stack renders
+correctly, Create focused by default. Then drove it live: `tmux
+new-session -d` running the real `worktree-manager picker --demo`,
+`send-keys`/`capture-pane` to open "New worktree…", Tab into the prompt
+box, type real text via `send-keys -l`, confirm it landed in the textarea
+via `capture-pane`, press Enter to confirm it advances to the options list
+(verified indirectly: Down+Space did NOT activate Create, proving focus
+was on the list, not the button group), Escape to cancel cleanly. No
+subprocess ever spawned.
+
+**Validation:** full `worktree-manager` suite: 1551 passed, 3 skipped, 3
+failed -- all 3 reconfirmed pre-existing this session too (same
+`test_mux_daemon.py` x1 / `test_update.py` x1 /
+`test_trusted_materializer_parity.py` x1 class this effort's Journal has
+already flagged twice; none touch any file this change modified).
