@@ -178,6 +178,34 @@ _Pending._
 
 ## Journal
 
+### 2026-10-03 — Phase 2 refinement: claimant-CWD contract + guidance-rich refusals
+- Operator feedback after Phase 2 landed: docs/skills needed to state the
+  intended usage explicitly (owning project = CWD, target repo = argument),
+  and it should be **invalid** to call these tools from a CWD that can't
+  trace back to a valid claimant worktree. Also: every failure path must
+  guide the agent back to the correct pattern, never leave it to conclude
+  "this tool doesn't work, fall back to gh/az/git directly."
+- Added `pr_cli.require_claimant_worktree()`: pr-watch/pr-merge now refuse
+  up front when CWD isn't a tracked worktree (untracked dir, bare anchor,
+  or the *target*'s own checkout instead of the caller's). Rewrote both
+  this and the existing foreign-repo-resolution refusal (from the first
+  Phase 2 landing) to spell out the correct invocation and explicitly warn
+  against the gh/az/git fallback.
+- Documented the contract: `pr-workflow.md` (new *Addressing a foreign
+  repo* section), `working-cross-repo/SKILL.md` (distinguishes "create a
+  worktree of the target" from "just check/merge via slug, stay in your
+  own worktree"), `venue-and-claims.md` (no claim-journal needed for an
+  existing foreign PR, just a valid claimant CWD).
+- Added a conftest.py autouse fixture: the new CWD resolution was
+  previously unmocked across the whole `test_pr_*` suite and read the
+  REAL enclosing git worktree of wherever tests happened to run (not
+  isolated by the existing HOME-isolation fixture) -- now defaults to a
+  fixed test worktree id. New `test_pr_claimant_guard.py` for the guard
+  itself.
+- 598-test `test_pr_*`/`test_providers.py` run passes (minus the
+  independently slow, pre-existing `test_pr_ops.py`). Landed via PR
+  [#5096](https://github.com/ThomasMichon/copilot-extensions/pull/5096).
+
 ### 2026-10-03 — Phase 2 landed
 - Added `pr_config.resolve_repo_config_for_slug()` +
   `ForeignRepoResolution`: resolves the `RepoConfig` that owns an explicit
