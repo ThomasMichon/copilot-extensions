@@ -130,17 +130,30 @@ class SessionForwards:
         """``holds`` without CodeSpaces the availability gate shows stopped.
 
         The Owner reconciles only these, so a stopped box's forwards are torn
-        down instead of rebuilt (a rebuild would boot it back up). ``relays``
-        (the Owner: ``active_codespaces()``) says which relays are live; a held
-        CodeSpace missing a relay or bridge forward forces a fresh listing."""
+        down instead of rebuilt (a rebuild would boot it back up). ``relays`` (the Owner:
+        ``active_codespaces()``) says which relays are live; a held CodeSpace
+        missing any forward it asks for (relay, bridge, reverse or local)
+        forces a fresh listing before anything is rebuilt."""
         if self._availability is None:
             return holds
         live = relays.active_codespaces() if relays is not None else set(holds)
         bridges = self.active()
-        lost = any(
-            cs not in live or (hold.daemon_port and cs not in bridges)
-            for cs, hold in holds.items()
-        )
+        reverse = self.active_reverse_forwards()
+        local = self.active_local_forwards() if self._local_factory is not None else {}
+
+        def missing(cs: str, hold: OwnerHold) -> bool:
+            if cs not in live or (hold.daemon_port and cs not in bridges):
+                return True
+            wanted_reverse = {int(v) for v in (hold.reverse_forwards or {})}
+            if not wanted_reverse <= set(reverse.get(cs, {})):
+                return True
+            if self._local_factory is None:
+                return False
+            # By venue port: a dynamic local forward's host port is assigned.
+            wanted_local = {int(v) for v in (getattr(hold, "local_forwards", None) or {}).values()}
+            return not wanted_local <= set(local.get(cs, {}).values())
+
+        lost = any(missing(cs, hold) for cs, hold in holds.items())
         stopped = await self._availability.stopped(holds, refresh=lost)
         return {cs: hold for cs, hold in holds.items() if cs not in stopped}
 

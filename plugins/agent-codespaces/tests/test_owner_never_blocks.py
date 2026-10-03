@@ -159,6 +159,25 @@ async def test_owner_tears_down_and_never_rebuilds_a_stopped_codespace(store):
     assert relays["down"] is not first
 
 
+async def test_any_lost_forward_relists_before_a_rebuild(store):
+    """A reverse forward is its own ssh process: when only it dies (the box just
+    stopped), the cached ``Available`` must not license its rebuild."""
+    owner.hold("cs", "cli:a@cs", daemon_port=41005, mux_session="wt-x",
+               reverse_forwards={9222: 7188})
+    listing, daemons = Listing(cs="Available"), {}
+    o = _owner(listing, {}, daemons)
+    await o.reconcile()
+    extra = daemons[("cs", 9222)]
+    assert extra.is_alive
+    calls = listing.calls
+    listing.states["cs"] = "Shutdown"
+    extra._alive = False  # only the reverse forward has noticed so far
+    await o.reconcile()
+    assert listing.calls == calls + 1  # re-listed, so the stop was seen
+    assert daemons[("cs", 9222)] is extra  # never rebuilt
+    assert o.active_codespaces() == set()
+
+
 async def test_a_healthy_owner_reuses_its_listing(store):
     owner.hold("up", "cli:a@up", daemon_port=41004, mux_session="wt-x")
     listing = Listing(up="Available")
