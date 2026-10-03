@@ -23,6 +23,20 @@ from worktree_manager.production_picker.picker_tui import (
 )
 
 
+def _abs_exe(name: str) -> str:
+    """A platform-correct absolute executable path for test fixtures.
+
+    ``provider_sources``'s own validation requires ``os.path.isabs(command)
+    or re.match(r"^[A-Za-z]:[\\/]", command)``. ``os.path.isabs`` is False
+    on Windows for a drive-less rooted path like ``"/bin/<name>"``, so a
+    fixture needs a path that is genuinely absolute on the current
+    platform. ``os.path.abspath`` resolves against the current drive on
+    Windows (producing a real ``X:\\...`` absolute path) and is a no-op
+    prefix-join on POSIX, so this is absolute on either.
+    """
+    return os.path.abspath(os.path.join(os.sep, "bin", name))
+
+
 def _install_roster(monkeypatch, entries, *, machine, local_id):
     """Point ``_build_sources`` at a fabricated roster + local identity."""
     fake_config = types.SimpleNamespace(
@@ -71,8 +85,8 @@ def _provider_descriptor(**overrides):
         "label": "Restricted target",
         "alias": "restricted-target",
         "shell": "bash",
-        "resolve": ["/bin/provider", "resolve", "one"],
-        "connect": ["/bin/provider", "connect", "one"],
+        "resolve": [_abs_exe("provider"), "resolve", "one"],
+        "connect": [_abs_exe("provider"), "connect", "one"],
         "venue": {
             "provider": "agent-containers",
             "target_id": "container:one",
@@ -222,8 +236,8 @@ def test_provider_registry_filters_project_and_isolates_invalid_files(tmp_path, 
                     "label": "Restricted target",
                     "alias": "restricted-target",
                     "shell": "bash",
-                    "resolve": ["/bin/agent-containers", "namespace-resolve", "one"],
-                    "connect": ["/bin/agent-containers", "ssh-stdio", "one"],
+                    "resolve": [_abs_exe("agent-containers"), "namespace-resolve", "one"],
+                    "connect": [_abs_exe("agent-containers"), "ssh-stdio", "one"],
                     "venue": {
                         "provider": "agent-containers",
                         "target_id": "container:one",
@@ -243,8 +257,8 @@ def test_provider_registry_filters_project_and_isolates_invalid_files(tmp_path, 
                     "label": "Other target",
                     "alias": "other-target",
                     "shell": "bash",
-                    "resolve": ["/bin/agent-containers", "namespace-resolve", "two"],
-                    "connect": ["/bin/agent-containers", "ssh-stdio", "two"],
+                    "resolve": [_abs_exe("agent-containers"), "namespace-resolve", "two"],
+                    "connect": [_abs_exe("agent-containers"), "ssh-stdio", "two"],
                     "venue": {
                         "provider": "agent-containers",
                         "target_id": "container:two",

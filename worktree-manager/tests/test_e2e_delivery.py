@@ -47,6 +47,7 @@ def _write_payload(root: Path, version: str) -> None:
     pkg = root / "worktree-manager" / "src" / "worktree_manager"
     pkg.mkdir(parents=True, exist_ok=True)
     (pkg / "__init__.py").write_text(f'__version__ = "{version}"\n', "utf-8")
+    (pkg / "__main__.py").write_text("", "utf-8")
     (root / "worktree-manager" / "pyproject.toml").write_text(
         f"[project]\nname='copilot-extensions-worktree-manager'\nversion='{version}'\n",
         "utf-8",

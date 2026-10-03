@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, budget posture, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.17.0-dev1"
+    "version": "1.18.0-dev1"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.17.0-dev1",
+      "version": "1.18.0-dev1",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -25,20 +25,20 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.9.1-dev1",
+      "version": "0.9.2-dev1",
       "source": "plugins/agent-bridge"
     },
     {
       "name": "agent-remote-driver",
       "description": "User-global SDK extension giving baseline drivability (attach to the live event stream, send/steer, abort) to any copilot CLI session present at launch time - independent of agent-bridge, agent-worktrees, or any other coordination plugin being installed in that venue",
-      "version": "0.1.1-dev1",
+      "version": "0.1.1-dev2",
       "source": "plugins/agent-remote-driver",
       "defaultEnabled": false
     },
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.5.21-dev1",
+      "version": "0.5.22-dev1",
       "source": "plugins/agent-codespaces"
     },
     {
@@ -92,7 +92,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.8.0-dev1",
+      "version": "0.8.0-dev2",
       "source": "plugins/agent-dispatch"
     },
     {

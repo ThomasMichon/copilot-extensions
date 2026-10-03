@@ -11,12 +11,13 @@ alone -- each of those omits exactly the state this skill exists to surface.
 
 ## Quick checks
 
-> **Before you start — use the payload-local session command.**
-> The agent-dispatch session command catalog supplies an exact `argv[0]`
-> owned by this plugin payload. Replace `<agent-dispatch catalog argv[0]>`
-> below with that path; never search `PATH` or substitute a same-named
-> command from another payload. In PowerShell, invoke it as
-> `& "<agent-dispatch catalog argv[0]>" <args>`.
+> **Before you start — use the payload-local session commands.**
+> The agent-dispatch, agent-bridge, and agent-mcp session command catalogs
+> each supply an exact `argv[0]` owned by that plugin's own payload. Replace
+> `<agent-dispatch catalog argv[0]>` / `<agent-bridge catalog argv[0]>` /
+> `<agent-mcp catalog argv[0]>` below with those paths; never search `PATH` or
+> substitute a same-named command from another payload. In PowerShell, invoke
+> a catalog path as `& "<agent-dispatch catalog argv[0]>" <args>`.
 
 ```bash
 <agent-dispatch catalog argv[0]> doctor --check-live-sessions   # ground truth ONLY for started/claimed tasks

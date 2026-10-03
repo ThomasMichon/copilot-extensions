@@ -206,6 +206,16 @@ class TestPrMergeDispatcherInference:
         def _must_not_call(config):
             raise AssertionError("inference must not run when a slug is explicit")
         monkeypatch.setattr(pr_merge_cli, "_infer_active_repo_slug", _must_not_call)
+        # The explicit slug must resolve to *some* repo config to reach the
+        # flow-classification point this test actually probes -- stand in
+        # for registry/remote resolution with a trivial same-repo match
+        # (this test is about inference being skipped, not resolution).
+        monkeypatch.setattr(
+            pr_config, "resolve_repo_config_for_slug",
+            lambda config, slug: pr_config.ForeignRepoResolution(
+                config.default_repo, "owner/name", same_as_active=True
+            ),
+        )
         # Halt just past the inference point so we never hit the network.
         # `cmd_pr_merge_dispatch` resolves flow via
         # `pr_config.resolve_actor_pr_flow`, which classifies the *configured*

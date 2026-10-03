@@ -2116,9 +2116,17 @@ def derive_worktree_root(anchor: str | Path) -> str:
     return f"{str(anchor).rstrip('/').rstrip(chr(92))}.worktrees"
 
 
-def tracking_dir() -> Path:
-    """Return the worktree tracking directory path (per-project)."""
-    return project_dir() / "worktrees"
+def tracking_dir(name: str | None = None) -> Path:
+    """Return the worktree tracking directory path (per-project).
+
+    ``name`` lets a caller that already has an explicit project/repo
+    identifier (e.g. a ``Config.repo_name`` passed via ``--config``) resolve
+    the right project's tracking directory instead of silently falling back
+    to the ambient active project, which may differ (#4949 follow-up: a
+    pre-merge safety lookup that silently missed another project's tracking
+    record because it always resolved the ambient one).
+    """
+    return project_dir(name) / "worktrees"
 
 
 def venv_python() -> Path:

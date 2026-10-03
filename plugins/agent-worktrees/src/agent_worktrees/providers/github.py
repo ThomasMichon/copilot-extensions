@@ -580,7 +580,7 @@ class GitHubProvider:
     def merge_pull(
         self, repo: str, number: int, *, squash: bool = True, admin: bool = False,
         api_base: str = "", token: str | None = None,
-        delete_source_branch: bool = True,
+        delete_source_branch: bool = True, expected_head_sha: str = "",
     ) -> str:
         """Directly merge PR ``number`` via ``gh pr merge``.
 
@@ -602,6 +602,15 @@ class GitHubProvider:
         ``authority_endpoint(api_base)`` (via ``GH_HOST``) so the merge always
         runs against the same host ``pr-merge --now``'s live permission gate
         just verified -- never a different ambient host.
+
+        ``expected_head_sha``, when given, is passed as GitHub's own
+        ``--match-head-commit``: the merge endpoint itself refuses (rather than
+        silently merging) if its view of the PR's head doesn't match. This is
+        the authoritative safety net for a confirmed real-world failure mode
+        (ThomasMichon/copilot-extensions#4949): the PR object's reported head
+        can stay stale for minutes after a push on a cross-fork PR even though
+        the underlying branch ref is already correct, and nothing else in this
+        call reads the real ref.
         """
         host = self.authority_endpoint(api_base)
         args = ["gh", "pr", "merge", str(number), "--repo", repo]
@@ -611,6 +620,8 @@ class GitHubProvider:
             args.append("--admin")
         if delete_source_branch:
             args.append("--delete-branch")
+        if expected_head_sha:
+            args += ["--match-head-commit", expected_head_sha]
         proc = run_cli(args, env=self._env(token, host=host))
         if proc.returncode != 0:
             return (
@@ -622,7 +633,7 @@ class GitHubProvider:
     def enable_auto_merge(
         self, repo: str, number: int, *, squash: bool = True,
         api_base: str = "", token: str | None = None,
-        delete_source_branch: bool = True,
+        delete_source_branch: bool = True, expected_head_sha: str = "",
     ) -> str:
         """Arm GitHub native auto-merge: ``gh pr merge <n> --squash --auto`` (#225).
 
@@ -633,6 +644,11 @@ class GitHubProvider:
         against ``finalize``/``pr-complete``. Returns "" once auto-merge is armed
         (the PR is NOT yet merged), or an error string so the caller falls back
         to an immediate :meth:`merge_pull`.
+
+        ``expected_head_sha``, when given, is passed as ``--match-head-commit``
+        -- auto-merge can complete immediately rather than only arming when
+        requirements are already satisfied, so this path needs the same
+        stale-head protection as :meth:`merge_pull`.
         """
         host = self.authority_endpoint(api_base)
         args = ["gh", "pr", "merge", str(number), "--repo", repo, "--auto"]
@@ -640,6 +656,8 @@ class GitHubProvider:
             args.append("--squash")
         if delete_source_branch:
             args.append("--delete-branch")
+        if expected_head_sha:
+            args += ["--match-head-commit", expected_head_sha]
         proc = run_cli(args, env=self._env(token, host=host))
         if proc.returncode != 0:
             return (

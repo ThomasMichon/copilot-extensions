@@ -85,24 +85,27 @@ VALID_DELEGATES = (
     "agent-bridge", "agent-codespaces", "agent-containers", "none",
 )
 
-# Ownership relationship of a related repo, from the operator's POV. This is
-# **expected-behavior metadata** (e.g. it drives the AI-attribution decision:
-# an authored increment in an ``owned`` -- or non-public ``internal`` -- target
-# needs no acknowledgement, an ``external`` one does). It is **derived ONCE at
-# registration** from the operator's own gh account logins + the repo's remote
-# (see :func:`classify_ownership`), then persisted here and treated as
-# authoritative -- consumers read this manifest instead of re-inspecting live gh
-# accounts. An explicit value always wins over the derivation (e.g. an ADO repo
-# the operator wholly owns is marked ``owned`` even though the ADO-host default
-# is ``internal``).
-#   owned     -- the operator wholly owns the target (their own gh namespace, or
-#                an explicitly-owned repo). No AI-acknowledgement on authored
-#                increments.
-#   internal  -- org-internal, not owned (e.g. an enterprise ADO org repo). No
-#                acknowledgement on authored increments, but not the operator's.
-#   external  -- public/external, not owned. Authored increments are
-#                acknowledged.
+# Ownership relationship of a related repo, from the operator's POV: who
+# maintains/reviews it -- NOT the AI-attribution axis (see ``VALID_AUDIENCE``
+# below). Derived ONCE at registration from the operator's own gh account
+# logins + the repo's remote (:func:`classify_ownership`), then persisted and
+# treated as authoritative; an explicit value always wins over the derivation.
+#   owned     -- operator wholly owns the target.
+#   internal  -- org-internal, not owned (e.g. an enterprise ADO org repo).
+#   external  -- public/external, not owned.
 VALID_OWNERSHIP = ("owned", "internal", "external")
+
+# Audience of a related repo -- who can read what gets published there. The
+# axis that actually drives the AI-attribution decision, orthogonal to
+# ``ownership`` above (an operator-owned repo can still be ``public``; a
+# third-party repo could be ``private``). Not reliably derivable from a git
+# remote, so set explicitly when it matters; empty means "unclassified" and
+# consumers judge the target themselves rather than assume the
+# disclosure-exempt case.
+#   public/internal -- disclosure applies by default.
+#   private          -- disclosure not required, but must be a positive,
+#                        verified classification, never assumed by default.
+VALID_AUDIENCE = ("public", "internal", "private")
 
 # Locus "kinds" -- where work on a related repo actually happens.
 VALID_LOCUS_KINDS = ("local", "machine", "codespace", "container")
@@ -161,10 +164,21 @@ class RelatedEntry:
     # Ownership relationship (one of VALID_OWNERSHIP) + the resolving operator
     # account. Derived once at registration (:func:`classify_ownership`) and
     # then authoritative; an explicit value in related.yaml always wins. Empty
-    # ``ownership`` means "not classified" -- consumers fall back to judging the
-    # target themselves. See VALID_OWNERSHIP for the AI-attribution semantics.
+    # means "not classified." Contribution/authority axis -- see
+    # ``audience``/``ai_attribution`` below for the AI-attribution axis.
     ownership: str = ""
     owner: str = ""                     # resolving operator account login (optional)
+    # Audience (one of VALID_AUDIENCE): who can read what gets published to
+    # this repo. Orthogonal to ``ownership``; drives AI-attribution. Never
+    # derived automatically; empty means "unclassified."
+    audience: str = ""
+    # Per-repo AI-attribution overrides for the ``ai-attribution`` plugin:
+    # ``disclose_on_open``/``disclose_on_reply`` (bool). Each key absent from
+    # this dict falls back to the audience-derived default (see
+    # ``effective_ai_attribution``); a present key is honored verbatim in
+    # either direction (can turn disclosure off *or* on relative to that
+    # default), not restricted to narrowing.
+    ai_attribution: dict[str, Any] = field(default_factory=dict)
     # Plugins this control plane side-loads when delegating work to the related
     # repo (the *related-repo* plugin lane -- distinct from a CodeSpace's own
     # ``codespacePlugins``). Each item is a normalized ``{"source": str,
@@ -287,10 +301,40 @@ def normalize_ownership(value: str | None) -> str:
 
     Only members of :data:`VALID_OWNERSHIP` are kept -- an unrecognized value
     normalizes to ``""`` (unclassified) so a typo never silently asserts a
-    wrong AI-attribution posture.
+    wrong AI-attribution posture. A non-string input (e.g. a YAML integer)
+    also normalizes to ``""`` rather than raising.
     """
-    v = (value or "").strip().lower()
+    if not isinstance(value, str):
+        return ""
+    v = value.strip().lower()
     return v if v in VALID_OWNERSHIP else ""
+
+
+def normalize_audience(value: str | None) -> str:
+    """Lower-case/strip an audience value; drop anything outside
+    :data:`VALID_AUDIENCE` to ``""`` (unclassified) rather than silently
+    asserting the disclosure-exempt ``private`` posture on a typo. A
+    non-string input (e.g. a YAML integer) also normalizes to ``""`` rather
+    than raising -- a single malformed entry must never break loading the
+    whole related config."""
+    if not isinstance(value, str):
+        return ""
+    v = value.strip().lower()
+    return v if v in VALID_AUDIENCE else ""
+
+
+def _parse_ai_attribution(raw: Any) -> dict[str, Any]:
+    """Normalize an ``ai_attribution:`` override block: keep only
+    ``disclose_on_open``/``disclose_on_reply`` as booleans, dropping anything
+    else (unknown keys, non-bool values, non-mapping input) so a malformed
+    override falls back to the audience-derived default."""
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for key in ("disclose_on_open", "disclose_on_reply"):
+        if key in raw and isinstance(raw[key], bool):
+            out[key] = raw[key]
+    return out
 
 
 def parse_preferred(value: str | None) -> tuple[str, str]:
@@ -420,6 +464,8 @@ def _parse_related_file(path: Path) -> RelatedConfig:
                 delegate=_parse_delegate(entry.get("delegate")),
                 ownership=normalize_ownership(entry.get("ownership")),
                 owner=str(entry.get("owner", "")).strip(),
+                audience=normalize_audience(entry.get("audience")),
+                ai_attribution=_parse_ai_attribution(entry.get("ai_attribution")),
                 plugins=_parse_plugins(entry.get("plugins")),
                 pr=_parse_related_pr(entry.get("pr")),
                 doc_root=str(path.parent),
@@ -594,6 +640,14 @@ def write_related(anchor: str | Path, cfg: RelatedConfig) -> None:
                 lines.append(f"    ownership: {_quote(entry.ownership)}")
             if entry.owner:
                 lines.append(f"    owner: {_quote(entry.owner)}")
+            if entry.audience:
+                lines.append(f"    audience: {_quote(entry.audience)}")
+            if entry.ai_attribution:
+                lines.append("    ai_attribution:")
+                for key in ("disclose_on_open", "disclose_on_reply"):
+                    if key in entry.ai_attribution:
+                        val = "true" if entry.ai_attribution[key] else "false"
+                        lines.append(f"      {key}: {val}")
             if entry.plugins:
                 lines.append("    plugins:")
                 for p in entry.plugins:
@@ -1014,6 +1068,10 @@ def upsert_related(anchor: str | Path, entry: RelatedEntry) -> RelatedConfig:
             existing.ownership = entry.ownership
         if entry.owner:
             existing.owner = entry.owner
+        if entry.audience:
+            existing.audience = entry.audience
+        if entry.ai_attribution:
+            existing.ai_attribution = {**existing.ai_attribution, **entry.ai_attribution}
     write_related(anchor, cfg)
     return cfg
 
@@ -1099,6 +1157,81 @@ def effective_ownership(entry: RelatedEntry) -> str:
         return classify_ownership(entry.name)[0]
     except Exception:
         return ""
+
+
+# Layers trusted to weaken AI-attribution disclosure (claim a `private`
+# audience, or an override that turns a key OFF): "machine" (the
+# machine-local project root harness *setup* writes, never an arbitrary
+# repo checkout) and "knowledge" (the operator's own bound personal
+# knowledge repo). Both are independently, positively provisioned by the
+# operator -- their mere existence as a config source is itself evidence
+# of operator control.
+#
+# "harness" is deliberately NEVER trusted, even to describe a repo OTHER
+# than itself. An earlier revision tried path-comparing the entry's
+# origin against the *described* repo's own checkout (trusting a
+# "harness" entry whenever it describes a sibling, not itself) -- that
+# does correctly block a target's own self-entry, but doesn't establish
+# that the "harness" anchor itself is operator-controlled at all: per
+# ``state_root.config_source_anchors``, "harness" just means "whichever
+# repo happens to be the current launch/base anchor," so an untrusted
+# repo A can commit a `related.yaml` entry describing some OTHER
+# registered repo B (not itself) with `audience: private` -- the path
+# inequality (A != B) would wrongly call that trusted. There is currently
+# no positive signal in this layer that distinguishes "the operator's own
+# control-plane repo" from "an arbitrary repo that happens to be the
+# launch anchor," so it stays untrusted unconditionally until one exists.
+# "repository"/"plugin"/``""``/"unknown" are untrusted for the same
+# reason (no positive evidence of operator authorship). An untrusted
+# entry can still WIDEN disclosure (claim `public`, or an override that
+# turns a key ON) -- only narrowing requires this trust.
+_TRUSTED_FOR_POLICY_WEAKENING = frozenset({"machine", "knowledge"})
+
+
+def _entry_trusted_for_policy_weakening(entry: RelatedEntry) -> bool:
+    """Whether ``entry`` may claim a disclosure-*weakening* value (a
+    ``private`` audience, or an ``ai_attribution`` override that turns a
+    key off) -- true only for :data:`_TRUSTED_FOR_POLICY_WEAKENING`
+    layers. See that constant's own comment for why ``"harness"`` is
+    excluded even when it appears to describe a different repo than
+    itself."""
+    return entry.origin_layer in _TRUSTED_FOR_POLICY_WEAKENING
+
+
+def effective_audience(entry: RelatedEntry) -> str:
+    """The authoritative audience for an entry: its explicit value, or ``""``
+    (unclassified) when unset -- unlike ``effective_ownership``, there is no
+    derivation fallback to guess it from. A ``private`` claim from a source
+    :func:`_entry_trusted_for_policy_weakening` doesn't trust is discarded
+    (treated as unclassified) rather than honored -- an untrusted source
+    must never be able to assert the disclosure-exempt case for itself."""
+    if entry.audience == "private" and not _entry_trusted_for_policy_weakening(entry):
+        return ""
+    return entry.audience
+
+
+def effective_ai_attribution(entry: RelatedEntry) -> dict[str, bool]:
+    """The resolved AI-attribution disclosure policy for an entry:
+    ``{"disclose_on_open": bool, "disclose_on_reply": bool}``. Defaults from
+    ``audience`` (``public``/``internal``/unclassified -> both True;
+    ``private`` -> both False), then applies any explicit per-key
+    ``ai_attribution`` override on the entry; a key absent from the override
+    stays at its audience-derived default. An override that would turn a key
+    OFF is only honored when
+    :func:`_entry_trusted_for_policy_weakening` trusts the entry -- from any
+    other source it is discarded (the key stays at its audience-derived
+    default), since an untrusted entry must never be able to narrow
+    disclosure for itself, only widen it."""
+    default = effective_audience(entry) != "private"
+    resolved = {"disclose_on_open": default, "disclose_on_reply": default}
+    trusted = _entry_trusted_for_policy_weakening(entry)
+    for key in ("disclose_on_open", "disclose_on_reply"):
+        if key in entry.ai_attribution:
+            value = bool(entry.ai_attribution[key])
+            if not trusted and value is False and resolved[key] is True:
+                continue
+            resolved[key] = value
+    return resolved
 
 
 def owned_targets(anchor: str | Path) -> list[dict[str, str]]:

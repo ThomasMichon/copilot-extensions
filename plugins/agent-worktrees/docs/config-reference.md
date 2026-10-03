@@ -681,7 +681,8 @@ A separate **committed, in-repo** file (a sibling of the in-repo `config.yaml`)
 that records, **from this repo's point of view**, the OTHER repos relevant to
 it. It is *directional* and *per-project* -- distinct from the global,
 machine-wide `repos.yaml` registry. Keys reference **global-registry names**;
-the file adds only relationship + locus + delegate, never checkout paths (those
+the file adds relationship + locus + delegate, plus the `ownership`/
+`audience`/`ai_attribution` metadata below -- never checkout paths (those
 still resolve from `repos.yaml`).
 
 Managed by `agent-worktrees related ...`; see the **`agent-worktrees-related`**
@@ -718,6 +719,10 @@ related:
 | `related.<name>.locus.codespace` | map | GitHub CodeSpace hints: `repo` / `machine` / `location` / `workspace_folder`. Cloud venue -- usable from any machine. |
 | `related.<name>.locus.container` | map | Local Docker dev-container fleet: `repo` / `workspace_folder` + a `machines` list scoping it to the fleet hosts. Local venue -- `machines` restricts where it runs. |
 | `related.<name>.delegate.via` | string | How to hand off work: `agent-bridge` \| `agent-codespaces` \| `agent-containers` \| `none`. |
+| `related.<name>.ownership` | string | Contribution/authority posture: `owned` \| `internal` \| `external`. Derived once at registration from the operator's own gh accounts + the remote; an explicit value always wins. |
+| `related.<name>.owner` | string | Resolving operator account login (optional, set alongside `ownership`). |
+| `related.<name>.audience` | string | Who can read what gets published here: `public` \| `internal` \| `private`. Orthogonal to `ownership`; drives the AI-attribution decision (see the `ai-attribution-audience-policy` effort). Never derived automatically; empty means unclassified. |
+| `related.<name>.ai_attribution` | map | Optional per-repo disclosure override: `disclose_on_open` / `disclose_on_reply` (bool), each defaulting to the `audience`-derived policy when omitted. |
 
 Reads degrade safely (a missing/malformed file yields an empty index); a bare
 `name:` is a valid minimal link. The canonical base file is
