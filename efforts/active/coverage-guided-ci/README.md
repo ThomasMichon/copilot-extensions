@@ -191,14 +191,22 @@ order.
       attribution through those commits' own diffs, or mark the file's
       attribution invalid (forcing it through the smoke fallback for that
       file specifically). **Done:** `ancestor_resolution.compute_file_remap`
-      classifies each touched file's `--unified=0` diff as a pure
-      insertion/deletion (remappable) or as containing at least one hunk
-      that both removes and adds lines (content actually changed --
-      invalid); `remap_or_invalidate_baseline` applies that per file across
-      a whole baseline, dropping invalidated files from the ``coverage``
-      map entirely -- which `selection.select_tests` already treats as
-      `no_baseline_entry`, so no changes were needed there to make
-      Phase 2's output usable by Phase 0's existing selector.
+      classifies each touched file's `--unified=0` diff as containing at
+      least one hunk that both removes and adds lines (content actually
+      changed -- invalidate the whole file) or as pure insertions/deletions
+      only (per-line remap, via `remap_line`); `remap_or_invalidate_baseline`
+      applies that per file across a whole baseline, dropping invalidated
+      files from the ``coverage`` map entirely -- which
+      `selection.select_tests` already treats as `no_baseline_entry`, so no
+      changes were needed there to make Phase 2's output usable by Phase
+      0's existing selector. `remap_line` itself is deliberately
+      **asymmetric**: a line preceded only by deletions is safely
+      remapped, but a line preceded by *any* insertion is dropped, never
+      remapped -- caught during this PR's own review before merge (see
+      Journal): a clean line-coordinate shift proves nothing about
+      execution, and inserted code can introduce new control flow that
+      makes a previously-reached line unreachable even though its line
+      number translates perfectly.
 - [x] Unit-test this against a constructed history with real intervening
       line insertions/deletions, not just a same-content forward-move case.
       **Done:** `tools/test_coverage_guided_selection.py`'s
@@ -341,25 +349,35 @@ piece of Phase 2:
   already established in Phase 0.
 - **`compute_file_remap` / `remap_line` / `remap_or_invalidate_baseline`**
   -- realize the Plan's remap-or-invalidate requirement. For each file the
-  resolved baseline covers, diffs it (`git diff --unified=0`) between the
-  baseline's own `measured_commit` and the fork point: a diff composed
-  entirely of pure insertion/deletion hunks (no hunk both removes and adds
-  lines) is cleanly remappable -- every covered line number is translated
-  through the cumulative offset, with a line that was itself deleted
-  dropping out silently (correct: it no longer exists to be covered). A
-  diff with even one hunk that genuinely replaces content invalidates that
-  file's attribution entirely, dropping it from the resulting baseline's
-  `coverage` map -- which `selection.select_tests` already treats as
-  `no_baseline_entry`, forcing that file's own smoke/coverage-debt fallback
-  for free. No changes were needed to `selection.py` itself to make
-  Phase 2's output immediately usable by Phase 0's existing selector --
-  confirmed by construction, not by assumption (see the integration test
-  below).
+  resolved baseline covers, diffs it (`git diff --unified=0 --no-ext-diff
+  --no-textconv`) between the baseline's own `measured_commit` and the
+  fork point: a diff with even one hunk that genuinely replaces content
+  invalidates that file's attribution entirely, dropping it from the
+  resulting baseline's `coverage` map -- which `selection.select_tests`
+  already treats as `no_baseline_entry`, forcing that file's own smoke/
+  coverage-debt fallback for free. Otherwise (pure insertions/deletions
+  only), each covered line is remapped **asymmetrically**, not just
+  shifted by cumulative offset: a line preceded only by deletions
+  translates safely (a test that already reached it in the old code can't
+  be retroactively un-reached by removing unrelated code elsewhere), but a
+  line preceded by *any* insertion is dropped rather than remapped --
+  caught during review (see below): inserted code can introduce new
+  control flow (an early `return`, a new guard clause) that causes a
+  previously-reaching test to no longer reach it, and a clean
+  line-coordinate shift alone can't prove an insertion was
+  execution-neutral. No changes were needed to `selection.py` itself to
+  make Phase 2's output immediately usable by Phase 0's existing selector
+  -- confirmed by construction, not by assumption (see the integration
+  test below).
 - Uses `--unified=0` specifically because it makes "a hunk with both
   nonzero old_len and nonzero new_len genuinely replaced content" a
   reliable signal -- with default context lines, an insertion sitting next
   to an unrelated unchanged line could otherwise look like it "replaced"
-  that context line.
+  that context line. `--no-ext-diff --no-textconv` (added during review)
+  prevent `GIT_EXTERNAL_DIFF`/a configured textconv driver from
+  transforming this machine-readable output in a way `_parse_hunks`
+  wouldn't recognize, which could otherwise silently report "unchanged"
+  for a file that actually changed.
 
 **Verified directly, per the Plan's own explicit ask** ("unit-test against
 a constructed history with real intervening line insertions/deletions, not
@@ -369,22 +387,34 @@ gained `TestIsAncestor`, `TestResolveNearestBaseline`,
 a real, throwaway git repo via subprocess (actual commits, not mocked
 diffs) covering: a real ancestor/non-ancestor/self pair and an unreachable
 commit; the newest-qualifying-generation resolution case and the
-none-qualify case; pure insertion, pure deletion, content replacement, a
-mixed insertion-then-replacement hunk set (confirming the whole file
-invalidates, not just the replaced hunk's own range); a full
-three-file integration pass (one untouched, one cleanly-shifted, one
+none-qualify case; pure insertion (and that lines after it are
+conservatively dropped, not shifted), pure deletion, content replacement,
+a mixed insertion-then-replacement hunk set (confirming the whole file
+invalidates, not just the replaced hunk's own range); a full three-file
+integration pass (one untouched, one deletion-shifted, one
 content-replaced) plus a "the only covered line was itself deleted" edge
-case and a no-mutation check on the input baseline; and, added during
-review, a real multi-commit cumulative-remap case (baseline measured ->
-two separate real intervening insertion commits -> a fork-point commit
-that also deletes a line, with a hand-computed expected mapping). Every
-git subprocess scrubs ambient repository-selection env vars and disables
-external-diff/textconv transforms that could otherwise mask or distort
-machine-readable output. Full
-`tools/test_coverage_guided_selection.py` suite: 47 passed, 5 skipped
-(the pre-existing opt-in real-subprocess integration tests, unaffected).
-`ruff check --select F,E9` (this repo's actual required lint selection)
-clean.
+case and a no-mutation check on the input baseline; a real multi-commit
+cumulative-remap case built entirely from deletions (baseline measured ->
+two separate real intervening deletion commits -> a fork-point commit
+that also deletes a line, with a hand-computed expected mapping); and,
+added during review, a direct regression test for the control-flow
+scenario above (inserting an early-exit guard clause before a covered
+line correctly drops that line's attribution rather than carrying it
+forward). Every git subprocess scrubs ambient repository-selection env
+vars. Full `tools/test_coverage_guided_selection.py` suite: 48 passed,
+5 skipped (the pre-existing opt-in real-subprocess integration tests,
+unaffected). `ruff check --select F,E9` (this repo's actual required
+lint selection) clean.
+
+**Caught during review (before merge):** the first version of this phase
+remapped a line through *any* pure insertion/deletion uniformly, treating
+a clean line-coordinate shift as proof an edit was execution-neutral.
+It isn't -- inserting a new early `return`/guard clause before a
+previously-covered line shifts that line's position predictably while
+also making it unreachable for a test that used to execute it, and hunk
+lengths alone can't distinguish that case from a harmless insertion.
+Fixed by making insertions asymmetric with deletions (see above) before
+this phase's own PR merged, not after.
 
 **Not yet done:** wiring `ancestor_resolution` into a real caller (Phase 3's
 diff-scoped selector is the first consumer -- it needs a resolved,

@@ -1009,7 +1009,14 @@ class TestComputeFileRemap:
         result = ar.compute_file_remap(repo, "a.txt", c1, c2)
         assert result.status == "unchanged"
 
-    def test_pure_insertion_is_remapped(self, tmp_path):
+    def test_pure_insertion_invalidates_lines_after_the_insertion_point(self, tmp_path):
+        """Regression test for a real soundness gap found in review: a
+        pure line-coordinate shift proves nothing about *execution* --
+        inserted code can introduce new control flow (an early `return`,
+        a new guard clause) that causes a test which used to reach a line
+        to no longer reach it, even though the line number itself
+        translates cleanly. So a preceding insertion must invalidate
+        (return None), never silently remap."""
         repo = _init_repo(tmp_path)
         (repo / "a.txt").write_text("1\n2\n3\n")
         c1 = _commit(repo, "first")
@@ -1017,10 +1024,49 @@ class TestComputeFileRemap:
         c2 = _commit(repo, "insert a line")
         result = ar.compute_file_remap(repo, "a.txt", c1, c2)
         assert result.status == "remapped"
-        # old line 1 unaffected, old lines 2/3 shift down by 1
+        # old line 1 sits strictly before the insertion -- still safe.
         assert ar.remap_line(1, result.hunks) == 1
-        assert ar.remap_line(2, result.hunks) == 3
-        assert ar.remap_line(3, result.hunks) == 4
+        # old lines 2/3 sit after the insertion -- conservatively dropped,
+        # NOT remapped to their shifted positions (3/4), since nothing
+        # about hunk lengths proves the insertion was execution-neutral.
+        assert ar.remap_line(2, result.hunks) is None
+        assert ar.remap_line(3, result.hunks) is None
+
+    def test_control_flow_changing_insertion_before_a_covered_line_is_invalidated(
+        self, tmp_path,
+    ):
+        """The concrete scenario review flagged: inserting an early guard
+        clause/return before a previously-covered line must not carry that
+        line's old attribution forward, even though the line number itself
+        maps cleanly to a new position."""
+        repo = _init_repo(tmp_path)
+        (repo / "f.py").write_text(
+            "def handler(x):\n"
+            "    do_setup()\n"
+            "    return process(x)\n"  # old line 3 -- covered below
+        )
+        old_commit = _commit(repo, "baseline measured here")
+        (repo / "f.py").write_text(
+            "def handler(x):\n"
+            "    do_setup()\n"
+            "    if not x:\n"
+            "        return None\n"  # a NEW early exit inserted above
+            "    return process(x)\n"
+        )
+        fork_commit = _commit(repo, "insert an early-exit guard clause")
+
+        baseline = {
+            "measured_commit": old_commit,
+            "coverage": {"f.py": {"3": ["test_handler_with_x"]}},
+        }
+        resolved = ar.ResolvedBaseline(baseline=baseline, baseline_commit=old_commit)
+        result = ar.remap_or_invalidate_baseline(repo, resolved, fork_commit)
+
+        # The old covered line's attribution must NOT survive as a
+        # confident remap to the new line 5 -- the whole file is dropped
+        # (its only covered line had nothing safely attributable left).
+        assert "f.py" not in result["coverage"]
+        assert result["remap_invalidated_files"] == ["f.py"]
 
     def test_pure_deletion_is_remapped_and_drops_removed_lines(self, tmp_path):
         repo = _init_repo(tmp_path)
@@ -1035,50 +1081,51 @@ class TestComputeFileRemap:
         assert ar.remap_line(3, result.hunks) is None  # deleted
         assert ar.remap_line(4, result.hunks) == 2
 
-    def test_cumulative_shift_across_several_real_intervening_commits(self, tmp_path):
+    def test_cumulative_shift_across_several_real_intervening_deletion_commits(
+        self, tmp_path,
+    ):
         """The Validation Plan's own required shape: baseline measured here
         -> several real, separate line-shifting commits -> fork point.
         `compute_file_remap` diffs directly between the two endpoints
         (never walking or applying each intervening commit one at a time),
         so this also confirms that approach produces the same cumulative
-        result a step-by-step replay would."""
+        result a step-by-step replay would. Uses deletions (not
+        insertions) throughout: only a preceding deletion is safely
+        remappable under the asymmetric insertion/deletion policy above."""
         repo = _init_repo(tmp_path)
-        (repo / "a.txt").write_text("1\n2\n3\n4\n5\n")
+        (repo / "a.txt").write_text("1\n2\n3\n4\n5\n6\n7\n")
         baseline_commit = _commit(repo, "baseline measured here")
 
-        # Commit 2: insert one line after old line 1.
-        (repo / "a.txt").write_text("1\nINSERTED_A\n2\n3\n4\n5\n")
-        _commit(repo, "intervening commit 1: insert after line 1")
+        # Commit 2: delete old line 2.
+        (repo / "a.txt").write_text("1\n3\n4\n5\n6\n7\n")
+        _commit(repo, "intervening commit 1: delete old line 2")
 
-        # Commit 3: insert two more lines after what is now line 4 (old
-        # line 3) -- a second, independent real commit, not folded into
-        # commit 2's own diff.
-        (repo / "a.txt").write_text(
-            "1\nINSERTED_A\n2\n3\nINSERTED_B\nINSERTED_C\n4\n5\n"
-        )
-        _commit(repo, "intervening commit 2: insert two more lines")
+        # Commit 3: delete two more lines (old lines 3 and 4) -- a second,
+        # independent real commit, not folded into commit 2's own diff.
+        (repo / "a.txt").write_text("1\n5\n6\n7\n")
+        _commit(repo, "intervening commit 2: delete two more lines")
 
-        # Commit 4 (the fork point): delete what was originally old line 5.
-        (repo / "a.txt").write_text(
-            "1\nINSERTED_A\n2\n3\nINSERTED_B\nINSERTED_C\n4\n"
-        )
+        # Commit 4 (the fork point): delete what was originally old line 7.
+        (repo / "a.txt").write_text("1\n5\n6\n")
         fork_commit = _commit(repo, "fork point: delete the old last line")
 
         result = ar.compute_file_remap(repo, "a.txt", baseline_commit, fork_commit)
         assert result.status == "remapped"
 
         # Hand-computed expected mapping from the baseline's old line
-        # numbers (1-5) to the fork point's new line numbers, reflecting
-        # the CUMULATIVE effect of all three intervening commits combined:
-        # old 1 -> new 1 ("1"); old 2 -> new 3 ("2", shifted +1 by
-        # INSERTED_A); old 3 -> new 4 ("3", shifted +1); old 4 -> new 7
-        # ("4", shifted +1 then +2 by INSERTED_B/INSERTED_C); old 5 was
-        # deleted in the fork-point commit -> None.
+        # numbers (1-7) to the fork point's new line numbers, reflecting
+        # the CUMULATIVE effect of all three intervening deletion commits
+        # combined: old 1 -> new 1 ("1"); old lines 2-4 were each deleted
+        # by one of the three commits -> None; old 5 -> new 2 ("5", 3
+        # lines removed ahead of it); old 6 -> new 3; old 7 was deleted by
+        # the fork-point commit itself -> None.
         assert ar.remap_line(1, result.hunks) == 1
-        assert ar.remap_line(2, result.hunks) == 3
-        assert ar.remap_line(3, result.hunks) == 4
-        assert ar.remap_line(4, result.hunks) == 7
-        assert ar.remap_line(5, result.hunks) is None
+        assert ar.remap_line(2, result.hunks) is None
+        assert ar.remap_line(3, result.hunks) is None
+        assert ar.remap_line(4, result.hunks) is None
+        assert ar.remap_line(5, result.hunks) == 2
+        assert ar.remap_line(6, result.hunks) == 3
+        assert ar.remap_line(7, result.hunks) is None
 
     def test_content_replacement_is_invalid(self, tmp_path):
         repo = _init_repo(tmp_path)
@@ -1104,15 +1151,15 @@ class TestComputeFileRemap:
 
 class TestRemapOrInvalidateBaseline:
     def test_full_integration_across_three_files(self, tmp_path):
-        """One untouched file, one cleanly-shiftable file, one
-        content-replaced file -- in the same remap pass."""
+        """One untouched file, one cleanly-shiftable (deletion-only) file,
+        one content-replaced file -- in the same remap pass."""
         repo = _init_repo(tmp_path)
         (repo / "unchanged.py").write_text("a\nb\n")
         (repo / "shifted.py").write_text("1\n2\n3\n")
         (repo / "replaced.py").write_text("x\ny\nz\n")
         old_commit = _commit(repo, "baseline measured here")
 
-        (repo / "shifted.py").write_text("1\nNEW\n2\n3\n")
+        (repo / "shifted.py").write_text("2\n3\n")  # delete old line 1
         (repo / "replaced.py").write_text("x\nCHANGED\nz\n")
         fork_commit = _commit(repo, "fork point")
 
@@ -1128,7 +1175,7 @@ class TestRemapOrInvalidateBaseline:
         result = ar.remap_or_invalidate_baseline(repo, resolved, fork_commit)
 
         assert result["coverage"]["unchanged.py"] == {"1": ["test_u"]}
-        assert result["coverage"]["shifted.py"] == {"3": ["test_s"], "4": ["test_s2"]}
+        assert result["coverage"]["shifted.py"] == {"1": ["test_s"], "2": ["test_s2"]}
         assert "replaced.py" not in result["coverage"]
         assert result["remap_invalidated_files"] == ["replaced.py"]
         assert result["remapped_to_commit"] == fork_commit

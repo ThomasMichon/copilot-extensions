@@ -36,11 +36,14 @@ Four pieces, each independently testable:
   walks `main`'s own history of a plugin's checked-in baseline for the
   newest generation whose `measured_commit` is an ancestor of that fork
   point, then carries its line-level attribution forward through every
-  intervening commit's own diff (remapping line numbers through a file's
-  diff when it's entirely pure insertions/deletions; invalidating that
-  file's attribution entirely -- regardless of whether any *covered* line
-  specifically sits inside the changed hunk -- the instant its diff
-  contains even one hunk that actually replaces existing content, since a
-  hunk mixing removed and added lines can shift every later line in the
-  file and isn't safely approximable by a scoped check).
+  intervening commit's own diff. A file invalidates entirely (dropped,
+  regardless of whether any *covered* line sits inside the changed hunk)
+  the instant its diff contains even one hunk that actually replaces
+  existing content. Otherwise (pure insertions/deletions only), each
+  covered line is remapped individually and asymmetrically: a line
+  preceded only by deletions translates safely through the cumulative
+  offset, but a line preceded by *any* insertion is dropped rather than
+  remapped -- inserted code can introduce new control flow (an early
+  `return`, a new guard) that skips a line a test used to reach, and a
+  line-coordinate shift alone can't prove that didn't happen.
 """

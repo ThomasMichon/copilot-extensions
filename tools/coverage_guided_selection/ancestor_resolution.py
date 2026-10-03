@@ -13,8 +13,16 @@ forward through every intervening commit's own diff, file by file:
   point is **entirely pure insertions/deletions** (no hunk both removes and
   adds lines -- i.e. no hunk actually replaces/edits existing content) has
   its covered line numbers translated through the diff's own line-number
-  shift. A line that was itself deleted drops out silently (correct: that
-  line no longer exists to be covered).
+  shift, with one deliberate asymmetry: a line preceded by a **deletion**
+  is safely remapped (a test that already reached it in the old code can't
+  be retroactively un-reached by removing unrelated code elsewhere), but a
+  line preceded by an **insertion** is treated the same as deleted-outright
+  attribution -- dropped, not remapped -- because newly inserted code can
+  introduce new control flow (an early `return`, a new guard clause) that
+  causes a previously-reaching test to no longer reach it, and hunk
+  lengths alone can't prove an insertion was execution-neutral. A line
+  that was itself deleted always drops out (correct: it no longer exists
+  to be covered).
 - A file with **any** hunk that both removes and adds lines genuinely
   changed content, so old line numbers inside it can't be trusted to still
   mean the same thing -- that file's attribution is **invalidated**
@@ -254,9 +262,37 @@ def compute_file_remap(
 def remap_line(old_line: int, hunks: tuple[Hunk, ...]) -> int | None:
     """Translate `old_line` through a file's own pure insert/delete hunks.
 
-    Returns `None` if `old_line` fell inside a deleted range (the line no
-    longer exists at the new commit -- correctly drops out of attribution
-    rather than erroring).
+    Returns `None` ("no longer safely attributable") when:
+
+    - `old_line` fell inside a deleted range (the line no longer exists at
+      the new commit -- correctly drops out of attribution rather than
+      erroring), or
+    - **any insertion hunk precedes `old_line`.** A pure line-coordinate
+      shift proves the *position* of unrelated content moved, but it
+      proves nothing about *execution*: newly inserted code can introduce
+      new control flow -- an early `return`/`raise`/`continue`/`break`, a
+      new guard clause -- that causes a test which genuinely reached
+      `old_line` at the baseline commit to no longer reach it at its
+      cleanly-translated new position, even though the line number itself
+      maps perfectly. Hunk lengths alone cannot prove an insertion was
+      execution-neutral, so any preceding insertion conservatively
+      invalidates that line's own attribution rather than silently
+      carrying forward evidence that might now be stale -- the vision's
+      own "never quieter than the evidence supports" Behavior, applied to
+      a risk line-arithmetic alone can't rule out.
+
+    A preceding pure **deletion** is, by contrast, safe to translate
+    through without invalidating: whatever test attributed `old_line` at
+    the baseline commit, by definition, already executed all the way down
+    to it in the OLD code -- removing *other*, unrelated code elsewhere in
+    the file cannot retroactively make that same test stop reaching a line
+    it already demonstrably reached. Only a newly inserted control-flow
+    statement can introduce a *new* skip; a deletion can only ever widen
+    what's reachable, never narrow what a test already proved it reaches
+    (data-flow-only effects, e.g. a deleted precondition that changes a
+    later branch's outcome, are an inherent limitation of line-based
+    attribution shared by every diff-scoped test-selection tool, not
+    something this function claims to rule out).
     """
     offset = 0
     for old_start, old_len, new_start, new_len in hunks:
@@ -265,7 +301,8 @@ def remap_line(old_line: int, hunks: tuple[Hunk, ...]) -> int | None:
             # line `old_start` (git reports the insertion point as the old
             # line immediately preceding it, with a 0-length old range).
             if old_line >= old_start + 1:
-                offset += new_len
+                return None  # a preceding insertion -- not provably safe
+            # Insertion strictly after old_line: no effect on it at all.
         else:
             if old_line < old_start:
                 continue
