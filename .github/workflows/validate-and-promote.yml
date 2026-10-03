@@ -689,6 +689,45 @@ jobs:
             echo "::error::Enrolled plugin(s) missing a collected coverage baseline this run: ${missing[*]} -- refusing to promote without the evidence these plugins are supposed to produce."
             exit 1
           fi
+      - name: Publish coverage baselines as a GitHub Release (durable evidence for this dev commit)
+        if: steps.decide.outputs.proceed == 'true'
+        # The full per-line coverage-baseline JSON for a large plugin
+        # suite can exceed GitHub's 100MB per-file git push limit, so the
+        # full payload is published here, as a Release asset, instead of
+        # ever entering a git tree; `promote_release.py`'s own
+        # `_write_coverage_baselines_into_scratch` checks in only a small
+        # correlation POINTER (a few hundred bytes) referencing this
+        # release -- see `tools/coverage_guided_selection/correlation.py`'s
+        # module docstring for the full design.
+        #
+        # Tagged on `DEV_SHA` itself (via `release_tag_for`'s formula, not
+        # the promotion's own eventual `main`-side tag) -- deliberately
+        # decoupled from whether/when/how this `dev` commit's promotion
+        # actually lands (a real post-merge `main` tag isn't knowable yet
+        # at this point in the job; see the "Tag the real post-merge
+        # commit" step below) -- the baseline evidence for a `dev` commit
+        # is a fact about that commit alone, published the moment
+        # collection succeeds. Idempotent: a retried run for the exact
+        # same `DEV_SHA` uploads over (never duplicates) an already-
+        # published release's assets.
+        env:
+          DEV_SHA: ${{ needs.gate.outputs.sha }}
+        run: |
+          # Mirrors `correlation.release_tag_for` -- duplicated here (not
+          # imported; this step has no Python dependency at all otherwise)
+          # -- keep in sync by hand if that formula ever changes. Uses the
+          # FULL `DEV_SHA`, never a truncated prefix -- see that
+          # function's own docstring for why a shortened prefix risks a
+          # release-tag collision between two distinct commits.
+          release_tag="coverage-baselines-${DEV_SHA}"
+          if gh release view "$release_tag" >/dev/null 2>&1; then
+            gh release upload "$release_tag" coverage-baselines/*.json --clobber
+          else
+            gh release create "$release_tag" --target "$DEV_SHA" \
+              --title "Coverage baselines @ ${DEV_SHA:0:12}" \
+              --notes "Per-plugin coverage baselines measured against dev commit $DEV_SHA. Correlated via the small pointer files promote_release.py checks into .github/coverage-baselines/ on main -- see tools/coverage_guided_selection/correlation.py." \
+              coverage-baselines/*.json
+          fi
       - name: Promote (push a candidate branch; report-only if push=false)
         id: promote
         if: steps.decide.outputs.proceed == 'true'
