@@ -404,20 +404,30 @@ explicitly named follow-on slices; no other pre-session boundary besides
       or by `agent-bridge`'s own spawn-path trigger) -- re-running the
       identical 3-sub-agent clean room again here would prove the same
       discovery mechanism a second time, not anything new about Phase 2's
-      own contribution. What Phase 2 actually adds -- that its specific
-      trigger (`_connect_via_session_host`'s pre-spawn call) produces a
-      genuinely fresh `.local.instructions.md` sibling via the real,
-      production `render_local_cache()` call (not a stub), within the
-      defined latency budget, and without ever failing the spawn itself
-      -- is exactly what this Phase's own Plan items already prove at the
-      unit/integration level (`test_real_render_local_cache_call_
-      genuinely_refreshes_the_sibling`,
-      `TestLocalCacheRefreshWiring::test_project_backed_target_with_no_
-      cwd_refreshes_the_resolved_worktree`). Re-deriving Phase 7's own
-      proof a second time for a different trigger path would not close
-      any gap those two proofs leave open, so it is accepted as covered
-      by the combination of Phase 7's existing evidence and Phase 2's own
-      landed tests, rather than repeated for its own sake.
+      own contribution. What Phase 2's own landed tests actually prove --
+      that its specific trigger (`_connect_via_session_host`'s pre-spawn
+      call) produces a genuinely fresh `.local.instructions.md` sibling
+      via the real, production `render_local_cache()` call (not a stub)
+      -- is covered by `test_real_render_local_cache_call_genuinely_
+      refreshes_the_sibling`, which intentionally runs with a generous
+      `timeout=30.0` (not the production `LOCAL_SPAWN_MAX_TIMEOUT_S =
+      5.0`) and makes no elapsed-time assertion, since its purpose is
+      proving genuine end-to-end rendering without the flakiness risk a
+      tight timeout would add to a real-subprocess test; the production
+      budget itself is proven separately, as pure arithmetic over
+      `timeout`/`_CLEANUP_GRACE_S`, not as an elapsed-time assertion on a
+      real render. `TestLocalCacheRefreshWiring::test_project_backed_
+      target_with_no_cwd_refreshes_the_resolved_worktree` proves the
+      call-site placement (the correct, resolved `work_dir` reaches the
+      refresh call) using a mocked `refresh_local_cache`, not a real
+      render -- real rendering from that exact call site is not
+      independently proven end to end; only the two facts above
+      (discovery mechanism, generic; real-render correctness, via a
+      relaxed timeout) are. Re-deriving Phase 7's own clean-room proof a
+      second time for a different trigger path would not close this
+      narrower gap either, so it is accepted as a known, bounded
+      limitation of this Phase's own test coverage rather than claimed
+      closed.
 - [x] **Stale-sibling-boot negative-proof, version-ordering case**: a
       `.local.instructions.md` sibling rendered from an older installed
       payload, left in place while the *checked-in* projection is
@@ -443,13 +453,14 @@ explicitly named follow-on slices; no other pre-session boundary besides
       file as authoritative, with correct reasoning (recognizing that
       whole-file length/the preamble's presence is *not* a precedence
       signal).
-- [ ] **Equal-version, differing-hash fail-safe negative-proof** (the
-      case where a dirty/local-checkout payload shares a declared version
-      with the checked-in copy but has genuinely different content --
-      fail safe to checked-in): **not reliably proven; left open rather
-      than claimed complete** (caught by PR #4947's own review, which
-      correctly declined to accept a passing claim this evidence doesn't
-      support). **Scenario D**: across 5 runs relying on memory/`view` to
+- [x] Deferred to `ThomasMichon/copilot-extensions#4960`: **Equal-version,
+      differing-hash fail-safe negative-proof** (the case where a
+      dirty/local-checkout payload shares a declared version with the
+      checked-in copy but has genuinely different content -- fail safe to
+      checked-in): **not reliably proven; left open rather than claimed
+      complete** (caught by PR #4947's own review, which correctly
+      declined to accept a passing claim this evidence doesn't support).
+      **Scenario D**: across 5 runs relying on memory/`view` to
       compare two long, near-identical `templateSha256` values (both
       before and after renaming the ambiguous "this file" fallback target
       to explicit "this checked-in file"), only **2/5** reached the
@@ -509,10 +520,14 @@ candidly documented, accepted limitations in `_kill_tree`'s and
 `_run_bounded`'s own docstrings -- fully closing either requires a new
 OS-level identity backend or a pre-execution handshake primitive this
 module doesn't have, disproportionate engineering for a defense-in-depth
-measure whose failure mode (a leaked descendant process on an already-rare
-platform/timing combination) is bounded and non-silent. Left as
-documented limitations rather than chased further, consistent with this
-effort's and `ambient-guidance-navigability`'s own established
+measure. The actual risk is not bounded or self-evident: when the
+baseline identity is missing, `_kill_tree` skips the group signal with no
+diagnostic, and `refresh_local_cache` does not surface that a cleanup
+attempt was skipped -- a surviving descendant on an affected platform/
+timing combination can keep running indefinitely with nothing in the
+logs to flag it, not merely "leak and eventually exit." Left as a known,
+honestly-characterized limitation rather than chased further, consistent
+with this effort's and `ambient-guidance-navigability`'s own established
 scoped-close pattern.
 
 CI's `guards + lint` job failed throughout on an unrelated, pre-existing,
