@@ -1588,6 +1588,30 @@ def test_governed_feed_not_configured_when_default_index_is_test_pypi():
     )
 
 
+def test_governed_feed_not_configured_when_public_pypi_host_has_trailing_dot():
+    # Regression: a fully-qualified hostname ending in "." (DNS-equivalent
+    # to the same host without it) must not bypass the public-PyPI
+    # denylist, even if that exact spelling is listed as trusted.
+    assert not bpa._governed_feed_configured(
+        env={"UV_DEFAULT_INDEX": "https://pypi.org./simple", _TRUST_VAR: "pypi.org."}
+    )
+    assert not bpa._governed_feed_configured(
+        env={"UV_DEFAULT_INDEX": "https://pypi.org./simple", _TRUST_VAR: "pypi.org"}
+    )
+
+
+def test_governed_feed_configured_when_trusted_host_has_trailing_dot_either_side():
+    # The normalization must work symmetrically: a trusted-list entry with
+    # a trailing dot must still match an index URL host without one, and
+    # vice versa.
+    assert bpa._governed_feed_configured(
+        env={"UV_DEFAULT_INDEX": "https://example.internal./simple", _TRUST_VAR: "example.internal"}
+    )
+    assert bpa._governed_feed_configured(
+        env={"UV_DEFAULT_INDEX": "https://example.internal/simple", _TRUST_VAR: "example.internal."}
+    )
+
+
 # --- resolve_toolchain_lock concurrent-publisher race --------------------
 
 
@@ -1705,15 +1729,19 @@ def test_resolve_toolchain_lock_pins_install_to_validated_index_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     # Regression: the install must be pinned to EXACTLY the one validated
-    # index (--no-config --index-url <url>), with any ambient
-    # supplemental-index environment variable stripped -- never trusting
-    # uv's own ambient config, which could otherwise still consult an
-    # untrusted supplemental index (UV_INDEX, or a plain [[index]] entry).
+    # index (--no-config --index-url <url>), with every ambient
+    # alternative-package-source environment variable stripped -- never
+    # trusting uv's own ambient config, which could otherwise still
+    # consult an untrusted supplemental index (UV_INDEX, UV_EXTRA_INDEX_URL,
+    # a plain [[index]] entry) or a flat-file link source (UV_FIND_LINKS,
+    # confirmed common on this repo's own clean-room runners).
     monkeypatch.setattr(
         btl, "_validated_trusted_index_url",
         lambda env: "https://governed.example/simple/",  # noqa: ARG005
     )
     monkeypatch.setenv("UV_INDEX", "https://untrusted.example/simple/")
+    monkeypatch.setenv("UV_EXTRA_INDEX_URL", "https://untrusted.example/extra/")
+    monkeypatch.setenv("UV_FIND_LINKS", "https://untrusted.example/links/")
     venv_dir = tmp_path / "toolchain-venv"
     install_cmds = []
     install_kwargs = []
@@ -1745,6 +1773,8 @@ def test_resolve_toolchain_lock_pins_install_to_validated_index_only(
     install_env = install_kwargs[0].get("env")
     assert install_env is not None
     assert "UV_INDEX" not in install_env
+    assert "UV_EXTRA_INDEX_URL" not in install_env
+    assert "UV_FIND_LINKS" not in install_env
 
 
 # --- build-system.requires enforcement against the locked toolchain -----
@@ -1792,13 +1822,15 @@ def test_build_wheel_accepts_toolchain_meeting_declared_build_requires(
     bpa.build_wheel(src_dir, tmp_path / "dist", toolchain=toolchain)  # must not raise
 
 
-def test_build_wheel_ignores_build_requires_for_packages_outside_toolchain(
+def test_build_wheel_matches_build_requires_name_case_insensitively(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # A requirement on a package this toolchain doesn't lock (e.g. a
-    # project-specific build backend) is out of scope for this check.
+    # Regression: PEP 508 names are case-insensitive, but Requirement.name
+    # preserves the source's own literal spelling -- a declared
+    # "Setuptools>=60" must still match the locked lowercase "setuptools"
+    # entry rather than being treated as "not locked at all".
     src_dir = tmp_path / "src"
-    _write_build_system_requires(src_dir, ["some-other-backend>=999.0.0"])
+    _write_build_system_requires(src_dir, ["Setuptools>=60.0.0", "Wheel"])
     toolchain = bpa.ToolchainLock(
         tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
     )
@@ -1809,6 +1841,27 @@ def test_build_wheel_ignores_build_requires_for_packages_outside_toolchain(
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
     bpa.build_wheel(src_dir, tmp_path / "dist", toolchain=toolchain)  # must not raise
+
+
+def test_build_wheel_rejects_build_requires_for_packages_outside_toolchain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: an applicable requirement on a package this toolchain
+    # does NOT lock at all (e.g. a project-specific build backend) must
+    # fail closed, not be silently treated as satisfied -- with
+    # --no-build-isolation, nothing installs it automatically.
+    src_dir = tmp_path / "src"
+    _write_build_system_requires(src_dir, ["some-other-backend>=999.0.0"])
+    toolchain = bpa.ToolchainLock(
+        tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
+    )
+
+    def fake_run(cmd, **kwargs):  # noqa: ARG001
+        raise AssertionError("uv build must never run once the pre-check fails")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError):
+        bpa.build_wheel(src_dir, tmp_path / "dist", toolchain=toolchain)
 
 
 def test_build_wheel_ignores_build_requires_with_inapplicable_marker(
