@@ -93,9 +93,9 @@ def test_compile_internal_token_whole_word_escapes_literal():
 
 def test_compile_internal_token_case_sensitive_wraps_group():
     token = iblk._compile_internal_token(
-        {"token": "CAR", "whole_word": True, "case_sensitive": True}, context="t",
+        {"token": "ABC", "whole_word": True, "case_sensitive": True}, context="t",
     )
-    assert token == r"regex:(?-i:\bCAR\b)"
+    assert token == r"regex:(?-i:\bABC\b)"
 
 
 def test_compile_internal_token_empty_token_raises():
@@ -266,6 +266,13 @@ def test_parse_blocklist_file_rejects_token_with_semicolon(tmp_path: Path):
         iblk.parse_blocklist_file(f, "r", "public")
 
 
+def test_parse_blocklist_file_rejects_unknown_field(tmp_path: Path):
+    f = tmp_path / "block-for-public.yaml"
+    f.write_text("entries:\n  - token: x\n    case_sensitve: true\n", encoding="utf-8")
+    with pytest.raises(iblk.BlocklistParseError, match="unknown field"):
+        iblk.parse_blocklist_file(f, "r", "public")
+
+
 def test_parse_blocklist_file_unreadable_raises_not_silent(tmp_path: Path, monkeypatch):
     """A permissions/IO error reading an EXISTING file must be surfaced, not
     treated the same as the file simply being absent."""
@@ -354,7 +361,7 @@ def test_sweep_deduplicates_identical_entries(home: Path, tmp_path: Path):
 
 
 def test_sweep_preserves_case_sensitive_entries_distinctly(home: Path, tmp_path: Path):
-    """Two case-sensitive entries differing only by case (CAR vs car) must
+    """Two case-sensitive entries differing only by case (ABC vs abc) must
     not collapse into one -- lowercasing the dedup key would silently drop
     enforcement for one of the two spellings."""
     source = tmp_path / "source"
@@ -362,11 +369,11 @@ def test_sweep_preserves_case_sensitive_entries_distinctly(home: Path, tmp_path:
     _write_blocklist(
         source, "public",
         "entries:\n"
-        "  - token: CAR\n"
+        "  - token: ABC\n"
         "    whole_word: true\n"
         "    case_sensitive: true\n"
         "    reason: same reason\n"
-        "  - token: car\n"
+        "  - token: abc\n"
         "    whole_word: true\n"
         "    case_sensitive: true\n"
         "    reason: same reason\n",
@@ -378,7 +385,7 @@ def test_sweep_preserves_case_sensitive_entries_distinctly(home: Path, tmp_path:
     entries = iblk.sweep("target")
     assert len(entries) == 2
     tokens = {e.token for e in entries}
-    assert tokens == {r"regex:(?-i:\bCAR\b)", r"regex:(?-i:\bcar\b)"}
+    assert tokens == {r"regex:(?-i:\bABC\b)", r"regex:(?-i:\babc\b)"}
 
 
 def test_sweep_ignores_repo_with_no_local_path(home: Path, tmp_path: Path):

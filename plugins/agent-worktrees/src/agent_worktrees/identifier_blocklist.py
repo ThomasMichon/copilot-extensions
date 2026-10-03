@@ -31,7 +31,7 @@ entries:
     kind: regex
     reason: Standalone internal abbreviation -- use a generic service placeholder
 
-  - token: CAR
+  - token: ABC
     whole_word: true
     case_sensitive: true
     reason: Case-sensitive acronym for a private repo -- refer to it generically
@@ -146,6 +146,9 @@ def applicable_tiers(target_rank: int) -> list[str]:
     ]
 
 
+_KNOWN_ENTRY_FIELDS = frozenset({"token", "kind", "whole_word", "case_sensitive", "reason"})
+
+
 def _require_bool(raw: dict, key: str, *, context: str) -> bool:
     """Strictly validate a boolean schema field.
 
@@ -172,11 +175,18 @@ def _compile_internal_token(raw: dict, *, context: str) -> str:
     same shape :func:`render_ci_format` and every downstream consumer
     already understands. Raises :class:`BlocklistParseError` (naming
     *context*, typically ``<path> (entry #N)``) for a missing/empty
-    ``token`` field, an unrecognized ``kind``, or a non-boolean
-    ``whole_word``/``case_sensitive`` value -- a typo here must never
-    silently fall back to a narrower, wrong interpretation while reporting
-    success.
+    ``token`` field, an unrecognized ``kind``, an unrecognized field name,
+    or a non-boolean ``whole_word``/``case_sensitive`` value -- a typo here
+    must never silently fall back to a narrower, wrong interpretation while
+    reporting success.
     """
+    unknown = set(raw) - _KNOWN_ENTRY_FIELDS
+    if unknown:
+        plural = "s" if len(unknown) != 1 else ""
+        raise BlocklistParseError(
+            f"{context}: unknown field{plural} {sorted(unknown)!r} (expected one "
+            f"of: {', '.join(sorted(_KNOWN_ENTRY_FIELDS))}) -- check for a typo"
+        )
     token = str(raw.get("token", "") or "").strip()
     if not token:
         raise BlocklistParseError(f"{context}: missing required 'token' field")
@@ -292,7 +302,7 @@ def _dedup_key(token: str) -> str:
     """Case-aware deduplication key for a token.
 
     Lowercasing every token (as the aggregator used to) breaks a
-    ``case_sensitive`` entry: ``CAR`` and ``car`` compile to distinct
+    ``case_sensitive`` entry: ``ABC`` and ``abc`` compile to distinct
     ``(?-i:...)`` regex tokens that must stay distinct, not collapse into
     one. A literal token is still lowercased (its own matching is always
     case-insensitive, so two differently-cased spellings of the same

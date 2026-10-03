@@ -92,7 +92,7 @@ entries:
     kind: regex
     reason: Standalone internal abbreviation -- use a generic service placeholder
 
-  - token: CAR
+  - token: ABC
     whole_word: true
     case_sensitive: true
     reason: Case-sensitive acronym for a private repo -- refer to it generically
