@@ -517,6 +517,23 @@ win grows with build complexity.
   variable set to this machine's actual governed-feed host) that
   `agent-bridge` still builds correctly, and confirmed the tool now fails
   closed with a clear error when that variable is unset.
+- A sixth review round found one more real issue: the marker-environment
+  query script computed `implementation_version` from
+  `platform.python_version()`, but PEP 508's `implementation_version` is
+  properly `sys.implementation.version` (formatted the same way
+  `packaging.markers`' own internal `format_full_version` helper does) --
+  these coincide on CPython but diverge on alternative implementations
+  (e.g. PyPy), where a marker keyed on `implementation_version` could
+  silently take the wrong branch despite the fix claiming to evaluate
+  against the actually-locked interpreter. Fixed by computing it from
+  `sys.implementation.version`'s own `major.minor.micro` (+ a release-
+  level/serial suffix for a non-final release) inside the query script
+  itself. 1 more unit test (107 total), running the real query script
+  end-to-end against the actual interpreter to prove the computed value
+  matches `sys.implementation.version` rather than `platform.python_version()`.
+  This slice has now gone through 6 automated review rounds, each finding
+  genuine, progressively narrower issues -- consistent with this effort's
+  own documented review history on its prior slice.
 - Real smoke test (not just mocked unit tests): built `agent-bridge` (10
   wheels) then `agent-worktrees` (its own wheel + vendored libs) against
   the SAME `--toolchain-venv` -- both manifests recorded the identical

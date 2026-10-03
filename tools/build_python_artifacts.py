@@ -670,12 +670,23 @@ def _venv_python_path(venv_dir: Path) -> Path:
 #: reports the same keys `packaging.markers.default_environment()` would,
 #: queried by running it THROUGH the locked interpreter itself -- so a
 #: PEP 508 marker evaluates against the actually-locked Python, never
-#: whatever process happens to be running this tool.
+#: whatever process happens to be running this tool. ``implementation_version``
+#: is deliberately computed from ``sys.implementation.version`` (mirroring
+#: `packaging.markers`' own `format_full_version` helper), NOT
+#: `platform.python_version()` -- they coincide on CPython but diverge on
+#: alternative implementations (e.g. PyPy), where a marker on
+#: `implementation_version` would otherwise silently take the wrong branch.
 _MARKER_ENV_QUERY_SCRIPT = (
     "import json, os, platform, sys\n"
+    "def _format_full_version(info):\n"
+    "    version = f'{info.major}.{info.minor}.{info.micro}'\n"
+    "    kind = info.releaselevel\n"
+    "    if kind != 'final':\n"
+    "        version += kind[0] + str(info.serial)\n"
+    "    return version\n"
     "print(json.dumps({\n"
     "    'implementation_name': sys.implementation.name,\n"
-    "    'implementation_version': platform.python_version(),\n"
+    "    'implementation_version': _format_full_version(sys.implementation.version),\n"
     "    'os_name': os.name,\n"
     "    'platform_machine': platform.machine(),\n"
     "    'platform_release': platform.release(),\n"
