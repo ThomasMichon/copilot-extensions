@@ -64,9 +64,33 @@ CREATE TABLE IF NOT EXISTS sync_meta (
 
 _LAST_FULL_SYNC_KEY = "last_full_sync_at"
 _TRACKER_IDENTITY_KEY = "tracker_identity"
+_INDEX_SIGNATURE_KEY = "index_signature"
 #: Sentinel relpath for the provenance sidecar's own stat entry -- distinct
 #: from any real in-tree relative path, so it can never collide.
 _PROVENANCE_ENTRY = "\0provenance"
+#: Global session-index files -- transferred alongside (not under)
+#: session-state/ for an unfiltered push (see
+#: ``agent_logger.sync.targets.base.SESSION_INDEX_NAMES``, duplicated here
+#: as a narrow literal tuple to avoid importing the targets package from
+#: this lower-level module).
+_INDEX_NAMES = ("session-store.db", "session-store.db-wal", "session-store.db-shm")
+
+
+def _compute_index_signature(source: Path) -> str:
+    """Stat-only signature over the global session-index files, so an
+    index-only change (no individual session touched) is still detected --
+    per-session signatures alone would never see it."""
+    hasher = hashlib.sha256()
+    entries: list[tuple[str, int, int]] = []
+    for name in _INDEX_NAMES:
+        try:
+            stat_result = (source / name).stat()
+        except OSError:
+            continue
+        entries.append((name, stat_result.st_size, stat_result.st_mtime_ns))
+    for name, size, mtime_ns in sorted(entries):
+        hasher.update(f"{name}\0{size}\0{mtime_ns}\n".encode())
+    return hasher.hexdigest()
 
 
 def compute_signature(session_dir: Path, provenance_file: Path | None = None) -> str:
@@ -323,6 +347,32 @@ class ChangeTracker:
                 "INSERT INTO sync_meta (key, value) VALUES (?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (_TRACKER_IDENTITY_KEY, identity),
+            )
+
+    def index_changed(self, source: Path) -> bool:
+        """Whether the global session-index files' own stat signature
+        differs from what was last recorded.
+
+        An index-only change (every individual session's own signature
+        unchanged) would otherwise never be detected by per-session change
+        tracking alone, leaving an unfiltered destination's index stale.
+        """
+        signature = _compute_index_signature(source)
+        with _connect(self.db_path) as conn:
+            row = conn.execute(
+                "SELECT value FROM sync_meta WHERE key = ?", (_INDEX_SIGNATURE_KEY,)
+            ).fetchone()
+        return row is None or row[0] != signature
+
+    def record_index(self, source: Path) -> None:
+        """Persist the global session-index files' current stat signature
+        as synced (see :meth:`index_changed`)."""
+        signature = _compute_index_signature(source)
+        with _connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO sync_meta (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (_INDEX_SIGNATURE_KEY, signature),
             )
 
     def reset(self) -> None:

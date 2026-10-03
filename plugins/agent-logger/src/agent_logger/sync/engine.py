@@ -89,6 +89,25 @@ def _all_session_ids(source: Path) -> list[str]:
     return sorted(d.name for d in session_state.iterdir() if d.is_dir())
 
 
+def _record_push_result(
+    tracker, snapshot: dict[str, str], result, unfiltered: bool, source: Path
+) -> None:
+    """After a successful push, persist only sessions that fully transferred.
+
+    A session with at least one deferred (locked) file did NOT fully land --
+    recording its signature anyway would permanently mask the gap once the
+    file unlocks without its size/mtime changing again. Also refreshes the
+    index tracker whenever this push was unfiltered (batch_mode always
+    carries the global index then, regardless of which sessions it covers).
+    """
+    to_record = {
+        sid: sig for sid, sig in snapshot.items() if sid not in result.deferred_sessions
+    }
+    tracker.record_signatures(to_record)
+    if unfiltered:
+        tracker.record_index(source)
+
+
 def _push_incremental(
     cfg: Config,
     target,
@@ -131,16 +150,28 @@ def _push_incremental(
     # an unfiltered push would.
     unfiltered = include is None
     identity = f"{source}|{target.describe()}|{machine}"
+    identity_stale = tracker.identity_changed(identity)
     do_full = (
         force_full
-        or tracker.identity_changed(identity)
+        or identity_stale
         or tracker.should_full_sync(settings["full_sync_interval_hours"])
     )
+    if do_full and (force_full or identity_stale):
+        # A forced pass or a changed destination identity makes every
+        # existing signature/marker untrustworthy: signatures are purely
+        # content-based, so a session unchanged since it was last sent to a
+        # DIFFERENT destination would otherwise look "already synced" here
+        # too, even though this destination never received it; and a stale
+        # "recently full-synced" marker surviving a failed forced attempt
+        # would let the next routine run skip retrying it. Clear the slate
+        # so every batch below rebuilds trustworthy state from scratch.
+        tracker.reset()
 
     if not do_full:
         changed = tracker.changed_sessions(source, include)
         final_include = changed if include is None else (changed & include)
-        if not final_include:
+        index_due = unfiltered and tracker.index_changed(source)
+        if not final_include and not index_due:
             target.heartbeat(machine)
             return PushResult(ok=True, detail="no session changes detected")
         # Snapshot before the transfer, not after: a signature recomputed
@@ -149,7 +180,7 @@ def _push_incremental(
         snapshot = tracker.snapshot(source, final_include)
         result = target.push(source, machine, final_include, batch_mode=unfiltered)
         if result.ok:
-            tracker.record_signatures(snapshot)
+            _record_push_result(tracker, snapshot, result, unfiltered, source)
         return result
 
     all_ids = _all_session_ids(source)
@@ -162,7 +193,13 @@ def _push_incremental(
     excluded_roots: list[str] = []
     measurement_complete = True
     batch_count = 0
-    for batch in chunked(all_ids, settings["batch_size"]):
+    # An unfiltered reconciliation with zero session dirs still needs one
+    # push call to carry an index-only change -- otherwise `run --full`
+    # on a source with no sessions yet would push nothing at all.
+    batches = list(chunked(all_ids, settings["batch_size"])) or (
+        [[]] if unfiltered else []
+    )
+    for batch in batches:
         batch_count += 1
         if verbose:
             print(f"session-sync: full sync batch {batch_count} ({len(batch)} session(s))")
@@ -175,13 +212,17 @@ def _push_incremental(
         total_excluded_bytes += result.excluded_byte_count
         excluded_roots.extend(result.excluded_roots)
         measurement_complete = measurement_complete and result.excluded_measurement_complete
-        tracker.record_signatures(snapshot)
+        _record_push_result(tracker, snapshot, result, unfiltered, source)
 
     vanished = tracker.vanished_sessions(source)
     if vanished:
         tracker.forget(vanished)
-    tracker.mark_full_sync()
+    # Identity before the completion marker: an interrupted exit here still
+    # leaves `should_full_sync` due (no fresh marker), so a later run forces
+    # another full reconciliation instead of silently trusting a signature
+    # set recorded under an identity that was never actually confirmed.
     tracker.record_identity(identity)
+    tracker.mark_full_sync()
 
     detail = (
         f"full reconciliation: {len(all_ids)} session(s) in {batch_count} batch(es)"

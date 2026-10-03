@@ -2330,6 +2330,114 @@ def test_engine_run_sync_preserves_index_for_unfiltered_incremental_push(
     assert (machine_dir / "session-store.db").read_text(encoding="utf-8") == "index-v2"
 
 
+def test_engine_run_sync_pushes_index_only_change_with_no_session_changes(
+    tmp_path: Path,
+) -> None:
+    """An index-only change (no individual session touched) must still be
+    detected and pushed on the next incremental run, not silently skipped."""
+    src = _make_source(tmp_path)
+    (src / "session-store.db").write_text("index-v1", encoding="utf-8")
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    assert engine.run_sync(cfg) == 0
+    machine_dir = next(dest.iterdir())
+    assert (machine_dir / "session-store.db").read_text(encoding="utf-8") == "index-v1"
+
+    (src / "session-store.db").write_text("index-v2-only", encoding="utf-8")
+    assert engine.run_sync(cfg) == 0
+    assert (
+        machine_dir / "session-store.db"
+    ).read_text(encoding="utf-8") == "index-v2-only"
+
+
+def test_engine_run_sync_full_pushes_index_only_source_with_no_sessions(
+    tmp_path: Path,
+) -> None:
+    """A full reconciliation must still carry an index-only source (zero
+    session directories) -- an empty batch list must not skip the index."""
+    src = tmp_path / "copilot"
+    src.mkdir()
+    (src / "session-store.db").write_text("index-only", encoding="utf-8")
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    assert engine.run_sync(cfg, full=True) == 0
+    machine_dir = next(dest.iterdir())
+    assert (
+        machine_dir / "session-store.db"
+    ).read_text(encoding="utf-8") == "index-only"
+
+
+def test_engine_run_sync_resets_stale_signatures_on_identity_change(
+    tmp_path: Path,
+) -> None:
+    """A session unchanged since it was last synced to destination A must
+    still be pushed to a NEW destination B -- its stale, content-only
+    signature from A must not fool B's incremental check into skipping it."""
+    src = tmp_path / "copilot"
+    for name in ("x", "y"):
+        sess = src / "session-state" / name
+        sess.mkdir(parents=True)
+        (sess / "events.jsonl").write_text(f'{{"id": "{name}"}}\n', encoding="utf-8")
+    dest_a = tmp_path / "dest-a"
+    cfg = _cfg(tmp_path / "home", src, dest_a)
+    cfg._data["sync"]["repo_allowlist"] = []
+
+    assert engine.run_sync(cfg) == 0
+    assert (dest_a / next(dest_a.iterdir()).name / "session-state" / "y").is_dir()
+
+    dest_b = tmp_path / "dest-b"
+    cfg._data["sync"]["targets"]["local"]["path"] = str(dest_b)
+
+    # y's content never changes -- only the destination does.
+    assert engine.run_sync(cfg) == 0
+    machine_dir = next(dest_b.iterdir())
+    assert (machine_dir / "session-state" / "x").is_dir()
+    assert (machine_dir / "session-state" / "y").is_dir()
+
+
+def test_engine_run_sync_does_not_record_deferred_session_signature(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    """A session with a deferred (locked) file during the push must not be
+    recorded as synced -- it must still show up as changed next run."""
+    src = _make_source(tmp_path)
+    dest = tmp_path / "dest"
+    cfg = _cfg(tmp_path / "home", src, dest)
+
+    from agent_logger.sync.targets.base import PushResult
+
+    real_push = LocalTarget.push
+    calls: list[set] = []
+
+    def _deferring_push(self, source, machine, include_sessions=None, *, batch_mode=False):
+        result = real_push(
+            self, source, machine, include_sessions, batch_mode=batch_mode
+        )
+        calls.append(include_sessions)
+        if len(calls) == 1:
+            return PushResult(
+                ok=True,
+                detail=result.detail,
+                file_count=result.file_count,
+                deferred_sessions=("abc-123",),
+            )
+        return result
+
+    monkeypatch.setattr(LocalTarget, "push", _deferring_push)
+
+    assert engine.run_sync(cfg) == 0  # first (full) pass "defers" abc-123
+
+    from agent_logger.sync.change_tracker import ChangeTracker, resolve_db_path
+
+    tracker = ChangeTracker(resolve_db_path(cfg.sync_change_tracking["db_path"], cfg.home))
+    assert tracker.changed_sessions(src) == {"abc-123"}
+
+    assert engine.run_sync(cfg) == 0  # second pass retries it, this time clean
+    assert tracker.changed_sessions(src) == set()
+
+
 def test_hub_compaction_fails_closed_when_tracked_lookup_unresolved(
     monkeypatch, capsys, tmp_path: Path,
 ) -> None:

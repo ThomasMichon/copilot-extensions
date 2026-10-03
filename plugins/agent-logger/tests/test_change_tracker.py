@@ -298,3 +298,49 @@ def test_reset_clears_identity(tmp_path: Path) -> None:
     tracker.record_identity("source|target|machine")
     tracker.reset()
     assert tracker.identity_changed("source|target-b|machine") is False
+
+
+def test_index_changed_true_for_fresh_db(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    source = tmp_path / "copilot"
+    source.mkdir()
+    assert tracker.index_changed(source) is True
+
+
+def test_index_changed_false_after_record(tmp_path: Path) -> None:
+    source = tmp_path / "copilot"
+    source.mkdir()
+    (source / "session-store.db").write_text("v1", encoding="utf-8")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record_index(source)
+    assert tracker.index_changed(source) is False
+
+
+def test_index_changed_true_after_content_change(tmp_path: Path) -> None:
+    source = tmp_path / "copilot"
+    source.mkdir()
+    (source / "session-store.db").write_text("v1", encoding="utf-8")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record_index(source)
+    (source / "session-store.db").write_text("v2-longer", encoding="utf-8")
+    assert tracker.index_changed(source) is True
+
+
+def test_index_changed_ignores_missing_index_files(tmp_path: Path) -> None:
+    """An absent index (no session-store.db at all) is still a stable,
+    recordable signature -- not an error."""
+    source = tmp_path / "copilot"
+    source.mkdir()
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record_index(source)
+    assert tracker.index_changed(source) is False
+
+
+def test_reset_clears_index_signature(tmp_path: Path) -> None:
+    source = tmp_path / "copilot"
+    source.mkdir()
+    (source / "session-store.db").write_text("v1", encoding="utf-8")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record_index(source)
+    tracker.reset()
+    assert tracker.index_changed(source) is True

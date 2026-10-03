@@ -1394,6 +1394,17 @@ def _count_sessions(dest: Path) -> int:
     return sum(1 for d in base.iterdir() if d.is_dir())
 
 
+def _deferred_session_ids(locked_paths: list[Path]) -> tuple[str, ...]:
+    """Session ids with >=1 deferred (locked) file -- parsed from each path's
+    ``session-state/<id>/...`` or ``provenance/<id>.json`` shape."""
+    ids: set[str] = set()
+    for rel in locked_paths:
+        parts = rel.parts
+        if len(parts) >= 2 and parts[0] in ("session-state", "provenance"):
+            ids.add(Path(parts[1]).stem if parts[0] == "provenance" else parts[1])
+    return tuple(sorted(ids))
+
+
 class FilesystemTarget(Target):
     """Base for targets that publish to a local-or-mounted directory root."""
 
@@ -1499,7 +1510,7 @@ class FilesystemTarget(Target):
                 excluded_measurement_complete=detritus.measurement_complete,
             )
         try:
-            destination_detritus = discover_session_detritus(dest, None)
+            destination_detritus = discover_session_detritus(dest, include_sessions)
         except OSError as exc:
             return PushResult(
                 ok=False,
@@ -1557,7 +1568,7 @@ class FilesystemTarget(Target):
             return PushResult(ok=False, detail=f"cannot inspect source: {exc}")
 
         try:
-            latest_detritus = discover_session_detritus(source, None)
+            latest_detritus = discover_session_detritus(source, include_sessions)
         except OSError as exc:
             return PushResult(
                 ok=False,
@@ -1610,6 +1621,7 @@ class FilesystemTarget(Target):
             excluded_byte_count=detritus.byte_count,
             excluded_roots=tuple(str(root) for root in detritus.roots),
             excluded_measurement_complete=detritus.measurement_complete,
+            deferred_sessions=_deferred_session_ids(locked_paths),
         )
 
     def sync_status(self, machine: str) -> SyncStatus:

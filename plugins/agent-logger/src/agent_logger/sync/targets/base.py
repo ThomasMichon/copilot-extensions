@@ -239,6 +239,14 @@ class PushResult:
     excluded_byte_count: int = 0
     excluded_roots: tuple[str, ...] = ()
     excluded_measurement_complete: bool = True
+    #: Session ids with at least one file deferred (e.g. a transient Windows
+    #: sharing violation on a live in-use file) -- a transfer that reported
+    #: ``ok=True`` overall but did NOT fully land for these ids. A caller
+    #: tracking "what's already synced" (see
+    #: :mod:`agent_logger.sync.change_tracker`) must not mark a deferred
+    #: session as synced, or an incomplete transfer gets permanently masked
+    #: once the file unlocks without its size/mtime changing again.
+    deferred_sessions: tuple[str, ...] = ()
 
 
 @dataclass
