@@ -1918,6 +1918,132 @@ def test_cli_owners_is_global_via_control_plane(tmp_path: Path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Audience + AI-attribution override: schema round-trip, normalization,
+# resolved disclosure policy
+# ---------------------------------------------------------------------------
+
+def test_audience_roundtrips(tmp_path: Path):
+    cfg = RelatedConfig(related={
+        "pub": RelatedEntry(name="pub", audience="public"),
+        "priv": RelatedEntry(
+            name="priv", audience="private",
+            ai_attribution={"disclose_on_open": False, "disclose_on_reply": True},
+        ),
+    })
+    related.write_related(tmp_path, cfg)
+    got = related.read_related(tmp_path)
+    assert got.related["pub"].audience == "public"
+    assert got.related["priv"].audience == "private"
+    assert got.related["priv"].ai_attribution == {
+        "disclose_on_open": False, "disclose_on_reply": True,
+    }
+    # Emitted YAML is valid + carries the fields.
+    data = yaml.safe_load(related.related_path(tmp_path).read_text(encoding="utf-8"))
+    assert data["related"]["pub"]["audience"] == "public"
+    assert data["related"]["priv"]["ai_attribution"]["disclose_on_open"] is False
+    assert data["related"]["priv"]["ai_attribution"]["disclose_on_reply"] is True
+
+
+def test_normalize_audience_drops_unknown():
+    assert related.normalize_audience("PUBLIC") == "public"
+    assert related.normalize_audience("  private ") == "private"
+    assert related.normalize_audience("owned") == ""  # not in VALID_AUDIENCE
+    assert related.normalize_audience(None) == ""
+
+
+def test_read_drops_bogus_audience(tmp_path: Path):
+    related.related_path(tmp_path).parent.mkdir(parents=True, exist_ok=True)
+    related.related_path(tmp_path).write_text(
+        "related:\n  x:\n    audience: bogus\n", encoding="utf-8")
+    e = related.read_related(tmp_path).related["x"]
+    assert e.audience == ""  # bogus dropped
+
+
+def test_parse_ai_attribution_drops_unknown_keys_and_nonbool_values():
+    assert related._parse_ai_attribution(
+        {"disclose_on_open": False, "unknown_key": True, "disclose_on_reply": "yes"}
+    ) == {"disclose_on_open": False}  # unknown key + non-bool value both dropped
+    assert related._parse_ai_attribution("not a dict") == {}
+    assert related._parse_ai_attribution(None) == {}
+
+
+def test_no_audience_emits_nothing(tmp_path: Path):
+    cfg = RelatedConfig(related={"x": RelatedEntry(name="x", role="tooling")})
+    related.write_related(tmp_path, cfg)
+    data = yaml.safe_load(related.related_path(tmp_path).read_text(encoding="utf-8"))
+    assert "audience" not in data["related"]["x"]
+    assert "ai_attribution" not in data["related"]["x"]
+
+
+def test_upsert_merges_audience_and_ai_attribution(tmp_path: Path):
+    related.upsert_related(tmp_path, RelatedEntry(name="x", role="tooling"))
+    related.upsert_related(tmp_path, RelatedEntry(
+        name="x", audience="private", ai_attribution={"disclose_on_open": False}))
+    e = related.get_related(tmp_path, "x")
+    assert e.role == "tooling"       # preserved
+    assert e.audience == "private"   # added
+    assert e.ai_attribution == {"disclose_on_open": False}
+    # A second upsert narrowing further merges rather than replaces.
+    related.upsert_related(tmp_path, RelatedEntry(
+        name="x", ai_attribution={"disclose_on_reply": False}))
+    e = related.get_related(tmp_path, "x")
+    assert e.ai_attribution == {
+        "disclose_on_open": False, "disclose_on_reply": False,
+    }
+
+
+def test_effective_audience_never_derives():
+    """Unlike effective_ownership, an unset audience must stay empty --
+    there is no derivation fallback to guess it from."""
+    assert related.effective_audience(RelatedEntry(name="x")) == ""
+    assert related.effective_audience(
+        RelatedEntry(name="x", audience="private")) == "private"
+
+
+def test_effective_ai_attribution_defaults_by_audience():
+    # public/internal/unclassified all default to disclosure required.
+    assert related.effective_ai_attribution(
+        RelatedEntry(name="x", audience="public")) == {
+        "disclose_on_open": True, "disclose_on_reply": True,
+    }
+    assert related.effective_ai_attribution(
+        RelatedEntry(name="x", audience="internal")) == {
+        "disclose_on_open": True, "disclose_on_reply": True,
+    }
+    assert related.effective_ai_attribution(RelatedEntry(name="x")) == {
+        "disclose_on_open": True, "disclose_on_reply": True,
+    }
+    # private defaults both to False.
+    assert related.effective_ai_attribution(
+        RelatedEntry(name="x", audience="private")) == {
+        "disclose_on_open": False, "disclose_on_reply": False,
+    }
+
+
+def test_effective_ai_attribution_override_narrows_only_the_stated_key():
+    # A public repo with only disclose_on_open overridden off keeps
+    # disclose_on_reply at its audience-derived default (True).
+    e = RelatedEntry(
+        name="x", audience="public",
+        ai_attribution={"disclose_on_open": False},
+    )
+    assert related.effective_ai_attribution(e) == {
+        "disclose_on_open": False, "disclose_on_reply": True,
+    }
+    # A private repo with disclose_on_reply explicitly turned ON keeps the
+    # explicit widening (the per-entry override is honored verbatim; the
+    # "never widens beyond audience" rule is about *default behavior* when a
+    # key is absent, not a cap on an operator's own explicit choice).
+    e2 = RelatedEntry(
+        name="x", audience="private",
+        ai_attribution={"disclose_on_reply": True},
+    )
+    assert related.effective_ai_attribution(e2) == {
+        "disclose_on_open": False, "disclose_on_reply": True,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Current-machine detection for `related list` / `related resolve`
 # ---------------------------------------------------------------------------
 

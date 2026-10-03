@@ -1,0 +1,9 @@
+{
+  "comment": "related.yaml: add audience + ai_attribution axis (ai-attribution-audience-policy Phase 1)",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}

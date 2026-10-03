@@ -39,6 +39,7 @@ def _related_usage() -> None:
     print("  add <name>                          Link a related repo + scaffold its doc")
     print("     [--role R] [--summary S] [--doc PATH] [--delegate D]")
     print("     [--ownership owned|internal|external] [--owner ACCOUNT]")
+    print("     [--audience public|internal|private]")
     print("     [--locus L] [--machines a,b] [--primary] [--no-scaffold]")
     print("     [--cs-repo R] [--cs-machine M] [--cs-location L]")
     print("     [--cs-workspace DIR]                                (codespace locus)")
@@ -422,6 +423,8 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                             "delegate": e.delegate,
                             "ownership": related.effective_ownership(e),
                             "owner": e.owner,
+                            "audience": related.effective_audience(e),
+                            "ai_attribution": related.effective_ai_attribution(e),
                             "provenance": related.entry_provenance(e),
                             "locus": {
                                 "preferred": e.locus.preferred,
@@ -470,6 +473,9 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                     "ownership": related.effective_ownership(e),
                     "ownership_explicit": e.ownership,
                     "owner": e.owner,
+                    "audience": related.effective_audience(e),
+                    "audience_explicit": e.audience,
+                    "ai_attribution": related.effective_ai_attribution(e),
                     "provenance": related.entry_provenance(e),
                     "locus": {
                         "preferred": e.locus.preferred,
@@ -566,6 +572,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             delegate=related.normalize_delegate(_related_opt(rest, "--delegate", "")),
             ownership=related.normalize_ownership(_related_opt(rest, "--ownership", "")),
             owner=(_related_opt(rest, "--owner", "") or "").strip(),
+            audience=related.normalize_audience(_related_opt(rest, "--audience", "")),
         )
         if not entry.ownership:
             derived, owner = related.classify_ownership(name)
@@ -701,6 +708,8 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                     ),
                     "ownership": related.effective_ownership(entry),
                     "owner": entry.owner,
+                    "audience": related.effective_audience(entry),
+                    "ai_attribution": related.effective_ai_attribution(entry),
                     "delegate_via": resn.delegate_via,
                     "current_machine": current_machine,
                     "steps": resn.steps,
@@ -756,6 +765,14 @@ def cmd_related_dispatch(argv: list[str]) -> int:
         if resn.delegate_via:
             print(f"  delegate: {resn.delegate_via}")
         print(f"  machine:  {current_machine or '(unknown)'}")
+        _audience = related.effective_audience(entry)
+        if _audience:
+            _policy = related.effective_ai_attribution(entry)
+            print(
+                f"  audience: {_audience}  "
+                f"(AI-attribution: open={_policy['disclose_on_open']}, "
+                f"reply={_policy['disclose_on_reply']})"
+            )
         for n in resn.notes:
             output.warn(n)
         print()
