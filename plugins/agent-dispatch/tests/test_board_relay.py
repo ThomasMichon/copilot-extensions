@@ -1208,6 +1208,49 @@ def test_snapshot_full_refetch_pins_endpoint_to_the_connected_coordinator(
         assert seen["relay_endpoint"] == "http://pinned-endpoint:5678"
 
 
+def test_snapshot_full_refetch_preserves_relay_cache_on_transient_failure(
+    monkeypatch,
+):
+    """`board_cli._build()` itself catches any `relay_fetch_many` failure
+    and silently falls back to an empty relay cache for that pass -- so a
+    transient `/worktree-status-relays` blip never raises up to
+    `full_refetch()` at all. Without its own detection, `full_refetch()`
+    would report success and wipe every row's cached worktree-relay status
+    instead of preserving it. This proves a fetch failure on a *second*
+    call falls back to the first call's successfully-cached relay entry,
+    rather than showing it as unknown."""
+    call = {"n": 0}
+
+    def fake_fetch_raw_tasks_direct(args, *, endpoint=None):
+        return [{"id": "t1", "repo": "r", "owner": "m1/wt1", "status": "started"}]
+
+    def fake_relay_fetch_many(refs, *, endpoint=None):
+        call["n"] += 1
+        if call["n"] == 1:
+            return {ref: {"turn_state": "active"} for ref in refs}
+        raise RuntimeError("relay endpoint unreachable")
+
+    monkeypatch.setattr(
+        board_cli, "_fetch_raw_tasks_direct", fake_fetch_raw_tasks_direct
+    )
+    monkeypatch.setattr(board_cli, "_relay_fetch_many", fake_relay_fetch_many)
+
+    args = types.SimpleNamespace(machine="m1", recent_mins=60)
+    snapshot = board_relay._Snapshot(args, "http://pinned-endpoint:5678")
+
+    first_rows = snapshot.full_refetch()
+    assert first_rows is not None
+    assert snapshot.relay_cache == {("r", "wt1"): {"turn_state": "active"}}
+
+    second_rows = snapshot.full_refetch()
+
+    assert second_rows is not None  # a relay-only failure is not fatal
+    assert call["n"] == 2
+    # The previously-cached entry must survive the second (failed) fetch --
+    # never silently replaced with an empty cache.
+    assert snapshot.relay_cache == {("r", "wt1"): {"turn_state": "active"}}
+
+
 def test_establish_with_fallback_polling_keeps_polling_during_the_handshake(
     monkeypatch,
 ):

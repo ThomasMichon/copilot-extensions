@@ -265,7 +265,18 @@ class _Snapshot:
         """One full network re-fetch + relay lookup, refreshing the cached
         raw tasks/relay entries :meth:`recompute_only` reads. Returns the
         new rows, or ``None`` on a transient failure (caller keeps the
-        previous snapshot and tries again later)."""
+        previous snapshot and tries again later).
+
+        ``board_cli._build()`` itself catches any ``relay_fetch_many``
+        failure and silently falls back to an empty relay cache for that
+        pass (so a transient ``/worktree-status-relays`` blip never
+        actually raises here) -- which would otherwise make this method
+        quietly wipe every row's cached worktree-relay status instead of
+        preserving it. ``_tracking_fetch_many`` below detects that failure
+        itself (not relying on an exception reaching this method at all)
+        and falls back to this snapshot's own previously-cached entries for
+        the affected refs, and the cache actually stored afterward is
+        merged with (never a flat replacement of) the prior one."""
         from . import board_cli
 
         try:
@@ -275,9 +286,19 @@ class _Snapshot:
         except Exception:
             return None
         cache: dict = {}
+        relay_fetch_failed = False
 
         def _tracking_fetch_many(refs):
-            fetched = board_cli._relay_fetch_many(refs, endpoint=self._endpoint)
+            nonlocal relay_fetch_failed
+            try:
+                fetched = board_cli._relay_fetch_many(refs, endpoint=self._endpoint)
+            except Exception:
+                relay_fetch_failed = True
+                # Preserve whatever this snapshot already knew about these
+                # refs from its last successful fetch, rather than letting
+                # `_build()`'s own blanket fallback silently show every row
+                # as having no worktree-relay status at all this pass.
+                fetched = {ref: self.relay_cache.get(ref) for ref in refs}
             cache.update(fetched)
             return fetched
 
@@ -290,6 +311,14 @@ class _Snapshot:
             )
         except Exception:
             return None
+        if relay_fetch_failed:
+            # Merge, don't replace: also keep any previously-cached ref
+            # this pass's rows didn't even touch (e.g. a task no longer
+            # worktree-claimed this pass), not just the ones re-fetched
+            # (or fallen back to) above.
+            merged = dict(self.relay_cache)
+            merged.update(cache)
+            cache = merged
         self.raw_tasks = tasks
         self.relay_cache = cache
         return rows
