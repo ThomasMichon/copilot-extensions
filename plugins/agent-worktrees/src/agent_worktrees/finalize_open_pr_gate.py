@@ -254,7 +254,7 @@ def _pr_entry_merge_status(pr, repo) -> bool | None:
     number = getattr(pr, "number", None)
     slug = getattr(pr, "repo", "") or ""
     if slug and "/" not in slug:
-        # Older records keep the project name ("odsp-web-harness"), not the
+        # Older records keep the project name ("my-project"), not the
         # hosting owner/name the provider needs: asking for it fails and
         # leaves a merged, aligned worktree unfinalizable forever. The tracked
         # PR URL names the real repository (its authority is checked below).

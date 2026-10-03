@@ -886,7 +886,7 @@ class TestPrMergeStatusIndeterminateVsUnmerged:
     record whose merge boundary genuinely can't be checked."""
 
     def test_a_project_name_repo_is_queried_by_the_slug_its_pr_url_names(self):
-        """Older records store the project name ("odsp-web-harness"), not the
+        """Older records store the project name ("my-project"), not the
         hosting owner/name: the provider must be asked for the URL's repo, or a
         merged, aligned worktree can never finalize."""
         from agent_worktrees import providers
@@ -902,12 +902,12 @@ class TestPrMergeStatusIndeterminateVsUnmerged:
         with mock.patch.object(providers, "get_provider", lambda _name: _Merged()), \
                 mock.patch.object(providers, "account_token_for_slug", lambda *_a: None):
             pr = SimpleNamespace(
-                branch="user/x/fix", repo="odsp-web-harness", number=584, provider="github",
-                state="merged", head_sha="", url="https://github.com/gim-home/odsp-web-harness/pull/584",
+                branch="user/x/fix", repo="my-project", number=584, provider="github",
+                state="merged", head_sha="", url="https://github.com/octo/my-project/pull/584",
             )
             repo = SimpleNamespace(pr=SimpleNamespace(provider="github", api_base=""))
             assert finalize_open_pr_gate.pr_merge_status(SimpleNamespace(pr=pr, prs=[pr]), repo) is True
-        assert asked[0] == ("gim-home/odsp-web-harness", 584)
+        assert asked[0] == ("octo/my-project", 584)
         assert pr.head_sha == "abc123"  # repaired in place for the boundary check
 
     def test_no_pr_at_all_is_confirmed_unmerged(self):
