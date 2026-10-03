@@ -43,7 +43,7 @@ distribution unit.
   `efforts/active/tiered-payload-provisioning/README.md`. The agent-index
   thin-client/heavy-server split is **already landed**
   (`efforts/active/agent-index-server-package-split/README.md`,
-  `efforts/active/agent-index-engine-daemon/README.md`) — do not re-plan it.
+  `efforts/active/agent-index-engine-daemon/README.md`) - do not re-plan it.
 - **What is genuinely missing** (this effort's actual scope): promotion-time
   first-party wheel/manifest generation keyed to payload hash + platform +
   architecture + Python ABI; a governed-feed-aware dependency-closure
@@ -56,7 +56,7 @@ distribution unit.
   effort's artifact set too, not just the top-level plugin wheel.
 - Baseline measurements (directional, to be re-validated with this effort's
   own spike rather than assumed): representative Windows ZIP sizes around
-  12–25 MiB for most plugins; a complete-venv-archive distribution strategy
+  12-25 MiB for most plugins; a complete-venv-archive distribution strategy
   was estimated at roughly 400 MiB per OS/arch/ABI tuple, which is why this
   effort does not pursue that as the primary distribution unit.
 
@@ -66,8 +66,8 @@ distribution unit.
 > that plugin installers can check for a version-matching, hash-verified
 > release and download it directly instead of building a virtual
 > environment from source on every update? Third-party dependencies must
-> never be pulled through a public hosted package index — only through the
-> machine's governed, seasoned feed configuration — and the design must
+> never be pulled through a public hosted package index - only through the
+> machine's governed, seasoned feed configuration - and the design must
 > avoid an excessive version lock that pins a dependency version newer than
 > what the governed feed currently carries (governed feeds can lag public
 > releases by about a week). A single packaged binary is not an acceptable
@@ -75,18 +75,18 @@ distribution unit.
 
 ## Plan
 
-### Phase 1 — Spike: governed-feed-only install and timing baseline
+### Phase 1 - Spike: governed-feed-only install and timing baseline
 
 - [x] **Done (2026-10-02).** Proved a first-party wheel can be installed
       while every transitive third-party resolution uses only the
       machine's governed feed configuration. See Proposal for the evidence
       and method.
 - [x] **Done (2026-10-02).** Measured actual governed-feed propagation lag
-      across 3 real third-party dependencies — see Proposal. Lag is **not**
+      across 3 real third-party dependencies - see Proposal. Lag is **not**
       a fixed constant; it varies per package from ~0 days to 65+ days,
       correcting this effort's original "~1 week" assumption.
 - [x] **Done (2026-10-02).** Compared from-source vs. verified first-party
-      wheel install, cold and warm cache, wall time and physical storage —
+      wheel install, cold and warm cache, wall time and physical storage -
       see Proposal. Network-activity comparison (request counts/bytes) was
       not captured; only host/index identity was verified. If a future
       phase needs exact byte/request-count deltas, re-run with a packet
@@ -96,7 +96,7 @@ distribution unit.
       evidence (a dynamic, feed-queried admission check, not a static
       age window).
 
-### Phase 2 — Promotion-built, content-addressed first-party artifacts
+### Phase 2 - Promotion-built, content-addressed first-party artifacts
 
 - [x] **Tool built (2026-10-02); pipeline wiring still open.**
       `tools/build_python_artifacts.py` builds a plugin's own wheel plus
@@ -112,34 +112,45 @@ distribution unit.
       sibling vendored lib without `editable = true` -- a pattern
       `uv_editable_problems` was never designed to accept at the
       whole-consumer level. It writes a manifest
-      recording the payload hash (a working-tree content hash — not `git
+      recording the payload hash (a working-tree content hash - not `git
       HEAD`, since promotion's scratch tree is mutated by version bumps and
       materialization before the build runs), the wheel filenames' own
       python/abi/platform tags (with a hard failure on a genuinely
       conflicting tag across the set, never a silent first-match guess),
       each wheel's sha256, and the build-tool `Generator:` actually used
-      (read from each built wheel's own `dist-info/WHEEL`, required —
+      (read from each built wheel's own `dist-info/WHEEL`, required -
       a wheel with no readable `Generator:` fails the build rather than
-      recording an unknown toolchain) — all folded together into one
-      `artifact_id`, including every wheel's own digest. **Not yet done:**
-      wiring this into the real promotion pipeline (`promote_release.py`)
-      — `build_python_artifacts.py` is a standalone, independently usable
-      tool today, not yet invoked anywhere in `validate-and-promote.yml`'s
-      actual promotion flow — and a per-run shared build-toolchain lock
-      (this tool still builds each wheel via the normal isolated PEP 517
-      build rather than one pre-resolved, pinned environment reused across
-      every wheel in a run). This checklist item stays open until
-      promotion actually invokes the builder.
+      recording an unknown toolchain) - all folded together into one
+      `artifact_id`, including every wheel's own digest. **Build
+      hermeticity resolved (2026-10-02, second slice):** every wheel is now
+      built `uv build --wheel --no-build-isolation` against ONE pinned
+      `setuptools`/`wheel` venv (`resolve_toolchain_lock`), resolved once
+      and reusable -- unchanged -- across every plugin in a run by passing
+      the same `--toolchain-venv` path to each invocation; each built
+      wheel's own `Generator:` is verified to match the locked toolchain
+      exactly, failing closed on any drift. The manifest's `build_toolchain`
+      field is now a structured lock record (`{"packages": {...},
+      "lock_id": "sha256:..."}`, schema version 2) rather than schema
+      version 1's ad hoc per-wheel generator list, and `lock_id` folds into
+      `artifact_id`. Smoke-tested for real: building `agent-bridge` then
+      `agent-worktrees` against the SAME `--toolchain-venv` produced
+      identical `lock_id`s, confirming the shared-lock mechanism. **Not yet
+      done:** wiring this into the real promotion pipeline
+      (`promote_release.py`) - `build_python_artifacts.py` is still a
+      standalone, independently usable tool today, not yet invoked anywhere
+      in `validate-and-promote.yml`'s actual promotion flow. This checklist
+      item stays open until promotion actually invokes the builder.
 - [ ] Resolve and pin a dependency closure for the third-party portion only,
       using a lag-tolerant selection policy informed by Phase 1, and record
       it in the manifest.
 - [ ] Design and implement an artifact trust/publication contract (digest
-      authentication, publication channel, credential model) — see Open
+      authentication, publication channel, credential model) - see Open
       Design Questions below; resolve these concretely during this phase,
       not deferred further.
 
 
-### Phase 3 — Verified consumption with correct fallback
+
+### Phase 3 - Verified consumption with correct fallback
 
 - [ ] Teach installers (via the shared installer engine, not a parallel
       mechanism) to locate, verify, and consume a matching artifact set,
@@ -150,7 +161,7 @@ distribution unit.
 - [ ] Validate across supported platform/architecture/Python-ABI
       combinations, including a clean-room first install.
 
-### Phase 4 — Retention, provenance, and documentation
+### Phase 4 - Retention, provenance, and documentation
 
 - [ ] Define artifact retention/GC with physical-storage accounting and
       provenance/licensing review.
@@ -161,18 +172,18 @@ distribution unit.
 
 Earlier review rounds on this effort surfaced several real design gaps
 worth preserving as named open questions, deliberately **not** pre-solved in
-this planning document — Phase 2 is where each gets a concrete, verified
+this planning document - Phase 2 is where each gets a concrete, verified
 answer against the actual repository/CI configuration:
 
 - **Feed model:** promotion runs on public CI and cannot certify
-  installability from any one consumer's private governed feed — the
+  installability from any one consumer's private governed feed - the
   governed-feed check is necessarily a consumer-side, install-time concern,
   not a promotion-time one.
 - **Lag-tolerant version selection:** resolving "newest compatible" would
   routinely pin versions a real governed feed doesn't carry yet; the
   resolver needs a seasoning/age constraint (or equivalent), tuned from
   Phase 1's measured lag. **Phase 1 evidence (2026-10-02) revises this: lag
-  is not a fixed ~1-week constant** — measured at 0 days (pydantic,
+  is not a fixed ~1-week constant** - measured at 0 days (pydantic,
   uvicorn) to 65+ days (fastapi) across just 3 real dependencies of one
   plugin. A static per-package age window would be wrong in one direction
   or the other depending on the package. The consumer-side admission check
@@ -308,9 +319,9 @@ already configured per the managed-machine governed-feed rules
 (`uv.toml` default index = `https://packagefeedproxy.microsoft.io/pypi/simple/`).
 Compared against installing the same plugin directly from its project
 directory (today's real from-source path). All timings are single runs on
-one Windows machine (augloop1) — directional, not statistically rigorous.
+one Windows machine (augloop1) - directional, not statistically rigorous.
 
-**1. Governed-feed-only resolution — proven.** The full verbose (`-v`)
+**1. Governed-feed-only resolution - proven.** The full verbose (`-v`)
 install log was searched for every contacted host. Zero matches for
 `pypi.org` or `files.pythonhosted.org`. Every third-party dependency
 (`fastapi`, `uvicorn`, `starlette`, `h11`, `wsproto`, `pyyaml`, `pydantic`,
@@ -318,14 +329,14 @@ install log was searched for every contacted host. Zero matches for
 `typing-extensions`, `typing-inspection`, `agent-client-protocol`) resolved
 through `packagefeedproxy.microsoft.io` → its backing
 `*.pkgs.visualstudio.com` Azure Artifacts feed → `*.vsblob.vsassets.io`
-blob storage — the full governed chain, never a public index. The 9
+blob storage - the full governed chain, never a public index. The 9
 first-party vendored-lib names (`agent-ssh-manager`, etc., which do not
 exist on any public index) were also checked against the governed feed
 first and fell back to the local `--find-links` wheels only once the feed
-had no matching name — confirming the governed feed is consulted
+had no matching name - confirming the governed feed is consulted
 uniformly for every name, with no special-cased bypass.
 
-**2. Feed propagation lag — measured, and the "~1 week" assumption does not
+**2. Feed propagation lag - measured, and the "~1 week" assumption does not
 hold uniformly.** Compared the governed-feed-resolved version of each
 third-party dependency against PyPI's actual release history
 (`pypi.org/rss/project/<name>/releases.xml`) as of 2026-10-02:
@@ -337,29 +348,29 @@ third-party dependency against PyPI's actual release history
 | uvicorn  | 0.54.0 (released 2026-09-25)  | 0.54.0 is PyPI's latest | ~0 days (7 days old, but current) |
 
 Lag varies from 0 to 65+ days across just 3 real dependencies of one
-plugin — it is not a fixed constant tunable with a single universal age
+plugin - it is not a fixed constant tunable with a single universal age
 window. This revises the Lag-tolerant version selection Open Design
 Question above: Phase 2 should query the governed feed's own currently
 available versions at install time, not apply an assumed age constant.
 
-**3. Timing and storage — wheel-based install is faster, markedly so
+**3. Timing and storage - wheel-based install is faster, markedly so
 warm.**
 
 | Scenario | From source (today) | First-party wheel (proposed) | Delta |
 |----------|---------------------|-------------------------------|-------|
 | Cold (no `uv` cache) | 24.4 s | 20.6 s | ~16% faster |
-| Warm (`uv` cache populated) | 15.2 s | 5.7 s | ~63% faster (2.7×) |
+| Warm (`uv` cache populated) | 15.2 s | 5.7 s | ~63% faster (2.7x) |
 
 First-party artifact storage cost is small relative to third-party deps:
 the 10 built wheels (`agent-bridge` + 9 libs) total ~0.89 MiB; the fully
-installed venv (including all third-party packages) is ~14.8 MiB — so the
+installed venv (including all third-party packages) is ~14.8 MiB - so the
 content-addressed first-party artifacts this effort proposes storing are a
 small fraction of total install footprint, consistent with the "bounded
 storage" goal. `agent-bridge`'s vendored libs are small pure-Python
 packages, so the cold-case win is modest here; a plugin with heavier
 build steps (e.g. anything invoking a native/compiled extension, or
 `agent-index`'s much larger footprint per the Context section's baseline
-measurements) would be expected to show a larger cold-case delta — not
+measurements) would be expected to show a larger cold-case delta - not
 yet measured directly.
 
 **Not yet done:** exact network request-count/byte deltas (only host
@@ -368,6 +379,65 @@ far); and a larger plugin than `agent-bridge` to test whether the cold-case
 win grows with build complexity.
 
 ## Journal
+
+### 2026-10-02 - Phase 2 slice 2: shared build-toolchain lock
+
+- Implemented the second Phase 2 slice: resolved the Build hermeticity
+  Open Design Question's remaining gap -- every wheel `build_python_artifacts.py`
+  builds is now built `uv build --wheel --no-build-isolation` against ONE
+  pinned `setuptools`/`wheel` venv, resolved by the new
+  `resolve_toolchain_lock(venv_dir, *, python=None)`, instead of `uv`'s
+  normal per-wheel isolated PEP 517 build (which silently resolves
+  "whatever satisfies the open-floor `requires` today," unrecorded and
+  unreproducible run-to-run).
+- `resolve_toolchain_lock` creates (or, if `venv_dir` already holds a venv
+  from an earlier call, reuses) one venv, installs `setuptools`+`wheel`
+  into it via `uv pip install` (governed-feed-only, like every other `uv`
+  call in this script), and reads back the EXACT installed versions via
+  the venv's own `importlib.metadata`. A caller shares one lock across an
+  entire promotion run by passing the SAME `--toolchain-venv` path to every
+  per-plugin CLI invocation in that run -- this tool still builds one
+  plugin per process invocation; sharing happens by venv reuse, not by
+  batching multiple plugins into one call.
+- Added `ToolchainLock` (`generator`/`lock_id` properties) and verified,
+  per wheel, that its actual `dist-info/WHEEL` `Generator:` line matches the
+  locked toolchain's exactly -- a mismatch (meaning `--no-build-isolation`
+  did not really use the pinned venv) fails the build closed rather than
+  silently recording a drifted toolchain.
+- **Manifest schema bumped to version 2:** `build_toolchain` is now a
+  structured record (`{"packages": {"setuptools": "...", "wheel": "..."},
+  "lock_id": "sha256:..."}`) describing the one lock every wheel in the set
+  was built against, replacing schema version 1's ad hoc list of per-wheel
+  `Generator:` strings gathered after the fact; `lock_id` (not the old
+  generator-string list) now folds into `artifact_id`.
+- `build_plugin_artifacts` gained a `toolchain: ToolchainLock | None`
+  parameter: when omitted (today's CLI default without `--toolchain-venv`),
+  it resolves its own disposable, single-invocation lock internally (still
+  a real, pinned, non-isolated build -- just not shared with any other
+  call) and tears down the disposable toolchain venv before returning.
+- 17 new unit tests (84 total now): `ToolchainLock` properties,
+  `resolve_toolchain_lock` (venv creation + install, venv reuse/skip,
+  venv/install/query failures, malformed-JSON and missing-package fail-
+  closed cases), `build_wheel`'s `--no-build-isolation`/`--python` command
+  construction when a toolchain is given (and that a stray `python=`
+  argument is ignored in that case), the generator-mismatch fail-closed
+  path, and the disposable-lock-resolution-and-cleanup path. All existing
+  tests updated to pass an explicit fake `ToolchainLock` so no unit test
+  invokes the real `resolve_toolchain_lock` (which shells out to `uv`).
+- Real smoke test (not just mocked unit tests): built `agent-bridge` (10
+  wheels) then `agent-worktrees` (its own wheel + vendored libs) against
+  the SAME `--toolchain-venv` -- both manifests recorded the identical
+  `lock_id`, confirming the shared-lock-across-a-run mechanism actually
+  works, and every wheel's `Generator:` matched the locked
+  `setuptools (84.0.0)` exactly. Full `tools/` suite re-run: zero new
+  failures (the only failures are the same ~45 pre-existing, environment-
+  specific clean-room/WSL-bash/symlink-sandboxing failures this effort's
+  prior slice already documented as unrelated).
+- **Not yet done** (named in the Phase 2 checklist): wiring this builder
+  into the real `promote_release.py` pipeline; the third-party dependency-
+  closure resolution/lag-tolerant selection; and the trust/publication
+  contract (attestation, GitHub Release channel). **Next:** pick up one of
+  those as the next Phase 2 slice.
 
 ### 2026-10-02 - Phase 2 slice 1: `tools/build_python_artifacts.py` (wheel + manifest build)
 

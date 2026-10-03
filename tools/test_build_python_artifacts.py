@@ -18,6 +18,15 @@ _SPEC.loader.exec_module(bpa)
 
 uer = bpa.uer  # the real uv_editable_ref module build_python_artifacts imports
 
+# A fake, already-resolved toolchain lock shared by every end-to-end test
+# below -- passed explicitly to `build_plugin_artifacts`/`build_wheel` so
+# none of these tests ever invokes the real `resolve_toolchain_lock` (which
+# would shell out to real `uv venv`/`uv pip install`).
+_FAKE_TOOLCHAIN = bpa.ToolchainLock(
+    Path("/fake/toolchain-venv/bin/python"),
+    {"setuptools": "84.1.0", "wheel": "0.44.0"},
+)
+
 
 # --- parse_wheel_filename -----------------------------------------------
 
@@ -825,7 +834,7 @@ def test_build_plugin_artifacts_end_to_end(
 
     out_dir = fake_repo / "dist"
 
-    def fake_build_wheel(source_dir: Path, out: Path, *, python=None, reserved_names=None):  # noqa: ARG001
+    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None):  # noqa: ARG001
         out.mkdir(parents=True, exist_ok=True)
         name = source_dir.name.replace("-", "_")
         wheel = out / f"{name}-0.1.0-py3-none-any.whl"
@@ -834,11 +843,14 @@ def test_build_plugin_artifacts_end_to_end(
 
     monkeypatch.setattr(bpa, "build_wheel", fake_build_wheel)
 
-    manifest = bpa.build_plugin_artifacts("demo", out_dir=out_dir)
+    manifest = bpa.build_plugin_artifacts("demo", out_dir=out_dir, toolchain=_FAKE_TOOLCHAIN)
 
     assert manifest["schema"] == bpa.MANIFEST_SCHEMA
     assert manifest["plugin"] == "demo"
-    assert manifest["build_toolchain"] == ["setuptools (84.1.0)"]
+    assert manifest["build_toolchain"] == {
+        "packages": {"setuptools": "84.1.0", "wheel": "0.44.0"},
+        "lock_id": _FAKE_TOOLCHAIN.lock_id,
+    }
     assert manifest["python_tag"] == "py3"
     assert {e["role"] for e in manifest["wheels"]} == {"plugin", "vendored-lib"}
     assert len(manifest["wheels"]) == 2
@@ -883,7 +895,7 @@ def test_build_plugin_artifacts_payload_hash_excludes_build_residue(
     expected_hash = bpa.compute_payload_hash([plugin_dir])
     out_dir = fake_repo / "dist"
 
-    def fake_build_wheel(source_dir: Path, out: Path, *, python=None, reserved_names=None):  # noqa: ARG001
+    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None):  # noqa: ARG001
         (source_dir / "demo.egg-info").mkdir(exist_ok=True)
         (source_dir / "demo.egg-info" / "PKG-INFO").write_text(
             "build residue", encoding="utf-8"
@@ -894,14 +906,14 @@ def test_build_plugin_artifacts_payload_hash_excludes_build_residue(
         return wheel
 
     monkeypatch.setattr(bpa, "build_wheel", fake_build_wheel)
-    manifest = bpa.build_plugin_artifacts("demo", out_dir=out_dir)
+    manifest = bpa.build_plugin_artifacts("demo", out_dir=out_dir, toolchain=_FAKE_TOOLCHAIN)
 
     assert manifest["payload_hash"] == expected_hash
 
     # Invariant: residue left behind by THIS invocation must not change
     # the NEXT invocation's "pre-build" hash either -- the egg-info
     # directory is still on disk when build_plugin_artifacts runs again.
-    manifest2 = bpa.build_plugin_artifacts("demo", out_dir=out_dir)
+    manifest2 = bpa.build_plugin_artifacts("demo", out_dir=out_dir, toolchain=_FAKE_TOOLCHAIN)
     assert manifest2["payload_hash"] == expected_hash
 
 
@@ -916,7 +928,7 @@ def test_build_plugin_artifacts_artifact_id_changes_with_wheel_bytes(
     out_dir = fake_repo / "dist"
 
     def make_builder(payload: bytes):
-        def fake_build_wheel(source_dir: Path, out: Path, *, python=None, reserved_names=None):  # noqa: ARG001
+        def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None):  # noqa: ARG001
             out.mkdir(parents=True, exist_ok=True)
             wheel = out / "demo-0.1.0-py3-none-any.whl"
             with zipfile.ZipFile(wheel, "w") as zf:
@@ -930,10 +942,10 @@ def test_build_plugin_artifacts_artifact_id_changes_with_wheel_bytes(
         return fake_build_wheel
 
     monkeypatch.setattr(bpa, "build_wheel", make_builder(b"aaa"))
-    manifest1 = bpa.build_plugin_artifacts("demo", out_dir=out_dir)
+    manifest1 = bpa.build_plugin_artifacts("demo", out_dir=out_dir, toolchain=_FAKE_TOOLCHAIN)
     (out_dir / "demo-0.1.0-py3-none-any.whl").unlink()
     monkeypatch.setattr(bpa, "build_wheel", make_builder(b"bbb"))
-    manifest2 = bpa.build_plugin_artifacts("demo", out_dir=out_dir)
+    manifest2 = bpa.build_plugin_artifacts("demo", out_dir=out_dir, toolchain=_FAKE_TOOLCHAIN)
 
     assert manifest1["payload_hash"] == manifest2["payload_hash"]
     assert manifest1["wheels"][0]["sha256"] != manifest2["wheels"][0]["sha256"]
@@ -967,14 +979,14 @@ def test_build_plugin_artifacts_preserves_raw_version(
     )
     out_dir = fake_repo / "dist"
 
-    def fake_build_wheel(source_dir: Path, out: Path, *, python=None, reserved_names=None):  # noqa: ARG001
+    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None):  # noqa: ARG001
         out.mkdir(parents=True, exist_ok=True)
         wheel = out / "demo-0.4.1.dev3-py3-none-any.whl"
         _make_fake_wheel(wheel, generator="setuptools (84.1.0)")
         return wheel
 
     monkeypatch.setattr(bpa, "build_wheel", fake_build_wheel)
-    manifest = bpa.build_plugin_artifacts("demo", out_dir=out_dir)
+    manifest = bpa.build_plugin_artifacts("demo", out_dir=out_dir, toolchain=_FAKE_TOOLCHAIN)
 
     assert manifest["version"] == "0.4.1-dev3"
     assert (out_dir / "demo-0.4.1-dev3-manifest.json").is_file()
@@ -990,7 +1002,7 @@ def test_build_plugin_artifacts_rejects_real_version_mismatch(
     )
     out_dir = fake_repo / "dist"
 
-    def fake_build_wheel(source_dir: Path, out: Path, *, python=None, reserved_names=None):  # noqa: ARG001
+    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None):  # noqa: ARG001
         out.mkdir(parents=True, exist_ok=True)
         wheel = out / "demo-9.9.9-py3-none-any.whl"
         _make_fake_wheel(wheel, generator="setuptools (84.1.0)")
@@ -998,7 +1010,7 @@ def test_build_plugin_artifacts_rejects_real_version_mismatch(
 
     monkeypatch.setattr(bpa, "build_wheel", fake_build_wheel)
     with pytest.raises(bpa.ArtifactBuildError):
-        bpa.build_plugin_artifacts("demo", out_dir=out_dir)
+        bpa.build_plugin_artifacts("demo", out_dir=out_dir, toolchain=_FAKE_TOOLCHAIN)
 
 
 def test_build_plugin_artifacts_unsafe_plugin_name_raises(
@@ -1024,7 +1036,7 @@ def test_build_plugin_artifacts_rejects_duplicate_wheel_filename(
     _write_pyproject(plugin_dir, sources={"demo-widget": "../../libs/widget"})
     out_dir = fake_repo / "dist"
 
-    def fake_build_wheel(source_dir: Path, out: Path, *, python=None, reserved_names=None):  # noqa: ARG001
+    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None):  # noqa: ARG001
         out.mkdir(parents=True, exist_ok=True)
         # Every source produces the SAME filename, regardless of identity.
         wheel = out / "collision-0.1.0-py3-none-any.whl"
@@ -1037,7 +1049,7 @@ def test_build_plugin_artifacts_rejects_duplicate_wheel_filename(
 
     monkeypatch.setattr(bpa, "build_wheel", fake_build_wheel)
     with pytest.raises(bpa.ArtifactBuildError):
-        bpa.build_plugin_artifacts("demo", out_dir=out_dir)
+        bpa.build_plugin_artifacts("demo", out_dir=out_dir, toolchain=_FAKE_TOOLCHAIN)
 
 
 def test_build_wheel_rejects_filename_already_reserved(
@@ -1059,3 +1071,258 @@ def test_build_plugin_artifacts_unknown_plugin_raises(tmp_path: Path, monkeypatc
     monkeypatch.setattr(bpa, "PLUGINS_DIR", tmp_path / "plugins")
     with pytest.raises(bpa.ArtifactBuildError):
         bpa.build_plugin_artifacts("nope", out_dir=tmp_path / "dist")
+
+
+# --- ToolchainLock -----------------------------------------------------
+
+
+def test_toolchain_lock_generator():
+    lock = bpa.ToolchainLock(Path("/fake/python"), {"setuptools": "84.1.0", "wheel": "0.44.0"})
+    assert lock.generator == "setuptools (84.1.0)"
+
+
+def test_toolchain_lock_id_stable_for_same_packages():
+    lock_a = bpa.ToolchainLock(Path("/fake/python"), {"setuptools": "84.1.0", "wheel": "0.44.0"})
+    lock_b = bpa.ToolchainLock(Path("/other/python"), {"wheel": "0.44.0", "setuptools": "84.1.0"})
+    assert lock_a.lock_id == lock_b.lock_id
+
+
+def test_toolchain_lock_id_changes_with_different_packages():
+    lock_a = bpa.ToolchainLock(Path("/fake/python"), {"setuptools": "84.1.0", "wheel": "0.44.0"})
+    lock_b = bpa.ToolchainLock(Path("/fake/python"), {"setuptools": "84.2.0", "wheel": "0.44.0"})
+    assert lock_a.lock_id != lock_b.lock_id
+
+
+# --- resolve_toolchain_lock (mocked subprocess) ------------------------
+
+
+def _toolchain_query_stdout(packages: dict[str, str]) -> str:
+    return json.dumps(packages)
+
+
+def test_resolve_toolchain_lock_creates_venv_and_installs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    venv_dir = tmp_path / "toolchain-venv"
+    venv_python = bpa._venv_python_path(venv_dir)
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        calls.append(cmd)
+        if cmd[:2] == ["uv", "venv"]:
+            venv_python.parent.mkdir(parents=True, exist_ok=True)
+            venv_python.write_text("", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["uv", "pip", "install"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        # the `<venv_python> -c <script> setuptools wheel` version query
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    lock = bpa.resolve_toolchain_lock(venv_dir)
+
+    assert lock.packages == {"setuptools": "84.1.0", "wheel": "0.44.0"}
+    assert lock.venv_python == venv_python
+    assert any(cmd[:2] == ["uv", "venv"] for cmd in calls)
+    assert any(cmd[:3] == ["uv", "pip", "install"] for cmd in calls)
+
+
+def test_resolve_toolchain_lock_reuses_existing_venv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: a second call with the SAME venv_dir (the mechanism a
+    # caller uses to share one toolchain lock across several plugins in
+    # one promotion run) must not re-create or re-install -- only read
+    # back the already-installed versions.
+    venv_dir = tmp_path / "toolchain-venv"
+    venv_python = bpa._venv_python_path(venv_dir)
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        calls.append(cmd)
+        assert cmd[:2] != ["uv", "venv"]
+        assert cmd[:3] != ["uv", "pip", "install"]
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=_toolchain_query_stdout({"setuptools": "84.1.0", "wheel": "0.44.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    lock = bpa.resolve_toolchain_lock(venv_dir)
+
+    assert lock.packages == {"setuptools": "84.1.0", "wheel": "0.44.0"}
+    assert len(calls) == 1
+
+
+def test_resolve_toolchain_lock_venv_creation_failure_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="no governed feed")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError):
+        bpa.resolve_toolchain_lock(tmp_path / "toolchain-venv")
+
+
+def test_resolve_toolchain_lock_install_failure_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    venv_dir = tmp_path / "toolchain-venv"
+    venv_python = bpa._venv_python_path(venv_dir)
+
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        if cmd[:2] == ["uv", "venv"]:
+            venv_python.parent.mkdir(parents=True, exist_ok=True)
+            venv_python.write_text("", encoding="utf-8")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="install failed")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError):
+        bpa.resolve_toolchain_lock(venv_dir)
+
+
+def test_resolve_toolchain_lock_query_nonzero_exit_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    venv_dir = tmp_path / "toolchain-venv"
+    venv_python = bpa._venv_python_path(venv_dir)
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
+
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError):
+        bpa.resolve_toolchain_lock(venv_dir)
+
+
+def test_resolve_toolchain_lock_query_malformed_json_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    venv_dir = tmp_path / "toolchain-venv"
+    venv_python = bpa._venv_python_path(venv_dir)
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
+
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        return subprocess.CompletedProcess(cmd, 0, stdout="not json", stderr="")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError):
+        bpa.resolve_toolchain_lock(venv_dir)
+
+
+def test_resolve_toolchain_lock_missing_package_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: a locked venv genuinely missing one of the two required
+    # packages (e.g. a previous partial/failed install) must fail closed
+    # rather than record an incomplete toolchain lock.
+    venv_dir = tmp_path / "toolchain-venv"
+    venv_python = bpa._venv_python_path(venv_dir)
+    venv_python.parent.mkdir(parents=True, exist_ok=True)
+    venv_python.write_text("", encoding="utf-8")
+
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout=_toolchain_query_stdout({"setuptools": "84.1.0"}), stderr=""
+        )
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    with pytest.raises(bpa.ArtifactBuildError):
+        bpa.resolve_toolchain_lock(venv_dir)
+
+
+# --- build_wheel with a locked toolchain --------------------------------
+
+
+def test_build_wheel_with_toolchain_uses_no_build_isolation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    out_dir = tmp_path / "dist"
+    toolchain = bpa.ToolchainLock(
+        tmp_path / "toolchain-venv" / "python", {"setuptools": "84.1.0", "wheel": "0.44.0"}
+    )
+    seen_cmd: list[str] = []
+
+    def fake_run(cmd, capture_output, text):  # noqa: ARG001
+        seen_cmd.extend(cmd)
+        (_staging_dir_from_cmd(cmd) / "demo-1.0-py3-none-any.whl").write_bytes(b"x")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(bpa.subprocess, "run", fake_run)
+    # A `python` argument must be ignored once a toolchain is given -- the
+    # toolchain's own venv_python is the only interpreter used.
+    bpa.build_wheel(tmp_path / "src", out_dir, python="/some/other/python", toolchain=toolchain)
+
+    assert "--no-build-isolation" in seen_cmd
+    assert str(toolchain.venv_python) in seen_cmd
+    assert "/some/other/python" not in seen_cmd
+
+
+# --- build_plugin_artifacts hermeticity verification --------------------
+
+
+def test_build_plugin_artifacts_rejects_generator_mismatch_with_toolchain(
+    fake_repo: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: a wheel whose actual Generator: does not match the
+    # locked toolchain means --no-build-isolation did not really use the
+    # pinned venv -- this must fail closed, not silently record a drifted
+    # toolchain.
+    plugin_dir = fake_repo / "plugins" / "demo"
+    _write_pyproject(plugin_dir)
+    out_dir = fake_repo / "dist"
+
+    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None):  # noqa: ARG001
+        out.mkdir(parents=True, exist_ok=True)
+        wheel = out / "demo-0.1.0-py3-none-any.whl"
+        _make_fake_wheel(wheel, generator="setuptools (60.0.0)")
+        return wheel
+
+    monkeypatch.setattr(bpa, "build_wheel", fake_build_wheel)
+    with pytest.raises(bpa.ArtifactBuildError):
+        bpa.build_plugin_artifacts("demo", out_dir=out_dir, toolchain=_FAKE_TOOLCHAIN)
+
+
+def test_build_plugin_artifacts_resolves_own_toolchain_when_none_given(
+    fake_repo: Path, monkeypatch: pytest.MonkeyPatch
+):
+    # Regression: a caller that doesn't pass a toolchain (today's CLI
+    # default) must still get a real, pinned, non-isolated build -- this
+    # verifies build_plugin_artifacts resolves (and cleans up) its own
+    # disposable lock rather than silently reverting to an isolated build.
+    plugin_dir = fake_repo / "plugins" / "demo"
+    _write_pyproject(plugin_dir)
+    out_dir = fake_repo / "dist"
+    resolved_dirs: list[Path] = []
+
+    def fake_resolve_toolchain_lock(venv_dir: Path, *, python=None):  # noqa: ARG001
+        resolved_dirs.append(venv_dir)
+        return _FAKE_TOOLCHAIN
+
+    def fake_build_wheel(source_dir: Path, out: Path, *, toolchain=None, reserved_names=None):  # noqa: ARG001
+        assert toolchain is _FAKE_TOOLCHAIN
+        out.mkdir(parents=True, exist_ok=True)
+        wheel = out / "demo-0.1.0-py3-none-any.whl"
+        _make_fake_wheel(wheel, generator="setuptools (84.1.0)")
+        return wheel
+
+    monkeypatch.setattr(bpa, "resolve_toolchain_lock", fake_resolve_toolchain_lock)
+    monkeypatch.setattr(bpa, "build_wheel", fake_build_wheel)
+
+    manifest = bpa.build_plugin_artifacts("demo", out_dir=out_dir)
+
+    assert len(resolved_dirs) == 1
+    assert not resolved_dirs[0].exists()  # the disposable toolchain dir is cleaned up
+    assert manifest["build_toolchain"]["lock_id"] == _FAKE_TOOLCHAIN.lock_id

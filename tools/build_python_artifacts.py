@@ -29,25 +29,45 @@ artifact set's identity folds together:
   guessed from the running interpreter), with a conflicting pair of
   non-universal tags across the wheel set treated as a hard failure rather
   than resolved by whichever wheel happened to be built first;
-* the **build-tool closure** actually used -- read from each wheel's own
-  `dist-info/WHEEL` ``Generator:`` line after the build, not assumed in
-  advance. A missing `Generator:` line fails the build closed rather than
-  silently recording an unknown toolchain. A promotion run that locks one
-  shared toolchain version for every wheel it builds (the effort's own
-  resolved direction) will naturally produce one shared value here; this
-  script does not perform that locking itself -- it faithfully reports
-  whatever toolchain a given invocation's `uv build` actually used; and
+* the **build-tool closure** actually used -- a single, pre-resolved
+  ``setuptools``/``wheel`` version pair, pinned into one dedicated venv
+  (``resolve_toolchain_lock``) BEFORE any wheel is built and reused,
+  unchanged, across every wheel in one invocation (and, when a caller
+  passes the same ``--toolchain-venv`` across several invocations, across
+  a whole promotion run). Every wheel is built with ``uv build --wheel
+  --no-build-isolation`` against that one locked venv rather than `uv`'s
+  normal per-wheel isolated PEP 517 build, which would otherwise silently
+  resolve "whatever satisfies pyproject.toml's open-floor `requires`
+  today" -- unrecorded and unreproducible run-to-run. Each built wheel's
+  own `dist-info/WHEEL` ``Generator:`` line is read back and verified to
+  match the locked toolchain exactly; a mismatch (or a missing
+  `Generator:` line) fails the build closed rather than silently recording
+  an unknown or drifted toolchain; and
 * every **wheel's own filename and digest** -- two artifact sets with the
   same source/tags/toolchain but byte-different wheels must never collide
   on the same `artifact_id`.
 
+**Manifest schema note (version 2):** ``build_toolchain`` is a structured
+record (``{"packages": {"setuptools": "...", "wheel": "..."}, "lock_id":
+"sha256:..."}``) describing the one locked toolchain every wheel in the
+set was built against -- not schema version 1's ad hoc list of per-wheel
+``Generator:`` strings gathered after the fact.
+
 Usage::
 
     python tools/build_python_artifacts.py agent-bridge --out-dir /tmp/dist
+
+    # Share one locked toolchain across several plugins in one promotion
+    # run by passing the SAME --toolchain-venv to each invocation:
+    python tools/build_python_artifacts.py agent-bridge --out-dir /tmp/dist \\
+        --toolchain-venv /tmp/toolchain-venv
+    python tools/build_python_artifacts.py agent-worktrees --out-dir /tmp/dist \\
+        --toolchain-venv /tmp/toolchain-venv
 """
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import re
@@ -71,7 +91,14 @@ REPO = Path(__file__).resolve().parent.parent
 PLUGINS_DIR = REPO / "plugins"
 LIBS_DIR = REPO / "libs"
 MANIFEST_SCHEMA = "copilot-extensions.python-artifact-manifest"
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
+
+#: The exact packages a locked build-toolchain venv pins -- every
+#: `pyproject.toml` under `plugins/` and `libs/` uses the same
+#: `setuptools.build_meta` backend (confirmed by this effort's own Build
+#: hermeticity survey), so pinning these two is sufficient to make every
+#: wheel in a run reproducible without a per-backend scheme.
+_LOCKED_TOOLCHAIN_PACKAGES = ("setuptools", "wheel")
 
 _GENERATOR_RE = re.compile(r"^Generator:\s*(.+?)\s*$", re.MULTILINE)
 _BUILD_TAG_RE = re.compile(r"^[0-9][^-]*$")
@@ -627,6 +654,114 @@ def read_wheel_generator(wheel_path: Path) -> str:
     return m.group(1)
 
 
+def _venv_python_path(venv_dir: Path) -> Path:
+    """The venv's own interpreter path -- Windows and POSIX venvs place it
+    differently, and this must match whatever `uv venv` actually created so
+    later steps query the right interpreter."""
+    if sys.platform == "win32":
+        return venv_dir / "Scripts" / "python.exe"
+    return venv_dir / "bin" / "python"
+
+
+class ToolchainLock:
+    """A resolved, pinned build toolchain (exact ``setuptools``/``wheel``
+    versions) installed into one dedicated venv, meant to be reused --
+    unchanged -- across every wheel built in a single invocation (and,
+    when a caller passes the same ``venv_dir`` to ``resolve_toolchain_lock``
+    across several invocations, across a whole promotion run), so two
+    wheels built moments apart never silently differ in which toolchain
+    version actually produced them (the `governed-python-artifact-promotion`
+    effort's own resolved Build hermeticity direction)."""
+
+    def __init__(self, venv_python: Path, packages: dict[str, str]):
+        self.venv_python = venv_python
+        self.packages = packages
+
+    @property
+    def generator(self) -> str:
+        """The exact ``Generator:`` string a wheel built with this locked
+        toolchain must carry -- used to verify a ``--no-build-isolation``
+        build actually used the pinned venv rather than silently falling
+        back to some other setuptools reachable on `PATH`."""
+        return f"setuptools ({self.packages['setuptools']})"
+
+    @property
+    def lock_id(self) -> str:
+        """A stable identity for this exact pinned toolchain, folded into
+        every artifact's own ``artifact_id`` (see ``build_plugin_artifacts``)
+        so two promotion runs that happen to lock different setuptools/
+        wheel versions are naturally different, auditable artifact
+        identities rather than a silent same-identity mismatch."""
+        pairs = [f"{name}=={version}" for name, version in sorted(self.packages.items())]
+        return "sha256:" + _hash_fields(*pairs)
+
+
+def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> ToolchainLock:
+    """Resolves one pinned build-toolchain venv at ``venv_dir`` and returns
+    its exact installed ``setuptools``/``wheel`` versions.
+
+    If ``venv_dir`` already holds a venv from an earlier call in this same
+    process or a previous invocation of this script (its own interpreter
+    already exists on disk), venv creation and package installation are
+    skipped and only the already-installed versions are read back -- this
+    is how a caller shares ONE toolchain lock across several plugins in one
+    promotion run without this tool needing to build more than one plugin
+    per process invocation: pass the same ``venv_dir`` (``--toolchain-venv``
+    on the CLI) to every invocation in that run.
+
+    Never resolves from a public index: ``uv venv``/``uv pip install`` both
+    honor this machine's own governed-feed configuration (`uv.toml`),
+    exactly like every other `uv` invocation in this script."""
+    venv_python = _venv_python_path(venv_dir)
+    if not venv_python.is_file():
+        venv_cmd = ["uv", "venv", str(venv_dir)]
+        if python:
+            venv_cmd += ["--python", python]
+        result = subprocess.run(venv_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise ArtifactBuildError(
+                f"uv venv failed for toolchain venv {venv_dir}:\n"
+                f"{result.stdout}\n{result.stderr}"
+            )
+        install = subprocess.run(
+            ["uv", "pip", "install", "--python", str(venv_python), *_LOCKED_TOOLCHAIN_PACKAGES],
+            capture_output=True, text=True,
+        )
+        if install.returncode != 0:
+            raise ArtifactBuildError(
+                f"uv pip install failed for toolchain venv {venv_dir}:\n"
+                f"{install.stdout}\n{install.stderr}"
+            )
+
+    query = subprocess.run(
+        [
+            str(venv_python), "-c",
+            "import importlib.metadata as m, json, sys\n"
+            "print(json.dumps({p: m.version(p) for p in sys.argv[1:]}))",
+            *_LOCKED_TOOLCHAIN_PACKAGES,
+        ],
+        capture_output=True, text=True,
+    )
+    if query.returncode != 0:
+        raise ArtifactBuildError(
+            f"could not read installed toolchain versions from {venv_python}:\n"
+            f"{query.stdout}\n{query.stderr}"
+        )
+    try:
+        packages = json.loads(query.stdout)
+    except json.JSONDecodeError as exc:
+        raise ArtifactBuildError(
+            f"{venv_python}: toolchain version query produced non-JSON output: {exc}"
+        ) from exc
+    missing = [p for p in _LOCKED_TOOLCHAIN_PACKAGES if not packages.get(p)]
+    if missing:
+        raise ArtifactBuildError(
+            f"{venv_dir}: locked toolchain venv is missing required package(s) "
+            f"{missing} -- refusing to record an incomplete toolchain lock"
+        )
+    return ToolchainLock(venv_python, packages)
+
+
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -640,12 +775,21 @@ def build_wheel(
     out_dir: Path,
     *,
     python: str | None = None,
+    toolchain: ToolchainLock | None = None,
     reserved_names: set[str] | None = None,
 ) -> Path:
-    """Builds a wheel for ``source_dir`` via `uv build --wheel`, resolving
-    its build-system `requires` the normal (isolated) way -- which, on a
-    correctly governed-feed-configured machine, already resolves only from
-    that feed; this script adds no index configuration of its own.
+    """Builds a wheel for ``source_dir`` via `uv build --wheel`.
+
+    When ``toolchain`` is given, builds with ``--no-build-isolation``
+    against that one locked venv (``toolchain.venv_python``) -- the
+    pinned, reproducible path every real ``build_plugin_artifacts`` call
+    uses -- and ``python`` is ignored (the toolchain's own venv already
+    pins the interpreter). Without a ``toolchain`` (direct callers / low-
+    level tests only), falls back to `uv`'s normal per-wheel ISOLATED PEP
+    517 build, resolving its build-system `requires` the normal way --
+    which, on a correctly governed-feed-configured machine, already
+    resolves only from that feed; this script adds no index configuration
+    of its own either way.
 
     Builds into a fresh, empty temporary staging directory (never directly
     into ``out_dir``) and moves the single resulting wheel into ``out_dir``
@@ -671,7 +815,9 @@ def build_wheel(
     with tempfile.TemporaryDirectory(prefix="build-python-artifacts-") as staging:
         staging_dir = Path(staging)
         cmd = ["uv", "build", "--wheel", "-o", str(staging_dir)]
-        if python:
+        if toolchain is not None:
+            cmd += ["--no-build-isolation", "--python", str(toolchain.venv_python)]
+        elif python:
             cmd += ["--python", python]
         cmd.append(str(source_dir))
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -743,11 +889,24 @@ def _assert_version_corresponds(
 
 
 def build_plugin_artifacts(
-    plugin: str, *, out_dir: Path, python: str | None = None
+    plugin: str,
+    *,
+    out_dir: Path,
+    python: str | None = None,
+    toolchain: ToolchainLock | None = None,
 ) -> dict:
     """Builds the plugin's own wheel plus every vendored lib wheel it needs,
     and returns the manifest describing the whole set (also written to
-    ``out_dir`` as ``<plugin>-<version>-manifest.json``)."""
+    ``out_dir`` as ``<plugin>-<version>-manifest.json``).
+
+    ``toolchain``, when given, is the ONE locked build-toolchain (see
+    ``resolve_toolchain_lock``) every wheel in this call is built against --
+    pass the same ``ToolchainLock`` across several ``build_plugin_artifacts``
+    calls to share one toolchain lock across an entire promotion run.
+    Without it, this call resolves its own disposable, single-invocation
+    lock internally (using ``python`` to choose the toolchain venv's own
+    interpreter) -- still a real, pinned, ``--no-build-isolation`` build,
+    just not shared with any other call."""
     if not uer.is_safe_lib_name(plugin):
         # `plugin` becomes a path component twice over (`PLUGINS_DIR /
         # plugin` and the manifest filename `{plugin}-{version}-manifest
@@ -793,100 +952,133 @@ def build_plugin_artifacts(
 
     entries: list[dict] = []
     wheel_infos: list[dict[str, str]] = []
-    generators: set[str] = set()
     reserved_names: set[str] = set()
 
-    plugin_wheel = build_wheel(
-        plugin_dir, out_dir, python=python, reserved_names=reserved_names
-    )
-    plugin_info = parse_wheel_filename(plugin_wheel)
-    raw_version = read_project_version(plugin_dir)
-    _assert_version_corresponds(
-        raw_version=raw_version, wheel_version=plugin_info["version"], label=plugin_dir
-    )
-    plugin_generator = read_wheel_generator(plugin_wheel)
-    generators.add(plugin_generator)
-    wheel_infos.append(plugin_info)
-    entries.append(
-        {
-            "role": "plugin",
-            "name": plugin_info["name"],
-            "source": f"plugins/{plugin}",
-            "filename": plugin_wheel.name,
-            "sha256": sha256_file(plugin_wheel),
-            "generator": plugin_generator,
-            "python_tag": plugin_info["python_tag"],
-            "abi_tag": plugin_info["abi_tag"],
-            "platform_tag": plugin_info["platform_tag"],
-        }
-    )
+    with contextlib.ExitStack() as stack:
+        if toolchain is None:
+            toolchain_dir = Path(
+                stack.enter_context(
+                    tempfile.TemporaryDirectory(prefix="build-python-artifacts-toolchain-")
+                )
+            )
+            toolchain = resolve_toolchain_lock(toolchain_dir, python=python)
 
-    for lib_name, lib_dir in vendored_libs:
-        lib_wheel = build_wheel(
-            lib_dir, out_dir, python=python, reserved_names=reserved_names
+        def _build_and_verify(source_dir: Path) -> tuple[Path, dict, str]:
+            wheel = build_wheel(
+                source_dir, out_dir, toolchain=toolchain, reserved_names=reserved_names
+            )
+            info = parse_wheel_filename(wheel)
+            generator = read_wheel_generator(wheel)
+            if generator != toolchain.generator:
+                raise ArtifactBuildError(
+                    f"{wheel}: built with generator {generator!r}, expected "
+                    f"the locked toolchain's {toolchain.generator!r} -- the "
+                    "--no-build-isolation build did not actually use the "
+                    "pinned toolchain venv"
+                )
+            return wheel, info, generator
+
+        plugin_wheel, plugin_info, plugin_generator = _build_and_verify(plugin_dir)
+        raw_version = read_project_version(plugin_dir)
+        _assert_version_corresponds(
+            raw_version=raw_version, wheel_version=plugin_info["version"], label=plugin_dir
         )
-        lib_info = parse_wheel_filename(lib_wheel)
-        lib_generator = read_wheel_generator(lib_wheel)
-        generators.add(lib_generator)
-        wheel_infos.append(lib_info)
-        rel_source = lib_dir.resolve().relative_to(REPO).as_posix()
+        wheel_infos.append(plugin_info)
         entries.append(
             {
-                "role": "vendored-lib",
-                "name": lib_info["name"],
-                "source": rel_source,
-                "filename": lib_wheel.name,
-                "sha256": sha256_file(lib_wheel),
-                "generator": lib_generator,
-                "python_tag": lib_info["python_tag"],
-                "abi_tag": lib_info["abi_tag"],
-                "platform_tag": lib_info["platform_tag"],
+                "role": "plugin",
+                "name": plugin_info["name"],
+                "source": f"plugins/{plugin}",
+                "filename": plugin_wheel.name,
+                "sha256": sha256_file(plugin_wheel),
+                "generator": plugin_generator,
+                "python_tag": plugin_info["python_tag"],
+                "abi_tag": plugin_info["abi_tag"],
+                "platform_tag": plugin_info["platform_tag"],
             }
         )
 
-    identity_tags = overall_identity_tags(wheel_infos)
-    toolchain = sorted(generators)
-    wheel_fields = [
-        field
-        for e in sorted(entries, key=lambda e: e["filename"])
-        for field in (e["filename"], e["sha256"])
-    ]
-    artifact_id = "sha256:" + _hash_fields(
-        payload_hash,
-        identity_tags["python_tag"],
-        identity_tags["abi_tag"],
-        identity_tags["platform_tag"],
-        ",".join(toolchain),
-        *wheel_fields,
-    )
+        for lib_name, lib_dir in vendored_libs:
+            lib_wheel, lib_info, lib_generator = _build_and_verify(lib_dir)
+            wheel_infos.append(lib_info)
+            rel_source = lib_dir.resolve().relative_to(REPO).as_posix()
+            entries.append(
+                {
+                    "role": "vendored-lib",
+                    "name": lib_info["name"],
+                    "source": rel_source,
+                    "filename": lib_wheel.name,
+                    "sha256": sha256_file(lib_wheel),
+                    "generator": lib_generator,
+                    "python_tag": lib_info["python_tag"],
+                    "abi_tag": lib_info["abi_tag"],
+                    "platform_tag": lib_info["platform_tag"],
+                }
+            )
 
-    manifest = {
-        "schema": MANIFEST_SCHEMA,
-        "schema_version": MANIFEST_SCHEMA_VERSION,
-        "plugin": plugin,
-        "version": raw_version,
-        "python_tag": identity_tags["python_tag"],
-        "abi_tag": identity_tags["abi_tag"],
-        "platform_tag": identity_tags["platform_tag"],
-        "payload_hash": payload_hash,
-        "build_toolchain": toolchain,
-        "artifact_id": artifact_id,
-        "wheels": entries,
-    }
-    manifest_path = out_dir / f"{plugin}-{raw_version}-manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return manifest
+        identity_tags = overall_identity_tags(wheel_infos)
+        wheel_fields = [
+            field
+            for e in sorted(entries, key=lambda e: e["filename"])
+            for field in (e["filename"], e["sha256"])
+        ]
+        artifact_id = "sha256:" + _hash_fields(
+            payload_hash,
+            identity_tags["python_tag"],
+            identity_tags["abi_tag"],
+            identity_tags["platform_tag"],
+            toolchain.lock_id,
+            *wheel_fields,
+        )
+
+        manifest = {
+            "schema": MANIFEST_SCHEMA,
+            "schema_version": MANIFEST_SCHEMA_VERSION,
+            "plugin": plugin,
+            "version": raw_version,
+            "python_tag": identity_tags["python_tag"],
+            "abi_tag": identity_tags["abi_tag"],
+            "platform_tag": identity_tags["platform_tag"],
+            "payload_hash": payload_hash,
+            "build_toolchain": {
+                "packages": dict(sorted(toolchain.packages.items())),
+                "lock_id": toolchain.lock_id,
+            },
+            "artifact_id": artifact_id,
+            "wheels": entries,
+        }
+        manifest_path = out_dir / f"{plugin}-{raw_version}-manifest.json"
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        return manifest
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("plugin", help="plugin name under plugins/")
     ap.add_argument("--out-dir", required=True, type=Path)
-    ap.add_argument("--python", help="interpreter to build wheels against")
+    ap.add_argument(
+        "--python", help="interpreter used to create the locked toolchain venv"
+    )
+    ap.add_argument(
+        "--toolchain-venv",
+        type=Path,
+        help=(
+            "reuse (or create) a locked build-toolchain venv at this path -- "
+            "pass the SAME path across multiple invocations in one promotion "
+            "run so every plugin built in that run shares one pinned "
+            "setuptools/wheel toolchain; omit for a disposable, single-"
+            "invocation toolchain lock"
+        ),
+    )
     args = ap.parse_args()
     try:
+        toolchain = None
+        if args.toolchain_venv is not None:
+            toolchain = resolve_toolchain_lock(args.toolchain_venv, python=args.python)
         manifest = build_plugin_artifacts(
-            args.plugin, out_dir=args.out_dir, python=args.python
+            args.plugin, out_dir=args.out_dir, python=args.python, toolchain=toolchain
         )
     except ArtifactBuildError as exc:
         print(f"build-python-artifacts: FAILED: {exc}", file=sys.stderr)
