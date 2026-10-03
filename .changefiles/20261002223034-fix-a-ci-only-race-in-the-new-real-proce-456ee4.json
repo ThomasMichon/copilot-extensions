@@ -1,0 +1,9 @@
+{
+  "comment": "Fix a CI-only race in the new real-process _terminate_mux_daemon_pid identity tests (spawned PID wasn't yet visible via ps before the first check).",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
