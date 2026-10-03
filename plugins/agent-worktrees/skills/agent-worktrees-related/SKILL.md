@@ -136,10 +136,13 @@ related:
   in either direction relative to the audience-derived default; a key that's
   *absent* from the override simply stays at that default. **Trust
   boundary:** a `private` audience or a disclosure-weakening override is
-  only honored from an operator-controlled config layer (the shared
-  harness baseline, a machine override, or the bound knowledge repo) --
-  never from a target repo's own tracked `related.yaml` (the "repository"
-  layer), so an untrusted repo can't suppress its own disclosure by
+  only honored from a machine override or the bound knowledge repo
+  unconditionally, or from the shared harness baseline when that entry
+  provably describes a *different*, registered repo (an operator's own
+  control-plane config describing a sibling) rather than the repo it was
+  read from -- never from a target repo's own self-entry (whether read as
+  "repository" layer, or as "harness" with no verifiable sibling
+  distinction), so an untrusted repo can't suppress its own disclosure by
   self-declaring `private`. Widening disclosure is never gated.
 - **`primary`** -- the default repo (used by `related resolve` with no name).
 

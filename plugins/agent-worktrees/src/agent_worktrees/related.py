@@ -1159,40 +1159,70 @@ def effective_ownership(entry: RelatedEntry) -> str:
         return ""
 
 
-# Layers trusted to weaken AI-attribution disclosure (claim a `private`
-# audience, or an override that turns a key OFF).
-#
-# Only "machine" (the machine-local project root harness *setup* writes,
-# never an arbitrary repo checkout) and "knowledge" (the operator's own
-# bound personal knowledge repo) qualify. "harness" is deliberately
-# EXCLUDED even though it is often operator-authored in practice: per
-# ``state_root.config_source_anchors``, "harness" just means "whichever
-# repo happens to be the current launch/base anchor" -- it carries no
-# distinction between "the operator's own control-plane config, describing
-# some OTHER repo" (legitimate) and "the literal target repo's own tracked
-# related.yaml, describing ITSELF" (the exact attack this gate exists to
-# block: any contributor to an untrusted repo could add a self-entry
-# claiming `audience: private`). Resolving that distinction needs knowing
-# whether the entry's origin and the described repo's own checkout are the
-# same path -- context this model-level function doesn't have -- so until
-# that refinement lands, "harness" is conservatively treated as untrusted.
-# This can only ever fail SAFE (a legitimate harness-layer policy is
-# ignored, falling back to the disclose-by-default posture), never
-# exploitably permissive. "plugin"/``""``/"unknown" are excluded for the
-# same reason (no positive evidence of operator authorship). An untrusted
-# entry can still WIDEN disclosure (claim `public`, or an override that
-# turns a key ON) -- only narrowing requires this trust.
+# Layers unconditionally trusted to weaken AI-attribution disclosure (claim
+# a `private` audience, or an override that turns a key OFF): "machine"
+# (the machine-local project root harness *setup* writes, never an
+# arbitrary repo checkout) and "knowledge" (the operator's own bound
+# personal knowledge repo). "harness" is NOT unconditionally trusted --
+# see :func:`_entry_trusted_for_policy_weakening` for why and how it's
+# still trusted in the one case that's actually safe. "plugin"/``""``/
+# "unknown" are never trusted (no positive evidence of operator
+# authorship). An untrusted entry can still WIDEN disclosure (claim
+# `public`, or an override that turns a key ON) -- only narrowing requires
+# this trust.
 _TRUSTED_FOR_POLICY_WEAKENING = frozenset({"machine", "knowledge"})
+
+
+def _entry_trusted_for_policy_weakening(entry: RelatedEntry) -> bool:
+    """Whether ``entry`` may claim a disclosure-*weakening* value (a
+    ``private`` audience, or an ``ai_attribution`` override that turns a
+    key off).
+
+    Unconditionally true for :data:`_TRUSTED_FOR_POLICY_WEAKENING` layers.
+    For ``"harness"`` -- per ``state_root.config_source_anchors``, this
+    just means "whichever repo happens to be the current launch/base
+    anchor," which is **either** the operator's own control-plane config
+    describing some *other* repo (legitimate -- an entirely normal way to
+    configure this whole system) **or** the literal target repo's own
+    tracked ``related.yaml`` describing *itself* (the attack this gate
+    exists to block: any contributor to an untrusted repo could otherwise
+    add a self-entry claiming `audience: private`) -- those two cases are
+    told apart by comparing the entry's ``origin_anchor`` against the
+    *described* repo's (``entry.name``'s) own registered checkout path.
+    Different paths -> describing a sibling, trusted. Same path -> a
+    self-entry, untrusted. If ``entry.name`` isn't even a registered repo,
+    there's no checkout path to compare against and no way to verify the
+    entry isn't self-describing, so this fails closed (untrusted) --
+    matching this whole effort's "when in doubt, require disclosure"
+    posture rather than risk a false negative. Any other layer
+    (``"repository"``, ``"plugin"``, ``""``, ``"unknown"``) is always
+    untrusted."""
+    if entry.origin_layer in _TRUSTED_FOR_POLICY_WEAKENING:
+        return True
+    if entry.origin_layer != "harness" or not entry.origin_anchor:
+        return False
+    from . import repos
+
+    reg = repos.find_repo(entry.name)
+    local_path = reg.local_path() if reg else None
+    if not local_path:
+        return False
+    try:
+        return os.path.abspath(str(entry.origin_anchor)) != os.path.abspath(
+            str(local_path)
+        )
+    except Exception:
+        return False
 
 
 def effective_audience(entry: RelatedEntry) -> str:
     """The authoritative audience for an entry: its explicit value, or ``""``
     (unclassified) when unset -- unlike ``effective_ownership``, there is no
     derivation fallback to guess it from. A ``private`` claim from a source
-    not in :data:`_TRUSTED_FOR_POLICY_WEAKENING` is discarded (treated as
-    unclassified) rather than honored -- an untrusted source must never be
-    able to assert the disclosure-exempt case for itself."""
-    if entry.audience == "private" and entry.origin_layer not in _TRUSTED_FOR_POLICY_WEAKENING:
+    :func:`_entry_trusted_for_policy_weakening` doesn't trust is discarded
+    (treated as unclassified) rather than honored -- an untrusted source
+    must never be able to assert the disclosure-exempt case for itself."""
+    if entry.audience == "private" and not _entry_trusted_for_policy_weakening(entry):
         return ""
     return entry.audience
 
@@ -1204,14 +1234,14 @@ def effective_ai_attribution(entry: RelatedEntry) -> dict[str, bool]:
     ``private`` -> both False), then applies any explicit per-key
     ``ai_attribution`` override on the entry; a key absent from the override
     stays at its audience-derived default. An override that would turn a key
-    OFF is only honored from a source in
-    :data:`_TRUSTED_FOR_POLICY_WEAKENING` -- from any other source it is
-    discarded (the key stays at its audience-derived default), since an
-    untrusted entry must never be able to narrow disclosure for itself, only
-    widen it."""
+    OFF is only honored when
+    :func:`_entry_trusted_for_policy_weakening` trusts the entry -- from any
+    other source it is discarded (the key stays at its audience-derived
+    default), since an untrusted entry must never be able to narrow
+    disclosure for itself, only widen it."""
     default = effective_audience(entry) != "private"
     resolved = {"disclose_on_open": default, "disclose_on_reply": default}
-    trusted = entry.origin_layer in _TRUSTED_FOR_POLICY_WEAKENING
+    trusted = _entry_trusted_for_policy_weakening(entry)
     for key in ("disclose_on_open", "disclose_on_reply"):
         if key in entry.ai_attribution:
             value = bool(entry.ai_attribution[key])

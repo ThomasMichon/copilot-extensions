@@ -2082,8 +2082,10 @@ def test_effective_audience_discards_private_from_an_untrusted_source():
     ) == ""
     # "harness" (whichever repo happens to be the current launch/base
     # anchor -- state_root.config_source_anchors labels it this way
-    # unconditionally, with no distinction from a target's own self-entry)
-    # is also untrusted, conservatively, until that distinction exists.
+    # unconditionally) with no origin_anchor at all is untrusted --
+    # there's nothing to compare against the described repo's own
+    # checkout, so it fails closed. See the dedicated harness/self-vs-
+    # sibling tests below for the positive-verification cases.
     assert related.effective_audience(
         RelatedEntry(name="x", audience="private", origin_layer="harness")
     ) == ""
@@ -2128,6 +2130,50 @@ def test_effective_ai_attribution_discards_narrowing_override_from_an_untrusted_
         # on disclose_on_reply is a no-op widening, not narrowing.
         "disclose_on_open": True, "disclose_on_reply": True,
     }
+
+
+def test_harness_entry_describing_a_different_registered_repo_is_trusted(
+    monkeypatch,
+):
+    """The positive case `_entry_trusted_for_policy_weakening` exists to
+    preserve: an operator's own control-plane config (read from a
+    "harness"-layer anchor, e.g. a facility-wide config repo) describing a
+    DIFFERENT, registered repo must still be trusted -- the whole point of
+    distinguishing self-entries from sibling-describing entries, rather
+    than blanket-excluding "harness"."""
+    from agent_worktrees import repos as repos_mod
+
+    monkeypatch.setattr(
+        repos_mod, "find_repo",
+        lambda name: SimpleNamespace(local_path=lambda plat=None: "/some/other/path")
+        if name == "sibling-repo" else None,
+    )
+    e = RelatedEntry(
+        name="sibling-repo", audience="private", origin_layer="harness",
+        origin_anchor="/path/to/the/control-plane-config-repo",
+    )
+    assert related.effective_audience(e) == "private"
+
+
+def test_harness_entry_describing_itself_is_untrusted(monkeypatch):
+    """The negative case: a "harness"-layer entry whose origin_anchor
+    matches the DESCRIBED repo's own registered checkout -- i.e. the repo's
+    own tracked related.yaml contains a self-entry -- must stay untrusted,
+    even though the layer label alone is identical to the trusted sibling
+    case above."""
+    from agent_worktrees import repos as repos_mod
+
+    same_path = "/path/to/untrusted-repo"
+    monkeypatch.setattr(
+        repos_mod, "find_repo",
+        lambda name: SimpleNamespace(local_path=lambda plat=None: same_path)
+        if name == "untrusted-repo" else None,
+    )
+    e = RelatedEntry(
+        name="untrusted-repo", audience="private", origin_layer="harness",
+        origin_anchor=same_path,
+    )
+    assert related.effective_audience(e) == ""
 
 
 def test_harness_layer_from_the_real_anchor_construction_path_is_untrusted(

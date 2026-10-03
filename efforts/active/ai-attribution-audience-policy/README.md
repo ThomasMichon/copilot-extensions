@@ -179,16 +179,16 @@ Finished the two checklist items the stashed diff hadn't reached yet (the
 SKILL.md schema doc + `references/related.yaml` example, and tests covering
 round-trip, normalization, and the audience-keyed disclosure-policy
 resolution/override logic) and trimmed the ported docstrings for brevity so
-`related.py`'s growth (1717 -> 1837 lines, after four rounds of
+`related.py`'s growth (1717 -> 1867 lines, after five rounds of
 review-driven additions) stayed as small as reasonably possible -- still
 required a deliberate, reviewed widen of its shrink-only
 `module-size-baseline.json` entry (a sanctioned path per `CONTRIBUTING.md`'s
 own Code Style section, not a silent bypass). All `related`-module tests
-(188) plus the standard validation suite (`check-module-size`,
+(190) plus the standard validation suite (`check-module-size`,
 `check-docs-consistency`, `check-version-consistency`,
 `check-effort-vision-structure`) pass clean. **Phase 1 is done.**
 
-PR #5084's own review (4 rounds) caught real issues worth recording
+PR #5084's own review (5 rounds) caught real issues worth recording
 candidly: the first round found that every piece of ported documentation
 (this doc, the SKILL.md, `references/related.yaml`, and a `related.py`
 docstring) had inherited a "narrow-only, never widens" framing for the
@@ -256,6 +256,28 @@ have, and forcing one without that context risked repeating this exact
 mistake a third time. Added a test that drives the real anchor-
 construction chain end to end (not a hand-tagged anchor) to close the gap
 the reviewer actually found.
+
+The fifth round correctly rejected the fourth round's "conservative
+exclusion" as a cop-out: blanket-excluding `"harness"` doesn't just block
+the attack, it also makes the effort's own *documented, intended*
+configuration path -- an operator's control-plane `related.yaml`
+describing a sibling repo -- silently inert, while `SKILL.md` kept
+claiming the harness baseline was trusted. The round-4 Journal entry's own
+"deliberately not attempted here" framing didn't hold up to a second look:
+the context the model-level function was missing (which repo is being
+described) is already carried on the entry itself (`entry.name`), and the
+registry (`repos.find_repo`) already resolves a registered repo's own
+checkout path -- nothing actually blocked implementing the real
+distinction. Implemented it: a new `_entry_trusted_for_policy_weakening`
+helper trusts `"harness"` only when `entry.origin_anchor` resolves to a
+path *different* from `entry.name`'s own registered checkout (describing a
+sibling); a target repo's self-entry (origin equals its own checkout) --
+or an unregistered `entry.name` with no checkout path to verify against --
+still fails closed. Added both the positive case (a sibling-describing
+harness entry is trusted) and the negative case (a self-describing one
+isn't) as dedicated tests, alongside the existing real-anchor-construction
+test, and corrected `SKILL.md`'s trust-boundary prose to describe the
+actual (self-vs-sibling) rule rather than a plain layer allowlist.
 
 ### 2026-09-19 - Kickoff
 Operator requested rework of `ai-attribution`'s disclosure default from
