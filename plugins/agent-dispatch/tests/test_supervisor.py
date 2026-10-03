@@ -107,6 +107,9 @@ class QueueBackedClient:
         conclusion_state=None,
         conclusion_detail=None,
         claim_token=None,
+        force=False,
+        confirmed_absent=False,
+        release_requested=False,
     ):
         return asdict(
             self._q.fail_spawn(
@@ -115,6 +118,9 @@ class QueueBackedClient:
                 conclusion_state=conclusion_state,
                 conclusion_detail=conclusion_detail,
                 claim_token=claim_token,
+                force=force,
+                confirmed_absent=confirmed_absent,
+                release_requested=release_requested,
             )
         )
 
@@ -170,6 +176,7 @@ class QueueBackedClient:
         conclusion_state=None,
         conclusion_detail=None,
         claim_token=None,
+        release_requested=False,
     ):
         return asdict(
             self._q.settle_spawn(
@@ -178,6 +185,7 @@ class QueueBackedClient:
                 conclusion_state=conclusion_state,
                 conclusion_detail=conclusion_detail,
                 claim_token=claim_token,
+                release_requested=release_requested,
             )
         )
 
