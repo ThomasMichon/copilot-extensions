@@ -22,6 +22,16 @@ from .connection_owner import (
 
 log = logging.getLogger("agent-codespaces")
 
+#: Run when this process's Owner has won the machine (before its "started"
+#: record): process-local setup only the live Owner may do, such as opening
+#: its rotating log.
+_START_HOOKS: list[Callable[[], object]] = []
+
+
+def on_owner_start(hook: Callable[[], object]) -> None:
+    if hook not in _START_HOOKS:
+        _START_HOOKS.append(hook)
+
 
 def renew_owner_singleton(
     interval: float,
@@ -97,6 +107,11 @@ class BeaconKeeper:
     def start(self) -> None:
         # Only the Owner that won the machine starts a keeper: its lifecycle
         # records never count a losing concurrent start as a restart.
+        for hook in list(_START_HOOKS):
+            try:
+                hook()
+            except Exception as exc:  # setup must never stop the Owner
+                log.warning("Connection Owner start hook failed: %s", exc)
         log.info("Connection Owner started (pid %s, interval %ss)", os.getpid(), self._interval)
         self._thread.start()
 

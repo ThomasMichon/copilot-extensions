@@ -250,17 +250,37 @@ def test_only_the_owner_that_won_the_machine_logs_its_lifecycle(monkeypatch, cap
 
     from agent_codespaces import owner_beacon
 
+    ran: list[str] = []
+    monkeypatch.setattr(owner_beacon, "_START_HOOKS", [])
+    owner_beacon.on_owner_start(lambda: ran.append("opened log"))
     monkeypatch.setattr(owner, "claim_owner_singleton", lambda _interval: False)
     with caplog.at_level(logging.INFO, logger="agent-codespaces"):
         asyncio.run(owner.run_owner_daemon(SimpleNamespace(), interval=15.0))
     lost = [r.getMessage() for r in caplog.records]
     assert any("already live" in m for m in lost)
     assert not any("Connection Owner started" in m or "stopping" in m for m in lost)
+    assert ran == []  # a losing start never opens (or rotates) the live Owner's log
     caplog.clear()
     keeper = owner_beacon.BeaconKeeper(SimpleNamespace(active_codespaces=lambda: []), 15.0, lambda: None)
     with caplog.at_level(logging.INFO, logger="agent-codespaces"):
         keeper.start()
         keeper.stop()
     won = [r.getMessage() for r in caplog.records]
+    assert ran == ["opened log"]
     assert any("Connection Owner started" in m for m in won)
     assert any("Connection Owner stopping" in m for m in won)
+
+
+def test_an_unresolvable_owner_log_path_falls_back_to_stderr(monkeypatch, capsys):
+    from agent_codespaces import owner_cli
+
+    class Looping:
+        def resolve(self):
+            raise RuntimeError("Symlink loop")
+
+        def __str__(self):
+            return "loop/owner.log"
+
+    monkeypatch.setattr(owner_cli, "owner_log_path", lambda: Looping())
+    assert owner_cli._attach_owner_log() is None
+    assert "logging to stderr only" in capsys.readouterr().err

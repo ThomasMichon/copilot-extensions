@@ -56,16 +56,17 @@ def _attach_owner_log() -> str | None:
     import logging
     from logging.handlers import RotatingFileHandler
 
-    path = owner_log_path().resolve()
+    path = owner_log_path()
     root = logging.getLogger()
-    if any(isinstance(h, RotatingFileHandler) and getattr(h, "baseFilename", None) == str(path)
-           for h in root.handlers):
-        return str(path)
     try:
+        path = path.resolve()
+        if any(isinstance(h, RotatingFileHandler) and getattr(h, "baseFilename", None) == str(path)
+               for h in root.handlers):
+            return str(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         handler = RotatingFileHandler(path, maxBytes=OWNER_LOG_MAX_BYTES,
                                       backupCount=OWNER_LOG_BACKUPS, encoding="utf-8")
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:  # RuntimeError: a symlink loop on Python < 3.13
         print(f"connection-owner: can't open {path} ({exc}); logging to stderr only", file=sys.stderr)
         return None
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
@@ -182,10 +183,15 @@ def cmd_owner(args: argparse.Namespace) -> int:
         print(f"connection-owner: reconciled once; held={held}; active={active}")
         return 0
 
-    log_path = _attach_owner_log()
+    # The rotating log isn't safe across processes: only the Owner that wins
+    # the machine opens it (a losing concurrent start must never rotate it).
+    from .owner_beacon import on_owner_start
+
+    on_owner_start(_attach_owner_log)
     print(
         f"connection-owner: starting reconcile daemon (interval={interval}s; "
-        f"idle_shutdown_after={idle_shutdown_after}; log={log_path or 'stderr'}; Ctrl-C to stop)...",
+        f"idle_shutdown_after={idle_shutdown_after}; log={owner_log_path()} once it owns the machine; "
+        "Ctrl-C to stop)...",
         file=sys.stderr,
     )
     try:
