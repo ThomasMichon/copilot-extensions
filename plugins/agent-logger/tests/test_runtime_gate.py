@@ -102,18 +102,27 @@ def _base_interpreter() -> Path | None:
     Returns ``None`` (never raises) when no candidate binary is found, so
     callers can fall back to the simpler in-process path for interpreters
     that are not venv-nested in the first place.
+
+    On Windows, the interpreter lives directly under the installation root
+    (``<prefix>\\python.exe``), not under a ``Scripts`` subdirectory (that
+    holds installed console-script shims, never the interpreter itself) --
+    both are searched, in that order, since some layouts still place it
+    there.
     """
     base = Path(sys.base_exec_prefix)
-    bin_dir = base / ("Scripts" if os.name == "nt" else "bin")
+    search_dirs = (
+        [base, base / "Scripts"] if os.name == "nt" else [base / "bin"]
+    )
     candidates = (
         ["python.exe"]
         if os.name == "nt"
         else [f"python{sys.version_info.major}.{sys.version_info.minor}", "python3", "python"]
     )
-    for name in candidates:
-        candidate = bin_dir / name
-        if candidate.is_file():
-            return candidate
+    for bin_dir in search_dirs:
+        for name in candidates:
+            candidate = bin_dir / name
+            if candidate.is_file():
+                return candidate
     return None
 
 
@@ -132,6 +141,7 @@ def _fake_runtime(runtime_root: Path) -> Path:
                 check=True,
                 capture_output=True,
                 text=True,
+                env=_clean_subprocess_env(),
             )
         else:
             venv.EnvBuilder(with_pip=False).create(slot)
