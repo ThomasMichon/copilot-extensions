@@ -4,7 +4,7 @@ import { createDriverServer, MAX_SSE_CLIENTS } from "../extensions/agent-remote-
 
 const TOKEN = "test-token-123";
 
-async function withServer(fn) {
+async function withServer(fn, extraOpts = {}) {
   const calls = { send: [], abort: 0 };
   const listeners = new Set();
   const driverServer = createDriverServer({
@@ -23,6 +23,7 @@ async function withServer(fn) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    ...extraOpts,
   });
   const port = await driverServer.listen();
   const base = `http://127.0.0.1:${port}`;
@@ -158,4 +159,40 @@ test("GET /events rejects a connection past MAX_SSE_CLIENTS with 503", async () 
       for (const c of controllers) c.abort();
     }
   });
+});
+
+test("GET /events disconnects a client whose buffered backlog exceeds maxSseBufferedBytes", async () => {
+  // A tiny cap (independent of any real network backpressure) exercises the
+  // mechanism itself: res.writableLength is nonzero immediately after any
+  // write, so a 1-byte cap deterministically trips the check without
+  // needing a genuinely slow/non-reading consumer.
+  await withServer(
+    async ({ base, emit }) => {
+      const res = await authed(`${base}/events`);
+      assert.equal(res.status, 200);
+      const reader = res.body.getReader();
+      // Drain the initial ": connected" comment so the stream is established.
+      await reader.read();
+
+      emit({ type: "assistant.message", content: "this write alone exceeds the 1-byte cap" });
+
+      // The server should destroy this connection -- either the stream ends
+      // cleanly (done: true) or the abrupt server-side destroy surfaces as a
+      // socket-level read error on the client, depending on timing. Either
+      // outcome proves the connection did not survive to keep buffering
+      // further events indefinitely; a read that keeps succeeding forever
+      // would be the actual failure this test guards against.
+      let disconnected = false;
+      try {
+        for (let i = 0; i < 20 && !disconnected; i += 1) {
+          const result = await reader.read();
+          disconnected = result.done;
+        }
+      } catch {
+        disconnected = true; // the abrupt destroy() surfaced as a read error -- also a disconnect
+      }
+      assert.equal(disconnected, true, "expected the over-backlogged connection to be closed by the server");
+    },
+    { maxSseBufferedBytes: 1 },
+  );
 });

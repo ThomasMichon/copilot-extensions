@@ -135,10 +135,16 @@ this plugin addresses both directly:
   ```
 - **Bounded, non-looping failure modes.** `MAX_SSE_CLIENTS` (16) caps
   concurrent `/events` subscribers per session -- a reconnect-storming or
-  misbehaving caller gets a `503`, never unbounded resource growth. The
-  driver server's own `listen()` is retried a bounded 3 times on a bind
-  race, then gives up and degrades silently (the session still runs exactly
-  as it would without the extension) -- it never retry-loops indefinitely.
+  misbehaving caller gets a `503`, never unbounded resource growth.
+  `MAX_SSE_BUFFERED_BYTES` (2MB) bounds the OTHER half of that same concern:
+  capping client *count* alone does not cap memory if a single slow or
+  non-reading client never drains its socket, since Node queues every
+  `res.write()` regardless -- a client whose buffered backlog exceeds this
+  cap is disconnected outright rather than allowed to accumulate an
+  unbounded backlog. The driver server's own `listen()` is retried a
+  bounded 3 times on a bind race, then gives up and degrades silently (the
+  session still runs exactly as it would without the extension) -- it
+  never retry-loops indefinitely.
   A crash this process catches (`uncaughtException`/`unhandledRejection`)
   still runs descriptor cleanup before the process exits -- its entry is
   gone immediately, not merely stale. A crash that bypasses all JS handlers
@@ -261,6 +267,12 @@ directory this process can create and write to.
   genuinely dead process, that is a real `registry.mjs` bug -- file it,
   don't hand-delete the file as a workaround (another session's sweep would
   have removed it on its own next startup).
+- **`bin/list-sessions.mjs` exits 1 with "could not read the session
+  registry."** The discovery directory itself is inaccessible (permissions,
+  a disk/mount issue) -- distinct from a genuinely empty fleet, which exits
+  0 and prints "No live agent-remote-driver sessions found." A sweep inside
+  a running session degrades the same way (logged, non-fatal; the session
+  itself still runs normally) rather than crashing.
 
 Contribute through this repo's normal worktree/PR flow (see
 [`CONTRIBUTING.md`](../../CONTRIBUTING.md)); file issues against

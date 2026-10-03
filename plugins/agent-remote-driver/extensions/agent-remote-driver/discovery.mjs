@@ -78,23 +78,25 @@ export function authorizes(authorizationHeader, expectedToken) {
 // Node's fs.renameSync uses the equivalent atomic replace on Windows).
 export function writeDescriptorAtomic(path, descriptor) {
   const tmpPath = `${path}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(tmpPath, JSON.stringify(descriptor, null, 2), { mode: 0o600 });
   try {
-    chmodSync(tmpPath, 0o600); // belt-and-suspenders where writeFileSync's mode is umask-adjusted
-  } catch {
-    /* best-effort; not fatal on platforms without POSIX perms (e.g. Windows) */
-  }
-  try {
+    writeFileSync(tmpPath, JSON.stringify(descriptor, null, 2), { mode: 0o600 });
+    try {
+      chmodSync(tmpPath, 0o600); // belt-and-suspenders where writeFileSync's mode is umask-adjusted
+    } catch {
+      /* best-effort; not fatal on platforms without POSIX perms (e.g. Windows) */
+    }
     renameSync(tmpPath, path);
   } catch (e) {
-    // A failed rename must not leave a credential-bearing temp file behind
-    // -- it carries the same bearer token as the real descriptor. Clean up,
-    // then surface the ORIGINAL error (the cleanup attempt's own outcome is
+    // A failed write OR a failed rename must not leave a credential-bearing
+    // temp file behind -- it carries the same bearer token as the real
+    // descriptor, and a write can fail (ENOSPC/EIO) after already creating
+    // or partially writing it, not just at the rename step. Clean up, then
+    // surface the ORIGINAL error (the cleanup attempt's own outcome is
     // never more important than why the write actually failed).
     try {
       unlinkSync(tmpPath);
     } catch {
-      /* best-effort; the original rename error is what the caller needs */
+      /* best-effort; the original error is what the caller needs */
     }
     throw e;
   }

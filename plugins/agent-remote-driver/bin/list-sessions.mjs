@@ -14,9 +14,12 @@
 // Usage:
 //   node bin/list-sessions.mjs [--no-probe] [--json]
 //
-// Exit code is always 0 (this is a read-only reporting tool); failures to
-// probe an individual session are reported per-entry, not as a process exit
-// failure.
+// Exit code is 0 for a normal run (including a genuinely empty fleet);
+// failures to probe an individual session are reported per-entry, not as a
+// process exit failure. Exit code is 1 only if the discovery directory
+// itself cannot be read (a real operational failure, e.g. EACCES/EIO) --
+// deliberately distinct from "zero live sessions found," which is a
+// normal, successful result.
 
 import { discoveryDir } from "../extensions/agent-remote-driver/discovery.mjs";
 import { listLive } from "../extensions/agent-remote-driver/registry.mjs";
@@ -63,7 +66,14 @@ async function main() {
   const asJson = args.includes("--json");
 
   const dir = discoveryDir();
-  const sessions = listLive(dir);
+  let sessions;
+  try {
+    sessions = listLive(dir);
+  } catch (e) {
+    process.stderr.write(`agent-remote-driver: could not read the session registry at ${dir}: ${e.message}\n`);
+    process.exitCode = 1;
+    return;
+  }
 
   let rows = sessions;
   if (probe && sessions.length > 0) {

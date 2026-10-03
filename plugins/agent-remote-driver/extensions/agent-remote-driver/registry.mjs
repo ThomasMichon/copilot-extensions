@@ -69,12 +69,21 @@ function readDescriptorSafe(path) {
 
 // Lists every descriptor currently on disk, valid or not. Each entry also
 // carries its file `path` so a caller can act on it (e.g. unlink).
+//
+// A missing directory is an EMPTY FLEET, not an error -- the common case
+// for a freshly provisioned machine/image before any session has ever
+// registered. Any OTHER `readdirSync` failure (EACCES, EIO, a transient
+// mount issue) is a genuine inability to see the registry at all and must
+// propagate: silently returning `[]` for those too would make a sweep
+// falsely "succeed" and make `bin/list-sessions.mjs` falsely report an
+// empty fleet when the registry is actually just inaccessible.
 export function listDescriptorFiles(dir) {
   let names;
   try {
     names = readdirSync(dir);
-  } catch {
-    return []; // directory doesn't exist yet -- an empty fleet, not an error
+  } catch (e) {
+    if (e && e.code === "ENOENT") return [];
+    throw e;
   }
   return names
     .filter((n) => n.endsWith(".json"))

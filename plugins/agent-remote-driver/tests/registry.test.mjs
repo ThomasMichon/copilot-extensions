@@ -63,6 +63,20 @@ test("listDescriptorFiles returns [] for a missing directory (empty fleet, not a
   assert.deepEqual(listDescriptorFiles(join(tmpDir(), "does-not-exist")), []);
 });
 
+test("listDescriptorFiles propagates a non-ENOENT readdirSync failure instead of reporting an empty fleet", () => {
+  // Pointing at a regular FILE (not a directory) makes readdirSync fail
+  // with ENOTDIR, not ENOENT -- simulating a real "the registry exists but
+  // is not actually readable as a directory" failure (EACCES/EIO are the
+  // realistic causes in production) without needing platform-specific
+  // permission APIs. Silently returning [] here would make a sweep falsely
+  // "succeed" and make bin/list-sessions.mjs falsely report zero sessions
+  // when the registry is actually inaccessible.
+  const dir = tmpDir();
+  const notADir = join(dir, "not-a-directory");
+  writeFileSync(notADir, "");
+  assert.throws(() => listDescriptorFiles(notADir), /ENOTDIR|ENOENT/);
+});
+
 test("listDescriptorFiles skips non-.json files and parses the rest", () => {
   const dir = tmpDir();
   writeDescriptor(dir, "s1");

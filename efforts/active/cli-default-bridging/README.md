@@ -495,7 +495,33 @@ tests without loading joinSession()"). 13 new tests exercise it with fully
 injected dependencies (a fake process-like object for signals, a fake
 timer scheduler) — no real OS signals or real waiting required.
 
-13 new `node --test` cases this round (61 total for the plugin, all
-passing). Comments that referenced "PR #5036" directly were reworded to stay
-timeless per review feedback; the PR's own description now carries the
-required Documentation impact statement.
+Running test count, for the record (the PR's own description previously
+mis-stated this round's delta — corrected there too): 36 after the initial
+fleet-hygiene commit → 48 after the first review-fix commit (atomic write +
+TOCTOU-v1 + signal fix + their tests, +12) → 61 after this round (+13,
+TOCTOU-v2 via atomic-claim, legacy-descriptor compatibility, unlink-failure
+reporting, the `lifecycle.mjs` extraction and its tests). Comments that
+referenced "PR #5036" directly were reworded to stay timeless per review
+feedback; the PR's own description now carries the required Documentation
+impact statement.
+
+### 2026-10-03 (cont'd) — Third review round: backpressure bound + two more hardening fixes
+
+- **SSE backpressure.** `MAX_SSE_CLIENTS` bounds client *count* but not
+  memory on its own — a single slow/non-reading client still lets Node
+  queue every forwarded event in its response buffer indefinitely. Added
+  `MAX_SSE_BUFFERED_BYTES` (2MB): a client whose buffered backlog exceeds it
+  is disconnected outright rather than allowed to keep growing.
+- **`writeDescriptorAtomic` write-failure cleanup.** The prior fix only
+  cleaned up the temp file when the *rename* failed; `writeFileSync` itself
+  can fail (ENOSPC/EIO) after already creating or partially writing the
+  file. Both paths now share one cleanup-then-rethrow block.
+- **`listDescriptorFiles` silently treated any `readdirSync` failure as an
+  empty fleet** — including EACCES/EIO, a genuine "the registry is
+  inaccessible" failure distinct from ENOENT's "no fleet yet." Now
+  propagates anything other than ENOENT; `bin/list-sessions.mjs` catches
+  that specifically and exits 1 with a clear message instead of falsely
+  reporting zero sessions.
+
+3 new `node --test` cases this round (64 total for the plugin, all
+passing).

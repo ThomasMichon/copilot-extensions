@@ -21,13 +21,23 @@
 // subscribers per session so a reconnect-storming or misbehaving caller
 // cannot exhaust this one session's file descriptors/memory -- a defensive
 // bound, independent of the fleet-wide discovery-file hygiene registry.mjs
-// provides.
+// provides. MAX_SSE_BUFFERED_BYTES bounds the OTHER half of that same
+// concern: capping the CLIENT COUNT does not cap memory if a single slow or
+// non-reading client never drains its socket -- Node queues every
+// `res.write()` call in the response's internal buffer regardless, so a
+// client count cap alone still allows up to MAX_SSE_CLIENTS slow consumers
+// to each accumulate an unbounded backlog of forwarded events. A client
+// whose buffered, not-yet-flushed bytes exceed this cap is treated as
+// unable to keep up and disconnected -- the same "drop, don't let a
+// disconnected-in-practice reader cost unbounded memory" posture driving
+// every other bound in this module.
 
 import { createServer } from "node:http";
 import { authorizes } from "./discovery.mjs";
 
 const MAX_BODY_BYTES = 1_000_000; // 1MB cap on a request body; avoids unbounded buffering
 export const MAX_SSE_CLIENTS = 16; // per-session cap on concurrent /events subscribers
+export const MAX_SSE_BUFFERED_BYTES = 2_000_000; // 2MB per-client backlog cap before dropping a slow consumer
 
 function sendJson(res, status, body) {
   const data = JSON.stringify(body);
@@ -78,10 +88,12 @@ async function readJsonBody(req) {
  *   Callers (extension.mjs) are responsible for invoking listeners OFF the
  *   CLI's own event loop (see the hot-potato discipline note in
  *   extension.mjs) -- this module just wires whatever it's given to SSE.
+ * @param {number} [opts.maxSseBufferedBytes] -- override MAX_SSE_BUFFERED_BYTES
+ *   (test-only knob; production callers should rely on the default).
  * @returns {{server: import("node:http").Server, listen: () => Promise<number>, close: () => Promise<void>}}
  */
 export function createDriverServer(opts) {
-  const { getSessionId, getPid, token, send, abort, subscribe } = opts;
+  const { getSessionId, getPid, token, send, abort, subscribe, maxSseBufferedBytes = MAX_SSE_BUFFERED_BYTES } = opts;
   const sseClients = new Set();
 
   function unauthorized(res) {
@@ -115,6 +127,14 @@ export function createDriverServer(opts) {
         const listener = (event) => {
           try {
             res.write(`data: ${JSON.stringify(event)}\n\n`);
+            // A slow or non-reading client makes Node queue every write in
+            // the response's own internal buffer, regardless of how small
+            // MAX_SSE_CLIENTS is -- cap per-client backlog, not just client
+            // count, so a handful of stalled consumers can't still grow
+            // memory without bound.
+            if (res.writableLength > maxSseBufferedBytes) {
+              res.destroy(new Error(`/events backlog exceeded ${maxSseBufferedBytes} bytes -- dropping a slow consumer`));
+            }
           } catch {
             /* connection likely closed; cleanup below will catch up */
           }

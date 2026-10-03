@@ -148,6 +148,20 @@ test("writeDescriptorAtomic cleans up the credential-bearing temp file when the 
   assert.deepEqual(leftoverTmp, []);
 });
 
+test("writeDescriptorAtomic surfaces (and doesn't mask) a write failure that happens before any rename is attempted", () => {
+  // A nonexistent parent directory makes writeFileSync itself fail (ENOENT)
+  // before renameSync is ever reached -- confirms the write step, not just
+  // the rename step, is covered by the same cleanup-then-rethrow path, and
+  // that a failed best-effort cleanup never masks the real error with one
+  // of its own.
+  const path = join(tmpDir(), "does-not-exist", "s1.json");
+
+  assert.throws(
+    () => writeDescriptorAtomic(path, buildDescriptor({ sessionId: "s1", pid: process.pid, port: 1, token: "secret-token" })),
+    /ENOENT/,
+  );
+});
+
 test("writeDescriptorAtomic replaces an existing descriptor's full content (the heartbeat-rewrite case)", () => {
   const dir = tmpDir();
   const path = join(dir, "s1.json");
