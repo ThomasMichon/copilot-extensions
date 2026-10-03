@@ -347,11 +347,25 @@ phase) is considered.
         snapshot on every retry until the background timer happens to fire,
         letting a new subscriber publish an incomplete roster as
         authoritative long before a real rescan ever occurs. The cache
-        therefore retains **last-known-good per namespace** (an entry whose
-        most recent resolve failed keeps serving its last successful
-        result, still correctly flagged in that tick's
-        `incomplete_namespaces`), and the endpoint accepts an explicit
-        force-refresh signal (e.g. a `force_refresh=true` query param) that
+        therefore retains **last-known-good per namespace, internally only
+        — this does not change what rows the default response serves for a
+        failing namespace:** today `list_agents_async()` skips a failing
+        namespace's rows entirely (serves none for it, lists it in
+        `incomplete_namespaces`) — `BridgeClient.list_agents()` and other
+        existing callers already discard `incomplete_namespaces` and just
+        use whatever rows came back, so if the cache started substituting
+        stale last-known-good rows into that same default response, those
+        callers would start treating stale/gone agents as currently live,
+        which is worse than today's "nothing for that namespace," not
+        compatible with it. Last-known-good is retained **only as internal
+        cache state** (what the recovery/opportunistic-refresh machinery
+        below operates on, and what a `require_complete` caller's own
+        distinct contract may choose to use) — the **default** response for
+        a namespace that's currently failing keeps skipping its rows
+        exactly like today, with the namespace still named in
+        `incomplete_namespaces`, unchanged. The endpoint accepts an
+        explicit force-refresh signal (e.g. a `force_refresh=true` query
+        param) that
         `_fetch_complete_initial_rows()`'s retry loop sets, triggering an
         immediate out-of-band re-scan of just the still-incomplete
         namespace(s) before responding — not a cache read. Every other
@@ -432,8 +446,8 @@ phase) is considered.
         namespace's `last_refreshed_at` plus a bound meaningfully larger
         than the normal refresh period, e.g. 3× the refresh interval) —
         past that deadline, the entry is internally treated as stale
-        (no longer eligible to be served as fresh, though still eligible
-        as last-known-good under the default response shape below); and
+        (no longer eligible to back the default response as current,
+        though still retained internally for the recovery machinery); and
         (c) **a stale or incomplete entry is never silently served as if
         nothing were wrong — any `GET` that observes a namespace as
         incomplete, uninitialized, or past its freshness deadline must
@@ -443,11 +457,16 @@ phase) is considered.
         on whether the caller passed `require_complete` (see the dedicated
         bullet above) — two distinct, deliberate branches, not one:**
         without `require_complete` (the default, and every existing
-        caller's actual behavior), the response is unchanged from today
-        regardless of the refresh's outcome — a successful refresh updates
-        the served value and drops the namespace from
-        `incomplete_namespaces`; a failed refresh still serves whatever
-        last-known-good (or nothing, if uninitialized) is on hand, with the
+        caller's actual behavior), the response is **unchanged from today
+        regardless of the refresh's outcome** — a successful refresh
+        updates the served value and drops the namespace from
+        `incomplete_namespaces`; a failed refresh serves **no rows for
+        that namespace** (today's existing skip-on-failure behavior,
+        `list_agents_async()`'s current shape — not a substitution of
+        stale last-known-good rows, which would make existing callers that
+        already discard `incomplete_namespaces` (e.g.
+        `BridgeClient.list_agents()`) start treating gone/stale agents as
+        currently live), with the
         namespace named in `incomplete_namespaces` exactly as it already
         is in Phase 2. **With** `require_complete`, a failed refresh is what
         escalates to the fail-closed `503` contract instead of a plain

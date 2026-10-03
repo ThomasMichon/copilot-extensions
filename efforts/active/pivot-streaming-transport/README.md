@@ -1610,3 +1610,24 @@ Round 19's opt-in fix wasn't applied consistently everywhere it needed to be:
   own summary paragraph. Removed.
 
 All replied-to inline.
+
+### 2026-10-02 — Phase 3 design PR (#4928) review round 21: last-known-good retention was itself a default-behavior change
+One high finding: **retaining last-known-good as the default response's
+substitute for a failing namespace's rows is itself incompatible with "the
+default response is unchanged."** Today a failing namespace's scan is
+skipped entirely — `list_agents_async()` serves no rows for it, only lists
+it in `incomplete_namespaces` — and existing callers like
+`BridgeClient.list_agents()` already discard that field and just use
+whatever rows came back. Substituting stale last-known-good rows into that
+same default response would make those callers start treating gone/stale
+agents as currently live, which is a regression relative to today's
+"nothing for that namespace," not a compatible continuation of it. Fixed by
+scoping last-known-good to **internal cache state only** — what the
+recovery/opportunistic-refresh machinery and a `require_complete` caller's
+own distinct contract operate on — while the **default** response keeps
+skipping a failing namespace's rows exactly like today, in both places this
+design described the behavior (the initial-scan recovery bullet and the
+require_complete-split bullet).
+
+Replied-to inline; the resurfaced Guiding Intent thread needed no further
+action.
