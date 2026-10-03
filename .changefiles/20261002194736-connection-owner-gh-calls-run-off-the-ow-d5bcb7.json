@@ -1,0 +1,9 @@
+{
+  "comment": "connection-owner: gh calls run off the Owner's event loop, and the Owner never rebuilds (and so never wakes) a CodeSpace GitHub has stopped -- one stopped box no longer silences every other CodeSpace's relay and bridge",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

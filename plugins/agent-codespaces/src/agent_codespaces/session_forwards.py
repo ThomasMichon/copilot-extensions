@@ -40,8 +40,20 @@ from .connection_owner import (
     release,
 )
 from ._ssh_retry import exec_with_retry
+from .owner_availability import AvailabilityGate
 
 log = logging.getLogger("agent-codespaces")
+
+
+async def _off_loop(factory: Callable[..., RelayChannel], *args: Any) -> RelayChannel:
+    """Build a channel in a worker thread.
+
+    The real factories run ``gh codespace ssh --config``, which waits up to
+    minutes for a starting CodeSpace. On the Owner's event loop that wait would
+    also stall every ssh ProxyCommand pump the Owner carries, so every other
+    CodeSpace's relay and bridge would stop forwarding, and keepalives would
+    then kill them."""
+    return await asyncio.to_thread(factory, *args)
 
 # Build a (not-yet-started) reverse forward into a CodeSpace:
 # ``(codespace, codespace_listen_port[, host_port]) -> channel``. Without
@@ -92,7 +104,9 @@ class SessionForwards:
         local_factory: LocalForwardFactory | None = None,
         bridge_probe: BridgeProbe | None = None,
         transcript_mirror: TranscriptMirrorFn | None = None,
+        availability: AvailabilityGate | None = None,
     ) -> None:
+        self._availability = availability
         self._daemon_factory = daemon_factory
         self._bridge_probe = bridge_probe
         self._mirror = transcript_mirror
@@ -111,6 +125,24 @@ class SessionForwards:
         self._local: dict[tuple[str, int], tuple[int, RelayChannel]] = {}
         self._local_failures: dict[tuple[str, int], int] = {}
         self._last_probe: dict[str, float] = {}
+
+    async def usable(self, holds: dict[str, OwnerHold], relays: Any = None) -> dict[str, OwnerHold]:
+        """``holds`` without CodeSpaces the availability gate shows stopped.
+
+        The Owner reconciles only these, so a stopped box's forwards are torn
+        down instead of rebuilt (a rebuild would boot it back up). ``relays``
+        (the Owner: ``active_codespaces()``) says which relays are live; a held
+        CodeSpace missing a relay or bridge forward forces a fresh listing."""
+        if self._availability is None:
+            return holds
+        live = relays.active_codespaces() if relays is not None else set(holds)
+        bridges = self.active()
+        lost = any(
+            cs not in live or (hold.daemon_port and cs not in bridges)
+            for cs, hold in holds.items()
+        )
+        stopped = await self._availability.stopped(holds, refresh=lost)
+        return {cs: hold for cs, hold in holds.items() if cs not in stopped}
 
     def active(self) -> dict[str, int]:
         """CodeSpace -> listen port of each currently-live daemon forward."""
@@ -160,7 +192,8 @@ class SessionForwards:
                 continue
             entry = self._channels.get(codespace)
             if entry is None:
-                entry = (hold.daemon_port, self._daemon_factory(codespace, hold.daemon_port))
+                channel = await _off_loop(self._daemon_factory, codespace, hold.daemon_port)
+                entry = (hold.daemon_port, channel)
                 self._channels[codespace] = entry
             if not await self._ensure(f"bridge forward for {codespace}", entry[1]):
                 self._channels.pop(codespace, None)
@@ -198,7 +231,7 @@ class SessionForwards:
         for key, venue in wanted.items():
             entry = self._local.get(key)
             if entry is None:
-                entry = (venue, self._local_factory(key[0], key[1], venue))
+                entry = (venue, await _off_loop(self._local_factory, key[0], key[1], venue))
                 self._local[key] = entry
             if not await self._ensure(f"local forward {key[1]}->{venue} for {key[0]}", entry[1]):
                 self._local.pop(key, None)
@@ -232,7 +265,7 @@ class SessionForwards:
             await old_channel.stop()
         except Exception:
             log.debug("old dynamic local forward stop failed for %s:%s", key[0], key[1])
-        entry = (venue, self._local_factory(key[0], 0, venue))
+        entry = (venue, await _off_loop(self._local_factory, key[0], 0, venue))
         if not await self._ensure(f"replacement local forward 0->{venue} for {key[0]}", entry[1]):
             await self._stop_untracked_local_forward(entry[1])
             return
@@ -296,7 +329,7 @@ class SessionForwards:
         for key, host in wanted.items():
             entry = self._extra.get(key)
             if entry is None:
-                entry = (host, self._daemon_factory(key[0], key[1], host))
+                entry = (host, await _off_loop(self._daemon_factory, key[0], key[1], host))
                 self._extra[key] = entry
             if not await self._ensure(f"reverse forward {key[1]}->{host} for {key[0]}", entry[1]):
                 self._extra.pop(key, None)
@@ -684,7 +717,8 @@ def make_remote_mux_probe(
 
         unknown: dict[str, bool | None] = {m: None for m in mux_sessions}
         try:
-            states = {cs.name: str(cs.state) for cs in list_codespaces()}
+            rows = await asyncio.to_thread(lambda: list(list_codespaces()))
+            states = {cs.name: str(cs.state) for cs in rows}
         except Exception as exc:
             log.debug("session probe: listing CodeSpaces failed: %s", exc)
             return unknown
