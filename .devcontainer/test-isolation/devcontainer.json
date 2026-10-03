@@ -161,8 +161,8 @@
   // Networking (Phase 1, item 2; closed in Phase 2): left at Docker's
   // default bridge network for container creation and the dependency-
   // preparation pass (`tools/run_tests_in_devcontainer.py`'s
-  // `prepare_dependencies`, which drives `uv sync`/`uv pip install` via
-  // `run-plugin-tests.py --collect-only`) -- that pass genuinely needs
+  // `prepare_dependencies`, which drives `uv venv`/`uv pip install` via
+  // `run-plugin-tests.py --prepare-only`) -- that pass genuinely needs
   // outbound reach to resolve packages. The wrapper then disconnects the
   // container from every attached network
   // (`disconnect_container_networks`) before the real pytest pass runs,

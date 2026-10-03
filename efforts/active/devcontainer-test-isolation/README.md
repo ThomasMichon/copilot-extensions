@@ -4,7 +4,7 @@
 - **Repo:** ThomasMichon/copilot-extensions
 - **Branch(es):** TBD (one per phase)
 - **Created:** 2026-10-02
-- **Status:** Active (Phase 1 done; Phase 2 in progress -- CI-lane decided, networking-scope and admission-lease closures still landing via separate PRs)
+- **Status:** Active (Phase 1 done; Phase 2 in progress -- CI-lane decided, networking-scope closed, admission-lease closure still landing via separate PR)
 - **Vision:** [`test-portfolio`](../../../visions/test-portfolio/README.md)'s
   containment boundary and host-safe-default behaviors; relates to, without
   changing, [`agent-containers`](../../../visions/plugins/agent-containers/README.md)'s
