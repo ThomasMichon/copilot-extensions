@@ -42,6 +42,12 @@ from .pivots import RegisteredPivot, format_template, parse_list_payload
 #: Hard cap on how long a pivot's ``list``/action command may run.
 LIST_TIMEOUT = 20.0
 ACTION_TIMEOUT = 30.0
+#: Hard cap for a ``create_action`` field's ``options_command`` -- this runs
+#: synchronously (off-thread, see `_run_bg`) right before a modal opens, so it
+#: is bounded tighter than a full action's own timeout: a slow/hung vocabulary
+#: source should degrade to the field's "Other…" free-text fallback promptly,
+#: not stall opening the dialog.
+OPTIONS_COMMAND_TIMEOUT = 5.0
 
 #: Phase 0 (render-perf follow-up, #4762, 2026-10-01):
 #: a held ``subscribe`` stream's producer can exit (crash, or a plain EOF with
@@ -78,6 +84,41 @@ def _child_process_env() -> dict[str, str]:
     for key in _CHILD_ENV_UNSET:
         env.pop(key, None)
     return env
+
+
+def resolve_dynamic_options(argv: Sequence[str]) -> list[str]:
+    """Run a ``create_action`` field's ``options_command`` and return its
+    JSON array of strings, or ``[]`` on ANY failure (not found, non-zero exit,
+    timeout, malformed/non-array output) -- this is a soft, best-effort
+    enrichment: a field that declares ``options_command`` always has
+    ``allow_other`` auto-forced true by
+    :func:`pivot_create_action.parse_create_action`, so an empty result still
+    leaves the field answerable via its "Other…" free-text fallback rather
+    than ever blocking the create dialog from opening. Never raises."""
+    argv = list(argv)
+    if not argv:
+        return []
+    resolved = shutil.which(argv[0])
+    if resolved:
+        argv = [resolved, *argv[1:]]
+    try:
+        proc = subprocess.run(
+            argv, capture_output=True, text=True, timeout=OPTIONS_COMMAND_TIMEOUT,
+            check=False, env=_child_process_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if proc.returncode != 0:
+        return []
+    try:
+        data = json.loads(proc.stdout or "[]")
+    except ValueError:
+        return []
+    if not isinstance(data, list) or any(not isinstance(item, str) for item in data):
+        return []
+    return data
+
+
 #: Overall watchdog for a one-shot (non-``subscribe``) streaming ``list``: a
 #: stalled producer is killed after this many seconds, but rows already received
 #: are kept. A ``subscribe`` (held/live) stream has no overall deadline.

@@ -1571,6 +1571,58 @@ def test_create_cli_sends_producer_fence(monkeypatch, capsys):
     assert seen["producer_request_id"] == "request-1"
 
 
+def test_create_cli_criteria_json_merges_into_labels(monkeypatch, capsys):
+    import json
+
+    seen = {}
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def create(self, title, **kwargs):
+            seen.update(title=title, **kwargs)
+            return {"id": "task-1", "status": "queued", "owner": None}
+
+    monkeypatch.setattr("agent_dispatch.__main__._client", lambda _args: FakeClient())
+    monkeypatch.setattr(
+        "agent_dispatch.__main__._scope_repo", lambda _args: "example.com/acme/widget"
+    )
+    args = _args(
+        [
+            "create",
+            "picker-authored",
+            "--label",
+            "manual",
+            "--criteria-json",
+            json.dumps(["review", "docs"]),
+        ]
+    )
+
+    assert args.func(args) == 0
+    assert seen["labels"] == ["manual", "review", "docs"]
+
+
+def test_create_cli_criteria_json_invalid_json_errors(monkeypatch, capsys):
+    monkeypatch.setattr("agent_dispatch.__main__._scope_repo", lambda _args: "repo")
+    args = _args(["create", "x", "--criteria-json", "not json"])
+    assert args.func(args) == 2
+    assert "must be valid JSON" in capsys.readouterr().err
+
+
+def test_create_cli_criteria_json_rejects_non_array(monkeypatch, capsys):
+    import json
+
+    monkeypatch.setattr("agent_dispatch.__main__._scope_repo", lambda _args: "repo")
+    for bad in (json.dumps({"a": 1}), json.dumps(["ok", 1]), json.dumps(["ok", ""])):
+        args = _args(["create", "x", "--criteria-json", bad])
+        assert args.func(args) == 2
+        assert "must be a JSON array" in capsys.readouterr().err
+
+
 def test_create_cli_ignores_capability_env_for_unmanaged_create(
     monkeypatch, capsys
 ):

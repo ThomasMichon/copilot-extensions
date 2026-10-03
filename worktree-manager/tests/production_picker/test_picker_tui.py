@@ -7653,6 +7653,33 @@ def _write_tasks_manifest_with_create(directory, *, confirm=False):
     (directory / "agent-dispatch.json").write_text(json.dumps(manifest), encoding="utf-8")
 
 
+def _write_tasks_manifest_with_dynamic_create(directory, *, options_py_expr):
+    """A Tasks manifest whose ``create_action`` has a ``criteria`` field
+    sourced from a live ``options_command`` (Phase B item 3): a short Python
+    one-liner standing in for ``agent-dispatch registrar vocabulary --json``,
+    so the test exercises the real subprocess-resolution + JSON-parsing path
+    without depending on agent-dispatch being installed."""
+    import json
+    manifest = {
+        "label": "Tasks",
+        "after": "Worktrees",
+        "list": [sys.executable],
+        "entry": {"id": "id", "title": "title"},
+        "empty_hint": "No proposed tasks.",
+        "create_action": {
+            "label": "New task",
+            "fields": [
+                {"name": "title", "type": "text"},
+                {"name": "criteria", "type": "multichoice",
+                 "options_command": [sys.executable, "-c", options_py_expr]},
+            ],
+            "run": [sys.executable, "create", "{field.title}",
+                    "--criteria-json", "{field.criteria}"],
+        },
+    }
+    (directory / "agent-dispatch.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+
 class _FakeRuntime:
     def __init__(self, rows):
         self.rows = rows
@@ -8985,6 +9012,96 @@ def test_registered_pivot_create_action_opens_and_submits(tmp_path, monkeypatch)
                 "--prompt", "investigate and fix it",
             ]
             assert rt.invalidated is True
+
+    asyncio.run(run())
+
+
+def test_registered_pivot_create_action_resolves_dynamic_options(tmp_path, monkeypatch):
+    """Phase B item 3: a ``create_action`` field declaring ``options_command``
+    has its options resolved LIVE (off the render flow, via ``_run_bg``)
+    right before the modal opens -- the modal must not appear until the
+    subprocess result lands, and must then show those live values, not an
+    empty/static list."""
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui.engine import CreateActionScreen
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_tasks_manifest_with_dynamic_create(
+        d, options_py_expr="import json; print(json.dumps(['alpha', 'beta']))"
+    )
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    rows = [{"id": "t1", "title": "existing task"}]
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            _seed_fake_tasks(scr, rows)
+            scr.htab = scr.htabs.index("Tasks")
+
+            scr.sel = ("BTN", 0)
+            await pilot.pause()
+            scr._activate()
+            # The subprocess runs off-thread -- give it a bounded number of
+            # pump cycles to land its call_from_thread callback, mirroring
+            # the project's existing _bg_threads-draining pattern. The
+            # deadline is deliberately wider than OPTIONS_COMMAND_TIMEOUT
+            # (5s) -- under full-suite CPU contention, spawning the child
+            # interpreter itself can approach that bound.
+            deadline = time.monotonic() + 15
+            while not isinstance(app.screen, CreateActionScreen) and time.monotonic() < deadline:
+                await pilot.pause()
+            assert isinstance(app.screen, CreateActionScreen)
+            screen = app.screen
+            criteria_field = next(q for q in screen._q if q["name"] == "criteria")
+            assert criteria_field["options"] == ["alpha", "beta"]
+
+    asyncio.run(run())
+
+
+def test_registered_pivot_create_action_dynamic_options_failure_degrades_to_free_text(
+    tmp_path, monkeypatch
+):
+    """A failing/empty ``options_command`` must never block the modal from
+    opening -- the field degrades to its forced ``allow_other`` free-text
+    fallback (empty ``options``), exactly the contract
+    ``pivot_create_action.parse_create_action`` establishes."""
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui.engine import CreateActionScreen
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    _write_tasks_manifest_with_dynamic_create(
+        d, options_py_expr="import sys; sys.exit(1)"
+    )
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    rows = [{"id": "t1", "title": "existing task"}]
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            _seed_fake_tasks(scr, rows)
+            scr.htab = scr.htabs.index("Tasks")
+
+            scr.sel = ("BTN", 0)
+            await pilot.pause()
+            scr._activate()
+            deadline = time.monotonic() + 15
+            while not isinstance(app.screen, CreateActionScreen) and time.monotonic() < deadline:
+                await pilot.pause()
+            assert isinstance(app.screen, CreateActionScreen)
+            screen = app.screen
+            criteria_field = next(q for q in screen._q if q["name"] == "criteria")
+            assert criteria_field["options"] == []
+            assert criteria_field["allow_other"] is True
 
     asyncio.run(run())
 

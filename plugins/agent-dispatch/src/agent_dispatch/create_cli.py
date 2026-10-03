@@ -103,6 +103,26 @@ def _cmd_create(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 2
+    labels = list(args.label or [])
+    if getattr(args, "criteria_json", None):
+        try:
+            criteria = json.loads(args.criteria_json)
+        except ValueError as exc:
+            print(
+                f"agent-dispatch create: --criteria-json must be valid JSON: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        if not isinstance(criteria, list) or any(
+            not isinstance(item, str) or not item for item in criteria
+        ):
+            print(
+                "agent-dispatch create: --criteria-json must be a JSON array of "
+                "non-empty strings",
+                file=sys.stderr,
+            )
+            return 2
+        labels.extend(criteria)
     with _core()._client(args) as c:
         task = c.create(
             args.title,
@@ -112,7 +132,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
             requires=args.require or [],
             excludes=args.exclude or [],
             affinity=_core()._parse_affinity(args.affinity),
-            labels=args.label or [],
+            labels=labels,
             payload_ref=args.payload_ref,
             payload_inline=payload_inline,
             target_machine=args.target_machine,
@@ -621,6 +641,13 @@ def _create_args_parent() -> argparse.ArgumentParser:
     )
     cp.add_argument("--affinity", action="append", help="soft preference key=value (repeatable)")
     cp.add_argument("--label", action="append", help="free-form label (repeatable)")
+    cp.add_argument(
+        "--criteria-json",
+        help="JSON array of label strings (e.g. from a picker's dynamically-"
+        "sourced multichoice field, populated via 'agent-dispatch registrar "
+        "vocabulary'); merged into --label. Rejected if not a JSON array of "
+        "non-empty strings.",
+    )
     cp.add_argument("--payload-ref")
     cp.add_argument("--payload-inline")
     cp.add_argument(

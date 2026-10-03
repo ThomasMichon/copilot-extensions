@@ -191,6 +191,19 @@ def _rewrite_manifest_commands(
             _as_argv(create_action.get("run"), where="`create_action.run`")
         )
         rewrite(create_action, "run")
+    if isinstance(create_action, dict):
+        for field_spec in create_action.get("fields") or []:
+            if not isinstance(field_spec, dict) or "options_command" not in field_spec:
+                continue
+            # Same validate-before-resolve ordering as `create_action.run` above
+            # -- an unvalidated `options_command` shape must not crash the scan.
+            field_spec["options_command"] = list(
+                _as_argv(
+                    field_spec.get("options_command"),
+                    where="`create_action.fields[].options_command`",
+                )
+            )
+            rewrite(field_spec, "options_command")
     return data
 
 
