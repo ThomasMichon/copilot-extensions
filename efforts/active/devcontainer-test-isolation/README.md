@@ -2250,3 +2250,20 @@ description updated to describe `--prepare-only`, not `--collect-only`
 what was done at the time, not rewritten). Unit tests, module-size,
 docs-consistency, and effort-vision-structure checks all re-confirmed
 passing after the fix.
+
+### 2026-10-03 — Review round 2 (PR #5095): fail-closed network-mode check
+A HIGH-severity finding caught that `disconnect_container_networks` read
+an empty `NetworkSettings.Networks` map as "nothing to disconnect,
+already isolated" -- but Docker can report that same empty map for a
+namespace-sharing mode (`--network host`, `--network container:<id>`)
+where the container still has real network access, the same pattern
+this repo's own `agent-containers` restricted-fleet check
+(`lifecycle.py:411-429`) already treats as uninspectable and rejects.
+Fixed by also reading `HostConfig.NetworkMode`: a `host`/`container:<id>`
+mode is now rejected outright, `none` is a legitimate no-op (Docker's
+real shape there is `{"none": {}}`, never truly empty), and any OTHER
+mode reporting zero attached networks is now rejected too rather than
+silently trusted. Added dedicated unit tests for each new fail-closed
+path; all pass, along with module-size/docs-consistency/effort-vision-
+structure checks, and a fresh Docker-backed end-to-end run confirmed the
+real container's own `NetworkMode` is `bridge` (never a rejected mode).

@@ -1486,7 +1486,7 @@ def test_strip_reinstall_leaves_other_flags_untouched() -> None:
 
 def test_disconnect_container_networks_disconnects_every_attached_network() -> None:
     inspect_result = mock.Mock(
-        returncode=0, stdout='{"bridge": {}, "test-isolation-net": {}}', stderr="",
+        returncode=0, stdout='bridge\t{"bridge": {}, "test-isolation-net": {}}', stderr="",
     )
     disconnect_result = mock.Mock(returncode=0, stdout="", stderr="")
     calls: list[list[str]] = []
@@ -1518,7 +1518,7 @@ def test_disconnect_container_networks_raises_on_inspect_failure() -> None:
 
 
 def test_disconnect_container_networks_raises_on_malformed_inspect_output() -> None:
-    inspect_result = mock.Mock(returncode=0, stdout="not json", stderr="")
+    inspect_result = mock.Mock(returncode=0, stdout="bridge\tnot json", stderr="")
     with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=inspect_result):
         try:
             wrapper._net_scope.disconnect_container_networks("abc123")
@@ -1529,7 +1529,7 @@ def test_disconnect_container_networks_raises_on_malformed_inspect_output() -> N
 
 
 def test_disconnect_container_networks_raises_on_disconnect_failure() -> None:
-    inspect_result = mock.Mock(returncode=0, stdout='{"bridge": {}}', stderr="")
+    inspect_result = mock.Mock(returncode=0, stdout='bridge\t{"bridge": {}}', stderr="")
     disconnect_result = mock.Mock(returncode=1, stdout="", stderr="not attached")
 
     def fake_run(args, **kwargs):
@@ -1542,6 +1542,51 @@ def test_disconnect_container_networks_raises_on_disconnect_failure() -> None:
             assert "not attached" in str(exc)
         else:
             raise AssertionError("expected SystemExit")
+
+
+def test_disconnect_container_networks_fails_closed_on_host_network_mode() -> None:
+    inspect_result = mock.Mock(returncode=0, stdout="host\t{}", stderr="")
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=inspect_result):
+        try:
+            wrapper._net_scope.disconnect_container_networks("abc123")
+        except SystemExit as exc:
+            assert "host" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+
+
+def test_disconnect_container_networks_fails_closed_on_shared_container_namespace() -> None:
+    inspect_result = mock.Mock(returncode=0, stdout="container:other-id\t{}", stderr="")
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=inspect_result):
+        try:
+            wrapper._net_scope.disconnect_container_networks("abc123")
+        except SystemExit as exc:
+            assert "container:other-id" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+
+
+def test_disconnect_container_networks_fails_closed_on_empty_map_with_non_none_mode() -> None:
+    # Invariant: an empty NetworkSettings.Networks map must never be read
+    # as "already isolated" for a mode other than literal "none" (Docker's
+    # real shape for --network none is one entry keyed "none" -> {}).
+    inspect_result = mock.Mock(returncode=0, stdout="bridge\t{}", stderr="")
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=inspect_result):
+        try:
+            wrapper._net_scope.disconnect_container_networks("abc123")
+        except SystemExit as exc:
+            assert "no inspectable attached networks" in str(exc)
+        else:
+            raise AssertionError("expected SystemExit")
+
+
+def test_disconnect_container_networks_no_op_for_none_mode() -> None:
+    inspect_result = mock.Mock(returncode=0, stdout='none\t{"none": {}}', stderr="")
+    with mock.patch.object(wrapper._net_scope.subprocess, "run", return_value=inspect_result) as run:
+        wrapper._net_scope.disconnect_container_networks("abc123")
+    assert run.call_count == 1  # only the inspect call -- nothing to disconnect
+
+
 
 
 def test_tear_down_removes_container_then_volume_on_success() -> None:

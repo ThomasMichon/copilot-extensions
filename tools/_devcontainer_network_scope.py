@@ -83,12 +83,20 @@ def strip_reinstall(passthrough: list[str], canonicalize: Canonicalize) -> list[
 def disconnect_container_networks(container_id: str) -> None:
     """Detach the container from every attached network -- closes the
     Phase 1 networking gap: the real test pass that follows has no
-    outbound reach. Reads the live network set from ``docker inspect``
-    rather than assuming a fixed name like "bridge" (not a stable
-    devcontainer-CLI contract). ``-f`` avoids a hang if something still
-    holds an open connection. Fails closed on any error here."""
+    outbound reach. Reads the live network set AND ``HostConfig.NetworkMode``
+    from ``docker inspect`` rather than assuming a fixed name like "bridge"
+    (not a stable devcontainer-CLI contract). Fails CLOSED for an
+    uninspectable namespace-sharing mode (``host``/``container:<id>``,
+    e.g. `plugins/agent-containers/src/agent_containers/lifecycle.py`'s
+    own restricted-fleet check applies the same rule): disconnecting
+    named networks cannot isolate those modes, so an empty
+    ``NetworkSettings.Networks`` there must never be read as "already
+    isolated" -- it would silently leave the real test pass with full
+    outbound reach. ``-f`` avoids a hang if something still holds an open
+    connection."""
     res = subprocess.run(
-        ["docker", "inspect", "-f", "{{json .NetworkSettings.Networks}}", container_id],
+        ["docker", "inspect", "-f",
+         "{{.HostConfig.NetworkMode}}\t{{json .NetworkSettings.Networks}}", container_id],
         capture_output=True, text=True, timeout=30,
     )
     if res.returncode != 0:
@@ -96,13 +104,31 @@ def disconnect_container_networks(container_id: str) -> None:
             f"docker inspect failed while resolving {container_id}'s "
             f"attached networks: {res.stderr.strip()}"
         )
+    network_mode, _, networks_json = res.stdout.strip().partition("\t")
     try:
-        networks = json.loads(res.stdout)
+        networks = json.loads(networks_json)
     except json.JSONDecodeError as exc:
         raise SystemExit(
             f"could not parse docker inspect's network output for "
             f"{container_id}: {exc}"
         ) from exc
+    if not isinstance(networks, dict):
+        raise SystemExit(
+            f"unexpected docker inspect network shape for {container_id}: {networks!r}"
+        )
+    if network_mode == "host" or network_mode.startswith("container:"):
+        raise SystemExit(
+            f"container {container_id} uses network mode {network_mode!r}, which shares a "
+            "namespace this wrapper cannot isolate by disconnecting named networks -- "
+            "refusing to proceed with network potentially still reachable."
+        )
+    if network_mode == "none":
+        return  # already fully isolated -- nothing attached to disconnect
+    if not networks:
+        raise SystemExit(
+            f"container {container_id} reports network mode {network_mode!r} with no "
+            "inspectable attached networks -- refusing to assume it is safely isolated."
+        )
     for net_name in networks:
         disc = subprocess.run(
             ["docker", "network", "disconnect", "-f", net_name, container_id],
