@@ -4415,11 +4415,12 @@ def test_new_worktree_decision_exits():
 
 def test_new_worktree_dialog_focus_stops_prompt_list_buttons():
     """The merged dialog's content stack is header -> prompt -> options ->
-    buttons, with exactly three focus stops (prompt box, options list,
-    buttons) -- Create is the default stop, Tab cycles forward through the
-    other two and wraps, and Enter from the prompt box advances straight to
-    the options list (mirroring every other field's accept-and-advance
-    convention in this project)."""
+    buttons, with exactly three Tab stops (prompt box, options list,
+    buttons) -- Create is the default stop, and Tab cycles forward through
+    the other two and wraps. Enter from the prompt box jumps straight to
+    Create (not the options list) -- the prompt is almost always left blank
+    or typed-and-done, so the common "just launch" case shouldn't need an
+    extra Tab/Shift+Tab after it."""
     from textual.widgets import SelectionList
     from worktree_manager.production_picker.picker_tui.engine import FocusGroup
     from worktree_manager.production_picker.picker_tui.field_widgets import (
@@ -4449,11 +4450,13 @@ def test_new_worktree_dialog_focus_stops_prompt_list_buttons():
             await pilot.press("tab")
             assert buttons.has_focus          # then back to the buttons
 
-            # Enter from the prompt box advances straight to the options list.
+            # Enter from the prompt box jumps straight to the button row,
+            # with Create highlighted -- not the options list.
             prompt_box.focus()
             await pilot.pause()
             await pilot.press("enter")
-            assert options.has_focus
+            assert buttons.has_focus
+            assert buttons._idx == 0
 
     asyncio.run(run())
 

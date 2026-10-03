@@ -32,7 +32,7 @@ class CreateActionScreen(FieldQuestionsMixin, ModalScreen[dict | None]):
     """Collects a pivot-level create action's fields. See module docstring."""
 
     CSS = """
-    CreateActionScreen { align: center middle; background: $background 55%; }
+    CreateActionScreen { align: center middle; background: $background; }
     CreateActionScreen > #create-frame {
         width: 80%; height: auto; max-height: 85%;
         border: round #ffaf00; background: $surface; padding: 0 2;

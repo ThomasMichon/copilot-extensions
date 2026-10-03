@@ -43,7 +43,7 @@ class QuitConfirmScreen(ModalScreen[bool]):
     """
 
     CSS = """
-    QuitConfirmScreen { align: center middle; background: $background 55%; }
+    QuitConfirmScreen { align: center middle; background: $background; }
     QuitConfirmScreen > #quit-frame {
         width: 48; height: auto; border: round #ffaf00;
         background: $surface; padding: 1 2;
@@ -99,7 +99,7 @@ class ProfConfirmScreen(ModalScreen[bool]):
     """
 
     CSS = """
-    ProfConfirmScreen { align: center middle; background: $background 55%; }
+    ProfConfirmScreen { align: center middle; background: $background; }
     ProfConfirmScreen > #prof-frame {
         width: 72; height: auto; max-height: 90%;
         border: round #ffaf00; background: $surface; padding: 1 2;
@@ -205,7 +205,7 @@ class TaskMenuScreen(ModalScreen[int]):
     """
 
     CSS = """
-    TaskMenuScreen { align: center middle; background: $background 55%; }
+    TaskMenuScreen { align: center middle; background: $background; }
     TaskMenuScreen > #task-frame {
         width: 72; height: auto; border: round #ffaf00;
         background: $surface; padding: 0 1;
@@ -294,7 +294,7 @@ class SubMenuScreen(ModalScreen[tuple]):
     """
 
     CSS = """
-    SubMenuScreen { align: center middle; background: $background 55%; }
+    SubMenuScreen { align: center middle; background: $background; }
     SubMenuScreen > #sub-frame {
         width: 72; height: auto; max-height: 90%;
         border: round #ffaf00; background: $surface; padding: 1 2;
@@ -575,7 +575,7 @@ class WtDetailsScreen(ModalScreen[None]):
     """
 
     CSS = """
-    WtDetailsScreen { align: center middle; background: $background 55%; }
+    WtDetailsScreen { align: center middle; background: $background; }
     WtDetailsScreen > #details-frame {
         width: 84; height: auto; max-height: 90%;
         border: round #ffaf00; background: $surface; padding: 1 2;
@@ -694,7 +694,7 @@ class ScopeDlgScreen(ModalScreen[bool]):
     """
 
     CSS = """
-    ScopeDlgScreen { align: center middle; background: $background 55%; }
+    ScopeDlgScreen { align: center middle; background: $background; }
     ScopeDlgScreen > #scope-frame {
         width: 68; height: auto; max-height: 90%;
         border: round #ffaf00; background: $surface; padding: 1 2;
@@ -842,12 +842,15 @@ class ScopeDlgScreen(ModalScreen[bool]):
 
     def _advance_focus(self, widget) -> None:
         """Enter from the (optional) prompt textarea (``_AutoExpandTextArea``'s
-        own accept-and-advance mechanic) advances to the options list -- the
-        next stop in the documented content stack (prompt -> list ->
-        buttons). Only reachable when ``show_prompt`` composed the textarea
-        in the first place."""
+        own accept-and-advance mechanic) jumps straight to the button row,
+        highlighting Create -- the prompt is almost always left blank or
+        typed-and-done, so advancing to the OPTIONS list first would make
+        the common "just launch" case take an extra Tab/Shift+Tab to reach
+        Create. The options list remains reachable via Tab, same as always."""
         try:
-            self.query_one("#scope-opts", SelectionList).focus()
+            group = self.query_one("#scope-buttons", FocusGroup)
+            group._idx = 0  # highlight Create (always first in this dialog)
+            group.focus()
         except Exception:
             pass
 
@@ -878,7 +881,7 @@ class CfgMenuScreen(ModalScreen[int]):
     """
 
     CSS = """
-    CfgMenuScreen { align: center middle; background: $background 55%; }
+    CfgMenuScreen { align: center middle; background: $background; }
     CfgMenuScreen > #cfg-frame {
         width: 56; height: auto; max-height: 80%;
         border: round #ffaf00; background: $surface; padding: 1 2;
@@ -938,7 +941,7 @@ class MaintMenuScreen(ModalScreen[int]):
     """
 
     CSS = """
-    MaintMenuScreen { align: center middle; background: $background 55%; }
+    MaintMenuScreen { align: center middle; background: $background; }
     MaintMenuScreen > #maint-frame {
         width: 64; height: auto; border: round #ffaf00;
         background: $surface; padding: 1 2;

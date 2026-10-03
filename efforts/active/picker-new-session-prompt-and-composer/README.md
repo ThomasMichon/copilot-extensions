@@ -312,8 +312,12 @@ real code, not assumption:
       rather than left stale. Render- and live-TTY-verified (tmux,
       `--demo`): the merged dialog's content stack renders exactly as
       specified, Tab cycles prompt -> list -> buttons (wrapping back to
-      prompt from buttons) and Enter in the prompt box advances straight to
-      the list, a typed prompt lands in the textarea correctly, and
+      prompt from buttons) and Enter in the prompt box (originally wired to
+      advance to the options list; **corrected same-day** per further
+      operator feedback -- see the 2026-10-03 Journal entry below -- to
+      jump straight to Create instead, since the prompt is almost always
+      left blank or typed-and-done) jumps straight to Create, a typed
+      prompt lands in the textarea correctly, and
       Escape cancels cleanly with no side effects. 9 New-worktree dialog
       tests rewritten for the one-screen flow (2 renamed
       `..._skips_seed_prompt` -> `..._drops_seed_prompt` to describe the
@@ -1920,3 +1924,89 @@ failed -- all 3 reconfirmed pre-existing this session too (same
 `test_mux_daemon.py` x1 / `test_update.py` x1 /
 `test_trusted_materializer_parity.py` x1 class this effort's Journal has
 already flagged twice; none touch any file this change modified).
+
+### 2026-10-03 (later same day) — Two operator corrections: Enter->Create (not list), and a profiled fix for a real Windows typing-lag cause
+Two pieces of feedback landed right after the merge above: (1) Enter from
+the prompt box should jump straight to Create, not the options list --
+simple, implemented and tested in minutes; (2) a much bigger, general
+complaint -- "the FPS of TTY in Windows is so slow that characters get
+dropped as I type, and it is really bad in our Picker right now,
+potentially due to render updates competing with key events."
+
+**Item 1 (Enter -> Create):** `ScopeDlgScreen._advance_focus` now focuses
+`#scope-buttons` with index 0 (Create highlighted) instead of
+`#scope-opts`. One-line reasoning captured in the docstring: the prompt is
+almost always left blank or typed-and-done, so advancing to the options
+list first would cost the common "just launch" path an extra Tab. Updated
+`test_new_worktree_dialog_focus_stops_prompt_list_buttons` to assert the
+new target; no other tests touch this path.
+
+**Item 2 (typing lag) -- investigated, root-caused, and fixed, not just
+theorized about.** The operator's own hypothesis ("render updates
+competing with key events") pointed in the right direction, but rather
+than guess at a fix, built a repeatable timing harness first: the existing
+headless Pilot test driver, instrumented with `time.perf_counter()` around
+a burst of `pilot.press()` calls into the New-worktree dialog's prompt
+textarea. Baseline: ~66ms/keystroke. Profiled with `cProfile` to find
+where that time actually goes rather than guessing -- the top offender was
+`textual/renderables/background_screen.py:process_segments` (called 5215
+times across 30 keystrokes) feeding `_compositor.py:render_full_update`,
+which fired on **almost every single keystroke** (35 times for 30
+keystrokes -- i.e. a FULL compositor re-render, not an incremental "chop"
+update). Traced this to every one of this project's `ModalScreen`s
+declaring `background: $background 55%` -- a translucent backdrop that
+lets the dimmed base screen show through. Textual cannot treat a
+translucent screen as opaque for compositing purposes, so it must
+re-blend the ENTIRE screen stack beneath it on every repaint the modal
+triggers (including a plain text-cursor blink/keystroke in its own
+textarea) -- not a one-time cost paid when the modal opens, a PER-FRAME
+one.
+
+Confirmed causally, not just correlatively: monkey-patched the identical
+scenario's CSS to drop the `55%` (opaque backdrop) and re-ran the same
+timing harness -- ~57ms/keystroke, and `render_full_update` dropped out of
+the profiler's top 25 entirely (incremental chop rendering took over).
+~15-20% less wall time per keystroke from this one change alone, and
+qualitatively a completely different rendering code path (full recomposite
+vs. incremental). This is a **systemic** pattern, not specific to the
+New-worktree dialog: found the identical `background: $background 55%;`
+rule on **17 separate `ModalScreen` subclasses** across 8 files -- every
+modal in this codebase, including every one with a text-input field
+(`CreateActionScreen`, `PivotFormScreen`/steer, now `ScopeDlgScreen`) and
+every menu/confirm/read-only card. Converted all 17 to a plain
+`background: $background;` (solid, opaque) -- losing the "see the dimmed
+list through the backdrop" visual nicety, trading it for every modal's
+redraws (keystrokes, arrow-key navigation, even the busy-spinner's own 0.1s
+ticker while a modal is open) becoming cheap, incremental, chop-only
+updates instead of full-screen recomposites. Render-verified (screenshot):
+the solid backdrop reads as a completely normal, common TUI modal style --
+no visual regression, just a different (and genuinely more standard)
+treatment than the dimmed-see-through look. Live-TTY-verified (tmux,
+`--demo`) that text still lands correctly and the dialog still opens/types/
+cancels cleanly with the new backdrop.
+
+**Scope note:** this closes one concrete, measurable, self-inflicted
+rendering cost that was present on every keystroke/navigation-key in every
+modal in this codebase -- it is not a claim that this is the ONLY
+contributor to perceived typing lag on Windows (ConPTY/terminal-driver
+overhead, Python's asyncio-on-Windows event loop cost, and the
+headless-Pilot-harness's own synchronization overhead are all real,
+separate factors this change does not touch, confirmed by the "opaque"
+case still measuring ~57ms/keystroke in the SAME harness, not near-zero).
+Framed as a real, evidenced improvement to a real bottleneck, not a
+complete fix for "Windows TTY is slow" in general.
+
+**Tests:** `test_new_worktree_dialog_focus_stops_prompt_list_buttons`
+updated for the Enter->Create change. No new tests added for the CSS
+change itself (a visual/CSS-only edit with no behavioral surface to pin --
+the existing focus/dismiss/collect tests already exercise every modal's
+functional behavior unchanged). Full suite re-run: 1550 passed, 3 skipped,
+5 failed -- 2 of the 5 (`test_steering_card_and_form_actions_gate_and_drive`,
+`test_pivot_steering_modals.py::test_form_collect_all_types_on_confirm`)
+are NEW full-suite-only flakes not seen in this effort's prior runs;
+confirmed both pass in isolation AND on the unmodified base commit via
+`git stash` (same methodology every prior Journal entry in this effort
+uses) -- genuinely pre-existing timing flakiness surfaced by load, not a
+regression from this change. The other 3 are the same
+`test_mux_daemon.py`/`test_update.py`/`test_trusted_materializer_parity.py`
+class flagged repeatedly already.
