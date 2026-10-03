@@ -43,9 +43,20 @@ reaches for on its own.
 
 This vision asks whether that scoping should **change** for agent-to-agent
 and delegated work specifically — not because the attended case's reasoning
-was wrong, but because this session's research turned up concrete,
-previously-unknown facts that shift the tradeoff for the *unattended* caller
-too:
+was wrong, but because **full end-to-end programmatic drive via mux was not
+previously verified as achievable**. The existing `remote-interactive-sessions`
+scoping is correct about what it covers: it was built for observation and
+limited steering of a session a human already started, not for an agent
+being able to create a session, fully control it, and cleanly end it the way
+ACP + Session Host already can. That is a real, important distinction this
+draft must not blur: **ACP already has native session create/terminate** —
+`session/new` and `session/close` are ordinary ACP methods Session Host
+already relies on. The gap this vision is actually about is narrower and
+more concrete: **agent-bridge's own CLI-side extension today only supports
+reporting on user-launched sessions and offering limited steering** — it was
+never built to create a session, drive it end-to-end, and gracefully end it.
+This session's research turned up concrete facts suggesting that gap may now
+be closable:
 
 - **Extensions do not auto-load in ACP mode today, and nothing can make them.**
   `src/cli/acp/server.ts` has zero references to "extension" anywhere in the
@@ -72,10 +83,14 @@ too:
   host-only-gated. The genuine, confirmed gap is session **creation** (a
   joined extension cannot call an equivalent of `session/new`) and the
   **ask_user/elicitation routing**, both detailed in Concepts below.
-- **Mux already gives this harness a slash-command surface Session Host's
-  bare ACP child never had**: a human-equivalent `/clear` or `/exit` typed
-  into the pane is a real, available substitute for session-reset and
-  graceful-exit RPCs a joined extension cannot call directly.
+- **ACP's native session create/terminate has no current equivalent in
+  agent-bridge's own extension, but mux already offers one.** Session Host
+  relies on ACP's `session/new`/`session/close` for full lifecycle control;
+  agent-bridge's current CLI-side extension has nothing equivalent because it
+  was built only for reporting/steering on human-launched sessions. A
+  human-equivalent `/clear` or `/exit` typed into the mux pane is a real,
+  available way to close that **specific** gap for a mux-driven session —
+  parity with what ACP already does natively, not a capability ACP lacks.
 
 The north star, if validation succeeds: a `copilot` process launched *anywhere*
 — any machine, any repo checkout, any CodeSpace, any container, any Dev Box —
@@ -100,11 +115,14 @@ agent-bridge ships today. Installed once per machine/image at the user-global
 level (not per-repo, not per-worktree), it gives baseline drivability —
 attach to the live event stream, send/steer, abort — to **any** `copilot`
 process that launches with it present, independent of which (if any)
-coordination plugin is also installed. agent-bridge may still ship a
-narrower, bridge-specific companion extension for its own niche needs (e.g.
-the inbox-polling/attributed-envelope mechanics `extensions/agent-bridge/`
-already has), but the floor capability — "can this session be driven at
-all" — belongs to this standalone extension, not to agent-bridge.
+coordination plugin is also installed. agent-bridge's own existing CLI-side
+extension (`extensions/agent-bridge/`) is narrower than this by design today:
+it was built for **reporting on and lightly steering sessions a human
+already launched**, not for creating, fully driving, and gracefully ending
+one — the capability this vision is actually about. agent-bridge may still
+ship that narrower companion extension for its own niche needs, but the
+floor capability — "can this session be driven end-to-end" — belongs to
+this standalone extension, not to agent-bridge's existing one.
 
 ### Launch-time presence, not join-time injection
 
@@ -148,11 +166,12 @@ otherwise block on a human:
    (`onElicitationRequest`) has first-class `"decline"`/`"cancel"` actions —
    but they are **final**, not deferrable; there is no "pending, I'll answer
    out-of-band shortly" state in the SDK today.
-4. **TTY command bridge**, for the narrow set of session-lifecycle actions a
-   joined extension cannot call as an RPC at all: typing `/clear` for a
-   fresh context window, or `/exit` for a graceful process end, into the mux
-   pane. Scoped to a small, named set of recognized slash-commands — not a
-   general automation mechanism.
+4. **TTY command bridge**, closing the one place agent-bridge's own extension
+   still trails ACP's native lifecycle control: typing `/clear` for a fresh
+   context window, or `/exit` for a graceful process end, into the mux pane,
+   as the mux-driven equivalent of ACP's `session/new`/`session/close` (which
+   Session Host already has and relies on). Scoped to a small, named set of
+   recognized slash-commands — not a general automation mechanism.
 5. **Worst case: full TTY screen-scrape driving.** Acknowledged explicitly
    as large, fragile, last-resort code that this vision does not propose
    building as a normal-path mechanism. Its existence as a fallback is a
@@ -193,8 +212,9 @@ driving processes cannot race the same session.
 ### tty-command-bridge-for-session-lifecycle
 
 A narrow, named set of slash-commands (starting with `/clear`, `/exit`)
-deliberately typed into the pane as the substitute for session-create/
-session-end RPCs a joined extension structurally cannot call.
+deliberately typed into the pane, closing agent-bridge's own extension's gap
+against ACP's native `session/new`/`session/close` — parity with Session
+Host's existing lifecycle control, not a capability beyond it.
 
 ### layered-blocked-interaction-escalation
 
