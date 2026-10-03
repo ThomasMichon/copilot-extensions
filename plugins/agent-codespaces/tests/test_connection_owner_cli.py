@@ -353,3 +353,32 @@ def test_an_interrupted_rotation_finishes_at_the_next_start(monkeypatch, tmp_pat
     assert (tmp_path / "owner.log.1").read_text("utf-8") == "staged"
     assert (tmp_path / "owner.log.2").read_text("utf-8") == "one"
     assert log.read_text("utf-8") == "new" and not (tmp_path / "owner.log.rotating").exists()
+
+
+def test_a_rotation_interrupted_after_shifting_backups_keeps_every_backup(monkeypatch, tmp_path):
+    """``.2 -> .3`` and ``.1 -> .2`` succeed, then ``.rotating -> .1`` fails: the
+    next start must not shift ``.2`` again (it would overwrite it)."""
+    import os
+
+    from agent_codespaces import owner_cli
+
+    monkeypatch.setattr(owner_cli, "OWNER_LOG_MAX_BYTES", 10)
+    log = tmp_path / "owner.log"
+    log.write_text("z" * 20, "utf-8")
+    for n, text in ((1, "one"), (2, "two"), (3, "three")):
+        (tmp_path / f"owner.log.{n}").write_text(text, "utf-8")
+    real = os.replace
+
+    def last_step_fails(src, dst):
+        if str(src).endswith(".rotating"):
+            raise PermissionError("interrupted")
+        return real(src, dst)
+
+    monkeypatch.setattr(os, "replace", last_step_fails)
+    owner_cli._rotate_at_start(log)
+    monkeypatch.setattr(os, "replace", real)
+    owner_cli._rotate_at_start(log)  # the next start finishes it
+    assert (tmp_path / "owner.log.1").read_text("utf-8") == "z" * 20
+    assert (tmp_path / "owner.log.2").read_text("utf-8") == "one"
+    assert (tmp_path / "owner.log.3").read_text("utf-8") == "two"
+    assert not (tmp_path / "owner.log.rotating").exists()

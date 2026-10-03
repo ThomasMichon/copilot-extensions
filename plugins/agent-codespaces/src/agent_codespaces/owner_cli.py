@@ -59,21 +59,23 @@ def _rotate_at_start(path) -> None:
     means this Owner appends and the next start rotates.
 
     The active file is staged aside first, and the backups shift only once that
-    succeeded: a refused rename then leaves every backup where it was. A staged
-    file left by an interrupted rotation is finished on the next start."""
+    succeeded: a refused rename then leaves every backup where it was. The
+    shift moves only the backups below the first free slot (the oldest is
+    dropped when none is free), so a rotation interrupted part-way is finished
+    by the next start without overwriting a backup it already moved."""
     import os
 
     staged = path.with_name(f"{path.name}.rotating")
+    backups = [path.with_name(f"{path.name}.{n}") for n in range(1, OWNER_LOG_BACKUPS + 1)]
     try:
         if not staged.exists():
             if path.stat().st_size < OWNER_LOG_MAX_BYTES:
                 return
             os.replace(path, staged)
-        for n in range(OWNER_LOG_BACKUPS - 1, 0, -1):
-            older = path.with_name(f"{path.name}.{n}")
-            if older.exists():
-                os.replace(older, path.with_name(f"{path.name}.{n + 1}"))
-        os.replace(staged, path.with_name(f"{path.name}.1"))
+        gap = next((i for i, b in enumerate(backups) if not b.exists()), len(backups) - 1)
+        for i in range(gap, 0, -1):
+            os.replace(backups[i - 1], backups[i])
+        os.replace(staged, backups[0])
     except OSError:
         pass
 
