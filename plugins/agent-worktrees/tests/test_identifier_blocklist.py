@@ -99,14 +99,30 @@ def test_compile_internal_token_whole_word_escapes_literal():
     token = iblk._compile_internal_token(
         {"token": "spo-core", "whole_word": True}, context="t",
     )
-    assert token == r"regex:\bspo\-core\b"
+    assert token == r"regex:\b(?:spo\-core)\b"
+
+
+def test_compile_internal_token_whole_word_groups_alternation():
+    """`\\bfoo|bar\\b` with no grouping binds the boundaries only to the
+    first/last alternative, so a regex alternation's first branch would
+    match with no word-boundary enforcement at all (e.g. "foo" inside
+    "foobar") -- violating the whole_word guarantee. The alternation must
+    be wrapped in a non-capturing group before the boundaries apply."""
+    token = iblk._compile_internal_token(
+        {"token": "foo|bar", "kind": "regex", "whole_word": True}, context="t",
+    )
+    assert token == r"regex:\b(?:foo|bar)\b"
+    compiled = re.compile(token[len("regex:"):])
+    assert compiled.search("foobar") is None
+    assert compiled.search("foo baz") is not None
+    assert compiled.search("baz bar") is not None
 
 
 def test_compile_internal_token_case_sensitive_wraps_group():
     token = iblk._compile_internal_token(
         {"token": "ABC", "whole_word": True, "case_sensitive": True}, context="t",
     )
-    assert token == r"regex:(?-i:\bABC\b)"
+    assert token == r"regex:(?-i:\b(?:ABC)\b)"
 
 
 def test_compile_internal_token_empty_token_raises():
@@ -433,7 +449,7 @@ def test_sweep_preserves_case_sensitive_entries_distinctly(home: Path, tmp_path:
     entries = iblk.sweep("target")
     assert len(entries) == 2
     tokens = {e.token for e in entries}
-    assert tokens == {r"regex:(?-i:\bABC\b)", r"regex:(?-i:\babc\b)"}
+    assert tokens == {r"regex:(?-i:\b(?:ABC)\b)", r"regex:(?-i:\b(?:abc)\b)"}
 
 
 def test_sweep_ignores_repo_with_no_local_path(home: Path, tmp_path: Path):

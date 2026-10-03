@@ -227,7 +227,13 @@ def _compile_internal_token(raw: dict, *, context: str) -> str:
     # the literal text the author wrote) gets promoted to a regex token.
     pattern = token if kind == "regex" else _re.escape(token)
     if whole_word:
-        pattern = rf"\b{pattern}\b"
+        # Group first: `\bfoo|bar\b` (no group) binds the boundaries only to
+        # the first/last alternative, so `foo|bar`'s first branch would
+        # match a bare "foo" with no word-boundary enforcement at all (e.g.
+        # inside "foobar") -- violating the whole_word guarantee for every
+        # alternative but the last. A non-capturing group scopes the
+        # boundaries to the whole alternation.
+        pattern = rf"\b(?:{pattern})\b"
     if case_sensitive:
         pattern = f"(?-i:{pattern})"
 
