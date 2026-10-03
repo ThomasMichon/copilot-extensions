@@ -110,6 +110,23 @@ def apply_session_link_succession(args: dict) -> dict:
 
     with tracking._RecordLock(yaml_path):
         record = tracking.load_record(yaml_path)
+        # Idempotency: a retried call with the SAME explicit handoff_token
+        # that's already linked to this exact successor must not append a
+        # second "reassigned" entry -- ownership did not change, only the
+        # retry replayed an already-settled link (mirrors
+        # tracking_session_registration_write.py's own already_linked
+        # check for session_register's handoff_token branch). An
+        # auto-generated token (handoff_token is None) always names a
+        # genuinely fresh handoff, so no such check applies there.
+        already_linked = bool(
+            handoff_token
+            and any(
+                h.token == handoff_token
+                and h.state == "linked"
+                and h.successor == successor_id
+                for h in record.handoffs
+            )
+        )
         try:
             tracking.link_succession(
                 record,
@@ -122,12 +139,13 @@ def apply_session_link_succession(args: dict) -> dict:
         except tracking.SessionLifecycleError as exc:
             return {"error": "lifecycle", "message": str(exc)}
         tracking.save_record(record, yaml_path)
-        tracking.record_pr_claims_reassigned(
-            record,
-            predecessor_session_id=predecessor_id,
-            successor_session_id=successor_id,
-            note="manual link-succession",
-        )
+        if not already_linked:
+            tracking.record_pr_claims_reassigned(
+                record,
+                predecessor_session_id=predecessor_id,
+                successor_session_id=successor_id,
+                note="manual link-succession",
+            )
 
     record = tracking.load_record(yaml_path)
     pred = record.session_entry(predecessor_id)

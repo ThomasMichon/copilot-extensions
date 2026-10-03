@@ -42,7 +42,7 @@ follow-up, not silently dropped):
   the one related check, ``worktree_attribution.foreign_task_id``, is a
   defensive reject of a stale carried worktree id, never an active
   reassignment) -- still unstarted, and tracked only in the consuming
-  effort's own Plan (aperture-labs, not this repo), not here.
+  deployment's own private effort tracker, not here.
 - Remote-mirroring for converged repos (today this is a single machine-
   local file, same posture ``claim_handoffs.py`` itself started from).
 
