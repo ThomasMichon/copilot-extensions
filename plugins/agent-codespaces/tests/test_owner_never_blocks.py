@@ -147,6 +147,35 @@ async def test_a_local_forward_counts_only_as_requested(store):
     assert listing.calls == calls + 1
 
 
+async def test_the_default_probe_opener_resolves_its_account_off_the_loop(monkeypatch):
+    """``_open_codespace`` (the mux and bridge probes' default opener) looks up
+    the CodeSpace's account and builds its source -- both may run ``gh`` -- in
+    a worker thread."""
+    import ssh_manager
+
+    from agent_codespaces import codespace_config, lifecycle
+
+    threads: list[threading.Thread] = []
+
+    def account(cs):
+        threads.append(threading.current_thread())
+        return "acct"
+
+    class Source:
+        def __init__(self, cs, *, account=None):
+            threads.append(threading.current_thread())
+
+    class Manager:
+        async def ensure_connected(self, *a):
+            return None
+
+    monkeypatch.setattr(lifecycle, "account_for_codespace", account)
+    monkeypatch.setattr(codespace_config, "CodespaceSource", Source)
+    monkeypatch.setattr(ssh_manager, "ConnectionManager", Manager)
+    await sf._open_codespace("cs")
+    assert len(threads) == 2 and all(t is not threading.main_thread() for t in threads)
+
+
 # -- the Owner -----------------------------------------------------------------
 
 def _owner(listing: Listing, relays: dict, daemons: dict) -> owner.ConnectionOwner:

@@ -654,14 +654,19 @@ def _bound_local_port(channel: RelayChannel) -> int | None:
 
 
 async def _open_codespace(codespace: str) -> Any:
-    """A connected ``ssh_manager.ConnectionManager`` for one short probe."""
+    """A connected ``ssh_manager.ConnectionManager`` for one short probe.
+
+    The account lookup (a ``gh codespace list`` when nothing is bound) and the
+    source (``gh auth token`` for a bound account) run in a worker thread: on
+    the Owner's loop they would stall every forward it carries."""
     from ssh_manager import ConnectionManager
 
     from .codespace_config import CodespaceSource
     from .lifecycle import account_for_codespace
 
     manager = ConnectionManager()
-    source = CodespaceSource(codespace, account=account_for_codespace(codespace))
+    source = await asyncio.to_thread(
+        lambda: CodespaceSource(codespace, account=account_for_codespace(codespace)))
     await manager.ensure_connected(codespace, source, [])
     return manager
 
