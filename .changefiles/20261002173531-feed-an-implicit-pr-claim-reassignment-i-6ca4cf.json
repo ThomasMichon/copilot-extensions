@@ -1,0 +1,9 @@
+{
+  "comment": "Feed an implicit PR-claim reassignment into claim_history when a context-handoff cutover links a predecessor to a successor session (worktree-claims-transitive-finalization Phase 3b).",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

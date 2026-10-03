@@ -122,6 +122,12 @@ def apply_session_link_succession(args: dict) -> dict:
         except tracking.SessionLifecycleError as exc:
             return {"error": "lifecycle", "message": str(exc)}
         tracking.save_record(record, yaml_path)
+        tracking.record_pr_claims_reassigned(
+            record,
+            predecessor_session_id=predecessor_id,
+            successor_session_id=successor_id,
+            note="manual link-succession",
+        )
 
     record = tracking.load_record(yaml_path)
     pred = record.session_entry(predecessor_id)
@@ -251,6 +257,13 @@ def apply_resolve_handoff_successor(args: dict) -> dict:
         except tracking.SessionLifecycleError as exc:
             return {"error": "lifecycle", "message": str(exc)}
         tracking.save_record(record, yaml_path)
+        # Deliberately NOT tracking.record_pr_claims_reassigned() here: this
+        # verb links the handoff only to immediately conclude that same
+        # successor in the same transaction (a historical registration gap
+        # being closed out on an already-terminal worktree, never a live
+        # "someone is now actively working this" transition) -- recording a
+        # reassignment to a session simultaneously marked concluded would
+        # misrepresent the ledger, not inform it.
 
     record = tracking.load_record(yaml_path)
     return {
