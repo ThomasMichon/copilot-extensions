@@ -110,34 +110,20 @@ def apply_session_link_succession(args: dict) -> dict:
 
     with tracking._RecordLock(yaml_path):
         record = tracking.load_record(yaml_path)
-        # Idempotency: a retried call that's already linked to this exact
-        # successor must not append a second "reassigned" entry -- ownership
-        # did not change, only the retry replayed an already-settled link.
-        # The succession link itself (who points to whom) is the only
-        # reliable signal, uniform across both of `link_succession`'s
-        # branches: the `handed-off` branch creates a NEW handoff object
-        # (``manual-<n>``) on every call lacking an explicit `handoff_token`
-        # -- so a token-presence check alone would miss a tokenless retry --
-        # while the direct (e.g. "concluded") branch never touches
-        # `record.handoffs` at all. The predecessor's own recorded state
-        # value is separate repairable metadata (a later call correcting it,
-        # e.g. handed-off -> concluded, for an otherwise-unchanged link must
-        # still count as idempotent), so it is deliberately excluded here.
-        # The two-way link fields alone are NOT enough, though: some other
-        # mechanism could move the resolved head elsewhere later while
-        # leaving this stale pair's fields intact, so a replay of this exact
-        # pair genuinely moves head (and ownership) back -- also require the
-        # successor to already BE the live resolved head for this to count
-        # as a true no-op.
-        pred = record.session_entry(predecessor_id)
-        succ = record.session_entry(successor_id)
-        already_linked = bool(
-            pred is not None
-            and succ is not None
-            and pred.successor == successor_id
-            and succ.predecessor == predecessor_id
-            and record.resolved_head_session == successor_id
-        )
+        # Idempotency + attribution: base this on the pre-call ownership
+        # head, not on whatever lineage metadata (handoff tokens,
+        # predecessor/successor fields) happens to already be in place --
+        # this is also a manual REPAIR surface, so those fields can lag or
+        # disagree with who actually, currently holds head. Only a head
+        # that genuinely changes (prior_head != successor_id) is a real
+        # reassignment; a replay that leaves the same session as head is
+        # always a no-op, however the lineage fields read. Falls back to
+        # the declared predecessor only when there was no prior head at all
+        # (a cold-start link); otherwise names whoever ACTUALLY held head
+        # before this call -- which may differ from the declared
+        # `predecessor_id` if head had already moved elsewhere by some
+        # other mechanism.
+        prior_head = record.resolved_head_session
         try:
             tracking.link_succession(
                 record,
@@ -150,10 +136,10 @@ def apply_session_link_succession(args: dict) -> dict:
         except tracking.SessionLifecycleError as exc:
             return {"error": "lifecycle", "message": str(exc)}
         tracking.save_record(record, yaml_path)
-        if not already_linked:
+        if prior_head != successor_id:
             tracking.record_pr_claims_reassigned(
                 record,
-                predecessor_session_id=predecessor_id,
+                predecessor_session_id=prior_head or predecessor_id,
                 successor_session_id=successor_id,
                 note="manual link-succession",
             )
