@@ -1,0 +1,9 @@
+{
+  "comment": "test_runtime_gate.py: build the fake-runtime venv from the real base interpreter (fixes a venv-of-venv bootstrap failure under uv's coverage-baseline harness on Python 3.10)",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

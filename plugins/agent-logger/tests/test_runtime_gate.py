@@ -76,6 +76,47 @@ def _write_module(path: Path, module_name: str) -> None:
     )
 
 
+def _base_interpreter() -> Path | None:
+    """Resolve the REAL, non-venv root interpreter backing this process.
+
+    Building the fake-runtime venv via `venv.EnvBuilder().create()` directly
+    in-process derives its `pyvenv.cfg` "home" from the CURRENT interpreter
+    -- fine when the current interpreter is already a real installation, but
+    this suite also runs under `uv run --with coverage ...`, which executes
+    pytest from inside UV'S OWN ephemeral venv. Creating a venv-of-a-venv
+    from Python 3.10 (which predates CPython's venv-of-venv fix, gh-84559 /
+    `sys._base_executable`, added in 3.11) resolves "home" to that ephemeral
+    venv's OWN directory rather than chasing through to the real interpreter
+    -- the new venv's own python binary then fails to even bootstrap
+    (`ModuleNotFoundError: No module named 'encodings'`) the moment anything
+    queries it in a fresh process, because its recorded base no longer
+    (or never correctly) points at a real stdlib.
+
+    `sys.base_exec_prefix` is unaffected by this gap -- unlike
+    `sys.executable`, it is always the real top-level installation prefix
+    reported by the running interpreter regardless of venv nesting depth,
+    pre- or post-3.11 alike. Build the venv by spawning THAT real
+    interpreter's own `-m venv` rather than calling `EnvBuilder.create()`
+    against whichever interpreter happens to be running this test, so the
+    created venv's "home" always chases back to a real, stable installation.
+    Returns ``None`` (never raises) when no candidate binary is found, so
+    callers can fall back to the simpler in-process path for interpreters
+    that are not venv-nested in the first place.
+    """
+    base = Path(sys.base_exec_prefix)
+    bin_dir = base / ("Scripts" if os.name == "nt" else "bin")
+    candidates = (
+        ["python.exe"]
+        if os.name == "nt"
+        else [f"python{sys.version_info.major}.{sys.version_info.minor}", "python3", "python"]
+    )
+    for name in candidates:
+        candidate = bin_dir / name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def _fake_runtime(runtime_root: Path) -> Path:
     slot = runtime_root / "versions" / "9.9.9"
     interpreter = (
@@ -84,7 +125,16 @@ def _fake_runtime(runtime_root: Path) -> Path:
         else slot / "bin" / "python"
     )
     if not interpreter.is_file():
-        venv.EnvBuilder(with_pip=False).create(slot)
+        base_python = _base_interpreter()
+        if base_python is not None:
+            subprocess.run(
+                [str(base_python), "-m", "venv", "--without-pip", str(slot)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        else:
+            venv.EnvBuilder(with_pip=False).create(slot)
     site_packages = _site_packages(interpreter)
     package = site_packages / "agent_logger"
     if package.exists():

@@ -4,8 +4,9 @@
 - **Repo:** ThomasMichon/copilot-extensions
 - **Branch(es):** per-slice PRs against `dev`
 - **Created:** 2026-09-27
-- **Status:** Active — Phases 0/1/2 Done (reconciliation, telemetry
-  pipeline, ranked report); Phase 3 (fix the top offenders) not yet started
+- **Status:** Active
+  <!-- Phases 0/1/2 Done (reconciliation, telemetry pipeline, ranked
+  report); Phase 3 (fix the top offenders) in progress -->
 - **Umbrella issue:** _pending — file once this effort's plan is reviewed and merged_
 - **Sub-issues:** the downstream tracker (flaky `test_first_use_provision_is_serialized`, filed on Gitea per facility convention, tracked here as the first known concrete item)
 
@@ -313,6 +314,67 @@ _Pending — Phase 3 findings (which fixes land, and in what order) will
 determine whether this section needs anything beyond the Plan above._
 
 ## Journal
+
+### 2026-10-03 — Fresh ranked report; agent-logger coverage-baseline root-caused (round 4)
+- Refreshed telemetry (7-day lookback, 1700 run/attempt rows, 384 failure
+  occurrences). Mux-daemon flaky-test entries (`test_terminate_mux_daemon_pid_*`)
+  confirmed resolved by PR #5017 (merged independently, same day) --
+  occurrences stop exactly at its merge timestamp.
+- `tools/test_check_marketplace_isolation.py::
+  test_payload_catalog_adopter_capabilities_avoid_bare_global_commands` was
+  a GENUINE currently-failing standing bug (not historical noise like the
+  other content-governance entries) -- `agent-dispatch`'s own
+  `troubleshooting-agent-dispatch/SKILL.md` used 15 bare
+  `agent-dispatch`/`agent-bridge`/`agent-mcp` command invocations instead of
+  the `<agent-dispatch catalog argv[0]>` placeholder convention every other
+  compliant skill in the repo already follows. Drafted a fix locally
+  (verified 18/18 marketplace-isolation tests passing), but another
+  contributor landed the identical fix concurrently (PRs #5037/#5039,
+  merged ahead of this one) -- dropped the duplicate during rebase and
+  confirmed the rebased tree matches their merged fix exactly.
+- Confirmed as historical-only (already passes cleanly on current `dev`
+  HEAD, no occurrences since their original burst window; NOT a Phase 3
+  action item): `test_shipped_projections_fit_the_budgets[context-handoff]`
+  / `test_context_handoff_handoff_fallback_projection_is_valid` (one
+  13.5-hour burst, 2026-09-29, zero since) and
+  `test_shipped_projections_fit_the_budgets[agent-worktrees]` (Sept 28-Oct 2,
+  zero since). Same content-governance-noise pattern established in the
+  2026-09-27 entry below.
+- `tests/test_command_boundary.py::
+  test_installers_preserve_two_step_cuda_engine_swap` -- the single highest
+  blocking-impact entry in the fresh ranking (57 occurrences, 1992 `dev`-push
+  runs stalled) -- confirmed entirely historical: all 57 occurrences fall in
+  a single ~20-hour window (2026-09-27), zero since, passes cleanly now.
+  Likely active-development churn on the agent-index-engine-daemon /
+  agent-index-server-package-split effort, already resolved.
+- `tests/test_skill_payload.py::test_cleaning_codespaces_skill_contract` --
+  new today, already has an open fix PR (#5043) from another contributor;
+  not re-done here.
+- **`agent-logger` coverage-baseline collection -- round 4, new root cause
+  found.** The same `validate-and-promote`-blocking `encodings` bootstrap
+  crash this repo's prior session (PR #5007) thought it had fixed (a
+  PYTHONHOME/PYTHONPATH/VIRTUAL_ENV/`__PYVENV_LAUNCHER__` env leak)
+  recurred identically on the next real CI run even with that fix merged.
+  Direct evidence from the job log: the "Coverage baseline" step runs
+  pytest via `uv run --with coverage ...` on a uv-managed Python 3.10
+  interpreter -- meaning pytest itself executes from INSIDE uv's own
+  ephemeral venv. `test_runtime_gate.py::_fake_runtime()` calls
+  `venv.EnvBuilder(with_pip=False).create(slot)` to build its disposable
+  test venv -- a venv-of-a-venv, which CPython did not correctly handle
+  until 3.11's `sys._base_executable` fix (gh-84559); under 3.10 the new
+  venv's `pyvenv.cfg` records "home" as the ephemeral uv venv's own
+  directory rather than chasing through to the real interpreter, so the
+  created venv's python binary can't find its own stdlib the moment
+  anything invokes it fresh -- the exact `encodings` crash. Fixed by
+  resolving the REAL root interpreter via `sys.base_exec_prefix` (stable
+  across any venv nesting depth, unlike `sys.executable`) and spawning
+  THAT interpreter's own `-m venv` instead of calling `EnvBuilder.create()`
+  in-process. Cannot be reproduced locally (no WSL/bash + no uv-managed
+  Python 3.10 nested-venv combination on this Windows box); the next
+  `validate-and-promote` run is the real confirmation.
+- Next: land both fixes above, confirm the next `validate-and-promote` run
+  goes green (agent-logger's coverage baseline specifically), then re-run
+  telemetry over a fresh window per the Validation Plan.
 
 ### 2026-09-27 — Signed-python-probe investigation corrected after review
 - A Copilot review on the PR carrying the prior entry (below) correctly
