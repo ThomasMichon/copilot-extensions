@@ -822,6 +822,16 @@ def self_install(
         return SelfInstallResult(version=version, action="error", root=str(r),
                                  slot=str(slot), reason=str(exc), cleaned=cleaned)
     try:
+        # Re-check under the lease: a concurrent self_install()/self_update()
+        # could have finished installing (and even activated) this EXACT
+        # version while this call was waiting to acquire it -- without this
+        # recheck, we would blindly rmtree + recopy a slot that is now the
+        # live, already-active install, racing whatever is currently running
+        # out of it. The lock-free check above only proves the version was
+        # needed at that point in time, not that it still is now.
+        if not needs_install(version, r):
+            return SelfInstallResult(version=version, action="already-current", root=str(r),
+                                     slot=str(slot), marker=version, cleaned=cleaned)
         _reap_stranded_cutover_passive(r, mux_daemon_cutover)
         try:
             _copy_payload(pd, slot)

@@ -147,6 +147,48 @@ def test_apply_reaps_stranded_cutover_passive_before_copying_payload(tmp_path, m
     assert breadcrumb.is_stale(record)
 
 
+def test_apply_rechecks_install_need_after_acquiring_the_lease(tmp_path, monkeypatch):
+    """A concurrent self_install()/self_update() could finish installing (and
+    even activating) this EXACT version while this call was waiting to
+    acquire the cutover lease. Without a recheck under the lease, this call
+    would blindly rmtree + recopy a slot that is now the live, already-active
+    install -- racing whatever is currently running out of it. The
+    lock-free pre-check only proves the version was needed at that point in
+    time, not that it still is by the time the lease is actually held."""
+    pd = _fake_payload(tmp_path, "7.8.9")
+    root = tmp_path / "root"
+    _patch_local_bin(monkeypatch, tmp_path)
+    _patch_provider_registry(monkeypatch, tmp_path)
+
+    real_needs_install = si.needs_install
+    calls: list[bool] = []
+
+    def _needs_install_then_satisfied(version_arg, root_arg):
+        result = real_needs_install(version_arg, root_arg)
+        calls.append(result)
+        if len(calls) == 1:
+            return True  # the lock-free pre-check: install still needed
+        # Simulate a concurrent self_install() having finished installing
+        # (and activating) this exact version while we waited for the lease.
+        slot = version_slot(version_arg, root_arg)
+        slot.mkdir(parents=True, exist_ok=True)
+        (slot / "installed-by-concurrent-caller.txt").write_text("already live")
+        si._write_marker(root_arg, version_arg)
+        return False
+
+    monkeypatch.setattr(si, "needs_install", _needs_install_then_satisfied)
+
+    res = self_install(pd, root=root, dry_run=False)
+
+    assert res.action == "already-current"
+    assert len(calls) == 2, "must recheck needs_install() a second time under the lease"
+    # The concurrently-installed slot must be left completely untouched --
+    # not rmtree'd and not recopied over.
+    slot = version_slot("7.8.9", root)
+    assert (slot / "installed-by-concurrent-caller.txt").exists()
+    assert not (slot / "src").exists()
+
+
 def test_apply_defers_when_cutover_lock_is_busy(tmp_path, monkeypatch):
     """If another process genuinely holds the cutover lock (a real,
     concurrent self_update()/activate_after_update() in flight),
