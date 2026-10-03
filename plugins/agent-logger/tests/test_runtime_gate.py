@@ -107,17 +107,26 @@ def _base_interpreter() -> Path | None:
     (``<prefix>\\python.exe``), not under a ``Scripts`` subdirectory (that
     holds installed console-script shims, never the interpreter itself) --
     both are searched, in that order, since some layouts still place it
-    there.
+    there. On Windows a single installation prefix only ever holds one
+    Python version, so `python.exe` there is unambiguous.
+
+    On POSIX, only the exact-version-pinned binary name
+    (``python{major}.{minor}``) is accepted -- never the generic `python3`/
+    `python` aliases, which could resolve to a DIFFERENT installed version
+    sharing the same `bin/` directory (e.g. a system Python alongside a
+    pyenv-managed one). `_site_packages()` derives the created venv's
+    site-packages path from *this process's own* `sys.version_info`; a
+    version-mismatched base interpreter would silently break that
+    computation. Falling back to in-process `EnvBuilder` (see the caller)
+    is strictly safer than guessing at an unpinned alias.
     """
     base = Path(sys.base_exec_prefix)
-    search_dirs = (
-        [base, base / "Scripts"] if os.name == "nt" else [base / "bin"]
-    )
-    candidates = (
-        ["python.exe"]
-        if os.name == "nt"
-        else [f"python{sys.version_info.major}.{sys.version_info.minor}", "python3", "python"]
-    )
+    if os.name == "nt":
+        candidates = ["python.exe"]
+        search_dirs = [base, base / "Scripts"]
+    else:
+        candidates = [f"python{sys.version_info.major}.{sys.version_info.minor}"]
+        search_dirs = [base / "bin"]
     for bin_dir in search_dirs:
         for name in candidates:
             candidate = bin_dir / name
