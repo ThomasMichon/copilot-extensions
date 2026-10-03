@@ -580,13 +580,25 @@ class GitHubProvider:
     def merge_pull(
         self, repo: str, number: int, *, squash: bool = True, admin: bool = False,
         api_base: str = "", token: str | None = None,
+        delete_source_branch: bool = True,
     ) -> str:
         """Directly merge PR ``number`` via ``gh pr merge``.
 
         The ``pr-merge <#> --now`` submitter-direct primitive. ``--squash`` keeps
         the non-interactive merge method explicit; ``--admin`` is used only when
-        the configured review is non-blocking. The source branch is deliberately
-        **not** deleted, so ``finalize`` can affirm the merge. Targets
+        the configured review is non-blocking. ``delete_source_branch`` (default
+        ``True``, matching :meth:`request_auto_complete`'s own default) passes
+        ``--delete-branch`` so the head branch is cleaned up on merge -- safe
+        because ``finalize``/``pr-complete`` verify a merged PR against the
+        tracked record's own ``pr.head_sha`` (fetched into the local object
+        database when the worktree pushed it), never by requiring the live
+        remote branch to still exist; a missing branch at finalize time is an
+        explicitly tested, ordinary precondition pass, not a special case this
+        caller needs to avoid creating. A repo whose own
+        ``delete_branch_on_merge`` setting is already on would delete the
+        branch regardless of this flag -- it is set explicitly here so every
+        repo this plugin merges into behaves the same way, not only ones that
+        happen to have that setting enabled. Targets
         ``authority_endpoint(api_base)`` (via ``GH_HOST``) so the merge always
         runs against the same host ``pr-merge --now``'s live permission gate
         just verified -- never a different ambient host.
@@ -597,6 +609,8 @@ class GitHubProvider:
             args.append("--squash")
         if admin:
             args.append("--admin")
+        if delete_source_branch:
+            args.append("--delete-branch")
         proc = run_cli(args, env=self._env(token, host=host))
         if proc.returncode != 0:
             return (
@@ -608,18 +622,24 @@ class GitHubProvider:
     def enable_auto_merge(
         self, repo: str, number: int, *, squash: bool = True,
         api_base: str = "", token: str | None = None,
+        delete_source_branch: bool = True,
     ) -> str:
         """Arm GitHub native auto-merge: ``gh pr merge <n> --squash --auto`` (#225).
 
         No ``--admin``: auto-merge waits on required checks rather than bypassing
-        them. The source branch is left in place so ``finalize`` can affirm the
-        eventual merge. Returns "" once auto-merge is armed (the PR is NOT yet
-        merged), or an error string so the caller falls back to a direct merge.
+        them. ``delete_source_branch`` (default ``True``) passes
+        ``--delete-branch`` so the head branch is cleaned up once the eventual
+        merge lands -- see :meth:`merge_pull`'s docstring for why this is safe
+        against ``finalize``/``pr-complete``. Returns "" once auto-merge is armed
+        (the PR is NOT yet merged), or an error string so the caller falls back
+        to an immediate :meth:`merge_pull`.
         """
         host = self.authority_endpoint(api_base)
         args = ["gh", "pr", "merge", str(number), "--repo", repo, "--auto"]
         if squash:
             args.append("--squash")
+        if delete_source_branch:
+            args.append("--delete-branch")
         proc = run_cli(args, env=self._env(token, host=host))
         if proc.returncode != 0:
             return (

@@ -1423,8 +1423,9 @@ class TestGitHubProvider:
 
     def test_merge_pull_squash_admin_builds_args(self, monkeypatch):
         # pr-merge --now: a submitter self-merge is a squash merge, admin past
-        # the non-blocking gate, and NEVER deletes the branch (so finalize can
-        # affirm the merge).
+        # the non-blocking gate, and deletes the branch by default (safe --
+        # finalize/pr-complete verify a merged PR against the tracked record's
+        # own head_sha, never the live remote branch).
         from agent_worktrees.providers import github
         captured = {}
 
@@ -1438,7 +1439,19 @@ class TestGitHubProvider:
         a = captured["args"]
         assert a[:5] == ["gh", "pr", "merge", "7", "--repo"]
         assert "--squash" in a and "--admin" in a
-        assert "--delete-branch" not in a
+        assert "--delete-branch" in a
+
+    def test_merge_pull_delete_source_branch_false_omits_flag(self, monkeypatch):
+        from agent_worktrees.providers import github
+        captured = {}
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: (captured.__setitem__("args", args), _proc())[1],
+        )
+        github.GitHubProvider().merge_pull(
+            "o/r", 7, squash=True, delete_source_branch=False,
+        )
+        assert "--delete-branch" not in captured["args"]
 
     def test_merge_pull_no_admin_omits_admin_flag(self, monkeypatch):
         from agent_worktrees.providers import github
@@ -1478,7 +1491,9 @@ class TestGitHubProvider:
 
     def test_enable_auto_merge_builds_auto_squash_no_admin(self, monkeypatch):
         # #225: native auto-merge is `--auto --squash`, never `--admin` (it must
-        # wait on required checks, not bypass them), and never deletes the branch.
+        # wait on required checks, not bypass them); deletes the branch by
+        # default once the eventual merge lands (same safety reasoning as
+        # merge_pull).
         from agent_worktrees.providers import github
         captured = {}
 
@@ -1492,7 +1507,19 @@ class TestGitHubProvider:
         a = captured["args"]
         assert a[:5] == ["gh", "pr", "merge", "7", "--repo"]
         assert "--auto" in a and "--squash" in a
-        assert "--admin" not in a and "--delete-branch" not in a
+        assert "--admin" not in a and "--delete-branch" in a
+
+    def test_enable_auto_merge_delete_source_branch_false_omits_flag(self, monkeypatch):
+        from agent_worktrees.providers import github
+        captured = {}
+        monkeypatch.setattr(
+            github, "run_cli",
+            lambda args, **kw: (captured.__setitem__("args", args), _proc())[1],
+        )
+        github.GitHubProvider().enable_auto_merge(
+            "o/r", 7, delete_source_branch=False,
+        )
+        assert "--delete-branch" not in captured["args"]
 
     def test_enable_auto_merge_honors_explicit_host(self, monkeypatch):
         from agent_worktrees.providers import github
