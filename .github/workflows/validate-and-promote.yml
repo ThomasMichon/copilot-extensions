@@ -769,18 +769,23 @@ jobs:
         # still-valid release's evidence before its own data was ever
         # checked.
         #
-        # Gated on `steps.promote.outputs.baselines_written`, NOT merely
-        # the "Promote" step's own exit code: `promote_release.py` exits 0
-        # for several paths that never reach baseline validation at all --
-        # a paused pipeline, a stale/out-of-order candidate, and (most
-        # commonly) a `workflow_dispatch --push=false` dry run or a "no
-        # real dev content change" no-op both return before
-        # `_write_coverage_baselines_into_scratch` is ever called. The
-        # "Promote" step's own bash greps its captured stdout for the
+        # Gated on `steps.promote.outputs.baselines_written` AND
+        # `steps.promote.outputs.land == 'true'` -- NOT merely the
+        # "Promote" step's own exit code. `promote_release.py` exits 0 for
+        # several paths that never reach baseline validation at all (a
+        # paused pipeline, a stale/out-of-order candidate, a "no real dev
+        # content change" no-op); `baselines_written` (the "Promote"
+        # step's own bash grepping its captured stdout for the
         # `coverage-baseline-checked-in: <plugin>` line that function
-        # prints ONLY once it has itself already validated and written a
-        # pointer -- the one precise signal this run actually produced
-        # real, validated baseline evidence.
+        # prints only once it has itself already validated and written a
+        # pointer) rules those out. But `_write_coverage_baselines_into_scratch`
+        # itself runs unconditionally whenever there IS a real content
+        # change -- including a `workflow_dispatch --push=false` **dry
+        # run**, which validates and writes a pointer into its own
+        # never-pushed scratch tree purely for reporting. `land` is false
+        # in exactly that case (see the "Promote" step above) -- requiring
+        # it too keeps this step from publishing a REAL Release (a side
+        # effect no dry run should ever have) off a report-only pass.
         #
         # The full per-line coverage-baseline JSON for a large plugin
         # suite can exceed GitHub's 100MB per-file git push limit, so the
@@ -800,7 +805,10 @@ jobs:
         # is a fact about that commit alone. Idempotent: a retried run for
         # the exact same (now-validated) `DEV_SHA` uploads over (never
         # duplicates) an already-published release's assets.
-        if: steps.decide.outputs.proceed == 'true' && steps.promote.outputs.baselines_written == 'true'
+        if: >-
+          steps.decide.outputs.proceed == 'true' &&
+          steps.promote.outputs.land == 'true' &&
+          steps.promote.outputs.baselines_written == 'true'
         env:
           DEV_SHA: ${{ needs.gate.outputs.sha }}
         run: |
