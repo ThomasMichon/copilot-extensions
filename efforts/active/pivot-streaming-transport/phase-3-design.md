@@ -347,7 +347,6 @@ phase) is considered.
         machine hands control to exactly one of them at a time), so there
         is nothing to quiesce before the promotion reconcile runs.
 - [ ] **3b — agent-bridge daemon-side cache (land first; smaller than the
-
       agent-dispatch relay, no new HTTP-call-shape change, though it does
       introduce its own new failure modes around the background refresh
       itself — see the bullets below, not "no new failure mode" at all):**

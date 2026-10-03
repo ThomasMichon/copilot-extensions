@@ -2434,6 +2434,72 @@ def test_liveness_gc_loop_auto_resumes_a_due_cooldown(tmp_path, monkeypatch):
         stop()
 
 
+def test_liveness_gc_publishes_a_bus_event_for_auto_suspend_with_zero_requeued(
+    tmp_path, monkeypatch
+):
+    """Phase 3a audit (round 7): the always-on liveness GC loop must publish
+    a board-visible wake whenever it transitions a task at all, not only
+    when `requeued` is nonzero. A CLI-embodied `started` task whose owner
+    resolves to `gone` is auto-*suspended*, not requeued (see
+    `queue_liveness.reconcile_liveness`'s own docstring) -- so a pass that
+    only suspends/dead-letters tasks previously published nothing, leaving
+    that board change invisible to the agent-dispatch relay's fast path
+    (`board_relay.py`) until the next 45s long reconcile."""
+    from agent_dispatch.coordinator import create_app
+
+    monkeypatch.setattr(
+        "agent_dispatch.tracking.liveness_verdict", lambda *a, **k: "gone"
+    )
+    monkeypatch.setattr("agent_dispatch.identity.resolve_machine", lambda: None)
+    q = TaskQueue(tmp_path / "tasks.db")
+    # A longer sweep_interval than the other loop tests in this module: the
+    # task must be created/claimed/started *before* the GC loop's first
+    # pass, which would otherwise requeue it (CLAIMED, not yet STARTED) on
+    # its very first sweep.
+    app = create_app(q, sweep_interval=1.0, enable_mcp=False)
+
+    events: list[dict] = []
+    original = app.state.bus.publish
+
+    def _record(event: dict) -> None:
+        events.append(event)
+        original(event)
+
+    app.state.bus.publish = _record
+
+    url, stop = _boot(app)
+    try:
+        c = DispatchClient(url)
+        task = c.create("x")
+        owner = c.claim(worker_id="m1/wt1", repo=TEST_REPO)["owner"]
+        c.start(task["id"], owner)
+
+        deadline = time.time() + 10
+        status = None
+        while time.time() < deadline:
+            status = c.get(task["id"])["status"]
+            if status == Status.SUSPENDED:
+                break
+            time.sleep(0.1)
+        assert status == Status.SUSPENDED
+
+        reconciled = [
+            e
+            for e in events
+            if e.get("type") == "task.reconciled" and e.get("suspended", 0) > 0
+        ]
+        assert reconciled, (
+            "expected a task.reconciled bus event with suspended > 0, got: "
+            f"{events}"
+        )
+        # The bug this guards against: a pass with requeued == 0 publishing
+        # nothing at all.
+        assert reconciled[0].get("requeued", 0) == 0
+        c.close()
+    finally:
+        stop()
+
+
 def test_health_loops_report_handoff_fallback_when_enabled(tmp_path, monkeypatch):
     """Opting in (``handoff_fallback_enabled=True``) arms the coordinator's
     reconciliation loop alongside liveness GC / orphan reap, on the same

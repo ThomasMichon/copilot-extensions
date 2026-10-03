@@ -435,12 +435,23 @@ async def _gc_loop(
         )
         counts = counts or {}
         requeued = counts.get("requeued", 0)
+        suspended_by_gc = counts.get("suspended", 0)
+        dead_lettered = counts.get("dead_lettered", 0)
         if requeued:
             log.info(
                 "liveness GC requeued %d task(s) with a gone owner (checked %d)",
                 requeued,
                 counts.get("checked", 0),
             )
+        # Publish on ANY board-visible transition this pass made -- not
+        # just `requeued`. A reconciled task can instead be auto-suspended
+        # (a CLI-embodied session's owner went gone) or dead-lettered (past
+        # `max_attempts`), each just as board-visible as a requeue, and a
+        # `requeued == 0` pass with a nonzero `suspended`/`dead_lettered`
+        # would otherwise leave that change invisible to the agent-dispatch
+        # relay's fast path (board_relay.py) until the next 45s long
+        # reconcile.
+        if requeued or suspended_by_gc or dead_lettered:
             bus.publish({"type": "task.reconciled", "requeued": requeued, **counts})
         # Piggyback the cooldown-monitor reconciler on the same always-on
         # cadence: a bare suspend's default cooldown (Phase 3 of
