@@ -474,6 +474,53 @@ def test_concurrent_manifest_repairs_do_not_race(tmp_path, monkeypatch):
     assert not si._control_plane_provider_manifest_is_stale(pd, root=root)
 
 
+def test_replace_with_retry_recovers_from_a_transient_permission_error(tmp_path, monkeypatch):
+    """Deterministic coverage for ``_replace_with_retry``'s own retry loop:
+    a transient Windows ``PermissionError`` from ``os.replace()`` (the
+    exact failure mode ``test_concurrent_manifest_repairs_do_not_race``
+    exercises only probabilistically, via genuine thread contention) must
+    not fail the call -- it must retry until a later attempt succeeds.
+    """
+    src = tmp_path / "src.tmp"
+    dst = tmp_path / "dst"
+    src.write_text("content", encoding="utf-8")
+
+    real_replace = os.replace
+    calls: list[int] = []
+
+    def _flaky_replace(s, d):
+        calls.append(1)
+        if len(calls) == 1:
+            raise PermissionError(13, "Access is denied")
+        return real_replace(s, d)
+
+    monkeypatch.setattr(si.os, "replace", _flaky_replace)
+
+    si._replace_with_retry(src, dst)
+
+    assert len(calls) == 2, "must have retried exactly once after the transient failure"
+    assert dst.read_text(encoding="utf-8") == "content"
+    assert not src.exists()
+
+
+def test_replace_with_retry_reraises_after_exhausting_attempts(tmp_path, monkeypatch):
+    """A PermissionError that never clears must still surface to the caller
+    -- not be swallowed indefinitely -- once the bounded retry budget is
+    spent.
+    """
+    src = tmp_path / "src.tmp"
+    dst = tmp_path / "dst"
+    src.write_text("content", encoding="utf-8")
+
+    def _always_fails(s, d):
+        raise PermissionError(13, "Access is denied")
+
+    monkeypatch.setattr(si.os, "replace", _always_fails)
+
+    with pytest.raises(PermissionError):
+        si._replace_with_retry(src, dst, attempts=3, delay_s=0.0)
+
+
 def test_known_legacy_prerename_binstub_is_recognized_and_cleaned(tmp_path, monkeypatch):
     """The pre-rename ``worktree-manager`` plugin prototype (before it became
     agent-worktrees, commit ab0716e28..6512114be) shipped this exact
