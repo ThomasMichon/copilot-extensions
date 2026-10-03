@@ -2437,7 +2437,7 @@ def test_liveness_gc_loop_auto_resumes_a_due_cooldown(tmp_path, monkeypatch):
 def test_liveness_gc_publishes_a_bus_event_for_auto_suspend_with_zero_requeued(
     tmp_path, monkeypatch
 ):
-    """Phase 3a audit (round 7): the always-on liveness GC loop must publish
+    """Phase 3a audit: the always-on liveness GC loop must publish
     a board-visible wake whenever it transitions a task at all, not only
     when `requeued` is nonzero. A CLI-embodied `started` task whose owner
     resolves to `gone` is auto-*suspended*, not requeued (see

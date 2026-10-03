@@ -541,18 +541,22 @@ def _event_loop(
     last_fetch_at = time.monotonic()
     next_recompute_at = last_fetch_at + RECOMPUTE_INTERVAL_SECONDS
     next_reconcile_at = last_fetch_at + LONG_RECONCILE_SECONDS
-    # Set only when an event-woken refetch fails transiently -- the wake
-    # must not be silently dropped just because `/tasks` hiccuped once, so
-    # a due retry is scheduled instead of waiting for the next (up to 45s
-    # later) long reconcile to notice the mutation.
-    next_event_retry_at: float | None = None
+    # Set whenever a full re-fetch is owed but not yet allowed to run --
+    # either a post-debounce event wake still inside the rate-limit floor,
+    # or a retry after a transient `/tasks` failure. Never blocks the
+    # control loop while waiting on it: the unified timeout computation
+    # below folds it into the same wait as the recompute/reconcile timers,
+    # so a long `--interval` (and therefore a long `refetch_floor`) can
+    # never freeze those independent timers for its own duration the way a
+    # flat `time.sleep`/drain-for-the-whole-wait here would.
+    next_event_fetch_at: float | None = None
     refetch_floor = max(MIN_REFETCH_INTERVAL_SECONDS, interval)
     try:
         while True:
             now = time.monotonic()
             next_deadline = min(next_recompute_at, next_reconcile_at)
-            if next_event_retry_at is not None:
-                next_deadline = min(next_deadline, next_event_retry_at)
+            if next_event_fetch_at is not None:
+                next_deadline = min(next_deadline, next_event_fetch_at)
             timeout = max(0.0, next_deadline - now)
             try:
                 kind, _payload = reader.queue.get(timeout=timeout)
@@ -566,6 +570,12 @@ def _event_loop(
                 continue  # a second ready frame would be a protocol bug; ignore
 
             if kind == "event":
+                if next_event_fetch_at is not None:
+                    # A fetch covering this wake is already scheduled
+                    # (rate-limited wait or a failure retry) -- redundant,
+                    # the upcoming fetch already covers it.
+                    continue
+
                 # Debounce: coalesce any further events already queued (or
                 # arriving within the debounce window) into this same wake.
                 # An event arriving mid-fetch (not observable here, since
@@ -575,43 +585,42 @@ def _event_loop(
                 if _drain_until(reader, DEBOUNCE_WINDOW_SECONDS):
                     return _Disconnected(prev)
 
-                wait_for = refetch_floor - (time.monotonic() - last_fetch_at)
-                if wait_for > 0:
-                    # Drain (never just sleep through) events arriving
-                    # during this rate-limit wait too -- the upcoming full
-                    # re-fetch already covers them, so leaving them unread
-                    # would only make the *next* loop iteration treat them
-                    # as a fresh, redundant wake (sustained heartbeat/
-                    # activity traffic could then keep the relay fetching
-                    # at the floor cadence indefinitely).
-                    if _drain_until(reader, wait_for):
-                        return _Disconnected(prev)
+                due_at = max(time.monotonic(), last_fetch_at + refetch_floor)
+                if due_at > time.monotonic():
+                    # Rate-limited: keep the wake pending without blocking
+                    # the control loop -- the next loop iteration's unified
+                    # timeout computation (above) lets the recompute/
+                    # reconcile timers keep running throughout this wait,
+                    # never frozen for up to `--interval` seconds the way a
+                    # flat sleep/drain here would.
+                    next_event_fetch_at = due_at
+                    continue
+
                 curr = snapshot.full_refetch()
                 last_fetch_at = time.monotonic()
                 if curr is not None:
                     ok, prev = _emit_diff(out, prev, curr)
                     if not ok:
                         return 0
-                    next_event_retry_at = None
                 else:
                     # Transient `/tasks` failure -- never drop the wake:
                     # schedule a rate-limited retry rather than silently
                     # leaving the mutation invisible until the next long
                     # reconcile.
-                    next_event_retry_at = time.monotonic() + refetch_floor
+                    next_event_fetch_at = time.monotonic() + refetch_floor
                 continue
 
             # kind == "timer"
-            if next_event_retry_at is not None and now >= next_event_retry_at:
+            if next_event_fetch_at is not None and now >= next_event_fetch_at:
                 curr = snapshot.full_refetch()
                 last_fetch_at = time.monotonic()
                 if curr is not None:
                     ok, prev = _emit_diff(out, prev, curr)
                     if not ok:
                         return 0
-                    next_event_retry_at = None
+                    next_event_fetch_at = None
                 else:
-                    next_event_retry_at = time.monotonic() + refetch_floor
+                    next_event_fetch_at = time.monotonic() + refetch_floor
             if now >= next_recompute_at:
                 curr = snapshot.recompute_only()
                 ok, prev = _emit_diff(out, prev, curr)
@@ -626,8 +635,8 @@ def _event_loop(
                     if not ok:
                         return 0
                     # The long reconcile just re-fetched everything, which
-                    # subsumes any pending event-retry.
-                    next_event_retry_at = None
+                    # subsumes any pending event-driven fetch.
+                    next_event_fetch_at = None
                 next_reconcile_at = time.monotonic() + LONG_RECONCILE_SECONDS
     except KeyboardInterrupt:
         return 0

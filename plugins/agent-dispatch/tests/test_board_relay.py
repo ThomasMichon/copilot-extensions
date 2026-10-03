@@ -144,17 +144,16 @@ def test_event_loop_trailing_fetch_after_mid_fetch_event(monkeypatch):
     assert [frame["entry"]["v"] for frame in stop.emitted] == [1, 2]
 
 
-def test_event_loop_drains_events_arriving_during_the_rate_limit_wait(
+def test_event_loop_coalesces_events_arriving_during_the_rate_limit_wait(
     monkeypatch,
 ):
-    """An event arriving while the loop is in its post-debounce rate-limit
-    wait (waiting out `refetch_floor` before the next full re-fetch is
-    allowed to run) must be drained/coalesced there too -- not left on the
-    queue, which would make the *next* loop iteration treat it as a fresh,
-    redundant wake and trigger a second trailing full-board fetch even
-    though the fetch about to run already covers it (sustained heartbeat/
-    activity traffic could otherwise keep the relay fetching at the floor
-    cadence indefinitely)."""
+    """An event arriving while a fetch is deferred inside the post-debounce
+    rate-limit wait (waiting out `refetch_floor` before the pending full
+    re-fetch is allowed to run) must be coalesced into that same pending
+    fetch -- not treated as a fresh wake that triggers a second, redundant
+    trailing full-board fetch, even though the fetch about to run already
+    covers it (sustained heartbeat/activity traffic could otherwise keep
+    the relay fetching at the floor cadence indefinitely)."""
     monkeypatch.setattr(board_relay, "DEBOUNCE_WINDOW_SECONDS", 0.0)
     monkeypatch.setattr(board_relay, "MIN_REFETCH_INTERVAL_SECONDS", 0.2)
     monkeypatch.setattr(board_relay, "RECOMPUTE_INTERVAL_SECONDS", 1000.0)
@@ -197,6 +196,52 @@ def test_event_loop_drains_events_arriving_during_the_rate_limit_wait(
     # drained/coalesced into it, never left on the queue to trigger a
     # second, redundant trailing fetch.
     assert calls["full"] == 1
+
+
+def test_event_loop_rate_limit_wait_never_blocks_independent_timers(
+    monkeypatch,
+):
+    """A long `--interval` (and therefore a long `refetch_floor`) must
+    never freeze the independent recompute/reconcile timers for its own
+    duration -- an event wake that is still inside the rate-limit floor
+    must defer its own fetch and return control to the scheduler, not
+    block the single control loop in a sleep/drain for the whole wait.
+    This proves the recompute tick keeps firing (several times) while an
+    event-woken fetch sits pending for a much longer rate-limit floor."""
+    monkeypatch.setattr(board_relay, "DEBOUNCE_WINDOW_SECONDS", 0.0)
+    monkeypatch.setattr(board_relay, "MIN_REFETCH_INTERVAL_SECONDS", 1.0)
+    monkeypatch.setattr(board_relay, "RECOMPUTE_INTERVAL_SECONDS", 0.02)
+    monkeypatch.setattr(board_relay, "LONG_RECONCILE_SECONDS", 1000.0)
+
+    reader = _reader_with(("event", {"type": "task.progress"}))
+    calls = {"full": 0, "recompute": 0}
+
+    class FakeSnapshot:
+        def full_refetch(self):
+            calls["full"] += 1
+            return [{"id": "t1", "v": calls["full"]}]
+
+        def recompute_only(self):
+            calls["recompute"] += 1
+            return [{"id": "t1", "v": calls["recompute"]}]
+
+    # Stop once the recompute tick has fired several times -- well before
+    # the 1.0s rate-limit floor elapses -- proving it ran concurrently with
+    # (not blocked by) the pending event-woken fetch.
+    stop = _StopAfter(limit=3)
+    monkeypatch.setattr(board_cli, "_emit_frame", stop)
+
+    # interval=1.0 mirrors a long `--interval` in practice (`refetch_floor`
+    # = max(MIN_REFETCH_INTERVAL_SECONDS, interval) = 1.0s here).
+    rc = board_relay._event_loop(
+        None, None, reader, FakeSnapshot(), [], interval=1.0
+    )
+
+    assert rc == 0
+    assert calls["recompute"] >= 3
+    # The event-woken fetch must not have fired yet -- three 0.02s
+    # recompute cycles take ~0.06s, far short of the 1.0s rate-limit floor.
+    assert calls["full"] == 0
 
 
 def test_event_loop_serializes_every_writer_never_running_concurrently(
