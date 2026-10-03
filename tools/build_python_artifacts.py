@@ -76,6 +76,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 import zipfile
 from pathlib import Path
 
@@ -697,7 +698,19 @@ class ToolchainLock:
         return "sha256:" + _hash_fields(*pairs)
 
 
-_GOVERNED_FEED_ENV_VARS = ("UV_INDEX_URL", "UV_DEFAULT_INDEX", "UV_INDEX")
+_GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS = ("UV_DEFAULT_INDEX", "UV_INDEX_URL")
+_PUBLIC_PYPI_HOSTS = {"pypi.org", "pypi.python.org"}
+
+
+def _is_public_pypi_url(url: str) -> bool:
+    """Whether ``url`` resolves to the public PyPI index itself -- a feed
+    configuration that NAMES this host, even explicitly, is never a
+    governed feed."""
+    try:
+        host = urllib.parse.urlsplit(url).hostname
+    except ValueError:
+        return False
+    return (host or "").lower() in _PUBLIC_PYPI_HOSTS
 
 
 def _user_uv_toml_candidates(env: dict) -> list[Path]:
@@ -716,16 +729,23 @@ def _user_uv_toml_candidates(env: dict) -> list[Path]:
 
 
 def _governed_feed_configured(*, env: dict | None = None) -> bool:
-    """Whether this machine declares SOME configured package index beyond
-    `uv`'s own implicit public-PyPI default -- checked via the environment
-    variables `uv` itself reads (`UV_INDEX_URL`/`UV_DEFAULT_INDEX`/
-    `UV_INDEX`) and the user-level `uv.toml` `uv` consults absent a project
-    override. Deliberately reads configuration, never a hardcoded URL --
-    this repository stays feed-neutral (see `tools/check-feed-neutrality.py`);
+    """Whether this machine's `uv` configuration actually selects a non-
+    public DEFAULT index -- not merely "some index is configured somewhere".
+    `UV_INDEX` (plural) and a plain `[[index]]` table without `default =
+    true` only add a SUPPLEMENTAL index; `uv` still falls back to public
+    PyPI for anything the supplemental index doesn't resolve, so neither
+    proves the governed-feed-only contract holds. Only `UV_DEFAULT_INDEX`/
+    `UV_INDEX_URL`, the legacy `index-url` key, or an `[[index]]` entry
+    with `default = true` actually replace the default -- and even then,
+    a default explicitly pointed AT public PyPI itself does not count.
+    Deliberately reads configuration, never a hardcoded URL -- this
+    repository stays feed-neutral (see `tools/check-feed-neutrality.py`);
     only each machine's own local configuration ever names a real feed."""
     env = dict(os.environ) if env is None else env
-    if any(env.get(var) for var in _GOVERNED_FEED_ENV_VARS):
-        return True
+    for var in _GOVERNED_FEED_DEFAULT_INDEX_ENV_VARS:
+        value = env.get(var)
+        if value and not _is_public_pypi_url(value):
+            return True
     for candidate in _user_uv_toml_candidates(env):
         if not candidate.is_file():
             continue
@@ -733,10 +753,19 @@ def _governed_feed_configured(*, env: dict | None = None) -> bool:
             data = tomllib.loads(candidate.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
             continue
-        if isinstance(data, dict) and (
-            data.get("index-url") or data.get("index") or data.get("default-index")
-        ):
+        if not isinstance(data, dict):
+            continue
+        index_url = data.get("index-url")
+        if isinstance(index_url, str) and index_url and not _is_public_pypi_url(index_url):
             return True
+        indexes = data.get("index")
+        if isinstance(indexes, list):
+            for entry in indexes:
+                if not isinstance(entry, dict) or entry.get("default") is not True:
+                    continue
+                url = entry.get("url")
+                if isinstance(url, str) and url and not _is_public_pypi_url(url):
+                    return True
     return False
 
 
@@ -754,38 +783,64 @@ def resolve_toolchain_lock(venv_dir: Path, *, python: str | None = None) -> Tool
     on the CLI) to every invocation in that run.
 
     Never resolves from a public index: this call itself first verifies a
-    governed feed is actually configured (``_governed_feed_configured``),
-    failing closed rather than letting `uv venv`/`uv pip install` silently
-    resolve `setuptools`/`wheel` from public PyPI on a runner with no
-    governed-feed configuration at all."""
+    governed, non-public DEFAULT index is actually configured
+    (``_governed_feed_configured``), failing closed rather than letting
+    `uv venv`/`uv pip install` silently resolve `setuptools`/`wheel` from
+    public PyPI on a runner with no governed-feed configuration at all.
+
+    Built in a staging directory and published into ``venv_dir`` only via
+    an atomic rename AFTER both `uv venv` and `uv pip install` succeed --
+    never directly into ``venv_dir`` -- so an interrupted or partially
+    failed setup never leaves a venv on disk that a later call's own
+    `venv_python.is_file()` reuse check would mistake for a complete,
+    already-installed one (which would otherwise skip straight to the
+    version query and fail there forever, requiring a manual delete to
+    recover)."""
     if not _governed_feed_configured():
         raise ArtifactBuildError(
-            "no governed package feed is configured on this machine "
-            f"(checked {', '.join(_GOVERNED_FEED_ENV_VARS)} and the user-"
-            "level uv.toml) -- refusing to install the build toolchain, "
-            "which would otherwise silently resolve setuptools/wheel from "
-            "public PyPI"
+            "no governed, non-public default package feed is configured "
+            "on this machine (checked UV_DEFAULT_INDEX/UV_INDEX_URL and "
+            "the user-level uv.toml's index-url / [[index]] default=true) "
+            "-- refusing to install the build toolchain, which would "
+            "otherwise silently resolve setuptools/wheel from public PyPI"
         )
     venv_python = _venv_python_path(venv_dir)
     if not venv_python.is_file():
-        venv_cmd = ["uv", "venv", str(venv_dir)]
-        if python:
-            venv_cmd += ["--python", python]
-        result = subprocess.run(venv_cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise ArtifactBuildError(
-                f"uv venv failed for toolchain venv {venv_dir}:\n"
-                f"{result.stdout}\n{result.stderr}"
+        staging_venv_dir = venv_dir.parent / f".{venv_dir.name}.staging-{os.getpid()}"
+        if staging_venv_dir.exists():
+            shutil.rmtree(staging_venv_dir, ignore_errors=True)
+        try:
+            venv_cmd = ["uv", "venv", str(staging_venv_dir)]
+            if python:
+                venv_cmd += ["--python", python]
+            result = subprocess.run(venv_cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise ArtifactBuildError(
+                    f"uv venv failed for toolchain venv {venv_dir}:\n"
+                    f"{result.stdout}\n{result.stderr}"
+                )
+            staging_venv_python = _venv_python_path(staging_venv_dir)
+            install = subprocess.run(
+                ["uv", "pip", "install", "--python", str(staging_venv_python),
+                 *_LOCKED_TOOLCHAIN_PACKAGES],
+                capture_output=True, text=True,
             )
-        install = subprocess.run(
-            ["uv", "pip", "install", "--python", str(venv_python), *_LOCKED_TOOLCHAIN_PACKAGES],
-            capture_output=True, text=True,
-        )
-        if install.returncode != 0:
-            raise ArtifactBuildError(
-                f"uv pip install failed for toolchain venv {venv_dir}:\n"
-                f"{install.stdout}\n{install.stderr}"
-            )
+            if install.returncode != 0:
+                raise ArtifactBuildError(
+                    f"uv pip install failed for toolchain venv {venv_dir}:\n"
+                    f"{install.stdout}\n{install.stderr}"
+                )
+            # Only now, with BOTH steps verified successful, publish the
+            # venv into its real location via a single rename -- a retry
+            # after any earlier failure never finds a partially built
+            # venv_dir, since venv_dir never existed until this point.
+            if venv_dir.exists():
+                shutil.rmtree(venv_dir, ignore_errors=True)
+            venv_dir.parent.mkdir(parents=True, exist_ok=True)
+            staging_venv_dir.rename(venv_dir)
+        finally:
+            if staging_venv_dir.exists():
+                shutil.rmtree(staging_venv_dir, ignore_errors=True)
 
     query = subprocess.run(
         [

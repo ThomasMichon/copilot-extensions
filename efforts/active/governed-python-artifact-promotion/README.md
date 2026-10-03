@@ -417,27 +417,46 @@ win grows with build complexity.
   call) and tears down the disposable toolchain venv before returning.
 - Also added `_governed_feed_configured`/`resolve_toolchain_lock`'s own
   governed-feed-only enforcement (an automated review finding on this
-  slice's PR): without it, a runner with no configured package index at
-  all would let `uv pip install setuptools wheel` silently resolve from
-  public PyPI, violating the effort's explicit prohibition (umbrella issue
-  #4876). `resolve_toolchain_lock` now fails closed before ever invoking
-  `uv venv`/`uv pip install` unless `UV_INDEX_URL`/`UV_DEFAULT_INDEX`/
-  `UV_INDEX` is set or the user-level `uv.toml` declares an index --
-  reading configuration only, never a hardcoded feed URL (this repo stays
-  feed-neutral; see `tools/check-feed-neutrality.py`).
-- 20 new unit tests (84 total): `ToolchainLock` properties,
+  slice's PR, refined across two rounds): without it, a runner with no
+  configured package index at all would let `uv pip install setuptools
+  wheel` silently resolve from public PyPI, violating the effort's
+  explicit prohibition (umbrella issue #4876). The check specifically
+  validates the EFFECTIVE DEFAULT index, not merely "some index is
+  configured somewhere": `UV_INDEX` (plural) and a plain `[[index]]` table
+  without `default = true` only add a SUPPLEMENTAL index (`uv` still falls
+  back to public PyPI for the default), so neither satisfies the gate; and
+  an explicit default that just points at `pypi.org`/`pypi.python.org`
+  itself is rejected too. Only `UV_DEFAULT_INDEX`/`UV_INDEX_URL`, the
+  legacy `index-url` key, or an `[[index]]` entry with `default = true`
+  (and a genuinely non-public URL) satisfy it. Reads configuration only,
+  never a hardcoded feed URL (this repo stays feed-neutral; see
+  `tools/check-feed-neutrality.py`).
+- A second review round also found that `resolve_toolchain_lock`'s venv-
+  reuse check (`venv_python.is_file()`) treated interpreter EXISTENCE as a
+  completion signal: if `uv venv` succeeded but `uv pip install` failed or
+  was interrupted, the shared `--toolchain-venv` path would permanently
+  look "already built" to every later retry, which would skip straight to
+  the (forever-failing) version query -- poisoned until someone manually
+  deleted it. Fixed by building into a sibling staging directory and
+  publishing it into the real `venv_dir` via a single atomic rename ONLY
+  after both `uv venv` and `uv pip install` succeed; a retry after any
+  earlier failure finds no `venv_dir` at all and redoes both steps.
+- 26 new unit tests (90 total): `ToolchainLock` properties,
   `resolve_toolchain_lock` (venv creation + install, venv reuse/skip,
   venv/install/query failures, malformed-JSON and missing-package fail-
-  closed cases, and the governed-feed-unconfigured refusal), the governed-
-  feed-detection helper itself (env-var and user-`uv.toml` paths, both
-  platforms, and a malformed-`uv.toml` fail-closed case), `build_wheel`'s
-  `--no-build-isolation`/`--python` command construction when a toolchain
-  is given (and that a stray `python=` argument is ignored in that case),
-  the generator-mismatch fail-closed path, and the disposable-lock-
-  resolution-and-cleanup path. All existing tests updated to pass an
-  explicit fake `ToolchainLock` (or stub the governed-feed check) so no
-  unit test invokes the real `resolve_toolchain_lock` (which shells out to
-  `uv`).
+  closed cases, the governed-feed-unconfigured refusal, and recovery from
+  a prior interrupted setup), the governed-feed-detection helper itself
+  (default-index env vars vs. supplemental-only `UV_INDEX`, `index-url`
+  vs. supplemental-only `[[index]]` tables, explicit-public-PyPI rejection,
+  both platforms, and a malformed-`uv.toml` fail-closed case),
+  `build_wheel`'s `--no-build-isolation`/`--python` command construction
+  when a toolchain is given (and that a stray `python=` argument is
+  ignored in that case), the generator-mismatch fail-closed path, the
+  disposable-lock-resolution-and-cleanup path, and that no staging
+  directory is left behind after a successful resolve. All existing tests
+  updated to pass an explicit fake `ToolchainLock` (or stub the governed-
+  feed check) so no unit test invokes the real `resolve_toolchain_lock`
+  (which shells out to `uv`).
 - Real smoke test (not just mocked unit tests): built `agent-bridge` (10
   wheels) then `agent-worktrees` (its own wheel + vendored libs) against
   the SAME `--toolchain-venv` -- both manifests recorded the identical
