@@ -33,6 +33,18 @@ your shell after a PATH change) and idempotent (re-running heals a partial
 install). The core install is never reimplemented — the Worktree Manager locates and
 calls agent-worktrees' own `install.{ps1,sh}`.
 
+`doctor` also reports **plugin-catalog alignment**: whether the authored
+catalog (`data/plugins.toml`) still matches the discovered plugin membership
+(same report as `plugins --reconcile`, folded into one surface). A discovered
+plugin with no authored entry (**uncovered**) is expected and non-blocking —
+it just runs on inferred defaults. An authored entry no longer discovered
+(**phantom/renamed**) or a plugin publishing a prerequisite the catalog
+doesn't carry (**published-prereq gap**) is real drift. In **human-readable
+mode**, that drift fails `doctor`'s exit status alongside the existing
+prerequisite/core-install gate; `--json` mode always exits `0` regardless of
+findings (including `plugin_alignment.ok: false`) — inspect the JSON payload's
+own `ok` fields for the actual status.
+
 ## One-line bootstrap
 
 **Windows (PowerShell):**

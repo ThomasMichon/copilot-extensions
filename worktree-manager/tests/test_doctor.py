@@ -154,7 +154,26 @@ def test_doctor_reports_clean_plugin_alignment(monkeypatch, capsys):
     assert wm.main(["doctor"]) == 0
     out = capsys.readouterr().out
     assert "plugin alignment:" in out
-    assert "no catalog drift" in out
+    assert "every discovered plugin has an authored catalog entry; no drift" in out
+
+
+def test_doctor_reports_uncovered_without_claiming_no_drift(monkeypatch, capsys):
+    """Uncovered-only coverage is non-blocking (inferred defaults), but must not
+    be rendered as a plain 'no drift' success -- it's still listed as missing
+    catalog knowledge."""
+    from worktree_manager import doctor_cli, source_config
+
+    _patch_common(
+        monkeypatch, doctor_cli, source_config,
+        cov=_cov(uncovered=["brand-new-plugin"]),
+    )
+
+    assert wm.main(["doctor"]) == 0
+    out = capsys.readouterr().out
+    assert "discovered but not in the authored catalog" in out
+    assert "brand-new-plugin" in out
+    assert "no errors (uncovered plugins are handled by inference)" in out
+    assert "no drift" not in out
 
 
 def test_doctor_fails_on_phantom_plugin_alignment(monkeypatch, capsys):
@@ -175,6 +194,26 @@ def test_doctor_fails_on_phantom_plugin_alignment(monkeypatch, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["plugin_alignment"]["ok"] is False
     assert payload["plugin_alignment"]["phantom"] == ["agent-bridge"]
+
+
+def test_doctor_fails_on_published_prereq_gap(monkeypatch, capsys):
+    from worktree_manager import doctor_cli, source_config
+
+    _patch_common(
+        monkeypatch, doctor_cli, source_config,
+        cov=_cov(gaps=[("some-plugin", "node")]),
+    )
+
+    assert wm.main(["doctor"]) == 1
+    out = capsys.readouterr().out
+    assert "a plugin publishes a prereq the catalog does not carry" in out
+    assert "some-plugin: node" in out
+
+    payload_rc = wm.main(["doctor", "--json"])
+    assert payload_rc == 0  # json mode still never gates on doctor findings
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["plugin_alignment"]["ok"] is False
+    assert payload["plugin_alignment"]["published_prereq_gaps"] == [["some-plugin", "node"]]
 
 
 def test_doctor_unreachable_marketplace_does_not_fail_alignment(monkeypatch, capsys):

@@ -62,8 +62,10 @@ def _print_alignment(cov) -> None:
         print("    ✗ a plugin publishes a prereq the catalog does not carry:")
         for plug, pr in cov.published_prereq_gaps:
             print(f"        - {plug}: {pr}")
-    if cov.ok:
-        print("    ✓ no catalog drift (`worktree-manager plugins --reconcile` for detail).")
+    if cov.ok and not cov.uncovered:
+        print("    ✓ every discovered plugin has an authored catalog entry; no drift.")
+    elif cov.ok:
+        print("    ✓ no errors (uncovered plugins are handled by inference).")
     print()
 
 
