@@ -27,10 +27,12 @@
   [`agent-bridge-cli-session-alignment`](../agent-bridge-cli-session-alignment/README.md) —
   a parallel consistency/alignment pass (evidence-gathered across
   `agent-bridge`, `agent-codespaces`, `agent-containers`, `agent-ssh`) over
-  the same CLI-mode surface, in Phase 3 (operator/contributor review) as of
-  2026-09-30. This effort's Phase 1 work should be checked against that
-  review's outcome once it lands, since it may adjust CLI-mode's
-  parameter/behavior surface.
+  the same CLI-mode surface. Its own Phase 3 checklist (operator review,
+  share-for-feedback) remains unchecked as of this writing, but the
+  contributor feedback and implementation it was gathering buy-in for have
+  already landed (issue #4702's comments; merged PRs #4658, #4913) — see
+  Phase 0 below for why that is enough to act on here regardless of the
+  sibling effort's own checkbox state.
 - **Related issue (explicitly deferred there, reopened here for the
   agent-driven case):**
   [#2971](https://github.com/ThomasMichon/copilot-extensions/issues/2971) —
@@ -160,11 +162,21 @@ and ordering before Phase 0 work begins.)_
 - [x] Check `agent-bridge-cli-session-alignment`'s Phase 3 review outcome
       once it lands; adjust Phase 1 below if it changes CLI-mode's
       parameter/behavior surface.
-      **Landed** (contributor buy-in in issue #4702's comments; implemented
-      across PR #4658 — merged, forwarded-route takeover fix — and PR #4913
-      — merged, the CLI-session-alignment diff split out of #4658 at the
-      maintainer's request). Concretely changes the surface Phase 1/2 below
-      build on:
+      **The substance this checkbox cares about has landed; the sibling
+      effort's own Phase 3 checklist has not been marked done and this item
+      does not claim otherwise.** Evidence: contributor
+      (`namankanakiya`) buy-in and a detailed per-finding response recorded
+      in issue #4702's comments, implemented across merged PR #4658
+      (forwarded-route takeover fix) and merged PR #4913 (the
+      CLI-session-alignment diff, split out of #4658 at the maintainer's
+      request). `agent-bridge-cli-session-alignment/README.md`'s own Phase 3
+      items ("Operator reviews the drafted findings/proposal", "Share with
+      the reviewed contributor for feedback") remain unchecked there — that
+      effort's own completion is out of scope here and not altered by this
+      file. What matters for *this* effort is only that CLI-mode's
+      parameter/behavior surface already changed as a result, so Phase 1/2
+      below must build on the new surface rather than the one described
+      when this effort was drafted:
       - `agent-ssh` now has an **attached-by-default** `copilot <host>` CLI
         entry point (previously `--detach`/`--stop`-only, no attach mode),
         and `"ssh"` was added to agent-bridge's `--cli` routing table
@@ -181,12 +193,14 @@ and ordering before Phase 0 work begins.)_
         precedent to study when designing Phase 2's driver-exclusivity
         primitive.
       - `agent-codespaces` gained dynamic `--forward 0:PORT` local forwards
-        (daemon/OS-assigned host port, opt-in) and shared, OS-released
-        `keeper_holds` (per-scope holds over one shared per-container/host
-        forward) — infrastructure-adjacent, not a CLI-mode behavior change
-        Phase 1 needs to react to directly, but worth knowing about if
-        Phase 1's extension needs its own port/connection bookkeeping per
-        venue.
+        (daemon/OS-assigned host port, opt-in) and an Owner beacon carrying
+        a process-birth identity (`owner_identity`). Separately, a shared,
+        OS-released `keeper_holds` primitive (per-scope holds over one
+        shared forward) was added to `ssh-manager`, used by both
+        `agent-containers` and `agent-ssh` — not `agent-codespaces`. None of
+        this is a CLI-mode behavior change Phase 1 needs to react to
+        directly, but worth knowing about if Phase 1's extension needs its
+        own port/connection bookkeeping per venue.
 
 ### Phase 1 — User-global remote-driver extension
 
@@ -301,19 +315,24 @@ Confirmed all three Phase 0 checks (see Plan above for full detail):
    distinction holds and Phase 2 is not redundant.
 2. Bug #1167 and the open Phase 5 docs items are noted, non-blocking, and
    squarely that effort's own scope.
-3. `agent-bridge-cli-session-alignment`'s Phase 3 review landed —
-   contributor (`namankanakiya`) buy-in recorded in issue #4702, implemented
-   across merged PRs #4658 (forwarded-route takeover fix) and #4913
-   (CLI-session-alignment diff, split from #4658 at the maintainer's
-   request). This changes CLI-mode's surface in three ways relevant here,
-   now folded into Phase 1 above: `agent-ssh` gained an attached-by-default
-   `copilot <host>` entry point (a fifth reachable venue); a new atomic
-   unclaimed-only reservation-release primitive (protocol v20,
-   `CLI_MODE_UNCLAIMED_RELEASE`) is a relevant precedent for Phase 2's
-   driver-exclusivity design (though it is itself still launch-time, not
-   live-session arbitration); and `agent-codespaces`' new dynamic-forward/
-   keeper-hold infrastructure is adjacent context, not a required Phase 1
-   change.
+3. `agent-bridge-cli-session-alignment`'s review-gathering substance landed
+   — contributor (`namankanakiya`) buy-in and a detailed per-finding
+   response recorded in issue #4702's comments, implemented across merged
+   PRs #4658 (forwarded-route takeover fix) and #4913 (CLI-session-alignment
+   diff, split from #4658 at the maintainer's request). That sibling
+   effort's own Phase 3 checklist ("Operator reviews...", "Share with the
+   reviewed contributor...") is still unchecked in its own README — this
+   entry does not mark it done, only notes that the surface it was gating
+   already changed. Three changes relevant here, now folded into Phase 1
+   above: `agent-ssh` gained an attached-by-default `copilot <host>` entry
+   point (a fifth reachable venue); a new atomic unclaimed-only
+   reservation-release primitive (protocol v20, `CLI_MODE_UNCLAIMED_RELEASE`)
+   is a relevant precedent for Phase 2's driver-exclusivity design (though it
+   is itself still launch-time, not live-session arbitration); and
+   `agent-codespaces` gained dynamic-forward/owner-identity changes, while a
+   separate `keeper_holds` primitive landed in `ssh-manager` shared by
+   `agent-containers`/`agent-ssh` (not `agent-codespaces`) — adjacent
+   context, not a required Phase 1 change.
 
 Before binding effort-focus and starting Phase 1 execution, the
 `## Participants`/`## Coordination` tables still need a real participant and
