@@ -555,11 +555,14 @@ def push_changes(
             if res:
                 pushed = True
                 break
-            # Surface git's REAL stderr instead of a generic "rejected" (#993):
+            # Surface git's REAL detail instead of a generic "rejected" (#993):
             # a pre-push hook decline (e.g. the version-consistency gate), an
             # auth 403, or a protected-branch block is invisible otherwise.
-            if res.stderr:
-                output.err(res.stderr.strip())
+            # Both streams matter -- git's own protocol error lands on
+            # stderr, but a hook's own check output (e.g. a module-size-cap
+            # violation's `[FAIL] ...` detail) commonly lands on stdout.
+            if res.failure_detail:
+                output.err(res.failure_detail.lstrip("\n"))
             # Only a non-fast-forward race is fixed by fetch+rebase+retry.
             # Everything else recurs identically -- fail fast with the real
             # reason above rather than burning three doomed attempts.
@@ -876,8 +879,8 @@ def _push_changes_pr(
             pushed = git_ops.push(remote, feature, cwd=worktree_path, force_with_lease=True)
         if not pushed:
             output.err(f"Failed to push {feature} to {remote}.")
-            if pushed.stderr:
-                output.err(pushed.stderr.strip())
+            if pushed.failure_detail:
+                output.err(pushed.failure_detail.lstrip("\n"))
             if pushed_pr is not None and pushed_pr.state in ("", "creating"):
                 tracking.save_record(record)
             return False
@@ -1023,8 +1026,8 @@ def _push_changes_pr_refspec(
             )
         if not pushed:
             output.err(f"Failed to push {wt_branch} to {remote}/{feature}.")
-            if pushed.stderr:
-                output.err(pushed.stderr.strip())
+            if pushed.failure_detail:
+                output.err(pushed.failure_detail.lstrip("\n"))
             if pushed_pr is not None and pushed_pr.state in ("", "creating"):
                 tracking.save_record(record)
             return False
