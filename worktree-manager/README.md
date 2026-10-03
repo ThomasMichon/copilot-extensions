@@ -45,6 +45,15 @@ prerequisite/core-install gate; `--json` mode always exits `0` regardless of
 findings (including `plugin_alignment.ok: false`) — inspect the JSON payload's
 own `ok` fields for the actual status.
 
+`doctor` also reports **repo registration**: whether every `repos.yaml` entry
+with a checkout path registered for this platform actually resolves to a real
+git checkout on disk (working tree or bare). A repo with no path registered
+for this platform at all is not flagged — it may legitimately be
+reference-only here — but a *registered yet missing or non-git* path is real
+drift, surfaced the same way plugin-catalog alignment is: it fails `doctor`'s
+exit status in human-readable mode, and `--json` mode always exits `0`
+regardless (inspect `repo_registration.ok`).
+
 ## One-line bootstrap
 
 **Windows (PowerShell):**

@@ -989,6 +989,20 @@ claiming discipline alone.
 
 ## Journal
 
+- **2026-10-03** — Claimed the dedicated mis-registered-repos doctor check
+  (Phase 7's remaining `doctor`/validation-breadth gap). Investigated
+  `agent-worktrees`' own `doctor.py` `missing_repo_entry` finding first
+  (issue [#2961](https://github.com/ThomasMichon/copilot-extensions/issues/2961))
+  to see if it could be surfaced directly; it detects the opposite
+  direction (an adopted project with no `repos.yaml` entry at all) and
+  lives inside `agent-worktrees`' own mutation-capable surface, so
+  importing it would break `harness_state.py`'s explicit read-only,
+  no-plugin-import boundary. Scoping this instead as a small, self-
+  contained read-model addition: for every `repos.yaml` entry, confirm its
+  resolved platform path actually exists on disk and is a real git
+  checkout (working tree or bare), surfaced in `worktree-manager doctor`
+  the same way plugin-catalog alignment was in PR #4986. In progress.
+
 - **2026-10-03** — Claimed and landed a bounded Phase 7 slice: fixed a
   stranded-cutover-passive bug in `self_install()` (a crashed
   `self_update()` could leave a passive mux-daemon's `cwd` pinned inside a

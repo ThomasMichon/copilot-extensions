@@ -319,6 +319,33 @@ def build_repos(home_dir: Path | None = None) -> list[RepoInfo]:
     return sorted(out, key=lambda r: (not r.is_project, r.name))
 
 
+def mis_registered_repos(home_dir: Path | None = None) -> list[tuple[str, str]]:
+    """``repos.yaml`` entries whose registered checkout doesn't actually resolve.
+
+    Read-only counterpart to a ``repos.yaml`` entry going stale (moved,
+    renamed, or never actually checked out on this machine) — surfaced by
+    ``worktree-manager doctor`` alongside plugin-catalog alignment. Each
+    result is ``(repo_name, problem)``. A repo without any path registered
+    for this platform is not itself flagged here (a legitimate reference-only
+    entry can be pathless on a given machine); only a *registered but wrong*
+    path is a problem.
+    """
+    problems: list[tuple[str, str]] = []
+    for repo in build_repos(home_dir):
+        if not repo.path:
+            continue
+        path = Path(repo.path)
+        if not path.exists():
+            problems.append((repo.name, f"registered path does not exist: {repo.path}"))
+            continue
+        is_git = (path / ".git").exists() or (
+            (path / "HEAD").is_file() and (path / "objects").is_dir()
+        )
+        if not is_git:
+            problems.append((repo.name, f"registered path is not a git checkout: {repo.path}"))
+    return problems
+
+
 def build_projects(home_dir: Path | None = None) -> list[ProjectInfo]:
     reg = projects_registry(home_dir)
     repos = {r.name: r for r in build_repos(home_dir)}

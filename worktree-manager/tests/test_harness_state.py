@@ -14,6 +14,7 @@ from worktree_manager.harness_state import (
     build_projects,
     build_repos,
     build_state,
+    mis_registered_repos,
     pr_model,
     repo_plugin_enablement,
     user_enabled_plugins,
@@ -127,6 +128,46 @@ def test_build_repos_indicators(tmp_path: Path):
     assert build_repos(home)[0].name == "dotfiles"
 
 
+def test_mis_registered_repos_flags_non_git_checkout(tmp_path: Path):
+    # `_make_home`'s `dotfiles` checkout dir exists but was never actually
+    # `git init`-ed — the fixture predates this check, so it's itself a
+    # realistic "exists but isn't a git checkout" case.
+    home = _make_home(tmp_path)
+    problems = dict(mis_registered_repos(home))
+    assert "dotfiles" in problems
+    assert "not a git checkout" in problems["dotfiles"]
+    # `some-lib` has no registered path at all on this platform — pathless,
+    # not mis-registered, so it must not be flagged.
+    assert "some-lib" not in problems
+
+
+def test_mis_registered_repos_accepts_real_git_checkouts(tmp_path: Path):
+    home = _make_home(tmp_path)
+    (tmp_path / "src" / "dotfiles" / ".git").mkdir()
+    assert mis_registered_repos(home) == []
+
+
+def test_mis_registered_repos_flags_missing_path(tmp_path: Path):
+    home = _make_home(tmp_path)
+    import shutil
+
+    shutil.rmtree(tmp_path / "src" / "dotfiles")
+    problems = dict(mis_registered_repos(home))
+    assert "does not exist" in problems["dotfiles"]
+
+
+def test_mis_registered_repos_accepts_bare_checkout(tmp_path: Path):
+    home = _make_home(tmp_path)
+    repo = tmp_path / "src" / "dotfiles"
+    import shutil
+
+    shutil.rmtree(repo)
+    repo.mkdir()
+    (repo / "HEAD").write_text("ref: refs/heads/dev\n")
+    (repo / "objects").mkdir()
+    assert mis_registered_repos(home) == []
+
+
 def test_build_projects_joins_config_and_enablement(tmp_path: Path):
     home = _make_home(tmp_path)
     projects = build_projects(home)
@@ -206,6 +247,7 @@ def test_missing_files_degrade_gracefully(tmp_path: Path):
     # An empty HOME: no registries, no settings — everything returns empty.
     assert build_repos(tmp_path) == []
     assert build_projects(tmp_path) == []
+    assert mis_registered_repos(tmp_path) == []
     st = build_state(tmp_path)
     assert st.user_enabled == () and st.repos == () and st.projects == ()
 

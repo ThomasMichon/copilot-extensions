@@ -6,6 +6,7 @@ import json
 
 from . import __version__, daemon_health
 from .core_install import core_status
+from .harness_state import mis_registered_repos
 from .model import coverage
 from .prereqs import current_os, detect_baseline, missing
 from .self_install import status as self_status
@@ -42,6 +43,17 @@ def _alignment_blocking(cov) -> bool:
     way, so it is not treated as drift.
     """
     return cov.source_kind != "none" and not cov.ok
+
+
+def _print_repo_registration(problems: list[tuple[str, str]]) -> None:
+    print("  repo registration:")
+    if problems:
+        print("    ✗ registered repos whose checkout doesn't resolve:")
+        for name, detail in problems:
+            print(f"        - {name}: {detail}")
+    else:
+        print("    ✓ every registered repo with a checkout path resolves to a real git checkout.")
+    print()
 
 
 def _print_alignment(cov) -> None:
@@ -82,6 +94,7 @@ def cmd_doctor(rest: list[str]) -> int:
     core = core_status()
     daemon_report = daemon_health.doctor_report(apply=apply_daemon_health)
     cov = coverage()
+    repo_problems = mis_registered_repos()
 
     if json_mode:
         selfst = self_status()
@@ -124,6 +137,10 @@ def cmd_doctor(rest: list[str]) -> int:
                         "uncovered": list(cov.uncovered),
                         "phantom": list(cov.phantom),
                         "published_prereq_gaps": [list(g) for g in cov.published_prereq_gaps],
+                    },
+                    "repo_registration": {
+                        "ok": not repo_problems,
+                        "problems": [{"repo": n, "detail": d} for n, d in repo_problems],
                     },
                     "source": {
                         "repo": _sc.resolved_repo(),
@@ -211,6 +228,8 @@ def cmd_doctor(rest: list[str]) -> int:
 
     _print_alignment(cov)
 
+    _print_repo_registration(repo_problems)
+
     gaps = missing(statuses)
     if gaps or not core.installed:
         print("  → not fully set up. Run `worktree-manager setup` to see the plan "
@@ -218,4 +237,6 @@ def cmd_doctor(rest: list[str]) -> int:
     else:
         print("  ✓ prerequisites satisfied and the core is installed.")
     print()
-    return 0 if (not gaps and core.installed and not _alignment_blocking(cov)) else 1
+    return 0 if (
+        not gaps and core.installed and not _alignment_blocking(cov) and not repo_problems
+    ) else 1
