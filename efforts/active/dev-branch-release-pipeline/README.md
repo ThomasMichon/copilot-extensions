@@ -2607,6 +2607,46 @@ version fields) is about `dev`, not about the machine-generated `main`
 snapshot a human never touches. Both fixes folded into the Plan/Context
 above before this PR clears review.
 
+### 2026-10-02 — Phase 7 plan merged; operator resolved the local-install design question
+
+PR #4974 merged after 14 review rounds, extracting the full Phase 7 design
+to a sibling doc (`phase-7-vendorable-changefiles.md`) along the way per
+this repo's own sibling-doc convention. The automated reviewer's later
+rounds caught several more real, substantive gaps beyond the two noted
+above — missing vendorable seeding/propagation in `preview_release.py`,
+two more `check-version-consistency.py` CI call sites, non-Python
+vendorables (`installer-engine`/`peer-launch`) excluded from the aggregator's
+consumer map, catalog-only `marketplace.json` fields with no other source,
+and a genuinely serious one: `agent-bridge`'s own install script rejects
+`plugin.json` version `"0.0.0"` as a downgrade, which would have broken
+local pre-merge installs outright under the placeholder design as first
+scoped. All folded into the sibling doc before merge.
+
+That local-install question was flagged back to the operator rather than
+assumed. Presented two options: give a local `dev` checkout its own
+distinct non-release version identity, or route ordinary numbered
+install/update flows through a generated preview/dev slot instead of ever
+installing the raw repo-tree `plugin.json` directly. **Operator chose the
+preview/dev-slot route** — once implemented, a numbered install will
+always materialize a real, content-distinct hypothetical version via
+`preview_release.py` first (already planned to be extended in this phase
+for the same seeding/propagation model as promotion), then install that
+generated slot, so the raw `"0.0.0"` placeholder is never what actually
+gets installed. The existing mutable `dev`-slot editable-install path is
+unaffected and will keep installing straight from the worktree exactly as
+today. Folded into the Plan, Design points, and Validation Plan — none of
+this is implemented yet.
+
+The remaining preview-identity edge cases (precedence-safe build identity
+vs. PEP 440/runtime-sorter comparators, validating persisted payload paths
+rather than only Git provenance) were deliberately left as
+implementation-time decisions with required validation coverage rather
+than fully pre-solved in the plan — operator direction: land the plan now
+and resolve those with tests during implementation.
+
+Phase 7 implementation can now begin.
+
+
 
 
 
