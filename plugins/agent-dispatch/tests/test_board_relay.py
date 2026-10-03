@@ -441,6 +441,80 @@ def test_event_loop_long_reconcile_runs_a_full_refetch(monkeypatch):
     assert calls["recompute"] == 0
 
 
+def test_event_loop_forces_reconnect_after_repeated_reconcile_failures(
+    monkeypatch,
+):
+    """The SSE read timeout is unbounded and the coordinator sends no
+    keepalive, so a hung/half-open connection can sit silently forever --
+    the reader thread may never observe a disconnect even though every
+    pinned-endpoint `/tasks` probe keeps failing. `_event_loop` must not
+    just keep rescheduling a failing long reconcile forever: after
+    `MAX_CONSECUTIVE_FETCH_FAILURES` failures in a row it must force a
+    reconnect (return `_Disconnected`) so the caller re-resolves
+    `active.json` and falls back to polling instead of leaving the board
+    stale indefinitely."""
+    monkeypatch.setattr(board_relay, "RECOMPUTE_INTERVAL_SECONDS", 1000.0)
+    monkeypatch.setattr(board_relay, "LONG_RECONCILE_SECONDS", 0.001)
+    monkeypatch.setattr(board_relay, "MAX_CONSECUTIVE_FETCH_FAILURES", 3)
+
+    reader = _reader_with()
+    calls = {"full": 0}
+
+    class FakeSnapshot:
+        def recompute_only(self):
+            raise AssertionError("recompute_only must not run for this test")
+
+        def full_refetch(self):
+            calls["full"] += 1
+            return None  # every reconcile fails
+
+    result = board_relay._event_loop(
+        None, None, reader, FakeSnapshot(), ["prev-rows"], interval=2.0
+    )
+
+    assert isinstance(result, board_relay._Disconnected)
+    assert result.prev == ["prev-rows"]
+    # Exactly 3 failed attempts before giving up -- neither fewer (too
+    # eager) nor more (never gives up at all, the bug this guards against).
+    assert calls["full"] == 3
+
+
+def test_event_loop_resets_failure_count_on_a_successful_reconcile(
+    monkeypatch,
+):
+    """A single successful full_refetch() must reset the consecutive-
+    failure counter -- an occasional transient blip must never accumulate
+    toward the reconnect threshold across unrelated successful cycles."""
+    monkeypatch.setattr(board_relay, "RECOMPUTE_INTERVAL_SECONDS", 1000.0)
+    monkeypatch.setattr(board_relay, "LONG_RECONCILE_SECONDS", 0.001)
+    monkeypatch.setattr(board_relay, "MAX_CONSECUTIVE_FETCH_FAILURES", 2)
+
+    reader = _reader_with()
+    calls = {"full": 0}
+
+    class FakeSnapshot:
+        def recompute_only(self):
+            raise AssertionError("recompute_only must not run for this test")
+
+        def full_refetch(self):
+            calls["full"] += 1
+            # Fail, succeed, fail, succeed, ... -- never two failures in a
+            # row, so the threshold (2) must never be reached.
+            if calls["full"] % 2 == 1:
+                return None
+            return [{"id": "t1", "v": calls["full"]}]
+
+    stop = _StopAfter(limit=1)
+    monkeypatch.setattr(board_cli, "_emit_frame", stop)
+
+    rc = board_relay._event_loop(
+        None, None, reader, FakeSnapshot(), [], interval=2.0
+    )
+
+    assert rc == 0
+    assert calls["full"] == 2  # fail once, then the successful retry
+
+
 def test_event_loop_disconnect_returns_disconnected_without_recursing(monkeypatch):
     """`_event_loop` never calls the reconnect loop itself -- it returns a
     plain `_Disconnected(prev)` for the top-level iterative driver to act
@@ -475,6 +549,76 @@ def test_run_relay_raises_when_daemon_doesnt_advertise_support(monkeypatch):
         board_relay.run_relay(
             "args", None, initial_rows=[{"id": "t1"}], interval=2.0
         )
+    assert closed["n"] == 1
+
+
+def test_daemon_supports_ready_frame_rejects_a_draining_coordinator():
+    """A coordinator mid zero-downtime cutover (flip-then-drain window)
+    must never be treated as a legitimately connectable target just
+    because it still advertises `events_ready_frame` -- a reconnect that
+    resolves the predecessor's endpoint just before the routing-table flip
+    could otherwise finish against that draining generation, stop the
+    fallback poller, and promote a snapshot that goes stale the moment the
+    predecessor actually retires. `status: draining` must raise
+    `HealthCheckFailed` (a transient connection failure), the same as any
+    other health-check problem, so the caller routes it through the normal
+    reconnect/retry path."""
+
+    class DrainingClient:
+        def health(self):
+            return {"status": "draining", "events_ready_frame": True}
+
+    with pytest.raises(board_relay.HealthCheckFailed):
+        board_relay._daemon_supports_ready_frame(DrainingClient())
+
+
+def test_daemon_supports_ready_frame_rejects_the_draining_flag_too():
+    """Same rejection via the boolean `draining` field, in case a
+    coordinator generation reports it that way instead of (or alongside)
+    `status`."""
+
+    class DrainingClient:
+        def health(self):
+            return {"draining": True, "events_ready_frame": True}
+
+    with pytest.raises(board_relay.HealthCheckFailed):
+        board_relay._daemon_supports_ready_frame(DrainingClient())
+
+
+def test_daemon_supports_ready_frame_accepts_a_healthy_coordinator():
+    """A non-draining, capability-advertising coordinator is unaffected by
+    the draining check."""
+
+    class HealthyClient:
+        def health(self):
+            return {"status": "ok", "events_ready_frame": True}
+
+    assert board_relay._daemon_supports_ready_frame(HealthyClient()) is True
+
+
+def test_connect_folds_a_draining_coordinator_into_disconnected(monkeypatch):
+    """End-to-end through `_connect`: a draining coordinator on the very
+    first connection attempt must be treated like any other transient
+    connection failure (`_Disconnected`, falling back to the caller's own
+    reconnect path) -- never `RelayUnavailable` (which would mean "this
+    daemon permanently doesn't support the fast path at all")."""
+    closed = {"n": 0}
+
+    class DrainingClient:
+        def health(self):
+            return {"status": "draining", "events_ready_frame": True}
+
+        def close(self):
+            closed["n"] += 1
+
+    monkeypatch.setattr(board_relay, "_build_client", lambda args: DrainingClient())
+
+    outcome = board_relay._connect(
+        "args", None, [{"id": "t1"}], allow_relay_unavailable=True
+    )
+
+    assert isinstance(outcome, board_relay._Disconnected)
+    assert outcome.prev == [{"id": "t1"}]
     assert closed["n"] == 1
 
 

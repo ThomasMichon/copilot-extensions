@@ -71,6 +71,19 @@ INITIAL_RECONNECT_BACKOFF_SECONDS = 1.0
 MAX_RECONNECT_BACKOFF_SECONDS = 30.0
 MAX_RECONNECT_ATTEMPTS = 6
 
+#: The SSE read timeout is intentionally unbounded and the coordinator sends
+#: no periodic keepalive (see client.py's `stream_events()`), so a hung or
+#: half-open connection can sit silently forever -- the reader thread never
+#: observes a disconnect, yet every pinned-endpoint `/tasks` probe keeps
+#: failing. Without a bound, `_event_loop` would just keep rescheduling a
+#: failed full re-fetch forever, never returning `_Disconnected` to
+#: re-resolve `active.json`/fall back to polling, leaving the board stale
+#: indefinitely. This caps how many *consecutive* full-refetch failures
+#: (event-woken retry or long reconcile, whichever happens to fail) are
+#: tolerated before the control loop gives up on this connection and forces
+#: a reconnect.
+MAX_CONSECUTIVE_FETCH_FAILURES = 3
+
 
 class RelayUnavailable(Exception):
     """The daemon doesn't advertise ready-frame support at all -- there is no
@@ -97,14 +110,25 @@ class HealthCheckFailed(Exception):
 
 
 def _daemon_supports_ready_frame(client: DispatchClient) -> bool:
-    """Raises :class:`HealthCheckFailed` if ``health()`` itself fails, so the
-    caller can route a transient failure through its own reconnect/retry
-    path rather than treating it as "capability not advertised" (which would
-    permanently disable the relay instead of retrying)."""
+    """Raises :class:`HealthCheckFailed` if ``health()`` itself fails -- or if
+    the daemon reports it is already **draining** (a zero-downtime
+    coordinator-generation cutover's flip-then-drain window) -- so the
+    caller routes a transient failure through its own reconnect/retry path
+    rather than treating it as "capability not advertised" (which would
+    permanently disable the relay instead of retrying) or, worse, treating
+    a draining predecessor as a legitimately connectable target. Without
+    this, a reconnect attempt that resolves the predecessor's endpoint just
+    before the routing-table flip could finish against that draining
+    generation, stop the fallback poller, and promote a snapshot that goes
+    stale the moment the predecessor actually retires."""
     try:
         health = client.health()
     except Exception as exc:
         raise HealthCheckFailed(str(exc)) from exc
+    if isinstance(health, dict) and (
+        health.get("status") == "draining" or health.get("draining")
+    ):
+        raise HealthCheckFailed("daemon is draining (coordinator cutover in progress)")
     return bool(isinstance(health, dict) and health.get("events_ready_frame"))
 
 
@@ -536,11 +560,22 @@ def _event_loop(
     """The single control loop driving every writer for one live SSE
     connection: event-woken re-fetches (debounced + rate-limited), the long
     reconcile, and the local recompute tick. Returns ``0`` on a clean exit,
-    or a :class:`_Disconnected` the moment the connection drops (never
-    calls the reconnect loop directly -- see :func:`_drive`)."""
+    or a :class:`_Disconnected` the moment the connection drops -- either
+    because the reader observed one, or because
+    :data:`MAX_CONSECUTIVE_FETCH_FAILURES` full-refetch failures in a row
+    indicate the pinned endpoint itself is unreachable even though the SSE
+    stream hasn't (yet, or ever will) report a disconnect (never calls the
+    reconnect loop directly -- see :func:`_drive`)."""
     last_fetch_at = time.monotonic()
     next_recompute_at = last_fetch_at + RECOMPUTE_INTERVAL_SECONDS
     next_reconcile_at = last_fetch_at + LONG_RECONCILE_SECONDS
+    # Counts consecutive full_refetch() failures across *both* call sites
+    # below (the event-woken retry and the long reconcile) -- the same
+    # underlying problem (the pinned `/tasks` endpoint is unreachable) can
+    # surface from either one, and the SSE connection itself may never
+    # signal a disconnect to otherwise notice it (see
+    # MAX_CONSECUTIVE_FETCH_FAILURES's own docstring).
+    consecutive_fetch_failures = 0
     # Set whenever a full re-fetch is owed but not yet allowed to run --
     # either a post-debounce event wake still inside the rate-limit floor,
     # or a retry after a transient `/tasks` failure. Never blocks the
@@ -551,6 +586,21 @@ def _event_loop(
     # flat `time.sleep`/drain-for-the-whole-wait here would.
     next_event_fetch_at: float | None = None
     refetch_floor = max(MIN_REFETCH_INTERVAL_SECONDS, interval)
+
+    def _note_fetch_result(curr: list[dict] | None) -> bool:
+        """Update the consecutive-failure counter for a just-completed
+        ``full_refetch()`` call (from either call site) and report whether
+        the bounded threshold has now been exceeded -- the caller must
+        force a reconnect (return :class:`_Disconnected`) when this returns
+        ``True``, since the SSE stream itself may never signal a
+        disconnect for a hung/half-open connection."""
+        nonlocal consecutive_fetch_failures
+        if curr is not None:
+            consecutive_fetch_failures = 0
+            return False
+        consecutive_fetch_failures += 1
+        return consecutive_fetch_failures >= MAX_CONSECUTIVE_FETCH_FAILURES
+
     try:
         while True:
             now = time.monotonic()
@@ -613,12 +663,15 @@ def _event_loop(
                     ok, prev = _emit_diff(out, prev, curr)
                     if not ok:
                         return 0
+                    _note_fetch_result(curr)
                 else:
                     # Transient `/tasks` failure -- never drop the wake:
                     # schedule a rate-limited retry rather than silently
                     # leaving the mutation invisible until the next long
                     # reconcile.
                     next_event_fetch_at = time.monotonic() + refetch_floor
+                    if _note_fetch_result(curr):
+                        return _Disconnected(prev)
                 continue
 
             # kind == "timer"
@@ -630,8 +683,11 @@ def _event_loop(
                     if not ok:
                         return 0
                     next_event_fetch_at = None
+                    _note_fetch_result(curr)
                 else:
                     next_event_fetch_at = time.monotonic() + refetch_floor
+                    if _note_fetch_result(curr):
+                        return _Disconnected(prev)
             if now >= next_recompute_at:
                 curr = snapshot.recompute_only()
                 ok, prev = _emit_diff(out, prev, curr)
@@ -648,6 +704,9 @@ def _event_loop(
                     # The long reconcile just re-fetched everything, which
                     # subsumes any pending event-driven fetch.
                     next_event_fetch_at = None
+                    _note_fetch_result(curr)
+                elif _note_fetch_result(curr):
+                    return _Disconnected(prev)
                 next_reconcile_at = time.monotonic() + LONG_RECONCILE_SECONDS
     except KeyboardInterrupt:
         return 0
