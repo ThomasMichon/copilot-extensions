@@ -4,7 +4,7 @@
 - **Repo:** ThomasMichon/copilot-extensions
 - **Branch(es):** TBD (one per phase)
 - **Created:** 2026-10-02
-- **Status:** Draft
+- **Status:** Active (Phase 1 done; Phase 2 in progress -- CI-lane decided, networking-scope and admission-lease closures still landing via separate PRs)
 - **Vision:** [`test-portfolio`](../../../visions/test-portfolio/README.md)'s
   containment boundary and host-safe-default behaviors; relates to, without
   changing, [`agent-containers`](../../../visions/plugins/agent-containers/README.md)'s
@@ -383,7 +383,20 @@ verbatim ask.
       wrapper could add on top of it. Wiring the wrapper into CI would
       only add Docker-in-Docker startup latency and flakiness risk for a
       boundary CI doesn't need; it stays a contributor-invoked local tool,
-      not a CI lane.
+      not a CI lane. **Accepted coverage tradeoff, recorded explicitly**:
+      `test-runner-linux`'s required CI job exercises
+      `tools/test_run_tests_in_devcontainer.py`'s own unit-level logic
+      (subprocess-shape assertions, argument handling) on every push/PR,
+      but a regression in the wrapper's REAL Docker/devcontainer boundary
+      itself (e.g. a runtime-posture flag silently stopping working) is
+      only caught by the manual, Docker-backed end-to-end validation this
+      effort's own Journal already documents -- there is no automated
+      lane that would catch that class of regression. This is a
+      deliberate, accepted gap (not an oversight): the cost of a
+      Docker-in-CI lane (startup latency, flakiness risk) was judged not
+      worth it for a boundary CI's own containment doesn't need, but a
+      future contributor hitting a real regression here should know
+      automated coverage stops at the unit level.
 - [ ] Close the networking residual gap flagged in Phase 1's second item
       (split dependency-resolution and test-execution into separate
       network-enabled/network-disconnected passes), or explicitly decide
@@ -413,11 +426,16 @@ verbatim ask.
 - [x] A real plugin's pytest suite (`ai-attribution`) passes end-to-end
       through `tools/run_tests_in_devcontainer.py`, with the container torn
       down afterward -- done live in Phase 1.
-- [x] Phase 2: the chosen CI-wiring shape (see Phase 2's first item) is
-      implemented and itself green in CI, not just locally. **Resolved as
-      "no CI lane"** -- there is no CI-wiring shape to implement or validate
-      green, since the upstream GitHub Actions runners already provide a
-      stronger per-job isolation boundary than this wrapper adds.
+- [x] Phase 2: the CI-lane decision is validated against the ACTUAL
+      outcome, not the original (CI-lane-shaped) criterion, which no
+      longer applies now that the decision is "no lane." **Validated:**
+      `test-runner-linux` (required CI) runs
+      `tools/test_run_tests_in_devcontainer.py`'s unit suite on every
+      push/PR -- confirmed green; the wrapper's real Docker/devcontainer
+      boundary itself is validated only manually (the Phase 1 Journal's
+      own `ai-attribution` end-to-end runs), an accepted, now explicitly
+      documented coverage tradeoff (see the paired Plan item above), not
+      an unaddressed gap.
 - [ ] Phase 2 (or a later revision of Phase 1): the networking residual gap
       is either closed (network-disconnected test-execution pass) or
       explicitly re-affirmed as an accepted, documented tradeoff rather than
@@ -432,9 +450,10 @@ Phase 1 delivered `.devcontainer/test-isolation/devcontainer.json` (the hardened
 workspace-volume-backed spec) and `tools/run_tests_in_devcontainer.py` (the
 opt-in wrapper that brings it up, populates it, and runs
 `tools/run-plugin-tests.py` inside it), both live-validated end-to-end
-against a real plugin suite. Phase 2 remains: decide and implement how (or
-whether) this gets wired into CI as an additional, non-blocking lane, and
-decide whether to close the networking residual gap now or defer it.
+against a real plugin suite. Phase 2's CI-lane question is now decided (no
+lane, an accepted coverage tradeoff recorded above); the networking-scope
+and admission-lease residual gaps remain open, each landing as its own
+follow-up PR.
 
 ## Journal
 
@@ -2115,3 +2134,23 @@ Phase 2 Plan item and its paired Validation Plan item resolved with this
 reasoning recorded inline, rather than leaving either as an indefinitely
 open question. Next up: the networking-scope residual gap (Phase 2's
 second item), as its own PR.
+
+### 2026-10-03 — Review round 1 (PR #5093): tracking-surface contradictions fixed
+A review of commit `d7998b452` surfaced 3 findings, all addressed:
+(1) the CI-lane decision's rationale (upstream CI already has a stronger
+isolation boundary) didn't by itself address this item's OTHER stated
+purpose -- catching a regression in the wrapper's own real Docker
+boundary -- so the accepted coverage tradeoff is now recorded explicitly
+(required CI covers the unit module; the real Docker boundary is
+validated manually only); (2) the paired Validation Plan checkbox
+claimed a "chosen CI-wiring shape... implemented and green" while also
+saying no such shape exists -- rewritten to validate the actual no-lane
+outcome instead of a criterion that no longer applies; (3) tracking
+surfaces were left contradictory after Phase 2 progress (effort
+`Status:` and the `efforts/README.md` index both still said `Draft`, the
+Proposal still described the CI decision as pending) -- both updated to
+`Active (Phase 2 in progress)`, and the stale Proposal sentence
+rewritten. `check-docs-consistency.py` and
+`check-effort-vision-structure.py` both still pass. Umbrella issue #5040
+still needs a matching update (tracked separately, not blocking this
+PR's merge).
