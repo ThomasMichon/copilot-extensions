@@ -346,6 +346,17 @@ the bridge connection instead.
 <agent-codespaces catalog argv[0]> version
 ```
 
+> **A raw `gh codespace list --json gitStatus` (or any `hasUncommittedChanges`/
+> `hasUnpushedChanges`/`ref` field from a direct `gh` call) reports git state for
+> only the CodeSpace's own bound/creation repo** -- never a second repo cloned
+> alongside it under `/workspaces/` (common for a fleet that boots from a
+> scaffold/devcontainer repo, e.g. `*-codespaces`, and clones the real product
+> repo as a sibling). That field is not a reliable presence-of-unfinished-work
+> signal for such a box, in either direction -- see the `cleaning-codespaces`
+> skill's *Dirty work* step for the observed false-positive/false-negative
+> pattern and the correct `verify` / `/workspaces/*` cross-repo check to use
+> instead.
+
 ## Creating and Deleting
 
 ```bash

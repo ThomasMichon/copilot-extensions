@@ -40,6 +40,31 @@ For every candidate, report:
    unpushed commits or unmerged branches.
 3. **Dirty work:** inspect the actual work checkout when safe to do so. Dirty or
    unexported work blocks routine retirement.
+
+   **`gh codespace list --json gitStatus` (or its `hasUncommittedChanges`/
+   `hasUnpushedChanges`/`ref` fields from any raw `gh` call) reports git state
+   for only the CodeSpace's own bound/creation repo -- never for a second repo
+   checked out alongside it under `/workspaces/`.** A CodeSpace fleet that
+   boots from a scaffold/devcontainer-definition repo (e.g. `*-codespaces`)
+   and then clones the *actual* product repo into a sibling `/workspaces/<repo>`
+   directory will report that field against the scaffold repo, which is
+   usually untouched -- silently hiding real uncommitted or unpushed work in
+   the product checkout (a false "safe"), or conversely flagging the scaffold
+   repo's own incidental local state as dirty on a box whose real work is
+   actually clean (a false "unsafe"). Observed directly: a raw `gh codespace
+   list --json gitStatus` sweep of a scaffold-repo-launched fleet reported
+   nearly every box dirty, yet most were clean once checked properly -- while
+   at least one the raw field didn't flag as having unpushed work turned out
+   to have a genuinely uncommitted file and an unpushed commit in its real
+   sibling product-repo checkout. **Do not use that raw field, from
+   any repo-scoped `gh` or `agent-codespaces list` call, to decide dirty vs.
+   clean for a multi-repo workspace.** Use `<agent-codespaces catalog argv[0]>
+   verify <name> --json` instead -- its cleanliness probe scans *every* git
+   repo under `/workspaces/*` and aggregates `dirty`/`ahead`/
+   `unpushed_branches` across all of them (see `cleanliness.py`'s
+   `probe_cleanliness`/`probe_command`) -- or SSH in and check each
+   `/workspaces/*/.git` checkout directly when a definitive per-repo diff is
+   needed.
 4. **Live session:** use bridge/lifecycle status. Never connect diagnostically
    in a way that can disrupt an active dispatch.
 5. **Effort:** locate the matching effort in the **user's state repo**, not
