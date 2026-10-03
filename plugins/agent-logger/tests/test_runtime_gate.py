@@ -37,10 +37,7 @@ def _site_packages(interpreter: Path) -> Path:
             "-X",
             "utf8",
             "-c",
-            (
-                "import site; print(next(p for p in site.getsitepackages() "
-                "if p.endswith(('site-packages','dist-packages'))))"
-            ),
+            "import sysconfig; print(sysconfig.get_path('purelib'))",
         ],
         capture_output=True,
         text=True,
