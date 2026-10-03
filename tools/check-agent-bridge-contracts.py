@@ -5,6 +5,11 @@ The registry is intentionally dependency-free repository evidence. This checker
 validates its structure, path confinement, hashes, source provenance, production
 protocol constants, and optional diff-scoped source coverage.
 
+**Commit-based cross-checks are opportunistic, not load-bearing**: a squash
+merge can orphan a provenance ``commit`` (copilot-extensions#2230, #5050), so
+that cross-check is skipped, never failed, once unresolvable -- the durable
+evidence is ``source_git_blob``/``source_sha256``, always format-validated.
+
 Usage:
 
     python tools/check-agent-bridge-contracts.py
@@ -605,23 +610,23 @@ def _validate_contract(
                 )
             if not isinstance(blob, str) or not _GIT_OBJECT_RE.fullmatch(blob):
                 errors.append(f"{prov_label}.source_git_blob: must be a full lowercase Git blob")
-            else:
+            commit_resolvable = _ensure_commit_available(commit)
+            if isinstance(blob, str) and _GIT_OBJECT_RE.fullmatch(blob) and commit_resolvable:
                 actual_blob = _git_blob(commit, source_path)
                 if actual_blob is None:
-                    errors.append(
-                        f"{prov_label}: cannot resolve {commit}:{source_path}"
-                    )
+                    errors.append(f"{prov_label}: cannot resolve {commit}:{source_path}")
                 elif actual_blob != blob:
                     errors.append(
                         f"{prov_label}: source_git_blob is {blob}, actual {actual_blob}"
                     )
-            actual_version = _plugin_version_at(commit)
-            if actual_version is None:
-                errors.append(f"{prov_label}: cannot resolve agent-bridge version at {commit}")
-            elif actual_version != version:
-                errors.append(
-                    f"{prov_label}: plugin_version is {version}, actual {actual_version}"
-                )
+            if commit_resolvable:
+                actual_version = _plugin_version_at(commit)
+                if actual_version is None:
+                    errors.append(f"{prov_label}: cannot resolve agent-bridge version at {commit}")
+                elif actual_version != version:
+                    errors.append(
+                        f"{prov_label}: plugin_version is {version}, actual {actual_version}"
+                    )
             method = provenance["capture_method"]
             if not isinstance(method, str) or not method.strip():
                 errors.append(f"{prov_label}.capture_method: must be non-empty")
@@ -630,8 +635,10 @@ def _validate_contract(
                     (commit, version, generation, source_path, blob)
                 )
                 runtime_generation_keys.add((version, generation))
-            if contract_id == "agent-bridge.http-wire" and source_path.endswith(
-                "/agent_bridge/protocol.py"
+            if (
+                commit_resolvable
+                and contract_id == "agent-bridge.http-wire"
+                and source_path.endswith("/agent_bridge/protocol.py")
             ):
                 historical_generation = _integer_constant_at(
                     commit, source_path, "HTTP_PROTOCOL_VERSION"
@@ -642,7 +649,8 @@ def _validate_contract(
                         f"historical HTTP_PROTOCOL_VERSION={historical_generation!r}"
                     )
             if (
-                contract_id == "agent-bridge.session-host-wire"
+                commit_resolvable
+                and contract_id == "agent-bridge.session-host-wire"
                 and source_path.endswith("/session_host/protocol.py")
             ):
                 historical_generation = _integer_constant_at(
@@ -711,12 +719,12 @@ def _validate_contract(
                             f"{fixture_label}: captured_from.source_sha256 must "
                             "be 64 lowercase hexadecimal characters"
                         )
-                    elif isinstance(captured.get("commit"), str) and isinstance(
-                        captured_source, str
+                    elif (
+                        isinstance(captured.get("commit"), str)
+                        and isinstance(captured_source, str)
+                        and _ensure_commit_available(captured["commit"])
                     ):
-                        historical_sha256 = _git_file_sha256(
-                            captured["commit"], captured_source
-                        )
+                        historical_sha256 = _git_file_sha256(captured["commit"], captured_source)
                         if historical_sha256 != captured_sha256:
                             errors.append(
                                 f"{fixture_label}: source_sha256 is "

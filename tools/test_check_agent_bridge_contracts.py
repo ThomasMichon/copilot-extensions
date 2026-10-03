@@ -299,6 +299,58 @@ def test_valid_registry_passes(repo: Path) -> None:
     assert "OK (2 contracts, 2 fixtures)" in result.stdout
 
 
+def test_unresolvable_commit_does_not_fail_validation(repo: Path) -> None:
+    """Regression test for copilot-extensions#5050 (recurrence of #2230): a
+    squash-merge discards every intermediate commit on a feature branch, so a
+    provenance/``captured_from`` entry's ``commit`` becomes permanently
+    unreachable through no fault of its content. The content-addressed
+    ``source_git_blob``/``source_sha256`` fields are the durable evidence;
+    an unresolvable commit must be a silently-skipped opportunistic check,
+    never a hard failure, as long as those fields are present and
+    well-formed."""
+    fake_commit = "f" * 40
+
+    def orphan_commit(data: dict[str, Any]) -> None:
+        for contract in data["contracts"]:
+            for provenance in contract["provenance"]:
+                provenance["commit"] = fake_commit
+
+    _mutate_registry(repo, orphan_commit)
+    for relative in (FIXTURE, HOST_FIXTURE):
+        path = repo / relative
+        fixture_data = json.loads(path.read_text(encoding="utf-8"))
+        fixture_data["captured_from"]["commit"] = fake_commit
+        _write(repo, relative, fixture_data)
+
+    def refresh_fixture_hashes(data: dict[str, Any]) -> None:
+        for contract in data["contracts"]:
+            for fixture_entry in contract["fixtures"]:
+                fixture_entry["sha256"] = _sha256(repo, fixture_entry["path"])
+
+    _mutate_registry(repo, refresh_fixture_hashes)
+
+    result = _run(repo)
+    assert result.returncode == 0, result.stderr
+    assert "OK (2 contracts, 2 fixtures)" in result.stdout
+
+
+def test_resolvable_commit_still_catches_real_mismatch(repo: Path) -> None:
+    """The opportunistic cross-check must still catch a genuine content
+    mismatch when the commit *is* resolvable -- the fix for #5050 relaxes
+    unresolvable history, not resolvable-but-wrong history."""
+
+    def mutation(data: dict[str, Any]) -> None:
+        http_contract = next(
+            c for c in data["contracts"] if c["id"] == "agent-bridge.http-wire"
+        )
+        http_contract["provenance"][0]["plugin_version"] = "9.9.9"
+
+    _mutate_registry(repo, mutation)
+    result = _run(repo)
+    assert result.returncode == 1
+    assert "plugin_version is 9.9.9, actual 1.0.0" in result.stderr
+
+
 def test_capability_constant_mismatch_fails(repo: Path) -> None:
     """The capability-versions cross-check (``_HTTP_CAPABILITY_CONSTANTS``)
     must actually catch a registry value that disagrees with the production
