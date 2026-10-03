@@ -63,77 +63,96 @@ _DRIVER_SCRIPT = textwrap.dedent(
 
     import pytest
 
-    test_paths_json, cov_source, cwd, cov_data_file, json_report_file, out_file, basetemp = sys.argv[1:8]
-    test_paths = json.loads(test_paths_json)
+    # Every statement below must stay inside this guard. A plugin's own
+    # tests may spawn real child processes via `multiprocessing.get_context
+    # ("spawn")` -- `spawn` bootstraps a fresh interpreter that re-imports
+    # this very script as a plain module (not as `__main__`) to reconstruct
+    # the pickled target it needs to run. Without this guard, that
+    # re-import re-executes `pytest.main(...)` unconditionally, which
+    # multiprocessing's own bootstrap-safety check catches and raises
+    # "An attempt has been made to start a new process before the current
+    # process has finished its bootstrapping phase" for -- confirmed live:
+    # `agent-worktrees`' own real cross-process file-lock tests spawn
+    # exactly such a child, which died at bootstrap with that exact error
+    # (observable as the spawned process simply never living), and the
+    # doomed re-execution's own half-started pytest-cov instance is what
+    # corrupted the real coverage data file the parent process was still
+    # writing to (`coverage.exceptions.DataError: ... no such table:
+    # context`). This is the same "Safe importing of main module" hazard
+    # Python's own `multiprocessing` docs describe for any script, not
+    # something specific to pytest or coverage.
+    if __name__ == "__main__":
+        test_paths_json, cov_source, cwd, cov_data_file, json_report_file, out_file, basetemp = sys.argv[1:8]
+        test_paths = json.loads(test_paths_json)
 
-    exit_code = pytest.main(
-        [
-            *test_paths,
-            "-q",
-            f"--basetemp={basetemp}",
-            f"--cov={cov_source}",
-            "--cov-context=test",
-            "--json-report",
-            f"--json-report-file={json_report_file}",
-            "-p",
-            "no:cacheprovider",
-            # Override any project-configured `addopts` (pytest.ini/
-            # pyproject.toml/setup.cfg) for this invocation only: an
-            # addopts like "-m smoke" would otherwise silently narrow
-            # collection to a subset while this run still exits 0, letting
-            # a partial run be recorded as a complete, authoritative
-            # baseline. Clearing the *environment* variable alone (see
-            # _AMBIENT_PYTEST_SELECTION_ENV_VARS) does not reach this
-            # configured-file source.
-            "-o",
-            "addopts=",
-        ]
-    )
+        exit_code = pytest.main(
+            [
+                *test_paths,
+                "-q",
+                f"--basetemp={basetemp}",
+                f"--cov={cov_source}",
+                "--cov-context=test",
+                "--json-report",
+                f"--json-report-file={json_report_file}",
+                "-p",
+                "no:cacheprovider",
+                # Override any project-configured `addopts` (pytest.ini/
+                # pyproject.toml/setup.cfg) for this invocation only: an
+                # addopts like "-m smoke" would otherwise silently narrow
+                # collection to a subset while this run still exits 0, letting
+                # a partial run be recorded as a complete, authoritative
+                # baseline. Clearing the *environment* variable alone (see
+                # _AMBIENT_PYTEST_SELECTION_ENV_VARS) does not reach this
+                # configured-file source.
+                "-o",
+                "addopts=",
+            ]
+        )
 
-    if exit_code != 0:
-        sys.exit(exit_code)
+        if exit_code != 0:
+            sys.exit(exit_code)
 
-    import coverage
+        import coverage
 
-    cov = coverage.CoverageData(basename=cov_data_file)
-    cov.read()
+        cov = coverage.CoverageData(basename=cov_data_file)
+        cov.read()
 
-    cwd_path = Path(cwd).resolve()
-    phase_suffixes = ("|run", "|setup", "|teardown")
-    coverage_map = {}
-    for measured_file in cov.measured_files():
-        try:
-            rel = str(Path(measured_file).resolve().relative_to(cwd_path))
-        except ValueError:
-            rel = measured_file
-        per_line = {}
-        for lineno, contexts in cov.contexts_by_lineno(measured_file).items():
-            tests = set()
-            for ctx in contexts:
-                for suffix in phase_suffixes:
-                    if ctx.endswith(suffix):
-                        tests.add(ctx[: -len(suffix)])
-                        break
-            if tests:
-                per_line[str(lineno)] = sorted(tests)
-        if per_line:
-            coverage_map[rel] = per_line
+        cwd_path = Path(cwd).resolve()
+        phase_suffixes = ("|run", "|setup", "|teardown")
+        coverage_map = {}
+        for measured_file in cov.measured_files():
+            try:
+                rel = str(Path(measured_file).resolve().relative_to(cwd_path))
+            except ValueError:
+                rel = measured_file
+            per_line = {}
+            for lineno, contexts in cov.contexts_by_lineno(measured_file).items():
+                tests = set()
+                for ctx in contexts:
+                    for suffix in phase_suffixes:
+                        if ctx.endswith(suffix):
+                            tests.add(ctx[: -len(suffix)])
+                            break
+                if tests:
+                    per_line[str(lineno)] = sorted(tests)
+            if per_line:
+                coverage_map[rel] = per_line
 
-    report = json.loads(Path(json_report_file).read_text())
-    durations = {}
-    for test in report.get("tests", []):
-        nodeid = test.get("nodeid")
-        if nodeid is None:
-            continue
-        total = 0.0
-        for phase in ("setup", "call", "teardown"):
-            phase_data = test.get(phase)
-            if phase_data:
-                total += float(phase_data.get("duration", 0.0))
-        durations[nodeid] = total
+        report = json.loads(Path(json_report_file).read_text())
+        durations = {}
+        for test in report.get("tests", []):
+            nodeid = test.get("nodeid")
+            if nodeid is None:
+                continue
+            total = 0.0
+            for phase in ("setup", "call", "teardown"):
+                phase_data = test.get(phase)
+                if phase_data:
+                    total += float(phase_data.get("duration", 0.0))
+            durations[nodeid] = total
 
-    Path(out_file).write_text(json.dumps({"durations": durations, "coverage": coverage_map}))
-    sys.exit(0)
+        Path(out_file).write_text(json.dumps({"durations": durations, "coverage": coverage_map}))
+        sys.exit(0)
     """
 )
 
@@ -343,7 +362,17 @@ def collect_baseline(
     fast on the first non-clean chunk, exactly like a single-chunk suite
     always has.
     """
-    with tempfile.TemporaryDirectory(prefix="cgs-baseline-") as tmp:
+    with tempfile.TemporaryDirectory(
+        prefix="cgs-baseline-", ignore_cleanup_errors=True
+    ) as tmp:
+        # `ignore_cleanup_errors=True` matches `run-plugin-tests.py`'s own
+        # sandboxed-tempdir handling -- confirmed live: a plugin whose own
+        # real tests spawn child processes (e.g. `agent-worktrees`' real
+        # cross-process file-lock tests) can leave a lingering handle open
+        # on a file under this tempdir past this function's own return,
+        # which would otherwise turn a clean, fully-passing collection run
+        # into a raised `OSError` on cleanup -- discarding a baseline that
+        # was already earned.
         cwd = cwd.resolve()  # resolve once: both the subprocess cwd and the
         # driver's own cwd argv must agree, or a relative `cwd` double-joins
         # itself when the driver re-resolves it from inside that directory.

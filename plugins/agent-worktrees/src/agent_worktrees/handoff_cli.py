@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 from . import config as cfg, finalize as fin, output, profile_assignment, sessions, tracking
-from . import pending_seed as pending_seed_mod
+from . import pending_seed as pending_seed_mod, embody_resume
 from . import reclaim_cli, resolve_launch_cli, status_monitor_runtime
 
 
@@ -135,6 +135,9 @@ def add_parsers(sub) -> None:
     g.add_argument("--codename", default=None, help="Embody the worktree with this codename (pr-attribution-codenames Phase 2/3) -- resolved locally first, then via a cross-machine SSH scan. A codename found on a DIFFERENT machine fails closed with the machine name (remote launch is not supported); resolve/embody there directly instead.")
     g.add_argument("--anchor", action="store_true", help="Embody directly in the active project's ANCHOR checkout instead of any worktree -- no worktree is created or required. Matches the existing headless-dispatch behavior (a CodeSpace/container ACP session already runs in the anchor, never a worktree); this brings CLI-mode into line with that same contract. Session id is synthesized as `anchor-<repo_name>` (one live anchor session per repo, same one-live-session-per-target rule as an ordinary worktree). The anchor is not writable through this harness's own PR-gated flow (see AGENTS.md) -- use for reads/exploration or a repo whose anchor is otherwise safe to drive directly; an actual change still belongs in a worktree/PR.")
     p.add_argument("--seed", default=None, help="Seed prompt injected as the session's first interactive turn once Copilot is ready")
+    r = p.add_mutually_exclusive_group()
+    r.add_argument("--fresh", action="store_true", help="Start a new conversation even in an existing worktree. By default, an existing worktree embodied without a seed resumes its head session (the conversation the worktree's ledger names as current), so bringing a task back never loses its history")
+    r.add_argument("--resume-head", dest="resume_head", action="store_true", help="Resume the worktree's head session even when a --seed (or pending seed) is given; the seed is then typed into the resumed conversation. Without this, a seeded embody starts a fresh conversation for its new task")
     p.add_argument("--seed-ready-timeout", dest="seed_ready_timeout", type=float, default=180.0, metavar="SECONDS", help="How long to wait for Copilot's input prompt before typing the --seed (default 180). A fresh MCP/skill-heavy autopilot can take much longer than the fast handoff default to become ready; if this is too short the seed is never delivered and the session idles at an empty prompt")
     p.add_argument("--driver", default=None, help="Label of the agent steering this session; stamps the 'driven by <agent>' banner (AGENT_BRIDGE_DRIVEN_BY) so a human taking over in Neuron Forge sees who's at the wheel")
     p.add_argument("--verify-timeout", dest="verify_timeout", type=float, default=0.0, metavar="SECONDS", help="Wait up to N seconds for the mux session to come up before returning (default 0: don't wait)")
@@ -241,7 +244,10 @@ def cmd_embody(args: argparse.Namespace) -> int:
     existing session (``created=false``), honoring "to act in an occupied space,
     interrogate the occupant or embody a fresh space." Otherwise it creates the
     session detached (never attaching -- the operator or Neuron Forge attaches
-    later). An optional ``--seed`` is injected as the first interactive turn via
+    later). Embodying an existing worktree without a seed resumes its head
+    conversation (``resume_session`` in the output; ``--fresh`` opts out, and
+    ``--resume-head`` resumes it even with a seed), so bringing a task back
+    never leaves it on a blank session. An optional ``--seed`` is injected as the first interactive turn via
     ``send-keys`` once Copilot is ready. Handoff cutover uses native
     ``-i`` startup instead because its attached successor does not
     need embody's post-launch bridge verification.
@@ -367,6 +373,10 @@ def cmd_embody(args: argparse.Namespace) -> int:
             profile=selection.profile,
             preflight=launch_preflight,
         )
+        resume_target = (
+            None if already else embody_resume.resume_target(args, record, seed, make_new=make_new)
+        )
+        launch_cmd = embody_resume.with_resume(launch_cmd, resume_target)
         _json_output(
             {
                 "ok": True,
@@ -375,6 +385,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 "session": sessions.mux_session_name(wt_id),
                 "work_dir": work_dir,
                 "would": "resume" if already else "create",
+                "resume_session": resume_target,
                 "cmd": list(launch_cmd),
                 "seed_len": len(seed) if seed else 0,
             }
@@ -519,7 +530,15 @@ def cmd_embody(args: argparse.Namespace) -> int:
         # sessions (agent-bridge's `cli-mode launch`) sets this.
         if getattr(args, "ensure_mux", False):
             sessions.ensure_mux_available()
-        result = sessions.mux_new_session(wt_id, work_dir, launch_cmd, env)
+        # Resolved here, from the record re-read under the lifecycle fence, so
+        # a head that advanced (or a process that started) during preflight or
+        # the lock wait is what's resumed -- or refused.
+        resume_target = embody_resume.resume_target(args, launch_record, seed, make_new=make_new)
+        refusal = embody_resume.live_head_refusal(resume_target, wt_id)
+        if refusal:
+            return _json_error(refusal, exit_code=3)
+        result = sessions.mux_new_session(
+            wt_id, work_dir, embody_resume.with_resume(launch_cmd, resume_target), env)
     finally:
         lifecycle_lock.release()
     if not result.get("ok"):
@@ -570,6 +589,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
         "work_dir": work_dir,
         "created": True,
         "resumed": False,
+        "resume_session": resume_target,
         "new_pane": new_pane,
         "driven_by": driver,
         "seeded": bool(seed_result.get("sent")) if seed else False,

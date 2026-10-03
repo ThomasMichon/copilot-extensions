@@ -172,7 +172,14 @@ def _cmd_print_endpoint(args: argparse.Namespace) -> int:
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
+    from .logging_setup import configure_file_logging
     from .server import CoordinatorAlreadyLiveError, serve
+
+    # This daemon normally runs headless (pythonw.exe, no console) -- without
+    # this, every log.info/log.warning/log.exception call across the package
+    # is silently dropped. See logging_setup's module docstring
+    # (copilot-extensions#4978).
+    configure_file_logging("coordinator")
 
     passive = bool(getattr(args, "passive", False))
     force = bool(getattr(args, "force", False))

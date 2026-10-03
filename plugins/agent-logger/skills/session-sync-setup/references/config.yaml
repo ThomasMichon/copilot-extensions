@@ -31,6 +31,17 @@ sync:
     min_age_days: 30            # only sessions at least this old
     require_untracked_worktree: true  # skip sessions of picker-tracked worktrees
     archive_root: null          # null => <home>/archived-sessions (out of ~/.copilot)
+  # Incremental sync via a local, stat-only change signature db. On by
+  # default -- disables only with `enabled: false` (then every run always
+  # pushes everything, as before this existed). See SKILL.md's "Change
+  # tracking" section for the `--delete-excluded` tradeoff and the doctor
+  # (`run --full`) realignment workflow.
+  change_tracking:
+    enabled: true
+    full_sync_interval_hours: 24  # periodic full/segmented reconciliation
+    batch_size: 100              # sessions per push call during a full pass
+    db_path: null                # null => <home>/sync-state.db
+
   notify:
     url: null                   # optional post-push HTTP POST; {machine} expands
     bearer_token_file: null

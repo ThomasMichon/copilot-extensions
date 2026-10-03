@@ -314,6 +314,7 @@ def reattach(
                     f"reattach: retiring stale reservation for exclusive_key "
                     f"{exclusive_key!r} (superseded by a fresh reattach)"
                 ),
+                release_requested=True,
             )
     new_task = client.create(
         old_task.get("title") or "",

@@ -82,12 +82,187 @@ def _included_sessions(source, allowlist: list[str],
     return included
 
 
+def _all_session_ids(source: Path) -> list[str]:
+    session_state = source / "session-state"
+    if not session_state.is_dir():
+        return []
+    return sorted(d.name for d in session_state.iterdir() if d.is_dir())
+
+
+def _record_push_result(
+    tracker, snapshot: dict[str, str], result, unfiltered: bool, index_snapshot: str | None,
+) -> None:
+    """After a successful push, persist only sessions that fully transferred.
+
+    A session with at least one deferred (locked) file did NOT fully land --
+    recording its signature anyway would permanently mask the gap once the
+    file unlocks without its size/mtime changing again. Any PRIOR stored
+    signature for a deferred session is also dropped (not just withheld):
+    an unchanged-since-last-full-sync session whose only issue this pass
+    was a transiently locked file would otherwise still match its old row
+    and be skipped as "already synced" on the very next incremental check.
+    Also records *index_snapshot* (captured before this push, see
+    :meth:`~agent_logger.sync.change_tracker.ChangeTracker.snapshot_index`)
+    whenever this push was unfiltered -- never recomputed after the fact,
+    for the same before/after-the-transfer reason as session signatures.
+    If the index itself was deferred (``result.index_deferred``), any
+    stored index signature is invalidated instead, so the next run still
+    sees it as changed rather than trusting a snapshot that never actually
+    landed.
+    """
+    to_record = {
+        sid: sig for sid, sig in snapshot.items() if sid not in result.deferred_sessions
+    }
+    tracker.record_signatures(to_record)
+    if result.deferred_sessions:
+        tracker.forget(result.deferred_sessions)
+    if unfiltered:
+        if result.index_deferred:
+            tracker.invalidate_index()
+        elif index_snapshot is not None:
+            tracker.record_index_signature(index_snapshot)
+
+
+def _push_incremental(
+    cfg: Config,
+    target,
+    source: Path,
+    machine: str,
+    include: set[str] | None,
+    *,
+    force_full: bool,
+    verbose: bool,
+):
+    """Resolve the actual push(es) for one sync pass via the change tracker.
+
+    Incremental by default: only sessions whose local signature changed
+    since the last successful sync are included -- the common case does not
+    invoke the target's transport at all. Falls back to a full, segmented
+    reconciliation (bounded-size batches, so one rsync invocation never has
+    to walk the whole corpus) on a from-scratch tracker db, when
+    *force_full* is set (``run --full``), on the configured periodic
+    cadence, or when the tracker's recorded source/destination/machine
+    identity no longer matches this run (a changed target/path/machine makes
+    its stored signatures describe a different destination -- see
+    :meth:`~agent_logger.sync.change_tracker.ChangeTracker.identity_changed`).
+    Change tracking itself is opt-out (``sync.change_tracking.enabled:
+    false`` reverts to always pushing everything, exactly as before this
+    existed).
+    """
+    from agent_logger.sync.change_tracker import ChangeTracker, chunked, resolve_db_path
+    from agent_logger.sync.targets.base import PushResult
+
+    settings = cfg.sync_change_tracking
+    if not settings["enabled"]:
+        return target.push(source, machine, include)
+
+    tracker = ChangeTracker(resolve_db_path(settings["db_path"], cfg.home))
+    # The repo-scope business filter (allowlist/denylist), not a transport
+    # batching artifact -- `batch_mode` on target.push tells the target "this
+    # explicit session set is only a size-bounded slice of what would
+    # otherwise be an unfiltered push", so it still transfers the global
+    # index and defers (rather than hard-fails) a locked file, exactly like
+    # an unfiltered push would.
+    unfiltered = include is None
+    identity = f"{source}|{target.describe()}|{machine}"
+    identity_stale = tracker.identity_changed(identity)
+    do_full = (
+        force_full
+        or identity_stale
+        or tracker.should_full_sync(settings["full_sync_interval_hours"])
+    )
+    if do_full and (force_full or identity_stale):
+        # A forced pass or a changed destination identity makes every
+        # existing signature/marker untrustworthy: signatures are purely
+        # content-based, so a session unchanged since it was last sent to a
+        # DIFFERENT destination would otherwise look "already synced" here
+        # too, even though this destination never received it; and a stale
+        # "recently full-synced" marker surviving a failed forced attempt
+        # would let the next routine run skip retrying it. Clear the slate
+        # so every batch below rebuilds trustworthy state from scratch.
+        tracker.reset()
+
+    if not do_full:
+        changed = tracker.changed_sessions(source, include)
+        final_include = changed if include is None else (changed & include)
+        index_due = unfiltered and tracker.index_changed(source)
+        if not final_include and not index_due:
+            target.heartbeat(machine)
+            return PushResult(ok=True, detail="no session changes detected")
+        # Snapshot before the transfer, not after: a signature recomputed
+        # post-push could capture a live append that happened during the
+        # push but was never actually transferred, permanently masking it.
+        snapshot = tracker.snapshot(source, final_include)
+        index_snapshot = tracker.snapshot_index(source) if unfiltered else None
+        result = target.push(source, machine, final_include, batch_mode=unfiltered)
+        if result.ok:
+            _record_push_result(tracker, snapshot, result, unfiltered, index_snapshot)
+        return result
+
+    all_ids = _all_session_ids(source)
+    if include is not None:
+        all_ids = [sid for sid in all_ids if sid in include]
+
+    total_files = 0
+    total_excluded_files = 0
+    total_excluded_bytes = 0
+    excluded_roots: list[str] = []
+    measurement_complete = True
+    batch_count = 0
+    # An unfiltered reconciliation with zero session dirs still needs one
+    # push call to carry an index-only change -- otherwise `run --full`
+    # on a source with no sessions yet would push nothing at all.
+    batches = list(chunked(all_ids, settings["batch_size"])) or (
+        [[]] if unfiltered else []
+    )
+    for batch in batches:
+        batch_count += 1
+        if verbose:
+            print(f"session-sync: full sync batch {batch_count} ({len(batch)} session(s))")
+        snapshot = tracker.snapshot(source, batch)
+        index_snapshot = tracker.snapshot_index(source) if unfiltered else None
+        result = target.push(source, machine, set(batch), batch_mode=unfiltered)
+        if not result.ok:
+            return result
+        total_files += result.file_count
+        total_excluded_files += result.excluded_file_count
+        total_excluded_bytes += result.excluded_byte_count
+        excluded_roots.extend(result.excluded_roots)
+        measurement_complete = measurement_complete and result.excluded_measurement_complete
+        _record_push_result(tracker, snapshot, result, unfiltered, index_snapshot)
+
+    vanished = tracker.vanished_sessions(source)
+    if vanished:
+        tracker.forget(vanished)
+    # Identity before the completion marker: an interrupted exit here still
+    # leaves `should_full_sync` due (no fresh marker), so a later run forces
+    # another full reconciliation instead of silently trusting a signature
+    # set recorded under an identity that was never actually confirmed.
+    tracker.record_identity(identity)
+    tracker.mark_full_sync()
+
+    detail = (
+        f"full reconciliation: {len(all_ids)} session(s) in {batch_count} batch(es)"
+        if all_ids else "full reconciliation: nothing to push"
+    )
+    return PushResult(
+        ok=True,
+        detail=detail,
+        file_count=total_files,
+        excluded_file_count=total_excluded_files,
+        excluded_byte_count=total_excluded_bytes,
+        excluded_roots=tuple(excluded_roots),
+        excluded_measurement_complete=measurement_complete,
+    )
+
+
 def run_sync(
     cfg: Config,
     *,
     dry_run: bool = False,
     prune: bool = False,
     verbose: bool = False,
+    full: bool = False,
 ) -> int:
     """Execute one sync pass. Returns a process exit code."""
     if _automation_disabled():
@@ -175,7 +350,9 @@ def run_sync(
                     file=sys.stderr,
                 )
 
-        result = target.push(source, machine, include)
+        result = _push_incremental(
+            cfg, target, source, machine, include, force_full=full, verbose=verbose
+        )
         if not result.ok:
             print(f"session-sync: push failed: {result.detail}", file=sys.stderr)
             return 1
@@ -532,6 +709,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--prune", action="store_true", help="prune old sessions after sync")
     p_run.add_argument("--verbose", action="store_true", help="verbose output")
     p_run.add_argument(
+        "--full",
+        action="store_true",
+        help="force a full, segmented reconciliation pass now (ignores the "
+        "periodic cadence and any incremental change-tracking state) -- the "
+        "operator escape hatch for local/upstream drift",
+    )
+    p_run.add_argument(
         "--detach",
         action="store_true",
         help="stage the package to a temp dir and run the sync in a detached, "
@@ -646,9 +830,12 @@ def main(argv: list[str] | None = None) -> int:
             if getattr(args, "detach", False):
                 from agent_logger.sync import spawn
 
-                return spawn.spawn_detached_sync(cfg, prune=args.prune)
+                return spawn.spawn_detached_sync(
+                    cfg, prune=args.prune, full=args.full
+                )
             return run_sync(
-                cfg, dry_run=args.dry_run, prune=args.prune, verbose=args.verbose
+                cfg, dry_run=args.dry_run, prune=args.prune, verbose=args.verbose,
+                full=args.full,
             )
         if args.command == "push":
             return run_push(

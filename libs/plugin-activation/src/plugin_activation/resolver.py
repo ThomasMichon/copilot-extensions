@@ -37,6 +37,7 @@ from plugin_resolve import (
     split_source,
 )
 
+from .bare_anchor import git_root
 from .state import PluginStateError, read_json_object
 
 REGISTRY_NAME = "plugin-activation"
@@ -565,9 +566,7 @@ def _verified_project_roots(
             registry_indeterminate = True
             continue
         try:
-            top = Path(_git(canonical, "rev-parse", "--show-toplevel")).resolve(
-                strict=True
-            )
+            top = git_root(canonical, _git, _same_file)  # a bare anchor counts as its own root
             actual_remote = _git(canonical, "remote", "get-url", "origin")
         except subprocess.CalledProcessError as exc:
             findings.append(

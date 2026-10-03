@@ -1,0 +1,406 @@
+"""Tests for agent_logger.sync.change_tracker."""
+
+from __future__ import annotations
+
+import time
+from pathlib import Path
+
+from agent_logger.sync.change_tracker import (
+    ChangeTracker,
+    chunked,
+    compute_signature,
+    resolve_db_path,
+    resolve_settings,
+)
+
+
+def _make_session(root: Path, session_id: str, content: str = "hello") -> Path:
+    sess = root / "session-state" / session_id
+    sess.mkdir(parents=True)
+    (sess / "events.jsonl").write_text(content, encoding="utf-8")
+    return sess
+
+
+def test_compute_signature_stable_for_unchanged_directory(tmp_path: Path) -> None:
+    sess = _make_session(tmp_path, "abc-123")
+    assert compute_signature(sess) == compute_signature(sess)
+
+
+def test_compute_signature_changes_on_content_change(tmp_path: Path) -> None:
+    sess = _make_session(tmp_path, "abc-123")
+    before = compute_signature(sess)
+    (sess / "events.jsonl").write_text("hello world, more content", encoding="utf-8")
+    after = compute_signature(sess)
+    assert before != after
+
+
+def test_compute_signature_changes_on_new_file(tmp_path: Path) -> None:
+    sess = _make_session(tmp_path, "abc-123")
+    before = compute_signature(sess)
+    (sess / "new-file.txt").write_text("new", encoding="utf-8")
+    after = compute_signature(sess)
+    assert before != after
+
+
+def test_compute_signature_ignores_excluded_roots(tmp_path: Path) -> None:
+    """Content inside an excluded (detritus) subtree must not perturb the
+    signature -- the transport never sends it, so tracking it would trigger
+    wasted pushes for content that gets filtered right back out."""
+    sess = _make_session(tmp_path, "abc-123")
+    node_modules = sess / "files" / "tool-output" / "proj" / "node_modules"
+    node_modules.mkdir(parents=True)
+    (node_modules / "pkg.js").write_text("v1", encoding="utf-8")
+
+    before = compute_signature(sess, excluded_roots=(node_modules,))
+    (node_modules / "pkg.js").write_text("v2-longer", encoding="utf-8")
+    (node_modules / "new.js").write_text("new", encoding="utf-8")
+    after = compute_signature(sess, excluded_roots=(node_modules,))
+    assert before == after
+
+
+def test_compute_signature_without_excluded_roots_still_sees_the_change(
+    tmp_path: Path,
+) -> None:
+    sess = _make_session(tmp_path, "abc-123")
+    node_modules = sess / "files" / "tool-output" / "proj" / "node_modules"
+    node_modules.mkdir(parents=True)
+    (node_modules / "pkg.js").write_text("v1", encoding="utf-8")
+
+    before = compute_signature(sess)
+    (node_modules / "pkg.js").write_text("v2-longer", encoding="utf-8")
+    after = compute_signature(sess)
+    assert before != after
+
+
+def test_compute_signature_uses_relative_paths_not_absolute(tmp_path: Path) -> None:
+    """The signature is keyed by each file's *relative* path within the
+    session dir, so moving the same session tree elsewhere on disk (same
+    content, same mtimes) still yields an identical signature."""
+    import shutil
+
+    one = _make_session(tmp_path, "abc-123")
+    moved_root = tmp_path / "moved"
+    moved_root.mkdir()
+    two = moved_root / "abc-123"
+    shutil.copytree(one, two)
+    # Preserve exact mtimes so only the absolute path differs.
+    for src_path in one.rglob("*"):
+        if src_path.is_file():
+            dst_path = two / src_path.relative_to(one)
+            stat_result = src_path.stat()
+            import os
+
+            os.utime(dst_path, ns=(stat_result.st_atime_ns, stat_result.st_mtime_ns))
+    assert compute_signature(one) == compute_signature(two)
+
+
+def test_chunked_splits_into_bounded_batches() -> None:
+    batches = list(chunked([str(i) for i in range(10)], 3))
+    assert [len(b) for b in batches] == [3, 3, 3, 1]
+    flattened = [item for batch in batches for item in batch]
+    assert flattened == [str(i) for i in range(10)]
+
+
+def test_chunked_empty_input_yields_nothing() -> None:
+    assert list(chunked([], 5)) == []
+
+
+def test_resolve_db_path_uses_configured_value(tmp_path: Path) -> None:
+    configured = str(tmp_path / "custom.db")
+    assert resolve_db_path(configured, tmp_path / "home") == Path(configured)
+
+
+def test_resolve_db_path_anchors_relative_value_to_home(tmp_path: Path) -> None:
+    """A relative db_path must resolve against home, not the process cwd --
+    a detached sync runs from a throwaway staging dir it deletes on exit
+    (see agent_logger.sync.spawn), so resolving against cwd there would
+    silently lose the tracker db after every detached run."""
+    home = tmp_path / "home"
+    assert resolve_db_path("tracker.db", home) == home / "tracker.db"
+    assert resolve_db_path("nested/tracker.db", home) == home / "nested" / "tracker.db"
+
+
+def test_resolve_db_path_defaults_under_home(tmp_path: Path) -> None:
+    assert resolve_db_path(None, tmp_path) == tmp_path / "sync-state.db"
+
+
+def test_resolve_settings_defaults() -> None:
+    settings = resolve_settings({})
+    assert settings == {
+        "enabled": True,
+        "full_sync_interval_hours": 24.0,
+        "batch_size": 100,
+        "db_path": None,
+    }
+
+
+def test_resolve_settings_honors_overrides() -> None:
+    settings = resolve_settings(
+        {"enabled": False, "full_sync_interval_hours": 6, "batch_size": 50, "db_path": "/x"}
+    )
+    assert settings == {
+        "enabled": False,
+        "full_sync_interval_hours": 6.0,
+        "batch_size": 50,
+        "db_path": "/x",
+    }
+
+
+def test_changed_sessions_reports_new_session_without_stored_signature(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "copilot"
+    _make_session(source, "abc-123")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    assert tracker.changed_sessions(source) == {"abc-123"}
+
+
+def test_changed_sessions_empty_after_record(tmp_path: Path) -> None:
+    source = tmp_path / "copilot"
+    _make_session(source, "abc-123")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record(source, {"abc-123"})
+    assert tracker.changed_sessions(source) == set()
+
+
+def test_changed_sessions_reports_modified_session(tmp_path: Path) -> None:
+    source = tmp_path / "copilot"
+    sess = _make_session(source, "abc-123")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record(source, {"abc-123"})
+    (sess / "events.jsonl").write_text("changed content here", encoding="utf-8")
+    assert tracker.changed_sessions(source) == {"abc-123"}
+
+
+def test_changed_sessions_only_touches_other_sessions_when_scoped(tmp_path: Path) -> None:
+    source = tmp_path / "copilot"
+    _make_session(source, "abc-123")
+    _make_session(source, "def-456")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record(source, {"abc-123", "def-456"})
+    assert tracker.changed_sessions(source) == set()
+    # Scoping to a subset never reports an untouched session outside it.
+    assert tracker.changed_sessions(source, {"abc-123"}) == set()
+
+
+def test_changed_sessions_missing_source_dir_is_empty(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    assert tracker.changed_sessions(tmp_path / "nonexistent") == set()
+
+
+def test_known_session_ids_and_vanished_sessions(tmp_path: Path) -> None:
+    source = tmp_path / "copilot"
+    _make_session(source, "abc-123")
+    _make_session(source, "def-456")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record(source, {"abc-123", "def-456"})
+    assert tracker.known_session_ids() == {"abc-123", "def-456"}
+
+    # Locally removed since the last sync -- vanished, but not yet forgotten.
+    import shutil
+
+    shutil.rmtree(source / "session-state" / "def-456")
+    assert tracker.vanished_sessions(source) == {"def-456"}
+    assert tracker.known_session_ids() == {"abc-123", "def-456"}
+
+    tracker.forget({"def-456"})
+    assert tracker.known_session_ids() == {"abc-123"}
+    assert tracker.vanished_sessions(source) == set()
+
+
+def test_vanished_sessions_empty_when_nothing_known(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    assert tracker.vanished_sessions(tmp_path / "copilot") == set()
+
+
+def test_should_full_sync_true_for_fresh_db(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    assert tracker.should_full_sync(24) is True
+
+
+def test_should_full_sync_false_right_after_marking(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.mark_full_sync()
+    assert tracker.should_full_sync(24) is False
+
+
+def test_should_full_sync_true_once_interval_elapses(tmp_path: Path, monkeypatch) -> None:
+    from agent_logger.sync import change_tracker as mod
+
+    tracker = ChangeTracker(tmp_path / "state.db")
+    now = time.time()
+    monkeypatch.setattr(mod.time, "time", lambda: now)
+    tracker.mark_full_sync()
+    assert tracker.should_full_sync(1) is False
+    monkeypatch.setattr(mod.time, "time", lambda: now + 3601)
+    assert tracker.should_full_sync(1) is True
+
+
+def test_should_full_sync_zero_interval_disables_cadence(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.mark_full_sync()
+    assert tracker.should_full_sync(0) is False
+
+
+def test_reset_clears_signatures_and_full_sync_marker(tmp_path: Path) -> None:
+    source = tmp_path / "copilot"
+    _make_session(source, "abc-123")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record(source, {"abc-123"})
+    tracker.mark_full_sync()
+    assert tracker.known_session_ids() == {"abc-123"}
+    assert tracker.should_full_sync(24) is False
+
+    tracker.reset()
+    assert tracker.known_session_ids() == set()
+    assert tracker.should_full_sync(24) is True
+
+
+def test_changed_sessions_detects_provenance_only_change(tmp_path: Path) -> None:
+    """Updating only the provenance sidecar (session-state content untouched)
+    must still be detected -- the push contract transfers it too."""
+    source = tmp_path / "copilot"
+    _make_session(source, "abc-123")
+    provenance_dir = source / "provenance"
+    provenance_dir.mkdir()
+    (provenance_dir / "abc-123.json").write_text("{}", encoding="utf-8")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record(source, {"abc-123"})
+    assert tracker.changed_sessions(source) == set()
+
+    (provenance_dir / "abc-123.json").write_text('{"changed": true}', encoding="utf-8")
+    assert tracker.changed_sessions(source) == {"abc-123"}
+
+
+def test_snapshot_then_record_signatures_matches_record(tmp_path: Path) -> None:
+    source = tmp_path / "copilot"
+    _make_session(source, "abc-123")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    snapshot = tracker.snapshot(source, {"abc-123"})
+    assert set(snapshot) == {"abc-123"}
+    tracker.record_signatures(snapshot)
+    assert tracker.changed_sessions(source) == set()
+
+
+def test_record_signatures_ignores_content_that_changes_after_snapshot(
+    tmp_path: Path,
+) -> None:
+    """The whole point of snapshot-before-push: a signature recorded as
+    synced must never silently absorb content that arrived after the
+    snapshot was taken (e.g. during the transfer itself)."""
+    source = tmp_path / "copilot"
+    _make_session(source, "abc-123")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    snapshot = tracker.snapshot(source, {"abc-123"})
+
+    # Simulate a live append happening after the snapshot but before the
+    # (here, simulated) transfer completes and the snapshot is recorded.
+    (source / "session-state" / "abc-123" / "events.jsonl").write_text(
+        "appended content", encoding="utf-8"
+    )
+    tracker.record_signatures(snapshot)
+
+    # The append was never actually captured by the recorded signature, so
+    # the next pass must still see it as changed.
+    assert tracker.changed_sessions(source) == {"abc-123"}
+
+
+def test_snapshot_skips_missing_session_directory(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    assert tracker.snapshot(tmp_path / "copilot", {"nonexistent"}) == {}
+
+
+def test_record_signatures_empty_is_a_noop(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record_signatures({})
+    assert tracker.known_session_ids() == set()
+
+
+def test_identity_changed_false_for_fresh_db(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    assert tracker.identity_changed("source|target|machine") is False
+
+
+def test_identity_changed_false_when_matching(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record_identity("source|target|machine")
+    assert tracker.identity_changed("source|target|machine") is False
+
+
+def test_identity_changed_true_when_destination_changes(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record_identity("source|target-a|machine")
+    assert tracker.identity_changed("source|target-b|machine") is True
+
+
+def test_reset_clears_identity(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record_identity("source|target|machine")
+    tracker.reset()
+    assert tracker.identity_changed("source|target-b|machine") is False
+
+
+def test_index_changed_true_for_fresh_db(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    source = tmp_path / "copilot"
+    source.mkdir()
+    assert tracker.index_changed(source) is True
+
+
+def test_index_changed_false_after_record(tmp_path: Path) -> None:
+    source = tmp_path / "copilot"
+    source.mkdir()
+    (source / "session-store.db").write_text("v1", encoding="utf-8")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record_index(source)
+    assert tracker.index_changed(source) is False
+
+
+def test_index_changed_true_after_content_change(tmp_path: Path) -> None:
+    source = tmp_path / "copilot"
+    source.mkdir()
+    (source / "session-store.db").write_text("v1", encoding="utf-8")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record_index(source)
+    (source / "session-store.db").write_text("v2-longer", encoding="utf-8")
+    assert tracker.index_changed(source) is True
+
+
+def test_index_changed_ignores_missing_index_files(tmp_path: Path) -> None:
+    """An absent index (no session-store.db at all) is still a stable,
+    recordable signature -- not an error."""
+    source = tmp_path / "copilot"
+    source.mkdir()
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record_index(source)
+    assert tracker.index_changed(source) is False
+
+
+def test_reset_clears_index_signature(tmp_path: Path) -> None:
+    source = tmp_path / "copilot"
+    source.mkdir()
+    (source / "session-store.db").write_text("v1", encoding="utf-8")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record_index(source)
+    tracker.reset()
+    assert tracker.index_changed(source) is True
+
+
+def test_invalidate_index_forces_recheck(tmp_path: Path) -> None:
+    source = tmp_path / "copilot"
+    source.mkdir()
+    (source / "session-store.db").write_text("v1", encoding="utf-8")
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.record_index(source)
+    assert tracker.index_changed(source) is False
+
+    tracker.invalidate_index()
+    assert tracker.index_changed(source) is True
+
+
+def test_invalidate_index_is_a_noop_when_nothing_recorded(tmp_path: Path) -> None:
+    tracker = ChangeTracker(tmp_path / "state.db")
+    tracker.invalidate_index()  # must not raise
+    source = tmp_path / "copilot"
+    source.mkdir()
+    assert tracker.index_changed(source) is True

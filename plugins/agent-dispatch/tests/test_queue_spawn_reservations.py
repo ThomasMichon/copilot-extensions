@@ -38,7 +38,6 @@ def test_task_queue_inherits_the_spawn_reservation_mixin():
 @pytest.mark.guard
 def test_spawn_reservation_methods_are_directly_importable():
     assert callable(SpawnReservationMixin.reserve_spawn)
-    assert callable(SpawnReservationMixin.rearm_spawn)
     assert callable(SpawnReservationMixin.record_spawn)
     assert callable(SpawnReservationMixin.record_spawn_worktree)
     assert callable(SpawnReservationMixin.record_cold)
@@ -69,7 +68,6 @@ def test_mixin_method_annotations_resolve_via_get_type_hints():
     mode."""
     for name in (
         "reserve_spawn",
-        "rearm_spawn",
         "_update_reservation",
         "record_spawn",
         "record_spawn_worktree",

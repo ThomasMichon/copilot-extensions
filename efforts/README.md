@@ -14,16 +14,15 @@ that pattern to this repository.
 | [Local-Cache Delivery Primacy](active/local-cache-delivery-primacy/README.md) | Active | #4925 |
 | [Pivot Streaming Transport & Render Performance](active/pivot-streaming-transport/README.md) | Active | #4762 |
 | [agent-dispatch Recipe Library](active/agent-dispatch-recipe-library/README.md) | Draft | #4691 |
-| [agent-dispatch Recipe Composability](active/agent-dispatch-recipe-composability/README.md) | Draft | #4959 |
+| [agent-dispatch Recipe Composability](active/agent-dispatch-recipe-composability/README.md) | In Progress | #4959 |
 | [Configurable token-command sourcing](active/token-command-sourcing/README.md) | Draft | _pending_ |
 | [CI Identifier Leak Guard](active/ci-identifier-leak-guard/README.md) | Active | #3923 |
 | [CI Reliability & Flakiness Telemetry](active/ci-flakiness-telemetry-and-reliability/README.md) | Active | _pending_ |
 | [Worktree/Effort Railroad Binding](active/worktree-effort-railroad-binding/README.md) | Draft | #3581 |
 | [Worktree Head-Succession Hardening](active/worktree-head-succession-hardening/README.md) | Draft | #3584 |
 | [Picker Creature Comforts](active/picker-creature-comforts/README.md) | Draft | #3586 |
-| [Dev/Main Release Pipeline](active/dev-branch-release-pipeline/README.md) | Done; pending archive | #3336 |
+| [Dev/Main Release Pipeline](active/dev-branch-release-pipeline/README.md) | Active (Phase 7) | #3336 |
 | [Promotion-Failure Reactive Fix Agent](active/promotion-failure-reactive-fix-agent/README.md) | Active | _TBD_ |
-| [Vendor Pointer Generalization](active/vendor-pointer-generalization/README.md) | Draft | See effort |
 | [Full-Harness Startup Reliability](active/full-harness-startup-reliability/README.md) | Active | #3303 |
 | [Unified Skill Review](active/unified-skill-review/README.md) | Draft | #2847 |
 | [Handoff Cutover Lifecycle Journal](active/handoff-cutover-lifecycle-journal/README.md) | Draft | #2457 |
@@ -43,6 +42,7 @@ that pattern to this repository.
 | [agent-bridge Session Discovery](active/agent-bridge-session-discovery/README.md) | Draft | #2530 |
 | [agent-bridge CLI-Mode Sessions](active/agent-bridge-cli-mode-sessions/README.md) | Active | See effort |
 | [Proposed Alignment/Convergence of Observable agent-bridge CLI Sessions](active/agent-bridge-cli-session-alignment/README.md) | Active | See effort |
+| [CLI-Default Bridging](active/cli-default-bridging/README.md) | Draft | See effort |
 | [Migration Intake](active/migration-intake/README.md) | Draft | See effort |
 | [Account-Aware Operations](active/account-aware-operations/README.md) | Draft | See effort |
 | [Agent Machines Declarative Control Plane](active/agent-machines-declarative-control-plane/README.md) | Active | #1418 (closed; historical, no live umbrella) |

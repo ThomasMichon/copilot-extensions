@@ -1,0 +1,9 @@
+{
+  "comment": "Generalize extends: to a multi-hop chain against any already-resolved declaration, with per-hop base-dir resolution and cycle detection",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

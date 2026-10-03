@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import __main__ as m
-from agent_worktrees import sessions
+from agent_worktrees import embody_resume, sessions
 
 
 # -- build_mux_new_session_argv (pure) --------------------------------------
@@ -694,6 +694,97 @@ class TestCmdEmbody:
         out = json.loads(capfd.readouterr().out)
         assert out["dry_run"] is True and out["would"] == "create"
         assert out["cmd"] == ["copilot"]
+
+    def _stub_existing(self, monkeypatch, tmp_path, wt="wtR"):
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: wt)
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
+        (tmp_path / f"{wt}.yaml").write_text("x")
+        monkeypatch.setattr(
+            m.tracking, "load_record",
+            lambda p: type("Rec", (), {"worktree_path": f"/w/{wt}"})(),
+        )
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
+        monkeypatch.setattr(sessions, "resolve_resume_target", lambda rec: "head-1")
+
+    @pytest.mark.parametrize(
+        "extra, resumed",
+        [
+            ({}, "head-1"),  # bringing a worktree back resumes its head
+            ({"seed": "new task"}, None),  # a seed is a new task: fresh
+            ({"seed": "carry on", "resume_head": True}, "head-1"),
+            ({"fresh": True}, None),
+            ({"copilot_args": ["--resume=other"]}, None),  # caller chose
+        ],
+    )
+    def test_dry_run_resumes_the_head_conversation(
+        self, monkeypatch, capfd, tmp_path, extra, resumed,
+    ):
+        self._stub_existing(monkeypatch, tmp_path)
+        monkeypatch.setattr(sessions, "mux_new_session",
+                            lambda *a, **k: pytest.fail("dry-run must not spawn"))
+        rc = m.cmd_embody(_ns(worktree_id="wtR", dry_run=True, **extra))
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["resume_session"] == resumed
+        assert out["cmd"] == (["copilot", "--resume=head-1"] if resumed else ["copilot"])
+
+    def test_create_resumes_the_head_conversation(self, monkeypatch, capfd, tmp_path):
+        self._stub_existing(monkeypatch, tmp_path)
+        monkeypatch.setattr(embody_resume, "session_liveness", lambda sid: "dead")
+        spawned = {}
+
+        def _spawn(wt, wd, cmd, env, **k):
+            spawned["cmd"] = cmd
+            return {"ok": True, "session": f"wt-{wt}", "new_pane": "%5", "error": None}
+
+        monkeypatch.setattr(sessions, "mux_new_session", _spawn)
+        rc = m.cmd_embody(_ns(worktree_id="wtR"))
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["created"] is True and out["resume_session"] == "head-1"
+        assert spawned["cmd"] == ["copilot", "--resume=head-1"]
+
+    @pytest.mark.parametrize("state, why", [
+        ("live", "already running"),  # a bare-terminal Copilot on the same conversation
+        ("unknown", "can't confirm"),  # no process probe here: fail closed
+    ])
+    def test_a_head_that_may_still_run_is_never_forked(
+        self, monkeypatch, capfd, tmp_path, state, why,
+    ):
+        self._stub_existing(monkeypatch, tmp_path)
+        monkeypatch.setattr(embody_resume, "session_liveness", lambda sid: state)
+        monkeypatch.setattr(sessions, "mux_new_session",
+                            lambda *a, **k: pytest.fail("must not fork a possibly-live head"))
+        rc = m.cmd_embody(_ns(worktree_id="wtR"))
+        assert rc == 3
+        assert why in capfd.readouterr().out
+
+    def test_the_head_is_resolved_under_the_lifecycle_fence(self, monkeypatch, capfd, tmp_path):
+        """The ledger advanced while embody waited: the session resumed is the
+        one the fenced re-read names, not the one seen at preflight."""
+        self._stub_existing(monkeypatch, tmp_path)
+        loads = {"n": 0}
+
+        def _load(p):
+            loads["n"] += 1
+            head = "stale-head" if loads["n"] == 1 else "fresh-head"
+            return type("Rec", (), {"worktree_path": "/w/wtR", "head": head})()
+
+        monkeypatch.setattr(m.tracking, "load_record", _load)
+        monkeypatch.setattr(sessions, "resolve_resume_target", lambda rec: rec.head)
+        monkeypatch.setattr(embody_resume, "session_liveness", lambda sid: "dead")
+        spawned = {}
+
+        def _spawn(wt, wd, cmd, env, **k):
+            spawned["cmd"] = cmd
+            return {"ok": True, "session": f"wt-{wt}", "new_pane": "%5", "error": None}
+
+        monkeypatch.setattr(sessions, "mux_new_session", _spawn)
+        assert m.cmd_embody(_ns(worktree_id="wtR")) == 0
+        assert loads["n"] >= 2
+        assert spawned["cmd"] == ["copilot", "--resume=fresh-head"]
+        assert json.loads(capfd.readouterr().out)["resume_session"] == "fresh-head"
 
 
 # -- cmd_embody --anchor: deliver directly in the anchor, no worktree ------

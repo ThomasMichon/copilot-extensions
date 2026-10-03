@@ -64,6 +64,69 @@ def test_apply_session_register_creates_a_new_session_entry(record_path):
     assert record.session_entry("sess-1") is not None
 
 
+def test_apply_session_register_new_session_branch_feeds_claim_history(
+    record_path,
+):
+    """worktree-claims-transitive-finalization Phase 3b: linking a
+    handoff_token for a session NOT yet tracked (the "new session" branch)
+    must feed claim_history for any ACTIVE pr-kind claim the worktree
+    holds, after -- never before -- the verb's own durable save."""
+    from agent_worktrees import claim_history, obligations
+
+    record = tracking.load_record(record_path)
+    record.sessions.append(tracking.SessionEntry("old", "2026-06-01T10:00:00"))
+    record.resources = [
+        tracking.ResourceClaim(kind="pr", ref="o/r#1", state=obligations.ACTIVE),
+    ]
+    tracking.open_handoff(record, "old", "tok", save=False)
+    tracking.save_record(record, record_path)
+
+    result = tracking_session_registration_write.apply_session_register(
+        {
+            "worktree_id": "wt-reg",
+            "yaml_path": str(record_path),
+            "session_id": "new",
+            "handoff_token": "tok",
+        }
+    )
+    assert result["ok"] is True
+    events = claim_history.history_for_ref("o/r#1")
+    assert [e["event"] for e in events] == ["reassigned"]
+    assert events[0]["session_id"] == "new"
+
+
+def test_apply_session_register_existing_session_branch_feeds_claim_history(
+    record_path,
+):
+    """Same Phase 3b wiring, for the "existing session" branch (the
+    successor is already tracked, e.g. a pre-associated handoff
+    candidate) -- the loop branch in apply_session_register, distinct from
+    the new-SessionEntry branch covered above."""
+    from agent_worktrees import claim_history, obligations
+
+    record = tracking.load_record(record_path)
+    record.sessions.append(tracking.SessionEntry("old", "2026-06-01T10:00:00"))
+    record.sessions.append(tracking.SessionEntry("new", "2026-06-01T10:00:00"))
+    record.resources = [
+        tracking.ResourceClaim(kind="pr", ref="o/r#1", state=obligations.ACTIVE),
+    ]
+    tracking.open_handoff(record, "old", "tok", save=False)
+    tracking.save_record(record, record_path)
+
+    result = tracking_session_registration_write.apply_session_register(
+        {
+            "worktree_id": "wt-reg",
+            "yaml_path": str(record_path),
+            "session_id": "new",
+            "handoff_token": "tok",
+        }
+    )
+    assert result["ok"] is True
+    events = claim_history.history_for_ref("o/r#1")
+    assert [e["event"] for e in events] == ["reassigned"]
+    assert events[0]["session_id"] == "new"
+
+
 def test_apply_session_register_rejects_a_terminal_managed_worktree(
     tmp_tracking_dir: Path,
 ):

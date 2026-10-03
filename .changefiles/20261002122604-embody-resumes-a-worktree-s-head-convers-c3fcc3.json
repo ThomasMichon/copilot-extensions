@@ -1,0 +1,9 @@
+{
+  "comment": "Embody resumes a worktree's head conversation; a dead head never blocks the session running in its worktree",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -796,38 +796,26 @@ class Config:
 
     @property
     def sync_compact(self) -> dict[str, Any]:
-        """Resolved cold-session compaction settings (``sync.compact``).
+        """Resolved ``sync.compact``; see ``compact.resolve_compact_settings``."""
+        from agent_logger.sync.compact import resolve_compact_settings
 
-        Compaction is **opt-in** (``enabled: false`` by default). ``codec`` is a
-        registered :mod:`agent_logger.sessions` codec (default ``targz``, stdlib
-        only). A cold session is one at least ``min_age_days`` old that (when
-        ``require_untracked_worktree``) does not belong to a tracked worktree --
-        one the picker renders. Since the picker only renders tracked worktrees,
-        an archived session is never one the picker needs.
-        """
         raw = dict(self._data.get("sync", {}).get("compact", {}) or {})
-        return {
-            "enabled": bool(raw.get("enabled", False)),
-            "codec": str(raw.get("codec") or "targz"),
-            "min_age_days": int(raw.get("min_age_days") or 30),
-            "require_untracked_worktree": bool(
-                raw.get("require_untracked_worktree", True)
-            ),
-            "archive_root": raw.get("archive_root"),
-        }
+        return resolve_compact_settings(raw)
 
     @property
     def compact_archive_root(self) -> Path:
-        """Local archive store for compacted sessions.
+        """Local archive store for compacted sessions; see ``compact.resolve_archive_root``."""
+        from agent_logger.sync.compact import resolve_archive_root
 
-        Deliberately **outside** ``~/.copilot`` (the Copilot CLI owns and
-        rotates that tree) — defaults to ``<home>/archived-sessions``, a stable
-        agent-logger-owned, non-cloud-synced location.
-        """
-        raw = self.sync_compact.get("archive_root")
-        if raw:
-            return Path(raw).expanduser()
-        return self.home / "archived-sessions"
+        return resolve_archive_root(self.sync_compact, self.home)
+
+    @property
+    def sync_change_tracking(self) -> dict[str, Any]:
+        """Resolved ``sync.change_tracking``; see ``change_tracker.resolve_settings``."""
+        from agent_logger.sync.change_tracker import resolve_settings
+
+        raw = dict(self._data.get("sync", {}).get("change_tracking", {}) or {})
+        return resolve_settings(raw)
 
     @property
     def log_path_template(self) -> str:

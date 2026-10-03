@@ -17,6 +17,56 @@ class SessionLifecycleError(ValueError):
     """Raised when an asserted session transition names an unknown session."""
 
 
+def record_pr_claims_reassigned(
+    record: tracking.WorktreeRecord,
+    *,
+    predecessor_session_id: str,
+    successor_session_id: str,
+    note: str,
+) -> None:
+    """Feed an **implicit** PR-claim reassignment into ``claim_history``
+    (worktree-claims-transitive-finalization Phase 3b): a context-handoff
+    cutover changes "who is actually working this PR right now" for every
+    ``pr``-kind claim this worktree holds, without any of ``claim_history``'s
+    already-wired explicit claim-verb call sites (``tracking_claim_write.py``
+    / ``pr_ops.py`` / ``finalize.py`` / ``claims_cli.py``) ever firing -- the
+    claim's ``worktree_id`` never changes, only the acting session does.
+
+    **Call this only after ``record``'s own save is durably confirmed** --
+    mirroring every other ``claim_history``-feeding call site
+    (``tracking_claim_write.py`` / ``pr_ops.py`` / ``finalize.py``): emitting
+    history before a save that could still fail would leave a false
+    "reassigned" entry for a handoff link that never actually persisted.
+    :func:`link_handoff` calls this itself, right after its own
+    ``save_record``, when invoked with its default ``save=True``; a caller
+    that instead invokes it with ``save=False`` (deferring the save to its
+    own later, single atomic write) owns calling this function itself, once
+    that later save has confirmed -- never before.
+
+    Best-effort: never raises, mirroring every other ``claim_history`` caller.
+    """
+    from . import obligations
+
+    pr_refs = [
+        claim.ref for claim in record.resources
+        if claim.kind == "pr" and claim.state == obligations.ACTIVE
+    ]
+    if not pr_refs:
+        return
+    from . import claim_history
+
+    for ref in pr_refs:
+        claim_history.record_event(
+            kind="pr",
+            ref=ref,
+            worktree_id=record.worktree_id,
+            machine=record.machine,
+            event="reassigned",
+            session_id=successor_session_id,
+            note=f"{note}: {predecessor_session_id} -> {successor_session_id}",
+        )
+
+
 def _next_lifecycle_revision(
     record: tracking.WorktreeRecord,
     *session_ids: str,
@@ -219,6 +269,15 @@ def link_handoff(
     )
     if save:
         tracking.save_record(record)
+        # Safe here only because THIS save just succeeded; a save=False
+        # caller must call record_pr_claims_reassigned() itself after its
+        # own save confirms (see that function's docstring).
+        record_pr_claims_reassigned(
+            record,
+            predecessor_session_id=predecessor.session_id,
+            successor_session_id=successor_id,
+            note="context-handoff linked",
+        )
     return handoff
 
 

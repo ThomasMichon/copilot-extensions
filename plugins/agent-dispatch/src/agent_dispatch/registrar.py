@@ -405,6 +405,33 @@ class ProfileDeclaration:
         return self.effective_filters().permits(task_attrs)
 
 
+def filter_vocabulary(declarations: Sequence["ProfileDeclaration"]) -> dict[str, list[str]]:
+    """Aggregate every declaration's effective ``permit`` values per dimension.
+
+    Returns the known-value vocabulary (:data:`_FILTER_DIMS`) spoken by the
+    currently-active pool set -- a value an operator-authored task could
+    usefully target to be eligible for at least one active pool. Built from
+    ``effective_filters().permit`` only (the ``name``/``labels``/``repos``
+    shorthand folded in, so a pool with no explicit ``filters`` still
+    contributes its name/labels as ``task-type`` values); ``reject``-only
+    values name something to steer *away* from, not toward, so they are
+    deliberately excluded. A dimension no declaration constrains at all is
+    omitted (an empty vocabulary would otherwise render as a dropdown with no
+    options and no signal). Each dimension's values are sorted for stable,
+    diffable output.
+
+    This is a read-only, pure aggregation over already-discovered
+    declarations -- callers needing the currently active set should pass
+    ``registrar_discovery``'s own combined/trusted declarations, not
+    rediscover them here.
+    """
+    vocab: dict[str, set[str]] = {}
+    for decl in declarations:
+        for dim, values in decl.effective_filters().permit.items():
+            vocab.setdefault(dim, set()).update(values)
+    return {dim: sorted(values) for dim, values in vocab.items() if values}
+
+
 def _num(x: float) -> str:
     """Render a float without a trailing ``.0`` so ``30.0`` -> ``30`` (arg parity)."""
     return str(int(x)) if float(x).is_integer() else str(x)

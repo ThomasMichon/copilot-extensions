@@ -78,6 +78,17 @@ in-plugin surface; and any `<project> <verb>` invocation continues to run
 one place — the Manager — and reads worktree state **only** across the process
 boundary (`agent-worktrees --json`), owning no worktree logic of its own.
 
+## Participants
+
+_Solo effort — one participant drives all phases; recorded here (rather than
+omitted per the template's single-effort allowance) solely so an
+agent-worktrees worktree can durably bind to this effort via `effort-focus
+bind` and refuse to finalize before the effort reaches `Status: Done`._
+
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Solo operator (private control repo) | Drives every phase end-to-end: claims the next unclaimed Plan item in the Journal, dispatches implementation, lands each slice's PR, and journals the outcome. | `copilot-extensions` worktrees created from a private control repo; no standing feature branch between slices. |
+
 ## Context
 
 **Cross-link (2026-09-28):** the companion `mux-daemon`'s own zero-downtime
@@ -920,6 +931,20 @@ overlapping work before it diverges, rather than relying on issue-comment
 claiming discipline alone.
 
 ## Journal
+
+- **2026-10-02** — Added a genuine `## Participants` declaration (this
+  effort predates that template convention and had none) solely so an
+  agent-worktrees worktree could durably bind to this effort via
+  `effort-focus bind` per operator request: "this worktree should claim the
+  effort so it can't finalize until the effort is done." Bound a worktree
+  on this machine with participant "Solo operator (private control repo)"
+  and slice "Phase 7 — Health, updating & presets (Ongoing)" — the only
+  currently-open-ended Plan phase, since Phase 4 is otherwise fully closed
+  and Phases 5/8 remain merely Planned rather than actively worked. That
+  worktree now carries the completion gate: it cannot
+  `effort-focus release --completed` until `Status: Done` and every
+  Plan/Validation Plan checkbox is resolved or explicitly transferred.
+  Docs-only.
 
 - **2026-10-02** — Landed Phase 4's generic control-plane-provider
   registration contract (claimed 2026-10-01). Resumed a prior session's

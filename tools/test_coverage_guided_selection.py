@@ -790,3 +790,68 @@ def test_collect_baseline_chunks_a_large_suite_and_merges_the_results(
         f"every chunk, not just one; got {sorted(attributed_tests)!r}"
     )
 
+
+def test_collect_baseline_survives_a_real_spawn_based_multiprocessing_child(
+    tmp_path: Path,
+) -> None:
+    # Regression test for a real failure this effort's agent-worktrees
+    # enrollment surfaced: `_DRIVER_SCRIPT` used to call `pytest.main(...)`
+    # unguarded at module scope. A plugin's own tests may spawn a real
+    # child process via `multiprocessing.get_context("spawn")` (e.g. to
+    # test genuine cross-process file-lock contention) -- `spawn`
+    # bootstraps a fresh interpreter that re-imports the driver script as
+    # a plain module (not `__main__`) to reconstruct its pickled target,
+    # which re-executed `pytest.main(...)` unconditionally and tripped
+    # multiprocessing's own bootstrap-safety guard ("An attempt has been
+    # made to start a new process before the current process has finished
+    # its bootstrapping phase"), killing the spawned child before it ever
+    # ran its real target -- and the doomed re-execution's own
+    # half-started pytest-cov instance corrupted the real coverage data
+    # file the parent was still writing to. Constructs a throwaway suite
+    # with a real `spawn`-context child (mirroring the real failure, not
+    # just a synthetic unit test of the guard itself) to confirm the fix
+    # holds end to end.
+    if os.environ.get("CGS_RUN_INTEGRATION_TEST") != "1":
+        pytest.skip(
+            "opt-in only: set CGS_RUN_INTEGRATION_TEST=1 to run the real "
+            "uv/coverage subprocess integration test"
+        )
+
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "__init__.py").write_text("")
+
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "__init__.py").write_text("")
+    (tests_dir / "test_spawn_child.py").write_text(
+        "import multiprocessing\n"
+        "\n\n"
+        "def _child_target(ready_path):\n"
+        "    with open(ready_path, 'w', encoding='utf-8') as fh:\n"
+        "        fh.write('ok')\n"
+        "\n\n"
+        "def test_real_spawn_child_completes(tmp_path):\n"
+        "    ready = tmp_path / 'ready'\n"
+        "    ctx = multiprocessing.get_context('spawn')\n"
+        "    proc = ctx.Process(target=_child_target, args=(str(ready),))\n"
+        "    proc.start()\n"
+        "    proc.join(timeout=30)\n"
+        "    assert proc.exitcode == 0, (\n"
+        "        f'spawned child must exit cleanly, got {proc.exitcode}'\n"
+        "    )\n"
+        "    assert ready.read_text(encoding='utf-8') == 'ok'\n"
+    )
+
+    result = baseline_mod.collect_baseline(
+        cwd=tmp_path,
+        test_path="tests",
+        cov_source="src",
+        plugin="spawn-regression",
+        timeout_s=60.0,
+    )
+
+    assert any(
+        "test_real_spawn_child_completes" in nodeid for nodeid in result["tests"]
+    )
+

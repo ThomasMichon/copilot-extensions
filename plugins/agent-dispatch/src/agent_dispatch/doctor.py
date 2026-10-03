@@ -402,6 +402,7 @@ def repair(diagnosis: Diagnosis, client: DispatchClient, *, reason: str) -> dict
                 detail=reason,
                 force=task_is_terminal,
                 confirmed_absent=task_is_terminal,
+                release_requested=True,
             )
             actions["reservation"] = {"state": fail_result.get("state")}
         except Exception as exc:

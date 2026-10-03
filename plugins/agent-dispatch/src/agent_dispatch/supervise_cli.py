@@ -406,9 +406,15 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
     # `copilot plugin update`); this daemon is lazy-started and inherits the
     # launching session's CWD. Relocate before the long-lived loop.
     from . import procutil
+    from .logging_setup import configure_file_logging
     from .supervisor_daemon import SupervisorDaemon, supervisor_lease_scope
 
     procutil.relocate_off_payload()
+    # This daemon normally runs headless (pythonw.exe, no console) -- without
+    # this, every log.info/log.warning/log.exception call across the package
+    # (supervisor.py's recovery paths included) is silently dropped. See
+    # logging_setup's module docstring (copilot-extensions#4978).
+    configure_file_logging("supervisor")
 
     machine, env = _registration_scope(args)
 

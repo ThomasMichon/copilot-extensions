@@ -4085,6 +4085,7 @@ from .tracking_lifecycle import (  # noqa: F401
     link_handoff,
     link_succession,
     open_handoff,
+    record_pr_claims_reassigned,
     repair_head_cache,
     set_head_session,
 )
