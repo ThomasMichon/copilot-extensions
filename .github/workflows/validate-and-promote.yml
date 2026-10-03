@@ -715,8 +715,11 @@ jobs:
         run: |
           # Mirrors `correlation.release_tag_for` -- duplicated here (not
           # imported; this step has no Python dependency at all otherwise)
-          # -- keep in sync by hand if that formula ever changes.
-          release_tag="coverage-baselines-${DEV_SHA:0:12}"
+          # -- keep in sync by hand if that formula ever changes. Uses the
+          # FULL `DEV_SHA`, never a truncated prefix -- see that
+          # function's own docstring for why a shortened prefix risks a
+          # release-tag collision between two distinct commits.
+          release_tag="coverage-baselines-${DEV_SHA}"
           if gh release view "$release_tag" >/dev/null 2>&1; then
             gh release upload "$release_tag" coverage-baselines/*.json --clobber
           else

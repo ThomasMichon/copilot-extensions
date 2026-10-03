@@ -75,8 +75,16 @@ def release_tag_for(measured_commit: str) -> str:
     formula by hand (not imported -- see `promote_release.py`'s own
     `COVERAGE_BASELINES_DIR` comment for why) -- keep all three in sync if
     this ever changes.
+
+    Uses the **full** `measured_commit` SHA, never a truncated prefix: a
+    shortened prefix risks two distinct commits colliding on the same
+    release tag, which would silently overwrite ("`--clobber`") an
+    unrelated commit's already-published baseline assets, and would leave
+    every pointer that already names that tag resolving to the wrong
+    payload.
     """
-    return f"coverage-baselines-{measured_commit[:12]}"
+    return f"coverage-baselines-{measured_commit}"
+
 
 
 def asset_name_for(plugin: str) -> str:

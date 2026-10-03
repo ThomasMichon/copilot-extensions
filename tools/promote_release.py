@@ -424,8 +424,11 @@ def _release_tag_for(measured_commit: str) -> str:
     """Mirrors `tools/coverage_guided_selection/correlation.py`'s own
     `release_tag_for` -- duplicated here (not imported), same reasoning as
     `COVERAGE_BASELINES_DIR` above. Keep both in sync if this ever changes.
+    Uses the full `measured_commit` SHA (never a truncated prefix) -- see
+    that function's own docstring for why a shortened prefix risks a
+    release-tag collision between two distinct commits.
     """
-    return f"coverage-baselines-{measured_commit[:12]}"
+    return f"coverage-baselines-{measured_commit}"
 
 
 def _write_coverage_baselines_into_scratch(
@@ -484,7 +487,7 @@ def _write_coverage_baselines_into_scratch(
                 f"{measured_commit!r}, not this promotion's own dev head "
                 f"{dev_head!r} -- refusing to check in a mismatched baseline"
             )
-        plugin = data.get("plugin") or src.stem
+        plugin = data["plugin"] if "plugin" in data else src.stem
         if plugin != src.stem:
             raise PromotionError(
                 f"coverage baseline {src.name!r} embeds plugin {plugin!r}, "

@@ -314,7 +314,7 @@ def test_promote_checks_in_a_matching_coverage_baseline(tmp_path: Path, repo: Pa
     # arbitrarily large.
     assert data["measured_commit"] == dev_head
     assert data["plugin"] == "demo-plugin"
-    assert data["release_tag"] == f"coverage-baselines-{dev_head[:12]}"
+    assert data["release_tag"] == f"coverage-baselines-{dev_head}"
     assert data["asset"] == "demo-plugin.json"
     assert "coverage" not in data
     assert "tests" not in data
@@ -362,6 +362,35 @@ def test_promote_refuses_a_coverage_baseline_whose_plugin_field_mismatches_its_f
     (baselines_dir / "demo-plugin.json").write_text(
         json.dumps({
             "plugin": "some-other-plugin",  # mismatches the filename
+            "measured_commit": dev_head,
+            "tests": {}, "coverage": {},
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(pr.PromotionError, match="does not match its own file name"):
+        pr.promote(
+            repo=repo, dev_ref="dev", main_ref="main", push=False,
+            coverage_baselines_dir=baselines_dir,
+        )
+
+
+def test_promote_refuses_a_coverage_baseline_with_an_empty_plugin_field(
+    tmp_path: Path, repo: Path,
+):
+    """A present-but-falsey `plugin` field (`""`, `None`, ...) must be
+    treated as a real, rejectable value -- never silently treated the same
+    as a genuinely absent key just because `bool(value)` is falsey."""
+    _git(["checkout", "-q", "dev"], repo)
+    (repo / "plugins" / "demo-plugin" / "new-file.txt").write_text("x\n", encoding="utf-8")
+    dev_head = _commit(repo, "demo-plugin: a change")
+    _git(["checkout", "-q", "main"], repo)
+
+    baselines_dir = tmp_path / "baselines"
+    baselines_dir.mkdir()
+    (baselines_dir / "demo-plugin.json").write_text(
+        json.dumps({
+            "plugin": "",  # present, but falsey
             "measured_commit": dev_head,
             "tests": {}, "coverage": {},
         }),

@@ -325,9 +325,13 @@ class TestCorrelation:
         with pytest.raises(correlation.BaselineCorrelationError):
             correlation.require_measured_commit(baseline)
 
-    def test_release_tag_for_is_keyed_on_the_measured_commit_prefix(self) -> None:
+    def test_release_tag_for_uses_the_full_measured_commit_not_a_prefix(self) -> None:
+        """A truncated prefix risks two distinct commits colliding on the
+        same release tag (silently overwriting an unrelated commit's
+        already-published baseline assets) -- the tag must embed the full
+        SHA."""
         sha = "abc123def456abc123def456abc123def456abc"
-        assert correlation.release_tag_for(sha) == "coverage-baselines-abc123def456"
+        assert correlation.release_tag_for(sha) == f"coverage-baselines-{sha}"
 
     def test_release_tag_for_is_stable_for_the_same_commit(self) -> None:
         sha = "f" * 40
