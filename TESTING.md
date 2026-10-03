@@ -142,10 +142,14 @@ python tools/run_tests_in_devcontainer.py --include-untracked agent-worktrees
 Everything after the wrapper's own small flag set (`--keep`,
 `--include-untracked`; or a literal `--` anywhere in the remaining
 arguments) is passed through to `tools/run-plugin-tests.py` *inside* the
-container -- with one normalization: a `--base` value that resolves on
-the host is rewritten to its resolved commit SHA (or appended, when
-changed-selection is active and `--base` was omitted entirely) before the
-in-container invocation is assembled; see below for why. The wrapper:
+container -- with one normalization (a `--base` value that resolves on
+the host is rewritten to its resolved commit SHA, or appended when
+changed-selection is active and `--base` was omitted entirely, before
+the in-container invocation is assembled; see below for why) and two
+known exceptions to otherwise-transparent passthrough: `--allow-host-state`
+is rejected outright (see below), and `--admission-wait`'s lease loses its
+host-wide coordination once run inside the container (see the Phase 2
+admission-lease gap below). The wrapper:
 
 1. Writes a per-invocation copy of `.devcontainer/test-isolation/devcontainer.json` with
    its workspace volume name made unique to this run, creates that volume

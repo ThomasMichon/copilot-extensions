@@ -334,9 +334,14 @@ verbatim ask.
       invokes `tools/run-plugin-tests.py` *inside* the container via
       `devcontainer exec` and passes through every one of that runner's own
       flags (`--changed`, `--all`, `-k`, etc.) semantically unchanged --
-      with one deliberate normalization, a resolvable `--base` is rewritten
+      with one deliberate normalization (a resolvable `--base` is rewritten
       to its resolved commit SHA before the in-container invocation is
-      assembled (see `TESTING.md` for why) -- so the
+      assembled; see `TESTING.md` for why) and two known exceptions:
+      `--allow-host-state` is rejected outright (it cannot honor its
+      documented fresh-tmpfs-`$HOME`/no-credentials contract inside this
+      wrapper's own containment), and `--admission-wait`'s host-wide lease
+      loses its cross-process coordination once run inside the container
+      (a tracked Phase 2 gap, see the Validation Plan item below) -- so the
       container adds a real OS-level boundary strictly on top of (never
       instead of, never duplicating) the turn-key runner's existing
       process-level containment. Validated end-to-end against a real
@@ -1765,3 +1770,34 @@ passed / 6 skipped) confirms the common case still works; `check-docs-
 consistency.py` and `check-effort-vision-structure.py` both pass. Docker
 cleanup (no leftover `test-isolation` volumes) and host `git status
 --short` reconfirmed clean of anything beyond this round's own diff.
+
+### 2026-10-03 — Review round 15 (twenty-first pass): both prior HIGH findings resolved, 3 LOW doc findings addressed (passthrough-exception documentation)
+A twenty-first review pass of commit `be7a6b096` confirmed both HIGH
+findings from the previous pass resolved (process-filter/working-tree-
+attribute bypass, symlinked-ancestor archiving escape). Remaining: 3
+restated MEDIUM findings already addressed in earlier passes (CI
+coverage, per-invocation volume naming/sizing -- no action), 2 restated
+LOW PR-metadata findings (stale test count and one remaining stale
+`.devcontainer/devcontainer.json` reference missed in the earlier PR-body
+edit, now both corrected directly on the PR body), and 3 NEW LOW
+findings: the wrapper's own module docstring, `TESTING.md`'s
+introductory passthrough-contract paragraph, and the effort's own Plan
+item all claimed every `run-plugin-tests.py` flag passes through
+semantically unchanged, without acknowledging the two exceptions already
+documented ELSEWHERE in each of those same files (`--allow-host-state`
+rejected outright; `--admission-wait`'s host-wide lease losing its
+cross-process coordination). Fixed by adding a one-clause qualification
+to each of the three introductory statements, cross-referencing the
+exception explanations each document already carries further down --
+closing the gap between the top-line summary and the full detail
+without duplicating it.
+
+Re-validated end-to-end: the full unit test suite (97 tests, unchanged
+by this doc-only pass) passes; `check-module-size.py --changed-since
+origin/dev` passes right at the cap (999 lines, after one more small
+docstring trim to make room for the qualification); a fresh
+Docker-backed end-to-end run (`ai-attribution`, 98 passed / 6 skipped)
+confirms the common case still works; `check-docs-consistency.py` and
+`check-effort-vision-structure.py` both pass. Docker cleanup (no
+leftover `test-isolation` volumes) and host `git status --short`
+reconfirmed clean of anything beyond this round's own diff.

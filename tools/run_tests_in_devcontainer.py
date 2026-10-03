@@ -6,16 +6,15 @@ Phase 1 of the ``devcontainer-test-isolation`` effort
 ``.devcontainer/test-isolation/devcontainer.json`` spec and runs
 ``tools/run-plugin-tests.py`` *inside* it, for a real OS-level filesystem/
 privilege boundary on top of (not instead of) that runner's existing
-process-level containment. Networking is NOT (yet) part of that boundary --
-the container keeps Docker's default bridge with full outbound reach (a
-known, named, open design gap; see the effort README's Phase 1 journal).
+process-level containment. Networking is NOT (yet) part of that boundary
+-- the container keeps Docker's default bridge with full outbound reach
+(a known, named, open design gap; see the effort README's journal).
 
 This is a deliberately separate, opt-in wrapper -- it never replaces
 ``run-plugin-tests.py`` for contributors who aren't using the devcontainer,
 and it never mounts the host checkout into the container. Everything the
-container's test run sees is a point-in-time COPY (see
-``_write_tar_of_repo`` below): the host checkout is only ever read from,
-never written to, by anything this script spawns.
+container's test run sees is a point-in-time COPY: the host checkout is
+only ever read from, never written to, by anything this script spawns.
 
 Usage::
 
@@ -25,8 +24,10 @@ Usage::
 
 Everything after the recognized flags below (or a literal ``--`` anywhere in
 the remaining arguments) passes through to ``tools/run-plugin-tests.py``
-inside the container, with one normalization: ``--base`` is rewritten to
-its resolved commit SHA (see `_rewrite_base_to_resolved_sha`).
+inside the container, with one normalization (``--base`` rewritten to its
+resolved commit SHA) and two exceptions: ``--allow-host-state`` is
+rejected outright, and ``--admission-wait``'s host-wide lease loses its
+cross-process coordination inside the container.
 """
 
 from __future__ import annotations
@@ -297,11 +298,9 @@ def _tracked_paths(*, include_untracked: bool) -> list[str]:
 def _warn_about_dirty_tracked_files() -> None:
     """Print a clear, explicit stderr warning naming every tracked file
     with an uncommitted modification -- the tracked-files-only boundary
-    (see ``_tracked_paths``) is about which PATHS are copied, not which
-    BYTES; a secret pasted into an otherwise-tracked file and never
-    committed is still copied in. Fails CLOSED (raises) if ``git status``
-    itself cannot be run: an unknown dirty state must never be silently
-    treated as "clean"."""
+    is about which PATHS are copied, not which BYTES; a secret pasted
+    into an otherwise-tracked file and never committed is still copied
+    in. Fails CLOSED (raises) if ``git status`` itself cannot be run."""
     res = subprocess.run(
         ["git", "-C", str(REPO), "status", "--porcelain=v1", "--untracked-files=no"],
         capture_output=True, timeout=30, env=_scrubbed_git_env(),
