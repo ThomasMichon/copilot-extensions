@@ -17,6 +17,7 @@ from .pr_cli import (
     _classify_pr_operands,
     _infer_active_repo_slug,
     _tracked_pr_head_evidence,
+    require_claimant_worktree,
 )
 
 
@@ -53,6 +54,10 @@ def _pr_merge_usage() -> None:
     print("  --max-passes N  (sweep+loop) Cap passes (0 = unbounded).", file=out)
     print("  --json          Emit the result JSON on stdout.", file=out)
     print("  Overrides: --host URL (api base), --token TOKEN.", file=out)
+    print(file=out)
+    print("  Run this FROM your own (claimant) worktree -- never from an", file=out)
+    print("  untracked directory or the target repo's own checkout. <owner/name>", file=out)
+    print("  addresses the target; no local checkout of it is required.", file=out)
 
 
 def _pr_merge_print_human(summary: dict) -> None:
@@ -85,6 +90,7 @@ def _pr_merge_now(
     apply: bool,
     token: str | None = None,
     viewer_permission: str | None = None,
+    config=None,
 ) -> int:
     """Perform (or preview) a submitter-direct merge -- ``pr-merge --now``.
 
@@ -187,6 +193,18 @@ def _pr_merge_now(
             else account_token_for_slug(args.repo, prcfg)
         )
     )
+
+    # Resolve BEFORE the auto-merge-vs-direct-merge branch below: native
+    # auto-merge (the default, prefer_auto_merge=True) can complete
+    # immediately -- not just arm -- when requirements are already
+    # satisfied, so it requires the same expected-head check as the direct
+    # merge_pull fallback (ThomasMichon/copilot-extensions#4949).
+    expected_head_sha = ""
+    if config is not None:
+        from . import pr_cli as _pr_cli
+        expected_head_sha = _pr_cli._tracked_pr_pushed_head(
+            config, args.repo, args.pr, provider.name,
+        )
 
     # General repo comprehension: this repo's *config* selects pr-self-merge
     # (a maintainer's choice), but that never implies the identity running
@@ -335,6 +353,7 @@ def _pr_merge_now(
                 delete_source_branch=getattr(prcfg, "delete_source_branch", True),
                 api_base=base,
                 token=tok,
+                expected_head_sha=expected_head_sha,
             )
         except ProviderError as exc:
             auto_err = str(exc)
@@ -376,6 +395,7 @@ def _pr_merge_now(
             delete_source_branch=getattr(prcfg, "delete_source_branch", True),
             api_base=base,
             token=tok,
+            expected_head_sha=expected_head_sha,
         )
     except ProviderError as exc:
         err = str(exc)
@@ -491,6 +511,11 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
     except SystemExit as exc:
         return int(exc.code or 0)
 
+    _claimant_id, claimant_error = require_claimant_worktree("pr-merge")
+    if claimant_error:
+        output.err(claimant_error)
+        return 2
+
     # A repo slug (contains '/') and/or a PR number (all digits) may be given in
     # any order; the slug is optional and inferred below when omitted, so a bare
     # `pr-merge <#>` is never mistaken for a repo.
@@ -518,7 +543,22 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
                     "project; pass an explicit repo slug"
                 )
                 return 2
-        repo_cfg = config.default_repo
+        resolution = pr_config.resolve_repo_config_for_slug(config, args.repo)
+        if not resolution.resolved:
+            output.err(
+                f"pr-merge: {args.repo!r} is not a registered repo this "
+                "machine can resolve a PR binding for. Register it "
+                "(agent-worktrees repos add <name> <path> --remote <url>) "
+                "so its own provider/token/policy can be resolved, then "
+                "retry -- CWD stays your own (claimant) worktree; "
+                f"{args.repo!r} is just the argument, you do not need a "
+                "local checkout of it. Refusing to fall back to the "
+                "active project's own binding for a different repo, and "
+                "do not fall back to gh/az repos/git directly -- that "
+                "skips this command's provider/token/policy resolution."
+            )
+            return 2
+        repo_cfg = resolution.repo_config
         default_branch = repo_cfg.default_branch
         actor_flow = pr_config.resolve_actor_pr_flow(
             repo_cfg,
@@ -538,6 +578,7 @@ def cmd_pr_merge_dispatch(argv: list[str]) -> int:
                 apply=apply,
                 token=args.token,
                 viewer_permission=actor_flow.viewer_permission,
+                config=config,
             )
 
         # A submitter-self-merge repo has no consent label: bare `pr-merge` is a

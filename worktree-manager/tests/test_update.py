@@ -213,6 +213,7 @@ def test_self_update_without_git_falls_back_to_tarball(monkeypatch, tmp_path):
         pkg = staging / "worktree-manager" / "src" / "worktree_manager"
         pkg.mkdir(parents=True, exist_ok=True)
         (pkg / "__init__.py").write_text('__version__ = "9.9.9"\n')
+        (pkg / "__main__.py").write_text("")
         (staging / "worktree-manager" / "pyproject.toml").write_text(
             "[project]\nname='x'\nversion='9.9.9'\n")
 

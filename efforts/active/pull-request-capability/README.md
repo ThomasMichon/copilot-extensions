@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-phase worktrees
 - **Created:** 2026-09-15
-- **Status:** Draft
+- **Status:** Active (Phase 2 landed; Phase 3 next)
 - **Vision:** [`plugins/agent-worktrees/pull-requests`](../../../visions/plugins/agent-worktrees/pull-requests/README.md)
   (all three Features: `conformance-verified-mock-provider`,
   `foreign-repo-pr-operations`, `reviewer-capable-provider`)
@@ -92,20 +92,37 @@ trace; not repeated here (public-artifact rule: keep this effort generic).
       forge-specific, e.g. exact URL formats).
 
 ### Phase 2 — Foreign-repo addressing
-- [ ] Design the addressing mechanism (e.g. a `--repo <name>` flag/config on
-      the `pr-*` command family) per Vision
-      §Features/`foreign-repo-pr-operations`. Resolve the named repo's own
-      registered provider/policy from the registry; never fall back to the
-      calling worktree's own repo/provider.
-- [ ] Implement honest failure per Vision
-      §Behaviors/`foreign-target-resolves-honestly`: an unregistered or
-      unreachable target reports plainly, not silently.
-- [ ] Wire foreign-repo addressing through the existing author-side
-      operations first (create/watch/merge/status/complete/ready) so Phase 3
-      inherits it rather than retrofitting.
+- [x] Design the addressing mechanism per Vision
+      §Features/`foreign-repo-pr-operations`. Added
+      `pr_config.resolve_repo_config_for_slug()`: resolves the repo that OWNS
+      a given `owner/name`/ADO `project/repo` slug, independent of the
+      caller's active project. Fast path for the caller's own active repo
+      (no extra config load); for a *different* registered repo, loads
+      **that repo's own** layered config via `config.load_project_config()`
+      (never inheriting the caller's); unregistered resolves honestly
+      (`ForeignRepoResolution(repo_config=None)`).
+- [x] Implement honest failure per Vision
+      §Behaviors/`foreign-target-resolves-honestly`: pr-watch/pr-merge now
+      refuse and report plainly when an explicit slug names a repo this
+      machine can't resolve a PR binding for, instead of silently using the
+      active project's own binding (the pre-existing bug this phase fixes).
+- [x] Wired foreign-repo addressing through `pr-watch` (`wait`/`cursor`) and
+      `pr-merge` (single PR + `--all` sweep, which share one resolution
+      point). `create`/`complete`/`ready` and `pr-status` were **not**
+      touched this phase — `pr-status` is inherently worktree-scoped (reads
+      that worktree's own tracking record, not addressable by a foreign
+      slug) and the others don't yet accept an explicit foreign-repo
+      positional the way pr-watch/pr-merge already did; left as a follow-on
+      if foreign addressing is wanted there too.
 - [ ] Extend the conformance contract (Phase 1) to run once against a local
       target and once against a foreign-addressed target, proving the two
-      paths converge on the same provider dispatch.
+      paths converge on the same provider dispatch. **Not done this
+      phase** — the conformance contract (Phase 1) exercises `PRProvider`
+      implementations directly, not the `pr_config`/CLI-level repo-binding
+      resolution this phase added; extending it would mean teaching the
+      contract to drive a *second*, foreign-addressed config through the
+      same assertions, which didn't fit this slice's scope. Left as a
+      concrete next step before Phase 3 reuses this resolver.
 
 ### Phase 3 — Reviewer-capable provider
 - [ ] Extend the `PRProvider` protocol with reviewer-side operations: read
@@ -160,6 +177,69 @@ trace; not repeated here (public-artifact rule: keep this effort generic).
 _Pending._
 
 ## Journal
+
+### 2026-10-03 — Phase 2 refinement: claimant-CWD contract + guidance-rich refusals
+- Operator feedback after Phase 2 landed: docs/skills needed to state the
+  intended usage explicitly (owning project = CWD, target repo = argument),
+  and it should be **invalid** to call these tools from a CWD that can't
+  trace back to a valid claimant worktree. Also: every failure path must
+  guide the agent back to the correct pattern, never leave it to conclude
+  "this tool doesn't work, fall back to gh/az/git directly."
+- Added `pr_cli.require_claimant_worktree()`: pr-watch/pr-merge now refuse
+  up front when CWD isn't a tracked worktree (untracked dir, bare anchor,
+  or the *target*'s own checkout instead of the caller's). Rewrote both
+  this and the existing foreign-repo-resolution refusal (from the first
+  Phase 2 landing) to spell out the correct invocation and explicitly warn
+  against the gh/az/git fallback.
+- Documented the contract: `pr-workflow.md` (new *Addressing a foreign
+  repo* section), `working-cross-repo/SKILL.md` (distinguishes "create a
+  worktree of the target" from "just check/merge via slug, stay in your
+  own worktree"), `venue-and-claims.md` (no claim-journal needed for an
+  existing foreign PR, just a valid claimant CWD).
+- Added a conftest.py autouse fixture: the new CWD resolution was
+  previously unmocked across the whole `test_pr_*` suite and read the
+  REAL enclosing git worktree of wherever tests happened to run (not
+  isolated by the existing HOME-isolation fixture) -- now defaults to a
+  fixed test worktree id. New `test_pr_claimant_guard.py` for the guard
+  itself.
+- 598-test `test_pr_*`/`test_providers.py` run passes (minus the
+  independently slow, pre-existing `test_pr_ops.py`). Landed via PR
+  [#5096](https://github.com/ThomasMichon/copilot-extensions/pull/5096).
+
+### 2026-10-03 — Phase 2 landed
+- Added `pr_config.resolve_repo_config_for_slug()` +
+  `ForeignRepoResolution`: resolves the `RepoConfig` that owns an explicit
+  `owner/name`/ADO `project/repo` slug, independent of the caller's active
+  project. Fast path for the caller's own repo; foreign-but-registered loads
+  via `config.load_project_config()` (confirmed this already existed and
+  does exactly what the vision describes -- no new config-loading mechanism
+  needed, just a slug->name lookup via the `repos` registry); unregistered
+  resolves honestly instead of guessing.
+- Wired into `pr-watch` (`wait`/`cursor`) and `pr-merge` (single PR +
+  `--all`, sharing one resolution point). Confirmed the pre-existing bug
+  this fixes: both commands already accepted an explicit foreign repo slug
+  but silently built the PR binding from `config.default_repo` regardless --
+  so addressing a different registered repo silently used the *wrong*
+  repo's provider/token/policy. Now it either resolves that repo's own
+  binding or refuses plainly.
+- 4 pre-existing tests (`test_pr_merge_now.py` x3, `test_pr_repo_inference.py`
+  x1) used fake single-repo configs with no real registry/remote, so they
+  relied on the old unconditional fallback; patched them to stub the new
+  resolver directly (they test merge/flow mechanics given an
+  already-resolved config, not resolution itself) rather than fake a
+  registry. Added 5 new tests for the resolver itself
+  (`test_pr_config_foreign_repo.py`).
+- Full `test_pr_*`/`test_providers.py` suite (487 tests) passes.
+  `check-module-size.py`/`check-feed-neutrality.py` pass. Landed via PR
+  [#5086](https://github.com/ThomasMichon/copilot-extensions/pull/5086)
+  (self-merged, Maintainer bypass).
+- **Scoped out of this phase, left as follow-ons:** `create`/`complete`/
+  `ready` and `pr-status` weren't touched (see Plan above for why); the
+  conformance contract wasn't extended to run against a foreign-addressed
+  target (Phase 1's contract tests `PRProvider` implementations directly,
+  not this phase's config-level resolver -- doing so cleanly is worth a
+  dedicated pass before Phase 3 builds on this resolver).
+- Not started: Phase 3 (reviewer-capable provider).
 
 ### 2026-09-15 — Kickoff
 - Effort created immediately after the `pull-requests` vision landed

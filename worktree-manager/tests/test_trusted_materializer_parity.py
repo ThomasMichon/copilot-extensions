@@ -71,7 +71,17 @@ def _outcome(log: list[str]) -> str:
     if line.startswith("OK"):
         return "ok"
     assert line.startswith("SKIP"), line
-    return "skip: is a symlink" if "is a symlink" in line else f"skip: {line.split(':', 1)[1].strip()}"
+    if "is a symlink" in line:
+        return "skip: is a symlink"
+    # Split on ": " (colon-SPACE), not a bare ":" -- every SKIP message is
+    # built as f"SKIP {path}: {reason}", and on Windows {path} starts with
+    # a drive letter ("D:\...") whose colon has no following space.
+    # Splitting on a bare ":" lands on THAT colon instead of the real
+    # "path: reason" separator, leaving the rest of the (platform- and
+    # scenario-specific -- trusted vs canonical builds under different tmp
+    # subdirectories) absolute path IN the compared string and making two
+    # otherwise-identical reasons compare unequal on Windows only.
+    return f"skip: {line.split(': ', 1)[1].strip()}"
 
 
 def _run_uv_editable_scenario(tmp_path: Path, canonical_mod, *, name: str, build) -> tuple[str, str]:

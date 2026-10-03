@@ -145,6 +145,7 @@ def cmd_owner(args: argparse.Namespace) -> int:
         make_supervised_relay_factory,
         run_owner_daemon,
     )
+    from .owner_availability import AvailabilityGate
     from .session_forwards import (
         SessionForwards,
         make_local_forward_factory,
@@ -203,6 +204,7 @@ def cmd_owner(args: argparse.Namespace) -> int:
             local_factory=make_local_forward_factory(config_source_cls=_account_source),
             bridge_probe=make_remote_bridge_probe(),
             transcript_mirror=_transcript_mirror(),
+            availability=AvailabilityGate(),
         ),
     )
 

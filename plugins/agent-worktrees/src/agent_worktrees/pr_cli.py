@@ -64,6 +64,10 @@ def _pr_watch_usage() -> None:
     print(file=out)
     print("  Overrides: --host URL (api base), --token TOKEN.", file=out)
     print(file=out)
+    print("  Run this FROM your own (claimant) worktree -- never from an", file=out)
+    print("  untracked directory or the target repo's own checkout. <owner/name>", file=out)
+    print("  addresses the target; no local checkout of it is required.", file=out)
+    print(file=out)
     print("  One-shot read: `wait ... --timeout 1` returns the current-state", file=out)
     print("  snapshot (verdict/merge/consent) even on timeout; or use the", file=out)
     print("  worktree-scoped `pr-status` for the same live state without waiting.", file=out)
@@ -81,6 +85,47 @@ def _pr_parse_repo(value: str) -> str:
     if value.count("/") != 1 or not all(value.split("/")):
         raise ValueError("repo must be a 'owner/name' (or ADO 'project/repo') slug")
     return value
+
+
+def require_claimant_worktree(verb: str) -> tuple[str | None, str]:
+    """Resolve CWD to the worktree that CLAIMS (owns, is responsible for the
+    lifetime of) this ``pr-*`` operation -- the contract behind
+    ``foreign-repo-pr-operations``: the **owning** project is always the
+    CWD; a (possibly foreign) **target** repo is always an explicit argument,
+    never inferred from "whichever repo's checkout I happen to be sitting
+    in." Returns ``(worktree_id, "")`` on success, or ``(None,
+    actionable_message)`` when CWD cannot be traced back to a live, tracked
+    worktree at all -- running from an untracked directory, a bare project
+    anchor, or the *target* repo's own checkout (instead of the caller's own
+    worktree) all fail this check.
+
+    Every ``pr-*`` command that can address a foreign repo calls this FIRST,
+    before any repo/config resolution, so a bad calling pattern is rejected
+    with concrete guidance rather than silently doing the wrong thing (or
+    worse, surfacing some unrelated downstream error that reads like a
+    reason to abandon this tool and shell out to ``gh``/``az repos``/``git``
+    directly -- which loses this command's provider/policy/binding
+    resolution entirely).
+    """
+    from . import worktree_identity
+
+    worktree_id = worktree_identity._infer_worktree_id_from_cwd()
+    if worktree_id:
+        return worktree_id, ""
+    return None, (
+        f"{verb}: this directory isn't a tracked agent-worktrees worktree, so "
+        "there's no claimant to own this operation. Run it FROM the worktree "
+        "responsible for the work (your own project's worktree -- `cd` there, "
+        "or launch/resume it first), and address the target repo as an "
+        f"explicit argument, e.g. `{verb} owner/target-repo <pr>` -- never "
+        "from an untracked directory, a bare project anchor, or the target "
+        "repo's own checkout. This works for a repo you have no local "
+        "checkout of at all; it does not require creating or entering a "
+        "worktree of the target. See the agent-worktrees `pr-workflow` "
+        "skill's foreign-repo-addressing section. Do not fall back to "
+        "gh/az repos/git directly for this -- that skips the provider, "
+        "token, and policy resolution this command exists to get right."
+    )
 
 
 def _infer_active_repo_slug(config: cfg.Config) -> str | None:
@@ -120,6 +165,123 @@ def _infer_active_github_slug(config: cfg.Config) -> str | None:
     if not repos.github_owner(remote):
         return None
     return git_ops.slug_from_url(remote)
+
+
+def _tracked_pr_pushed_head(
+    config: cfg.Config,
+    repo: str,
+    number: int,
+    provider: str,
+) -> str:
+    """Return the locally recorded head_sha from the most recent push, even if
+    the provider never independently confirmed it.
+
+    Distinct from :func:`_tracked_pr_head_evidence`, which only returns a value
+    once the provider's own ``observe_head`` has matched it (evidence suitable
+    for *trusting* the provider). This one answers a narrower, pre-merge
+    safety question instead: "what did we ourselves just push?" -- so
+    ``pr-merge --now`` can hand it to the provider's merge call as
+    ``--match-head-commit`` and let the provider's own merge endpoint refuse
+    rather than silently merge a stale head the PR object hasn't caught up to
+    yet (ThomasMichon/copilot-extensions#4949). Returns "" (no safety check
+    applied) when no tracked record applies -- never a reason to block a merge
+    outright by itself.
+
+    Resolves the tracking path against the **supplied** ``config.repo_name``
+    (never the ambient active project) so `` pr-merge --config <other>``
+    looks up the right project's tracking record instead of silently missing
+    it and disabling the safeguard.
+
+    Always scans **every** tracked worktree record in that project -- never
+    returns early on a CWD-derived record's match alone. A CWD match is a
+    useful hint for *which* record to prefer, but it is not proof that no
+    *other* record claims the same ``(repo, number, provider)`` with a
+    different (possibly staler) ``head_sha``; returning the CWD record's
+    value without checking the rest would let a stale record silently win
+    and hand ``--match-head-commit`` the very stale value this safeguard
+    exists to catch (ThomasMichon/copilot-extensions#5034). A
+    neutral CWD (a supported ``--project <name> pr-merge <repo> <n> --now``
+    invocation moves the process to the project's **anchor**, never a
+    tracked worktree, so CWD inference returns nothing there) and a
+    cross-project ``--config <other>`` invocation run from *inside a
+    different project's own worktree* are both handled the same way: the
+    full-scan result is authoritative regardless of what CWD inference
+    found.
+    """
+    tracking_dir = cfg.tracking_dir(getattr(config, "repo_name", None))
+    try:
+        worktree_id = _core()._infer_worktree_id_from_cwd(config)
+    except Exception:
+        # No active project/worktree context (e.g. called outside a managed
+        # repo, or from a test driving the dispatcher directly) is a normal,
+        # unguarded condition for this helper -- fall back to "no evidence"
+        # rather than letting resolution failure block an otherwise-eligible
+        # merge.
+        worktree_id = None
+    cwd_match = ""
+    if worktree_id:
+        try:
+            record = tracking.load_record(
+                tracking_dir / f"{_core()._resolve_worktree_id(worktree_id)}.yaml"
+            )
+        except Exception:
+            record = None
+        if record is not None:
+            cwd_match = _find_tracked_pr_head(record, repo, number, provider)
+    # Scan every record in this project's tracking directory for an
+    # unambiguous match. More than one record claiming the same
+    # (repo, number, provider) with *different* head_sha values is a
+    # genuinely ambiguous state this helper should never guess through;
+    # "no evidence" (and thus no safety check) is the honest answer in
+    # that case -- even when one of the disagreeing records is the one
+    # CWD inference happened to point at.
+    try:
+        candidates = sorted(tracking_dir.glob("*.yaml"))
+    except Exception:
+        return cwd_match
+    matches: set[str] = set()
+    for path in candidates:
+        try:
+            record = tracking.load_record(path)
+        except Exception:
+            continue
+        found = _find_tracked_pr_head(record, repo, number, provider)
+        if found:
+            matches.add(found)
+    if len(matches) == 1:
+        return next(iter(matches))
+    if matches:
+        # More than one distinct head_sha claimed for the same PR -- refuse
+        # to guess, regardless of whether cwd_match is one of them.
+        return ""
+    # The full scan found nothing (e.g. tracking_dir.glob matched no files,
+    # or every record failed to load) -- fall back to whatever the CWD
+    # record itself yielded, if anything.
+    return cwd_match
+
+
+def _find_tracked_pr_head(
+    record: tracking.WorktreeRecord, repo: str, number: int, provider: str,
+) -> str:
+    """Return the recorded head_sha of ``record``'s PR matching
+    ``(repo, number, provider)``, or "" if none does.
+
+    Compares ``repo`` case-insensitively: GitHub (and most other provider)
+    repository slugs are case-insensitive, so an explicit ``Owner/Repo``
+    operand must still match a tracked ``owner/repo`` record -- an exact
+    string comparison would silently miss that match and omit the
+    stale-head safeguard for the very PR it's meant to protect.
+    """
+    repo_lower = repo.lower()
+    for pr in record.prs:
+        target_repo = pr.repo or record.repo
+        if (
+            pr.number == number
+            and target_repo.lower() == repo_lower
+            and (pr.provider or provider) == provider
+        ):
+            return pr.head_sha
+    return ""
 
 
 def _tracked_pr_head_evidence(
@@ -262,6 +424,11 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
     except SystemExit as exc:
         return int(exc.code or 0)
 
+    _claimant_id, claimant_error = require_claimant_worktree(f"pr-watch {verb}")
+    if claimant_error:
+        output.err(claimant_error)
+        return 2
+
     if verb == "wait":
         if args.timeout < 0:
             output.err("--timeout must be >= 0 (0 = no limit)")
@@ -272,7 +439,6 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
 
     try:
         config = cfg.load_config(Path(args.config) if args.config else None)
-        base_prcfg = config.default_repo.pr
         if args.repo is None:
             args.repo = _infer_active_repo_slug(config)
             if not args.repo:
@@ -281,12 +447,29 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
                     "project; pass an explicit repo slug"
                 )
                 return 2
+        from . import pr_config
+        resolution = pr_config.resolve_repo_config_for_slug(config, args.repo)
+        if not resolution.resolved:
+            output.err(
+                f"pr-watch: {args.repo!r} is not a registered repo this "
+                "machine can resolve a PR binding for. Register it "
+                "(agent-worktrees repos add <name> <path> --remote <url>) "
+                "so its own provider/token/policy can be resolved, then "
+                "retry -- CWD stays your own (claimant) worktree; "
+                f"{args.repo!r} is just the argument, you do not need a "
+                "local checkout of it. Refusing to fall back to the "
+                "active project's own binding for a different repo, and "
+                "do not fall back to gh/az repos/git directly -- that "
+                "skips this command's provider/token/policy resolution."
+            )
+            return 2
+        repo_cfg = resolution.repo_config
+        base_prcfg = repo_cfg.pr
         prcfg = base_prcfg
         resolved_token = args.token
         if verb == "wait":
-            from . import pr_config
             actor_flow = pr_config.resolve_actor_pr_flow(
-                config.default_repo,
+                repo_cfg,
                 args.repo,
                 api_base=args.host,
                 token=resolved_token,

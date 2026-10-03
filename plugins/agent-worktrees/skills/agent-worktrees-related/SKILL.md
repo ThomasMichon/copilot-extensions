@@ -100,16 +100,53 @@ related:
   `--plugin-dir` (no marketplace fetch in the venue). Git-backed and repo-local
   directory marketplaces are both supported, but every listed source must be
   enabled and installed on the machine that dispatches the work.
-- **`ownership`** -- the operator's ownership posture toward the repo:
-  `owned` (the operator wholly owns it -- their own gh namespace, or explicitly
-  marked), `internal` (org-internal, not owned -- e.g. an enterprise ADO org repo),
-  or `external` (public/external, not owned). **Derived once at registration**
-  from the operator's own gh account logins + the repo's remote, then treated as
-  **authoritative** -- consumers (e.g. the AI-attribution decision) read this
-  manifest instead of re-inspecting live `gh` accounts. An explicit value always
-  wins over the derivation, so an ADO repo the operator wholly owns is marked
-  `owned` even though the ADO-host default is `internal`. `owner` records the
-  resolving operator account when derivable.
+- **`ownership`** -- the operator's contribution/authority posture toward the
+  repo (who maintains it, who reviews it) -- **not** the AI-attribution axis
+  (see `audience` below for that): `owned` (the operator wholly owns it --
+  their own gh namespace, or explicitly marked), `internal` (org-internal,
+  not owned -- e.g. an enterprise ADO org repo), or `external` (public/
+  external, not owned). **Derived once at registration** from the operator's
+  own gh account logins + the repo's remote, then treated as
+  **authoritative** -- consumers read this manifest instead of
+  re-inspecting live `gh` accounts. An explicit value always wins over the
+  derivation, so an ADO repo the operator wholly owns is marked `owned` even
+  though the ADO-host default is `internal`. `owner` records the resolving
+  operator account when derivable.
+- **`audience`** -- who can read what gets published to this repo: `public`
+  (visible on the public internet), `internal` (org-internal -- enterprise
+  ADO, internal Gitea -- visible to coworkers/org members, not the public
+  internet), or `private` (not visible beyond the operator and explicitly
+  invited collaborators). This is the axis the AI-attribution decision
+  actually keys on, orthogonal to `ownership` above -- an operator-owned
+  repo can still be `public` just as easily as a third-party repo could be
+  `private`. Unlike `ownership`, this is **never derived automatically**:
+  set it explicitly when it matters, since it isn't reliably inferable from
+  a git remote alone. Omitted (empty) means "unclassified," and consumers
+  judge the target themselves rather than silently assuming the
+  disclosure-exempt `private` case. `public`/`internal`/unclassified all
+  default to disclosure required; only a positively-set `private` opts out.
+- **`ai_attribution`** -- an optional per-repo override of the
+  `audience`-derived disclosure policy, consumed by the `ai-attribution`
+  plugin: `disclose_on_open` (bool) and `disclose_on_reply` (bool), each
+  defaulting to the audience-derived value when omitted. A key that *is*
+  present is honored verbatim -- it can turn disclosure OFF for a case the
+  operator has consciously decided doesn't need it (e.g. opening issues/PRs
+  in a repo they maintain directly), or explicitly ON for a `private` repo
+  that still needs it in one direction (e.g. still disclosing on replies) --
+  in either direction relative to the audience-derived default; a key that's
+  *absent* from the override simply stays at that default. **Trust
+  boundary:** a `private` audience or a disclosure-weakening override is
+  only honored from a machine override or the bound knowledge repo --
+  never from the shared harness baseline (whichever repo happens to be
+  the current launch/base anchor carries no positive signal that it's
+  operator-controlled, so an untrusted launch repo can't suppress
+  disclosure for itself *or* for any other repo it describes), and never
+  from a target repo's own tracked `related.yaml` (the "repository"
+  layer). Widening disclosure is never gated. This means a harness-level
+  `related.yaml` cannot currently supply a `private` audience or a
+  narrowing override for anything -- a known, deliberate limitation, not
+  an oversight; use the machine or knowledge-repo layer for any policy
+  that needs to narrow disclosure.
 - **`primary`** -- the default repo (used by `related resolve` with no name).
 
 ## CLI
@@ -146,6 +183,7 @@ commands instead of emitting the full roster every session.
 
 `add` options: `--role R`, `--summary S`, `--doc PATH`, `--delegate D`,
 `--ownership owned|internal|external`, `--owner ACCOUNT`,
+`--audience public|internal|private`,
 `--locus L`, `--machines a,b`, `--primary`, `--no-scaffold`; for a codespace
 locus `--cs-repo R --cs-machine M --cs-location L --cs-workspace DIR`; and for a
 container locus `--container-repo R --container-workspace DIR

@@ -109,6 +109,218 @@ coverage. When splitting an existing oversized test module, assign one
 contract per resulting file as you go; retrofitting the marker onto
 already-small, single-contract files is not required.
 
+## Optional devcontainer-based isolation (Linux)
+
+`tools/run_tests_in_devcontainer.py` is an opt-in wrapper around the turn-key
+runner above that additionally runs it inside a hardened, ephemeral
+devcontainer (`.devcontainer/test-isolation/devcontainer.json`, a named alternate config -- never the canonical `.devcontainer/devcontainer.json` root path, which would let a direct "Reopen in Container" pick up an empty, wrapper-only workspace by accident) -- a real OS-level
+filesystem/privilege boundary on top of (not instead of) the turn-key
+runner's own process-level containment. **Networking is NOT yet part of
+that boundary** -- the container keeps Docker's default bridge network with
+full outbound reach (a known, named, open design gap; see the effort
+README's Phase 1 journal), so a test can still open ordinary sockets and
+reach external or host/LAN services. The filesystem/privilege boundary
+exists for the case the turn-key runner cannot cover on its own: a buggy or
+adversarial test that escapes process-level containment via an absolute
+path write or a privilege a job object doesn't restrict. See
+`efforts/active/devcontainer-test-isolation/README.md` for the full design
+rationale and the findings (Phase 0) that shaped it.
+
+Requires the [devcontainers CLI](https://github.com/devcontainers/cli)
+(`npm i -g @devcontainers/cli`) and a working Docker daemon. Linux only --
+this repo's CI already runs a dedicated `windows-latest` job covering the
+Windows-specific containment paths described above, so a devcontainer adds
+nothing there.
+
+```bash
+python tools/run_tests_in_devcontainer.py agent-worktrees
+python tools/run_tests_in_devcontainer.py --changed
+python tools/run_tests_in_devcontainer.py --all -- -k some_filter
+python tools/run_tests_in_devcontainer.py --include-untracked agent-worktrees
+```
+
+Everything after the wrapper's own small flag set (`--keep`,
+`--include-untracked`; or a literal `--` anywhere in the remaining
+arguments) is passed through to `tools/run-plugin-tests.py` *inside* the
+container -- with one normalization (a `--base` value that resolves on
+the host is rewritten to its resolved commit SHA, or appended when
+changed-selection is active and `--base` was omitted entirely, before
+the in-container invocation is assembled; see below for why) and three
+known exceptions to otherwise-transparent passthrough: `--allow-host-state`
+is rejected outright (see below), `--admission-wait`'s lease loses its
+host-wide coordination once run inside the container (see the Phase 2
+admission-lease gap below), and a `--max-memory-mb`/`--max-processes`/
+`--max-temp-mb` value above the container's own fixed outer ceiling is
+rejected outright (see below). The wrapper:
+
+1. Writes a per-invocation copy of `.devcontainer/test-isolation/devcontainer.json` with
+   its workspace volume name made unique to this run, creates that volume
+   explicitly as a size-bounded (4 GiB), tmpfs-backed Docker volume (not
+   the default unbounded local-disk volume), then brings the container up
+   via `devcontainer up` -- **never** a bind mount of the host checkout.
+2. Copies a point-in-time snapshot of the host checkout into that volume
+   (a `tar` file streamed through `docker exec`'s stdin). The working-tree
+   files come from `git ls-files --cached` by DEFAULT -- git-tracked files
+   only, deliberately NOT every file physically present under the checkout
+   and NOT untracked files either: this repository has no blanket
+   `.gitignore` rule for `.env`-style config or arbitrary credential
+   filenames, so an untracked-but-not-ignored secret file sitting in the
+   working tree would otherwise still be copied into a container that then
+   has outbound network access. Pass `--include-untracked` to additionally
+   include untracked-but-not-gitignored files (e.g. to test a new,
+   not-yet-committed file) -- a deliberate, explicit opt-in, never the
+   default. `.git` is handled separately and deliberately minimally: rather
+   than copying the real git database wholesale (which would carry every
+   branch, stash, reflog, and unreachable object -- local-only content
+   having nothing to do with the plugin suite being run, into a container
+   that can still reach the network), a `git bundle` containing only the
+   object closure of `HEAD` and the `--changed` diff base (`--base`, or
+   that runner's own
+   `origin/main` default when `--base` isn't passed) is built and cloned
+   into a fresh, minimal git directory instead -- this also transparently
+   handles a linked worktree's `.git` (this repo's own required flow,
+   where `.git` is a pointer FILE naming an absolute HOST path, meaningless
+   inside the container) without needing to special-case it. The index is
+   then rebuilt from `HEAD` (`git read-tree HEAD`) rather than copied from
+   the host -- a copied index can reference a staged-but-uncommitted
+   blob that is unreachable from both `HEAD` and the base ref, which the
+   bundle would then be missing entirely. The tradeoff: staged state isn't
+   preserved as "staged" inside the container, but every modification
+   (staged or not) is still visible as an ordinary working-tree difference,
+   since the modified file's actual current on-disk content is what gets
+   copied in regardless. `config` is always replaced with a fresh,
+   credential-free minimal one and `hooks` is always dropped (neither is
+   needed for `git diff`/`status`/`rev-parse`, and either could carry
+   credential-bearing or otherwise sensitive
+   content). Every `git` subprocess call here scrubs ambient
+   `GIT_DIR`/`GIT_WORK_TREE`/etc. from its environment first, so a
+   contaminated calling environment can't silently redirect it to the wrong
+   repository. The host checkout is only ever **read**, never mutated, by
+   anything that happens afterward inside the container.
+3. Runs `tools/run-plugin-tests.py` inside the container via
+   `devcontainer exec` and propagates its exit code.
+4. Tears the container AND its per-invocation volume down afterward (pass
+   `--keep` to leave both running for debugging); a failed removal raises
+   rather than silently reporting success, and a failed `devcontainer up`
+   itself still triggers best-effort cleanup of anything it managed to
+   create.
+
+The container itself runs with every Linux capability dropped
+(`--cap-drop=ALL`), `no-new-privileges`, a read-only root filesystem with
+only `/tmp`, `/run`, `$HOME`, and the size-bounded workspace volume
+writable, and hard resource ceilings (14 GiB memory with no extra swap, 4
+CPUs, a 512-process PID limit) -- no Docker socket is ever mounted in.
+Outbound networking is currently left at Docker's default bridge (a known,
+named, open design gap -- see the effort README's Phase 1 journal);
+everything else above has been validated against a real container, not
+merely asserted.
+
+Because the workspace is a fresh copy rather than the live checkout, an
+uncommitted MODIFICATION to a tracked file is included (the copy reads the
+working tree's current on-disk content at invocation time, not the
+committed blob) -- but a new, never-committed file is NOT included unless
+`--include-untracked` is passed, per the tracked-files-by-default policy
+above. **Known, accepted residual exposure**: the tracked-files boundary is
+about which PATHS are copied, not which bytes -- a secret pasted directly
+into an otherwise-tracked file (e.g. a config example) and never committed
+is still copied in, since the content read is the live on-disk file, not
+the last-committed blob. A clean CI checkout has no such dirty state; a
+contributor's local checkout might. This is a deliberate tradeoff (the
+wrapper's whole point is testing in-progress, uncommitted changes), not an
+oversight -- "tracked" means "this path isn't the kind of thing that
+normally carries secrets," never "every byte currently in it is safe." The
+wrapper prints an explicit stderr warning naming every dirty tracked file
+before building the snapshot, so this residual exposure is surfaced at the
+moment it's actually relevant, not only here (and fails closed -- aborts
+rather than proceeding -- if that check itself cannot run). The same
+residual exposure applies to a tracked file carrying a Git
+assume-unchanged or skip-worktree index flag: `git status` deliberately
+will not report an on-disk modification for such a path, but the wrapper
+still copies the file's real current content. The wrapper separately warns
+about any such flagged path before building the snapshot (and likewise
+fails closed if that check itself cannot run), so a locally "hidden"
+modification doesn't go unnoticed just because `git status` stays quiet
+about it. A fresh, per-invocation volume means no state (including prior
+test artifacts) carries over between runs.
+
+An unresolvable `--base` is a HARD failure, not a silent degradation, when
+changed-selection is actually in play (an explicit `--changed`, or
+`tools/run-plugin-tests.py`'s own default when neither `--all` nor an
+explicit plugin name is given): that runner's own `changed_plugins()`
+quietly reports an empty target set for a bad diff base rather than
+erroring, so a typo'd or never-fetched `--base` could otherwise make a run
+silently report "No plugin suites to run." instead of the real problem. An
+explicit plugin name or `--all` run is unaffected, since neither ever
+consults `--base` at all.
+
+A `--base` value that DOES resolve on the host (bare flag, `=value` form,
+or an unambiguous abbreviation like `--bas`) is rewritten to its resolved
+commit SHA before the in-container invocation is assembled -- this matters
+for a ref-relative expression (e.g. `origin/dev~1`): it resolves fine on
+the host, but `git bundle create` does not preserve a remote-tracking ref
+(`refs/remotes/origin/...`) as a named ref in its resulting clone (unlike
+a plain local branch name, which it does preserve), so the unrewritten
+expression would otherwise fail to resolve again inside the materialized
+snapshot even though the underlying commit object is present. A bare SHA
+has no such problem -- it resolves against any clone containing its
+object, named ref or not.
+
+Two of `run-plugin-tests.py`'s own flags cannot retain their documented
+semantics through this wrapper, for the same structural reason (a fresh,
+credential-free tmpfs `$HOME` per container): `--allow-host-state` is
+rejected outright with a clear error (its whole contract is preserving
+the caller's real HOME/config/credentials, which this isolation boundary
+specifically does not expose) -- run `tools/run-plugin-tests.py` directly
+for that case instead. `--admission-wait`/the host-wide heavy-test-slot
+lease it waits for is a known, accepted residual gap: that lease lives
+under `$HOME`/`XDG_CACHE_HOME`, which is a fresh tmpfs per container
+invocation, so concurrent wrapped runs acquire unrelated per-container
+leases rather than coordinating against one shared host-wide slot. A
+genuine fix needs a host-side admission mechanism (acquired before
+container startup) rather than relying on the inner runner's own
+container-local lease; tracked as an open Phase 2 item, not silently
+worked around here.
+
+A third exception, for a different reason: the container itself enforces
+FIXED, lower outer resource ceilings (`--memory=14g`, `--pids-limit=512`,
+and `/tmp`'s own `size=6144m` tmpfs) regardless of what the inner runner's
+own `--max-memory-mb`/`--max-processes`/`--max-temp-mb` flags claim. A
+value above the matching outer ceiling would otherwise pass through
+unmodified, then be silently preempted by the container at the wrong
+moment (an OOM-kill, a hit `ENOSPC` on `/tmp`, or a stalled fork) instead
+of the clear, immediate rejection the other two exceptions already give
+-- so the wrapper rejects an over-the-ceiling value outright, before any
+container work begins, naming the exact flag/value/ceiling involved.
+
+Every git subprocess the wrapper runs on the HOST (bundling, cloning,
+reading the dirty/hidden-flag warnings, etc.) forces
+`GIT_NO_LAZY_FETCH=1` and `GIT_NO_REPLACE_OBJECTS=1` in addition to the
+repository-selection scrubbing and `GIT_OPTIONAL_LOCKS=0` described above
+-- without them, resolving `HEAD`/the diff base in a partial clone could
+lazily fetch missing objects INTO the host repository (a host mutation
+this wrapper exists to prevent), and a locally configured replacement ref
+could silently substitute different history into the snapshot than what
+`HEAD`/`--base` actually name.
+
+Inside the container, `uv` is bootstrapped via a pinned-version,
+SHA-256-verified direct download of its release tarball (not a bare
+`curl ... | sh` pipeline) -- the installed `uv` persists and runs again on
+every later `devcontainer exec` with the checkout snapshot already
+present and outbound networking reachable, so an unpinned/unverified
+installer would have everything it needed to defeat the isolation
+boundary. The devcontainer spec also grants the workspace path a `git`
+`safe.directory` exemption (via `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_0`/
+`GIT_CONFIG_VALUE_0` `containerEnv` entries): the workspace volume's own
+mountpoint is always root-owned (nothing inside the container can ever
+`chown` it, since `--cap-drop=ALL` drops `CAP_CHOWN` too), and modern Git
+refuses to operate inside a working tree it discovers is owned by a
+different user -- without the exemption, every git invocation
+`run-plugin-tests.py` makes (including its own changed-file diffing)
+would fail, and since that script treats a failed `git diff` as an empty
+target set rather than an error, it would silently report "no plugin
+suites to run" instead of the real problem.
+
+
 ## Local Windows SSH proxy regression
 
 After preparing the isolated `agent-bridge` test environment with the turn-key
