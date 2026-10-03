@@ -47,11 +47,11 @@
 // client count so a bind race or a reconnect-storming caller degrades
 // gracefully instead of spinning or exhausting resources.
 
-import { mkdirSync, writeFileSync, unlinkSync, chmodSync } from "node:fs";
+import { mkdirSync, unlinkSync } from "node:fs";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { createDriverServer, MAX_SSE_CLIENTS } from "./driver-server.mjs";
-import { discoveryDir, descriptorPath, generateToken, buildDescriptor } from "./discovery.mjs";
+import { discoveryDir, descriptorPath, generateToken, buildDescriptor, writeDescriptorAtomic } from "./discovery.mjs";
 import { sweepStale } from "./registry.mjs";
 
 const FLUSH_MS = 250; // drain the forwarded-event queue to SSE subscribers
@@ -115,13 +115,11 @@ function writeDescriptor(port, token) {
       cwd: process.cwd(),
       startedAt: state.startedAt,
     });
-    const path = descriptorPath(state.sessionId);
-    writeFileSync(path, JSON.stringify(descriptor, null, 2), { mode: 0o600 });
-    try {
-      chmodSync(path, 0o600); // belt-and-suspenders on platforms where writeFileSync's mode is umask-adjusted
-    } catch {
-      /* best-effort; not fatal on platforms without POSIX perms (e.g. Windows) */
-    }
+    // Atomic write (temp file + rename): a plain truncating write on the
+    // live path would let a concurrent reader (another session's startup
+    // sweep, bin/list-sessions.mjs) observe a half-written file mid-heartbeat
+    // and misjudge this live session as unreadable/stale.
+    writeDescriptorAtomic(descriptorPath(state.sessionId), descriptor);
     state.descriptorWritten = true;
   } catch (e) {
     // Best-effort, matching agent-bridge's own degrade-silently posture: a
@@ -215,11 +213,24 @@ if (port !== null) {
   if (typeof state.heartbeat.unref === "function") state.heartbeat.unref();
 }
 
-for (const sig of ["exit", "SIGINT", "SIGTERM"]) {
-  process.on(sig, () => {
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  const handler = () => {
     cleanupDescriptor();
-  });
+    // Registering a listener suppresses Node's default termination for this
+    // signal, so returning here would leave the process alive with the
+    // heartbeat interval still armed -- which would simply recreate the
+    // descriptor this handler just removed on its next tick. Remove this
+    // listener (so the re-raise cannot recurse into it) and re-send the
+    // identical signal: with no listener left, the OS's default disposition
+    // actually terminates the process. Matches
+    // context-handoff/extensions/context-handoff/crash-diagnostics.mjs's
+    // established pattern.
+    process.off(sig, handler);
+    process.kill(process.pid, sig);
+  };
+  process.on(sig, handler);
 }
+process.on("exit", cleanupDescriptor);
 // A crash (uncaught exception / unhandled rejection) must still clean up the
 // descriptor -- otherwise the crashed session orphans a discovery file that
 // would sit there until some OTHER session's startup sweep happens to reap

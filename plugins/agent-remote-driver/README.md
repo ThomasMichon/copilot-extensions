@@ -142,6 +142,18 @@ this plugin addresses both directly:
   A crash (`uncaughtException`/`unhandledRejection`) still runs descriptor
   cleanup before the process exits, so a crashed session's own entry doesn't
   linger as "discoverable" any longer than its next heartbeat-timeout window.
+  `SIGINT`/`SIGTERM` handlers remove themselves and re-raise the signal
+  after cleanup, so Node's default termination still actually happens
+  (a listener alone would otherwise suppress it and leave the heartbeat
+  timer re-creating the descriptor it just removed).
+- **No TOCTOU between a sweep's staleness snapshot and its delete.** A sweep
+  lists descriptors as a snapshot, but the owning session can legitimately
+  refresh its heartbeat before the sweep acts on it. `reapIfStillStale`
+  re-reads and re-validates staleness immediately before unlinking, so a
+  descriptor that went fresh again between the snapshot and the delete
+  survives. The heartbeat rewrite itself is atomic (temp file + rename,
+  `writeDescriptorAtomic`), so a concurrent reader never observes a
+  half-written descriptor mid-refresh in the first place.
 
 
 

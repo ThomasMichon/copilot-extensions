@@ -419,10 +419,27 @@ and `bin/list-sessions.mjs`:
   the shared discovery directory at its own startup — no dedicated reaper
   daemon.
 - Bare pid-liveness isn't trustworthy alone (pid reuse after a crash) — added
-  a heartbeat (`updatedAt`, refreshed every 30s) so staleness requires both a
-  dead pid AND (defensively) a stale heartbeat. A true cross-platform
-  birth-time check (mirroring `agent-codespaces`' Connection Owner
-  `owner_identity` pattern) is named as a follow-up, not yet built.
+  a heartbeat (`updatedAt`, refreshed every 30s). `isStale` reaps on EITHER
+  signal alone (a dead pid, OR a live pid whose heartbeat has gone stale) —
+  not "both required," which would under-reap a hung process with a dead
+  heartbeat. A true cross-platform birth-time check (mirroring
+  `agent-codespaces`' Connection Owner `owner_identity` pattern) is named as
+  a follow-up, not yet built.
+- A snapshot-then-act TOCTOU (the owning session can refresh its heartbeat
+  between a sweep's staleness snapshot and its delete) is closed by
+  `reapIfStillStale`: re-read and re-validate staleness immediately before
+  unlinking, never act on the original snapshot alone. Similarly, the
+  heartbeat's own on-disk rewrite is now atomic (temp file + rename, see
+  `discovery.mjs`'s `writeDescriptorAtomic`) so a concurrent reader never
+  observes a half-written descriptor mid-heartbeat. Caught in PR #5036's own
+  review round, fixed in the same PR.
+- A `SIGINT`/`SIGTERM` handler that only unlinks and returns leaves Node's
+  default termination suppressed (a registered listener disables it) — the
+  process stays alive with the heartbeat timer still armed, which would
+  simply recreate the descriptor the handler just removed. Fixed to match
+  `context-handoff`'s established pattern: remove the listener, then
+  re-raise the identical signal so the OS's default disposition actually
+  terminates the process. Also caught in PR #5036's review.
 - `bin/list-sessions.mjs` is the one aggregation entry point: sweep + list +
   bounded-concurrency (max 8 in-flight) `/health` confirmation in a single
   pass, so a fleet controller never re-implements its own per-session

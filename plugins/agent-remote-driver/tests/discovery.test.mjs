@@ -1,12 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   discoveryDir,
   descriptorPath,
   generateToken,
   buildDescriptor,
   authorizes,
+  writeDescriptorAtomic,
 } from "../extensions/agent-remote-driver/discovery.mjs";
+
+function tmpDir() {
+  return mkdtempSync(join(tmpdir(), "agent-remote-driver-discovery-test-"));
+}
 
 test("discoveryDir honors AGENT_REMOTE_DRIVER_CONFIG_DIR override", () => {
   const dir = discoveryDir({ AGENT_REMOTE_DRIVER_CONFIG_DIR: "/tmp/xyz" });
@@ -99,3 +107,74 @@ test("authorizes rejects when no token is configured", () => {
   assert.equal(authorizes("Bearer anything", ""), false);
   assert.equal(authorizes("Bearer anything", undefined), false);
 });
+
+// --- writeDescriptorAtomic (PR #5036 review: atomicity regression) ---
+
+test("writeDescriptorAtomic writes the full, valid JSON content to the target path", () => {
+  const dir = tmpDir();
+  const path = join(dir, "s1.json");
+  const descriptor = buildDescriptor({ sessionId: "s1", pid: process.pid, port: 1234, token: "tok" });
+
+  writeDescriptorAtomic(path, descriptor);
+
+  const reread = JSON.parse(readFileSync(path, "utf-8"));
+  assert.deepEqual(reread, descriptor);
+});
+
+test("writeDescriptorAtomic never leaves a .tmp file behind on success", () => {
+  const dir = tmpDir();
+  const path = join(dir, "s1.json");
+  writeDescriptorAtomic(path, buildDescriptor({ sessionId: "s1", pid: process.pid, port: 1, token: "t" }));
+
+  const names = readdirSync(dir);
+  assert.deepEqual(names, ["s1.json"]);
+});
+
+test("writeDescriptorAtomic replaces an existing descriptor's full content (the heartbeat-rewrite case)", () => {
+  const dir = tmpDir();
+  const path = join(dir, "s1.json");
+  const first = buildDescriptor({ sessionId: "s1", pid: process.pid, port: 1, token: "t", updatedAt: "2026-01-01T00:00:00.000Z" });
+  writeDescriptorAtomic(path, first);
+
+  const second = buildDescriptor({ sessionId: "s1", pid: process.pid, port: 1, token: "t", updatedAt: "2026-01-01T00:01:00.000Z" });
+  writeDescriptorAtomic(path, second);
+
+  const reread = JSON.parse(readFileSync(path, "utf-8"));
+  assert.equal(reread.updatedAt, "2026-01-01T00:01:00.000Z");
+  // Exactly one file -- the rename replaced the old content, it didn't append
+  // a second copy or leave the previous version alongside it.
+  assert.deepEqual(readdirSync(dir), ["s1.json"]);
+});
+
+test("writeDescriptorAtomic never produces a truncated/partial read: a reader only ever sees complete JSON", () => {
+  // Can't literally interleave two OS threads from a single-threaded Node
+  // test, but we can confirm the mechanism itself: content only ever lands
+  // at the final path via rename (not via in-place truncate+write), so a
+  // reader racing this call either sees the complete prior file or the
+  // complete new one -- never a half-written one. Write once, then
+  // immediately re-read and fully parse without error, many times in a row,
+  // as a sanity check that the written bytes are always a complete,
+  // parseable document.
+  const dir = tmpDir();
+  const path = join(dir, "s1.json");
+  for (let i = 0; i < 20; i += 1) {
+    const descriptor = buildDescriptor({ sessionId: "s1", pid: process.pid, port: i + 1, token: "t" });
+    writeDescriptorAtomic(path, descriptor);
+    const reread = JSON.parse(readFileSync(path, "utf-8")); // throws on any partial/invalid content
+    assert.equal(reread.port, i + 1);
+  }
+});
+
+test("writeDescriptorAtomic's temp filename is unique per pid+timestamp (no cross-write collision)", () => {
+  const dir = tmpDir();
+  const path = join(dir, "s1.json");
+  // Pre-seed an unrelated stray .tmp file to confirm writeDescriptorAtomic
+  // doesn't accidentally pick it up or collide with it.
+  writeFileSync(join(dir, `s1.json.${process.pid}.stale.tmp`), "stale");
+  writeDescriptorAtomic(path, buildDescriptor({ sessionId: "s1", pid: process.pid, port: 1, token: "t" }));
+
+  const names = readdirSync(dir).sort();
+  assert.deepEqual(names, [`s1.json.${process.pid}.stale.tmp`, "s1.json"].sort());
+  assert.equal(JSON.parse(readFileSync(path, "utf-8")).sessionId, "s1");
+});
+

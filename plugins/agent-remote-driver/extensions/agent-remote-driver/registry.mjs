@@ -94,27 +94,53 @@ export function isStale(descriptor, { now = Date.now(), heartbeatTimeoutMs = DEF
   return now - updatedAt > heartbeatTimeoutMs;
 }
 
+// Revalidates ONE snapshot-flagged-stale entry immediately before acting on
+// it, and deletes it only if it is still stale at that moment. Exported
+// (not just inlined into sweepStale's loop) specifically so the TOCTOU fix
+// itself is independently testable: a test can snapshot a descriptor, then
+// mutate the underlying file (simulating the owner's heartbeat racing the
+// sweep) before calling this, and assert the refreshed file survives.
+export function reapIfStillStale(path, snapshotDescriptor, opts = {}) {
+  if (!isStale(snapshotDescriptor, opts)) return { removed: false, descriptor: snapshotDescriptor };
+  const revalidated = readDescriptorSafe(path);
+  if (!isStale(revalidated, opts)) {
+    // The owner refreshed its heartbeat since the snapshot -- it is live
+    // again; never delete it on stale information.
+    return { removed: false, descriptor: revalidated };
+  }
+  try {
+    unlinkSync(path);
+  } catch {
+    /* already gone or in-use; fine either way */
+  }
+  return { removed: true, descriptor: revalidated };
+}
+
 // Removes every stale descriptor in `dir`. Best-effort: a file that
 // disappears between listing and unlink (another sweep won the race, or the
 // session itself just exited cleanly) is not an error. Returns which paths
 // were removed vs kept, for logging/tests.
+//
+// TOCTOU guard (load-bearing): `listDescriptorFiles` above returns a
+// SNAPSHOT. Between that snapshot and acting on it, the owning session can
+// legitimately refresh its own heartbeat (extension.mjs's periodic
+// `writeDescriptor`) -- deleting based on the stale snapshot alone would
+// destroy a descriptor that is fresh again by the time we act. See
+// `reapIfStillStale` above for the actual revalidate-before-delete logic.
 export function sweepStale(dir, opts = {}) {
   const removed = [];
   const kept = [];
   for (const { path, descriptor } of listDescriptorFiles(dir)) {
-    if (isStale(descriptor, opts)) {
-      try {
-        unlinkSync(path);
-      } catch {
-        /* already gone or in-use; fine either way */
-      }
+    const result = reapIfStillStale(path, descriptor, opts);
+    if (result.removed) {
       removed.push(path);
     } else {
-      kept.push({ path, descriptor });
+      kept.push({ path, descriptor: result.descriptor });
     }
   }
   return { removed, kept };
 }
+
 
 // The aggregated, fleet-wide view: sweep first (so a stale entry never
 // shows up as "live"), then return every surviving descriptor. This is the

@@ -9,6 +9,7 @@ import {
   listDescriptorFiles,
   isStale,
   sweepStale,
+  reapIfStillStale,
   listLive,
   DEFAULT_HEARTBEAT_TIMEOUT_MS,
 } from "../extensions/agent-remote-driver/registry.mjs";
@@ -165,3 +166,77 @@ test("a written-and-reread descriptor still parses with the fields isStale needs
   const reread = JSON.parse(readFileSync(path, "utf-8"));
   assert.equal(isStale(reread), false);
 });
+
+// --- TOCTOU regression coverage (PR #5036 review) ---
+//
+// A sweep's staleness snapshot can go stale itself: the owning session can
+// refresh its own heartbeat between the snapshot read and the delete. These
+// tests simulate that race directly by mutating the file AFTER taking a
+// stale snapshot, then calling reapIfStillStale with that stale snapshot --
+// exactly the shape sweepStale's own loop produces.
+
+test("reapIfStillStale does NOT delete a file that was refreshed after the snapshot was taken", () => {
+  const dir = tmpDir();
+  const deadSnapshot = { pid: deadPid(), updatedAt: new Date().toISOString() };
+  const path = writeDescriptor(dir, "racing-session", { pid: deadPid() });
+  // Simulate the race: the real owner (a different, live pid) refreshes the
+  // descriptor on disk AFTER the stale snapshot above was captured, but
+  // BEFORE the sweep acts on it.
+  writeDescriptor(dir, "racing-session", { pid: process.pid });
+
+  const result = reapIfStillStale(path, deadSnapshot);
+
+  assert.equal(result.removed, false);
+  assert.equal(existsSync(path), true);
+  assert.equal(result.descriptor.pid, process.pid);
+});
+
+test("reapIfStillStale DOES delete a file that is still stale on revalidation", () => {
+  const dir = tmpDir();
+  const pid = deadPid();
+  const deadSnapshot = { pid, updatedAt: new Date().toISOString() };
+  const path = writeDescriptor(dir, "truly-dead-session", { pid });
+
+  const result = reapIfStillStale(path, deadSnapshot);
+
+  assert.equal(result.removed, true);
+  assert.equal(existsSync(path), false);
+});
+
+test("reapIfStillStale never revalidates (or touches disk) for an already-live snapshot", () => {
+  const dir = tmpDir();
+  const liveSnapshot = { pid: process.pid, updatedAt: new Date().toISOString() };
+  const path = writeDescriptor(dir, "already-live", { pid: process.pid });
+
+  const result = reapIfStillStale(path, liveSnapshot);
+
+  assert.equal(result.removed, false);
+  assert.equal(existsSync(path), true);
+  assert.equal(result.descriptor, liveSnapshot); // returned the snapshot as-is, no re-read needed
+});
+
+test("sweepStale as a whole never deletes a descriptor refreshed mid-sweep", () => {
+  const dir = tmpDir();
+  // A plain, unambiguously-stale entry alongside the racing one, to confirm
+  // the fix doesn't just make sweepStale over-conservative in general.
+  const stalePath = writeDescriptor(dir, "plain-dead", { pid: deadPid() });
+  const racingPath = writeDescriptor(dir, "racing", { pid: deadPid() });
+
+  // listDescriptorFiles (sweepStale's own first step) takes its snapshot now.
+  const snapshot = listDescriptorFiles(dir);
+  // The owner of "racing" refreshes between the snapshot and any action on it.
+  writeDescriptor(dir, "racing", { pid: process.pid });
+
+  const removed = [];
+  const kept = [];
+  for (const { path, descriptor } of snapshot) {
+    const result = reapIfStillStale(path, descriptor);
+    if (result.removed) removed.push(path);
+    else kept.push(path);
+  }
+
+  assert.deepEqual(removed, [stalePath]);
+  assert.deepEqual(kept, [racingPath]);
+  assert.equal(existsSync(racingPath), true);
+});
+
