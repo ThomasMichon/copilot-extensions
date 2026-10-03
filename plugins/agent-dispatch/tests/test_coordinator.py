@@ -778,6 +778,71 @@ def test_verify_submitted_can_opt_in_legacy_row_and_assign_evaluator(api, tmp_pa
         raise AssertionError("backfill verification did not complete asynchronously")
 
 
+def test_verify_submitted_publishes_bus_event(api, tmp_path):
+    """Phase 3a audit: `verify-submitted` updates `updated_at` with no prior
+    bus event at all -- a pure wake signal is enough."""
+    script = tmp_path / "eval.py"
+    script.write_text(
+        "import json, sys\n"
+        "json.dump({'decision': 'noop'}, sys.stdout)\n",
+        encoding="utf-8",
+    )
+    api.app.state.queue.register_registration(
+        "evaluator",
+        {
+            "repo": TEST_REPO,
+            "evaluator_ref": "review-loop",
+            "evaluator_spec": {"scripts": {"review-loop": [sys.executable, str(script)]}},
+        },
+        machine=_registration_machine(),
+    )
+    tid = api.post("/tasks", json={"title": "x", "repo": TEST_REPO}).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+    api.post(f"/tasks/{tid}/complete", json={"worker_id": "w1"})
+    with api.app.state.queue._connect() as conn:
+        conn.execute(
+            "UPDATE tasks SET status = ?, require_verification = 0, evaluator_ref = NULL WHERE id = ?",
+            (Status.SUBMITTED, tid),
+        )
+    events = _record_bus_events(api)
+    backfill = api.post(
+        f"/tasks/{tid}/verify-submitted", json={"evaluator_ref": "review-loop"}
+    )
+    assert backfill.status_code == 200
+    assert any(
+        e["type"] == "task.verification_requested" and e["task_id"] == tid
+        for e in events
+    )
+
+
+def test_register_run_waiter_publishes_bus_event(api):
+    """Phase 3a audit: registering a run waiter can move a task from
+    `started` to `suspended` with no prior bus event at all."""
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+    api.post(
+        f"/tasks/{tid}/owner-session",
+        json={"worker_id": "w1", "owner_session_id": "session-1"},
+    )
+    events = _record_bus_events(api)
+    r = api.post(
+        f"/tasks/{tid}/run-waiter/register",
+        json={
+            "worker_id": "w1",
+            "reason": "long-running op",
+            "host": "host-1",
+            "resume_worktree": "wt-1",
+        },
+    )
+    assert r.status_code == 200
+    assert any(
+        e["type"] == "task.run_waiter_registered" and e["task_id"] == tid
+        for e in events
+    )
+
+
 def test_complete_over_http_triggers_immediate_whole_goal_verification(api, tmp_path):
     script = tmp_path / "eval.py"
     script.write_text(
@@ -1512,6 +1577,87 @@ def test_activity_over_http(api):
     assert invalid.json()["activity"] == "IDLE"
 
 
+def _record_bus_events(api) -> list[dict]:
+    """Phase 3a's event-coverage audit: every board-visible mutation must
+    publish *some* bus event (a pure wake trigger is enough). Patches
+    ``app.state.bus.publish`` to record every call made during the test."""
+    events: list[dict] = []
+    original = api.app.state.bus.publish
+
+    def _record(event: dict) -> None:
+        events.append(event)
+        original(event)
+
+    api.app.state.bus.publish = _record
+    return events
+
+
+def test_heartbeat_over_http_publishes_bus_event(api):
+    """Phase 3a audit: heartbeat updates `updated_at`/leases with no prior
+    bus event at all."""
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+    events = _record_bus_events(api)
+    r = api.post(f"/tasks/{tid}/heartbeat", json={"worker_id": "w1"})
+    assert r.status_code == 200
+    assert any(e["type"] == "task.heartbeat" for e in events)
+
+
+def test_activity_over_http_publishes_bus_event(api):
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    reservation = api.post(
+        "/spawn-reservations", json={"task_id": tid, "reserved_by": "sup"}
+    ).json()["reservation"]
+    key = reservation["key"]
+    api.post(
+        f"/spawn-reservations/{key}/spawned",
+        json={"session_handle": "local-body:s1"},
+    )
+    events = _record_bus_events(api)
+    r = api.post(
+        f"/tasks/{tid}/activity",
+        json={"activity": "ACTIVE", "reservation_key": key},
+    )
+    assert r.status_code == 200
+    assert any(e["type"] == "task.activity_updated" for e in events)
+
+
+def test_steer_take_over_http_publishes_bus_event(api):
+    """Phase 3a audit: `take_steer` updates `lease_expires_at`/
+    `last_seen_at`/`updated_at` (board-sort-/liveness-relevant) with no
+    prior bus event at all. A pure wake signal is enough -- no task payload
+    is expected on this event."""
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    api.post("/claim", json={"worker_id": "w1", "repo": TEST_REPO})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+    api.post(f"/tasks/{tid}/steer", json={"fields": {"note": "look at X"}})
+    events = _record_bus_events(api)
+    r = api.post(
+        f"/tasks/{tid}/steer/take", json={"worker_id": "w1", "all_pending": False}
+    )
+    assert r.status_code == 200
+    assert any(
+        e["type"] == "task.steer_taken" and e["task_id"] == tid for e in events
+    )
+
+
+def test_recover_over_http_publishes_bus_event(api):
+    """Phase 3a audit: manual recovery (`POST /recover`) can requeue,
+    suspend, or dead-letter rows with no event published at all today."""
+    events = _record_bus_events(api)
+    r = api.post("/recover")
+    assert r.status_code == 200
+    assert any(e["type"] == "task.recovered" for e in events)
+
+
+def test_events_route_advertises_ready_frame_capability(api):
+    """Phase 3a: `/health` advertises `/events?ready_frame=1` support so a
+    relay client can gate on genuine daemon support before waiting for the
+    frame -- see `board_relay.py`."""
+    assert api.get("/health").json()["events_ready_frame"] is True
+
+
 def test_goal_and_progress_log_over_http(api):
     # A goal-bearing task carries goal + done_criteria on the row...
     r = api.post(
@@ -1952,6 +2098,62 @@ def test_sse_stream_distinguishes_retry_recorded_result(server_url):
     assert "result" not in recorded["task"]
     confirmed = next(e for e in received if e["type"] == "task.completed")
     assert confirmed["task"]["status"] == "completed"
+
+
+def test_stream_events_ready_frame_handshake(server_url):
+    """Phase 3a: a caller that requests ``ready_frame=True`` sees the ready
+    sentinel as its first item (closing the registration-vs-real-event
+    race); every other caller (the default) never sees it at all, even
+    though the daemon genuinely emits it for an opted-in connection."""
+    streamer = DispatchClient(server_url)
+    watcher = DispatchClient(server_url)  # mirrors `agent-dispatch watch`
+    mutator = DispatchClient(server_url)
+
+    relay_events: list[dict] = []
+    watch_events: list[dict] = []
+
+    def collect_relay():
+        try:
+            for ev in streamer.stream_events(ready_frame=True):
+                relay_events.append(ev)
+                if len(relay_events) >= 2:
+                    break
+        except Exception:
+            return
+
+    def collect_watch():
+        try:
+            for ev in watcher.stream_events():
+                watch_events.append(ev)
+                if ev.get("type") == "task.created":
+                    break
+        except Exception:
+            return
+
+    t1 = threading.Thread(target=collect_relay, daemon=True)
+    t2 = threading.Thread(target=collect_watch, daemon=True)
+    t1.start()
+    t2.start()
+
+    deadline = time.time() + 15
+    while time.time() < deadline and mutator.health().get("subscribers", 0) < 2:
+        time.sleep(0.05)
+    assert mutator.health()["subscribers"] >= 2
+
+    mutator.create("streamed")
+
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+    streamer.close()
+    watcher.close()
+    mutator.close()
+
+    assert relay_events[0] == {"type": "ready"}
+    assert relay_events[1]["type"] == "task.created"
+    # The default (non-opted-in) caller never sees the ready frame at all,
+    # even though the daemon genuinely emitted it on the other connection.
+    assert all(e.get("type") != "ready" for e in watch_events)
+    assert watch_events[0]["type"] == "task.created"
 
 
 def test_health_reports_zero_subscribers_initially(api):

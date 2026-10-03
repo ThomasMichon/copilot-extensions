@@ -795,14 +795,15 @@ def register_task_routes(
 
     @app.post("/tasks/{task_id}/heartbeat")
     def heartbeat(task_id: str, body: WorkerBody) -> dict:
-        return _guard(lambda: queue.heartbeat(task_id, body.worker_id))
+        return _guard(lambda: queue.heartbeat(task_id, body.worker_id), "task.heartbeat")
 
     @app.post("/tasks/{task_id}/activity")
     def activity(task_id: str, body: ActivityBody) -> dict:
         return _guard(
             lambda: queue.set_activity(
                 task_id, body.activity, reservation_key=body.reservation_key
-            )
+            ),
+            "task.activity_updated",
         )
 
     @app.post("/tasks/{task_id}/owner-session")
@@ -895,6 +896,11 @@ def register_task_routes(
             msg = str(exc)
             status = 404 if msg.startswith("no such task") else 409
             raise HTTPException(status_code=status, detail=msg) from exc
+        # A board-sort-/liveness-relevant mutation (updates `lease_expires_at`/
+        # `last_seen_at`/`updated_at`) with no prior bus event -- Phase 3a's
+        # event-coverage audit. A pure wake signal is enough: the relay only
+        # treats any event as a trigger for a full re-fetch, never a payload.
+        bus.publish({"type": "task.steer_taken", "task_id": task_id})
         key = "steers" if body.all_pending else "steer"
         return {"task_id": task_id, key: steer}
 
@@ -906,6 +912,10 @@ def register_task_routes(
     @app.post("/recover")
     def recover() -> dict:
         counts = queue.reconcile_liveness()
+        # Manual recovery can requeue, suspend, or dead-letter rows with no
+        # event published at all today -- Phase 3a's event-coverage audit.
+        # Content-free: a pure wake signal, same as every other bullet here.
+        bus.publish({"type": "task.recovered", **counts})
         return {"recovered": counts["requeued"], **counts}
 
     register_verification_routes(

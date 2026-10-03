@@ -1,0 +1,9 @@
+{
+  "comment": "pivot-streaming-transport Phase 3a: agent-dispatch CLI-relayed daemon fast path for the Tasks pivot's --subscribe stream",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "minor"
+    }
+  ]
+}

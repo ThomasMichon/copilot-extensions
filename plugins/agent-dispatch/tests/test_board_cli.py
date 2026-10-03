@@ -774,3 +774,98 @@ def test_fetch_rows_delegated_raises_on_nonzero_exit(monkeypatch):
         assert False, "expected RuntimeError"
     except RuntimeError as exc:
         assert "boom" in str(exc)
+
+
+def test_run_stream_uses_relay_for_direct_subscribe_path(monkeypatch):
+    """Phase 3a: the direct (local) ``--subscribe`` path hands off to
+    ``board_relay.run_relay`` instead of the legacy poll loop."""
+    monkeypatch.setattr(board_cli, "_local_machine", lambda: "m1")
+    monkeypatch.setattr(board_cli, "_fetch_rows", lambda args: [{"id": "t1"}])
+
+    fake_board_relay = types.ModuleType("agent_dispatch.board_relay")
+
+    class RelayUnavailable(Exception):
+        pass
+
+    recorded = {}
+
+    def run_relay(args, out, *, initial_rows, interval):
+        recorded["initial_rows"] = initial_rows
+        recorded["interval"] = interval
+        return 0
+
+    fake_board_relay.RelayUnavailable = RelayUnavailable
+    fake_board_relay.run_relay = run_relay
+    monkeypatch.setitem(sys.modules, "agent_dispatch.board_relay", fake_board_relay)
+
+    rc = board_cli.main(["--machine", "m1", "--stream", "--subscribe"])
+
+    assert rc == 0
+    assert recorded["initial_rows"] == [{"id": "t1"}]
+    assert recorded["interval"] == board_cli.DEFAULT_SUBSCRIBE_INTERVAL
+
+
+def test_run_stream_falls_back_to_poll_loop_when_relay_unavailable(monkeypatch):
+    """A daemon that doesn't advertise ready-frame support (``run_relay``
+    raises ``RelayUnavailable``) falls back to the unmodified poll loop for
+    this connection's whole lifetime, rather than erroring out."""
+    monkeypatch.setattr(board_cli, "_local_machine", lambda: "m1")
+
+    calls = {"n": 0}
+
+    def fetch(args):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return [{"id": "t1"}]
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(board_cli, "_fetch_rows", fetch)
+    monkeypatch.setattr(board_cli.time, "sleep", lambda _secs: None)
+
+    fake_board_relay = types.ModuleType("agent_dispatch.board_relay")
+
+    class RelayUnavailable(Exception):
+        pass
+
+    def run_relay(args, out, *, initial_rows, interval):
+        raise RelayUnavailable("daemon too old")
+
+    fake_board_relay.RelayUnavailable = RelayUnavailable
+    fake_board_relay.run_relay = run_relay
+    monkeypatch.setitem(sys.modules, "agent_dispatch.board_relay", fake_board_relay)
+
+    rc = board_cli.main(["--machine", "m1", "--stream", "--subscribe"])
+
+    assert rc == 0
+    assert calls["n"] == 2  # initial fetch + one poll_loop tick before KeyboardInterrupt
+
+
+def test_run_stream_skips_relay_for_delegated_machine(monkeypatch):
+    """Phase 3a scope: a delegated (cross-machine) ``--subscribe`` board
+    never attempts the relay at all, even if ``board_relay`` is importable --
+    this machine's own coordinator only describes *its own* tasks."""
+    monkeypatch.setattr(board_cli, "_local_machine", lambda: "m1")
+    calls = {"n": 0}
+
+    def fetch(args):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return [{"id": "t1"}]
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(board_cli, "_fetch_rows", fetch)
+    monkeypatch.setattr(board_cli.time, "sleep", lambda _secs: None)
+
+    fake_board_relay = types.ModuleType("agent_dispatch.board_relay")
+
+    def run_relay(*_args, **_kwargs):
+        raise AssertionError("the relay must never be attempted for a delegated board")
+
+    fake_board_relay.RelayUnavailable = Exception
+    fake_board_relay.run_relay = run_relay
+    monkeypatch.setitem(sys.modules, "agent_dispatch.board_relay", fake_board_relay)
+
+    rc = board_cli.main(["--machine", "m2", "--stream", "--subscribe"])
+
+    assert rc == 0
+    assert calls["n"] == 2

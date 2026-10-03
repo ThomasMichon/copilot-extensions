@@ -1054,15 +1054,44 @@ class DispatchClient(RegistrationClientMixin, WorktreeStatusClientMixin, Complet
 
     # -- supervisor registrations (RegistrationClientMixin) -----------------
 
-    def stream_events(self) -> Iterator[dict]:
-        """Yield task events from the coordinator's SSE stream (blocking)."""
-        with self._http.stream("GET", "/events") as resp:
+    def stream_events(self, *, ready_frame: bool = False) -> Iterator[dict]:
+        """Yield task events from the coordinator's SSE stream (blocking).
+
+        ``ready_frame=False`` (every existing caller, e.g. ``agent-dispatch
+        watch``) is byte-for-byte unchanged: no ``ready_frame`` query param is
+        ever sent, so no daemon -- old or new -- ever emits that control
+        frame to this call, and any ``type: "ready"`` frame that somehow
+        still arrives is filtered here regardless, never forwarded to the
+        caller. ``ready_frame=True`` (Phase 3a's own relay, exclusively) asks
+        the daemon to emit that frame immediately after subscription
+        registration and yields it to the caller as the first item -- the
+        daemon-side registration-vs-real-event race this handshake exists to
+        close. The read timeout is unbounded for this one long-lived GET
+        (the coordinator emits no periodic keepalive and a quiet board would
+        otherwise trip httpx's shared default timeout mid-stream)."""
+        params = {"ready_frame": "1"} if ready_frame else {}
+        timeout = httpx.Timeout(10.0, read=None)
+        with self._http.stream(
+            "GET", "/events", params=params, timeout=timeout
+        ) as resp:
             if resp.status_code >= 400:
                 resp.read()
                 raise DispatchError(resp.status_code, resp.text)
             for line in resp.iter_lines():
-                if line.startswith("data:"):
-                    yield json.loads(line[len("data:") :].strip())
+                if not line.startswith("data:"):
+                    continue
+                payload = json.loads(line[len("data:") :].strip())
+                if payload.get("type") == "ready":
+                    if ready_frame:
+                        yield payload
+                        continue
+                    # Filtered for every other caller, regardless of whether
+                    # this request itself asked for it -- the filtering lives
+                    # here, not only in the relay's own consumer, so a future
+                    # control frame can never leak to `agent-dispatch watch`
+                    # or any other existing `stream_events()` consumer.
+                    continue
+                yield payload
 
 
 class ResolvingDispatchClient:

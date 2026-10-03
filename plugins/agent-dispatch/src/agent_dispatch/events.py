@@ -44,11 +44,23 @@ class EventBus:
             except asyncio.QueueFull:
                 pass  # slow subscriber: drop rather than block producers
 
-    async def subscribe(self) -> AsyncIterator[dict]:
-        """Yield events published after subscription, until the caller stops."""
+    async def subscribe(self, *, ready_frame: dict | None = None) -> AsyncIterator[dict]:
+        """Yield events published after subscription, until the caller stops.
+
+        ``ready_frame``, when given, is yielded immediately once this queue is
+        registered (before waiting on any real event) -- registration happens
+        synchronously the moment this async generator is first iterated, so a
+        caller that then starts its "has the subscription actually begun?"
+        reconcile right after seeing this frame is guaranteed not to race the
+        registration itself (Phase 3a's startup/reconnect subscription-gap
+        fix). Opt-in only: a caller that passes ``None`` (every existing
+        consumer) sees no behavior change at all.
+        """
         q: asyncio.Queue[dict] = asyncio.Queue(maxsize=self._max_queue)
         self._subscribers.add(q)
         try:
+            if ready_frame is not None:
+                yield ready_frame
             while True:
                 yield await q.get()
         finally:

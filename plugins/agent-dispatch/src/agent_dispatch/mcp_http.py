@@ -791,7 +791,7 @@ def build_coordinator_mcp(
     @mcp.tool(name="dispatch_heartbeat")
     def heartbeat(task_id: str, worker_id: str) -> dict:
         """Extend the lease on a held task during long work."""
-        return _mutate(lambda: queue.heartbeat(task_id, worker_id), None)
+        return _mutate(lambda: queue.heartbeat(task_id, worker_id), "task.heartbeat")
 
     @mcp.tool(name="dispatch_detach")
     def detach(task_id: str) -> dict:
@@ -802,6 +802,10 @@ def build_coordinator_mcp(
     def recover() -> dict:
         """Force a liveness GC pass (requeue tasks whose owner is confirmed gone)."""
         counts = queue.reconcile_liveness()
+        # Matching the HTTP /recover route's own event (Phase 3a audit): this
+        # call bypasses _mutate entirely (no single task/CompletionOutcome to
+        # route through it), so publish directly -- content-free wake signal.
+        bus.publish({"type": "task.recovered", **counts})
         return {"recovered": counts["requeued"], **counts}
 
     @mcp.tool(name="dispatch_rearm_spawn")

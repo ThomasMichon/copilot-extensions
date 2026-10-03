@@ -526,14 +526,15 @@ def _fetch_rows_delegated(args: argparse.Namespace) -> list[dict]:
     return json.loads(result.stdout or "[]")
 
 
-def _fetch_rows_direct(args: argparse.Namespace) -> list[dict]:
-    """Direct path (this host IS ``args.machine``, the common case): query this
-    machine's own coordinator ``/tasks`` endpoint and run the board through
-    :func:`_build`. A standalone fetch (rather than reusing ``main``'s inline
-    one-shot query) because ``--subscribe`` needs to call it repeatedly from
-    inside one long-lived process, never re-exec'ing the CLI per re-scan.
-    Raises on any fetch/parse failure -- same contract as
-    :func:`_fetch_rows_delegated`."""
+def _fetch_raw_tasks_direct(args: argparse.Namespace) -> list[dict]:
+    """Network-only half of :func:`_fetch_rows_direct`: fetch this machine's
+    own coordinator ``/tasks`` endpoint and return the raw task dicts,
+    recording the resolved endpoint in ``_RELAY_ENDPOINT`` as a side effect
+    (same as the combined function used to). Split out so Phase 3a's relay
+    (``board_relay.py``) can drive its own zero-network local recompute tick
+    by re-running :func:`_build` against the last-fetched raw tasks instead
+    of re-fetching -- never imported by the plain one-shot/poll path, which
+    keeps calling the combined :func:`_fetch_rows_direct` below unchanged."""
     query = {
         "status": (
             "proposed,queued,claimed,started,suspended,"
@@ -553,6 +554,18 @@ def _fetch_rows_direct(args: argparse.Namespace) -> list[dict]:
         tasks = json.loads(response.read().decode("utf-8"))
     global _RELAY_ENDPOINT
     _RELAY_ENDPOINT = endpoint
+    return tasks
+
+
+def _fetch_rows_direct(args: argparse.Namespace) -> list[dict]:
+    """Direct path (this host IS ``args.machine``, the common case): query this
+    machine's own coordinator ``/tasks`` endpoint and run the board through
+    :func:`_build`. A standalone fetch (rather than reusing ``main``'s inline
+    one-shot query) because ``--subscribe`` needs to call it repeatedly from
+    inside one long-lived process, never re-exec'ing the CLI per re-scan.
+    Raises on any fetch/parse failure -- same contract as
+    :func:`_fetch_rows_delegated`."""
+    tasks = _fetch_raw_tasks_direct(args)
     return _build(
         tasks,
         machine=args.machine,
@@ -613,15 +626,59 @@ def _diff_rows(
 DEFAULT_SUBSCRIBE_INTERVAL = 2.0
 
 
+def poll_loop(
+    args: argparse.Namespace,
+    out,
+    prev: list[dict],
+    interval: float,
+    *,
+    sleep=time.sleep,
+) -> int:
+    """Phase 1's original poll-and-diff ``--subscribe`` loop: every
+    ``interval`` seconds, re-fetch via :func:`_fetch_rows` and emit the diff
+    vs. ``prev`` as ``delta``/``removed`` frames. This is the universal
+    degraded path: used directly whenever Phase 3a's relay doesn't apply
+    (a delegated/cross-machine board, or a daemon that never advertises
+    ready-frame support -- see :func:`_run_stream`), and reused by
+    ``board_relay.py`` itself for a transient SSE failure's immediate
+    fallback and for the permanent fallback once its own bounded reconnect
+    retries are exhausted -- one implementation of "poll and diff," not a
+    second copy that could drift from this one. Returns 0 on a clean
+    ``KeyboardInterrupt`` or once the reader closes the pipe (matching
+    ``_run_stream``'s own contract); never returns otherwise."""
+    try:
+        while True:
+            sleep(interval)
+            try:
+                curr = _fetch_rows(args)
+            except Exception:
+                # A transient re-fetch failure (coordinator hiccup, delegated
+                # subprocess blip) must not kill the live channel -- skip
+                # this tick and try again next time.
+                continue
+            deltas, removed = _diff_rows(prev, curr)
+            for entry in deltas:
+                if not _emit_frame({"type": "delta", "entry": entry}, out):
+                    return 0
+            for rid in removed:
+                if not _emit_frame({"type": "removed", "id": rid}, out):
+                    return 0
+            prev = curr
+    except KeyboardInterrupt:
+        return 0
+
+
 def _run_stream(args: argparse.Namespace) -> int:
     """Emit the Tasks board as the registered-pivot NDJSON envelope (D2):
     ``begin`` -> a ``row`` per task -> ``done``. With ``--subscribe`` the
-    channel is then held open: every ``--interval`` seconds the board is
-    re-fetched and the diff vs. the last snapshot is emitted as
-    ``delta``/``removed`` frames, so an open pivot live-updates without a
-    poll-interval-driven CLI re-exec. A transient re-fetch failure during
-    ``--subscribe`` skips that tick rather than killing the channel -- only
-    the initial fetch failing is fatal (emits ``error``, matching the
+    channel is then held open and live-updated one of two ways: Phase 3a's
+    event-woken relay (``board_relay.py``) for the direct, non-delegated
+    path when the coordinator advertises support, or the original Phase 1
+    poll-and-diff loop (:func:`poll_loop`) otherwise -- a delegated
+    ``--machine`` board, a daemon that doesn't advertise ready-frame support
+    (no observable subscription barrier to reconcile against -- see
+    ``board_relay.py``'s own docstring), or ``httpx`` genuinely unavailable.
+    Only the initial fetch failing is fatal (emits ``error``, matching the
     one-shot path's exit-1 contract)."""
     out = sys.__stdout__
     try:
@@ -647,27 +704,34 @@ def _run_stream(args: argparse.Namespace) -> int:
             or DEFAULT_SUBSCRIBE_INTERVAL
         ),
     )
-    prev = rows
-    try:
-        while True:
-            time.sleep(interval)
+
+    # Phase 3a scope: the direct (local) path only -- this machine's own
+    # coordinator `/events` stream describes only *this* machine's tasks, so
+    # relaying it for a delegated `--machine` board would silently mix in
+    # the wrong machine's events (or none at all). A delegated board keeps
+    # the unmodified poll loop, full stop, never attempted below.
+    local = _local_machine()
+    is_direct = bool(local and local == args.machine.casefold())
+    if is_direct:
+        try:
+            from . import board_relay
+        except ImportError:
+            board_relay = None  # httpx (or the module itself) unavailable
+        if board_relay is not None:
             try:
-                curr = _fetch_rows(args)
-            except Exception:
-                # A transient re-fetch failure (coordinator hiccup, delegated
-                # subprocess blip) must not kill the live channel -- skip
-                # this tick and try again next time.
-                continue
-            deltas, removed = _diff_rows(prev, curr)
-            for entry in deltas:
-                if not _emit_frame({"type": "delta", "entry": entry}, out):
-                    return 0
-            for rid in removed:
-                if not _emit_frame({"type": "removed", "id": rid}, out):
-                    return 0
-            prev = curr
-    except KeyboardInterrupt:
-        return 0
+                return board_relay.run_relay(
+                    args, out, initial_rows=rows, interval=interval
+                )
+            except board_relay.RelayUnavailable:
+                # The daemon doesn't advertise ready-frame support at all --
+                # no observable subscription barrier exists to reconcile
+                # against (`stream_events()` is a lazy generator), so don't
+                # attempt a half-optimized relay with an unclosed startup
+                # race. Fall back to the unmodified poll loop for this
+                # connection's whole remaining lifetime.
+                pass
+
+    return poll_loop(args, out, rows, interval)
 
 
 def main(argv: list[str] | None = None) -> int:
