@@ -369,12 +369,21 @@ verbatim ask.
       daemon and network access to pull a base image.
 
 ### Phase 2 — Wire into CI / contributor flow
-- [ ] Decide whether to add an opt-in CI lane (not a required gate, since
+- [x] Decide whether to add an opt-in CI lane (not a required gate, since
       the existing turn-key runner already gates every push/PR) that runs a
       representative subset of plugin suites through
       `tools/run_tests_in_devcontainer.py` on `ubuntu-latest`, to catch any
       future regression in the container boundary itself without slowing
-      down the default fast path.
+      down the default fast path. **Decided: no CI lane.** This wrapper
+      exists to give a *local* contributor an OS-level containment
+      boundary `run-plugin-tests.py` alone can't provide on their own
+      machine -- the upstream GitHub Actions runners already execute every
+      plugin suite inside a single-tenant, ephemeral, disposable VM per
+      job, which is a stronger isolation boundary than this Docker-in-CI
+      wrapper could add on top of it. Wiring the wrapper into CI would
+      only add Docker-in-Docker startup latency and flakiness risk for a
+      boundary CI doesn't need; it stays a contributor-invoked local tool,
+      not a CI lane.
 - [ ] Close the networking residual gap flagged in Phase 1's second item
       (split dependency-resolution and test-execution into separate
       network-enabled/network-disconnected passes), or explicitly decide
@@ -404,8 +413,11 @@ verbatim ask.
 - [x] A real plugin's pytest suite (`ai-attribution`) passes end-to-end
       through `tools/run_tests_in_devcontainer.py`, with the container torn
       down afterward -- done live in Phase 1.
-- [ ] Phase 2: the chosen CI-wiring shape (see Phase 2's first item) is
-      implemented and itself green in CI, not just locally.
+- [x] Phase 2: the chosen CI-wiring shape (see Phase 2's first item) is
+      implemented and itself green in CI, not just locally. **Resolved as
+      "no CI lane"** -- there is no CI-wiring shape to implement or validate
+      green, since the upstream GitHub Actions runners already provide a
+      stronger per-job isolation boundary than this wrapper adds.
 - [ ] Phase 2 (or a later revision of Phase 1): the networking residual gap
       is either closed (network-disconnected test-execution pass) or
       explicitly re-affirmed as an accepted, documented tradeoff rather than
@@ -2086,3 +2098,20 @@ common case still works; `check-docs-consistency.py` and
 `check-effort-vision-structure.py` both pass. Docker cleanup (no
 leftover `test-isolation` volumes/containers) and host `git status
 --short` reconfirmed clean of anything beyond this round's own diff.
+
+### 2026-10-03 — Phase 2 kicked off: CI-lane item decided (no lane)
+Phase 1 merged (`51788b7c9`) in a prior session; this picks up Phase 2's
+three remaining items, driven as separate serial PRs rather than one
+combined change. First up is the lowest-risk item, a pure decision with
+no code: whether to wire `tools/run_tests_in_devcontainer.py` into CI as
+an opt-in lane. **Decided: no.** The upstream GitHub Actions runners
+that already gate every push/PR execute each plugin suite inside a
+single-tenant, ephemeral VM per job -- a stronger isolation boundary than
+a Docker-in-CI invocation of this wrapper would add on top of it. The
+wrapper's actual value is giving a contributor running tests on their
+own, shared, long-lived machine an OS-level boundary `run-plugin-tests.py`
+alone can't provide there; CI doesn't have that problem. Marked both the
+Phase 2 Plan item and its paired Validation Plan item resolved with this
+reasoning recorded inline, rather than leaving either as an indefinitely
+open question. Next up: the networking-scope residual gap (Phase 2's
+second item), as its own PR.
